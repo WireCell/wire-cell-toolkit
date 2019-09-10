@@ -77,7 +77,7 @@ namespace WireCell {
 
         /// Trivial accessor
         int nimpbins_per_wire() const { return m_nimpbins_per_wire; }
-
+        void set_nimpbins_per_wire(int nbins);
 
         //// Geometry related:
 
@@ -136,6 +136,7 @@ namespace WireCell {
 	
 
     private:
+        int m_nwires;
         int m_nimpbins_per_wire;
 	Point m_origin;
 	Vector m_axis[3];

@@ -7,7 +7,8 @@ Pimpos::Pimpos(int nwires, double minwirepitch, double maxwirepitch,
                const Vector& pitch,
                const Point& origin,
 	       int nbins)       // default=10
-    : m_nimpbins_per_wire(nbins)
+    : m_nwires(nwires)
+    , m_nimpbins_per_wire(nbins)
     , m_origin(origin)
     , m_axis{Vector(0,0,0), wire.norm(), pitch.norm()}
 {
@@ -29,6 +30,12 @@ Pimpos::Pimpos(int nwires, double minwirepitch, double maxwirepitch,
 
     // Impact binning.  Impact *positions* are bin-edges.
     m_impactbins.set(nimpstot, pmin, pmax);
+}
+
+void Pimpos::set_nimpbins_per_wire(int nbins)
+{
+    const int nimpstot = m_nwires * nbins;
+    m_impactbins.set(nimpstot, m_impactbins.min(), m_impactbins.max());
 }
 
 std::pair<int, int> Pimpos::closest(double pitch) const
