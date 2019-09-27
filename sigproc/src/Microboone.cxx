@@ -14,17 +14,17 @@
 
 // Register the components defined here
 WIRECELL_FACTORY(mbCoherentNoiseSub,
-                 WireCell::SigProc::Microboone::CoherentNoiseSub,
-                 WireCell::IChannelFilter)
+		 WireCell::SigProc::Microboone::CoherentNoiseSub,
+		 WireCell::IChannelFilter)
 WIRECELL_FACTORY(mbOneChannelNoise,
-                 WireCell::SigProc::Microboone::OneChannelNoise,
-                 WireCell::IChannelFilter, WireCell::IConfigurable)
+		 WireCell::SigProc::Microboone::OneChannelNoise,
+		 WireCell::IChannelFilter, WireCell::IConfigurable)
 WIRECELL_FACTORY(mbOneChannelStatus,
-                 WireCell::SigProc::Microboone::OneChannelStatus,
-                 WireCell::IChannelFilter, WireCell::IConfigurable)
+		 WireCell::SigProc::Microboone::OneChannelStatus,
+		 WireCell::IChannelFilter, WireCell::IConfigurable)
 WIRECELL_FACTORY(mbADCBitShift,
-                 WireCell::SigProc::Microboone::ADCBitShift,
-                 WireCell::IChannelFilter, WireCell::IConfigurable)
+		 WireCell::SigProc::Microboone::ADCBitShift,
+		 WireCell::IChannelFilter, WireCell::IConfigurable)
 
 
 
@@ -41,7 +41,7 @@ double filter_time(double freq){
 double filter_low(double freq, double cut_off){
     if ( (freq>0.177 && freq<0.18) || (freq > 0.2143 && freq < 0.215) ||
 	 (freq >=0.106 && freq<=0.109) || (freq >0.25 && freq<0.251)){
-    	return 0;
+	return 0;
     }else{
 	return  1-exp(-pow(freq/cut_off,8));
     }
@@ -57,14 +57,16 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
 				   const WireCell::Waveform::compseq_t& respec,
 				   int res_offset,
 				   std::vector< std::vector<int> >& rois,
+				   std::map<int,std::vector< std::vector<int> >>& chgr_rois,
 				   float decon_limit1,
-                   float roi_min_max_ratio)
+		   float roi_min_max_ratio)
 {
     double ave_coef = 0;
     double_t ave_coef1 = 0;
     std::map<int,double> coef_all;
 
     const int nbin = medians.size();
+    const int nroi = rois.size();
 
     for (auto it: chansig) {
 	int ch = it.first;
@@ -112,7 +114,7 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
 	    scaling = coef_all[ch]/ave_coef;
 	    // add some protections ... 
 	    if (scaling < 0) scaling = 0;
-	    //	    if (scaling < 0.5 && scaling > 0.3) scaling = 0.5;
+	    //      if (scaling < 0.5 && scaling > 0.3) scaling = 0.5;
 	    if (scaling > 1.5) scaling = 1.5;
 	}else{
 	    scaling = 0;
@@ -161,29 +163,191 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
 	    
 	    // judge if any ROI is good ... 
 	    for (auto roi: rois){
-         	const int bin0 = std::max(roi.front()-1, 0);
-         	const int binf = std::min(roi.back()+1, nbin-1);
+		const int bin0 = std::max(roi.front()-1, 0);
+		const int binf = std::min(roi.back()+1, nbin-1);
 		double max_val = 0;
 		double min_val = 0;
 		for (int i=bin0; i<=binf; i++){
-         	    int time_bin = i-res_offset;
-         	    if (time_bin <0) time_bin += nbin;
+		    int time_bin = i-res_offset;
+		    if (time_bin <0) time_bin += nbin;
 		    if (time_bin >=nbin) time_bin -= nbin;
-    		    if (i==bin0){
+		    if (i==bin0){
 			max_val = signal_roi_decon.at(time_bin);
 			min_val = signal_roi_decon.at(time_bin);
 		    }else{
 			if (signal_roi_decon.at(time_bin) > max_val) max_val = signal_roi_decon.at(time_bin);
 			if (signal_roi_decon.at(time_bin) < min_val) min_val = signal_roi_decon.at(time_bin);
 		    }
-         	}
+		}
 
-		//		if (signal.ch==1027)
+		//              if (signal.ch==1027)
 		//std::cout << roi.front() << " Xin " << max_val << " " << decon_limit1 << std::endl;
+
+		// if (ch==481 || ch==482 || ch==484 || ch==485) {
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": test_roi: " << roi.front() << " " << roi.back() << " " 
+		//               << flag_replace[roi.front()] << std::endl;
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": decon_limit1: " << decon_limit1
+		//               << " roi_min_max_ratio: " << roi_min_max_ratio << std::endl;          
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": max val: " << max_val << std::endl;
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": min val: " << min_val << std::endl;                
+		// }
 		
 		if ( max_val > decon_limit1 && fabs(min_val) < max_val * roi_min_max_ratio)
 		    flag_replace[roi.front()] = true;
 	    }
+
+	    // supplementary protection
+	    const int channel_nroi = chgr_rois[ch].size();
+	    std::vector< std::vector<int> > temp_rois;
+
+	    // hyu1: extend median roi based on the adjacent with channel roi
+	    for (int i=0;i!=nroi;i++) {
+
+		const int roi0 = rois.at(i).front();
+		const int roif = rois.at(i).back();
+
+		std::vector<int> temp_roi;
+		int temp_roi0 = roi0;
+		int temp_roif = roif;
+
+		for (int j=0;j!=channel_nroi;j++) {
+
+		    const int channel_roi0 = chgr_rois[ch].at(j).front();
+		    const int channel_roif = chgr_rois[ch].at(j).back();
+		
+		    if (channel_roi0 > roif) break;
+		    if (channel_roif < roi0) continue;
+
+		    if (channel_roi0 <= roi0) 
+			temp_roi0 = channel_roi0;
+		    
+		    if (channel_roif >= roif) {
+			temp_roif = channel_roif;
+			break;  
+		    }                       
+		} 
+
+		for (int ibin=temp_roi0;ibin<=temp_roif;ibin++) {
+		    temp_roi.push_back(ibin);
+		}
+		temp_rois.push_back(temp_roi);
+	    }
+
+	 //    if (ch==481 || ch==482 || ch==484 || ch==485) {
+		// std::cout << "[Hongzhao] debug_roi_ch" << ch << ": supplementary protection info starts" << std::endl;
+		// for (auto roi: rois) {
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": median_roi: " << roi.front() << " " << roi.back() << std::endl;
+		// }           
+		// for (auto roi: chgr_rois[ch]) {
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": raw_roi: " << roi.front() << " " << roi.back() << std::endl;
+		// }
+		// for (auto roi: temp_rois) {
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": temp_roi: " << roi.front() << " " << roi.back() << std::endl;
+		// }
+	 //    }
+
+	    WireCell::Waveform::realseq_t temp_signal_roi(nbin,0);
+	    for (auto roi: temp_rois){
+		const int bin0 = std::max(roi.front()-1, 0);
+		const int binf = std::min(roi.back()+1, nbin-1);
+		const double m0 = signal[bin0];
+		const double mf = signal[binf];
+		const double roi_run = binf - bin0;
+		const double roi_rise = mf - m0;
+		for (auto bin : roi) {
+		    const double m = m0 + (bin - bin0)/roi_run*roi_rise;
+		    temp_signal_roi.at(bin) = signal.at(bin) - m;
+		}
+	    }
+
+	    // do the deconvolution with a very loose low-frequency filter
+	    WireCell::Waveform::compseq_t temp_signal_roi_freq = WireCell::Waveform::dft(temp_signal_roi);
+	    WireCell::Waveform::shrink(temp_signal_roi_freq,respec);
+	    for (size_t i=0;i!=temp_signal_roi_freq.size();i++){
+		double freq;
+		// assuming 2 MHz digitization
+		if (i <temp_signal_roi_freq.size()/2.){
+		    freq = i/(1.*temp_signal_roi_freq.size())*2.;
+		}else{
+		    freq = (temp_signal_roi_freq.size() - i)/(1.*temp_signal_roi_freq.size())*2.;
+		}
+		std::complex<float> factor = filter_time(freq)*filter_low_loose(freq);
+		temp_signal_roi_freq.at(i) = temp_signal_roi_freq.at(i) * factor;
+	    }
+	    WireCell::Waveform::realseq_t temp_signal_roi_decon = WireCell::Waveform::idft(temp_signal_roi_freq);
+
+	    // hyu1: subtract the baseline within expanded roi region before making the judgment of a good signal
+	    for (auto roi: temp_rois){
+
+		const int bin0 = std::max(roi.front()-1, 0);
+		int time_bin0 = bin0 - res_offset;
+		if (time_bin0 <0) time_bin0 += nbin;
+		if (time_bin0 >=nbin) time_bin0 -= nbin;
+
+		const int binf = std::min(roi.back()+1, nbin-1);
+		int time_binf = binf - res_offset;
+		if (time_binf <0) time_binf += nbin;
+		if (time_binf >=nbin) time_binf -= nbin;
+
+		const double m0 = temp_signal_roi_decon[time_bin0];
+		const double mf = temp_signal_roi_decon[time_binf];
+		const double roi_run = binf - bin0;
+		const double roi_rise = mf - m0;
+		for (auto bin : roi) {
+		    int time_bin = bin-res_offset;
+		    if (time_bin <0) time_bin += nbin;
+		    if (time_bin >=nbin) time_bin -= nbin;
+		    const double m = m0 + (bin - bin0)/roi_run*roi_rise;
+		    temp_signal_roi_decon.at(time_bin) -= m;
+		}
+	    }
+	    
+	    std::map<int, bool> temp_flag_replace;
+	    for (auto roi: rois){
+		temp_flag_replace[roi.front()] = false;
+	    }
+	
+	    // judge if any ROI is good ... 
+	    for (auto roi: rois){
+		const int bin0 = std::max(roi.front()-1, 0);
+		const int binf = std::min(roi.back()+1, nbin-1);
+		double max_val = 0;
+		double min_val = 0;
+		// int max_time_bin=-1;
+		// int min_time_bin=-1;
+		for (int i=bin0; i<=binf; i++){
+		    int time_bin = i-res_offset;
+		    if (time_bin <0) time_bin += nbin;
+		    if (time_bin >=nbin) time_bin -= nbin;
+		    if (i==bin0){
+			max_val = temp_signal_roi_decon.at(time_bin);
+			min_val = temp_signal_roi_decon.at(time_bin);
+			// max_time_bin = time_bin;
+			// min_time_bin = time_bin;
+		    }else{
+			if (temp_signal_roi_decon.at(time_bin) > max_val) { max_val = temp_signal_roi_decon.at(time_bin); /*max_time_bin=time_bin;*/ }
+			if (temp_signal_roi_decon.at(time_bin) < min_val) { min_val = temp_signal_roi_decon.at(time_bin); /*min_time_bin=time_bin;*/ }
+		    }
+		}
+
+		// if (ch==481 || ch==482 || ch==484 || ch==485) {
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": test_roi: " << roi.front() << " " << roi.back() << " " 
+		//               << temp_flag_replace[roi.front()] << std::endl;
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": decon_limit1: " << decon_limit1
+		//               << " roi_min_max_ratio: " << roi_min_max_ratio << std::endl;          
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": max val: " << max_val
+		//               << " max bin: " << max_time_bin << std::endl;
+		//     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": min val: " << min_val
+		//               << " min bin: " << min_time_bin << std::endl;                
+		// }
+
+		if ( max_val > decon_limit1 && fabs(min_val) < max_val * roi_min_max_ratio)
+		    temp_flag_replace[roi.front()] = true;
+	    }
+
+	    // if (ch==481 || ch==482 || ch==484 || ch==485) {
+	    //     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": supplementary protection info ends" << std::endl;
+	    // }
 	    
 	    WireCell::Waveform::realseq_t  temp_medians = medians;
 
@@ -191,7 +355,11 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
 		// original code used the bins just outside the ROI
 		const int bin0 = std::max(roi.front()-1, 0);
 		const int binf = std::min(roi.back()+1, nbin-1);
-		if (flag_replace[roi.front()]){
+		if (flag_replace[roi.front()] || temp_flag_replace[roi.front()]){
+		    // if (ch==481 || ch==482 || ch==484 || ch==485) {
+		    //     std::cout << "[Hongzhao] debug_roi_ch" << ch << ": protect_roi: " << roi.front() << " " << roi.back() << " "
+		    //               << flag_replace[roi.front()] << " " << temp_flag_replace[roi.front()] << std::endl;
+		    // }
 		    const double m0 = temp_medians[bin0];
 		    const double mf = temp_medians[binf];
 		    const double roi_run = binf - bin0;
@@ -202,6 +370,20 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
 		    }
 		}
 	    }
+
+	 //    if (ch==481 || ch==482 || ch==484 || ch==485) {
+		// for(int ibin=0;ibin!=nbin;ibin++) {
+		//     std::cout << "[Hongzhao] debug_waveform_ch" << ch << ": " 
+		// 	      << signal.at(ibin) << "\t"
+		// 	      << medians.at(ibin) << "\t"
+		// 	      << signal_roi.at(ibin) << "\t"
+		// 	      << signal_roi_decon.at(ibin) << "\t"
+		// 	      << temp_signal_roi.at(ibin) << "\t"
+		// 	      << temp_signal_roi_decon.at(ibin) << "\t"
+		// 	      << temp_medians.at(ibin) << "\t"
+		// 	      << scaling << std::endl;
+		// }
+	 //    }
 	    
 	    // collection plane, directly subtracti ... 
 	    for (int i=0;i!=nbin;i++){
@@ -281,7 +463,7 @@ std::vector< std::vector<int> > Microboone::SignalProtection(WireCell::Waveform:
 	float content = medians.at(j);
 	if (fabs(content-mean)>limit){
 	    //protection_factor*rms) {
-	    //	    medians.at(j) = 0; 
+	    //      medians.at(j) = 0; 
 	    signalsBool.at(j) = true;
 	    // add the front and back padding
 	    for (int k=0;k!=pad_b;k++){
@@ -303,57 +485,57 @@ std::vector< std::vector<int> > Microboone::SignalProtection(WireCell::Waveform:
     if (respec.size() > 0 && (respec.at(0).real()!=1 || respec.at(0).imag()!=0) && res_offset!=0){
 	//std::cout << nbin << std::endl;
 
-     	WireCell::Waveform::compseq_t medians_freq = WireCell::Waveform::dft(medians);
-     	WireCell::Waveform::shrink(medians_freq,respec);
+	WireCell::Waveform::compseq_t medians_freq = WireCell::Waveform::dft(medians);
+	WireCell::Waveform::shrink(medians_freq,respec);
 	
-    	for (size_t i=0;i!=medians_freq.size();i++){
-    	    double freq;
-    	    // assuming 2 MHz digitization
-    	    if (i <medians_freq.size()/2.){
-    		freq = i/(1.*medians_freq.size())*2.;
-    	    }else{
-    		freq = (medians_freq.size() - i)/(1.*medians_freq.size())*2.;
-    	    }
-    	    std::complex<float> factor = filter_time(freq)*filter_low(freq, decon_lf_cutoff);
-    	    medians_freq.at(i) = medians_freq.at(i) * factor;
-    	}
-    	WireCell::Waveform::realseq_t medians_decon = WireCell::Waveform::idft(medians_freq);
+	for (size_t i=0;i!=medians_freq.size();i++){
+	    double freq;
+	    // assuming 2 MHz digitization
+	    if (i <medians_freq.size()/2.){
+		freq = i/(1.*medians_freq.size())*2.;
+	    }else{
+		freq = (medians_freq.size() - i)/(1.*medians_freq.size())*2.;
+	    }
+	    std::complex<float> factor = filter_time(freq)*filter_low(freq, decon_lf_cutoff);
+	    medians_freq.at(i) = medians_freq.at(i) * factor;
+	}
+	WireCell::Waveform::realseq_t medians_decon = WireCell::Waveform::idft(medians_freq);
 	
-    	temp = Derivations::CalcRMS(medians_decon);
-    	mean = temp.first;
-    	rms = temp.second;
+	temp = Derivations::CalcRMS(medians_decon);
+	mean = temp.first;
+	rms = temp.second;
 	
-    	if (protection_factor*rms > upper_decon_limit){
-    	    limit = protection_factor*rms;
-    	}else{
-    	    limit = upper_decon_limit;
-    	}
+	if (protection_factor*rms > upper_decon_limit){
+	    limit = protection_factor*rms;
+	}else{
+	    limit = upper_decon_limit;
+	}
 
 	
-	//	std::cout << "Xin: " << protection_factor << " " << rms << " " << upper_decon_limit << std::endl;
+	//      std::cout << "Xin: " << protection_factor << " " << rms << " " << upper_decon_limit << std::endl;
 
 
 	
-    	for (int j=0;j!=nbin;j++) {
-    	    float content = medians_decon.at(j);
-    	    if ((content-mean)>limit){
-    		int time_bin = j + res_offset;
+	for (int j=0;j!=nbin;j++) {
+	    float content = medians_decon.at(j);
+	    if ((content-mean)>limit){
+		int time_bin = j + res_offset;
 		if (time_bin >= nbin) time_bin -= nbin;
-		//	medians.at(time_bin) = 0; 
-    		signalsBool.at(time_bin) = true;
-    		// add the front and back padding
-    		for (int k=0;k!=pad_b;k++){
-    		    int bin = time_bin+k+1;
-    		    if (bin > nbin-1) bin = nbin-1;
-    		    signalsBool.at(bin) = true;
-    		}
-    		for (int k=0;k!=pad_f;k++){
-    		    int bin = time_bin-k-1;
-    		    if (bin <0) { bin = 0; }
-    		    signalsBool.at(bin) = true;
-    		}
-    	    }
-    	}
+		//      medians.at(time_bin) = 0; 
+		signalsBool.at(time_bin) = true;
+		// add the front and back padding
+		for (int k=0;k!=pad_b;k++){
+		    int bin = time_bin+k+1;
+		    if (bin > nbin-1) bin = nbin-1;
+		    signalsBool.at(bin) = true;
+		}
+		for (int k=0;k!=pad_f;k++){
+		    int bin = time_bin-k-1;
+		    if (bin <0) { bin = 0; }
+		    signalsBool.at(bin) = true;
+		}
+	    }
+	}
 
 
 	// // second-level decon ...
@@ -365,48 +547,48 @@ std::vector< std::vector<int> > Microboone::SignalProtection(WireCell::Waveform:
 	// WireCell::Waveform::compseq_t respec_freq = WireCell::Waveform::dft(respec_time);
 	// WireCell::Waveform::shrink(medians_freq,respec_freq);
 	// for (size_t i=0;i!=medians_freq.size();i++){
-    	//     double freq;
-    	//     // assuming 2 MHz digitization
-    	//     if (i <medians_freq.size()/2.){
-    	// 	freq = i/(1.*medians_freq.size())*2.;
-    	//     }else{
-    	// 	freq = (medians_freq.size() - i)/(1.*medians_freq.size())*2.;
-    	//     }
-    	//     std::complex<float> factor = filter_time(freq)*filter_low(freq, decon_lf_cutoff);
-    	//     medians_freq.at(i) = medians_freq.at(i) * factor;
-    	// }
+	//     double freq;
+	//     // assuming 2 MHz digitization
+	//     if (i <medians_freq.size()/2.){
+	//      freq = i/(1.*medians_freq.size())*2.;
+	//     }else{
+	//      freq = (medians_freq.size() - i)/(1.*medians_freq.size())*2.;
+	//     }
+	//     std::complex<float> factor = filter_time(freq)*filter_low(freq, decon_lf_cutoff);
+	//     medians_freq.at(i) = medians_freq.at(i) * factor;
+	// }
 	// medians_decon = WireCell::Waveform::idft(medians_freq);
 	
-    	// temp = Derivations::CalcRMS(medians_decon);
-    	// mean = temp.first;
-    	// rms = temp.second;
+	// temp = Derivations::CalcRMS(medians_decon);
+	// mean = temp.first;
+	// rms = temp.second;
 	
-	// //	if (protection_factor*rms > upper_decon_limit){
+	// //   if (protection_factor*rms > upper_decon_limit){
 	// limit = protection_factor*rms;
-    	// // }else{
-    	// //     limit = upper_decon_limit;
-    	// // }
+	// // }else{
+	// //     limit = upper_decon_limit;
+	// // }
 	
-    	// for (int j=0;j!=nbin;j++) {
-    	//     float content = medians_decon.at(j);
-    	//     if ((content-mean)>limit){
-    	// 	int time_bin = j + res_offset;
-	// 	if (time_bin >= nbin) time_bin -= nbin;
-	// 	//	medians.at(time_bin) = 0; 
-    	// 	signalsBool.at(time_bin) = true;
-    	// 	// add the front and back padding
-    	// 	for (int k=0;k!=pad_b;k++){
-    	// 	    int bin = time_bin+k+1;
-    	// 	    if (bin > nbin-1) bin = nbin-1;
-    	// 	    signalsBool.at(bin) = true;
-    	// 	}
-    	// 	for (int k=0;k!=pad_f;k++){
-    	// 	    int bin = time_bin-k-1;
-    	// 	    if (bin <0) { bin = 0; }
-    	// 	    signalsBool.at(bin) = true;
-    	// 	}
-    	//     }
-    	// }
+	// for (int j=0;j!=nbin;j++) {
+	//     float content = medians_decon.at(j);
+	//     if ((content-mean)>limit){
+	//      int time_bin = j + res_offset;
+	//      if (time_bin >= nbin) time_bin -= nbin;
+	//      //      medians.at(time_bin) = 0; 
+	//      signalsBool.at(time_bin) = true;
+	//      // add the front and back padding
+	//      for (int k=0;k!=pad_b;k++){
+	//          int bin = time_bin+k+1;
+	//          if (bin > nbin-1) bin = nbin-1;
+	//          signalsBool.at(bin) = true;
+	//      }
+	//      for (int k=0;k!=pad_f;k++){
+	//          int bin = time_bin-k-1;
+	//          if (bin <0) { bin = 0; }
+	//          signalsBool.at(bin) = true;
+	//      }
+	//     }
+	// }
 
 
     }
@@ -438,7 +620,7 @@ std::vector< std::vector<int> > Microboone::SignalProtection(WireCell::Waveform:
     
     std::map<int, bool> flag_replace;
     for (auto roi: rois){
-    	flag_replace[roi.front()] = true;
+	flag_replace[roi.front()] = true;
     }
     
     if (respec.size() > 0 && (respec.at(0).real()!=1 || respec.at(0).imag()!=0) && res_offset!=0){
@@ -451,79 +633,79 @@ std::vector< std::vector<int> > Microboone::SignalProtection(WireCell::Waveform:
     //     // use ROI to get a new waveform
     //     WireCell::Waveform::realseq_t medians_roi(nbin,0);
     //     for (auto roi: rois){
-    // 	const int bin0 = std::max(roi.front()-1, 0);
-    // 	const int binf = std::min(roi.back()+1, nbin-1);
-    // 	const double m0 = medians[bin0];
-    // 	const double mf = medians[binf];
-    // 	const double roi_run = binf - bin0;
-    // 	const double roi_rise = mf - m0;
-    // 	for (auto bin : roi) {
-    // 	    const double m = m0 + (bin - bin0)/roi_run*roi_rise;
-    // 	    medians_roi.at(bin) = medians.at(bin) - m;
-    // 	}
+    //  const int bin0 = std::max(roi.front()-1, 0);
+    //  const int binf = std::min(roi.back()+1, nbin-1);
+    //  const double m0 = medians[bin0];
+    //  const double mf = medians[binf];
+    //  const double roi_run = binf - bin0;
+    //  const double roi_rise = mf - m0;
+    //  for (auto bin : roi) {
+    //      const double m = m0 + (bin - bin0)/roi_run*roi_rise;
+    //      medians_roi.at(bin) = medians.at(bin) - m;
+    //  }
     //     }
     //     // do the deconvolution with a very loose low-frequency filter
     //     WireCell::Waveform::compseq_t medians_roi_freq = WireCell::Waveform::dft(medians_roi);
     //     WireCell::Waveform::shrink(medians_roi_freq,respec);
     //     for (size_t i=0;i!=medians_roi_freq.size();i++){
-    // 	double freq;
-    // 	// assuming 2 MHz digitization
-    // 	if (i <medians_roi_freq.size()/2.){
-    // 	    freq = i/(1.*medians_roi_freq.size())*2.;
-    // 	}else{
-    // 	    freq = (medians_roi_freq.size() - i)/(1.*medians_roi_freq.size())*2.;
-    // 	}
-    // 	std::complex<float> factor = filter_time(freq)*filter_low_loose(freq);
-    // 	medians_roi_freq.at(i) = medians_roi_freq.at(i) * factor;
+    //  double freq;
+    //  // assuming 2 MHz digitization
+    //  if (i <medians_roi_freq.size()/2.){
+    //      freq = i/(1.*medians_roi_freq.size())*2.;
+    //  }else{
+    //      freq = (medians_roi_freq.size() - i)/(1.*medians_roi_freq.size())*2.;
+    //  }
+    //  std::complex<float> factor = filter_time(freq)*filter_low_loose(freq);
+    //  medians_roi_freq.at(i) = medians_roi_freq.at(i) * factor;
     //     }
     //     WireCell::Waveform::realseq_t medians_roi_decon = WireCell::Waveform::idft(medians_roi_freq);
     
     //     // judge if a roi is good or not ...
     //     //shift things back properly
     //     for (auto roi: rois){
-    //     	const int bin0 = std::max(roi.front()-1, 0);
-    //     	const int binf = std::min(roi.back()+1, nbin-1);
-    //     	flag_replace[roi.front()] = false;
+    //          const int bin0 = std::max(roi.front()-1, 0);
+    //          const int binf = std::min(roi.back()+1, nbin-1);
+    //          flag_replace[roi.front()] = false;
     
-    // 	double max_val = 0;
-    // 	double min_val = 0;
-    // 	// double max_adc_val=0;
-    // 	// double min_adc_val=0;
+    //  double max_val = 0;
+    //  double min_val = 0;
+    //  // double max_adc_val=0;
+    //  // double min_adc_val=0;
     
-    // 	for (int i=bin0; i<=binf; i++){
-    //     	    int time_bin = i-res_offset;
-    //     	    if (time_bin <0) time_bin += nbin;
-    // 	    if (time_bin >=nbin) time_bin -= nbin;
+    //  for (int i=bin0; i<=binf; i++){
+    //              int time_bin = i-res_offset;
+    //              if (time_bin <0) time_bin += nbin;
+    //      if (time_bin >=nbin) time_bin -= nbin;
     
-    // 	    if (i==bin0){
-    // 		max_val = medians_roi_decon.at(time_bin);
-    // 		min_val = medians_roi_decon.at(time_bin);
-    // 		// max_adc_val = medians.at(i);
-    // 		// min_adc_val = medians.at(i);
-    // 	    }else{
-    // 		if (medians_roi_decon.at(time_bin) > max_val) max_val = medians_roi_decon.at(time_bin);
-    // 		if (medians_roi_decon.at(time_bin) < min_val) min_val = medians_roi_decon.at(time_bin);
-    // 		// if (medians.at(i) > max_adc_val) max_adc_val = medians.at(i);
-    // 		// if (medians.at(i) < min_adc_val) min_adc_val = medians.at(i);
-    // 	    }
-    //     	}
+    //      if (i==bin0){
+    //          max_val = medians_roi_decon.at(time_bin);
+    //          min_val = medians_roi_decon.at(time_bin);
+    //          // max_adc_val = medians.at(i);
+    //          // min_adc_val = medians.at(i);
+    //      }else{
+    //          if (medians_roi_decon.at(time_bin) > max_val) max_val = medians_roi_decon.at(time_bin);
+    //          if (medians_roi_decon.at(time_bin) < min_val) min_val = medians_roi_decon.at(time_bin);
+    //          // if (medians.at(i) > max_adc_val) max_adc_val = medians.at(i);
+    //          // if (medians.at(i) < min_adc_val) min_adc_val = medians.at(i);
+    //      }
+    //          }
     
-    // 	//std::cout << "Xin: " << upper_decon_limit1 << std::endl;
-    // 	//	if ( max_val > upper_decon_limit1)
-    // 	//	if ( max_val > 0.04 && fabs(min_val) < 0.6*max_val)
-    // 	//if (max_val > 0.06 && fabs(min_val) < 0.6*max_val)
-    // 	if (max_val > 0.06)
-    // 	    flag_replace[roi.front()] = true;
+    //  //std::cout << "Xin: " << upper_decon_limit1 << std::endl;
+    //  //      if ( max_val > upper_decon_limit1)
+    //  //      if ( max_val > 0.04 && fabs(min_val) < 0.6*max_val)
+    //  //if (max_val > 0.06 && fabs(min_val) < 0.6*max_val)
+    //  if (max_val > 0.06)
+    //      flag_replace[roi.front()] = true;
     //     }
     // } 
 
     // Replace medians for above regions with interpolation on values
     // just outside each region.
     for (auto roi : rois) {
-        // original code used the bins just outside the ROI
-        const int bin0 = std::max(roi.front()-1, 0);
-        const int binf = std::min(roi.back()+1, nbin-1);
-        if (flag_replace[roi.front()]){
+	// original code used the bins just outside the ROI
+	const int bin0 = std::max(roi.front()-1, 0);
+	const int binf = std::min(roi.back()+1, nbin-1);
+	if (flag_replace[roi.front()]){
 	    const double m0 = medians[bin0];
 	    const double mf = medians[binf];
 	    const double roi_run = binf - bin0;
@@ -532,7 +714,7 @@ std::vector< std::vector<int> > Microboone::SignalProtection(WireCell::Waveform:
 		const double m = m0 + (bin - bin0)/roi_run*roi_rise;
 		medians.at(bin) = m;
 	    }
-        }
+	}
     }
     
   
@@ -547,16 +729,16 @@ bool Microboone::NoisyFilterAlg(WireCell::Waveform::realseq_t& sig, float min_rm
     
     // int planeNum,channel_no;
     // if (ch < 2400) {
-    // 	planeNum = 0;
-    // 	channel_no = ch;
+    //  planeNum = 0;
+    //  channel_no = ch;
     // }
     // else if (ch < 4800) {
-    // 	planeNum = 1;
-    // 	channel_no = ch - 2400;
+    //  planeNum = 1;
+    //  channel_no = ch - 2400;
     // }
     // else {
-    // 	planeNum = 2;
-    // 	channel_no = ch - 4800;
+    //  planeNum = 2;
+    //  channel_no = ch - 4800;
     // }
 
     // //std::cout << rmsVal << " " << ch << std::endl;
@@ -565,36 +747,36 @@ bool Microboone::NoisyFilterAlg(WireCell::Waveform::realseq_t& sig, float min_rm
     // double minRMSCut[3] = {2,2,2};
 
     // if (planeNum == 0) {
-    // 	if (channel_no < 100) {
-    // 	    maxRMSCut[0] = 5;
-    // 	    minRMSCut[0] = 1;
-    // 	}
-    // 	else if (channel_no >= 100 && channel_no<2000) {
-    // 	    maxRMSCut[0] = 11; // increase the threshold slightly ... 
-    // 	    minRMSCut[0] = 1.9;
-    // 	}
-    // 	else if (channel_no >= 2000 && channel_no < 2400) {
-    // 	    maxRMSCut[0] = 5;
-    // 	    minRMSCut[0] = 0.9; // take into account FT-1 channel ... 
-    // 	}
+    //  if (channel_no < 100) {
+    //      maxRMSCut[0] = 5;
+    //      minRMSCut[0] = 1;
+    //  }
+    //  else if (channel_no >= 100 && channel_no<2000) {
+    //      maxRMSCut[0] = 11; // increase the threshold slightly ... 
+    //      minRMSCut[0] = 1.9;
+    //  }
+    //  else if (channel_no >= 2000 && channel_no < 2400) {
+    //      maxRMSCut[0] = 5;
+    //      minRMSCut[0] = 0.9; // take into account FT-1 channel ... 
+    //  }
     // }
     // else if (planeNum == 1) {
-    // 	if (channel_no <290){
-    // 	    maxRMSCut[1] = 5;
-    // 	    minRMSCut[1] = 1;
-    // 	}
-    // 	else if (channel_no>=290 && channel_no < 2200) {
-    // 	    maxRMSCut[1] = 11;
-    // 	    minRMSCut[1] = 1.9;
-    // 	}
-    // 	else if (channel_no >=2200) {
-    // 	    maxRMSCut[1] = 5;
-    // 	    minRMSCut[1] = 1;
-    // 	}
+    //  if (channel_no <290){
+    //      maxRMSCut[1] = 5;
+    //      minRMSCut[1] = 1;
+    //  }
+    //  else if (channel_no>=290 && channel_no < 2200) {
+    //      maxRMSCut[1] = 11;
+    //      minRMSCut[1] = 1.9;
+    //  }
+    //  else if (channel_no >=2200) {
+    //      maxRMSCut[1] = 5;
+    //      minRMSCut[1] = 1;
+    //  }
     // }
     // else if (planeNum == 2) {
-    // 	maxRMSCut[2] = 8;
-    // 	minRMSCut[2] = 1.3; // reduce threshold to take into account the adaptive baseline ... 
+    //  maxRMSCut[2] = 8;
+    //  minRMSCut[2] = 1.3; // reduce threshold to take into account the adaptive baseline ... 
     // }
   
     //if(rmsVal > maxRMSCut[planeNum] || rmsVal < minRMSCut[planeNum]) {
@@ -917,36 +1099,44 @@ Microboone::CoherentNoiseSub::apply(channel_signals_t& chansig) const
     std::vector< std::vector<int> > rois = Microboone::SignalProtection(medians,respec,res_offset,pad_f,pad_b,decon_limit, decon_lf_cutoff, adc_limit, protection_factor, min_adc_limit);
 
     // if (achannel == 3840){
-    // 	std::cout << "Xin1: " << rois.size() << std::endl;
-    // 	for (size_t i=0;i!=rois.size();i++){
-    // 	    std::cout << "Xin1: " << rois.at(i).front() << " " << rois.at(i).back() << std::endl;
-    // 	}
+    //  std::cout << "Xin1: " << rois.size() << std::endl;
+    //  for (size_t i=0;i!=rois.size();i++){
+    //      std::cout << "Xin1: " << rois.at(i).front() << " " << rois.at(i).back() << std::endl;
+    //  }
     // }
     
     //std::cerr <<"\tSigprotection done: " << chansig.size() << " " << medians.size() << " " << medians.at(100) << " " << medians.at(101) << std::endl;
 
+    std::map<int,std::vector< std::vector<int> >> chgr_rois;
+    for (auto it: chansig) {
+	int ch = it.first;
+	WireCell::IChannelFilter::signal_t& signal = it.second;
+	std::vector< std::vector<int> > channel_rois = Microboone::SignalProtection(signal,respec,res_offset,pad_f,pad_b,decon_limit, decon_lf_cutoff, adc_limit, protection_factor, min_adc_limit);
+	chgr_rois[ch] = channel_rois;
+    }
+
     // calculate the scaling coefficient and subtract
-    Microboone::Subtract_WScaling(chansig, medians, respec, res_offset, rois, decon_limit1, roi_min_max_ratio);
+    Microboone::Subtract_WScaling(chansig, medians, respec, res_offset, rois, chgr_rois, decon_limit1, roi_min_max_ratio);
 
     
     // WireCell::IChannelFilter::signal_t& signal = chansig.begin()->second;
     // for (size_t i=0;i!=signal.size();i++){
-    // 	signal.at(i) = medians.at(i);
+    //  signal.at(i) = medians.at(i);
     // }
     
     //std::cerr <<"\tSubtrace_WScaling done" << std::endl;
 
     // for (auto it: chansig){
-    // 	std::cout << "Xin3 " << it.first << std::endl;
-    // 	break;
+    //  std::cout << "Xin3 " << it.first << std::endl;
+    //  break;
     // }
   
-    return WireCell::Waveform::ChannelMaskMap();		// not implemented
+    return WireCell::Waveform::ChannelMaskMap();                // not implemented
 }
 WireCell::Waveform::ChannelMaskMap
 Microboone::CoherentNoiseSub::apply(int channel, signal_t& sig) const
 {
-    return WireCell::Waveform::ChannelMaskMap();		// not implemented
+    return WireCell::Waveform::ChannelMaskMap();                // not implemented
 }
 
 
@@ -1010,9 +1200,9 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
 
     bool is_partial = m_check_partial(spectrum); // Xin's "IS_RC()"
     
-    int nspec=0;		// just catch any non-zero
+    int nspec=0;                // just catch any non-zero
     if (!is_partial) {
-        auto const& spec = m_noisedb->rcrc(ch);
+	auto const& spec = m_noisedb->rcrc(ch);
 	WireCell::Waveform::shrink(spectrum, spec);
 
 	if (nsiglen != spec.size()) {
@@ -1022,8 +1212,8 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
     }
 
     {
-        auto const& spec = m_noisedb->config(ch);
-        WireCell::Waveform::scale(spectrum, spec);
+	auto const& spec = m_noisedb->config(ch);
+	WireCell::Waveform::scale(spectrum, spec);
 
 	if (nsiglen != spec.size()) {
 	    ++nmismatchlen;
@@ -1109,20 +1299,20 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
     Microboone::RemoveFilterFlags(signal);
 
     if (is_noisy) {
-        // std::cerr << "OneChannelNoise: "<<ch
-        //           <<" is_noisy="<<is_noisy
-        //           <<", is_chirp="<<is_chirp
-        //           <<", is_partial="<<is_partial
-        //           <<", baseline="<<baseline<<std::endl;
+	// std::cerr << "OneChannelNoise: "<<ch
+	//           <<" is_noisy="<<is_noisy
+	//           <<", is_chirp="<<is_chirp
+	//           <<", is_partial="<<is_partial
+	//           <<", baseline="<<baseline<<std::endl;
 
 	chirped_bins.first = 0;
 	chirped_bins.second = signal.size();
 	ret["noisy"][ch].push_back(chirped_bins);
 
-        if (ret.find("lf_noisy") != ret.end()) {
-            if(ret["lf_noisy"].find(ch)!=ret["lf_noisy"].end())
-                ret["lf_noisy"].erase(ch);
-        }
+	if (ret.find("lf_noisy") != ret.end()) {
+	    if(ret["lf_noisy"].find(ch)!=ret["lf_noisy"].end())
+		ret["lf_noisy"].erase(ch);
+	}
 	
     }
 
@@ -1220,7 +1410,7 @@ WireCell::Waveform::ChannelMaskMap Microboone::ADCBitShift::apply(int ch, signal
 
 	// do the correction ...
 	const int nl = signal.size();
-        std::vector<int> x(nl,0), x_orig(nl,0);
+	std::vector<int> x(nl,0), x_orig(nl,0);
 	for (int i=0;i!=nl;i++){
 	    x_orig[i] = signal.at(i);
 	    x[i] = signal.at(i);
@@ -1316,7 +1506,7 @@ void Microboone::OneChannelStatus::configure(const WireCell::Configuration& cfg)
     m_anode_tn = get(cfg, "anode", m_anode_tn);
     m_anode = Factory::find_tn<IAnodePlane>(m_anode_tn);
     if (!m_anode) {
-        THROW(KeyError() << errmsg{"failed to get IAnodePlane: " + m_anode_tn});
+	THROW(KeyError() << errmsg{"failed to get IAnodePlane: " + m_anode_tn});
     }
     //std::cerr << "OneChannelStatus: \n" << cfg << "\n";
 }
@@ -1378,7 +1568,7 @@ bool Microboone::OneChannelStatus::ID_lf_noisy(signal_t& sig) const{
 	}
     }
     if (!valid) {
-        return false;
+	return false;
     }
 
     
@@ -1398,17 +1588,17 @@ bool Microboone::OneChannelStatus::ID_lf_noisy(signal_t& sig) const{
     //     temp_sig.at(i)=i;
     // }
     // do FFT 
-    Waveform::compseq_t sig_freq = Waveform::dft(temp_sig);	
+    Waveform::compseq_t sig_freq = Waveform::dft(temp_sig);     
     for (int i=0;i!=m_nbins;i++){
-        content += abs(sig_freq.at(i+1));
+	content += abs(sig_freq.at(i+1));
     }
 
     //std::cout << mean << " " << rms << " " << content << " " << valid << std::endl;
     // std::cout << m_threshold << " " << m_window << " " << m_nbins << " " << m_cut << std::endl;
     
     if (content/valid>m_cut) {
-        // std::cerr << "OneChannelStatus::ID_lf_noisy: content=" << content << " valid=" << valid << " m_cut="<<m_cut<< std::endl;
-        return true;
+	// std::cerr << "OneChannelStatus::ID_lf_noisy: content=" << content << " valid=" << valid << " m_cut="<<m_cut<< std::endl;
+	return true;
     }
     
     return false;
