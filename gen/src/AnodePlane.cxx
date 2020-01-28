@@ -73,6 +73,8 @@ WireCell::Configuration Gen::AnodePlane::default_configuration() const
     cfg["faces"][0] = Json::nullValue;
     cfg["faces"][1] = Json::nullValue;
 
+    cfg["split_bb"] = false;
+
     return cfg;
 }
 
@@ -153,6 +155,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
     channel_wire_collector_t chwcollector;
 
     m_faces.resize(nfaces);
+    bool split_bb = get(cfg, "split_bb", false);
     // note, WireSchema requires front/back face ordering in an anode
     for (size_t iface=0; iface<nfaces; ++iface) { 
         const auto& ws_face = ws_faces[iface];
@@ -174,6 +177,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
 
         IWirePlane::vector planes(nplanes);
         // note, WireSchema requires U/V/W plane ordering in a face.
+        std::vector<Ray> bb_rays;
         for (size_t iplane=0; iplane<nplanes; ++iplane) { 
             const auto& ws_plane = ws_planes[iplane];
 
@@ -211,6 +215,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
 
             const BoundingBox bb = ws_store.bounding_box(ws_plane);
             const Ray bb_ray = bb.bounds();
+            bb_rays.push_back(bb_ray);
             const Vector plane_center = 0.5*(bb_ray.first + bb_ray.second);
 
             const double pitchmin = wire_pitch_dirs.second.dot(wires[0]->center() - plane_center);
@@ -249,6 +254,18 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
                 if (sensitive_face) {
                     auto v1 = bb_ray.first;
                     auto v2 = bb_ray.second;
+                    // Only get the intersection of bounding in z-direction
+                    if (split_bb){
+                        if(v1.z() > v2.z()) {std::swap(v1,v2);} // v1.z always < v2.z
+                        for(auto& ray: bb_rays) {
+                            auto h = ray.first; // head
+                            auto t = ray.second; // tail
+                            if(h.z() > t.z()) {std::swap(h,t);} // h.z always < t.z
+                            if(h.z() > v1.z()) {v1.z(h.z());}
+                            if(t.z() < v2.z()) {v2.z(t.z());}
+                        }
+                    }
+
                     // Enlarge to anode/cathode planes in X and by 1/2 pitch in Z.
                     Point p1(  anode_x, v1.y(), std::min(v1.z(), v2.z()) - 0.5*mean_pitch);
                     sensvol(p1);

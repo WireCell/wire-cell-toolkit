@@ -92,10 +92,10 @@ base {
                 ],
             } for n in std.range(0,3)],*/
 
-        local xanode = [-365.33*wc.cm, 0, 0, 365.33*wc.cm],
+        local xanode = [-369.33*wc.cm, -71.1*wc.cm, 71.1*wc.cm, 369.33*wc.cm],
         local offset_response = [if a%2==0 then +10*wc.cm else -10*wc.cm for a in std.range(0,3)],
         local xresponse = [xanode[a] + offset_response[a] for a in std.range(0,3)],
-        local xcathode = [-149.1*wc.cm, -149.1*wc.cm, 149.1*wc.cm, 149.1*wc.cm],
+        local xcathode = [-220.29*wc.cm, -220.29*wc.cm, 220.29*wc.cm, 220.29*wc.cm],
         volumes : [
             {
                 local world = 100,  // identify this geometry
@@ -117,6 +117,8 @@ base {
                 ],
             } for a in std.range(0,3) for s in std.range(1,2)
         ],
+
+        split_bb: true,
 
         // This describes some rough, overall bounding box.  It's not
         // directly needed but can be useful on the Jsonnet side, for
@@ -191,7 +193,8 @@ base {
         // fixme: this is for microboone and probably bogus for
         // protodune because (at least) the span of MB wire lengths do
         // not cover pdsp's.
-        noise: "protodune-noise-spectra-v1.json.bz2",
+        // noise: "protodune-noise-spectra-v1.json.bz2",
+        noise: "t600-corr-noise-spectra.json.bz2",
 
 
         chresp: null,

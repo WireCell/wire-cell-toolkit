@@ -124,6 +124,8 @@ function(params)
             nimpacts: params.sim.nimpacts,
             // The wire schema file
             wire_schema: wc.tn($.wires),
+            // split bounding box
+            split_bb: params.det.split_bb,
 
             faces : vol.faces,
         },
