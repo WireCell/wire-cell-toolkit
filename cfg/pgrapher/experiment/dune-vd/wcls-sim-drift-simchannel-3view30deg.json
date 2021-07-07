@@ -1,0 +1,5897 @@
+[
+   {
+      "data": {
+         "art_tag": "IonAndScint",
+         "assn_art_tag": "",
+         "model": "",
+         "scale": -1
+      },
+      "name": "",
+      "type": "wclsSimDepoSource"
+   },
+   {
+      "data": {
+         "generator": "default",
+         "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+         ]
+      },
+      "type": "Random"
+   },
+   {
+      "data": {
+         "DL": 3.9999999999999998e-07,
+         "DT": 8.8000000000000015e-07,
+         "ar39activity": 1.6021764870000004e-34,
+         "density": 8669456899850258432,
+         "drift_speed": 0.001565,
+         "fluctuate": true,
+         "lifetime": 10400000,
+         "rng": "Random",
+         "time_offset": 0,
+         "xregions": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ]
+      },
+      "type": "Drifter"
+   },
+   {
+      "data": {
+         "filename": "dunevd10kt-1x6x6-3view30deg-wires-v1.json.bz2"
+      },
+      "type": "WireSchemaFile"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 0,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm0",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 1,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm1",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 2,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm2",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 3,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm3",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 4,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm4",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 5,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm5",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 6,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm6",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 7,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm7",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 8,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm8",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 9,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm9",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 10,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm10",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 11,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm11",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 12,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm12",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 13,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm13",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 14,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm14",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 15,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm15",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 16,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm16",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 17,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm17",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 18,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm18",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 19,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm19",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 20,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm20",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 21,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm21",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 22,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm22",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 23,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm23",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 24,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm24",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 25,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm25",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 26,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm26",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 27,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm27",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 28,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm28",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 29,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm29",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 30,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm30",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 31,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm31",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 32,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm32",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 33,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm33",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 34,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm34",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "faces": [
+            {
+               "anode": 3250,
+               "cathode": -3250,
+               "response": 3060.8000000000002
+            },
+            null
+         ],
+         "ident": 35,
+         "nimpacts": 10,
+         "wire_schema": "WireSchemaFile"
+      },
+      "name": "crm35",
+      "type": "AnodePlane"
+   },
+   {
+      "data": {
+         "anodes_tn": [
+            "AnodePlane:crm0",
+            "AnodePlane:crm1",
+            "AnodePlane:crm2",
+            "AnodePlane:crm3",
+            "AnodePlane:crm4",
+            "AnodePlane:crm5",
+            "AnodePlane:crm6",
+            "AnodePlane:crm7",
+            "AnodePlane:crm8",
+            "AnodePlane:crm9",
+            "AnodePlane:crm10",
+            "AnodePlane:crm11",
+            "AnodePlane:crm12",
+            "AnodePlane:crm13",
+            "AnodePlane:crm14",
+            "AnodePlane:crm15",
+            "AnodePlane:crm16",
+            "AnodePlane:crm17",
+            "AnodePlane:crm18",
+            "AnodePlane:crm19",
+            "AnodePlane:crm20",
+            "AnodePlane:crm21",
+            "AnodePlane:crm22",
+            "AnodePlane:crm23",
+            "AnodePlane:crm24",
+            "AnodePlane:crm25",
+            "AnodePlane:crm26",
+            "AnodePlane:crm27",
+            "AnodePlane:crm28",
+            "AnodePlane:crm29",
+            "AnodePlane:crm30",
+            "AnodePlane:crm31",
+            "AnodePlane:crm32",
+            "AnodePlane:crm33",
+            "AnodePlane:crm34",
+            "AnodePlane:crm35"
+         ],
+         "artlabel": "simpleSC",
+         "drift_speed": 0.001565,
+         "g4_ref_time": 0,
+         "nsigma": 3,
+         "readout_time": 4687500,
+         "response_plane": 189.20000000000002,
+         "rng": "Random",
+         "start_time": -250000,
+         "tick": 500,
+         "u_time_offset": 0,
+         "u_to_rp": 189.20000000000002,
+         "use_energy": true,
+         "v_time_offset": 0,
+         "v_to_rp": 189.20000000000002,
+         "y_time_offset": 0,
+         "y_to_rp": 189.20000000000002
+      },
+      "name": "postdrift",
+      "type": "wclsSimChannelSink"
+   },
+   {
+      "data": {
+         "gate": [
+            -63897.76357827476,
+            4687602.2364217248
+         ]
+      },
+      "name": "bagger",
+      "type": "DepoBagger"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer1",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer2_00",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer2_01",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer2_02",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer2_03",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer2_04",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tag_rules": [ ]
+      },
+      "name": "layer2_05",
+      "type": "DepoSetFanout"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer4_00",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer4_01",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer4_02",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer4_03",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer4_04",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer4_05",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "multiplicity": 6,
+         "tags": [
+            "orig0",
+            "orig1",
+            "orig2",
+            "orig3",
+            "orig4",
+            "orig5",
+            "orig6",
+            "orig7",
+            "orig8",
+            "orig9",
+            "orig10",
+            "orig11",
+            "orig12",
+            "orig13",
+            "orig14",
+            "orig15",
+            "orig16",
+            "orig17",
+            "orig18",
+            "orig19",
+            "orig20",
+            "orig21",
+            "orig22",
+            "orig23",
+            "orig24",
+            "orig25",
+            "orig26",
+            "orig27",
+            "orig28",
+            "orig29",
+            "orig30",
+            "orig31",
+            "orig32",
+            "orig33",
+            "orig34",
+            "orig35"
+         ]
+      },
+      "name": "layer3",
+      "type": "FrameFanin"
+   },
+   {
+      "data": {
+         "filename": "dunevd-resp-isoc3views-18d92.json.bz2"
+      },
+      "name": "field0",
+      "type": "FieldResponse"
+   },
+   {
+      "data": {
+         "gain": 1.9226117844000003e-12,
+         "nticks": 9503,
+         "postgain": 1,
+         "shaping": 1200,
+         "tick": 500
+      },
+      "type": "ColdElecResponse"
+   },
+   {
+      "data": {
+         "nticks": 9503,
+         "tick": 500,
+         "width": 1000000
+      },
+      "type": "RCResponse"
+   },
+   {
+      "data": {
+         "magnitude": 1,
+         "nticks": 9503,
+         "start": 0,
+         "tick": 500,
+         "time_smear": 1000
+      },
+      "type": "ResponseSys"
+   },
+   {
+      "data": {
+         "field_response": "FieldResponse:field0",
+         "long_padding": 1500000,
+         "long_responses": [
+            "RCResponse",
+            "RCResponse"
+         ],
+         "nticks": 9503,
+         "overall_short_padding": 200000,
+         "plane": 0,
+         "short_responses": [
+            "ColdElecResponse"
+         ],
+         "tick": 500
+      },
+      "name": "PIRfield0plane0",
+      "type": "PlaneImpactResponse"
+   },
+   {
+      "data": {
+         "field_response": "FieldResponse:field0",
+         "long_padding": 1500000,
+         "long_responses": [
+            "RCResponse",
+            "RCResponse"
+         ],
+         "nticks": 9503,
+         "overall_short_padding": 200000,
+         "plane": 1,
+         "short_responses": [
+            "ColdElecResponse"
+         ],
+         "tick": 500
+      },
+      "name": "PIRfield0plane1",
+      "type": "PlaneImpactResponse"
+   },
+   {
+      "data": {
+         "field_response": "FieldResponse:field0",
+         "long_padding": 1500000,
+         "long_responses": [
+            "RCResponse",
+            "RCResponse"
+         ],
+         "nticks": 9503,
+         "overall_short_padding": 200000,
+         "plane": 2,
+         "short_responses": [
+            "ColdElecResponse"
+         ],
+         "tick": 500
+      },
+      "name": "PIRfield0plane2",
+      "type": "PlaneImpactResponse"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm0",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor0",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm0",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer0",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm0",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm0",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm0",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm0",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm0",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig0",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer0",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm1",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor1",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm1",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer1",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm1",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm1",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm1",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm1",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm1",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig1",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer1",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm2",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor2",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm2",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer2",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm2",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm2",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm2",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm2",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm2",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig2",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer2",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm3",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor3",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm3",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer3",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm3",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm3",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm3",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm3",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm3",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig3",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer3",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm4",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor4",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm4",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer4",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm4",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm4",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm4",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm4",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm4",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig4",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer4",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm5",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor5",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm5",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer5",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm5",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm5",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm5",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm5",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm5",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig5",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer5",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm6",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor6",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm6",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer6",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm6",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm6",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm6",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm6",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm6",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig6",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer6",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm7",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor7",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm7",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer7",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm7",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm7",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm7",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm7",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm7",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig7",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer7",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm8",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor8",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm8",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer8",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm8",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm8",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm8",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm8",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm8",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig8",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer8",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm9",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor9",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm9",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer9",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm9",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm9",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm9",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm9",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm9",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig9",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer9",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm10",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor10",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm10",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer10",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm10",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm10",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm10",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm10",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm10",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig10",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer10",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm11",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor11",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm11",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer11",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm11",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm11",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm11",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm11",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm11",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig11",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer11",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm12",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor12",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm12",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer12",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm12",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm12",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm12",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm12",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm12",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig12",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer12",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm13",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor13",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm13",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer13",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm13",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm13",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm13",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm13",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm13",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig13",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer13",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm14",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor14",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm14",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer14",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm14",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm14",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm14",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm14",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm14",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig14",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer14",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm15",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor15",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm15",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer15",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm15",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm15",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm15",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm15",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm15",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig15",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer15",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm16",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor16",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm16",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer16",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm16",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm16",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm16",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm16",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm16",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig16",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer16",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm17",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor17",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm17",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer17",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm17",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm17",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm17",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm17",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm17",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig17",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer17",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm18",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor18",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm18",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer18",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm18",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm18",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm18",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm18",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm18",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig18",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer18",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm19",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor19",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm19",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer19",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm19",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm19",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm19",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm19",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm19",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig19",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer19",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm20",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor20",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm20",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer20",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm20",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm20",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm20",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm20",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm20",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig20",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer20",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm21",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor21",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm21",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer21",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm21",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm21",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm21",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm21",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm21",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig21",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer21",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm22",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor22",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm22",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer22",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm22",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm22",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm22",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm22",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm22",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig22",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer22",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm23",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor23",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm23",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer23",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm23",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm23",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm23",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm23",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm23",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig23",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer23",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm24",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor24",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm24",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer24",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm24",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm24",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm24",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm24",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm24",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig24",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer24",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm25",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor25",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm25",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer25",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm25",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm25",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm25",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm25",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm25",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig25",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer25",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm26",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor26",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm26",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer26",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm26",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm26",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm26",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm26",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm26",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig26",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer26",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm27",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor27",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm27",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer27",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm27",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm27",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm27",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm27",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm27",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig27",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer27",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm28",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor28",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm28",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer28",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm28",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm28",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm28",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm28",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm28",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig28",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer28",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm29",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor29",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm29",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer29",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm29",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm29",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm29",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm29",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm29",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig29",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer29",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm30",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor30",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm30",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer30",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm30",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm30",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm30",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm30",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm30",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig30",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer30",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm31",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor31",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm31",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer31",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm31",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm31",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm31",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm31",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm31",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig31",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer31",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm32",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor32",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm32",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer32",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm32",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm32",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm32",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm32",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm32",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig32",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer32",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm33",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor33",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm33",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer33",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm33",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm33",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm33",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm33",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm33",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig33",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer33",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm34",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor34",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm34",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer34",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm34",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm34",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm34",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm34",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm34",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig34",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer34",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm35",
+         "drift_speed": 0.001565,
+         "first_frame_number": 100,
+         "fluctuate": true,
+         "nsigma": 3,
+         "pirs": [
+            "PlaneImpactResponse:PIRfield0plane0",
+            "PlaneImpactResponse:PIRfield0plane1",
+            "PlaneImpactResponse:PIRfield0plane2"
+         ],
+         "readout_time": 4751500,
+         "rng": "Random",
+         "start_time": -63897.76357827476,
+         "tick": 500
+      },
+      "name": "ductor35",
+      "type": "DepoTransform"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm35",
+         "fill": 0,
+         "nticks": 9375,
+         "tags": [ ],
+         "tbin": 128,
+         "toffset": 0
+      },
+      "name": "reframer35",
+      "type": "Reframer"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm35",
+         "chanstat": "",
+         "nsamples": 9375,
+         "period": 500,
+         "spectra_file": "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+         "wire_length_scale": 10
+      },
+      "name": "empericalnoisecrm35",
+      "type": "EmpiricalNoiseModel"
+   },
+   {
+      "data": {
+         "model": "EmpiricalNoiseModel:empericalnoisecrm35",
+         "nsamples": 9375,
+         "replacement_percentage": 0.02,
+         "rng": "Random"
+      },
+      "name": "addnoiseempericalnoisecrm35",
+      "type": "AddNoise"
+   },
+   {
+      "data": {
+         "anode": "AnodePlane:crm35",
+         "baselines": [
+            9.0000000000000007e-07,
+            9.0000000000000007e-07,
+            2.0000000000000002e-07
+         ],
+         "frame_tag": "orig35",
+         "fullscale": [
+            0,
+            1.9999999999999999e-06
+         ],
+         "gain": 1,
+         "resolution": 12
+      },
+      "name": "digitizer35",
+      "type": "Digitizer"
+   },
+   {
+      "data": {
+         "tag_rules": [
+            {
+               "frame": {
+                  ".*": "orig"
+               },
+               "merge": {
+                  "orig\\d+": "daq"
+               }
+            }
+         ]
+      },
+      "type": "Retagger"
+   },
+   {
+      "data": {
+         "anodes_tn": [
+            "AnodePlane:crm0",
+            "AnodePlane:crm1",
+            "AnodePlane:crm2",
+            "AnodePlane:crm3",
+            "AnodePlane:crm4",
+            "AnodePlane:crm5",
+            "AnodePlane:crm6",
+            "AnodePlane:crm7",
+            "AnodePlane:crm8",
+            "AnodePlane:crm9",
+            "AnodePlane:crm10",
+            "AnodePlane:crm11",
+            "AnodePlane:crm12",
+            "AnodePlane:crm13",
+            "AnodePlane:crm14",
+            "AnodePlane:crm15",
+            "AnodePlane:crm16",
+            "AnodePlane:crm17",
+            "AnodePlane:crm18",
+            "AnodePlane:crm19",
+            "AnodePlane:crm20",
+            "AnodePlane:crm21",
+            "AnodePlane:crm22",
+            "AnodePlane:crm23",
+            "AnodePlane:crm24",
+            "AnodePlane:crm25",
+            "AnodePlane:crm26",
+            "AnodePlane:crm27",
+            "AnodePlane:crm28",
+            "AnodePlane:crm29",
+            "AnodePlane:crm30",
+            "AnodePlane:crm31",
+            "AnodePlane:crm32",
+            "AnodePlane:crm33",
+            "AnodePlane:crm34",
+            "AnodePlane:crm35"
+         ]
+      },
+      "name": "meganodes",
+      "type": "MegaAnodePlane"
+   },
+   {
+      "data": {
+         "anode": "MegaAnodePlane:meganodes",
+         "digitize": true,
+         "frame_tags": [
+            "daq"
+         ],
+         "pedestal_mean": "native"
+      },
+      "name": "simdigits",
+      "type": "wclsFrameSaver"
+   },
+   {
+      "type": "DumpFrames"
+   },
+   {
+      "data": {
+         "edges": [
+            {
+               "head": {
+                  "node": "Drifter",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "wclsSimDepoSource",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "wclsSimChannelSink:postdrift",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Drifter",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoBagger:bagger",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "wclsSimChannelSink:postdrift",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoBagger:bagger",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Retagger",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "FrameFanin:layer3",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "wclsFrameSaver:simdigits",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Retagger",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DumpFrames",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "wclsFrameSaver:simdigits",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor0",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor1",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor2",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor3",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor4",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor5",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor6",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor7",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor8",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor9",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor10",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor11",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor12",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor13",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor14",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor15",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor16",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor17",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor18",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor19",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor20",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor21",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor22",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor23",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor24",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor25",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor26",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor27",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor28",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor29",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor30",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor31",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor32",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor33",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor34",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoTransform:ductor35",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer0",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer1",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer2",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer3",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer4",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer5",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer6",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer7",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer8",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer9",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer10",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer11",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer12",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer13",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer14",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer15",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer16",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer17",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer18",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer19",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer20",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer21",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer22",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer23",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer24",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer25",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer26",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer27",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer28",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer29",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer30",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer31",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer32",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer33",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer34",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "Digitizer:digitizer35",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer2_00",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer2_01",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 1
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer2_02",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 2
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer2_03",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 3
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer2_04",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 4
+               }
+            },
+            {
+               "head": {
+                  "node": "DepoSetFanout:layer2_05",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoSetFanout:layer1",
+                  "port": 5
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer3",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "FrameFanin:layer4_00",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer3",
+                  "port": 1
+               },
+               "tail": {
+                  "node": "FrameFanin:layer4_01",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer3",
+                  "port": 2
+               },
+               "tail": {
+                  "node": "FrameFanin:layer4_02",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer3",
+                  "port": 3
+               },
+               "tail": {
+                  "node": "FrameFanin:layer4_03",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer3",
+                  "port": 4
+               },
+               "tail": {
+                  "node": "FrameFanin:layer4_04",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "FrameFanin:layer3",
+                  "port": 5
+               },
+               "tail": {
+                  "node": "FrameFanin:layer4_05",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer0",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor0",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm0",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer0",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer0",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm0",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer1",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor1",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm1",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer1",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer1",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm1",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer2",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor2",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm2",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer2",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer2",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm2",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer3",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor3",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm3",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer3",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer3",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm3",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer4",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor4",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm4",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer4",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer4",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm4",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer5",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor5",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm5",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer5",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer5",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm5",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer6",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor6",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm6",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer6",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer6",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm6",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer7",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor7",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm7",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer7",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer7",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm7",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer8",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor8",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm8",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer8",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer8",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm8",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer9",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor9",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm9",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer9",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer9",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm9",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer10",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor10",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm10",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer10",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer10",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm10",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer11",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor11",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm11",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer11",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer11",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm11",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer12",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor12",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm12",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer12",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer12",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm12",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer13",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor13",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm13",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer13",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer13",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm13",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer14",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor14",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm14",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer14",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer14",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm14",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer15",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor15",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm15",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer15",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer15",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm15",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer16",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor16",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm16",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer16",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer16",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm16",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer17",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor17",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm17",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer17",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer17",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm17",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer18",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor18",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm18",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer18",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer18",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm18",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer19",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor19",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm19",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer19",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer19",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm19",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer20",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor20",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm20",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer20",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer20",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm20",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer21",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor21",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm21",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer21",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer21",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm21",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer22",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor22",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm22",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer22",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer22",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm22",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer23",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor23",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm23",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer23",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer23",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm23",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer24",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor24",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm24",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer24",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer24",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm24",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer25",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor25",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm25",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer25",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer25",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm25",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer26",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor26",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm26",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer26",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer26",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm26",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer27",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor27",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm27",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer27",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer27",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm27",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer28",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor28",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm28",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer28",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer28",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm28",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer29",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor29",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm29",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer29",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer29",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm29",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer30",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor30",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm30",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer30",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer30",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm30",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer31",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor31",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm31",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer31",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer31",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm31",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer32",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor32",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm32",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer32",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer32",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm32",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer33",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor33",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm33",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer33",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer33",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm33",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer34",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor34",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm34",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer34",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer34",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm34",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Reframer:reframer35",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "DepoTransform:ductor35",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm35",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "Reframer:reframer35",
+                  "port": 0
+               }
+            },
+            {
+               "head": {
+                  "node": "Digitizer:digitizer35",
+                  "port": 0
+               },
+               "tail": {
+                  "node": "AddNoise:addnoiseempericalnoisecrm35",
+                  "port": 0
+               }
+            }
+         ]
+      },
+      "type": "Pgrapher"
+   }
+]

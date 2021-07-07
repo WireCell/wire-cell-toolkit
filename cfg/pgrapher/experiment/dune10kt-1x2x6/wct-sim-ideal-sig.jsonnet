@@ -12,7 +12,8 @@ local g = import "pgraph.jsonnet";
 local cli = import "pgrapher/ui/cli/nodes.jsonnet";
 
 local io = import "pgrapher/common/fileio.jsonnet";
-local params = import "pgrapher/experiment/dune10kt-1x2x6/params.jsonnet";
+local params_maker = import 'pgrapher/experiment/dune10kt-1x2x6/simparams.jsonnet';
+local params = params_maker({});
 local tools_maker = import "pgrapher/common/tools.jsonnet";
 
 local tools = tools_maker(params);

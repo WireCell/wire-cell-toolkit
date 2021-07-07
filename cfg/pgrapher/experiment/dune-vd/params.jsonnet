@@ -4,7 +4,7 @@
 local wc = import "wirecell.jsonnet";
 local base = import "pgrapher/common/params.jsonnet";
 
-base {
+function(response_plane) base {
     // This section will be overwritten in simparams.jsonnet
     det : {
 
@@ -14,11 +14,11 @@ base {
         // Only one CRP is defined in this geometry 
         // CRMs are oneside anodes     
 
-        response_plane: 10*wc.cm, // relative to collection wires
+        response_plane: response_plane,
 
-        local upper_crp_x = 300.507*wc.cm,
+        local upper_crp_x = 325.00*wc.cm, //300.507*wc.cm,
         local upper_resp_x = upper_crp_x-self.response_plane,
-        local cathode_x = 0*wc.cm,
+        local cathode_x = -325.00*wc.cm,
        
         volumes: [
             {
@@ -96,21 +96,17 @@ base {
     files: {
 
         // Standard wire geometry with 2 wire planes and third dummy induction
-        // wires: "dunevd-wires-twoplanes.json.bz2",
-        // wires: "dunevd10kt_3view_v1_1x6x6.json.bz2",
-        wires: "dunevd10kt_3view_30deg_v1_1x6x6.json.bz2",
+        wires: "dunevd10kt-1x6x6-3view30deg-wires-v1.json.bz2",
 
         // Based on the simulations made for the 50L prototype 
         fields: [
-            "pcbro-response-avg.json.bz2",
+            "dunevd-resp-isoc3views.json.bz2",
         ],
 
         // fixme: this is for microboone and probably bogus for
         // protodune because (at least) the span of MB wire lengths do
         // not cover pdsp's.
-        // noise: "protodune-noise-spectra-v1.json.bz2",
-        noise: "dunevd10kt_3view_30deg_noise_spectra_v1.json.bz2",
-
+        noise: "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
 
         chresp: null,
 

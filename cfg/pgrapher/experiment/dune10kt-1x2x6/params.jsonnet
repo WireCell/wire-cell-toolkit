@@ -4,7 +4,7 @@
 local wc = import "wirecell.jsonnet";
 local base = import "pgrapher/common/params.jsonnet";
 
-base {
+function(params) base {
     // This section will be overwritten in simparams.jsonnet
     det : {
 
@@ -141,7 +141,7 @@ base {
         // The "absolute" time (ie, in G4 time) that the lower edge of
         // of final readout tick #0 should correspond to.  This is a
         // "fixed" notion.
-        local tick0_time = -250*wc.us,
+        local tick0_time = if std.objectHas(params, 'G4RefTime') then params.G4RefTime else 0,
 
         // Open the ductor's gate a bit early.
         local response_time_offset = $.det.response_plane / $.lar.drift_speed,

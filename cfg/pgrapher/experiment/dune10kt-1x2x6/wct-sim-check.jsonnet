@@ -12,7 +12,8 @@ local wc = import 'wirecell.jsonnet';
 
 local io = import 'pgrapher/common/fileio.jsonnet';
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
-local params = import 'pgrapher/experiment/dune10kt-1x2x6/simparams.jsonnet';
+local params_maker = import 'pgrapher/experiment/dune10kt-1x2x6/simparams.jsonnet';
+local params = params_maker({});
 
 local tools = tools_maker(params);
 

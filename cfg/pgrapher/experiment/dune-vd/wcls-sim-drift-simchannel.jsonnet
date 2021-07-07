@@ -13,7 +13,8 @@ local wc = import 'wirecell.jsonnet';
 local io = import 'pgrapher/common/fileio.jsonnet';
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local base = import 'pgrapher/experiment/dune-vd/params.jsonnet';
-local params = base {
+local response_plane = std.extVar('response_plane')*wc.cm;
+local params = base(response_plane) {
   lar: super.lar {
     // Longitudinal diffusion constant
     DL: std.extVar('DL') * wc.cm2 / wc.s,
@@ -149,14 +150,15 @@ local wcls_simchannel_sink = g.pnode({
     readout_time: params.daq.readout_time,
     nsigma: 3.0,
     drift_speed: params.lar.drift_speed,
-    u_to_rp: 100 * wc.mm,  // 90.58 * wc.mm,
-    v_to_rp: 100 * wc.mm,  // 95.29 * wc.mm,
-    y_to_rp: 100 * wc.mm,
+    u_to_rp: response_plane,  // 90.58 * wc.mm,
+    v_to_rp: response_plane,  // 95.29 * wc.mm,
+    y_to_rp: response_plane,
     u_time_offset: 0.0 * wc.us,
     v_time_offset: 0.0 * wc.us,
     y_time_offset: 0.0 * wc.us,
     g4_ref_time: G4RefTime,
     use_energy: true,
+    response_plane: response_plane,
   },
 }, nin=1, nout=1, uses=tools.anodes);
 
@@ -202,7 +204,7 @@ local multipass = [
                 sn_pipes[n],
                 // origmagnify_pipe[n],
                 // nf_pipes[n],
-                sp_pipes[n],
+                // sp_pipes[n],
                 // spmagnify_pipe[n],
              ],
              'multipass%d' % n)

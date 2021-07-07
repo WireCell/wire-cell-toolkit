@@ -19,7 +19,9 @@ physics :{
             plugins: ["WireCellPgraph", "WireCellGen","WireCellSio","WireCellRoot","WireCellLarsoft","WireCellTbb"]
 
             // needs to be found via your WIRECELL_PATH
-            configs: ["pgrapher/experiment/dune-vd/wcls-sim-drift-simchannel.jsonnet"]
+            # configs: ["pgrapher/experiment/dune-vd/wcls-sim-drift-simchannel-3view.json"]
+            # configs: ["pgrapher/experiment/dune-vd/wcls-sim-drift-simchannel-3view30deg.json"]
+            configs: ["pgrapher/experiment/dune-vd/wcls-sim-drift-simchannel-2view.json"]
 
 
             // Contract note: these exact "type:name" must be used to identify
@@ -29,35 +31,13 @@ physics :{
             outputers: [
                "wclsSimChannelSink:postdrift",
                "wclsFrameSaver:simdigits"
-            //   ,"wclsFrameSaver:nfdigits",
-            //   "wclsFrameSaver:spsignals",
-            //   "wclsFrameSaver:spthresholds"
             ]
 
             // Make available parameters via Jsonnet's std.extVar()
             params: {
             }
             structs: {
-              # Longitudinal diffusion constant [cm2/s]
-              DL: 4.0
-              # Transverse diffusion constant [cm2/s]
-              DT: 8.8
-              # Electron lifetime [ms]
-              lifetime: 10.4
-              # Electron drift speed, assumes a certain applied E-field [mm/us]
-              driftSpeed: 1.565
-              # G4RefTime
-              G4RefTime: @local::dunefd_detectorclocks.G4RefTime
-              # response plane [cm]
-              response_plane: 10.0
-              # file: wires
-              files_wires: "\"dunevd10kt-1x6x6-3view30deg-wires-v1.json.bz2\""
-              # file: fields
-              files_fields: "\"pcbro-response-avg.json.bz2\""
-              # file: noise
-              files_noise: "\"dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2\""
             }
-
          }
       }
    }

@@ -34,7 +34,8 @@ local raw_input_label = std.extVar('raw_input_label');  // eg "daq"
 
 local data_params = import 'params.jsonnet';
 local simu_params = import 'simparams.jsonnet';
-local params = if reality == 'data' then data_params else simu_params;
+local params_maker = if reality == 'data' then data_params else simu_params;
+local params = params_maker({});
 
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);

@@ -1,0 +1,141 @@
+# #include "protoDUNE_reco_data_Dec2018.fcl"
+#include "services_dune.fcl"
+
+process_name: wclsdatanfsp
+
+services:
+{
+  #message:              @local::dune_message_services_prod_debug
+  TimeTracker:       {}
+  RandomNumberGenerator: {}
+  # @table::dunefdvd_simulation_services
+  @table::protodune_services
+  # @table::protodune_rawdecoding_services
+  # @table::protodune_simulation_services
+  # @table::protodune_data_services
+  TFileService: { 
+   closeFileFast: true  # default
+   fileName:  "%ifb_raw_anal.root"
+   tmpDir: "<parent-path-of-filename>"  # default
+  }
+  IFBeam:            {}
+}
+
+
+source: {
+   module_type: RootInput
+   saveMemoryObjectThreshold: 10485760
+
+   #inputCommands: ["drop *", "keep raw::RawDigits_*_*_*"]
+   #inputCommands: ["drop *", "keep *_*_*_Swizzler"]
+}
+
+physics :{
+   producers: {
+      nfspl1 : {
+         module_type : WireCellToolkit
+         wcls_main: {
+            tool_type: WCLS
+            apps: ["Pgrapher"]
+
+            logsinks: ["stdout"]
+            loglevels: ["debug", "pgraph:info"]
+
+            # Libraries in which to look for WCT components
+            plugins: ["WireCellGen", "WireCellSigProc", "WireCellRoot", "WireCellPgraph", "WireCellLarsoft"]
+
+            # The tool marshals the art::Event to these visitors before.
+            # See notes below in params.
+            inputers: ["wclsRawFrameSource"
+               # To use wclsMultiChannelNoiseDB you must also put epoch:dynamic below
+               # and you must have geo::Geometry service in your environment.
+               # ,"wclsMultiChannelNoiseDB"  
+            ]
+
+            # or after the WCT app is run.  These names MUST be used identically in the Jsonnet
+            # fixme: https://github.com/WireCell/larwirecell/issues/3
+            #outputers: ["wclsFrameSaver:nfsaver", "wclsFrameSaver:spsaver"]
+            outputers: ["wclsFrameSaver:spsaver"]
+
+            # This sets the "main" Jsonnet file which provides the 
+            # configuration for the Wire-Cell Toolkit components.  It is
+            # take as relative to entries in WIRECELL_PATH.
+            configs: ["pgrapher/experiment/dune-vd/wcls-nf-sp.jsonnet"]
+
+            # Set the "external variables" required by the Jsonnet.
+            # ext-var, string
+            params : {
+                # This locates the input raw::RawDigit collection in the art::Event 
+                raw_input_label: "tpcrawdecoder:daq"
+                # raw_input_label: "simmer:orig"
+                #raw_input_label: "caldata"
+
+                # Set "data" vs. "sim".  The epoch below probably should follow suit.
+                reality: "data"
+                # reality: "sim"
+
+                # if epoch is "dynamic" you MUST add
+                # "wclsMultiChannelNoiseDB" to "inputers" and must NOT
+                # add it if not "dynamic"
+                # epoch: "dynamic"
+                # epoch: "perfect"
+                epoch: "after"
+
+                # Save output signal waveforms (recob::Wire) in "sparse" or "dense" form
+                signal_output_form: "sparse"
+
+                # file: wires
+                # dunevd10kt-1x6x6-3view-wires-v1.json.bz2
+                # dunevd10kt-1x6x6-3view30deg-wires-v1.json.bz2
+                # dunevd10kt-1x6x6-2view-wires-v1.json.bz2
+                files_wires: "dunevd10kt-1x6x6-3view30deg-wires-v1.json.bz2"
+
+                # file: fields
+                # 3view30: dunevd-resp-isoc3views-18d92.json.bz2
+                # 2view: pcbro-response-avg-12d50.json.bz2
+                files_fields: "dunevd-resp-isoc3views-18d92.json.bz2"
+            }
+            # ext-code, code
+            structs : {
+                # for nticks calculation in common/params.jsonnet: elec
+                driftSpeed: 1.565
+                
+                # used in ChannelSelector
+                # 3view: 864; 3view30deg: 900; 2view: 928
+                channel_per_crm: 900
+                
+                # response plane, related to which field response is used [cm]
+                # 3view30: dunevd-resp-isoc3views-18d92.json.bz2: 18.92
+                # 2view: pcbro-response-avg-12d50.json.bz2: 12.50
+                response_plane: 18.92
+            }
+         }
+      }
+   }
+
+   p1 : [ nfspl1 ]
+   trigger_paths : [ p1 ]
+   
+   o1 : [ out1 ]
+   end_paths: [ o1 ]
+}
+
+outputs:{
+   out1: {
+      module_type: RootOutput
+      fileName: "output.root"
+      #SelectEvents: [p1]
+      saveMemoryObjectThreshold: 10485760 
+
+      outputCommands :   [
+         "keep *_*_*_*"
+         # "drop *_nfspl1_raw_*",
+         # "drop *_nfspl1_threshold_*",
+         # "drop *_nfspl1_wiener_*",
+         # "drop *_nfspl1_gauss_*",
+         # "drop *_wcNoiseFilter_*_*",
+         # "drop *_daq_*_*"
+      ]
+
+   }
+}
