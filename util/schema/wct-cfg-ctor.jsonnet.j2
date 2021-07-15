@@ -1,0 +1,29 @@
+{% import 'wct-cfg-ctor-macros.jsonnet.j2' as ctor %}
+/*
+ * This file is 100% generated.  Any manual edits will likely be lost.
+ *
+ * This holds constructor functions for creating objects from the
+ * schema: {{ ctor.ctor_dotpath(model.path) }}
+ * 
+ * Prefer these functions over manual object construction to assure
+ * greater validity.
+ *
+ */
+{% for ep in model.extrefs %}
+local {{ ctor.ctor_extref(ep) }} = import "schema/{{ ctor.ctor_extref(ep, '/') }}.jsonnet";
+{% endfor %}
+
+{% for ep in model.extrefs %}
+{{ ctor.ctor_extref(ep) }} +
+{% endfor %}
+{
+    {{ ctor.ctor_namespace_beg(model.path) }}
+    {% for t in model.types %}
+    // Construct {{ t.name }} ({{t.schema}})
+    // {{ t.doc }}
+    {{ ctor["ctor_"+t.schema](model, t)|indent }}
+
+    {% endfor %}
+    {{ ctor.ctor_namespace_end(model) }}
+}
+

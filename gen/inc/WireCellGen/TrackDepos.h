@@ -6,6 +6,8 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
 
+#include "WireCellGen/Cfg/TrackDepos/Structs.hpp"
+
 #include <tuple>
 #include <deque>
 
@@ -24,27 +26,30 @@ namespace WireCell {
             virtual void configure(const WireCell::Configuration& config);
             virtual WireCell::Configuration default_configuration() const;
 
-            /// Add track starting at given <time> and stretching across given
-            /// ray.  The <dedx> gives a uniform charge/distance and if < 0
-            /// then it gives the (negative of) absolute amount of charge per
-            /// deposition.
-            void add_track(double time, const WireCell::Ray& ray, double dedx = -1.0);
 
             /// ISourceNode
             virtual bool operator()(IDepo::pointer& out);
 
+          public:
+            // Expose for use by unit tests
             WireCell::IDepo::vector depos();
-
-            typedef std::tuple<double, Ray, double> track_t;
+            void add_track(double time, WireCell::Ray ray, double dedx = -1.0);
+            using track_t = std::tuple<double, Ray, double>;
             std::vector<track_t> tracks() const { return m_tracks; }
 
-           private:
-            double m_stepsize;
-            double m_clight;
-            std::deque<WireCell::IDepo::pointer> m_depos;
-            std::vector<track_t> m_tracks;  // collect for posterity
+          private:
+
+            void apply_grouping();
+
+            using config_t = WireCellGen::Cfg::TrackDepos::Config;
+            config_t m_cfg;
+
             int m_count;
             Log::logptr_t l;
+
+            std::vector<track_t> m_tracks; // keep to enable testing
+            std::deque<WireCell::IDepo::pointer> m_depos;
+
         };
 
     }  // namespace Gen

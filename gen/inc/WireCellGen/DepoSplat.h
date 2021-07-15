@@ -1,6 +1,10 @@
-/** This class "splats" depos directly into a frame without regards to
- * much reality.  It's only useful for gross, but fast debugging jobs.
- * The frame it produces is the moral equivalent of post-SP.
+/** DepoSplat is a "fast" approximate combination of sim+sigproc.
+ * 
+ * It "splats" depos directly into a frame without regards to much
+ * reality.  It's only useful for gross, but fast debugging jobs.
+ *
+ * DepoSplat is configured exactly as a Ductor and thus (unusually)
+ * reuses its schema.
  */
 
 #ifndef WIRECELLGEN_DEPOSPLAT

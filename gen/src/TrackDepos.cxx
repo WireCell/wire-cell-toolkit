@@ -7,6 +7,10 @@
 #include "WireCellUtil/Testing.h"
 #include "WireCellUtil/Persist.h"
 
+#include "WireCellUtil/nljs2jcpp.hpp" // remove when ditch JsonCPP
+#include "WireCellGen/Cfg/TrackDepos/Nljs.hpp"
+using nljs_t = WireCellGen::Cfg::TrackDepos::data_t;
+
 #include <sstream>
 
 WIRECELL_FACTORY(TrackDepos, WireCell::Gen::TrackDepos, WireCell::IDepoSource, WireCell::IConfigurable)
@@ -15,49 +19,54 @@ using namespace std;
 using namespace WireCell;
 
 Gen::TrackDepos::TrackDepos(double stepsize, double clight)
-  : m_stepsize(stepsize)
-  , m_clight(clight)
-  , m_count(0)
-  , l(Log::logger("sim"))
+    : m_cfg{stepsize, clight}
+    , m_count(0)
+    , l(Log::logger("sim"))
+{
+
+}
+
+Gen::TrackDepos::~TrackDepos()
 {
 }
 
-Gen::TrackDepos::~TrackDepos() {}
 
 Configuration Gen::TrackDepos::default_configuration() const
 {
-    Configuration cfg;
-    cfg["step_size"] = 1.0 * units::mm;
-    cfg["clight"] = 1.0;  // fraction of speed of light the track goes
-    cfg["tracks"] = Json::arrayValue;
-    cfg["group_time"] = -1;  // if positive then chunk the
-                             // stream of output depos into
-                             // groups delineated by EOS
-                             // markers and such that each
-                             // group spans a time period no
-                             // more than group_time.
-    return cfg;
+    nljs_t nljs = m_cfg;
+    return nljs.get<Json::Value>();
+}
+
+// wart: translate from schema/codegen rep of a ray to hand-written
+template <typename RAY>
+WireCell::Ray ray2ray(const RAY& ray)
+{
+    return WireCell::Ray(
+        WireCell::Point(ray.tail.x, ray.tail.y, ray.tail.z),
+        WireCell::Point(ray.head.x, ray.head.y, ray.head.z));
 }
 
 void Gen::TrackDepos::configure(const Configuration& cfg)
 {
-    m_stepsize = get<double>(cfg, "step_size", m_stepsize);
-    Assert(m_stepsize > 0);
-    m_clight = get<double>(cfg, "clight", m_clight);
-    for (auto track : cfg["tracks"]) {
-        double time = get<double>(track, "time", 0.0);
-        double charge = get<double>(track, "charge", -1.0);
-        Ray ray = get<Ray>(track, "ray");
-        add_track(time, ray, charge);
+    nljs_t nljs = cfg;
+    m_cfg = nljs.get<config_t>();
+
+    for (auto& track : m_cfg.tracks) {
+        add_track(track.time, ray2ray(track.ray), track.charge);
     }
-    double gt = get<double>(cfg, "group_time", -1);
-    if (m_depos.empty() or gt <= 0.0) {
+
+    apply_grouping();
+}
+
+void Gen::TrackDepos::apply_grouping()
+{
+    if (m_depos.empty() or m_cfg.group_time <= 0.0) {
         m_depos.push_back(nullptr);
         return;
     }
     std::deque<WireCell::IDepo::pointer> grouped;
     double now = m_depos.front()->time();
-    double end = now + gt;
+    double end = now + m_cfg.group_time;
     for (auto depo : m_depos) {
         if (depo->time() < end) {
             grouped.push_back(depo);
@@ -65,7 +74,7 @@ void Gen::TrackDepos::configure(const Configuration& cfg)
         }
         grouped.push_back(nullptr);
         now = depo->time();
-        end = now + gt;
+        end = now + m_cfg.group_time;
         grouped.push_back(depo);
     }
     grouped.push_back(nullptr);
@@ -80,11 +89,13 @@ static std::string dump(IDepo::pointer d)
     return ss.str();
 }
 
-void Gen::TrackDepos::add_track(double time, const WireCell::Ray& ray, double charge)
+void Gen::TrackDepos::add_track(double time, WireCell::Ray ray, double charge)
 {
+    // store this only to facilitate unit tests
+    m_tracks.emplace_back(time, ray, charge);
+
     l->debug("add_track({} us, ({} -> {})cm, {})", time / units::us, ray.first / units::cm, ray.second / units::cm,
              charge);
-    m_tracks.push_back(track_t(time, ray, charge));
 
     const WireCell::Vector dir = WireCell::ray_unit(ray);
     const double length = WireCell::ray_length(ray);
@@ -93,23 +104,24 @@ void Gen::TrackDepos::add_track(double time, const WireCell::Ray& ray, double ch
 
     double charge_per_depo = units::eplus;  // charge of one positron
     if (charge > 0) {
-        charge_per_depo = -charge / (length / m_stepsize);
+        charge_per_depo = -charge / (length / m_cfg.step_size);
     }
     else if (charge <= 0) {
         charge_per_depo = charge;
     }
 
     while (step < length) {
-        const double now = time + step / (m_clight * units::clight);
+        const double now = time + step / (m_cfg.clight * units::clight);
         const WireCell::Point here = ray.first + dir * step;
         SimpleDepo* sdepo = new SimpleDepo(now, here, charge_per_depo);
         m_depos.push_back(WireCell::IDepo::pointer(sdepo));
-        step += m_stepsize;
+        step += m_cfg.step_size;
         ++count;
     }
 
     // earliest first
     std::sort(m_depos.begin(), m_depos.end(), ascending_time);
+
     l->debug("depos: {} over {}mm", m_depos.size(), length / units::mm);
 }
 
@@ -129,4 +141,8 @@ bool Gen::TrackDepos::operator()(output_pointer& out)
     return true;
 }
 
-WireCell::IDepo::vector Gen::TrackDepos::depos() { return WireCell::IDepo::vector(m_depos.begin(), m_depos.end()); }
+WireCell::IDepo::vector Gen::TrackDepos::depos() {
+    return WireCell::IDepo::vector(m_depos.begin(), m_depos.end());
+}
+
+

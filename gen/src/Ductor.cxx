@@ -9,120 +9,61 @@
 
 #include <string>
 
+#include "WireCellUtil/nljs2jcpp.hpp" // remove when ditch JsonCPP
+#include "WireCellGen/Cfg/Ductor/Nljs.hpp"
+using nljs_t = WireCellGen::Cfg::Ductor::data_t;
+
 WIRECELL_FACTORY(Ductor, WireCell::Gen::Ductor, WireCell::IDuctor, WireCell::IConfigurable)
 
 using namespace std;
 using namespace WireCell;
 
 Gen::Ductor::Ductor()
-  : m_anode_tn("AnodePlane")
-  , m_rng_tn("Random")
-  , m_start_time(0.0 * units::ns)
-  , m_readout_time(5.0 * units::ms)
-  , m_tick(0.5 * units::us)
-  , m_drift_speed(1.0 * units::mm / units::us)
-  , m_nsigma(3.0)
-  , m_fluctuate(true)
-  , m_mode("continuous")
-  , m_frame_count(0)
-  , l(Log::logger("sim"))
+    : l(Log::logger("sim"))
 {
 }
 
 WireCell::Configuration Gen::Ductor::default_configuration() const
 {
-    Configuration cfg;
-
-    /// How many Gaussian sigma due to diffusion to keep before truncating.
-    put(cfg, "nsigma", m_nsigma);
-
-    /// Whether to fluctuate the final Gaussian deposition.
-    put(cfg, "fluctuate", m_fluctuate);
-
-    /// The initial time for this ductor
-    put(cfg, "start_time", m_start_time);
-
-    /// The time span for each readout.
-    put(cfg, "readout_time", m_readout_time);
-
-    /// The sample period
-    put(cfg, "tick", m_tick);
-
-    /// If false then determine start time of each readout based on the
-    /// input depos.  This option is useful when running WCT sim on a
-    /// source of depos which have already been "chunked" in time.  If
-    /// true then this Ductor will continuously simulate all time in
-    /// "readout_time" frames leading to empty frames in the case of
-    /// some readout time with no depos.
-    put(cfg, "continuous", true);
-
-    /// Fixed mode simply reads out the same time window all the time.
-    /// It implies discontinuous (continuous == false).
-    put(cfg, "fixed", false);
-
-    /// The nominal speed of drifting electrons
-    put(cfg, "drift_speed", m_drift_speed);
-
-    /// Allow for a custom starting frame number
-    put(cfg, "first_frame_number", m_frame_count);
-
-    /// Name of component providing the anode plane.
-    put(cfg, "anode", m_anode_tn);
-    put(cfg, "rng", m_rng_tn);
-
-    cfg["pirs"] = Json::arrayValue;
-    /// don't set here so user must, but eg:
-    // cfg["pirs"][0] = "PlaneImpactResponseU";
-    // cfg["pirs"][1] = "PlaneImpactResponseV";
-    // cfg["pirs"][2] = "PlaneImpactResponseW";
-
-    return cfg;
+    nljs_t nljs = m_cfg;
+    return nljs.get<Json::Value>();
 }
 
 void Gen::Ductor::configure(const WireCell::Configuration& cfg)
 {
-    m_anode_tn = get<string>(cfg, "anode", m_anode_tn);
-    m_anode = Factory::find_tn<IAnodePlane>(m_anode_tn);
-
-    m_nsigma = get<double>(cfg, "nsigma", m_nsigma);
-    bool continuous = get<bool>(cfg, "continuous", true);
-    bool fixed = get<bool>(cfg, "fixed", false);
+    nljs_t nljs = cfg;
+    m_cfg = nljs.get<config_t>();
+    
+    m_anode = Factory::find_tn<IAnodePlane>(m_cfg.anode);
 
     m_mode = "continuous";
-    if (fixed) {
+    if (m_cfg.fixed) {
         m_mode = "fixed";
     }
-    else if (!continuous) {
+    else if (!m_cfg.continuous) {
         m_mode = "discontinuous";
     }
 
-    m_fluctuate = get<bool>(cfg, "fluctuate", m_fluctuate);
     m_rng = nullptr;
-    if (m_fluctuate) {
-        m_rng_tn = get(cfg, "rng", m_rng_tn);
-        m_rng = Factory::find_tn<IRandom>(m_rng_tn);
+    if (m_cfg.fluctuate) {
+        m_rng = Factory::find_tn<IRandom>(m_cfg.rng);
     }
 
-    m_readout_time = get<double>(cfg, "readout_time", m_readout_time);
-    m_tick = get<double>(cfg, "tick", m_tick);
-    m_start_time = get<double>(cfg, "start_time", m_start_time);
-    m_drift_speed = get<double>(cfg, "drift_speed", m_drift_speed);
-    m_frame_count = get<int>(cfg, "first_frame_number", m_frame_count);
-
-    auto jpirs = cfg["pirs"];
-    if (jpirs.isNull() or jpirs.empty()) {
+    if (m_cfg.pirs.empty()) {
         l->critical("must configure with some plane impace response components");
         THROW(ValueError() << errmsg{"Gen::Ductor: must configure with some plane impact response components"});
     }
     m_pirs.clear();
-    for (auto jpir : jpirs) {
-        auto tn = jpir.asString();
+    for (const auto& tn : m_cfg.pirs) {
         auto pir = Factory::find_tn<IPlaneImpactResponse>(tn);
         m_pirs.push_back(pir);
     }
 
+    m_frame_count = m_cfg.first_frame_number;
+    m_start_time = m_cfg.start_time;
+
     l->debug("AnodePlane: {}, mode: {}, fluctuate: {}, time start: {} ms, readout time: {} ms, frame start: {}",
-             m_anode_tn, m_mode, (m_fluctuate ? "on" : "off"), m_start_time / units::ms, m_readout_time / units::ms,
+             m_cfg.anode, m_mode, (m_cfg.fluctuate ? "on" : "off"), m_start_time / units::ms, m_cfg.readout_time / units::ms,
              m_frame_count);
 }
 
@@ -136,11 +77,11 @@ ITrace::vector Gen::Ductor::process_face(IAnodeFace::pointer face, const IDepo::
 
         const Pimpos* pimpos = plane->pimpos();
 
-        Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
+        Binning tbins(m_cfg.readout_time / m_cfg.tick, m_start_time, m_start_time + m_cfg.readout_time);
 
-        Gen::BinnedDiffusion bindiff(*pimpos, tbins, m_nsigma, m_rng);
+        Gen::BinnedDiffusion bindiff(*pimpos, tbins, m_cfg.nsigma, m_rng);
         for (auto depo : face_depos) {
-            bindiff.add(depo, depo->extent_long() / m_drift_speed, depo->extent_tran());
+            bindiff.add(depo, depo->extent_long() / m_cfg.drift_speed, depo->extent_tran());
         }
 
         auto& wires = plane->wires();
@@ -211,7 +152,7 @@ void Gen::Ductor::process(output_queue& frames)
         traces.insert(traces.end(), newtraces.begin(), newtraces.end());
     }
 
-    auto frame = make_shared<SimpleFrame>(m_frame_count, m_start_time, traces, m_tick);
+    auto frame = make_shared<SimpleFrame>(m_frame_count, m_start_time, traces, m_cfg.tick);
     IFrame::trace_list_t indices(traces.size());
     for (size_t ind = 0; ind < traces.size(); ++ind) {
         indices[ind] = ind;
@@ -230,7 +171,7 @@ void Gen::Ductor::process(output_queue& frames)
     m_depos.clear();
 
     if (m_mode == "continuous") {
-        m_start_time += m_readout_time;
+        m_start_time += m_cfg.readout_time;
     }
 
     ++m_frame_count;
@@ -262,7 +203,7 @@ bool Gen::Ductor::start_processing(const input_pointer& depo)
 
     // Note: we use this depo time even if it may not actually be
     // inside our sensitive volume.
-    bool ok = depo->time() > m_start_time + m_readout_time;
+    bool ok = depo->time() > m_start_time + m_cfg.readout_time;
     return ok;
 }
 

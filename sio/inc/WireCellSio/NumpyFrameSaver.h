@@ -7,6 +7,8 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/Logging.h"
 
+#include "WireCellSio/Cfg/NumpyFrameSaver/Structs.hpp"
+
 namespace WireCell {
     namespace Sio {
 
@@ -24,7 +26,9 @@ namespace WireCell {
             virtual void configure(const WireCell::Configuration& config);
 
            private:
-            Configuration m_cfg;
+            using config_t = WireCellSio::Cfg::NumpyFrameSaver::Config;
+            config_t m_cfg;
+            
             int m_save_count;  // count frames saved
             Log::logptr_t l;
         };

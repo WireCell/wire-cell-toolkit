@@ -1,0 +1,62 @@
+// -*- jsonnet -*-
+local moo = import "moo.jsonnet";
+local wc = import "wirecell.jsonnet";
+local util_seq = import "Util_Base.schema";
+local t = moo.oschema.hier(util_seq).WireCellUtil.Cfg.Base;
+
+local wcc = import "cfgschema.jsonnet";
+local f = wcc("Gen","AnodePlane");
+local s = f.schema;
+
+
+local hier = {
+
+    // Face 0 or "front" is the one that is toward the positive X-axis
+    // (wire coordinate system).  A face consists of wires and some
+    // bounds on the X-coordinate in the form of three planes:
+    //
+    // - response :: The response plane demarks the location where the
+    //   complex fields near the wires are considered sufficiently
+    //   regular.
+    //
+    // - anode and cathode :: These two planes bracket the region in X
+    //   for the volume associated with the face.
+    // 
+    // Note, the transverse active area is determined by the wires.
+
+    face: s.record("Face", [
+        s.field("anode", t.Distance, default=0,
+                doc="Active volume boundary along drift direction near wires"),
+        s.field("response", t.Distance, default=0,
+                doc="Position where drift simulation ends and field response calcualtion begins"),
+        s.field("cathode", t.Distance, default=0,
+                doc="Active volume boundary along drift direction near cathode"),
+    ], doc="Interesting drift positions on one anode face"), 
+
+    // fixme: actually, the Faces can have null entries, thought these
+    // are not captured in the Face schema.  This will probably break
+    // something.
+    faces: s.sequence("Faces", self.face, 
+                      doc="One or two faces"),
+
+
+    cfg: s.component([
+
+        s.field("ident", t.Count, default=0,
+                doc="Identifier of wire plane as used in wire file"),
+        s.field("wire_schema", t.TypeName, default="",
+                doc="Type name of IWireSchema component"),
+        
+        s.field("nimpacts", t.Count, default=10,
+                doc="Number of impact positions per wire"),
+
+        //fixme:
+        // This faithfully reproduces the original schema.  Better would
+        // be to add to Face a FaceID (0 or 1) and not give semantic
+        // meaning to the element indices of the faces array.
+        s.field("faces", $.faces, default=[],
+                doc="Description of each face"),
+    ], doc="Configuration for AnodePlane"),
+};
+
+util_seq + f.build(hier)

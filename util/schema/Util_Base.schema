@@ -1,0 +1,78 @@
+/* Hand-written base schema
+ * 
+ * Before making a novel type local to a component schema, consider
+ * using one from here and if none fit consider if the nove type is
+ * general enough that it should be added.  Note, types are novel
+ * based on the semantic meaning and not their underlying type.
+ */
+
+// -*- jsonnet -*- 
+local wcc = import "cfgschema.jsonnet";
+
+local moo = import "moo.jsonnet";
+local f = wcc("Util", "Base");
+local s = f.schema;
+
+// A type-name can be ident or ident:ident.
+local tnre = '^(%s(:%s)?)$' % [ moo.re.ident, moo.re.ident ];
+
+local hier = {
+    tf: s.boolean("Flag",
+                  doc="A general boolean flag"),
+
+    ident: s.string("Ident", pattern=moo.re.ident_only,
+                    doc="A code-friendly identifier"),
+
+    tn: s.string("TypeName", pattern=tnre,
+                 doc="A component type name identifier"),
+
+    tns: s.sequence("TypeNames", self.tn,
+                    doc="A sequence of component type name identifiers"),
+
+    count: s.number("Count", "i4",
+                    doc="A simple counting number"),
+
+    charge: s.number("Charge", "f8",
+                     doc="Amount of charge per some unit"),
+
+    distance: s.number("Distance", "f8",
+                       doc="A spacial distance"),
+
+    time: s.number("Time", "f8",
+                   doc="A temporal duration"),
+
+    speed: s.number("Speed", "f8",
+                    doc="A speed in units distance per time"),
+
+    tick: s.number("Tick", "f8",
+                   doc="A sampling period"),
+    
+    normalized: s.number("Normalized", "f8",
+                         s.nc(minimum=0.0, maximum=1.0),
+                         doc="A real number in [0,1]"),
+
+    scaling: s.number("Scaling", "f8",
+                      doc="A multiplicative scaling factor"),
+
+    tag: s.string("Tag", pattern=moo.re.ident_only,
+                  doc="A simple identifying tag associated with some data"),
+    tags: s.sequence("Tags", self.tag,
+                     doc="A sequence of tags"),
+
+    filename: s.string("Filename", pattern="$(%s)^"%moo.re.hierpath,
+                       doc="Something resembling a file system tree path name"),
+    npzfilename: s.string("FilenameNPZ", pattern="$(%s).npz$" % moo.re.hierpath,
+                       doc="A filename with NPZ extension"),
+
+    point: s.record("Point", [
+        s.field("x", self.distance, doc="X coordinate"),
+        s.field("y", self.distance, doc="Y coordinate"),
+        s.field("z", self.distance, doc="Z coordinate"),
+    ], doc="A Cartesian point in 3-space."),
+
+    ray: s.record("Ray", [
+        s.field("tail", self.point, doc="Start point"),
+        s.field("head", self.point, doc="End point"),
+    ], doc="A directed line segment in 3-space"),
+};
+f.build(hier)

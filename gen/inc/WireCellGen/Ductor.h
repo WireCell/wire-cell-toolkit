@@ -13,6 +13,8 @@
 #include "WireCellIface/IRandom.h"
 #include "WireCellUtil/Logging.h"
 
+#include "WireCellGen/Cfg/Ductor/Structs.hpp"
+
 #include <vector>
 
 namespace WireCell {
@@ -34,26 +36,23 @@ namespace WireCell {
             virtual WireCell::Configuration default_configuration() const;
 
            protected:
-            // The "Type:Name" of the IAnodePlane (default is "AnodePlane")
-            std::string m_anode_tn;
-            std::string m_rng_tn;
-            std::vector<std::string> m_pir_tns;
 
-            IAnodePlane::pointer m_anode;
-            IRandom::pointer m_rng;
+            // Note, at least DepoSplat inherits from Ductor and needs
+            // access to the config.
+            using config_t = WireCellGen::Cfg::Ductor::Config;
+            config_t m_cfg{};
+            
+            
+            IAnodePlane::pointer m_anode{nullptr};
+            IRandom::pointer m_rng{nullptr};
             std::vector<IPlaneImpactResponse::pointer> m_pirs;
-
             IDepo::vector m_depos;
+            std::string m_mode{"continuous"};
 
-            double m_start_time;
-            double m_readout_time;
-            double m_tick;
-            double m_drift_speed;
-            double m_nsigma;
-            bool m_fluctuate;
-            std::string m_mode;
-
-            int m_frame_count;
+            // These two are initialized from config but we update
+            // them so hold them outside of m_cfg.
+            size_t m_frame_count{0};
+            double m_start_time{0.0};
 
             virtual void process(output_queue& frames);
             virtual ITrace::vector process_face(IAnodeFace::pointer face, const IDepo::vector& face_depos);

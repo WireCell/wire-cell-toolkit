@@ -10,6 +10,9 @@
 #include <tuple>
 #include <sstream>
 
+#include "WireCellUtil/nljs2jcpp.hpp" // remove when ditch JsonCPP
+#include "WireCellSio/Cfg/NumpyFrameSaver/Nljs.hpp"
+
 WIRECELL_FACTORY(NumpyFrameSaver, WireCell::Sio::NumpyFrameSaver, WireCell::IFrameFilter, WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -25,41 +28,19 @@ Sio::NumpyFrameSaver::~NumpyFrameSaver() {}
 
 WireCell::Configuration Sio::NumpyFrameSaver::default_configuration() const
 {
-    Configuration cfg;
-
-    // If digitize is true, then samples as 16 bit ints.  Otherwise
-    // save as 32 bit floats.
-    cfg["digitize"] = false;
-
-    // This number is set to the waveform sample array before any
-    // charge is added.
-    cfg["baseline"] = 0.0;
-
-    // This number will be multiplied to each waveform sample before
-    // casting to dtype.
-    cfg["scale"] = 1.0;
-
-    // This number will be added to each scaled waveform sample before
-    // casting to dtype.
-    cfg["offset"] = 0.0;
-
-    // The frame tags to consider for saving.  If null or empty then all traces are used.
-    cfg["frame_tags"] = Json::arrayValue;
-    // The summary tags to consider for saving
-    // cfg["summary_tags"] = Json::arrayValue;
-    // The channel mask maps to consider for saving
-    // cfg["chanmaskmaps"] = Json::arrayValue;
-
-    // The output file name to write.  Only compressed (zipped) Numpy
-    // files are supported.  Writing is always in "append" mode.  It's
-    // up to the user to delete a previous instance of the file if
-    // it's old contents are not wanted.
-    cfg["filename"] = "wct-frame.npz";
-
-    return cfg;
+    nljs_t nljs = m_cfg;
+    return nljs.get<Json::Value>();
 }
 
-void Sio::NumpyFrameSaver::configure(const WireCell::Configuration& config) { m_cfg = config; }
+void Sio::NumpyFrameSaver::configure(const WireCell::Configuration& config)
+{
+    nljs_t nljs = config;
+    m_cfg = nljs.get<config_t>();
+    if (m_cfg.frame_tags.empty()) {
+        // internally we use an empty tag to mean all tags
+        m_cfg.frame_tags.push_back("");
+    }
+}
 
 bool Sio::NumpyFrameSaver::operator()(const IFrame::pointer& inframe, IFrame::pointer& outframe)
 {
@@ -73,20 +54,9 @@ bool Sio::NumpyFrameSaver::operator()(const IFrame::pointer& inframe, IFrame::po
 
     const std::string mode = "a";
 
-    const float baseline = m_cfg["baseline"].asFloat();
-    const float scale = m_cfg["scale"].asFloat();
-    const float offset = m_cfg["offset"].asFloat();
-    const bool digitize = m_cfg["digitize"].asBool();
-
-    const std::string fname = m_cfg["filename"].asString();
-
     // Eigen3 array is indexed as (irow, icol) or (ichan, itick)
     // one row is one channel, one column is a tick.
     // Numpy saves reversed dimensions: {ncols, nrows} aka {ntick, nchan} dimensions.
-
-    if (m_cfg["frame_tags"].isNull() or m_cfg["frame_tags"].empty()) {
-        m_cfg["frame_tags"][0] = "";
-    }
 
     std::stringstream ss;
     ss << "NumpyFrameSaver: see frame #" << inframe->ident() << " with " << inframe->traces()->size()
@@ -99,13 +69,17 @@ bool Sio::NumpyFrameSaver::operator()(const IFrame::pointer& inframe, IFrame::po
         ss << " \"" << t << "\"";
     }
     ss << " looking for tags:";
-    for (auto jt : m_cfg["frame_tags"]) {
-        ss << " \"" << jt.asString() << "\"";
+    for (auto ft : m_cfg.frame_tags) {
+        if (ft.empty()) {
+            ss << " <all>";
+        }
+        else {
+            ss << " \"" << ft << "\"";
+        }
     }
     l->debug(ss.str());
 
-    for (auto jtag : m_cfg["frame_tags"]) {
-        const std::string tag = jtag.asString();
+    for (auto tag : m_cfg.frame_tags) {
         auto traces = aux::tagged_traces(inframe, tag);
         l->debug("NumpyFrameSaver: save {} tagged as {}", traces.size(), tag);
         if (traces.empty()) {
@@ -123,21 +97,18 @@ bool Sio::NumpyFrameSaver::operator()(const IFrame::pointer& inframe, IFrame::po
         const size_t nrows = std::distance(chbeg, chend);
         l->debug("NumpyFrameSaver: saving ncols={} nrows={}", ncols, nrows);
 
-        Array::array_xxf arr = Array::array_xxf::Zero(nrows, ncols) + baseline;
+        Array::array_xxf arr = Array::array_xxf::Zero(nrows, ncols) + m_cfg.baseline;
         aux::fill(arr, traces, channels.begin(), chend, tbinmm.first);
-        arr = arr * scale + offset;
+        arr = arr * m_cfg.scale + m_cfg.offset;
 
         {  // the 2D frame array
             const std::string aname = String::format("frame_%s_%d", tag.c_str(), m_save_count);
-            if (digitize) {
+            if (m_cfg.digitize) {
                 Array::array_xxs sarr = arr.cast<short>();
-                // const short* sdata = sarr.data();
-                // cnpy::npz_save(fname, aname, sdata, {ncols, nrows}, mode);
-                save2d(sarr, aname, fname, mode);
+                save2d(sarr, aname, m_cfg.filename, mode);
             }
             else {
-                // cnpy::npz_save(fname, aname, arr.data(), {ncols, nrows}, mode);
-                save2d(arr, aname, fname, mode);
+                save2d(arr, aname, m_cfg.filename, mode);
             }
             l->debug("NumpyFrameSaver: saved {} with {} channels {} ticks @t={} ms qtot={}", aname, nrows, ncols,
                      inframe->time() / units::ms, arr.sum());
@@ -145,14 +116,14 @@ bool Sio::NumpyFrameSaver::operator()(const IFrame::pointer& inframe, IFrame::po
 
         {  // the channel array
             const std::string aname = String::format("channels_%s_%d", tag.c_str(), m_save_count);
-            cnpy::npz_save(fname, aname, channels.data(), {nrows}, mode);
+            cnpy::npz_save(m_cfg.filename, aname, channels.data(), {nrows}, mode);
             
         }
 
         {  // the tick array
             const std::string aname = String::format("tickinfo_%s_%d", tag.c_str(), m_save_count);
             const std::vector<double> tickinfo{inframe->time(), inframe->tick(), (double) tbinmm.first};
-            cnpy::npz_save(fname, aname, tickinfo.data(), {3}, mode);
+            cnpy::npz_save(m_cfg.filename, aname, tickinfo.data(), {3}, mode);
         }
     }
 

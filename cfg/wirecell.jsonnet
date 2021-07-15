@@ -365,6 +365,37 @@
         
     },
 
+    mergePatchEx(target, patch, hidden)::
+    if std.isObject(patch) then
+      local target_object =
+        if std.isObject(target) then target else {};
+    
+      local target_fields =
+        if std.isObject(target_object) then std.objectFieldsEx(target_object, hidden) else [];
+
+      local null_fields = [k for k in std.objectFieldsEx(patch, hidden) if patch[k] == null];
+      local both_fields = std.setUnion(target_fields, std.objectFieldsEx(patch, hidden));
+      {
+        [k]:
+        if !std.objectHasEx(patch, k, hidden) then
+           target_object[k]
+        else if !std.objectHasEx(target_object, k, hidden) then
+          $.mergePatchEx(null, patch[k], hidden) tailstrict
+        else
+            $.mergePatchEx(target_object[k], patch[k], hidden) tailstrict
+        for k in std.setDiff(both_fields, null_fields)
+      }
+      else
+        patch,
+
+    mergePatch(target, patch)::
+      $.mergePatchEx(target, patch, false),
+
+    mergePatchAll(target, patch)::
+      $.mergePatchEx(target, patch, true),
+
+    mergeObjects(objs)::
+      std.foldl($.mergePatchAll, objs, {}),
 }
 
 
