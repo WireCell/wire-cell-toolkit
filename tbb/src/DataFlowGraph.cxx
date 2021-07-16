@@ -3,6 +3,8 @@
 #include "WireCellUtil/Type.h"
 #include "WireCellUtil/NamedFactory.h"
 
+#include <tbb/global_control.h>
+
 #include <iostream>
 
 WIRECELL_FACTORY(TbbDataFlowGraph, WireCellTbb::DataFlowGraph, WireCell::IDataFlowGraph, WireCell::IConfigurable)
@@ -12,9 +14,7 @@ using namespace WireCell;
 using namespace WireCellTbb;
 
 DataFlowGraph::DataFlowGraph(int max_threads)
-  : m_sched(tbb::global_control::max_allowed_parallelism,
-            max_threads > 0 ? max_threads : 1)
-  , m_graph()
+  : m_graph()
   , m_factory(m_graph)
   , l(Log::logger("tbb"))
 {
@@ -25,14 +25,15 @@ DataFlowGraph::~DataFlowGraph() {}
 Configuration DataFlowGraph::default_configuration() const
 {
     Configuration cfg;
-    cfg["max_threads"] = 1;
+    cfg["max_threads"] = 0;
     return cfg;
 }
 
 void DataFlowGraph::configure(const Configuration& cfg)
 {
-    // int maxthreads = get<int>(cfg,"max_threads");
-    // fixme: now what?
+    if (! cfg["max_threads"].isNull()) {
+        m_thread_limit = cfg["max_threads"].asInt();
+    }
 }
 
 bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t sport, size_t rport)
@@ -85,6 +86,14 @@ bool DataFlowGraph::run()
         l->debug("Initialize node of type: {}", demangle(it.first->signature()));
         it.second->initialize();
     }
+
+    std::unique_ptr<tbb::global_control> gc;
+    if (m_thread_limit) {
+        gc = std::make_unique<tbb::global_control>(
+            tbb::global_control::max_allowed_parallelism,
+            m_thread_limit);
+    }
     m_graph.wait_for_all();
+
     return true;
 }

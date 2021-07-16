@@ -25,6 +25,10 @@
 #include <fftw3.h>
 #endif
 
+#if HAVE_TBB_LIB
+#include <tbb/global_control.h>
+#endif
+
 using namespace WireCell;
 using namespace std;
 namespace po = boost::program_options;
@@ -79,7 +83,12 @@ int Main::cmdline(int argc, char* argv[])
          "specify a Jsonnet top level arguments variable=<code>")
         
         ("path,P", po::value<vector<string> >(),
-         "add to JSON/Jsonnet search path");
+         "add to JSON/Jsonnet search path")
+#if HAVE_TBB_LIB
+        ("threads,t", po::value<int>(),
+         "limit number of threads used")
+#endif
+        ;
     // clang-format on
 
     po::variables_map opts;
@@ -170,6 +179,12 @@ int Main::cmdline(int argc, char* argv[])
             }
         }
     }
+
+#ifdef HAVE_TBB_LIB
+    if (opts.count("threads")) {
+        m_threads = opts["threads"].as<int>();
+    }
+#endif
 
     // Maybe make this cmdline configurable.  For now, set all
     // backends the same.
@@ -295,12 +310,28 @@ void Main::operator()()
         auto a = Factory::find<IApplication>(type, name);  // throws
         app_objs.push_back(a);
     }
+    l->debug("executing {} apps, thread limit {}:",
+             m_apps.size(), m_threads);
+
+#if HAVE_TBB_LIB
+    std::unique_ptr<tbb::global_control> gc;
+    if (m_threads) {
+        gc = std::make_unique<tbb::global_control>(
+            tbb::global_control::max_allowed_parallelism,
+            m_threads);
+    }
+    l->debug("executing {} apps, thread limit {}:",
+             m_apps.size(), m_threads);
+#else
     l->debug("executing {} apps:", m_apps.size());
+#endif
+
     for (size_t ind = 0; ind < m_apps.size(); ++ind) {
         auto aobj = app_objs[ind];
         l->debug("executing app: \"{}\"", m_apps[ind]);
         aobj->execute();  // throws
     }
+
 }
 
 void Main::finalize()

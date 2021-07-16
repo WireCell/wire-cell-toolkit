@@ -91,11 +91,17 @@ namespace WireCell {
         /// Call to finalize any terminal components.
         void finalize();
 
+
+
        private:
         ConfigManager m_cfgmgr;
         std::vector<std::string> m_plugins, m_apps, m_cfgfiles, m_load_path;
         Persist::externalvars_t m_extvars, m_extcode, m_tlavars, m_tlacode;
         Log::logptr_t l;
+
+        // Limit number of threads.  0 means set no limit.  This is
+        // only relevant if we are built with TBB support
+        int m_threads{0};
     };
 
 }  // namespace WireCell

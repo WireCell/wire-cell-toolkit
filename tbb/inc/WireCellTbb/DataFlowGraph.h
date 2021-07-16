@@ -7,8 +7,6 @@
 #include "WireCellTbb/NodeWrapper.h"
 #include "WireCellTbb/WrapperFactory.h"
 
-#include <tbb/global_control.h>
-
 #include <map>
 #include <string>
 
@@ -31,10 +29,10 @@ namespace WireCellTbb {
         virtual WireCell::Configuration default_configuration() const;
 
        private:
-        tbb::global_control m_sched; // pass in number of threads
         tbb::flow::graph m_graph;    // here lives the TBB graph
         WrapperFactory m_factory;
         WireCell::Log::logptr_t l;
+        int m_thread_limit{0};  // 0 means no limit
     };
 
 }  // namespace WireCellTbb
