@@ -1,0 +1,88 @@
+{% import 'ocpp.hpp.j2' as cppm %}
+{% set hppguard = "_".join(model.path).upper() %}
+{% set hppns = "::".join(model.path) %}
+/*
+ * This file is 100% generated.  Any manual edits will likely be lost.
+ *
+ * This contains configuration related types and methods for schema: 
+ *
+ *     {{ model.path|join(".") }}
+ *
+ */
+#ifndef {{ hppguard }}
+#define {{ hppguard }}
+
+{% for ep in model.extrefs %}
+{% set ep = ep.split(".") %}
+{% set ep = [ep[0]+ep[1]] + ep[2:] %}
+#include "{{ep|join("/")}}.hpp"
+{% endfor %}
+
+#include <cstdint>
+{% for schema, typeref in model.byscn.items() %}
+{% if typeref %}{% for imp in model.lang.imports.get(schema, []) %}
+// for {{schema}}
+#include <{{imp}}>
+{% endfor %}{% endif %}
+{% endfor %}
+
+#include <nlohmann/json.hpp>
+
+namespace {{ hppns }} {
+
+    //
+    // Type definitions.
+    //
+
+    {% for t in model.types %}
+    // @brief {{ t.doc }}
+    {{ cppm["declare_"+t.schema](model, t)|indent }}
+
+    {% endfor %}
+
+
+    //
+    // JSON serialization methods
+    //
+
+    using data_t = nlohmann::json;
+
+    {%- for fqn in model.byscn.enum -%}
+    {%- set e = model.byref[fqn] -%}
+    {% set n = fqn|listify|relpath(model.path)|join("::") %}
+    NLOHMANN_JSON_SERIALIZE_ENUM( {{n}}, {
+            {% for sname in e.symbols %}
+            { {{"::".join(model.path)}}::{{n}}::{{sname}}, "{{sname}}" },
+            {% endfor %}
+        })
+    {% endfor %}
+
+    {% for fqn in model.byscn.record %}    
+    {% set r = model.byref[fqn] %}
+    {% set n = fqn|listify|relpath(model.path)|join("::") %}
+    inline void to_json(data_t& j, const {{n}}& obj) {
+        {% for b in r.fields if b.name.startswith("_base_") %}
+        to_json(j, (const {{b.type}}&)obj);
+        {% endfor %}
+        {% for f in r.fields if not f.name.startswith("_base_") %}
+        j["{{f.name}}"] = obj.{{f.name}};
+        {% endfor%}
+    }
+    
+    inline void from_json(const data_t& j, {{r.name}}& obj) {
+        {% for b in r.fields if b.name.startswith("_base_") %}
+        from_json(j, ({{b.type}}&)obj);
+        {% endfor %}
+        {% for f in r.fields if not f.name.startswith("_base_") %}
+        {% if f.item in model.byscn.any %}
+        obj.{{f.name}} = j.at("{{f.name}}");
+        {% else %}
+        if (j.contains("{{f.name}}"))
+            j.at("{{f.name}}").get_to(obj.{{f.name}});    
+        {% endif %}
+        {% endfor%}
+    }
+    {% endfor %}
+} // {{ hppns }}
+
+#endif // {{ hppguard }}

@@ -1,0 +1,29 @@
+// -*- jsonnet -*-
+local wc = import "wirecell.jsonnet";
+local moo = import "moo.jsonnet";
+
+// We will use util types
+local util_seq = import "WireCellUtil/Base.schema";
+local t = moo.oschema.hier(util_seq).WireCell.Util.Cfg.Base;
+
+local wcc = import "cfgschema.jsonnet";
+local f = wcc("Sio","NumpyFrameSaver");
+local s = f.schema;
+
+util_seq + [
+    s.component([
+        s.field("digitize", t.Flag, default=false,
+                doc="If true then truncate to 16 bit short int, o.w. save as 32 bit floats"),
+        s.field("baseline", t.Charge, default=0.0,
+                doc="Initial value to which frame samples add"),
+        s.field("scale", t.Scaling, default=1.0,
+                doc="Multiplicative scale applied to each frame sample"),
+        s.field("offset", t.Charge, default=0.0,
+                doc="Additive offset applied to scaled frame samples"),
+        s.field("frame_tags", t.Tags, default=[],
+                doc="Frame tags to consider saving, assume all frames if empty"),
+        s.field("filename", t.FilenameNPZ, default="wct-frame.npz",
+                doc="Name of NPZ file to which frames are saved"),
+    ], "Configuration for NumpyFrameSaver component"),
+]
+

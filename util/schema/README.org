@@ -1,0 +1,559 @@
+#+title: WCT schema-based configuration
+
+* Overview
+
+The Wire-Cell Toolkit configuration sub-system provides run-time
+directives to compiled code components.  In its most basic form, a
+developer must provide code to interpret configuration information.
+Developing such code is repetitive and error-prone and with varying
+correctness.  Even when done well, no facility is provided to help the
+end user to learn what structure is required, what are any default
+values, etc.
+
+To remedy these and other problems, Wire-Cell Toolkit now supports
+defining configuration /schema/.  This allows a formal description of a
+configuration object's data structure and its constituent types.
+
+From the schema, two important actions can be driven: validation and
+code generation (codegen).  Validation means to confirm that a given
+object indeed matches the requirements described by a schema.  Codegen
+is the act of producing some pristine code product by applying a
+/template/ to a given schema.  The products of codegen can also include
+elements of validation.
+
+The rest of this document describes:
+
+- How to develop a /schema/ for a component configuration.
+- What types of codegen WCT supports.
+- How to use codegen products to greatly simplify your WCT component C++ code.
+- How to use other codegen products to simplify constructing configuration data objects in a valid-by-construction manner.
+
+
+* Writing a schema
+
+In this section we will walk through the schema describing the
+configuration objects expected by the [[../../gen/src/TrackDepos.cxx][ ~TrackDepos~ ]] component from the
+~gen~ sub-package of WCT.
+
+** File name, location and basic strucure
+
+WCT places schema files next to public header files.  As an example,
+the subsections below will walk through this schema file:
+
+[[../../gen/inc/WireCellGen/TrackDepos.schema][ ~gen/inc/WireCellGen/TrackDepos.schema~ ]]
+
+The name and location of the schema file is important.  In the codegen
+process it will be used to determine a C++ ~namespace~ as well as the
+path of a generated C++ header.  We will see more details on this
+transformation in the section [[Codegen]].
+
+A schema file is written in the Jsonnet language with the help from
+objects and functions provided by the schema system called *moo*.
+
+We now walk through the example schema file by breaking it up into
+four consecutive sections:
+
+1. Initial "importing" of the Jsonnet modules for ~moo~ and any external
+   schema holding types we wish to use.
+
+2. A section where we construct some utility / helper objects.
+
+3. The main body holding a "working object" where we define the new
+   data types of our schema.
+
+4. A final line of code that calls a function to process our "working
+   object" into a standardized form expected by any users of the file.
+
+
+** Imports
+
+We start by importing the ~moo.jsonnet~ and ~wirecell.jsonnet~ files.  The
+latter is done so we may use WCT conventions for units on default
+values specified in the schema.
+
+
+#+begin_src jsonnet
+local wc = import "wirecell.jsonnet";
+local moo = import "moo.jsonnet";
+#+end_src
+
+Next, we want to refer to types from schemas defined elsewhere.
+Almost all schema will want to use one or more types from the "base".
+We import that schema like this:
+
+#+begin_src jsonnet
+local util_seq = import "WireCellUtil/Base.schema";
+#+end_src
+
+#+begin_caution
+In general, we should only import schema from packages in a way that
+retains WCT's general dependency tree rules.  In particular, schema
+for a component in a plugin library (eg ~WireCellGen~) should only
+import types from itself, ~WireCellUtil~, ~WireCellIface~ or ~WireCellAux~
+and not from another plugin library (eg, not from ~WireCellSigProc~).
+#+end_caution
+
+Lastly we will import a module specifically provided to help us make
+our schema.  We'll see it in action next.
+
+#+begin_src jsonnet
+local wcc = import "cfgschema.jsonnet";
+#+end_src
+
+** Helpers
+
+To help assure the data structures that comprise the schema itself are
+correctly formed, we rely on some helper objects.  These are made next
+as:
+
+#+begin_src jsonnet
+local t = moo.oschema.hier(util_seq).WireCell.Util.Cfg.Base;
+local f = wcc("Gen","TrackDepos");
+local s = f.schema;
+#+end_src
+
+Comments:
+
+- The standard form for a schema, eg stored here in ~util_seq~ is a
+  sorted sequence (ie, JSON array) of objects.  The ~hier()~ function
+  converts that sequence into an object with its keys given by the
+  type names of each type element in the sequence.  This lets the ~t~
+  object be used later as a convenient source of referencing "base"
+  types.
+
+- We also reference only a part of what ~hier()~ returns to get just the
+  type object.  This is merely a shorthand to avoid repeating
+  ~WireCellUtil.Cfg.Base~ each time we wanted a particular type object.
+
+- The ~f~ variable holds the object returned from the call of the ~wcc()~
+  function.  It provides two helpers.  The first is ~f.schema~ which we
+  store in variable ~s~ as a shorthand and is a "factory" that can build
+  types which are placed in the correct namespace (the one defined by
+  the arguments to ~wcc()~).  Also provided is an ~f.build()~ function
+  which we will use at the very end.
+
+** Creating types
+
+The main body of our schema is a "working object" which we temporarily
+hold in the ~hier~ variable:
+
+#+begin_src jsonnet
+local hier = {
+  // ...    
+};
+#+end_src
+
+Inside the body of this object we will create one top level attribute
+for each type using the ~s~ helper described above.  The "working
+object" is used so that as we may reference some of the types we just
+created as parts of other, compound types (sequences, records).  We
+will also refer to some "base" types provided by the ~t~ object created
+above.
+
+Here is our first type defined for ~TrackDepos~:
+
+#+begin_src jsonnet
+    local hier = {
+    
+        track: s.record("Track", [
+            s.field("time", t.Time, 0.0,
+                    doc="Absolute time at the start of the track"),
+            s.field("charge", t.Charge, -1.0,
+                    doc="If negative, number of electrons per depo, else electrons per track"),
+            s.field("ray", t.Ray,
+                    doc="The ray defining the track endpoints"),
+        ], doc=""),
+  
+        tracks: s.sequence("Tracks", self.track,
+                         doc="A sequence of tracks"),
+        // ...
+  
+    };
+#+end_src
+
+Here,
+
+- we define a ~Track~ type as a ~record~ with ~fields~ called ~time~, ~charge~ and ~ray~.
+- the types of these fields are provided by the ~Base~ module we previously imported.
+- we define a ~sequence~ type with element type ~Track~.
+- for all types and for fields in the record we give "documentation strings".
+- for some fields we give default vales.
+
+Let's now finish the "working object" by providing one more type which
+represents the full structure of what our configurable ~TrackDepos~
+expects.  
+
+#+begin_src jsonnet
+  local hier = {
+  
+      // ...Track and Tracks defined above...
+  
+      cfg: s.component([
+          s.field("step_size", t.Distance, 1.0*wc.mm,
+                  doc="Distance along track between two neighboring depos."),
+          s.field("clight", t.Normalized, 1.0,
+                  doc="Fraction of speed of light at which track progresses"),
+          s.field("group_time", t.Time, -1,
+                  doc="If positive, chunk the depos into groups spaning this amount of time with an EOS delimiting each group.  O.w. all depos are sent out as a stream."),
+          s.field("tracks", self.tracks,
+                  doc="Description of tracks on which to generate depos.")
+      ], "Configuration for TrackDepos component"),
+  
+  };
+#+end_src
+
+Notes,
+
+- we create it through the ~s.component()~ function which is essentially
+  the same as ~record()~ but assures certain naming conventions are
+  enforced, eg the type is always called ~Config~ and resides at a path
+  defined with the package and component name
+  (~WireCell.Gen.Cfg.TrackDepos~ in this example).
+- we reference the type ~Tracks~ via the variable ~self.tracks~.
+- the other fields are simple atomic types taken from the "base" set and with defaults.
+
+** Last line
+
+At the very end, just after our "working object" we place a final line
+of code which is the actual entry point when the file is evaluated.
+It will evaluate the previously defined ~local~ objects and produce type
+objects in the required sequence form:
+
+#+begin_src jsonnet
+util_seq + f.build(hier)
+#+end_src
+
+Details of this post processing are in ~moo~ documentation.  Look for
+~moo.oschema.sort_select~ if interested.  But, for here, just a few
+things need to be understood.
+
+- Since we used a few types from the "base", we prepend the entire
+  base sequence (~util_seq~).  The fact that this adds "extra" types
+  that we did not use is not a problem.
+
+- The second part of the output sequence is produced by the call to
+  ~f.build(hier)~.  This is essentially the opposite of the ~hier()~
+  function in that it flattens the array into a sequence.  It also
+  applies a topological sort on that sequence according to any
+  dependencies.  For example it assures that ~Track~ is before ~Tracks~
+  and that is before the "main" configuration object which will be
+  called ~Config~.
+
+
+* Introducing moo 
+
+We will use the ~moo~ command next in order to exercise our schema.  The
+*moo* package provides support for defining schema and transforming it
+through templates to generate a wide variety of products.
+
+WCT's build system will automatically call the ~moo~ program to generate
+code.  However, only require ~moo~ when the user wishes to do some
+schema development.  
+
+To learn how to install ~moo~ see:
+
+  https://brettviren.github.io/moo/moo.html#install
+
+What follows is self-contained usage information but see the
+[[https://brettviren.github.com/moo][moo web site]] for additional documentations and examples.
+
+
+* Compiling schema
+
+Sometimes we may not write perfect Jsonnet on the first try (though it
+is possible!).  Especially when beginning, it is best that we test
+that our schema is at least is syntactically correct as we develop it.
+One way to do this is to use ~moo~ to "compile" the Jsonnet to JSON.
+
+#+begin_example
+❯ moo -M cfg -M util/inc -M util/schema compile gen/inc/WireCellGen/TrackDepos.schema
+#+end_example
+
+When successful you will see JSON printed to your terminal.
+Otherwise, ~moo~, through the Jsonnet compiler, will give an helpful
+message error and call trace.
+
+* Codegen
+
+With ~moo~ we say we /render/ a /model/ against a /template/ in order to
+generate an artifact (code or other types of files).  See the ~moo~
+documentation to understand these terms.  For the most part, the WCT
+developer needs to only know the basics:
+
+- template :: a file written in some target syntax (eg C++)
+  interspersed with Jinja2 macros and markup.
+
+- model :: a transformation of some data structure (eg a schema) into
+  a new data structure to fit expectations of a template.
+
+- render :: applying a schema to a template via a model to product the
+  artifact.
+
+Ultimately, to test your schema it is useful to see it renders to the
+C++ header file that we ultimately want.  Here is an example command:
+
+#+begin_example
+❯ moo -g /lang:ocpp.jsonnet \
+    -M util/inc -M cfg -M util/schema \
+    -A path=WireCell.Gen.Cfg.TrackDepos \
+    -A os=gen/inc/WireCellGen/TrackDepos.schema \
+    render omodel.jsonnet util/schema/cfg.hpp.j2
+#+end_example
+
+If all goes well you will see a perfect C++ header file printed to
+stdout.  Here are a few details on this command:
+
+- The ~omodel.jsonnet~ file is provided by ~moo~ and defines the "model"
+  object to be formed.
+- The ~cfg.hpp.j2~ file is provided by WCT (in ~util/schema/~) and defines
+  the "template" to which the model is applied.
+- The ~-M~ adds directories to the path in which Jsonnet files are
+  searched.  You may also add them to the env. var. ~MOO_LOAD_PATH~.
+- The ~-A~ are Jsonnet /top-level arguments/ (TLAs) to the function defined by ~omodel.jsonnet~.
+
+
+* Build system
+
+When ~moo~ is available, WCT's ~wscript~ will automatically process schema
+files to generate code.  The schema files are locating with this
+pattern:
+
+#+begin_example
+<pkg>/inc/WireCell<Pkg>/<Component>.schema
+#+end_example
+
+So far two artifact files are generated for each ~.schema~ file:
+
+- ~<pkg>/inc/WireCell<Pkg>/Cfg/<Component>.hpp~ reflects the schema into
+  C++ types and serialization methods.  In particular, the C++ struct
+  ~WireCell::<Pkg>::Cfg::<Component>::Config~ is what the component
+  should use to get its configuration information.
+
+- ~cfg/schema/<pkg>/<component>.jsonnet~ provides Jsonnet functions that
+  may be used to help construct configuration objects.  The arguments
+  to these functions reflect the schema and their body insinuates
+  validation code.  Thus any bugs in configuration code are caught at
+  Jsonnet compile time instead of WCT run-time.  
+
+If ~moo~ is not found during ~./wcb configure ...~ or when no changes are
+made to the ~.schema~ files, the build system will not run any codegen
+and previous artifact files will be retained.
+
+* Refactoring configurable component
+
+Before the above schema and codegen support was added to WCT, many
+configurable components have been developed.  Their "old style" code
+patterns can continue to work.  However, with a small amount of work
+they can be refactored and the resulting C++ code will become simpler
+and more robust.
+
+The basic steps are:
+
+1. Develop new schema matching existing.
+
+2. Change base class from ~IConfigurable~ to ~Aux::Configurable<Config>~
+
+3. Remove ~default_configuration()~ and ~configure()~ methods.
+
+4. Translate usage of configuration info from JsonCPP to ~m_cfg~.
+
+Details for each step are now given using ~TrackDepos~ as an example.
+
+** Develop new schema
+
+Depending on the component, the code which (implicitly) defines the
+configuration schema may be concentrated in the ~IConfigurable~
+interface methods or may be more broadly spread throughout the other
+methods of your component.  Read though carefully to find where the
+JsonCPP object is accessed.  Every key used to access it should become
+a field in a record schema.
+
+For this initial refactoring, it is suggested to avoid making changes
+to the implicit schema.  Focus on performing a *transliteration* from
+implicit to explicit.
+
+** Change base classes
+
+Old style code gained configuration by implementing the ~IConfigurable~
+interface base class.  Remove it from the inheritance chain and add
+instead ~Aux::Configurable<Config>~.  Focusing on just the relevant
+lines:
+
+#+begin_src c++
+#include "WireCellAux/Configurable.h"
+#include "WireCellGen/Cfg/TrackDepos.hpp"
+namespace WireCell::Gen {
+
+  using WireCell::Gen::Cfg::TrackDepos::Config;
+  
+  /// A producer of depositions created from some number of simple, linear tracks.
+  class TrackDepos : public Aux::Logger,
+                     public Aux::Configurable<Config>, 
+                     public IDepoSource {  
+
+#+end_src
+
+The ~Config~ type is a ~struct~ from ~Cfg/TrackDepos.hpp~ which was
+generated from the schema.
+
+** Remove ~IConfigurable~ methods
+
+In old style code we defined two methods of the ~IConfigurable~
+interface to handle configuration information:
+
+- ~default_configuration()~ to return a default JsonCPP object
+- ~configure()~ to accept a JsonCPP object from user
+
+Both of these are now provided by the ~Aux::Configurable~ base class and
+should eventually be *removed* from your component class.  There are
+some caveats w.r.t. ~configure()~:
+
+- The ~configure()~ method is also used as a one-time, post-config entry
+  method.  If your component requires that entry, move the
+  initialization code into a new ~configured()~ method.  This will be
+  called by the base class at the end of ~configure()~.
+
+- In rare cases, ~configure()~ may be kept if some munging of the
+  JsonCPP object is needed.  For example, to keep backwards
+  compatibility wit some obsolete (implicit) schema.
+
+** Translate usage of config info
+
+The ~Aux::Configurable<Config>~ base class provides a ~protected~ data
+member of type ~Config~ called ~m_cfg~.  This ~struct~ has all its
+attributes set according to schema default and user-provided config
+data.  It is thus what your new refactored code should use.
+
+In translating to using ~m_cfg~ a number of patterns will likely be seen:
+
+- Where the JsonCPP object was held as a member, translate its use, eg, from ~m_jcfg["key"]~ to ~m_cfg.key~.
+- Where a config value was stored as a member, eg with ~m_key = get(cfg, "key", m_key)~ delete the ~m_key~ as an class attribute and instead use ~m_cfg.key~ in the code.
+
+
+* Configuration objects construction functions
+
+Besides generating C++, we use the schema to generate Jsonnet which
+defines configuration object construction functions.  These functions
+help define configuration objects as they insinuate type validation
+code and provide arguments which reflect the schema.  Both patterns
+help to turn bugs that would otherwise not be caught until run-time
+into bugs that are caught more immediately by the Jsonnet compiler.
+
+As described above, these are defined in files under
+~cfg/schema/<pkg>/<component>.jsonnet~.  Some example usage:
+
+
+#+begin_src jsonnet
+  local b = import "schema/util/base.jsonnet";
+  b.util.base.Point()
+#+end_src
+
+Gives:
+
+#+begin_src json
+{
+   "x": 0,
+   "y": 0,
+   "z": 0
+}
+#+end_src
+
+While trying to give some wrong value:
+
+#+begin_src jsonnet
+b.util.base.Point(wrong=42)
+#+end_src
+
+Gives
+
+#+begin_example
+RUNTIME ERROR: function has no parameter wrong
+	<cmdline>:1:46-73	
+#+end_example
+
+Or a wrong type:
+
+#+begin_src jsonnet
+b.util.base.Point(x="fortytwo");
+#+end_src
+
+#+begin_example
+RUNTIME ERROR: Assertion failed.
+	cfg/schema/util/base.jsonnet:24:22-58	function <anonymous>
+	cfg/schema/util/base.jsonnet:51:16-39	object <anonymous>
+	During manifestation	
+#+end_example
+
+* Todo list
+
+** [4/48] convert components [8%]
+
+Below is a check list of components to refactor.  Maybe daunting but
+as a point of comparison, Ductor took about 30 minutes while also
+paying attention to meetings and fixing some regressions added to
+TrackDepos.
+
+#+begin_example
+❯ for n in (grep -c IConfigurable *.h|grep -v :0 | sed -e 's/\.h:.*//g')
+      echo -- '- [ ] '$n
+  end
+#+end_example
+
+** gen
+
+- [ ] AddCoherentNoise
+- [ ] AddNoise
+- [X] AnodePlane
+- [ ] BlipSource
+- [ ] ColdElecResponse
+- [ ] DepoBagger
+- [ ] DepoChunker
+- [ ] DepoFanout
+- [ ] DepoFramer
+- [ ] DepoMerger
+- [ ] DepoSetFanout
+- [X] DepoSplat
+- [ ] DepoTransform
+- [ ] DepoZipper
+- [ ] Detsim
+- [ ] Diffuser
+- [ ] Digitizer
+- [ ] Drifter
+- [X] Ductor (removed)
+- [ ] EmpiricalNoiseModel
+- [ ] Fourdee
+- [ ] FrameFanin
+- [ ] FrameFanout
+- [ ] FrameSummer
+- [ ] MegaAnodePlane
+- [ ] Misconfigure
+- [ ] MultiDuctor
+- [ ] NoiseSource
+- [ ] PerChannelVariation
+- [ ] PlaneDiffuser
+- [ ] PlaneImpactResponse
+- [ ] Random
+- [ ] RCResponse
+- [ ] RecombinationModels
+- [ ] Reframer
+- [ ] ResponseSys
+- [ ] Retagger
+- [ ] SilentNoise
+- [ ] StaticChannelStatus
+- [ ] TimeGatedDepos
+- [X] TrackDepos
+- [ ] TruthSmearer
+- [ ] TruthTraceID
+- [ ] WarmElecResponse
+- [ ] WireBoundedDepos
+- [ ] WireParams
+- [ ] WireSchemaFile
+- [ ] WireSource
+
+** sio
+
+- [ ] BeeDepoSource
+- [ ] JsonDepoSource
+- [ ] NumpyDepoLoader
+- [ ] NumpyDepoSaver
+- [X] NumpyFrameSaver

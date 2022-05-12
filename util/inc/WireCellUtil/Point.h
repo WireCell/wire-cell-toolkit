@@ -49,6 +49,18 @@ namespace WireCell {
     /// memory is constrained and double precision is not required.
     typedef D3Vector<float> PointF;
 
+    /// Create a point from a point-like thing
+    template <typename POINT>
+    Point make_point(const POINT& point) {
+        return Point(point.x, point.y, point.z);
+    }
+
+    /// Create a ray from a ray-like thing
+    template <typename RAY>
+    Ray make_ray(const RAY& ray) {
+        return WireCell::Ray(make_point(ray.tail), make_point(ray.head));
+    }
+
     /** Return true if point is contained in a rectangular solid
      * described by the ray bounds running between diagonally opposed
      * corners.*/

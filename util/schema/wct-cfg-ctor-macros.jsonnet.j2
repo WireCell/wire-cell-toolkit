@@ -1,0 +1,69 @@
+{% macro lower_list(lst, delim='_') %}
+{{ lst[1]|lower }}{{delim}}{{ lst[3]|lower }}
+{%- endmacro -%}
+{% macro lower_path(path, delim='_') %}
+{% set p = path.split('.') %}
+{{ lower_list(p, delim) }}
+{%- endmacro -%}
+
+{% macro ctor_typepath(typeref, delim='.') %}
+{% set p = typeref.split('.') %}
+{{ p[1]|lower }}{{delim}}{{ p[3]|lower }}{{delim}}{{ ".".join(p[4:])}}
+{%- endmacro -%}
+
+{% macro ctor_namespace_beg(lst) %}
+{{ lst[1]|lower }}: { {{ lst[3]|lower }}: {
+{%- endmacro -%}
+
+{% macro ctor_namespace_end(lst) %}
+} }, // {{ lst[1]|lower }}.{{ lst[3]|lower }}
+{%- endmacro -%}
+
+{% macro ctor_boolean(model, t) %}
+{{ t.name }}(val) :: assert(std.type(val)=='boolean');assert(val == true || val == false); val,
+{%- endmacro -%}
+
+{# fixme: add checks for pattern/format #}
+{% macro ctor_string(model, s) %}
+{{ s.name }}(val) :: assert(std.type(val)=='string'); val,
+{%- endmacro -%}
+
+{# fixme: add checks for dtype and contraints #}
+{% macro ctor_number(model, n) %}
+{{ n.name }}(val) :: assert(std.type(val)=='number'); val,
+{%- endmacro -%}
+
+{# note: nothing really to check for any... #}
+{% macro ctor_any(model, a) %}
+{{ a.name }}(val) :: val,
+{%- endmacro -%}
+
+{# fixme: add checks that e is in enum list #}
+{% macro ctor_enum(model, e) %}
+{{ e.name }}(val) :: assert(std.type(val)=='string'); val,
+{%- endmacro -%}
+
+{% macro ctor_sequence(model, s) %}
+{{ s.name }}(val) :: assert(std.type(val)=='array'); [$.{{ ctor_typepath(s["items"]) }}(v) for v in val],
+{%- endmacro -%}
+
+{% macro ctor_field_default_eq(model, field) %}
+{{jsonnet.field_default(model.all_types, field)}}
+{%- endmacro -%}
+
+{% macro ctor_arglist(model, fields) %}
+{% for f in fields %}{{f.name}}={{ctor_field_default_eq(model, f)}}{{ ", " if not loop.last }}{% endfor%}
+{%- endmacro -%}
+
+{% macro ctor_record(model, r) %}
+{{ r.name }}(obj=null, {{ctor_arglist(model, r.fields)}}) :: {
+    assert(std.setMember(std.type(obj), ["null", "object"])),
+    res: if std.type(obj) == 'object' then obj else {
+        {% for f in r.fields %}
+        {{f.name}}: $.{{ ctor_typepath(f.item) }}({{f.name}}),
+        {% endfor %}
+    },
+}.res,
+{%- endmacro -%}
+
+
