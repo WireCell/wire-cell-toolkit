@@ -86,6 +86,25 @@ function(params)
         },
     },
 
+    elec_resps : std.mapWithIndex(function (n, elec)
+    {
+        type: if std.objectHas(elec, "type")
+              then elec.type
+              else "ColdElecResponse",
+        data: sim_response_binning {
+            shaping: elec.shaping,
+            gain: elec.gain,
+            postgain: elec.postgain,
+            filename: if std.objectHas(elec, "filename")
+                      then elec.filename
+                      else ""
+        },
+
+    }, if std.objectHas(params, "elecs")
+       then params.elecs
+       else [params.elec], // backward compatible
+    ),
+
     rc_resp : {
         type: "RCResponse",
         data: sim_response_binning {
@@ -118,8 +137,8 @@ function(params)
                 field_response: wc.tn(fr),
                 // note twice we give rc so we have rc^2 in the final convolution
                 short_responses: if params.sys_status == false
-                                    then [wc.tn($.elec_resp)]
-                                    else [wc.tn($.elec_resp), wc.tn($.sys_resp)],
+                                    then [wc.tn($.elec_resps[n])]
+                                    else [wc.tn($.elec_resps[n]), wc.tn($.sys_resp)],
 		overall_short_padding: if std.objectHas(params, 'overall_short_padding')
                                     then params.overall_short_padding
                                     else if params.sys_status == false
@@ -132,7 +151,7 @@ function(params)
         else [wc.tn($.rc_resp), wc.tn($.rc_resp)],
 		long_padding: 1.5*wc.ms,
 	    },
-            uses: [$.dft, fr, $.elec_resp, $.rc_resp, $.sys_resp],
+            uses: [$.dft, fr, $.elec_resps[n], $.rc_resp, $.sys_resp],
         } for plane in [0,1,2]], $.fields),
 
     // One anode per detector "volume"
