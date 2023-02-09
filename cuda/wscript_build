@@ -1,1 +1,1 @@
-bld.smplpkg('WireCellCuda', use='CUDA')
+bld.smplpkg('WireCellCuda', use='WireCellIface CUDA CUFFT')

@@ -51,7 +51,7 @@ int main(int argc,const char *argv[])
     cfg.env.CXXFLAGS += ['-Wno-deprecated-declarations']
     cfg.env.CXXFLAGS += ['-Wall', '-Wno-unused-local-typedefs', '-Wno-unused-function']
     # cfg.env.CXXFLAGS += ['-Wpedantic', '-Werror']
-
+    
     if cfg.options.with_spdlog_static.lower() in ("yes","on","true"):
         cfg.env.CXXFLAGS += ['-DSPDLOG_COMPILED_LIB=1']
 
