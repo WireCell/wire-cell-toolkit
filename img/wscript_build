@@ -1,2 +1,2 @@
-bld.smplpkg('WireCellImg', use='WireCellAux')
+bld.smplpkg('WireCellImg', use='WireCellAux', test_use='WireCellImg')
 

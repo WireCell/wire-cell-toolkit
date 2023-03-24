@@ -19,7 +19,8 @@ function(services, params) function(anode)
     local img = low.img(anode);
 
 
-    //-------------- haiwangs
+/*
+    //-------------- haiwang's
 
 local img = import "img.jsonnet";
 
@@ -190,4 +191,7 @@ function(slicing_strategy = "single")
     ], "main");
 
     high.main(graph, "TbbFlow")
+    
+*/
+
     

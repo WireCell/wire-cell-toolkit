@@ -1,0 +1,27 @@
+#+title: The tenio test
+
+This test runs a sequence of similar ~wire-cell~ jobs to transform one
+data tier to another.  The data tiers are:
+
+- depo :: ionization deposition groups 
+
+- adc :: frame of ADC waveforms
+
+- acp :: "a copy" of ADC, for checking basic I/O
+- sig :: signal processed results
+- img :: imaging results
+- ptc :: point cloud results
+
+Each stage is in a Jsonnet file named
+
+#+begin_example
+tenio-<tier1>-<tier1>.jssonet
+#+end_example
+
+All stages can be run together with:
+
+#+begin_example
+snakemake -p -jall -s img/test/tenio.smake all
+#+end_example
+
+

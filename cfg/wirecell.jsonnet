@@ -307,6 +307,14 @@
     /// example usage: 
     TrackDepos :: self.Component + { type: "TrackDepos" },
 
+    /// Construct a basic configuration node (aka "inode")
+    cfg(type, name="", data={}) :: {
+        type:type, name:name, data:data
+    },
+
+    /// Return cfg object name or ""
+    cname(cfgobj) :: if std.objectHas(cfgobj, "name") then cfgobj.name else "",
+
     /// Return canonical "type:name" or just "type" if no name from a
     /// configuration object.  Use this instead of bare names to
     /// better guard against typos and changes in dependent
@@ -320,9 +328,11 @@
     ///
     /// This function can also be applied to objects which happen to
     /// be produced by pgraph.pnode()
-    tn(obj) :: if std.objectHas(obj, "name") && obj.name != ""
-               then obj.type + ":" + obj.name
-               else obj.type,
+    tn(cfgobj) :: if std.objectHas(cfgobj, "inode") then
+                      $.tn(cfgobj.inode)
+                  else if self.cname(cfgobj) == "" then
+                      cfgobj.type
+                  else cfgobj.type + ":" + cfgobj.name,
 
 
     // Return a new list where only the first occurrence of any object is kept.

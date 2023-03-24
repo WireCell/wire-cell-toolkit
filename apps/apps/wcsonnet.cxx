@@ -33,9 +33,11 @@ int main(int argc, char** argv)
 {
     CLI::App app{"wcsonnet is a Wire-Cell Toolkit aware Jsonnet compiler"};
 
-    std::string filename;
+    std::string filename, output="/dev/stdout";
     std::vector<std::string> load_path, extvars, extcode, tlavars, tlacode;
 
+    app.add_option("-o,--output", output,
+                   "Output file");
     app.add_option("-P,--path", load_path,
                    "Search paths to consider in addition to those in WIRECELL_PATH")->type_size(1)->allow_extra_args(false);
     app.add_option("-V,--ext-str", extvars,
@@ -86,7 +88,8 @@ int main(int argc, char** argv)
                            m_tlavars, m_tlacode);
 
     auto jdat = parser.load(filename);
-    std::cout << jdat << std::endl;
+    std::ofstream out(output);
+    out << jdat << std::endl;
 
     return 0;
 }

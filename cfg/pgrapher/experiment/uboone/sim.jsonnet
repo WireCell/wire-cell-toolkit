@@ -12,7 +12,21 @@ function(params, tools)
 
     local sr = params.shorted_regions,
 
+    // A depo set oriented subgraph for WireBoundedDepos.
+    local wbdepos_sets = [
+        sim.deposet_filter(
+            sim.make_wbdepo(tools.anode, sr.uv + sr.vy, "reject", "nominal"),
+            "nominal"),
+        sim.deposet_filter(
+            sim.make_wbdepo(tools.anode, sr.uv, "accept", "shorteduv"),
+            "shoteduv"),
+        sim.deposet_filter(
+            sim.make_wbdepo(tools.anode, sr.vy, "accept", "shortedvy"),
+            "shortedvy"),
+    ],
 
+    // The older per-depo WireBoundedDepos subgraph, best to use the
+    // depo set version above
     local wbdepos = [
         sim.make_wbdepo(tools.anode, sr.uv + sr.vy, "reject", "nominal"),
         sim.make_wbdepo(tools.anode, sr.uv, "accept", "shorteduv"),
@@ -29,6 +43,8 @@ function(params, tools)
 
     local pipelines = [g.pipeline([wbdepos[n], baggers[n], depos2frames[n]], "ubsigpipe%d"%n)
                        for n in [0,1,2]],
+    local pipelines_sets = [g.pipeline([wbdepos_sets[n], depos2frames[n]], "ubsigpipe%d"%n)
+                            for n in [0,1,2]],
 
     
     local ubsigtags = ['ubsig%d'%n for n in [0,1,2]],
@@ -36,6 +52,8 @@ function(params, tools)
     local signal = g.pipeline([f.fanpipe('DepoFanout', pipelines, 'FrameFanin', 'ubsigraph', ubsigtags),
                                sim.make_reframer('ubsigrf', tools.anode, ubsigtags)], 'ubsignal'),
 
+    local signal_sets = g.pipeline([f.fanpipe('DepoSetFanout', pipelines_sets, 'FrameFanin', 'ubsigraph', ubsigtags),
+                                    sim.make_reframer('ubsigrf', tools.anode, ubsigtags)], 'ubsignal'),
 
     //
     // Noise:
@@ -107,6 +125,7 @@ function(params, tools)
 
     ret: {
         signal : signal,
+        signal_sets : signal_sets,
         empty_csdb : empty_csdb,
         miscfg_csdb : miscfg_csdb,
         make_noise_model :: make_noise_model,

@@ -3,7 +3,6 @@
 
 #include "WireCellIface/IClusterFanout.h"
 #include "WireCellIface/IConfigurable.h"
-#include "WireCellUtil/TagRules.h"
 #include "WireCellAux/Logger.h"
 
 namespace WireCell::Img {
@@ -30,7 +29,6 @@ namespace WireCell::Img {
         size_t m_count{0};
 
         bool m_trivial{false};
-        tagrules::Context m_ft;
 
     };
 }

@@ -28,6 +28,21 @@ function(params, tools)
         },
     }, nin=1, nout=1, uses=[tools.random]),
 
+    // Wrap an IDepoFilter in a IDepoSetFilter.  Despite using the
+    // "DepoSetDrifter" as the wrapper, it can accept any IDepoFilter
+    // aka IDrifter.  This wrapping simply runs many calls to the
+    // IDepoFilter over the depos in a set.  Motivation for doing this
+    // is to work around the slowdown pathology in Pgrapher when many
+    // depos are passed in the begining of a large graph.
+    deposet_filter :: function(depofilt, name="")
+        g.pnode({
+            type: 'DepoSetDrifter',
+            name: name,
+            data: {
+                drifter: wc.tn(depofilt),
+            },
+        }, nin=1, nout=1, uses=[depofilt]),
+
     // Implement "fixed" depo mode like LArG4 uses
     make_bagger :: function(name="bagger") g.pnode({
         type:'DepoBagger',
@@ -221,8 +236,9 @@ function(params, tools)
     misconfigure:: function(params, chndbobj=null) {
 
         local split = g.pnode({
-            type: "FrameSplitter",
-            name: "misconsplit"
+            type: "FrameFanout",
+            name: "misconsplit",
+            data: { multiplicity: 2 },
         }, nin=1, nout=2),
 
         local chsel_static = g.pnode({

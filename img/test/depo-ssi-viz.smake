@@ -27,7 +27,7 @@ figdir=f"{docdir}/{{dname}}"
 event_indices = [0]
 
 def depo_file(wc):
-    return depofiles[wc.dname]
+    return datadir + "/" + depofiles[wc.dname]
 rule intern_depos:
     input:
         depo_file

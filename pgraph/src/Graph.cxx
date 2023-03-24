@@ -22,7 +22,11 @@ bool Graph::connect(Node* tail, Node* head, size_t tpind, size_t hpind)
     Port& tport = tail->output_ports()[tpind];
     Port& hport = head->input_ports()[hpind];
     if (tport.signature() != hport.signature()) {
-        l->critical("port signature mismatch: \"{}\" != \"{}\"", tport.signature(), hport.signature());
+        l->critical("port signature mismatch:\n\ttail: {}\n\thead: {}\n\ttail data: {}\n\thead data: {}",
+                    tail->ident(),
+                    head->ident(),
+                    tport.signature(),
+                    hport.signature());
         THROW(ValueError() << errmsg{"port signature mismatch"});
         return false;
     }

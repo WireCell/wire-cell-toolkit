@@ -1,11 +1,13 @@
 jobcfg: img/test/depo-ssi-viz.jsonnet
 depofiles:
-  muon: test/data/muon-depos.npz
+  muon: muon-depos.npz
   point: depo-point.npz
-  cosmics: ../../data/cosmic-500-1-depos.npz
+  cosmics: cosmic-500-1-depos.npz
+datadir: /home/bv/opt/wire-cell-test-data/pdsp/sim/img
 outdir: build/img/test/depo-ssi-viz
 docdir: img/docs/depo-ssi-viz
-detector: pdsp
+# detector: pdsp
+detector: uboone
 variant: nominal
 drift_speed: "1.56*mm/us"
 start_time: "314*us"

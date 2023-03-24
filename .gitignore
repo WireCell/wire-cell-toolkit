@@ -69,3 +69,4 @@ latexmk-out
 
 svg-inkscape
 *.html
+test_graph_visitor*.dot
