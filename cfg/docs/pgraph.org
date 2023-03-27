@@ -1,0 +1,181 @@
+#+title: WCT ~pgraph~ configuration support
+
+* Introduction
+
+The most popular paradigm in which to use WCT that of data flow
+programming (DFP).  This constructs a WCT job as a directed graph
+which vertices or /nodes/ made up of executable and potentially
+configurable WCT components.  A node has a well defined or variable
+number of /input ports/ and /output ports/.  As such, these kinds of graph
+are sometimes called "port graphs" and the "p" in "pgraph" stands for
+"port".  Each port allows passage of data objects of a specific
+interface type (~IData~).  A valid graph has exactly one edge to or from
+every port and both ports on either end of the edge must pass the same
+data type.
+
+Describing the connectivity of such a graph is both simple and
+complex.  In the end, one must simply provide a configuration in the
+form of a flat list of node configuration objects.  Each node
+configuration object must have a ~type~ attribute naming a WCT component
+type.  A ~name~ attribute must also be supplied if more than one
+instance of a ~type~ exists in the list and it must be unique among all
+instances of common ~type~.  A ~name~ is otherwise optional.  The list of
+nodes is accompanied with a list edges where each edge is expressed as
+an ordered pair of ~<type>:<name>~.
+
+While very simple in representation, properly forming and reasoning
+about complex graphs configurations is more difficult.  To help with
+this, WCT provides the ~pgraph.jsonnet~ library of functions.
+
+* ~pgraph~ concepts
+
+** inode
+
+In ~pgraph.jsonnet~, a configuration object for an particular instance
+of a WCT component that has an ~INode~ interface is called an *inode*.  As
+introduced above an *inode* must have a ~type~ attribute and may require a
+~name~ attribute.  If the WCT component is configurable (has an
+~IConfigurable~ interface) then the *inode* may also have a ~data~ attribute
+to supply a configuration parameters to the component instance of a
+type given by ~type~.
+
+** pnode
+
+One very useful intermediate construction which is supported by port
+graphs is that of forming a "aggregate" node from a subgraph.  This
+hides arbitrary complexity of a subgraph by conceptually presenting
+the whole as a single node.  Any unattached ports from any of the
+subgraph nodes are assigned to the aggregate node.  A user may connect
+this node into a yet larger graph without the need to understand the
+internal complexity.  This abstraction can be repeated to arbitrary
+scale.  That is one may construct an entire DFP graph as aggregates of
+aggregates of nodes, etc.
+
+The most important functions in ~pgraph.jsonnet~ are those that provide
+ways to form various types of subgraph aggregate nodes.  For this to
+work, a new type of "node" is required that can represent individual
+*inode* nodes as well as aggregates of *inode* nodes.  This is called a
+*pnode*.  A *pnode* is structured similarly to an *inode*.  It has a ~type~
+but all *pnode* has type of ~"Pnode"~.  A *pnode* may also have an instance
+~name~ with the same governing rules as for *inode*.  Additional
+attributes of a *pnode* hold the subgraph information and allow
+unattached ports of the subgraph to be enumerated as if their were on
+the *pnode* itself.
+
+* ~pgraph~ functions
+
+Here describes the most important functions.  Read the code and
+comments in ~pgraph.jsonnet~ for details.  In the examples, we will
+assume
+
+#+begin_src jsonnet
+local pg = import "pgraph.jsonnet";
+#+end_src
+
+** Port
+
+** Edge
+
+** Atomic pnode
+
+The simplest *pnode* is one that represents a single *inode*.
+
+#+begin_src jsonnet
+  local mf = {type:"MyFilter"};
+  local pnode = pg.pnode(mf, nin=1, nout=1);
+#+end_src
+
+If the component has compile-time port cardinality, the ~nin~ and ~nout~
+arguments *must* match expectations.  For components with dynamic port
+cardinality, ~nin~ or ~nout~ will set the number to be used.
+
+** Pipeline of pnodes
+
+A very common subgraph pattern is a linear pipeline of nodes.  These
+can be aggregated as such:
+
+#+begin_src jsonnet
+  local mf1 = {type:"MyFilter", name:"foo"};
+  local mf2 = {type:"MyFilter", name:"bar"};
+  local pipe = pg.pipeline([mf1,mf2]);
+#+end_src
+
+The input ports of ~mf1~ form the input ports of ~pipe~ and likewise the
+output ports of ~mf2~.
+
+** Arbitrary subgraph aggregation
+
+An arbitrary aggregation can be formed with the ~intern()~ function.  It
+accepts zero or more *pnode* objects in three collections: ~innodes~,
+~centernodes~ and ~outnodes~ along with zero or more edges in ~edges~ array
+and input and output ports in ~iports~ and ~oports~.  In principle, all
+other *pnode* creating functions can be implemented as calls to ~intern()~
+with some restriction on which of these arguments are passed.
+
+Using the *pnode* instances created above:
+
+#+begin_src jsonnet
+  local sg = pg.intern(innodes=[pnode, pipe], outnodes=[pnode,pipe]);
+#+end_src
+
+The result would be a *pnode* with two input and two output ports taken
+from those of ~pnode~ and ~pipe~.
+
+Emulating the ~pipeline()~ function:
+
+#+begin_src jsonnet
+  local pipe2 = pg.intern(innodes=[mf1],outnodes=[mf2],
+                          edges=[pg.edge(mf1,mf2)]);
+#+end_src
+
+Or a longer pipeline with three nodes
+
+#+begin_src jsonnet
+  local pipe2 = pg.intern(innodes=[mf1],centernodes=[mf],outnodes=[mf2],
+                          edges=[pg.edge(mf1,mf), pf.edge(mf,mf2)]);
+#+end_src
+
+So far, the ports of the resulting *pnode* are calculated assuming all
+input ports of input nodes are open and likewise for output.  The
+order of these ports on the resulting *pnode* follows the order of the
+nodes in their arrays and the ports in each node.
+
+In some cases, ports may no be available for attaching or one may wish
+to expose ports in a different order.  In such cases ~iports~ and ~oports~
+can be explicitly given.
+
+For example, a common subgraph pattern is an "edge tap" whereby we
+wish to send to its nominal recipient as well as a new consumer.  We
+must have exactly one edge per port and so we may not "split an edge".
+However, there are components called "fanout" which produce a number
+of parallel outputs from each input.
+
+Here is a very contrived example:
+
+#+begin_src jsonnet
+  local fanout = pg.pnode({type:"MyFanout"}, nin=1, nout=3);
+  local tapped = pg.intern(innodes=[mf], centernodes=[fanout], outnodes=[mf1,mf2],
+                           edges=[pg.edge(mf,fanout),
+                                  pg.edge(fanout,mf1,1,0),
+                                  pg.edge(fanout,mf2,2,0)],
+                           oports=[mf2.oports[0], mf1.oports[0], fanout.oports[0]]);
+#+end_src
+
+Output port 0 of the ~fanout~ is left unconnected and output port 1 of
+the ~fanout~ connects to the input port of ~mf1~ and likewise for 2.  If
+~oports~ were not given then the output ports of the resulting ~tapped~
+*pnode* would be in order port 0 from ~[fanout,mf1,mf2]~.  For reasons
+only known to the user, the reverse ordering was explicitly wanted and
+given by ~oports~.
+
+** Fans and taps
+
+Note, ~pgraph~ provides a subobject called ~fan~ with various functions to
+construct fan in/out subgraphs: ~fanout(), fanin(), pipe(), sink()~.  It
+also provides the ~tap()~ function to make constructing "edge taps" as
+described above simple.
+
+** Edge insertion
+
+** Aggregate closed component graphs
+

@@ -11,6 +11,8 @@
 #include "TH1F.h"
 #include "TStyle.h"
 
+#include "printer.h"
+
 void draw_text(const Point& pt, const std::string text, int color = 1, int align = 22);
 
 void dump(const blobs_t& blobs)
@@ -149,27 +151,6 @@ Point draw_blob(Coordinates& coords, const Blob& blob, int color = 1)
     pl->Draw();
     return center;
 }
-
-struct Printer {
-    TCanvas canvas;
-    std::string fname;
-    int count;
-    Printer(std::string fn)
-      : canvas("test_raytiling", "Ray Tiling", 500, 500)
-      , fname(fn)
-      , count(0)
-    {
-        canvas.Print((fname + ".pdf[").c_str(), "pdf");
-    }
-    ~Printer() { canvas.Print((fname + ".pdf]").c_str(), "pdf"); }
-    void operator()()
-    {
-        canvas.Print((fname + ".pdf").c_str(), "pdf");
-        canvas.Print(Form("%s-%02d.png", fname.c_str(), count), "png");
-        canvas.Print(Form("%s-%02d.svg", fname.c_str(), count), "svg");
-        ++count;
-    }
-};
 
 void draw_points_blobs(Coordinates& coords, Printer& print, const std::vector<Point>& points, const blobs_t& blobs)
 {

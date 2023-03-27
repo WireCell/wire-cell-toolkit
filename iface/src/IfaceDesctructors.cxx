@@ -11,6 +11,7 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IApplication.h"
 #include "WireCellIface/IBlob.h"
+#include "WireCellIface/IBlobDepoFill.h"
 #include "WireCellIface/IBlobSet.h"
 #include "WireCellIface/IBlobSetFanin.h"
 #include "WireCellIface/IBlobSetFanout.h"
@@ -21,6 +22,7 @@
 #include "WireCellIface/IChannelSpectrum.h"
 #include "WireCellIface/IChannelStatus.h"
 #include "WireCellIface/IClusterFanin.h"
+#include "WireCellIface/IClusterFanout.h"
 #include "WireCellIface/IClusterFilter.h"
 #include "WireCellIface/IClusterFramer.h"
 #include "WireCellIface/IClusterSink.h"
@@ -109,6 +111,7 @@ IAnodeFace::~IAnodeFace() {}
 IAnodePlane::~IAnodePlane() {}
 IApplication::~IApplication() {}
 IBlob::~IBlob() {}
+IBlobDepoFill::~IBlobDepoFill() {}
 IBlobSet::~IBlobSet() {}
 IBlobSetFanin::~IBlobSetFanin() {}
 IBlobSetFanout::~IBlobSetFanout() {}
@@ -119,6 +122,7 @@ IChannelResponse::~IChannelResponse() {}
 IChannelSpectrum::~IChannelSpectrum() {}
 IChannelStatus::~IChannelStatus() {}
 IClusterFanin::~IClusterFanin() {}
+IClusterFanout::~IClusterFanout() {}
 IClusterFilter::~IClusterFilter() {}
 IClusterFramer::~IClusterFramer() {}
 IClusterSink::~IClusterSink() {}

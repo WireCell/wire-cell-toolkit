@@ -25,6 +25,9 @@ namespace WireCell {
             // The pitch indices bounding the strip in its layer pitch direction.
             grid_range_t bounds;
 
+            // Note, this returns a pair of coordiante_t which is
+            // called a crossing_t but these two do not cross as they
+            // are in the same layer.
             crossing_t addresses() const
             {
                 return std::make_pair(coordinate_t{layer, bounds.first}, coordinate_t{layer, bounds.second});
@@ -40,6 +43,10 @@ namespace WireCell {
             }
         };
         typedef std::vector<Strip> strips_t;
+
+        // Return two crossing points of ray with bounds of strip.
+        Ray crossing_points(const Coordinates& coords, const coordinate_t& ray,
+                            const Strip& strip);
 
         // Activity represents an absolutly positioned span of pitch
         // indices which may contain some measure of some kind of
@@ -104,7 +111,11 @@ namespace WireCell {
 
         class Blob {
            public:
-            void add(const Coordinates& coords, const Strip& strip);
+            // Add a strip to this blob, updating corners.
+            // A nudge will effectively enlarge strips for the purpose of the inclusion
+            // tests by this fraction of the pitch.
+            void add(const Coordinates& coords, const Strip& strip,
+                     double nudge = 0);
 
             const strips_t& strips() const { return m_strips; }
             strips_t& strips() { return m_strips; }
@@ -119,10 +130,16 @@ namespace WireCell {
                 if (nstrips == 0) {
                     return false;
                 }  // empty
+                for (const auto& strip : m_strips) {
+                    if (strip.bounds.second == strip.bounds.first) {
+                        return false; // strip has no width
+                    }
+                }
                 if (nstrips == 1) {
                     return true;
-                }  // no corners expected
-                return corners().size() > 0;
+                }  // no corners expected with 1 strip
+                // A blob must have some area
+                return corners().size() >= 3;
             }
 
             std::string as_string() const;
@@ -137,7 +154,8 @@ namespace WireCell {
 
         class Tiling {
            public:
-            Tiling(const Coordinates& coords);
+            // Create a tiling with coordintes.
+            Tiling(const Coordinates& coords, double nudge=0);
 
             // Return a new activity which is shrunk to fall into the shadow of the blob.
             Activity projection(const Blob& blob, const Activity& activity);
@@ -148,8 +166,9 @@ namespace WireCell {
             // Refine existing blobs with the activity in a new layer.
             blobs_t operator()(const blobs_t& prior, const Activity& activity);
 
-           private:
+          private:
             const Coordinates& m_coords;
+            const double m_nudge;
         };
 
         /// free functions
@@ -158,13 +177,29 @@ namespace WireCell {
         size_t drop_invalid(blobs_t& blobs);
 
         // Visit each blob and prune away any portions of strips which
-        // are outside the corners.  These vestigle strip portions can
-        // result when another layer provides a corner inside the
-        // strip in question.
-        void prune(const Coordinates& coords, blobs_t& blobs);
+        // are outside the corners.  These vestigial strip portions
+        // can result when another layer provides a corner inside the
+        // strip in question.  If a 2-layer corner is within
+        // edge_nudge fraction of a pitch bin to an edge in the 3rd
+        // layer, it will be considered moved to that near edge for
+        // the purposes of determining how the strip in that 3rd layer
+        // shall be pruned.
+        void prune(const Coordinates& coords, blobs_t& blobs, double nudge=1e-3);
 
-        // One stop shopping to generate blobs from activity
-        blobs_t make_blobs(const Coordinates& coords, const activities_t& activities);
+        // One stop shopping to generate blobs from activity.
+        //
+        // A nudge gives a distance as a fraction of one pitch.
+        //
+        // It important for wire crossing patterns that ideally have
+        // 3-ray crossing points but due to FP round-off error and/or
+        // imprecise wires in fact do not have 3-ray crossing points.
+        // The size of the nudge should be larger than this 3-ray
+        // crossing point breakage.  Note, if the ideal crossing
+        // pattern actually has crossing points w/in this distance,
+        // they will be effectively coalesced.
+        blobs_t make_blobs(const Coordinates& coords,
+                           const activities_t& activities,
+                           double nudge = 1e-3);
 
         inline std::ostream& operator<<(std::ostream& os, const WireCell::RayGrid::Strip& s)
         {

@@ -1,7 +1,36 @@
 #include "WireCellUtil/RayGrid.h"
+#include "WireCellUtil/Range.h"
 
 using namespace WireCell;
 using namespace WireCell::RayGrid;
+using namespace WireCell::Range;
+
+Coordinates::~Coordinates()
+{
+}
+
+Coordinates::Coordinates()
+    : m_nlayers(0)
+{
+}
+Coordinates::Coordinates(const Coordinates& other)
+{
+    (*this) = other;
+}
+Coordinates& Coordinates::operator=(const Coordinates& other)
+{
+    m_nlayers = other.m_nlayers;
+    m_pitch_mag = other.m_pitch_mag;
+    m_pitch_dir = other.m_pitch_dir;
+    m_center = other.m_center;
+    m_zero_crossing = other.m_zero_crossing;
+    m_ray_jump = other.m_ray_jump;
+    m_a.resize(boost::extents[m_nlayers][m_nlayers][m_nlayers]);
+    m_b.resize(boost::extents[m_nlayers][m_nlayers][m_nlayers]);
+    m_a = other.m_a;
+    m_b = other.m_b;
+    return *this;
+}
 
 Coordinates::Coordinates(const ray_pair_vector_t& rays, int normal_axis, double normal_location)
   : m_nlayers(rays.size())
@@ -19,7 +48,7 @@ Coordinates::Coordinates(const ray_pair_vector_t& rays, int normal_axis, double 
         return v;
     };
 
-    // must go through 1, 2 and 3 combonations
+    // must go through 1, 2 and 3 combinations
 
     // First, find the per-layer things
     for (layer_index_t ilayer = 0; ilayer < m_nlayers; ++ilayer) {
@@ -76,8 +105,14 @@ Coordinates::Coordinates(const ray_pair_vector_t& rays, int normal_axis, double 
                 }
             }
             if (il == im) {
-                m_zero_crossing(il, im).invalidate();
-                m_ray_jump(il, im).invalidate();
+                // Initially we set diagonal elements to the "invalid"
+                // point.  But then realized these special case values
+                // are both useful and meaningful in context.  Setting
+                // zero crossing to centers is apparently redundant
+                // but m_center must be kept in order that centers()
+                // may continue to return a const reference.
+                m_zero_crossing(il, im) = m_center[il];
+                m_ray_jump(il, im) = ray_unit(rpl.first);
             }
         }
     }
@@ -116,7 +151,10 @@ Coordinates::Coordinates(const ray_pair_vector_t& rays, int normal_axis, double 
     }
 }
 
-Vector Coordinates::zero_crossing(layer_index_t one, layer_index_t two) const { return m_zero_crossing(one, two); }
+Vector Coordinates::zero_crossing(layer_index_t one, layer_index_t two) const
+{
+    return m_zero_crossing(one, two);
+}
 
 Vector Coordinates::ray_crossing(const coordinate_t& one, const coordinate_t& two) const
 {
@@ -134,4 +172,36 @@ double Coordinates::pitch_location(const coordinate_t& one, const coordinate_t& 
     const tensor_t::index il = one.layer, im = two.layer, in = other;
     const tensor_t::index i = one.grid, j = two.grid;
     return j * m_a[il][im][in] + i * m_a[im][il][in] + m_b[il][im][in];
+}
+
+vector_array1d_t Coordinates::ring_points(const crossings_t& corners) const
+{
+    const size_t npts = corners.size();
+    vector_array1d_t points(npts);
+    if (!npts) return points;
+    Point avg;
+    for (size_t ind : irange(npts)) {
+        const auto& [one, two] = corners[ind];
+        auto pt = ray_crossing(one, two);
+        points[ind] = pt;
+        avg += pt;
+    }
+    avg = avg / (double)npts;
+    std::vector<double> ang(npts);
+    std::vector<size_t> indices(npts);
+    for (size_t ind : irange(npts)) {
+        auto dir = points[ind] - avg;
+        ang[ind] = atan2(dir[2], dir[1]);
+        indices[ind] = ind;
+    }
+    std::sort(indices.begin(), indices.end(),
+              [&](size_t a, size_t b) -> bool {
+                  return ang[a] < ang[b];
+              });
+    
+    std::vector<Point> ret(npts);
+    for (size_t ind : irange(npts)) {
+        ret[ind] = points[indices[ind]];
+    }
+    return ret;
 }

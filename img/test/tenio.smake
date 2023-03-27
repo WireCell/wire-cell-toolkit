@@ -1,0 +1,116 @@
+#!/usr/bin/env snakemake
+
+import os
+from pathlib import Path
+
+# where things are and go relative to this file
+tstdir = Path(workflow.basedir).absolute()
+imgdir = tstdir.parent
+topdir = imgdir.parent
+blddir = topdir / "build"
+outdir = blddir / "img/test/tenio"
+
+# static info
+dataext = "tar.gz"
+
+# expand info
+stages = dict(
+    adc = dict(cfg="tenio-depo-adc", deps=()),
+    acp = dict(cfg="tenio-adc-acp", deps=("adc",)),
+    sig = dict(cfg="tenio-adc-sig", deps=("adc",)),
+    img = dict(cfg="tenio-sig-img", deps=("sig",)),
+    ptc = dict(cfg="tenio-img-ptc", deps=("img",))
+)
+aids = [0,1,2,3,4,5]
+
+# What "all" builds
+graphviz_files = f"{outdir}/{{stage}}/flow-graph.pdf"
+apa_files = [f"{outdir}/{{stage}}/apa-{apa}.{dataext}" for apa in aids]
+end_game = \
+    expand(graphviz_files, stage=stages) \
+    , expand(apa_files, stage=stages) \
+    , f"{outdir}/adc_acp.log"
+
+rule all:
+    input: end_game
+
+# normally, wire-cell reads Jsonnet directly, compile to JSON here
+# because we also want graphviz but Python's Jsonnet is slow so use
+# wcsonnet.  Then, might was well use the JSON with wire-cell below.
+def compile_jsonnet_input(w):
+    cfg = stages[w.stage]["cfg"]
+    return f"{tstdir}/{cfg}.jsonnet",
+def compile_jsonnet_args(w):
+    args = [f"-A 'outfiles={outdir}/{w.stage}/apa-%(anode)s.{dataext}'"]
+    deps = stages[w.stage]["deps"]
+    args += [f"-A 'infiles={outdir}/{dep}/apa-%(anode)s.{dataext}'" for dep in deps]
+    return " ".join(args)
+rule compile_jsonnet:
+    input: compile_jsonnet_input
+    output: f"{outdir}/{{stage}}/wct-cfg.json"
+    params: compile_jsonnet_args
+    shell: '''
+    wcsonnet -A detector=pdsp {params} {input} > {output}
+    '''
+
+rule generate_graphviz:
+    input: rules.compile_jsonnet.output
+    output: graphviz_files,
+    shell: "wirecell-pgraph dotify --no-params {input} {output}"
+
+
+def make_deps(w):
+    ret = list()
+    deps = stages[w.stage]["deps"]
+    for dep in deps:
+        ret += [f"{outdir}/{dep}/apa-{apa}.{dataext}" for apa in aids]
+    return ret
+
+# a generic rule that can make XXX->YYY given a matching .jsonnet
+# which defines a function with common calling prototype.  Simply add
+# an entry to the global "stages" dict to add novel transforms.
+rule make_data:
+    input:
+        wctcfg = rules.compile_jsonnet.output,
+        deps = make_deps
+    output:
+        log = f"{outdir}/{{stage}}/wct.log",
+        outfiles = apa_files
+    shell: "wire-cell -l {output.log} -L debug -c {input.wctcfg}"
+
+
+def compare_frames(fn1, fn2, outn):
+    from wirecell.util import ario
+    a1 = ario.load(fn1)
+    a2 = ario.load(fn2)
+
+    k1 = list(a1.keys());
+    k1.sort()
+    k2 = list(a2.keys());
+    k2.sort();
+    if len(k1) != len(k2):
+        raise ValueError(f'key set size mismatch: {len(k1)} != {len(k2)}')
+    for a,b in zip(k1,k2):
+        if a != b:
+            raise ValueError(f'key set mismatch: {a} != {b}')
+
+    out = open(outn,"w");
+    out.write(f"{len(k1)} keys match\n")
+
+    for key in k1:
+        d1 = a1[key]
+        d2 = a2[key]
+        if key.endswith("metadata"):
+            if d1 != d2:
+                raise ValueError(f'metadata value mismatch with key: {key}')
+            continue
+        assert d1.dtype == d2.dtype
+        assert d1.size == d2.size
+
+rule compare_frames_adc_acp:
+    input:
+        adc = expand(apa_files, stage=["adc"]),
+        acp = expand(apa_files, stage=["acp"])
+    output: f"{outdir}/adc_acp.log"
+    run:
+        compare_frames(input.adc[0], input.acp[0], output[0])

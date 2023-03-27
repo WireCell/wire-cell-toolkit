@@ -1,0 +1,57 @@
+#+title: Example activities 1
+
+The file [[file:activities1.txt]] is dumped using the ~operator<<(ostream&,
+activities_t)~ operator for one example that shows some problem in a
+past version tiling.
+
+It is processed as
+
+#+begin_example
+./wcb -p --notests install
+./wcb --target=check_act2viz
+./build/util/check_act2viz util/test/activities1.txt act1.svg
+firefox act1.svg
+#+end_example
+
+A copy of that SVG file may be found [[https://www.phy.bnl.gov/~bviren/tmp/wctimg/act1.svg][here]] (or may not).  Some features of these SVGs:
+
+- An "activity" given to the tiling algorithm is represented as a
+  polygon with black outline and colored according to plane (0=red,
+  1=blue, 2=green).  The activity is centered on the "wire" or "strip"
+  and thus its black outine represents the "half pitch" boundary.
+
+- Clicking on a wire will return the SVG to full view (see below for
+  zooms).
+
+- Mouse-over a wire gives its identifying numbers: plane,
+  wire-in-plane (~wip~), wire ident (~wid~) and wire count number (~wcn~).
+
+- A blob is represented as a yellow polygon.
+
+- You may click on a blob to zoom to that region.  With small blobs in
+  large detectors you may need to first use your browser's usual zoom
+  in order to resolve the blob area enough to click.  After the SVG
+  redraws you may then need to return your browser to default zoom
+  level.
+
+- Each blob has an anchor link.  This allows easy sharing of a detail.
+  For example, here is [[https://www.phy.bnl.gov/~bviren/tmp/wctimg/act1.svg#blob1][blob 1]].
+
+- The corner of blobs are represented by black dots with white
+  outlines.
+
+- Mousing over a blob corner gives a pair of ~(layer,wip)~ numbers.
+  Layers 0/1 provide constraints on overall horiz/vert active area and
+  so the layer number is not the plane number:
+
+|-------+-------+-------|
+| layer | plane | desc  |
+|-------+-------+-------|
+|     0 |     - | horiz |
+|     1 |     - | vert  |
+|     2 |     0 | U     |
+|     3 |     1 | V     |
+|     4 |     2 | W     |
+|-------+-------+-------|
+
+

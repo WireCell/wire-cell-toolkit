@@ -13,7 +13,8 @@ namespace WireCell::Aux {
 
     class SimpleBlob : public IBlob {
        public:
-        SimpleBlob(int ident, float value, float uncertainty, const RayGrid::Blob& shape, ISlice::pointer slice,
+        SimpleBlob(int ident, float value, float uncertainty,
+                   const RayGrid::Blob& shape, ISlice::pointer slice,
                    IAnodeFace::pointer face)
           : m_ident(ident)
           , m_value(value)
@@ -48,9 +49,11 @@ namespace WireCell::Aux {
 
     class SimpleBlobSet : public IBlobSet {
        public:
-        SimpleBlobSet(int ident, const ISlice::pointer& slice)
+        SimpleBlobSet(int ident, const ISlice::pointer& slice,
+                      const IBlob::vector& blobs = {})
           : m_ident(ident)
           , m_slice(slice)
+          , m_blobs(blobs)
         {
         }
         virtual ~SimpleBlobSet();

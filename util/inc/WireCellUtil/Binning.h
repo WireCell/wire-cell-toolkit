@@ -18,7 +18,7 @@ namespace WireCell {
 
        public:
         /** Create a binning
-            \param nbins gives the number of uniform, discrete separation between bounds.
+            \param nbins gives the number of uniform partitions of space between bounds.
             \param minval gives the lower bound of the linear space (low edge of bin 0)
             \param maxval gives the upper bound of the linear space (high edge of bin nbins-1)
         */
@@ -106,6 +106,56 @@ namespace WireCell {
     {
         os << bins.nbins() << "@[" << bins.min() << "," << bins.max() << "]";
         return os;
+    }
+
+    // Return a subset of the binning which contains the bounds
+    inline
+    Binning subset(const Binning& bins, double xmin, double xmax) {
+        if (xmin > xmax) std::swap(xmin, xmax);
+        const int lo = std::max(0,            bins.bin(xmin));
+        const int hi = std::min(bins.nbins(), bins.bin(xmax));
+        const int n = hi-lo;
+        if (n <= 0) {
+            return Binning();
+        }
+        return Binning(hi-lo, bins.edge(lo), bins.edge(hi));
+    }
+
+    // P(X<=L) for X ~ N(mean,sigma)
+    inline
+    double gcumulative(double L, double mean=0, double sigma=1) {
+        const double scale = sqrt(2)*sigma;
+        return 0.5+0.5*std::erf((L - mean)/scale);
+    }
+    // P(L1 <= X <= L2) for X ~ N(mean,sigma)
+    inline
+    double gbounds(double L1, double L2, double mean=0, double sigma=1) {
+        if (L1 == L2) return 0;
+        if (L1 > L2) std::swap(L1, L2);
+        const double scale = sqrt(2)*sigma;
+        return 0.5*( std::erf((L2 - mean)/scale) - std::erf((L1 - mean)/scale));
+    }
+        
+    // Add the absolutely normlized, bin-integrated Gaussian
+    // distribution to iterated elements.  Return sum of bin integrals
+    // which will not < 1.0 given finite binning span.
+    template<typename OutputIt>
+    double gaussian(OutputIt out, const Binning& bins, double mean=0, double sigma=1)
+    {
+        const int nedges = bins.nbins() + 1;
+        double last_cumu = 0;
+        double total = 0;
+        for (int edge = 0 ; edge < nedges; ++edge) {
+            const double this_cumu = gcumulative(bins.edge(edge), mean, sigma);
+            if (edge) {
+                const double bin_cumu = (this_cumu - last_cumu);
+                total += bin_cumu;
+                *out = bin_cumu;
+                ++out;
+            }
+            last_cumu = this_cumu;
+        }
+        return total;
     }
 
 }  // namespace WireCell

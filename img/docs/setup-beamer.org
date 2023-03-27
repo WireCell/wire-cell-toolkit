@@ -1,0 +1,44 @@
+#+author: Brett Viren
+#+email: bv@bnl.gov
+#+STARTUP: beamer
+#+options: ':t
+#+LaTeX_CLASS: beamer
+#+LATEX_CLASS_OPTIONS: [serif,professionalfont,colorlinks,aspectratio=169]
+#+latex_header: \usepackage{pdfpages}
+#+latex_header: \usepackage{xcolor}
+#+latex_header: \usepackage{graphicx}
+#+latex_header: \usepackage{xspace}
+#+latex_header: \usepackage{libertine}
+#+latex_header: \usepackage{fontawesome}
+#+latex_header: \mode<beamer>{\usetheme{Boadilla}}
+#+latex_header: \setbeamertemplate{navigation symbols}{}
+#+latex_header: \setbeamerfont{alerted text}{series=\bfseries}
+
+#+LaTeX_HEADER: \lstloadlanguages{[ISO]C++}
+
+#+LaTeX_HEADER: \definecolor{codegreen}{rgb}{0,0.6,0}
+#+LaTeX_HEADER: \definecolor{codegray}{rgb}{0.5,0.5,0.5}
+#+LaTeX_HEADER: \definecolor{codepurple}{rgb}{0.50,0,0.82}
+#+LaTeX_HEADER: \definecolor{codeorange}{rgb}{0.95,0.3,0.1}
+#+LaTeX_HEADER: \definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+#+LaTeX_HEADER: \lstdefinestyle{mystyle}{
+#+LaTeX_HEADER:     commentstyle=\color{codegreen},
+#+LaTeX_HEADER:     keywordstyle=\color{codeorange},
+#+LaTeX_HEADER:     numberstyle=\tiny\color{codegray},
+#+LaTeX_HEADER:     stringstyle=\color{codepurple},
+#+LaTeX_HEADER:     basicstyle=\footnotesize,
+#+LaTeX_HEADER:     breakatwhitespace=false,         
+#+LaTeX_HEADER:     breaklines=true,                 
+#+LaTeX_HEADER:     captionpos=b,                    
+#+LaTeX_HEADER:     keepspaces=true,                 
+#+LaTeX_HEADER:     numbers=left,                    
+#+LaTeX_HEADER:     numbersep=5pt,                  
+#+LaTeX_HEADER:     showspaces=false,                
+#+LaTeX_HEADER:     showstringspaces=false,
+#+LaTeX_HEADER:     showtabs=false,                  
+#+LaTeX_HEADER:     tabsize=2
+#+LaTeX_HEADER: }
+#+LaTeX_HEADER: \lstset{style=mystyle}
+
+
+

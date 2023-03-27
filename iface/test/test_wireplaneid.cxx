@@ -7,6 +7,14 @@
 using namespace WireCell;
 using namespace std;
 
+void test_roundtrip(WirePlaneLayer_t layer, int face, int apa)
+{
+    WirePlaneId wpid(layer, face, apa);
+    Assert(wpid.layer() == layer);
+    Assert(wpid.face() == face);
+    Assert(wpid.apa() == apa);
+}
+
 int main()
 {
     WirePlaneLayer_t layers[] = {kUnknownLayer, kUlayer, kVlayer, kWlayer};
@@ -38,6 +46,8 @@ int main()
             for (int apa = 0; apa < 3; ++apa) {
                 cerr << "Raw: " << ilayer << " " << layer << " " << face << " " << apa << endl;
 
+                test_roundtrip(layer, face, apa);
+
                 WirePlaneId wpid(layer, face, apa);
 
                 cerr << "\twpid=" << wpid << endl;
@@ -58,4 +68,14 @@ int main()
             }
         }
     }
+
+    {
+        std::vector<int> packed = {0, 8, 32, 56, 80, 88};
+        for (auto p : packed) {
+            WirePlaneId wpid(p);
+            cerr << "wpid=" << wpid.ident() << " packed=" << p << " layer=" << wpid.layer() << " face=" << wpid.face() << " apa=" << wpid.apa() << "\n";
+            Assert(p == wpid.ident());
+        }
+    }
+    return 0;
 }

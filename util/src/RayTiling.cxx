@@ -7,6 +7,14 @@
 using namespace WireCell;
 using namespace WireCell::RayGrid;
 
+Ray RayGrid::crossing_points(const Coordinates& coords,
+                             const coordinate_t& ray,
+                             const Strip& strip)
+{
+    return Ray( coords.ray_crossing(ray, {strip.layer, strip.bounds.first}),
+                coords.ray_crossing(ray, {strip.layer, strip.bounds.second}));
+}
+
 Activity::Activity(layer_index_t layer)
   : m_span{}
   , m_layer(layer)
@@ -120,52 +128,104 @@ static crossings_t find_corners(const Strip& one, const Strip& two)
     return ret;
 }
 
-void Blob::add(const Coordinates& coords, const Strip& strip)
+// Return non-negative pitch index if the crossing is in the strip,
+// else return -1.
+//
+// The nominal pitch index of the crossing, while still in floating
+// point form, is moved by the amount "nudge" toward the "center" 
+// pitch location prior to truncating to an integer index and testing
+// for strip inclusion.  This nudge is intended to combat floating
+// point imprecision in the case that crossing points would fall
+// exactly on a a strip ray given infinite precision.  MicroBooNE and
+// Vertical Drift are two such detectors where this nudge may be
+// required to achieve consistent results.
+static
+int in_strip(const Coordinates& coords,
+             const crossing_t& c, const Strip& strip,
+             double center, double nudge)
+{
+    const double pitch = coords.pitch_location(c.first, c.second, strip.layer);
+    double find = coords.pitch_relative(pitch, strip.layer);
+    if (strip.layer >= 2) {     // only nudge for plane layers
+        if (pitch < center) {
+            find += nudge;
+        }
+        else {
+            find -= nudge;
+        }
+    }
+    const int pind = std::floor(find);
+    if (strip.in(pind)) {
+        return pind;
+    }
+    return -1;
+}
+
+void Blob::add(const Coordinates& coords, const Strip& strip, double nudge)
 {
     const size_t nstrips = m_strips.size();
 
-    if (nstrips == 0) {  // special case
+    // special case, first strip, no corners
+    if (nstrips == 0) {
         m_strips.push_back(strip);
         return;
     }
 
-    if (nstrips == 1) {  // special case
+    // special case, second strip, all corners are good corners
+    if (nstrips == 1) { 
         m_strips.push_back(strip);
         m_corners = find_corners(m_strips.front(), m_strips.back());
         return;
     }
-
-    crossings_t surviving;
-
-    // See what old corners are inside the new strip
+    
+    // Find center of existing blob in the pitch of new strip.
+    double center_in_new = 0;
     for (const auto& c : m_corners) {
-        const double pitch = coords.pitch_location(c.first, c.second, strip.layer);
-        const int pind = coords.pitch_index(pitch, strip.layer);
+        center_in_new += coords.pitch_location(c.first, c.second, strip.layer);
+    }
+    center_in_new /= m_corners.size();
 
-        if (strip.in(pind)) {
-            surviving.push_back(c);
+    // Old corners in new strip
+    crossings_t surviving;
+    for (const auto& c : m_corners) {
+        const int pind = in_strip(coords, c, strip, center_in_new, nudge);
+        if (pind < 0) {
+            continue;
         }
+        surviving.push_back(c);
+    }
+
+    // Precalc centers of old corners in old strips for use below
+    std::unordered_map<layer_index_t, double> center_in_old;
+    for (auto& old_strip : m_strips) {
+        double center = 0;
+        for (const auto& c : m_corners) {
+            center += coords.pitch_location(c.first, c.second, old_strip.layer);
+        }
+        center_in_old[old_strip.layer] = center / m_corners.size();
     }
 
     // see what new corners are inside all old strips;
     for (size_t si1 = 0; si1 < nstrips; ++si1) {
         auto corners = find_corners(m_strips[si1], strip);
         for (const auto& c : corners) {
-            // check each corner if inside all other strips
+            // check if old+new corner inside other old strips
             bool miss = false;
             for (size_t si2 = 0; si2 < nstrips; ++si2) {
                 if (si1 == si2) {
                     continue;
                 }
                 const auto& s2 = m_strips[si2];
-                double pitch = coords.pitch_location(c.first, c.second, s2.layer);
-                const int pind = coords.pitch_index(pitch, s2.layer);
-                if (s2.in(pind)) {
-                    continue;
+                // double pitch = coords.pitch_location(c.first, c.second, s2.layer);
+                // const int pind = coords.pitch_index(pitch, s2.layer);
+                // if (s2.in(pind)) {
+                //     continue;
+                // }
+                const int pind = in_strip(coords, c, s2, center_in_old[s2.layer], nudge);
+                if (pind < 0) {
+                    miss = true;
+                    break;
                 }
-
-                miss = true;
-                break;
             }
             if (!miss) {
                 surviving.push_back(c);
@@ -178,8 +238,9 @@ void Blob::add(const Coordinates& coords, const Strip& strip)
 
 const crossings_t& Blob::corners() const { return m_corners; }
 
-Tiling::Tiling(const Coordinates& coords)
+Tiling::Tiling(const Coordinates& coords, double nudge)
   : m_coords(coords)
+  , m_nudge(nudge)
 {
 }
 
@@ -189,7 +250,7 @@ blobs_t Tiling::operator()(const Activity& activity)
     const size_t nstrips = strips.size();
     blobs_t ret(nstrips);
     for (size_t ind = 0; ind < nstrips; ++ind) {
-        ret[ind].add(m_coords, strips[ind]);
+        ret[ind].add(m_coords, strips[ind], m_nudge);
     }
     return ret;
 }
@@ -279,7 +340,7 @@ blobs_t Tiling::operator()(const blobs_t& prior_blobs, const Activity& activity)
         auto strips = proj.make_strips();
         for (auto strip : strips) {
             Blob newblob = blob;  // copy
-            newblob.add(m_coords, strip);
+            newblob.add(m_coords, strip, m_nudge);
             if (newblob.corners().empty()) {
                 continue;
             }
@@ -298,18 +359,18 @@ size_t WireCell::RayGrid::drop_invalid(blobs_t& blobs)
     return dropped;
 }
 
-void WireCell::RayGrid::prune(const Coordinates& coords, blobs_t& blobs)
+void WireCell::RayGrid::prune(const Coordinates& coords, blobs_t& blobs, double nudge)
 {
     for (auto& blob : blobs) {
         auto& strips = blob.strips();
         const int nlayers = strips.size();
-        std::vector<std::vector<grid_index_t> > mms(nlayers);
+
+        // Collect corners projected into each layer.  Represent this
+        // projection as the absolute pitch in units of pitch bin
+        // index.
+        std::vector<std::vector<double> > mms(nlayers);
+
         for (const auto& corner : blob.corners()) {
-            // fixme off by one bugs here?  Adding the two rays making
-            // up a corner adds a pitch-bin-edge.  Adding the ray
-            // crossing point measured in the 3rd layer pitch adds a
-            // bin pitch-bin-content which should be either floor()'ed
-            // or ceil()'ed (or both?)
 
             mms[corner.first.layer].push_back(corner.first.grid);
             mms[corner.second.layer].push_back(corner.second.grid);
@@ -319,24 +380,46 @@ void WireCell::RayGrid::prune(const Coordinates& coords, blobs_t& blobs)
                 if (corner.first.layer == layer or corner.second.layer == layer) {
                     continue;
                 }
+
+                // See Issue #196.
                 const double ploc = coords.pitch_location(corner.first, corner.second, layer);
-                const int pind = coords.pitch_index(ploc, layer);
-                mms[layer].push_back(pind);
-                mms[layer].push_back(pind + 1);
+                const double prel = coords.pitch_relative(ploc, layer);
+                mms[layer].push_back(prel);
             }
         }
 
-        for (int layer = 0; layer < nlayers; ++layer) {
+        // Start with first wire plane layer.
+        for (int layer = 2; layer < nlayers; ++layer) {
             auto mm = std::minmax_element(mms[layer].begin(), mms[layer].end());
-            strips[layer].bounds.first = *mm.first;
-            strips[layer].bounds.second = *mm.second;
+
+            double pmin = *mm.first;
+            double pmax = *mm.second;
+
+            int imin, imax;
+            if (std::abs(pmin-std::round(pmin)) < nudge) {
+                imin = std::round(pmin);
+            }
+            else {
+                imin = std::floor(pmin);
+            }
+            if (std::abs(pmax-std::round(pmax)) < nudge) {
+                imax = std::round(pmax);
+            }
+            else {
+                imax = std::ceil(pmax);
+            }
+            
+            strips[layer].bounds.first = imin;
+            strips[layer].bounds.second = imax;
         }
     }
 }
 
-blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords, const activities_t& activities)
+blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords,
+                                      const activities_t& activities, 
+                                      double nudge)
 {
-    Tiling rc(coords);
+    Tiling rc(coords, nudge);
     blobs_t blobs;
 
     for (const auto& activity : activities) {
@@ -352,6 +435,8 @@ blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords, const activitie
         }
         drop_invalid(blobs);
     }
-    prune(coords, blobs);
+    prune(coords, blobs, nudge);
+    drop_invalid(blobs);
+
     return blobs;
 }

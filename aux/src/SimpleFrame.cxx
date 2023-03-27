@@ -57,17 +57,17 @@ const IFrame::trace_summary_t& Aux::SimpleFrame::trace_summary(const tag_t& tag)
 
 void Aux::SimpleFrame::tag_frame(const tag_t& tag) { m_frame_tags.push_back(tag); }
 
-void Aux::SimpleFrame::tag_traces(const tag_t& tag, const IFrame::trace_list_t& indices,
-                             const IFrame::trace_summary_t& summary)
-{
-    auto& info = m_trace_info[tag];
-    info.indices = indices;
-    info.summary = summary;
+// void Aux::SimpleFrame::tag_traces(const tag_t& tag, const IFrame::trace_list_t& indices,
+//                              const IFrame::trace_summary_t& summary)
+// {
+//     auto& info = m_trace_info[tag];
+//     info.indices = indices;
+//     info.summary = summary;
 
-    // Kind of dumb way to update this but we want to be able to
-    // return a reference to it later.
-    m_trace_tags.clear();
-    for (auto& it : m_trace_info) {
-        m_trace_tags.push_back(it.first);
-    }
-}
+//     // Kind of dumb way to update this but we want to be able to
+//     // return a reference to it later.
+//     m_trace_tags.clear();
+//     for (auto& it : m_trace_info) {
+//         m_trace_tags.push_back(it.first);
+//     }
+// }

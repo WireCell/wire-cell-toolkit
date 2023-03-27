@@ -1,0 +1,116 @@
+#+title: Wire Schema and Conventions
+#+latex_header: \usepackage[margin=1in]{geometry}
+#+options: ':t
+
+* Introduction
+
+Wire-Cell Toolkit requires a description of the sensitive electrodes be they of wire or strip shape.  Parallel planes of wires are stacked to fill one "face".  One or more "faces" are collected into an "anode".  A "detector" is comprised of one or more anode.
+
+This information is represented as a nested object hierarchy in WCT C++, Python and JSON.  These objects follow a common data structure schema.  In addition, for the objects to be considered valid they must adhere to certain required conventions that are not expressed in the data structure schema.  Persisted JSON objects are said to be stored in "wires files".
+
+This document makes use of [[https://www.ietf.org/rfc/rfc2119.txt][RFC 2119]] language.
+
+* Compliance
+
+Prior to being formalized in this document, all existing wires files are not in compliance in some way.  Where possible, WCT will attempt to correct invalid wires.  Novel wires files must be compliant as determined by the validation mechanism now provided by WCT.
+
+* Schema
+
+The wire data structure schema is represented formally:
+
+- C++ :: [[https://github.com/WireCell/wire-cell-toolkit/blob/master/util/inc/WireCellUtil/WireSchema.h][~WireSchema::StoreDB~]] and referenced structs
+- Python :: [[https://github.com/WireCell/wire-cell-python/blob/master/wirecell/util/wires/schema.py][~wirecell.util.wires.schema~]] classes
+- JSON :: a JSON Schema is still to-be-developed
+
+The schema defines these types of data structure types: ~Store~, ~Detector~, ~Anode~, ~Face~, ~Plane~, ~Wire~, and ~Point~ Instances of these types form a layered hierarchy.  Each layer represents instances of one type and the layers are ordered according to the type list above.
+
+The hierarchy is represented by a parent of one type referring to a number of children of the next lower type.  A ~Store~ holds reference to all ~Detector~ instances by aggregating them directly into an array.  A ~Store~ likewise holds arrays of all other types listed with the possible exception of ~Ponit~ (explained below).  Instances of all other non-leaf types refer to their children with an integer array holding indices into the corresponding ~Store~ array.  The C++ schema has ~Wire~ as a leaf type while JSON and Python schema have ~Point~ leaves.  A C++ ~Wire~ directly holds its two endpoints as ~Point~ instances while the others refer to a ~Point~ through its index in the ~Store~ point array.
+
+All structures except for ~Store~ and ~Point~ have an integer attribute ~ident~ which is generally intended to be an opaque, unique identifier of the instance.
+
+* Conventions
+
+A number of features of the wire data can not be expressed in a formal schema and are subject to a number of required conventions.  They are given in this section and written as to be directed to a provider of wire data.
+
+** Identity
+
+Instances of all schema types except ~Store~ must provide an ~ident~ attribute. 
+
+- Value :: An ~ident~ value shall be represented by a non-negative but signed 32 bit integer type.  A zero value may be used.
+
+- Uniqueness :: The ~ident~ of children shall be unique in the context of their parent.  An ~ident~ value may be unique over a broader scope.
+
+** Coordinate systems
+
+The coordinate systems relevant to the wires are described in this section.  External coordinate systems may exist and they are out of scope.  The user must convert data from external coordinate systems to transform it into WCT coordinates..
+
+- Global :: A singular, global Cartesian coordinate spans the detector.
+
+- Wire endpoint coordinates :: The endpoints of wires shall be provided in the global coordinate system.
+
+- Global X :: The global X axis direction $\hat{x}$ shall be parallel or anti-parallel to the nominal drift directions in the detector.   The user must define the which of the two possible directions $\hat{x}$ points.
+
+- Global Y :: The global Y axis direction $\hat{y}$ must be parallel to one pair of sides of the active area of the wire planes.  It must be chosen in relation to a well defined, fixed direction defined externally to this coordinate system.  For "horizontal drift" detectors, it must be chosen anti-parallel to the force of gravity.  For "vertical drift" detectors, it should point near the direction of a applied neutrino or particle test beam if one exists.
+
+- Global Z :: The Z axis direction shall follow from $\hat{z} = \hat{x} \times \hat{y}$.
+
+- Global origin :: The origin of the global coordinates should be chosen to lay within the detector volume.
+
+- Plane P :: The wire plane pitch axis P shall be defined for each wire plane.  It shall point in the direction $\hat{p}$ that is perpendicular to $\hat{w}$ (see below) and in the direction of ascending order.  Wire order is determined by one coordinate of the wire center points.  For planes with $|\hat{w} \cdot \hat{z}|$ near unity, the ordering coordinate shall be the global Y value of the center point. Otherwise, the global Z value of the center point shall be used.
+
+- Plane W :: The wire plane direction axis W shall be defined for each wire plane.  It shall point in the direction $\hat{w}$ according to $\hat{w} = \hat{p} \times \hat{x}$.  As a consequence, when $|\hat{w}\cdot\hat{z}|$ is near unity, $\hat{w}$ points in the $-\hat{z}$ direction and otherwise points generally in the $+\hat{y}$ direction.
+
+- Plane origin :: The origin of P and X shall be the wire center point with the minimum pitch position.
+
+Note, "near unity" is taken to be within $1.0 \pm 10^{-4}$ or about less than $1^{\circ}$.
+
+** Ordering 
+
+The requirements on the order of children arrays held by parents are given in this section.
+
+*** Wire in plane index
+
+The wire-in-plane (WIP) index (or number) orders wires in their plane.
+
+- Values :: The WIP index must be a non-negative integer counting monotonically and without gaps from zero.
+
+- Order :: The WIP index increases in the direction of positive pitch.
+
+*** Wire endpoints
+
+An instance of ~Wire~ has attributes ~tail~ and ~head~ representing the wire endpoints.
+
+- Direction :: The wire direction $\hat{w}$ is considered run from ~tail~ to ~head~ and thus their assignment must reflect the definition of the W axis describe above.
+
+*** Segment
+
+A "wire" is actually a "wire segment" and given a segment number.
+
+- Segment :: The segment number shall count the number of other
+  segments between it and the input to the electronics channel.
+
+** Uniformity
+
+All wires in a wire plane should be mutually parallel, coplanar and
+uniformly spaced in the pitch direction.
+
+* Correctness
+
+Real world "wires files" may (and do) violate the this specification.  For example,
+
+- Finite precision of wire endpoint leads to violation of orthogonality and uniformity.
+- Simple disregard of ordering and equivalently wire and pitch direction.
+
+The ~WireSchema::Store::validate()~ method may be used to validate a constructed ~store~.  If a violation is found then ~ValueError~ exception is thrown.
+
+The ~WireSchema::load(filename, correction)~ method attempts to correct some common problems.  The level of correction is configured by the ~correction~ level:
+
+- none :: The store represents data as-is from the file.
+
+- order :: Reorder wires and their endpoints.
+
+- direction :: Rotate wires about their centers so that all in a plane are parallel.  The common wire direction is taken as the average over the original wires, rotated into the Y-Z plane.  Wire length and centers are held fixed.
+
+- pitch :: Translate wires along a common pitch direction so that they become uniformly distributed.  The common pitch is taken as the average over all wires rotated into the Y-Z plane.  The center Y/Z of the central wire at WIP = nwires/2 is kept fixed and X is set to the average of all center X.
+
+

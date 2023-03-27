@@ -134,7 +134,7 @@ NoiseModeler::Collector& NoiseModeler::nc(int chid)
         for (auto [c,g] : m_chgrp) {
             ugroups.insert(g);
         }
-        ugroups.insert(0);
+        // ugroups.insert(0);      // why this?
         for (int g : ugroups) {
             m_gcol.emplace(g, Collector(m_dft, m_nfft));
         }

@@ -53,11 +53,16 @@ static ray_pair_vector_t get_raypairs(const BoundingBox& bb, const IWirePlane::v
     return raypairs;
 }
 
-AnodeFace::AnodeFace(int ident, IWirePlane::vector planes, const BoundingBox& bb)
+AnodeFace::AnodeFace(int ident, IWirePlane::vector planes, const BoundingBox& bb, int which, int aid)
   : m_ident(ident)
   , m_planes(planes)
   , m_bb(bb)
   , m_coords(get_raypairs(bb, planes))
+  , m_which(which)
+  , m_aid(aid)
+{
+}
+AnodeFace::~AnodeFace()
 {
 }
 

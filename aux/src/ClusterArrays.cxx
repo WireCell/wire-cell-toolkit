@@ -3,8 +3,6 @@
 #include "WireCellUtil/GraphTools.h"
 
 #include <map>
-#include <vector>
-#include <unordered_map>
 
 using namespace WireCell;
 using namespace WireCell::Aux;
@@ -17,29 +15,24 @@ using blob_t = cluster_node_t::blob_t;
 using slice_t = cluster_node_t::slice_t;
 using meas_t = cluster_node_t::meas_t;
 
+ClusterArrays::ClusterArrays()
+{
+}
+ClusterArrays::~ClusterArrays()
+{
+}
+
 ClusterArrays::ClusterArrays(const cluster_graph_t& graph)
-    : m_graph(graph)
 {
-    this->clear();              // not really needed on construction.
+    this->init(graph);
+}
+void ClusterArrays::clear()
+{
+    m_na.clear();
+    m_ea.clear();
+    m_v2s.clear();
 }
 
-
-template<typename ArrayType>
-void clear_array(ArrayType& arr)
-{
-    std::vector<size_t> extents(arr.num_dimensions(), 0);
-    arr.resize(extents);
-}
-template<typename ArrayType>
-size_t array_size(const ArrayType& arr)
-{
-    return arr.num_elements();
-}
-template<typename ArrayType>
-bool is_empty(const ArrayType& arr)
-{
-    return 0 == array_size(arr);
-}
 template<typename ArrayType>
 void rezero(ArrayType& arr, const std::vector<size_t>& sv)
 {
@@ -47,364 +40,318 @@ void rezero(ArrayType& arr, const std::vector<size_t>& sv)
     arr.resize(sv);
     std::fill_n(arr.data(), arr.num_elements(), 0);
 }
-template<typename ArrayType>
-void reindex(ArrayType& arr, const std::vector<size_t>& sv)
+
+
+std::vector<ClusterArrays::node_code_t> ClusterArrays::node_codes() const
 {
-    arr.reindex(sv);
+    std::vector<ClusterArrays::node_code_t> ret;
+    for (const auto& [code, arr] : m_na) {
+        ret.push_back(code);
+    }
+    return ret;
 }
 
-void ClusterArrays::clear()
+std::vector<ClusterArrays::edge_code_t> ClusterArrays::edge_codes() const
 {
-    m_node_codes.clear();
-
-    clear_array(m_vdesc_indices);
-    clear_array(m_vdescs);
-    clear_array(m_edges);
-    clear_array(m_node_ranges);
-    clear_array(m_idents);
-    clear_array(m_signals);
-    clear_array(m_slice_durations);
-    clear_array(m_wire_endpoints);
-    clear_array(m_wire_addresses);
-    clear_array(m_blob_shapes);
+    std::vector<ClusterArrays::edge_code_t> ret;
+    for (const auto& [code, arr] : m_ea) {
+        ret.push_back(code);
+    }
+    return ret;
+}
+const ClusterArrays::edge_array_t&
+ClusterArrays::edge_array(ClusterArrays::edge_code_t ec) const
+{
+    static edge_array_t dummy;
+    auto it = m_ea.find(ec);
+    if (it == m_ea.end()) {
+        return dummy;
+    }
+    return it->second;
+}
+const ClusterArrays::node_array_t&
+ClusterArrays::node_array(ClusterArrays::node_code_t nc) const
+{
+    static node_array_t dummy;
+    auto it = m_na.find(nc);
+    if (it == m_na.end()) {
+        return dummy;
+    }
+    return it->second;
 }
 
 
-const std::string& ClusterArrays::node_codes() const
+
+// Some hard-wired schema values
+// See ClusterArray.org docs and keep in sync.
+// For the common node array columns
+static const size_t ident_col=0; // all node types
+static const size_t sigv_col=1;  // all but wires
+static const size_t sigu_col=2;  // all but wires
+
+
+ClusterArrays::node_row_t ClusterArrays::node_row(cluster_vertex_t vtx)
 {
-    if (! m_node_codes.empty()) {
-        return m_node_codes;
-    }
-    const auto& vdescs = graph_vertices();
-    const auto nnodes = array_size(vdescs);
-    m_node_codes.resize(nnodes);
-    for (size_t ind=0; ind<nnodes; ++ind) {
-        m_node_codes[ind] = m_graph[vdescs[ind]].code();
-    }
-    return m_node_codes;
+    const auto& sa = m_v2s[vtx];
+    typedef boost::multi_array_types::index_range range;
+    return m_na[sa.code][boost::indices[sa.index][range()]];
 }
 
-
-boost::iterator_range<boost::counting_iterator<size_t>>
-ClusterArrays::ntype_range(char code) const
+ClusterArrays::edge_code_t
+ClusterArrays::edge_code(ClusterArrays::node_code_t nc1, ClusterArrays::node_code_t nc2)
 {
-    size_t ind = cluster_node_t::code_index(code);
-    if (ind >= cluster_node_t::known_codes.size()) {
-        return boost::counting_range(std::size_t{0},std::size_t{0});
+    if (nc2 < nc1) {
+        std::swap(nc1, nc2);
     }
-    const auto& ranges = node_ranges();
-    return index_range(ranges[ind]);
+    return ((nc1&0xff)<<8) | (nc2&0xff);
 }
-
-void ClusterArrays::core_nodes() const
+std::string ClusterArrays::edge_code_str(ClusterArrays::edge_code_t ec)
 {
-    size_t nvtxs = array_size(m_vdescs);
-    if (nvtxs) {
-        return;
+    std::string ret;
+    ret.push_back((char)( (ec&0xff00) >> 8 ));
+    ret.push_back((char)( (ec&0xff) ));
+    return ret;
+}
+void ClusterArrays::init(const cluster_graph_t& graph)
+{
+    this->clear();
+
+    // Loop vertices to get per-type sizes.
+    std::unordered_map<node_code_t, size_t> counts;
+    for (const auto& vdesc : vertex_range(graph)) {
+        const auto& node = graph[vdesc];
+        node_code_t code = node.code();
+        ++counts[code];
     }
 
-    nvtxs = boost::num_vertices(m_graph);
+    // This hardwires the number of columns in the schema for each
+    // node array type.  See ClusterArray.org for definitive
+    // description and keep it in sync here.
+    std::unordered_map<node_code_t, size_t> node_array_ncols = {
+        // [ident, value, uncertainty, index, wpid]
+        {'c',3+2},
+        // [ident, wip, seg, ch, plane, [tail x,y,z], [head x,y,z]]
+        {'w',11},
+        // [ident,sigv,sigu, faceid,sliceid,start,span, [3x2 wire bounds], nc,[12 corner y,z]]
+        {'b',3+4+3*2+1+12*2},
+        // [ident,sigv,sigu, frameid, start, span]
+        {'s',3+3},
+        // [ident,sigv,sigu, wpid]
+        {'m', 4},
+    };
 
-    // Map ordering value to its vertex
-    using ordering_t = int;
-    using ordered_t = std::map<ordering_t, cluster_vertex_t>;
-    // Map node type code to its set of ordered vertices
-    using grouped_t = std::unordered_map<char, ordered_t>;
+    // Allocate node arrays
+    for (const auto& [code, count] : counts) {
+        const std::vector<size_t> shape = {count, node_array_ncols[code]};
+        rezero(m_na[code], shape);
+    }
 
-    grouped_t node_types;
-    for (const auto& vdesc : vertex_range(m_graph)) {
-        const auto& node = m_graph[vdesc];
-        char code = node.code();
-        ordering_t order = node.ident();
-        node_types[code][order] = vdesc;
+    // Loop vertices, build vtx<->row lookups and set ident column
+    counts.clear();             // reuse to track nrows.
+    for (const auto& vdesc : vertex_range(graph)) {
+        const auto& node = graph[vdesc];
+        const node_code_t code = node.code();
+
+        node_array_t::size_type row = counts[code];
+        ++counts[code];
+
+        m_v2s[vdesc] = store_address_t{code, row};
+
+        m_na[code][row][ident_col] = node.ident();
     }
     
-    const size_t ntypes = cluster_node_t::known_codes.size();
+    // One more time to process things that require graph traversal.
+    for (const auto& vdesc : vertex_range(graph)) {
+        const auto& node = graph[vdesc];
+        const node_code_t code = node.code();
 
-    rezero(m_node_ranges, {ntypes, 2});
-    rezero(m_vdescs, {nvtxs});
-    rezero(m_vdesc_indices, {nvtxs});
-
-    size_t full_index = 0;         // count up to Nnodes-1
-
-    // Define the per-type partition and ordering
-    for (size_t itype=0; itype < ntypes; ++itype) {
-        const char code = cluster_node_t::known_codes[itype];
-        const auto& of_type = node_types[code];
-        const int noftype = of_type.size();
-
-        m_node_ranges[itype][0] = full_index;
-        m_node_ranges[itype][1] = noftype;
-
-        for (const auto& [ord, vdesc] : of_type) {
-            m_vdescs[full_index] = vdesc;
-            m_vdesc_indices[vdesc] = full_index;
-            ++full_index;
+        if (code == 's') {      // also does 'm' and 'c' 
+            init_signals(graph, vdesc);
+            continue;
+        }
+        if (code == 'w') {
+            init_wire(graph, vdesc);
+            continue;
+        }
+        if (code == 'b') {
+            init_blob(graph, vdesc);
+            continue;
         }
     }
-}
 
-const ClusterArrays::vdesc_indices_t& ClusterArrays::vdesc_indices() const
-{
-    core_nodes();
-    return m_vdesc_indices;
-}
+    // And the edges.  First to collect the data and learn the sizes.
+    std::unordered_map<edge_code_t, size_t> ecounts;
+    for (const auto& edge : mir(boost::edges(graph))) {
+        auto tvtx = boost::source(edge, graph);
+        auto hvtx = boost::target(edge, graph);
 
-const ClusterArrays::vdescs_t& ClusterArrays::graph_vertices() const
-{
-    core_nodes();
-    return m_vdescs;
-}
+        auto tsa = m_v2s[tvtx];
+        auto hsa = m_v2s[hvtx];
 
-const ClusterArrays::node_ranges_t& ClusterArrays::node_ranges() const
-{
-    core_nodes();
-    return m_node_ranges;
-}
-
-const ClusterArrays::idents_t& ClusterArrays::idents() const
-{
-    if (! is_empty(m_idents)) {
-        return m_idents;
+        auto ecode = edge_code(tsa.code, hsa.code);
+        ++ecounts[ecode];
     }
-    const auto& vdescs = graph_vertices();
-    const size_t nvtxs = array_size(vdescs);
-    rezero(m_idents, {nvtxs});
-    for (size_t ind=0; ind<nvtxs; ++ind) {
-        const auto& vdesc = vdescs[ind];
-        const auto& node = m_graph[vdesc];
-        m_idents[ind] = node.ident();
-    }
-    return m_idents;
-}
-
-
-#include <iostream> // debug
-
-const ClusterArrays::signals_t& ClusterArrays::signals() const
-{
-    if (! is_empty(m_signals)) {
-        return m_signals;
+    for (const auto& [ecode, esize] : ecounts) {
+        rezero(m_ea[ecode], {esize, 2});
     }
 
-    const auto& vdescs = graph_vertices();
-    const auto& vdinds = vdesc_indices();
-    const size_t nvtxs = array_size(vdinds);
-    rezero(m_signals, {nvtxs, 2});
+    // And again, this time with feeling!
+    ecounts.clear();
+    for (const auto& edge : mir(boost::edges(graph))) {
+        auto tvtx = boost::source(edge, graph);
+        auto hvtx = boost::target(edge, graph);
 
-    // std::cerr << "signals: codes:\n" <<  node_codes() << std::endl;
+        auto tsa = m_v2s[tvtx];
+        auto hsa = m_v2s[hvtx];
 
-    // Slices we can traverse directly.  The rest are via graph
-    // neighbors.
-    for (auto sind : ntype_range('s')) {
-        const auto svtx = vdescs[sind];
-        const auto& snode = m_graph[svtx];
-        assert('s' == snode.code());
-        const auto& islice = std::get<slice_t>(snode.ptr);
-        const auto& activity = islice->activity();
+        // Do manual ordering to keep code/index correlated
+        if (hsa.code < tsa.code) {
+            std::swap(tsa, hsa);
+        }
+        auto ecode = edge_code(tsa.code, hsa.code);
+        edge_array_t::size_type erow = ecounts[ecode];
+        ++ecounts[ecode];
+        m_ea[ecode][erow][0] = tsa.index;
+        m_ea[ecode][erow][1] = hsa.index;
+    }
+}
+
+
+void ClusterArrays::init_signals(const cluster_graph_t& graph, cluster_vertex_t svtx)
+{
+    const auto& snode = graph[svtx];
+    assert('s' == snode.code());
+    const auto& islice = std::get<slice_t>(snode.ptr);
+    const auto& activity = islice->activity();
         
-        for (const auto& [chid, sig] : activity) {
-            m_signals[sind][0] += sig.value();
-            m_signals[sind][1] += sig.uncertainty();
-        }
+    // The slices get a sum of all their activity.
+    auto srow = node_row(svtx);
+    for (const auto& [chid, sig] : activity) {
+        srow[sigv_col] += sig.value();
+        srow[sigu_col] += sig.uncertainty();
+    }
+    {   // slice start and span, just after sigv/sigu.
+        node_array_t::size_type col = sigu_col;
+        srow[++col] = islice->frame()->ident();
+        srow[++col] = islice->start();
+        srow[++col] = islice->span();
+    }
+    for (auto bvtx : mir(boost::adjacent_vertices(svtx, graph))) {
+        const auto& bnode = graph[bvtx];
+        if (bnode.code() != 'b') { continue; }
 
-        for (auto bvtx : mir(boost::adjacent_vertices(svtx, m_graph))) {
-            const auto& bnode = m_graph[bvtx];
-            if (bnode.code() != 'b') { continue; }
-
-            auto bind = vdinds[bvtx];
-            auto iblob = get<blob_t>(bnode.ptr);
-            m_signals[bind][0] += iblob->value();
-            m_signals[bind][1] += iblob->uncertainty();
+        auto brow = node_row(bvtx);
+        auto iblob = get<blob_t>(bnode.ptr);
+        brow[sigv_col] += iblob->value();
+        brow[sigu_col] += iblob->uncertainty();
             
-            for (auto mvtx : mir(boost::adjacent_vertices(bvtx, m_graph))) {
-                const auto& mnode = m_graph[mvtx];
-                if (mnode.code() != 'm') { continue; }
+        for (auto mvtx : mir(boost::adjacent_vertices(bvtx, graph))) {
+            const auto& mnode = graph[mvtx];
+            if (mnode.code() != 'm') { continue; }
 
-                auto mind = vdinds[mvtx];
+            {
+                auto mrow = node_row(mvtx);
+                auto imeas = std::get<meas_t>(mnode.ptr);
+                auto mval = imeas->signal();
+                node_array_t::size_type col = 0;
+                mrow[col++] = imeas->ident();
+                mrow[col++] = mval.value();
+                mrow[col++] = mval.uncertainty();
+                mrow[col++] = imeas->planeid().ident();
+            }
 
-                for (auto cvtx : mir(boost::adjacent_vertices(mvtx, m_graph))) {
-                    const auto& cnode = m_graph[cvtx];
-                    if (mnode.code() != 'c') { continue; }
-
-                    auto ichan = std::get<channel_t>(cnode.ptr);
-                    auto sigit = activity.find(ichan);
-                    if (sigit == activity.end()) {
-                        continue;
-                    }
-                    auto cval = sigit->second;
-                    auto cind = vdinds[cvtx];
-
-                    m_signals[cind][0] += cval.value();
-                    m_signals[cind][1] += cval.uncertainty();
-                    m_signals[mind][0] += cval.value();
-                    m_signals[mind][1] += cval.uncertainty();
+            for (auto cvtx : mir(boost::adjacent_vertices(mvtx, graph))) {
+                const auto& cnode = graph[cvtx];
+                if (cnode.code() != 'c') { continue; }
+                
+                auto ichan = std::get<channel_t>(cnode.ptr);
+                auto sigit = activity.find(ichan);
+                if (sigit == activity.end()) {
+                    continue;
                 }
+                auto cval = sigit->second;
+
+                auto crow = node_row(cvtx);
+                crow[sigv_col] = cval.value();
+                crow[sigu_col] = cval.uncertainty();
+                crow[sigu_col+1] = ichan->index();
+                crow[sigu_col+2] = ichan->planeid().ident();
             }
         }
     }
-    return m_signals;
+
 }
 
-const ClusterArrays::edges_t& ClusterArrays::edges() const
+void ClusterArrays::init_wire(const cluster_graph_t& graph, cluster_vertex_t wvtx)
 {
-    if (! is_empty(m_edges)) {
-        return m_edges;
-    }
+    auto wrow = node_row(wvtx);
 
-    // edges are given as pairs of node array indices and we want the
-    // in this major-to-minor order:
-    // (tail type, head type, tail instance, head instance)
-    struct Edge {
-        size_t tail_ind, head_ind;   // index in node array
-        size_t tail_type, head_type; // type number in [1,6]
-        int tail_ord, head_ord;      // ordering value
-    };
+    const auto& wnode = graph[wvtx];
 
-    size_t nedges = boost::num_edges(m_graph);
-    std::vector<Edge> edgedat(nedges);
+    const auto& iwire = get<wire_t>(wnode.ptr);
+    const auto [p1,p2] = iwire->ray();
 
-    // pack edge data for sorting
-    const auto& vdinds = vdesc_indices();
-    size_t iedge=0;
-    for (const auto& edge : mir(boost::edges(m_graph))) {
-        auto tvtx = boost::source(edge, m_graph);
-        auto hvtx = boost::target(edge, m_graph);
+    // Wires have ident col=0 set above, see ClusterArrays.org.
+    node_array_t::size_type col = 1;
+    wrow[col++] = iwire->index();
+    wrow[col++] = iwire->segment();
+    wrow[col++] = iwire->channel();
+    wrow[col++] = iwire->planeid().ident();
 
-        const auto& tnode = m_graph[tvtx];
-        const auto& hnode = m_graph[hvtx];
-
-        edgedat[iedge++] = Edge{
-            vdinds[tvtx], vdinds[hvtx],
-            tnode.ptr.index(), hnode.ptr.index(),
-            tnode.ident(), hnode.ident()};
-    }
-
-    // assure edge ordering
-    std::sort(edgedat.begin(), edgedat.end(), [](const Edge& a, const Edge&b) {
-        if (a.tail_type < b.tail_type) return true;
-        if (a.tail_type > b.tail_type) return false;
-        // tie
-        if (a.head_type < b.head_type) return true;
-        if (a.head_type > b.head_type) return false;
-        // tie2
-        if (a.tail_ord < b.tail_ord) return true;
-        if (a.tail_ord > b.tail_ord) return false;
-        return a.head_ord < b.head_ord;
-    });
-    
-    // pack out
-    rezero(m_edges, {nedges, 2});
-    for (size_t ind=0; ind<nedges; ++ind) {
-        m_edges[ind][0] = edgedat[ind].tail_ind;
-        m_edges[ind][1] = edgedat[ind].head_ind;
-    }
-    return m_edges;
+    wrow[col++] = p1.x();
+    wrow[col++] = p1.y();
+    wrow[col++] = p1.z();
+    wrow[col++] = p2.x();
+    wrow[col++] = p2.y();
+    wrow[col++] = p2.z();
 }
 
-const ClusterArrays::slice_durations_t& ClusterArrays::slice_durations() const
+void ClusterArrays::init_blob(const cluster_graph_t& graph, cluster_vertex_t bvtx)
 {
-    if (! is_empty(m_slice_durations)) {
-        return m_slice_durations;
+    auto brow = node_row(bvtx);
+    const auto& bnode = graph[bvtx];
+    const auto& iblob = get<blob_t>(bnode.ptr);
+    const auto iface = iblob->face();
+    const auto islice = iblob->slice();
+    const auto& coords = iface->raygrid();
+
+    const auto& shape = iblob->shape();
+    const auto& strips = shape.strips();
+
+    // skip common [ident,sigv,sigu] filled elsewhere
+    node_array_t::size_type col = 3;
+
+    // 3:faceid, 4:sliceid, 5:start, 6:span
+    brow[col++] = iface->ident();
+    brow[col++] = islice->ident();
+    brow[col++] = islice->start();
+    brow[col++] = islice->span();
+
+    // 3x2 wire bounds: [7:13]
+    for (size_t sind = 0; sind < 3; ++sind) {
+        size_t strip_index = 2 + sind; // skip "virtual" layers
+        const auto& bounds = strips[strip_index].bounds;
+
+        brow[col++] = bounds.first;  // these are 
+        brow[col++] = bounds.second; // WIP numbers
     }
 
-    const size_t scode_index = cluster_node_t::code_index('s');
-    const auto& slice_range = node_ranges()[scode_index];
-    rezero(m_slice_durations, {slice_range[1], 2});
-    reindex(m_slice_durations, {slice_range[0], 0});
-    // it's now indexed with absolute indices
+    // 13, [14:38]
+    //// corners is an awkward array.  Each of the 3 pairs of planes
+    //// has 4 corners so a total of 12 but only those corners
+    //// contained by each of the three "strips" that make up the blob
+    //// are relevant and given.  Best we can do, I think is to use
+    //// 1+2*12 = 25 columns.  First to given the number of corners,
+    //// than that number of (y,z) pairs and zero pad any remainder.
+    //// Alternatively we may define a second array type of shape 3 x
+    //// N with columns (rowid, y, z).
 
-    const auto& vdescs = graph_vertices();
-    for (auto sind : index_range(slice_range)) {
-        const auto svtx = vdescs[sind];
-        const auto& snode = m_graph[svtx];
-
-        const auto& islice = get<slice_t>(snode.ptr);
-        m_slice_durations[sind][0] = islice->start();
-        m_slice_durations[sind][1] = islice->span();
-    }
-    reindex(m_slice_durations, {0,0});
-    // it's now indexed with relative indices starting at 0
-    return m_slice_durations;
-}
-
-const ClusterArrays::wire_endpoints_t& ClusterArrays::wire_endpoints() const
-{
-    if (is_empty(m_wire_endpoints)) {
-        core_wires();
-    }
-    return m_wire_endpoints;
-}
-
-const ClusterArrays::wire_addresses_t& ClusterArrays::wire_addresses() const
-{
-    if (is_empty(m_wire_addresses)) {
-        core_wires();
-    }
-    return m_wire_addresses;
-}
-
-void ClusterArrays::core_wires() const
-{
-    const size_t wcode_index = cluster_node_t::code_index('w');
-    const auto& wire_range = node_ranges()[wcode_index];
-    const size_t wire0 = wire_range[0];
-    const size_t nwires = wire_range[1];
-    rezero(m_wire_endpoints, {nwires, 2, 3});
-    rezero(m_wire_addresses, {nwires, 4});
-
-    const auto& vdescs = graph_vertices();
-    for (size_t ind=0; ind< nwires; ++ind) {
-        size_t wind = ind + wire0; // relative index
-
-        const auto wvtx = vdescs[wind];
-        const auto& wnode = m_graph[wvtx];
-
-        const auto& iwire = get<wire_t>(wnode.ptr);
-        const auto [p1,p2] = iwire->ray();
-        m_wire_endpoints[ind][0][0] = p1.x();
-        m_wire_endpoints[ind][0][1] = p1.y();
-        m_wire_endpoints[ind][0][2] = p1.z();
-        m_wire_endpoints[ind][1][0] = p2.x();
-        m_wire_endpoints[ind][1][1] = p2.y();
-        m_wire_endpoints[ind][1][2] = p2.z();
-
-        m_wire_addresses[ind][0] = iwire->index();
-        m_wire_addresses[ind][1] = iwire->segment();
-        m_wire_addresses[ind][2] = iwire->channel();
-        m_wire_addresses[ind][3] = iwire->planeid().ident();
+    const auto& corners = shape.corners();
+    brow[col++] = corners.size();
+    for (const auto& c : corners) {
+        auto pos = coords.ray_crossing(c.first, c.second);
+        brow[col++] = pos[1];
+        brow[col++] = pos[2];
     }
 }
 
-
-const ClusterArrays::blob_shapes_t& ClusterArrays::blob_shapes() const
-{
-    if (! is_empty(m_blob_shapes)) {
-        return m_blob_shapes;
-    }
-
-    const size_t bcode_index = cluster_node_t::code_index('b');
-    const auto& blob_range = node_ranges()[bcode_index];
-    const size_t blob0 = blob_range[0];
-    const size_t nblobs = blob_range[1];
-    rezero(m_blob_shapes, {nblobs, 3, 2});
-
-    const auto& vdescs = graph_vertices();
-    for (size_t ind=0; ind< nblobs; ++ind) {
-        size_t bind = ind + blob0;
-
-        const auto bvtx = vdescs[bind];
-        const auto& bnode = m_graph[bvtx];
-
-        const auto& iblob = get<blob_t>(bnode.ptr);
-        const auto& strips = iblob->shape().strips();
-
-        for (size_t sind = 0; sind < 3; ++sind) {
-            size_t strip_index = 2 + sind; // skip "virtual" layers
-            const auto& bounds = strips[strip_index].bounds;
-            m_blob_shapes[ind][sind][0] = bounds.first;  // these are 
-            m_blob_shapes[ind][sind][1] = bounds.second; // WIP indices
-        }
-    }
-    return m_blob_shapes;
-}

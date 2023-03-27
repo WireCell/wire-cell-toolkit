@@ -1,4 +1,5 @@
-
+// These intervals are for numberic ranges, eg for error propagation.
+// https://www.boost.org/doc/libs/1_80_0/libs/numeric/interval/doc/interval.htm
 #include <boost/numeric/interval.hpp>
 #include <iostream>
 

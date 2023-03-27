@@ -136,21 +136,43 @@ namespace pigenc {
         return std::stol(dt);
     }
 
-    // /// Write simple, raw array of elements type Type
+    /// Write bytes with all specified.
+    inline
+    std::ostream& write_data(std::ostream& os,
+                             char* bytes,
+                             const shape_t& shape,
+                             const std::string& dtype_name,
+                             size_t dtype_size,
+                             bool fortran_order=false)
+    {
+        auto head = make_header(dtype_name, shape, fortran_order);
+        size_t nbytes = dtype_size;
+        for (auto s: shape) {
+            nbytes *= s;
+        }
+        os.write(head.data(), head.size());
+        os.write(bytes, nbytes);
+        return os;
+    }
+
+    /// Write simple, raw array of elements type Type
     template<typename Type>
     std::ostream& write_data(std::ostream& os,
                              Type* data,
                              const shape_t& shape,
                              bool fortran_order=false)
     {
-        auto head = make_header(dtype<Type>(), shape, fortran_order);
-        size_t size = 1;
-        for (auto s: shape) {
-            size *= s;
-        }
-        os.write(head.data(), head.size());
-        os.write((char*)data, size*sizeof(Type));
-        return os;
+        return write_data(os, (char*)data, shape, dtype<Type>(),
+                          sizeof(Type), fortran_order);
+
+        // auto head = make_header(dtype<Type>(), shape, fortran_order);
+        // size_t size = 1;
+        // for (auto s: shape) {
+        //     size *= s;
+        // }
+        // os.write(head.data(), head.size());
+        // os.write((char*)data, size*sizeof(Type));
+        // return os;
     }
         
 

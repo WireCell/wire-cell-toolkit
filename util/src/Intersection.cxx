@@ -1,22 +1,24 @@
 #include "WireCellUtil/Intersection.h"
 
-#include <set>
-using namespace std;
-
 using namespace WireCell;
 
-int WireCell::hit_square(int axis0, const Ray& bounds, const Point& point, const Vector& dir, Ray& hits)
+int WireCell::box_intersection(int axis0, const Ray& bounds, const Point& point, const Vector& dir, Ray& hits)
 {
-    const Point& bmin = bounds.first;
-    const Point& bmax = bounds.second;
-
-    double hit1[3] = {0}, hit2[3] = {0};
+    hits = Ray(point,point);
 
     int hitmask = 0;
-    if (0 == dir[axis0]) {
-        return hitmask;
+    if (0.0 == dir[axis0]) {
+        return hitmask;         // parallel to side
     }
 
+    Point bmin = bounds.first;
+    Point bmax = bounds.second;
+    for (size_t axis=0; axis<3; ++axis) {
+        if (bmin[axis] > bmax[axis]) {
+            std::swap(bmin[axis], bmax[axis]);
+        }
+    }
+    
     int axis1 = (axis0 + 1) % 3;
     int axis2 = (axis1 + 1) % 3;
 
@@ -29,9 +31,9 @@ int WireCell::hit_square(int axis0, const Ray& bounds, const Point& point, const
 
         if (bmin[axis1] <= one && one <= bmax[axis1] && bmin[axis2] <= two && two <= bmax[axis2]) {
             hitmask |= 1;
-            hit1[axis0] = intercept;
-            hit1[axis1] = one;
-            hit1[axis2] = two;
+            hits.first[axis0] = intercept;
+            hits.first[axis1] = one;
+            hits.first[axis2] = two;
         }
     }
 
@@ -44,26 +46,28 @@ int WireCell::hit_square(int axis0, const Ray& bounds, const Point& point, const
 
         if (bmin[axis1] <= one && one <= bmax[axis1] && bmin[axis2] <= two && two <= bmax[axis2]) {
             hitmask |= 2;
-            hit2[axis0] = intercept;
-            hit2[axis1] = one;
-            hit2[axis2] = two;
+            hits.second[axis0] = intercept;
+            hits.second[axis1] = one;
+            hits.second[axis2] = two;
         }
     }
 
-    hits = Ray(Point(hit1), Point(hit2));
+    auto hdir = hits.second-hits.first;
+    if (hdir.dot(dir) < 0) {
+        std::swap(hits.first, hits.second);
+        hitmask = ((hitmask&0x1) << 1) | ((hitmask&0x2)>>1);
+    }
     return hitmask;
 }
 
-int WireCell::box_intersection(const Ray& bounds, const Ray& ray, Ray& hits)
+int WireCell::box_intersection(const Ray& bounds, const Point& point, const Vector& dir, Ray& hits)
 {
     PointSet results;
-    const Point& point = ray.first;
-    const Point dir = (ray.second - ray.first).norm();
 
     // check each projection
     for (int axis = 0; axis < 3; ++axis) {
         Ray res;
-        int got = hit_square(axis, bounds, point, dir, res);
+        int got = box_intersection(axis, bounds, point, dir, res);
 
         if (got & 1) {
             // pair<PointSet::iterator, bool> what =
@@ -75,25 +79,26 @@ int WireCell::box_intersection(const Ray& bounds, const Ray& ray, Ray& hits)
         }
     }
 
-    if (results.size() > 2) {
-        return -1;
-    }
+    hits = Ray(point,point);
 
     int hitmask = 0;
-    for (auto hitit = results.begin(); hitit != results.end(); ++hitit) {
-        const Point& hit = *hitit;
-        Vector hitdir = hit - point;
-        double dot = hitdir.norm().dot(dir);
-
-        if (dot > 0) {  // actually should be closer to +/-1 w/in tolerance
+    int count = 0;
+    for(auto& hit : results) {
+        if (count == 0) {
             hits.first = hit;
             hitmask |= 1;
         }
-        else {
+        if (count == 1) {
             hits.second = hit;
             hitmask |= 2;
         }
+        ++count;
     }
 
+    auto hdir = hits.second-hits.first;
+    if (hdir.dot(dir) < 0) {
+        std::swap(hits.first, hits.second);
+        hitmask = ((hitmask&0x1) << 1) | ((hitmask&0x2)>>1);
+    }
     return hitmask;
 }

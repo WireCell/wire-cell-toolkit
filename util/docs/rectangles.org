@@ -1,0 +1,212 @@
+#+title: Rectangles - a 2D interval tree
+#+LATEX_HEADER: \usepackage[margin=1in]{geometry}
+
+* Intervals, trees, sets and maps.
+
+An interval is a finite segment on some number line, 1D space.  It is
+defined by its two endpoint values and if those endpoints are
+considered inside (closed) or outside (open) the interval.
+
+Generally, we will assume a /right-open/ interval meaning the lower
+endpoint is considered inside the interval and the upper endpoint is
+just outside the interval.  This is consistent with iteration ranges,
+for example those from C++ or Python.  This choice also makes clear
+when on right-open interval's upper endpoint is equal to another
+right-open interval's lower endpoint that the two are not considered
+overlapping.
+
+An /interval tree/ is a data structure that allows (relatively) fast
+insert, traversals and queries on a set of intervals.  Queries include
+finding intervals that cover a point, an intersection of the collected
+intervals with another, shortest interval containing two sets of
+intervals ("hull").  These take into consideration closed vs open
+endpoints.
+
+When a container only holds intervals it is an /interval set/.  When
+data is associated with each interval, an /interval map/ provides the
+container.  In this case, when intervals overlap, the interval map
+requires a way combined the data from the overlapping intervals.
+Either the data type must support combination operations or the data
+must be held in a container that does (eg a set).
+
+* Rectangle map and regions
+
+An interval is one dimensional.  The concepts described above can be
+extended to two or more orthogonal dimensions.  Here we stick with two
+and thus the interval map becomes a /rectangle map/.  After adding many
+elemental rectangles and their associated data to the map we may
+perform iterations and queries analogous to the ones described above
+for the 1D interval map.
+
+As with the 1D case, when rectangles are added, their overlap results
+in smaller rectangular /regions/.  The data associated with the
+elemental rectangles become /combined/ in some manner on these regions.
+This can be seen in the figure below.  The green elemental rectangle
+holding the data ~[b]~ and the yellow elemental rectangle holding ~[c]~
+overlap to produce a region with the combination ~{b,c}~.
+
+[[file:test_rectangles_find.svg]]
+
+To implement the 2D extension simply, each dimension is handled with
+independent 1D interval maps.  This produces a dimensional hierarchy
+as described.  Given a rectangle, its interval along the horizontal
+X-axis is stored into a top level 1D interval map, called here an
+/xmap/.  The data type for the values of an xmap is a 1D interval map
+called a /ymap/.  As the name implies it maps 1D intervals along the
+vertical Y-axis.  The data type of the ymap is that provided by the
+user and the hierarchy ends.  Having the ymap hold a /zmap/ which then
+holds user data would trivially extend this idea to a 3D /box map/, etc.
+
+While conceptually simple and easy to implement, this hierarchy
+results in each X-interval being applied through every value of Y.
+This can be seen in the figure where the red rectangle ~[a]~ leads to
+X-intervals on the blue rectangle ~[d]~ (and others) despite the have no
+overlap.  This artifact will be exposed to various iteration and query
+methods called on the rectangle map.  On the other hand, for a given X
+interval, the intervals in the Y dimension have no such artifacts.  
+
+Iteration and queries on a rectangle map follow this dimensional
+hierarchy.  For example, in the center of the figure is a gray square
+that intersects the elemental rectangles.  To determine the
+intersection, first the 1D interval intersection along the X dimension
+is found using the xmap.  Then with the returned ymaps, their
+intersection along the square's Y interval are found.  The figure
+colors these intersections which are summarized with this log output
+from the test program.
+
+#+begin_example
+X<- [400,600) Y<- [400,600)
+X-> [400,501.495) Y-> [400,408.36) {e}
+X-> [400,501.495) Y-> [572.966,600) {b}
+X-> [501.495,600) Y-> [400,408.36) {e}
+X-> [501.495,600) Y-> [572.966,600) {b}
+#+end_example
+
+The first line gives the dimensions of the square and the remaining
+lines iterate over the regions, showing their combined data.  Here,
+each only has a single datum because the gray square does not happen
+to overlap any regions formed from multiple elemental rectangles.
+
+
+* WCT implementation
+
+** Construction, inserting and iterating
+
+In brief pseudocode:
+
+#+begin_src c++
+  #include "WireCellUtil/Rectangles.h"
+  using namespace WireCell;
+  
+  // (1)
+  using rec_t = Rectangles<int, char>;
+  rec_t recs;
+  
+  // (2)
+  recs.add(0,7, 0, 4, 'a');
+  // (3)
+  auto elem = rec_t::element_t(
+      rec_t::rectangle_t(
+          rec_t::interval_t(3,11),
+          rec_t::interval_t(2, 6)), 'b');
+  // (4)
+  recs += elem;
+  
+  // (5)
+  for (const auto& [rec, cs] : recs.regions()) {
+      // (6)
+      const auto& [xi, yi] = rec
+      auto x1 = xi.lower();
+      auto x2 = xi.upper();
+      //...
+  
+      // (7)
+      for (char c : cs) {
+          // ...
+      }
+  }
+#+end_src
+
+Comments:
+
+1. A ~Rectangles<Key,Value>~ is created.  The key is integer type and is
+   that of the rectangle coordinates.  The value type is simply ~char~.
+   By default, the data is held in a ~std::set<char>~ and additional
+   template arguments allow for different value containers.
+
+2. One rectangle and associated data is loaded.
+
+3. An rectangle object can be also created and combined with the data
+   to produce an "element" of the rectangle map.
+
+4. The ~operator+=~ is another way to load the rectangle map and one
+   which mimics the underlying ~boost::icl~ 1D Boost interval container
+   library API.
+
+5. The regions of the rectangle map are iterated, unpacking them
+   directly into a rectangle object and a ~std::set<char>~ of combined
+   data.
+
+6. The rectangle object is unpacked into two intervals and some user
+   operation is done.
+
+7. The user data ~std::set<char>~ is iterated.
+
+** Queries
+
+Following the dimensional hierarchy the user is free to use the
+various [[https://www.boost.org/doc/libs/1_80_0/libs/icl/doc/html/boost_icl/interface/function_synopsis.html][~boost::icl~]] functions to perform various queries.  First on
+the /xmap/ and then on the on or more /ymap/ objects returned from there.
+
+The WCT ~Rectangles~ implementation provides one such query which is
+used to produce the /intersection/ of the gray square and the regions as
+described above and shown in the figure.
+
+Continuing the pseudocode example from above, 
+
+#+begin_src c++
+  
+  auto isec = recs.intersection(rec_t::interval_t(5,9),
+                                rec_t::interval_t(3, 5))
+  
+    for (const auto& [rect, qs] : isec) {
+        const auto& [qxi, qyi] = rect;
+        // ...
+    }
+  
+#+end_src
+
+** Tests
+
+There are several tests found at ~util/test/~:
+
+- ~test_rectangles.cxx~ :: basic proof of principle
+- ~test_rectangles2.cxx~ :: simple use of ~Rectangles~
+- ~test_rectangles_find.cxx~ :: more full test of ~Rectangles~ 
+
+The first two produce an [[http://www.eukleides.org/][eukleides]] file which can be rendered.  The
+second produces an SVG similar to, but randomly different, from the
+one shown in the figure above.
+
+#+begin_example
+./build/util/test_rectangles
+eukleides --output=./build/util/test_rectangles.pdf ./build/util/test_rectangles.euk
+evince ./build/util/test_rectangles.pdf
+
+./build/util/test_rectangles2
+eukleides --output=./build/util/test_rectangles2.pdf ./build/util/test_rectangles2.euk
+evince ./build/util/test_rectangles2.pdf
+
+./build/util/test_rectangles_find
+display ./build/util/test_rectangles_find.svg
+#+end_example
+
+
+* See more
+
+- https://www.boost.org/doc/libs/1_80_0/libs/icl/doc/html/index.html
+
+- https://en.wikipedia.org/wiki/Interval_tree
+
+
+  

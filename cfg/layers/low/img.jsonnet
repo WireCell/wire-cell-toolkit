@@ -66,7 +66,7 @@ function (anode) {
             data: { multiplicity: 2 },
         }, nin=1, nout=2),
 
-        local tilings = [$.single_tiling(face) for face in [0,1]],
+        local tilings = [$.single_tiling(face, ext) for face in [0,1]],
 
         local blobsync = pg.pnode({
             type: "BlobSetSync",
@@ -84,27 +84,146 @@ function (anode) {
             name=ident+ext),
     }.ret,
 
-    // Different tiling strategies.
-    tiling : {
+    // A tiling subgraph matching the anode faces.  The "uname" must
+    // be unique across all application of this function to a subgraph
+    // servicing a given anode.
+    tiling :: function(uname="")
+        if std.length(std.prune(anode.data.faces)) == 2 then
+            $.wrapped_tiling(uname)
+        else if std.type(anode.data.faces[0]) == "null" then
+            $.single_tiling(1, uname)
+        else
+            $.single_tiling(0, uname),
     
-        // The "perfect" tiling aka "3-plane tiling" assumes all
-        // channels are operational.  It produces one tiling node per
-        // anode face.
-        perfect :: function(ext="")
-            if std.length(std.prune(anode.data.faces)) == 2 then
-                $.wrapped_tiling(ext)
-            else if std.type(anode.data.faces[0]) == "null" then
-                $.single_tiling(1, ext)
-            else
-                $.single_tiling(0, ext),
-
-        // The "mixed" tiling will add so called "2-plane" tiling with
-        // signals from each plane ignored and instead with their dead
-        // channels considered "fired" in addition to "perfect"
-        // tiling.  This produces 4 tiling nodes per anode face.
-        // mixed :: function(ext) ...
+    // Blobify: produce a subgraph which consumes a frame a, performs
+    // slicing on the slices performs tiling finally producing a
+    // blobset.
+    // 
+    // The subgraph may itself be composed of subgraphs each formed by
+    // replicating a nominally linear pipeline segment into multiple
+    // parallel pipelines with identical code but unique configuration
+    // parameters.  There are three possible points of such pipeline
+    // splitting.  Starting from downstream / inner-most points in the
+    // graph and working upstream / outward:
+    //
+    // - face :: A tiling operates on a single anode face.  A single
+    // time slice from a wrapped anode must be processed by two
+    // separate tiling nodes each focused on one anode face.
+    //
+    // - slicing :: The slicer preceding one or a pair of tiling must
+    // be configured with arrays of plane identifiers that determine
+    // how channel activity in a slice is determined.  Typically only
+    // one category of activity should be set for any given plane
+    // though the code allows for a plane to reside in multiple
+    // categories.  The categories, in their order of application,
+    // are:
+    // 
+    //   - active :: assign the sum of all values from the channel
+    //   across the current slice as the slice activity for that
+    //   channel.
+    // 
+    //   - dummy :: assign a fixed, configured value and uncertainy as
+    //   the activity for ALL channels in the plane.  Default is small
+    //   value with large uncertainty.
+    // 
+    //   - masked :: assign a configured value and uncertainty as the
+    //   slice activity for any channel with an entry in the frame's
+    //   "bad" channel mask map that overlaps the slice.  Default
+    //   small value with large uncertainty.
+    // 
+    // - strategy :: A logical grouping of a number of slicing
+    // subgraphs.  For example, all slicing which span some
+    // permutation of plane categorizations may comprise a strategy.
+    // 
+    // Some predefined strategies named:
+    blobify_strategies : {
+        // All 3view and 2view with active channels plus third view
+        // with active or bad channels.
+        live: [
+            {
+                active: [0,1,2],
+            },
+            {
+                active: [0,1],
+                masked:   [2],
+            },
+            {
+                active: [1,2],
+                masked:   [0],
+            },
+            {
+                active: [0,2],
+                masked:   [1],
+            },
+        ],
+        // The pseudo-inverse of "live".  Only consider bad channels
+        // in two views.  Third view poses no constraints on blob
+        // forming by making all channels active with fixed values.
+        dead: [
+            {
+                dummy:    [2],
+                masked: [0,1],
+            },
+            {
+                dummy:    [0],
+                masked: [1,2],
+            },
+            {
+                dummy:    [1],
+                masked: [0,2],
+            },
+        ]
     },
-    
+
+    // This grouping may also be used to supply a second fanout layer
+    // simply to work around fan size limits.
+    //
+    // Where any of these splittings result in more than one parallel
+    // pipeline, the multiple pipelines are bounded by fanout/fanin
+    // pairs.  Where there is no splitting (eg, tiling with single
+    // faced anodes) the fans are omitted as a minor optimization.
+
+    // Make blobify subgraph consuming frame and producing blobset.
+    // It will have a singel slicer and one or two tiling depending on
+    // number of anode faces.
+
+    // - uname :: Unique name in context of applying function on a given anode
+    // - tag, errtag :: The trace tags for input signal and signal error traces
+    // - planes :: object giving the plane categorization arrays
+    // - trange :: time slice tbin min/max range in ticks
+    // - span :: the time slice span in ticks
+
+    blobify_single :: function(uname, tag, errtag,
+                               planes={}, trange=[0,0], span=4)
+        local p = { active: [], masked: [], dummy: [] } + planes;
+        pg.pipeline([$.slicing(tag, errtag, trange[0], trange[1], uname,
+                               span, p.active, p.masked, p.dummy),
+                     $.tiling(uname)], "blobify_single_"+uname),
+
+    // Make a full blobify subgraph over a slicing strategy array of
+    // slicing objects.
+    blobify :: function(uname, tag, errtag,
+                        strategy=[], trange=[0,0], span=4)
+        local nstrats = std.length(strategy);
+        local pipes = [
+            $.blobify_single('%s-s%d'%[uname,sind], tag, errtag, strategy[sind], trange, span)
+            for sind in std.range(0,nstrats-1)
+        ];
+        if nstrats == 1
+        then pipes[0]
+        else
+        local fanout = pg.pnode({
+            type:'FrameFanout',
+            name: uname,
+            data: { multiplicity: nstrats },
+        }, nin=1, nout=nstrats);
+        local fanin = pg.pnode({
+            type:'BlobSetMerge',
+            name: uname,
+            data: { multiplicity: nstrats },
+        }, nin=nstrats, nout=1);
+        pg.fan.pipe('FrameFanout', pipes, 'BlobSetMerge', uname),
+
     // A node that clusters blobs between slices w/in the given number
     // of slice spans.  Makes blob-blob edges
     clustering :: function(spans=1.0) pg.pnode({
@@ -122,7 +241,7 @@ function (anode) {
     }, nin=1, nout=1),
 
     // The recommended charge solving
-    charge_solving :: function(meas_val_thresh=10.0,
+    charge_solving :: function(meas_val_thresh=0.0,
                                meas_err_thresh=1.0e9,
                                blob_val_thresh=0,
                                whiten=true)

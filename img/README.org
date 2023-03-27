@@ -1,24 +1,9 @@
 #+title: Wire-Cell Imaging
 
-* Intro
-
 This sub-package holds Wire-Cell Toolkit 3D imaging components.
 
-Below are some notes on them.
+- Some notes and docs are in [[doc/]].
 
-* Slicing
+- An informal note on some of the algorithms is in [[https://www.phy.bnl.gov/~bviren/tmp/wctimg/raygrid.pdf][raygrid.pdf]]
 
-A *frame* is partitioned into time-slices of a given *span* (typically 4
-or 6 ticks).
-
-The *time* of a *slice* of index $s_i$ has is measured relative to the *time* of its *frame* $t_f$
-
-\[ t_{s_i} = t_f + i*span \]
-
-Note, when comparing the time of slices (and thus blobs) to depos an
-arbitrary time offset can be introduced in the simulation.
-
-
-A slice has *activity* which maps a *channel* (~IChannel~) to a pair of
-numbers giving a *signal value* and *signal uncertainty* .
-
+  

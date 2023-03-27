@@ -1,0 +1,340 @@
+# Default configuration.  Provide your own with --configfile or
+# override specific args with --config
+configfile: workflow.source_path("depo-ssi-viz.yaml")
+
+# evil shortcut to promote keys to variables
+for k,v in config.items(): globals()[k] = v
+
+# derived from config.  note, may need variant as partial key.
+anodes = {
+    "pdsp": list(range(6)),
+    "uboone": [0]
+}[detector]
+
+# literals, tied to the job and not subject to config
+frame_tiers = ["adc", "sig"]
+cluster_tiers = ["img", "tru"]
+
+# where output goes
+detdir=f"{outdir}/{detector}"
+jobdir=f"{detdir}/{{dname}}"
+wctdir=f"{jobdir}/wct"   # wire-cell output
+pltdir=f"{jobdir}/plots" # plot PDFs
+pvdir =f"{jobdir}/pv"    # paraview files
+figdir=f"{docdir}/{{dname}}"
+
+# fixme: this is a function of depo file
+event_indices = [0]
+
+def depo_file(wc):
+    return depofiles[wc.dname]
+rule intern_depos:
+    input:
+        depo_file
+    output:
+        f"{wctdir}/depos-orig.npz"
+    shell: """
+    cp {input} {output}
+    """
+
+
+# Explanation of the tourtourous coupling you see w.r.t Jsonnet/JSON
+# handling.  For simple jobs without all the extra diagnostics, we
+# would NOT generate a JSON version of the Jsonnet config.  We would
+# simply have wire-cell consume Jsonnet directly.  But we also want to
+# process the config in Python and the Python jsonnet package only
+# provides the slower C++/Jsonnet implementation.  So we use the
+# faster wcsonnet/Go/Jsonnet to make the JSON for Python to consume.
+# But, since we make the JSON anyways, we might was well use it also
+# when calling wire-cell so we do not need to repeat all TLAs.  Clear
+# as mud.
+rule jsonify:
+    input: 
+        jobcfg
+    output:
+        f"{wctdir}/depo-ssi-viz.json"
+    params:
+        indepos=rules.intern_depos.output,
+        outdepos=f"{wctdir}/depos-drifted.npz",
+        frames=f"{wctdir}/frames-%(tier)s-a%(anode)s.npz",
+        clusters=f"{wctdir}/clusters-%(tier)s-a%(anode)s.npz"
+    shell: """
+    wcsonnet \
+      -A 'detector={detector}' \
+      -A 'variant={variant}' \
+      -A 'indepos={params.indepos}' \
+      -A 'outdepos={params.outdepos}' \
+      -A 'frames={params.frames}' \
+      -A 'clusters={params.clusters}' \
+      {input} > {output}
+    """
+
+
+rule wctify:
+    input:
+        cfg=rules.jsonify.output,
+        depos=rules.intern_depos.output
+    output:
+        log=f"{wctdir}/wire-cell.log", 
+        drifted=f"{wctdir}/depos-drifted.npz",
+        frames=expand(f"{wctdir}/frames-{{tier}}-a{{anode}}.npz",
+                      tier=frame_tiers, anode=anodes, dname='{dname}'),
+        clusters=expand(f"{wctdir}/clusters-{{tier}}-a{{anode}}.npz",
+                        tier=cluster_tiers, anode=anodes, dname='{dname}')
+    shell: """
+    wire-cell -l stderr -l {output.log} -L debug -c {input.cfg} || exit -1
+    for one in {output.clusters} ; do
+        if [ -n "$(file $one | grep empty)" ] ; then
+          echo "Empty cluster file $one"
+          rm -f $one
+          touch $one
+        fi
+    done
+    """
+## use of zip leaves an "empty" file of a few bytes which makes it hard to test for later.
+
+
+rule plot_drifted:
+    input:
+        rules.wctify.output.drifted
+    output:
+        f"{pltdir}/depos-drifted-i{{index}}-{{plotname}}.pdf"
+    shell: """
+    wirecell-gen plot-depos -p {wildcards.plotname} -i{wildcards.index} {input} {output}
+    """
+rule plot_interned:
+    input:
+        rules.intern_depos.output
+    output:
+        f"{pltdir}/depos-interned-i{{index}}-{{plotname}}.pdf"
+    shell: """
+    wirecell-gen plot-depos -p {wildcards.plotname} -i{wildcards.index} {input} {output}
+    """
+
+rule plot_depos_all:
+    input:
+        expand(rules.plot_drifted.output, dname=depofiles,
+               index=event_indices, plotname=["tyqscat", "tzqscat"]),
+        expand(rules.plot_interned.output, dname=depofiles,
+               index=event_indices, plotname=["qxz", "qzy", "qxy"])
+
+rule plot_adc_frames:
+    input:
+        f"{wctdir}/frames-adc-a{{anode}}.npz"
+    output:
+        f"{pltdir}/frames-adc-a{{anode}}-i{{index}}.pdf"
+    shell: """
+    wirecell-util npz-to-img \
+    --array frame_orig{wildcards.anode}_{wildcards.index} \
+    --cmap seismic \
+    --title "$(basename {input})" \
+    --xtitle 'Relative tick number' \
+    --ytitle 'Relative channel number' \
+    --ztitle 'ADC (median subtracted)' \
+    --vmin '-50' --vmax '50' --mask 0 --dpi 600 \
+    --baseline='median'\
+    -o "{output}" "{input}"
+    """
+
+rule plot_sig_frames:
+    input:
+        f"{wctdir}/frames-sig-a{{anode}}.npz"
+    output:
+        f"{pltdir}/frames-sig-a{{anode}}-i{{index}}.pdf"
+    shell: """
+    wirecell-util npz-to-img \
+    --array frame_gauss{wildcards.anode}_{wildcards.index} \
+    --cmap viridis \
+    --title "$(basename {input})" \
+    --xtitle 'Relative tick number' \
+    --ytitle 'Relative channel number' \
+    --ztitle 'Signal (ionization electrons)' \
+    --vmin '0' --vmax '10000' --mask 0 --dpi 600 \
+    -o "{output}" "{input}"
+    """
+
+rule plot_frames_all:
+    input:
+        expand(f"{pltdir}/frames-{{tier}}-a{{anode}}-i{{index}}.pdf",
+               dname=depofiles,
+               tier=frame_tiers, anode=anodes, index=event_indices)
+
+
+rule pv_depos_orig:
+    input:
+        rules.intern_depos.output
+    output:
+        [f"{pvdir}/depos-orig-i%d.vtp" % n for n in event_indices]
+    params:
+        outpat=f"{pvdir}/depos-orig-i%d.vtp"
+    shell: """
+    wirecell-img paraview-depos {input} {params.outpat}
+    """
+
+rule pv_depos_drifted:
+    input:
+        rules.wctify.output.drifted
+    output:
+        [f"{pvdir}/depos-undrifted-i%d.vtp"%n for n in event_indices]
+    params:
+        speed = drift_speed,
+        outpat = f"{pvdir}/depos-undrifted-i%d.vtp"
+    shell: """
+    wirecell-img paraview-depos -D '{params.speed},0' {input} {params.outpat}
+    """
+
+rule pv_blobs:
+    input:
+        f"{wctdir}/clusters-{{tier}}-a{{anode}}.npz"
+    output:
+        [f"{pvdir}/clusters-{{tier}}-a{{anode}}-i%d.vtu"%n for n in event_indices]
+    params:
+        speed=drift_speed,
+        time=start_time,
+        outpat=f"{pvdir}/clusters-{{tier}}-a{{anode}}-i%d.vtu"
+    shell: """
+    if [ -s {input} ] ; then
+        wirecell-img paraview-blobs -B '{params.speed},{params.time}' {input} {params.outpat}
+    else
+        touch {output}
+    fi
+    """
+
+rule pv_all:
+    input:
+        expand(rules.pv_depos_orig.output, dname=depofiles),
+        expand(rules.pv_depos_drifted.output, dname=depofiles),
+        expand(rules.pv_blobs.output, tier=["img","tru"], anode=anodes,
+               dname=depofiles)
+
+def plot_pattern(multipage, basedir=pltdir):
+    '''
+    Provide a general multipage vs multifile plot file pattern
+    '''
+    base = f"{basedir}/{{category}}-{{tier}}-a{{anode}}-{{plotname}}"
+    if multipage:
+        return base + ".{ext}"
+    return base + "-i%d.{ext}"
+
+def plot_output(multipage, basedir=pltdir):
+    '''
+    Generate output file or files pattern.  Wildcards unresolved, but expanded for number of events.
+    '''
+    pat = plot_pattern(multipage, basedir)
+    if multipage:
+        return pat
+    return [pat%n for n in event_indices]
+
+def plot_blobs_params(w):
+    '''
+    Generate the params dict for plot category "blobs"
+    '''
+    ret = dict(pages = expand(plot_pattern(w['ext'] in ('pdf',)), **w))
+    return ret
+
+rule plot_blobs_multipage:
+    input:
+        f"{wctdir}/clusters-{{tier}}-a{{anode}}.npz"
+    output: plot_output(True)
+    params: p = plot_blobs_params
+    wildcard_constraints:
+        category = "blobs"
+    shell: """
+    if [ -s {input} ] ; then
+      wirecell-img plot-{wildcards.category} -p {wildcards.plotname} {input} {params.p[pages]}
+    else
+      touch {output}
+    fi
+    """
+use rule plot_blobs_multipage as plot_blobs_multifile with:
+    output: plot_output(False)
+
+def plot_debls_params(w):
+    ret = dict(
+        plot="depos-blobs",
+        speed=drift_speed,
+        time=start_time,
+        pages = expand(plot_pattern(w['ext'] in ('pdf',)), **w))
+    return ret
+
+## apparently inheritance doesn't cover shell so we will copy-paste from plot_blobs_multipage.
+rule plot_debls_multipage:
+    input:
+        depos=rules.wctify.output.drifted,
+        blobs=f"{wctdir}/clusters-{{tier}}-a{{anode}}.npz"
+    output: plot_output(True)
+    wildcard_constraints:
+        category = "debls"
+    params: p = plot_debls_params
+    shell: """
+    if [ -s {input.blobs} ] ; then
+      wirecell-img plot-{params.p[plot]} -B '{params.p[speed]},{params.p[time]}' -D '{params.p[speed]},0' -p {wildcards.plotname} {input.depos} {input.blobs} {params.p[pages]}
+    else
+      touch {output}
+    fi
+    """
+use rule plot_debls_multipage as plot_debls_multifile with:
+    output: plot_output(False)
+
+#f"{pltdir}/clusters-{{tier}}-a{{anode}}-{{plotname}}.pdf",
+rule plot_blobs_all:
+    input:
+        expand(rules.plot_blobs_multipage.output,
+               tier=cluster_tiers, anode=anodes, dname=depofiles,
+               category=['blobs'], ext=['pdf'],
+               plotname=["ty", "tz", "views"]),
+        expand(rules.plot_blobs_multifile.output,
+               tier=cluster_tiers, anode=anodes, dname=depofiles,
+               category=['blobs'], ext=['png'],
+               plotname=["ty", "tz", "views"]),
+        expand(rules.plot_debls_multipage.output,
+               tier=['tru','img'],
+               anode=anodes, dname=depofiles,
+               category=['debls'], ext=['pdf'],
+               plotname=['outlines']),
+        expand(rules.plot_debls_multifile.output,
+               tier=['tru','img'],
+               anode=anodes, dname=depofiles,
+               category=['debls'], ext=['png'],
+               plotname=['outlines'])
+
+rule plot_all:
+    input:
+        rules.plot_depos_all.input,
+        rules.plot_frames_all.input,
+        rules.plot_blobs_all.input
+
+
+rule dotify:
+    input: 
+        rules.jsonify.output
+    output:
+        f"{wctdir}/depo-ssi-viz-flow-graph.pdf"
+    shell: """
+    wirecell-pgraph dotify --no-params {input} {output}
+    """
+        
+def copy_names(srcs, tgtdir):
+    ret = [os.path.join(tgtdir, os.path.basename(src)) for src in set(srcs)]
+    return ret
+
+rule copy_for_docs:
+    input: plot_output(True)
+    output: plot_output(True, figdir)
+    shell: 'cp {input} {output}'
+rule copy_all:
+    input:
+        expand(rules.copy_for_docs.output,
+               tier=['tru','img'],
+               anode=[5], dname=depofiles,
+               category=['debls'], ext=['pdf'],
+               plotname=['outlines'])
+
+rule all:
+    input:
+        expand(rules.dotify.output, dname=depofiles),
+        rules.pv_all.input,
+        rules.plot_all.input
+
+        
+

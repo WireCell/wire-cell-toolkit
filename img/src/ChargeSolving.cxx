@@ -164,7 +164,7 @@ static void dump_sg(const graph_t& sg, Log::logptr_t& log)
         }
     }
 
-    log->debug("cs graph: slice={} index={} vertices={} edges={} nblob={} bval={} nmeas={} mval={}",
+    log->trace("cs graph: slice={} index={} vertices={} edges={} nblob={} bval={} nmeas={} mval={}",
                gval.islice->ident(), gval.index,
                boost::num_vertices(sg), boost::num_edges(sg),
                nblob, bval, nmeas, mval);
@@ -187,7 +187,8 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
 {
     out = nullptr;
     if (!in) {
-        log->debug("EOS");
+        log->debug("EOS at call={}", m_count);
+        ++m_count;
         return true;
     }
 
@@ -203,7 +204,8 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
     // }
 
     const size_t nstrats = m_weighting_strategies.size();
-    std::vector<float> blob_threshold(nstrats, 0); // fixme make configurable
+
+    std::vector<float> blob_threshold(nstrats, m_blob_thresh.value());
 
     SolveParams sparams{Ress::Params{Ress::lasso}, 1000, m_whiten};
     for (size_t ind = 0; ind < nstrats; ++ind) {
@@ -224,17 +226,20 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
     for (const auto& sg : sgs) {
         dump_sg(sg, log);
     }
-    log->debug("cluster={} solved nsubclusters={} over nstrategies={}",
+    log->debug("count={} cluster={} solved nsubclusters={} over nstrategies={}",
+               m_count,
                in->ident(), sgs.size(), m_weighting_strategies.size());
 
     auto packed = repack(in_graph, sgs);
 
-    log->debug("cluster={} nvertices={} nedges={}",
+    log->debug("call={} cluster={} nvertices={} nedges={}",
+               m_count,
                in->ident(),
                boost::num_vertices(packed),
                boost::num_edges(packed));
 
     out = std::make_shared<Aux::SimpleCluster>(packed, in->ident());
+    ++m_count;
     return true;
 }
 

@@ -85,13 +85,13 @@ bool Aux::TaggedFrameTensorSet::operator()(const input_pointer& in, output_point
         }
 
         // "channels" tensor
-        SimpleTensor<int>* cht = new SimpleTensor<int>({nchans});
+        SimpleTensor* cht = new SimpleTensor({nchans}, (int*)nullptr);
         Eigen::Map<Eigen::ArrayXi> charr((int*) cht->data(), nchans);
         assert((size_t) charr.size() == nchans);
         charr.setZero();
 
         // "summary" tensor, create but only fill and save if we have summary
-        SimpleTensor<double>* sumt = new SimpleTensor<double>({nchans});
+        SimpleTensor* sumt = new SimpleTensor({nchans}, (double*)nullptr);
         Eigen::Map<Eigen::ArrayXd> sumarr((double*) sumt->data(), nchans);
         assert((size_t) sumarr.size() == nchans);
         sumarr.setZero();
@@ -103,7 +103,7 @@ bool Aux::TaggedFrameTensorSet::operator()(const input_pointer& in, output_point
         const std::vector<size_t> shape = {nchans, nticks};
 
         // "waveform" tensor
-        SimpleTensor<float>* st = new SimpleTensor<float>(shape);
+        SimpleTensor* st = new SimpleTensor(shape, (float*)nullptr);
         Eigen::Map<Eigen::ArrayXXf> arr((float*) st->data(), nchans, nticks);
         arr.setConstant(pad);
 
@@ -160,9 +160,9 @@ bool Aux::TaggedFrameTensorSet::operator()(const input_pointer& in, output_point
             for (auto ch_bl : cmm) {
                 nranges += ch_bl.second.size();
             }
-            SimpleTensor<double>* ranges = new SimpleTensor<double>({nranges, 2});
+            SimpleTensor* ranges = new SimpleTensor({nranges, 2}, (double*)nullptr);
             Eigen::Map<Eigen::ArrayXXd> ranges_arr((double*) ranges->data(), nranges, 2);
-            SimpleTensor<double>* channels = new SimpleTensor<double>({nranges});
+            SimpleTensor* channels = new SimpleTensor({nranges}, (double*)nullptr);
             Eigen::Map<Eigen::ArrayXd> channels_arr((double*) channels->data(), nranges);
 
             size_t ind = 0;

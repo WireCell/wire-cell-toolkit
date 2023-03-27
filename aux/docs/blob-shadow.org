@@ -1,0 +1,151 @@
+#+title: Blob-Shadow
+#+startup: beamer
+#+setupfile: setup-beamer.org
+#+latex_header: \usepackage{algorithm}
+#+latex_header: \usepackage{algpseudocode}
+
+#+latex_header: \algnewcommand\algorithmicforeach{\textbf{for each}}
+#+latex_header: \algdef{S}[FOR]{ForEach}[1]{\algorithmicforeach\ #1\ \algorithmicdo}
+
+* Topics
+
+- Concept
+- Algorithm
+- Code
+- Test
+
+* Blob shadows
+
+#+begin_quote
+A pair of blobs, in the same slice and anode face, are considered to be
+mutually \textbf{shadowing} if they overlap in a given detector view.
+#+end_quote
+
+Two types of detector views are considered:
+
+- wire :: the blobs share a number of wire segments
+- channel :: the blobs share a number of channels
+
+Notes:
+
+- These are degenerate for non-wire-wrapped detectors.
+- Define shadow "width" as number of contiguous, shared wires or
+  channels.
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=9]{../../img/docs/dpf-raytiling.pdf}
+#+end_center
+
+
+* Blob Shadow Graph
+
+A BS graph is \textbf{derived} from an ~ICluster~ graph, with:
+
+- vertex :: represents a blob, 1-to-1 with those in original cluster graph.
+  - Holds the blob /vertex descriptor/ into original cluster graph.
+
+- edge :: represents/connects a pair of blobs in shadow.
+  - Holds shadow range bounds (begin/end wire/channel indices).
+
+- graph :: global property of the BS graph
+  - Holds the code of the shadow type (~'w'~ or ~'c'~).
+
+* Finding shadows
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+\footnotesize
+
+#+begin_algorithmic
+\Procedure{BlobShadow}{$cgraph,type$}
+\State $bsgraph$ \gets \Call{Directed}{$cgraph$}
+\State $slices$ \gets \Call{SliceNodes}{$cgraph$}
+\ForEach{$slice \in slices $}
+\State $blobs$ \gets \Call{Neighbors}{$svtx$} 
+\ForEach{$blob \in blobs$}
+\State $leaves$ \gets \Call{LeavesOfType}{$bvtx,type,cgraph$}
+\ForEach{$leaf \in leaves$}
+\State update $leaf \to \{leaf\_blobs + blob\}$ in $leaf\_lookup$
+\EndFor
+\EndFor
+\ForEach{$(leaf,leaf\_blobs) \in leaf\_lookup$}
+\ForEach{$uniq\_pair(b1,b2) \in blobs$}
+\State Add new $b1-b2$ edge or update if
+\State existing and increase the shadow width
+\EndFor
+\EndFor
+\EndFor
+\State \Return $bsgraph$
+\EndProcedure
+#+end_algorithmic
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+\footnotesize
+
+- In words: for each /slice/, associate the reachable /leaves/ (/wires/ or /channels/) to its /blobs/.  Then, iterate on each /leaf/ in an exhaustive pair-wise way to create and edge or if edge exists increase its shadow width.
+
+- Rewriting as \textbf{directed} graph is needed as finding /leaves/ is done with a breadth-first-search which will not properly terminate if given an undirected graph.
+
+
+* Code
+
+#+begin_src C++
+  #include "WireCellAux/BlobShadow.h"
+  using namespace WireCell::Aux;
+  // ...
+  cluster_graph_t cg = ...;
+  auto bsw = BlobShadow::shadow(cg, 'w');
+  auto bsc = BlobShadow::shadow(cg, 'c');
+#+end_src
+
+* Test
+
+#+begin_example
+./wcb --target=test_blobshadow
+./build/aux/test_blobshadow
+#+end_example
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.35
+:END:
+
+[[file:test_blobshadow_orig.pdf]]
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.35
+:END:
+
+[[file:test_blobshadow_cdir.pdf]]
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.25
+:END:
+
+[[file:test_blobshadow_blob.pdf]]
+
+
+# Local Variables:
+# eval: (fix-latex-previews)
+# End:

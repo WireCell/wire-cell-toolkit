@@ -1,0 +1,11 @@
+jobcfg: img/test/depo-ssi-viz.jsonnet
+depofiles:
+  muon: test/data/muon-depos.npz
+  point: depo-point.npz
+  cosmics: ../../data/cosmic-500-1-depos.npz
+outdir: build/img/test/depo-ssi-viz
+docdir: img/docs/depo-ssi-viz
+detector: pdsp
+variant: nominal
+drift_speed: "1.56*mm/us"
+start_time: "314*us"

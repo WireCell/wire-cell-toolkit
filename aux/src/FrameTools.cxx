@@ -402,3 +402,4 @@ IFrame::pointer Aux::sum(std::vector<IFrame::pointer> frames, int ident)
 
     return std::make_shared<SimpleFrame>(ident, start_time, out_traces, tick);
 }
+

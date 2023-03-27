@@ -45,16 +45,26 @@ bool DepoSetDrifter::operator()(const input_pointer& in, output_pointer& out)
     IDepo::vector in_depos(in->depos()->begin(), in->depos()->end());
     in_depos.push_back(nullptr); // input EOS
 
+    double charge_in = 0, charge_out=0;
     IDepo::vector all_depos;
     for (auto idepo : in_depos) {
         IDrifter::output_queue more;        
         (*m_drifter)(idepo, more);
         all_depos.insert(all_depos.end(), more.begin(), more.end());
+
+        if (idepo) {
+            charge_in += idepo->charge();
+        }
+        for (const auto& d : more) {
+            if (d) {
+                charge_out += d->charge();
+            }
+        }
     }
     // The EOS comes through
     all_depos.pop_back();
         
-    log->debug("call={} drifted ndepos={}", m_count, all_depos.size());
+    log->debug("call={} drifted ndepos={} in={} out={}", m_count, all_depos.size(), charge_in, charge_out);
     out = std::make_shared<Aux::SimpleDepoSet>(m_count, all_depos);
     ++m_count;
     return true;

@@ -1,0 +1,10 @@
+
+#+name: awk
+#+begin_src bash :var re="" :var file="/dev/null" :var lang="shell" :exports none :results output code
+awk "$re" "$file"
+#+end_src
+
+#+name: grep
+#+begin_src bash :var re="" :var file="/dev/null"  :var a=0 :var lang="shell" :exports none :results output code
+grep -m1 -A$a "$re" "$file"
+#+end_src

@@ -5,10 +5,11 @@
 #include "WireCellIface/IBlobSet.h"
 
 namespace WireCell {
+
     /** A blob set fan-out component takes a vector of blob sets (see
      * IBlobFanin, IBlobPipeline) and produces a fan of blob sets.
      */
-    class IBlobSetFanout : public IFanoutNode<IBlobSet::vector, IBlobSet, 0> {
+    class IBlobSetFanout : public IFanoutNode<IBlobSet, IBlobSet, 0> {
        public:
         virtual ~IBlobSetFanout();
 

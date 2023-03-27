@@ -5,6 +5,7 @@
 #include <iostream>
 
 using namespace WireCell;
+using namespace WireCell::Aux;
 
 void test_small()
 {
@@ -13,7 +14,7 @@ void test_small()
     for (auto s : shape) {
         nele *= s;
     }
-    Aux::SimpleTensor<float> st(shape);
+    SimpleTensor st(shape, (float*)nullptr);
     Assert(st.size() == sizeof(float) * nele);
     auto& d = st.store();
     Assert(d.size() == st.size());
@@ -39,12 +40,12 @@ void test_large()
     const size_t nchans = 15360;
     const size_t nticks = 6000;
 
-    Aux::SimpleTensor<int>* cht = new Aux::SimpleTensor<int>({nchans});
+    SimpleTensor* cht = new SimpleTensor({nchans}, (int*)nullptr);
     Eigen::Map<Eigen::ArrayXi> charr((int*) cht->data(), nchans);
     assert((size_t) charr.size() == nchans);
     charr.setZero();
 
-    Aux::SimpleTensor<double>* sumt = new Aux::SimpleTensor<double>({nchans});
+    SimpleTensor* sumt = new SimpleTensor({nchans}, (double*)nullptr);
     Eigen::Map<Eigen::ArrayXd> sumarr((double*) sumt->data(), nchans);
     assert((size_t) sumarr.size() == nchans);
     sumarr.setZero();
@@ -54,7 +55,7 @@ void test_large()
     for (auto s : shape) {
         nele *= s;
     }
-    Aux::SimpleTensor<float>* st = new Aux::SimpleTensor<float>(shape);
+    SimpleTensor* st = new SimpleTensor(shape, (float*)nullptr);
     Eigen::Map<Eigen::ArrayXXf> arr((float*) st->data(), nchans, nticks);
     const double pad = 0.0;
     arr.setConstant(pad);

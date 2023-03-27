@@ -1,0 +1,285 @@
+#+title: Wire-Cell Toolkit Tensor Set Data Model
+#+setupfile: ../../util/docs/setup-note.org
+
+* Introduction
+
+This document defines the Wire-Cell Toolkit (WCT) /tensor data model/.
+It factors into two layers: "generic" and "specific".
+
+The /generic tensor data model/ defines a tensor as a numeric array with
+an associated metadata object and an ordered collection (set) of such
+tensor objects.  The WCT data interface classes ~ITensor~ and ~ITensorSet~
+embody these two aspects. 
+
+The /specific tensor data model/ defines conventions on the generic
+tensor data model in order to map certain other data types to the
+generic tensor data model. 
+
+The next two sections define the generic and specific tensor data
+models and are written in rfc2119 language.
+
+* Generic tensor data model
+
+** Tensor
+
+A *tensor* shall be composed of two conceptual parts: an *array* part and
+a *metadata* (MD) part.
+
+The *array* part consists of a sequence of elements that shall be stored
+contiguously and associated with a *shape*, layout *order* and element
+*type* and *size*.
+
+The array *shape* shall be represented as a vector of integer type with
+each element corresponding to the number of elements spanned by the
+corresponding dimension.
+The array layout *order* shall be represented as a vector which stores
+the majority of the dimensions or it shall be empty indicating "C"
+layout.  A "C" layout should be used.
+The array element *type* shall be represented as a string with values
+following Numpy [[https://numpy.org/doc/stable/reference/arrays.interface.html#arrays-interface][array interface]] ~typestr~ specification.  This typically
+means a letter followed by a number giving the size in bytes of the
+type.
+The array element *size* shall be represented as an integer providing
+the size of one element measured in bytes.
+
+A tensor *metadata* (MD) part shall follow the JSON data model and be of
+JSON type /object/.  The model reserves the following attributes names.
+
+- array :: optional and when existing it is an object providing array
+  specifications using keyword names given in bold above (*shape*, etc).
+Additional MD attributes are required by the specific tensor data
+model.  User application may define attributes not otherwise reserved
+here.  The MD must be faithfully passed through any tensor converter
+round trip.
+
+A *tensor set* shall be composed of two conceptual parts: an ordered
+sequence of tensors and a metadata part.  A tensor set shall not
+contain other tensor sets.
+The ordering of a tensor set sequence shall be stable and may be
+empty.  A tensor may be contained in multiple tensor sets.
+The tensor set MD object shall follow the JSON data model and be of
+JSON type object but otherwise this tensor data model places no
+requirements on its contents.  The tensor set MD must be faithfully
+passed through any tensor set converter round trip.
+
+* Specific tensor data model
+
+The specific tensor data model defines a number of complex specific
+data types in terms of the generic tensor data model.  
+
+** Common metadata conventions
+
+A tensor MD shall have an attribute named *datapath* of type string that
+identifies the tensor in a logical hierarchical structure of multiple
+tensors.  The *datapath* value shall be unique among all tensors held in
+a tensor set.  The value shall be interpreted as a sequence of atomic
+identifiers separated by a ~"/"~ (slash) character.  An atomic
+identifier must be valid for use as a name of C++ or Python variables
+or functions.  A *datapath* value may be stored in a tensor MD attribute
+and refer to another tensor when both tensors are held in the same
+tensor set.
+
+A tensor MD shall have an attribute *datatype* which is identifies a
+data type in the specific tensor data model that it represents.  The
+*datatype* value shall be one from the set of specific types described
+below.  Additional requirements on MD attributes may be defined that
+are specific to a *datatype* as described in the corresponding section
+below.
+
+Complex data types may be represented as an *aggregation* of multiple
+tensors.  These shall be defined on a per data type basis below as a
+set of MD attributes providing *datapath* values.
+
+** Overview of specific types
+
+The following specific types are mapped to the basic tensor data
+model.  Each item in the list gives the *datatype* MD attribute value
+and describes the WCT data type to which it associates.
+
+- pcarray :: a ~PointCloud::Array~
+- pcdataset :: a ~PointCloud::Dataset~
+- pcgraph :: a ~PointGraph~
+
+- trace :: one ~ITrace~ as 1D array or multiple ~ITrace~ as 2D array.
+- tracedata :: tagged trace indices and summary data
+- frame :: an ~IFrame~ as aggregate of traces and/or traceblocks
+
+- cluster :: an ~ICluster~ 
+The specific requirements for each data type are given in the
+following sections in terms of their tensor array and metadata and in
+some cases in terms of other types defined previously.
+
+** pcarray
+
+The *datatype* of *pcarray* indicates a tensor representing one
+~PointCloud::Array~.
+The tensor array information shall map directly to that of ~Array~.
+A *pcarray* places no additional requirements on its tensor MD.
+
+** pcdataset
+
+The *datatype* of *pcdataset* indicates a tensor representing on
+~PointCloud::Dataset~.
+The tensor array shall be empty.
+The tensor MD shall have the following attributes:
+
+- arrays :: an object representing the named arrays.  Each attribute
+  name provides the array name and each attribute value provides a
+  *datapath* to a tensor of type *pcarray* holding the named array.
+Additional user application ~Dataset~ metadata may reside in the tensor
+MD.
+
+** pcgraph
+
+The *datatype* of *pcgraph* indicates a tensor representing a "point cloud
+graph".  This extends a point cloud to include relationships between
+pairs of points.  The array part of a *pcgraph* tensor shall be empty.
+The MD part of a *pcgraph* tensor shall provide reference to two
+*pcdataset* instances with the following MD attributes:
+
+- nodes :: a *datapath* refering to a *pcdataset* representing graph vertex features.
+
+- edges :: a *datapath* refering to a *pcdataset* representing graph edges and their features.
+
+In addition, the *pcdataset* referred to by the *edges* attribute shall
+provide two arrays of integer type with names *tails* and *heads*.  Each
+shall provide indices into the *nodes* point cloud representing the tail
+and head endpoint of graph edges.  A node or edge dataset may be
+shared between different *pcgraph* instances.
+
+** trace
+
+The *datatype* of *trace* indicates a tensor representing a single ~ITrace~
+or a collection of ~ITrace~ which have been combined.
+
+The tensor array shall represent the samples over a contiguous period
+of time from traces.
+
+The tensor array shall have dimensionality of one when representing a
+single ~ITrace~.  A collection of ~ITrace~ shall be represented with a
+two-dimensional array with each row representing one or more traces
+from a common channel.  In such a case, the full trace content
+associated with a given channel may be represented by one or more
+rows.
+
+The array element type shall be either ~"i2"~ (~int16_t~) or ~"f4"~ (~float~)
+depending on if ADC or signals are represented, respectively.
+
+The tensor MD may include the attribute *tbin* with integer value and
+providing the number of sample periods (ticks) between the frame
+reference time and the first sample (column) in the array.
+
+** tracedata
+
+The *datatype* of *tracedata* provides per-trace information for a subset
+of.  It is similar to a *pcdataset* and in fact may carry that value as
+the *datatype* but it requires the following differences.
+
+It defines additional MD attributes:
+
+- tag :: optional, a trace tag.  If omitted or empty string, dataset must span total trace ordering.
+
+The following array names are recognized:
+
+- chid :: channel ident numbers for the traces.
+
+- index :: provides indices into the total trace ordering.  
+
+- summary :: trace summary values.
+
+A chid value is require for every trace.  If the *tracedata* has no *tag*
+then a *chid* array spanning the total trace ordering must be provided
+and neither *index* nor *summary* is recognized.  If the *tracedata* has a
+*tag* it must provide an *index* array and may provide a *summary* array and
+may provide a *chid* array each corresponding to the traces identified
+by *index*.
+
+** frame
+
+The *datatype* of *frame* represents an ~IFrame~.
+
+The tensor array shall be empty.
+
+The tensor MD aggregates tensors of datatype *trace* and *tracedata* and
+provides other values as listed;
+
+- ident :: the frame ident number (required)
+
+- tags :: an array of string giving frame tags
+
+- time :: the reference time of the frame (required)
+
+- tick :: the sample period of the traces (required)
+
+- masks :: channel mask map (optional)
+  
+- traces :: a sequence of datapath references to tensors of datatype *trace*.  The order of this sequence, along with the order of rows in any 2D *trace* tensors determines the /total order of traces/.
+
+- tracedata :: a sequence of datapath references to tensors of datatype *tracedata*
+
+In converting an ~IFrame~ to a *frame* tensor the sample values may be
+truncated to *type* ~"i2"~.
+
+A frame tensor of type ~"i2"~ shall have its sample values inflated to
+type ~float~ when converted to an ~IFrame~.
+
+** cluster
+
+A ~cluster~ is a ~pcgraph~ with convention for how to serialize each of
+its node types as described here.
+
+*** wire
+
+*** channel
+
+*** measure
+
+*** blob
+
+*** slice
+
+* Similarity to HDF5
+
+The data model is intentionally similar to HDF5 abstract data model
+and there is a conceptual mapping between the two:
+
+#+begin_center
+HDF5 group hierarchy
+
+$\leftrightarrow$ 
+
+~ITensor~ metadata attribute providing a hierarchy path as array of string.
+#+end_center
+
+#+begin_center
+HDF5 group 
+
+$\leftrightarrow$ 
+
+No direct equivalent but an ~ITensor~ with no array is effectively the same.
+#+end_center
+
+#+begin_center
+HDF5 dataset
+
+$\leftrightarrow$ 
+
+~ITensor~ array.
+#+end_center
+
+#+begin_center
+HDF5 dataspace and datatype
+
+$\leftrightarrow$ 
+
+~ITensor~ methods ~shape()~, ~dtype()~, etc.
+#+end_center
+
+#+begin_center
+HDF5 group or dataset attribute
+
+$\leftrightarrow$ 
+
+~ITensor~ metadata attribute
+#+end_center
+

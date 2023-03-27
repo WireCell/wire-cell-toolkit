@@ -14,8 +14,6 @@ using namespace WireCell::RayGrid;
 
 Img::GridTiling::GridTiling()
     : Aux::Logger("GridTiling", "img")
-    , m_blobs_seen(0)
-    , m_threshold(0.0)
 {
 }
 
@@ -25,6 +23,7 @@ void Img::GridTiling::configure(const WireCell::Configuration& cfg)
 {
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
     m_face = m_anode->face(cfg["face"].asInt());
+    m_nudge = get(cfg, "nudge", m_nudge);
     if (!m_face) {
         log->error("no such face: {}", cfg["face"]);
         THROW(ValueError() << errmsg{"APA lacks face"});
@@ -41,6 +40,7 @@ WireCell::Configuration Img::GridTiling::default_configuration() const
     cfg["face"] = 0;    // the face number to focus on
     // activity must be bigger than this much to consider.
     cfg["threshold"] = m_threshold;
+    cfg["nudge"] = m_nudge;
     return cfg;
 }
 
@@ -140,7 +140,7 @@ bool Img::GridTiling::operator()(const input_pointer& slice, output_pointer& out
 
     // SPDLOG_LOGGER_TRACE(log, "anode={} face={} slice={} making blobs",
     //                     anodeid, faceid, slice->ident());
-    auto blobs = make_blobs(m_face->raygrid(), activities);
+    auto blobs = make_blobs(m_face->raygrid(), activities, m_nudge);
 
     const float blob_value = 0.0;  // tiling doesn't consider particular charge
     for (const auto& blob : blobs) {

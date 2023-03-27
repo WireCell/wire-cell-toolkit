@@ -71,6 +71,14 @@ namespace WireCell {
             return ss.str();
         }
 
+        inline
+        std::string indent(size_t num, const std::string& tab="\t")
+        {
+            std::stringstream ss;
+            for (size_t ind=0; ind<num; ++ind) ss << tab;
+            return ss.str();
+        }
+
         bool endswith(const std::string& whole, const std::string& part);
         bool startswith(const std::string& whole, const std::string& part);
 

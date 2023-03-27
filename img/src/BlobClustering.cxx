@@ -158,7 +158,7 @@ void Img::BlobClustering::flush(output_queue& clusters)
     }
 
     // 3) pack and clear
-    clusters.push_back(std::make_shared<Aux::SimpleCluster>(grind.graph()));
+    clusters.push_back(std::make_shared<Aux::SimpleCluster>(grind.graph(), cur_ident()));
     m_cache.clear();
 }
 
@@ -167,6 +167,12 @@ void Img::BlobClustering::flush(output_queue& clusters)
 static int frame_ident(const IBlobSet::pointer& bs)
 {
     return bs->slice()->frame()->ident();
+}
+
+int Img::BlobClustering::cur_ident() const
+{
+    if (m_cache.empty()) return false;
+    return frame_ident(m_cache.front());
 }
 
 // Determine if we have a BlobSet from a fresh frame
@@ -188,16 +194,18 @@ bool Img::BlobClustering::operator()(const input_pointer& blobset,
     
     if (!blobset) {  // eos
         flush(clusters);
-        log->debug("flush {} clusters + EOS on EOS",
-                 clusters.size());
+        log->debug("flush {} clusters + EOS on EOS at call={}",
+                   clusters.size(), m_count);
         for (const auto& cl : clusters) {
             const auto& gr = cl->graph();
             
-            log->debug("cluster {}: nvertices={} nedges={}",
+            log->debug("call={} cluster={} nvertices={} nedges={}",
+                       m_count,
                        cl->ident(), boost::num_vertices(gr),
                        boost::num_edges(gr));
         }
         clusters.push_back(nullptr);  // forward eos
+        ++m_count;
         return true;
     }
 
@@ -206,6 +214,6 @@ bool Img::BlobClustering::operator()(const input_pointer& blobset,
     }
 
     m_cache.push_back(blobset);
-
+    ++m_count;
     return true;
 }

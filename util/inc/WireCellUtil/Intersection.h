@@ -5,33 +5,41 @@
 
 namespace WireCell {
 
-    /** Determine a 2D square is intersected by a 3D ray projected to
-     * its plane.
+    /** Find intersection of a ray and the sides of an axis-aligned
+     * box which are orthogonal to the given axis.
      *
-     * \param axis0 is the axis number (0,1,2) to which the projected
-     * plane is perpendicular.
+     * \param axis0 is the axis number (0,1,2).
      *
-     * \param bounds is a raw from opposite corners of the bounding box.
+     * \param bounds is a ray from opposite corners of a box defining a CLOSED interval in 3-space.
      *
-     * \param point is a WireCell::Point from which a ray emanates.
+     * \param point is the origin point of a ray
      *
-     * \param dir is a WireCell::Vector in the direction of the ray.
+     * \param dir is the unit vector along the direction of a ray
      *
-     * \param hits is the returned intersection(s).
+     * \param hits provides a pair of intersection(s).
      *
-     * \return a "hit mask" with 0 indicating the ray did not
-     * intersect, 1 or 2 meaning the first or second point in the ray
-     * is valid and 3 meaning both are.
+     * \return a "hit mask" categorizes the intersections:
+     *
+     * - 0 :: the ray does not intersect, hits is not valid.
+     * 
+     * - 1 :: the ray intersects at a single point (box corner), hits.first is valid.
+     *
+     * - 2 :: the ray intersects at a single point (box corner), hits.second is valid.
+     *
+     * - 3 :: the ray intersects at two points, hits is fully valid.
+     *
+     * Invalid points in hits are set to the origin point.
+     *
+     * The hits ray is made parallel to the ray "dir".
+     *
      */
-
-    int hit_square(int axis0, const Ray& bounds, const Point& point, const Vector& dir, Ray& hits);
+    int box_intersection(int axis0, const Ray& bounds, const Vector& point, const Vector& dir, Ray& hits);
 
     /** Determine if a ray hits a rectangular box aligned with the
-     * Cartesian axes.
-     *
-     * See WireCelll::hit_square for definition of arguments and return value.
+     * Cartesian axes.  See above variant of this function for
+     * arguments and return value description.
      */
-    int box_intersection(const Ray& bounds, const Ray& ray, Ray& hits);
+    int box_intersection(const Ray& bounds, const Vector& point, const Vector& dir, Ray& hits);
 
 }  // namespace WireCell
 

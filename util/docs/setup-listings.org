@@ -1,0 +1,107 @@
+
+
+#+begin_export latex
+\colorlet{punct}{red!60!black}
+\definecolor{background}{HTML}{EEEEEE}
+\definecolor{delim}{RGB}{20,105,176}
+\definecolor{keyword}{RGB}{20,105,176}
+\definecolor{comment}{RGB}{20,200,10}
+\colorlet{numb}{magenta!60!black}
+\lstdefinestyle{talk}{
+    basicstyle=\normalfont\ttfamily,
+    numbers=none,
+    numberstyle=\scriptsize,
+    stepnumber=1,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=lines,
+    backgroundcolor=\color{background},
+    keywords = [2]{include, if, for, const, typedef, using, public, private, virtual, class, return, void},
+    keywordstyle=[2]\color{keyword},
+    comment=[l]{//},
+    commentstyle=\color{comment}\ttfamily,
+    stringstyle=\color{blue}\ttfamily,
+    morestring=[b]',
+    morestring=[b]",
+    otherkeywords={:, =, ==, ::}
+}
+\lstset{style=talk}
+
+\lstdefinelanguage{cpp}{
+    basicstyle=\normalfont\ttfamily,
+    numbers=left,
+    numberstyle=\scriptsize,
+    stepnumber=1,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=lines,
+    backgroundcolor=\color{background},
+    keywords = [2]{include, if, for, const, typedef, using, public, private, virtual, class, return, void},
+    keywordstyle=[2]\color{keyword},
+    comment=[l]{//},
+    commentstyle=\color{comment}\ttfamily,
+    stringstyle=\color{blue}\ttfamily,
+    morestring=[b]',
+    morestring=[b]",
+    otherkeywords={:, =, ==, ::}
+}
+\lstdefinelanguage{bash}{
+    basicstyle=\normalfont\ttfamily,
+    numbers=left,
+    numberstyle=\scriptsize,
+    stepnumber=1,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=lines,
+    backgroundcolor=\color{background},
+    keywords = [1]{import, local},
+    keywordstyle=[2]\color{keyword},
+    comment=[l]{//},
+    commentstyle=\color{comment}\ttfamily,
+    stringstyle=\color{blue}\ttfamily,
+    morestring=[b]',
+    morestring=[b]",
+}
+\lstdefinelanguage{jsonnet}{
+    basicstyle=\normalfont\ttfamily,
+    numbers=left,
+    numberstyle=\scriptsize,
+    stepnumber=1,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=lines,
+    backgroundcolor=\color{background},
+    keywords = {$},
+    keywords = [2]{self, import, local, true, false, null, function},
+    keywordstyle=[2]\color{keyword},
+    comment=[l]{//},
+    commentstyle=\color{comment}\ttfamily,
+    stringstyle=\color{blue}\ttfamily,
+    morestring=[b]',
+    morestring=[b]",
+    otherkeywords={:, =, ==}
+}
+\lstdefinelanguage{json}{
+    basicstyle=\normalfont\ttfamily,
+    numbers=left,
+    numberstyle=\scriptsize,
+    stepnumber=1,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=lines,
+    backgroundcolor=\color{background},
+    keywords = [1]{import, local},
+    keywordstyle=[2]\color{keyword},
+    comment=[l]{//},
+    commentstyle=\color{comment}\ttfamily,
+    stringstyle=\color{blue}\ttfamily,
+    morestring=[b]',
+    morestring=[b]",
+}
+
+#+end_export

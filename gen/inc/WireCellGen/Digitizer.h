@@ -48,6 +48,7 @@ namespace WireCell {
             std::vector<double> m_fullscale, m_baselines;
             std::string m_frame_tag;
             size_t m_count{0};
+            bool m_round{false};  // apply round to FP ADC values
         };
 
     }  // namespace Gen

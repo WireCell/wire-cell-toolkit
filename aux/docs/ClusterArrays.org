@@ -1,0 +1,151 @@
+#+title: ~WireCell::Aux::ClusterArrays~
+
+Provides array representations of ~ICluster~.
+
+The ~ICluster~ graph represents the complex connection and attributes of
+five types of objects.  In addition to graph edges providing inter
+object referencing, these objects reference other objects internally
+leading to an even more complex graph.  The ~ClusterArrays~ class
+"flattens" the attributes and their relationship into a set of arrays.
+This document describes the ~ClusterArrays~ interface and give guidance
+on how to use the array its produces.
+
+* Low-level array representation
+
+The API provides arrays in the form of [[https://www.boost.org/doc/libs/1_79_0/libs/multi_array/doc/user.html][Boost.MultiArray]] types.
+
+* Array schema
+
+The array schema closely matches that provided by the python-geometric
+~HeteroData~ interface.  It factors into *node array* and *edge array*
+schema.
+
+
+** Node array schema
+
+An ~ICluster~ graph node of one of a fixed set of *node types* (/channel,
+wire, blob, slice, measure/).  The first letter of the type name is
+the *node type code*.  Each node type has exactly one array schema.
+
+The order of the rows in a node array follows the order in the
+~ICluster~ node collection.  The meaning of each column of each node
+type is described in the following subsection.  Some column types are
+inherently integer but are represented precisely as ~double~ and are
+marked with "(int)".
+
+Take care that the enumerated lists below are 1-based counts, one more
+than the 0-based array indices.
+
+*** Channel
+
+A channel represents an amount of signal collected from its attached
+wire segments over the duration of a time slice.
+
+1. /ident/, (int) channel ID as defined in the "wires" file
+2. /value/, the central value of the signal
+3. /uncertainty/, the uncertainty in the value
+4. /index/, (int) the channel index
+5. /wpid/, (int) the wire plane id
+
+*** Wire
+
+The wire array reproduces purely static "geometric" information about
+physical wire segments.
+
+1. /ident/, (int) the application determined ID number.
+2. /wip/, (int) the wire-in-plane (WIP) index.
+3. /segment/, (int) the number of segments between this wire segment and the channel input.
+4. /channel/, (int) the channel ID (not row index).
+5. /plane/, (int) the plane ID (not necessarily a plane index).
+6. /tailx/, the x coordinate of the tail endpoint of the wire.
+7. /taily/, the y coordinate of the tail endpoint of the wire.
+8. /tailz/, the z coordinate of the tail endpoint of the wire.
+9. /headx/, the x coordinate of the head endpoint of the wire.
+10. /heady/, the y coordinate of the head endpoint of the wire.
+11. /headz/, the z coordinate of the head endpoint of the wire.
+
+
+*** Blob
+
+A blob describes a volume in space bounded in the longitudinal
+direction by the duration of a time slice and in the transverse
+directions by pairs of wires from each plane and with an associated
+signal contained by this region.
+
+1. /ident/, (int) the application determined ID number.
+2. /value/, the central value of the signal
+3. /uncertainty/, the uncertainty in the value
+4. /faceid/, (int) the face ident from ~WirePlaneId(kUnkownLayer,face,apa)~
+5. /sliceid/, (int) the slice ident
+6. /start/, the start time of the blob
+7. /span/, the time span of the blob
+8. /min1/, (int) the WIP providing lower bound of the blob in plane 1.
+9. /max1/, (int) the WIP providing upper bound of the blob in plane 1.
+10. /min2/, (int) the WIP providing lower bound of the blob in plane 2.
+11. /max2/, (int) the WIP providing upper bound of the blob in plane 2.
+12. /min3/, (int) the WIP providing lower bound of the blob in plane 3.
+13. /max3/, (int) the WIP providing upper bound of the blob in plane 3.
+14. /ncorners/, (int) the number of corners
+15. 24 columns holding /corners as (y,z) pairs/, 12 pairs, of which /ncorners/ are valid.
+
+*** Slice
+
+A slice represents a duration in drift/readout time.
+
+1. /ident/, (int) the application determined ID number.
+2. /value/, the central value of the signal.
+3. /uncertainty/, the uncertainty in the value.
+4. /frameid/, (int) the frame ident number
+5. /start/, the start time of the slice.
+6. /span/, the duration time of the slice.
+
+The ~ISlice~ also holds the "activity map" mapping channels in slice to charge.
+
+
+*** Measure
+
+A measure represents the collection of channels in a given plane
+connected to a set of wires that span a blob in one wire plane.
+Its signal is the sum of channel signals.
+
+1. /ident/, (int) the application determined ID number.
+2. /value/, the central value of the signal.
+3. /uncertainty/, the uncertainty in the value.
+4. /wpid/, the wire plane ID
+
+** Edge array schema
+
+~ICluster~ does not associate any data with edges and so only
+connectivity information is covered by the edge array schema.  There
+is one type of array with two columns, each providing an index into a
+node array of an endpoint of the edge.  Index is represented in type
+~int~.
+
+Each *edge array* spans the edges of one *edge type*.  The edge type is
+defined as the combination of the *node type codes* (see above) of nodes
+which the edge connects.  The combination is formed so that the codes
+are in alphabetical order and this order is reflected in the order of
+the columns.  For example if one has an edge array of type ~bs~
+(blob-slice) then the first column of the array holds row indices into
+the blob type node array and the second column holds row indices into
+the slice type node array.  The rows of edge arrays follow the order
+of edges in the ~ICluster~ graph.
+
+
+* Implementation
+
+The ~ClusterArrays~ class will convert ~ICluster~ to arrays following
+above schema.  See ~ClusterFileSink::numpify()~ for example usage.
+
+A test:
+
+#+begin_example
+wire-cell -l stdout -L debug -A detector=pdsp \
+          -c img/test/depo-ssi-viz.jsonnet
+#+end_example
+
+That test and some plotting can be run as:
+
+#+begin_example
+snakemake -j6 -s img/test/depo-ssi-viz.smake all
+#+end_example

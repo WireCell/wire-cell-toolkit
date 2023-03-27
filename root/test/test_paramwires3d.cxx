@@ -53,7 +53,8 @@ void test1()
 void test2()
 {
     double pitches[] = {10.0, 5.0, 3.0, -1};
-    int want[] = {371, 747, 1243, 0};
+//    int want[] = {371, 747, 1243, 0};
+    int want[] = {375, 747, 1243, 0};
     for (int ind = 0; pitches[ind] > 0.0; ++ind) {
         WireParams* params = new WireParams;
         Configuration cfg = params->default_configuration();

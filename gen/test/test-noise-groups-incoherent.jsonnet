@@ -1,25 +1,24 @@
 // Make an incoherent GroupNoiseModel "map file".
 //
-// Here we assume the test-noise-spectra.jsonnet with 10 groups and
-// PDSP APA0 channel numbering.
+// Here we assume the test-noise-spectra.jsonnet with 10 groups
+// (numbered 1 to 10) and PDSP APA0 channel numbering.  The particualr
+// noise grouping is totally bogus for the real PDSP detector.
 //
-// We make each plane channel range use a different spectra.
+// We make each "plane" channel range use a different spectra.
+//
+// Note at the lowest noise, quantization error dominates and the
+// modeled noise adding a relatively large component.  In this test,
+// starting at about group 3, the modeled spectra are comparable to
+// the input spectra in the peak but the modeled noise spectra will
+// still have a fatter tail.
+local step=256;
 [
     // Note the "plane" attribute is not standard and shoud/must be
     // ignored.
     {
-        plane: "u",
-        groupID: 9,             // noisiest
-        channels: std.range(0, 800-1),
+        plane: "p%d"%n,
+        groupID: n,
+        channels: std.range(step*(n-1), (step*n)-1),
     },
-    {
-        plane: "v",
-        groupID: 5,
-        channels: std.range(800, 800 + 800-1),
-    },
-    {
-        plane: "w",
-        groupID: 0,             // quietest
-        channels: std.range(800 + 800, 800 + 800 + 960-1),
-    },
-]    
+    for n in std.range(1,10)
+]

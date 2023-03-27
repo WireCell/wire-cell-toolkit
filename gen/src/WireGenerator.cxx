@@ -58,7 +58,7 @@ static GenWire* make_wire(int index, const Point& point, const Point& proto, con
     const Ray wireray(pt1, pt2);
 
     Ray hits;
-    int hitmask = box_intersection(bounds, wireray, hits);
+    int hitmask = box_intersection(bounds, pt1, ray_unit(wireray), hits);
     if (3 != hitmask) {
         return 0;
     }

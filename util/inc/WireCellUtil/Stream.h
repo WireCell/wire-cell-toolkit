@@ -1,11 +1,12 @@
 /**
-   Wire-Cell Toolkit Stream provides methods to send data to
-   std::ostream.
+   Wire-Cell Toolkit Stream provides methods to send data to a
+   std::ostream (which really should be a boost iostream).
 
    WCT Stream is intended for binary sinks and sources and thus
    applying to std::cin or std::cout is not recomended.
 
-   This is a thin wrapper around custard/pigenc.
+   The Stream API currently supports array-like data by encoding array
+   information into Numpy file format using custard/pigenc.
  */
 
 #ifndef WIRECELLUTIL_STREAM
@@ -39,7 +40,17 @@ namespace WireCell::Stream {
     /// supported file types.
     using custard::output_filters;
 
-    /// Stream vector to custard stream.  Must have tar filter!
+    /// Note, to use these practically, the ostreams need to end in a
+    /// tar, zip or other container filter.
+
+    using shape_t = std::vector<size_t>;
+
+    /// Stream array as type-less bytes with all specified.
+    std::ostream& write(std::ostream& so, const std::string& fname,
+                        const std::byte* bytes, const shape_t& shape,
+                        const std::string& dtype_name);
+
+    /// Stream vector to custard stream.  
     template<typename Type>
     std::ostream& write(std::ostream& so, const std::string& fname, const std::vector<Type>& vec) {
         pigenc::File pig;
@@ -50,7 +61,7 @@ namespace WireCell::Stream {
         return pig.write(so);
     }
     
-    /// Stream vector from custard stream.  Must have tar filter!
+    /// Stream vector from custard stream.
     template<typename Type>
     std::istream& read(std::istream& si, std::string& fname, std::vector<Type>& arr) {
         size_t fsize;
