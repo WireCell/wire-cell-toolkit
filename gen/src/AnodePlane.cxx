@@ -209,7 +209,10 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
 
             const double pitchmin = wire_pitch_dirs.second.dot(wires[0]->center() - plane_center);
             const double pitchmax = wire_pitch_dirs.second.dot(wires[nwires - 1]->center() - plane_center);
-            const Vector pimpos_origin(response_x, plane_center.y(), plane_center.z());
+            // const Vector pimpos_origin(response_x, plane_center.y(), plane_center.z());
+            const Vector pimpos_origin(plane_center.x(), plane_center.y(), plane_center.z());
+            if (std::fabs(ecks_dir.x()) > 0.999) { pimpos_origin.x(response_x); } // drift in x-axis
+            else if (std::fabs(ecks_dir.y()) > 0.999) { pimpos_origin.y(response_x); } // y-axis
 
             log->debug("face:{}, plane:{}, origin:{} mm", iface, iplane, pimpos_origin / units::mm);
 
@@ -268,13 +271,25 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
                 else if (std::fabs(pitch_dir.y()) > 0.999)
                     pext = Point(0, 0.5 * mean_pitch, 0);
 
-                Point p1(anode_x, std::min(v1.y(), v2.y()), std::min(v1.z(), v2.z()));
-                p1 += pext * (-1.0);
-                bb(p1);
-                Point p2(cathode_x, std::max(v1.y(), v2.y()), std::max(v1.z(), v2.z()));
-                p2 += pext;
-                bb(p2);
-                bbvols.push_back(bb);
+                if (std::fabs(ecks_dir.x()) > 0.999) { // drift in x-axis
+                    Point p1(anode_x, std::min(v1.y(), v2.y()), std::min(v1.z(), v2.z()));
+                    p1 += pext * (-1.0);
+                    bb(p1);
+                    Point p2(cathode_x, std::max(v1.y(), v2.y()), std::max(v1.z(), v2.z()));
+                    p2 += pext;
+                    bb(p2);
+                    bbvols.push_back(bb);
+                }
+                else if (std::fabs(ecks_dir.y()) > 0.999) { // drift in y
+                    Point p1(std::min(v1.x(), v2.x()), anode_x, std::min(v1.z(), v2.z()));
+                    p1 += pext * (-1.0);
+                    bb(p1);
+                    Point p2(std::max(v1.x(), v2.x()), cathode_x, std::max(v1.z(), v2.z()));
+                    p2 += pext;
+                    bb(p2);
+                    bbvols.push_back(bb);
+                }
+
             }
         }  // plane
 
