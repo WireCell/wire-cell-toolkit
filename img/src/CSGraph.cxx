@@ -167,7 +167,7 @@ graph_t CS::prune(const graph_t& csg, float threshold)
     for (auto oldv : vertex_range(csg)) {
         const auto& node = csg[oldv];
         if (node.kind == node_t::blob) {
-            if (node.value.value() <= threshold) {
+            if (node.value.value() < threshold) {
                 continue;
             }
             ++nblobs;

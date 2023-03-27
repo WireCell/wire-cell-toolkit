@@ -1,0 +1,647 @@
+#+title: WCT Point Cloud Support
+#+BEAMER_HEADER: \title[UVCGAN + SigProc]{Wire-Cell Signal Processing applied to \\ UVCGAN Domain-Translated ADC}
+#+setupfile: ~/sync/talks/setup.org
+#+LATEX_CLASS_OPTIONS: [serif,professionalfont,colorlinks,aspectratio=149]
+#+latex_header: \usepackage{svg}
+
+* Topics
+
+- Motivation
+- Field response effects
+- Data sample description
+- WCT processing
+- Some result plots
+
+* Motivation
+
+- ADC are (in part) formed by a \textbf{convolution} of a /field response/ (FR) and a distribution of /ionization electrons/.
+
+- We define our two /data domains/ based on each having a unique FR.
+
+- Comparing domain-translated and target-domain images is typically done in a way that is sensitive only to pixel-local information.
+
+- Different FRs introduce non-pixel-local differences (due to the convolution).
+
+- Signal processing (SP), in part, applies a \textbf{deconvolution} of an ADC image with \textbf{another FR} to recover an approximate measure of the original distribution of ionization electrons.
+
+  - SP is sensitive to mismatch between convolution-FR and deconvolution-FR
+
+  - Must run SP in any case
+
+So, let's apply SP to domain-translated data and see what happens.
+
+* Understanding effect of different field responses
+
+*Very conceptually*, we can understand LArTPC ADC production by method $x$ as a \textbf{convolution} of signal $S$ with response $R_x$ and ultimately with added noise $N$:
+\[ADC_x = S \otimes R_{x} + N,\ x\in\{sim,det,gan\}\]
+
+The /signal processing/ will \textbf{approximately} recover $S$ through a \textbf{deconvolution} with another response $R_{SP}$:
+\[S'_x = ADC_x \otimes R^{-1}_{SP}\]
+
+In toyzero, the FR in $R_{sim}$ is "q1d", $R_{det}$ is "2d", $R_{gan} \approx R_{det}$ and we take $R_{SP} = average(R_{sim})$ for SP and (ignoring $N$) on:
+- $sim$: $R_{sim}/R_{SP}$ approximately cancels giving \textbf{artificially idyllic} $S'$.
+- $det$: $R_{det}/R_{SP}$ \textbf{mismatch} leads to artifacts in $S'$.
+- $gan$:  $R_{gan}/R_{SP}$ we train to effectively "match the mismatch" of $det$.
+
+* Example: ground-truth domain differences
+
+#+ATTR_LATEX: :height 0.9\textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/xddp/real/66/raw.pdf]]
+
+* Example: signal processing with matched/mismatched domains
+
+#+ATTR_LATEX: :height 0.9\textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/xddp/real/66/sig.pdf]]
+
+* Data sample
+
+Dmitrii hand selected sample of $256\times 256$ patches covering a variety of topologies:
+
+#+begin_example
+  $ ls {fake,real}_{a,b}/sample_*.npz | wc -l
+  128
+#+end_example
+
+Two sources of data:
+
+- real :: Wire-Cell sim, U-plane, patch crop
+- fake :: cross-domain translation by UVCGAN
+
+The two /toyzero/ data domains:
+
+- a :: quasi-1D field response
+- b :: 2D field response
+
+Samples are \textbf{noise-free} ADC counts relative to baseline/pedestal and represented with floating point values.
+
+* Processing
+
+Some of the data tiers of the processing stages:
+
+- raw :: import original noise-free ADC patches (fix sign error).
+- rnd :: round \textbf{raw} floats to integer just for display purposes.
+- vlt :: scale \textbf{raw} to pre-digitized voltage level.
+- noi :: load into WCT and add noise (needed for proper SP) to \textbf{vlt}.
+- dig :: re-digitize to give /noise-full/ ADC.
+- sig :: apply WCT noise-filtering and signal-processing with $R_{q1d}$ to get $S'$.
+
+* Plots
+
+Will show some trio of plots of these data tiers for a given \textbf{data tier} and \textbf{domain}.
+
+1. The UVCGAN-translated image ("GAN").
+2. Initial WC simulation input to UVCGAN ("Sim").
+3. The percentage difference relative to their average ("%-diff").
+
+Notes: 
+
+- Noise is identical, does not contribute to the "%-diff".
+
+- Unconventional color maps chosen to accentuate differences.
+
+
+* 
+
+#+begin_center
+Two crossing tracks in 2D domain
+#+end_center
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/raw.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/rnd.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/noi.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/dig.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/sig.pdf]]
+
+
+* 
+
+#+begin_center
+Two crossing tracks in q1d domain
+#+end_center
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/raw.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/rnd.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/noi.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/dig.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/sig.pdf]]
+
+
+* 
+
+#+begin_center
+A somewhat /elongated/ track in 2d domain.
+#+end_center
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/2/raw.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/2/rnd.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/2/noi.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/2/dig.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/2/sig.pdf]]
+
+* 
+
+#+begin_center
+A somewhat /elongated/ track in q1d domain.
+#+end_center
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/2/raw.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/2/rnd.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/2/noi.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/2/dig.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/2/sig.pdf]]
+
+
+* 
+
+#+begin_center
+A somewhat /isochronous/ track in 2d domain.
+#+end_center
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/19/raw.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/19/rnd.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/19/noi.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/19/dig.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/19/sig.pdf]]
+
+* 
+
+#+begin_center
+A somewhat /isochronous/ track in q1d domain.
+#+end_center
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/19/raw.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/19/rnd.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/19/noi.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/19/dig.pdf]]
+
+* 
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/19/sig.pdf]]
+
+
+
+
+* Conclusions
+
+UVCGAN (on toyzero) produces FP values with many "cosmetic" errors.
+- See many $\pm \epsilon$ values where $\equiv 0.0$ expected.
+- They can be removed via a ~round()~ to integer value.
+- They become insignificant after noise is added.
+
+Sim/GAN difference in track core are $\mathcal{O}(1\%)$.
+- Small compared to core errors due to mismatched FR in sim/SP.
+
+Much larger error near sharp edges.
+- Indicates that the domain translation learning is not complete?
+
+I think we can use these plots (or some nicer versions) to support the paper.  
+
+- Understanding how these errors propagate through further reconstruction could be a future project.
+
+
+* 
+
+#+begin_center
+\Huge $\mathcal{FIN}$
+#+end_center
+
+* Technicalities
+
+A Snakemake recipe automates WCT running and plotting:
+
+#+begin_example
+snakemake -p -jall -s sigproc/test/adc-noise-sig.smake
+#+end_example
+
+- Some changes/fixes needed and are in [[https://github.com/WireCell/wire-cell-toolkit/pull/193][PR #193]].
+
+- Presentation source: ~sigproc/docs/adc-noise-sig.org~ 
+
+* Add noise + SP job
+
+#+ATTR_LATEX: :width \textwidth
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/dfp.pdf]]
+
+* Other generators
+
+The "two crossing tracks" sample with these generators:
+
+- UVCGAN
+- ACLGAN
+- CycleGAN
+- UGATIT
+
+* 
+
+#+begin_center
+Two crossing tracks in 2D domain
+#+end_center
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/raw.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/b/66/raw.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/b/66/raw.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/b/66/raw.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/rnd.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/b/66/rnd.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/b/66/rnd.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/b/66/rnd.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/noi.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/b/66/noi.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/b/66/noi.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/b/66/noi.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/dig.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/b/66/dig.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/b/66/dig.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/b/66/dig.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/b/66/sig.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/b/66/sig.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/b/66/sig.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/b/66/sig.pdf]]
+
+* 
+
+#+begin_center
+Two crossing tracks in q1d domain
+#+end_center
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/raw.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/a/66/raw.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/a/66/raw.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/a/66/raw.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/rnd.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/a/66/rnd.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/a/66/rnd.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/a/66/rnd.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/noi.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/a/66/noi.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/a/66/noi.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/a/66/noi.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/dig.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/a/66/dig.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/a/66/dig.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/a/66/dig.pdf]]
+
+
+* UVCGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UVCGAN/frdp/a/66/sig.pdf]]
+
+* ACLGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/ACLGAN/frdp/a/66/sig.pdf]]
+
+* CycleGAN
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/CycleGAN/frdp/a/66/sig.pdf]]
+
+* UGATIT
+
+\vspace{-1mm}
+
+#+ATTR_LATEX: :height \textheight 
+[[../../build/sigproc/test/adc-noise-sig/UGATIT/frdp/a/66/sig.pdf]]
+
+# Local Variables:
+# eval: (fix-latex-previews)
+# End:

@@ -48,7 +48,10 @@ void TbbFlow::configure(const Configuration& cfg)
         INode::pointer tail_node = WireCell::Factory::lookup<INode>(tail_tn.type, tail_tn.name);
         INode::pointer head_node = WireCell::Factory::lookup<INode>(head_tn.type, head_tn.name);
 
-        m_dfp->connect(tail_node, head_node, conn.tail, conn.head);
+        bool ok = m_dfp->connect(tail_node, head_node, conn.tail, conn.head);
+        if (!ok) {
+            THROW(ValueError() << errmsg{"edge connection error"});
+        }
     }
 }
 

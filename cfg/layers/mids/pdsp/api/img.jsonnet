@@ -36,7 +36,7 @@ function(services, params) function(anode)
     low.pg.pipeline([
         sigunc,
         img.slicing("gauss"+ident, "gauss_error"+ident, span=params.img.span),
-        img.tiling[params.img.tiling_strategy](),
+        img.tiling(),
         img.clustering(),
         img.grouping(),
         img.charge_solving(),   // fixme: a few optins we may want to allow to specify in variant params

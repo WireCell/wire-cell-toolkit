@@ -167,7 +167,11 @@ function(services, params, options={}) {
         data: {
             nominal_gain: params.elec.gain,
             nominal_shaping: params.elec.shaping,
-            deviants: params.noise.channel_deviants,
+            deviants:  [ {
+                chid: ch,
+                gain: params.misconfigured.gain,
+                shaping: params.misconfigured.shaping,
+            } for ch in params.misconfigured.channels ],
         }
     },
 

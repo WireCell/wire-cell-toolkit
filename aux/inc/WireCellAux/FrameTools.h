@@ -5,6 +5,7 @@
 #define WIRECELL_FRAMETOOLS
 
 #include "WireCellIface/IFrame.h"
+#include "WireCellIface/ITensorSet.h"
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/Logging.h"
 
@@ -120,3 +121,9 @@ namespace WireCell {
 }  // namespace WireCell
 
 #endif
+
+
+
+
+
+

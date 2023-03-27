@@ -48,7 +48,17 @@ namespace WireCell::Sio {
         /// traces.  If no tags are given or the tag "*" is found the
         /// entire frame will be matched.  Where a trace is included
         /// in more than one match it will be saved redundantly.
+        /// Note: the file retains no indication if a given tag is on
+        /// a frame or trace scope.
         std::vector<std::string> m_tags;
+
+        /// The channel mask map (CMM) can be saved to the stream as a
+        /// .npy file named like "chanmask_<tag>_<ident>.npy" where
+        /// <tag> is the map key, such as "bad".  Emitting the CMM may
+        /// be suppressed with by setting "masks=false" in the
+        /// configuration.  By default it is true.
+        bool m_masks{true};
+
 
         /// The array may be transformed as:
         ///  (arr+baseline)*scale + offset
@@ -69,6 +79,7 @@ namespace WireCell::Sio {
 
         void one_tag(const IFrame::pointer& frame,
                      const std::string& tag);
+        void masks(const IFrame::pointer& frame);
 
         size_t m_count{0};
     };        

@@ -1,0 +1,34 @@
+#+title: Wire-Cell Noise Model
+
+* Overview
+
+WCT provides a single "noise model" which perhaps is best labeled a "sampled spectrum" model.
+It is rather simple but covers all known forms of noise. 
+
+The model is parameterized by three pieces of information, all of which are provided by the user:
+
+- one or more "mean noise spectra"
+
+- a mapping from channel to spectrum
+
+- a mapping strategy
+
+The kernel of the model performs a sampling of a spectrum to generate a voltage-level waveform.
+The sampling has two steps.  First, each frequency bin of the mean spectrum is fluctuated according to the Rayleigh distribution.  To this fluctuated spectrum an inverse discrete Fourier transform is applied to produce a novel voltage-level waveform.
+
+The resulting waveform is then added to one or more channels via a mapping and tha mapping strategy.
+
+There are two mapping strategies:
+
+- the "incoherent" strategy adds a single waveform to a single channel via the mapping. A channel is mapped directly to a spectrum from which the waveform was generated.
+
+- the "coherent" strategy adds a single waveform to each in a group of channels. A channel is mapped to a "group" and the "group" is mapped to a spectrum.
+
+There is a WCT graph component that implements each strategy: ~IncoherentAddNoise~ and ~CoherentAddNoise~, respectively.[fn:old] 
+
+A WCT graph may, of course, apply multiple instances of either or both components.  This allows both types of noises to be added and, for example, interleaving of different types of coherent noise.
+
+Note, it is left to the user to provide properly normalized spectra so that when combined there is no "double counting" of noise power.
+
+
+[fn:old] An older ~AddNoise~ was used.  This component type is aliased to ~IncoherentAddNoise~.

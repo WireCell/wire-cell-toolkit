@@ -39,13 +39,18 @@
 
 #include "WireCellGen/DepoTransform.h"
 #include "WireCellGen/ImpactTransform.h"
-#include "WireCellUtil/NamedFactory.h"
-#include "WireCellIface/IAnodePlane.h"
+#include "WireCellGen/BinnedDiffusion_transform.h"
+
 #include "WireCellAux/SimpleTrace.h"
 #include "WireCellAux/SimpleFrame.h"
-#include "WireCellGen/BinnedDiffusion_transform.h"
+#include "WireCellAux/DepoTools.h"
+
+#include "WireCellIface/IAnodePlane.h"
+
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Point.h"
+#include "WireCellUtil/NamedFactory.h"
+
 
 WIRECELL_FACTORY(DepoTransform, WireCell::Gen::DepoTransform, WireCell::IDepoFramer, WireCell::IConfigurable)
 
@@ -152,46 +157,14 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
     }
 
     auto depos = in->depos();
+    size_t ndepos_used=0;
 
     Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
     ITrace::vector traces;
     for (auto face : m_anode->faces()) {
         // Select the depos which are in this face's sensitive volume
-        IDepo::vector face_depos, dropped_depos;
-        auto bb = face->sensitive();
-        if (bb.empty()) {
-            log->debug("call={}: anode {} face {} is marked insensitive, skipping",
-                     m_count, m_anode->ident(), face->ident());
-            continue;
-        }
-
-        for (auto depo : (*depos)) {
-            if (bb.inside(depo->pos())) {
-                face_depos.push_back(depo);
-            }
-            else {
-                dropped_depos.push_back(depo);
-            }
-        }
-
-        if (face_depos.size()) {
-            auto ray = bb.bounds();
-            log->debug(
-                "call={}: anode: {}, face: {}, processing {} depos spanning "
-                "t:[{},{}]ms, bb:[{}-->{}]cm",
-                m_count,
-                m_anode->ident(), face->ident(), face_depos.size(), face_depos.front()->time() / units::ms,
-                face_depos.back()->time() / units::ms, ray.first / units::cm, ray.second / units::cm);
-        }
-        if (dropped_depos.size()) {
-            auto ray = bb.bounds();
-            log->debug(
-                "call={}: anode: {}, face: {}, dropped {} depos spanning "
-                "t:[{},{}]ms, outside bb:[{}-->{}]cm",
-                m_count,
-                m_anode->ident(), face->ident(), dropped_depos.size(), dropped_depos.front()->time() / units::ms,
-                dropped_depos.back()->time() / units::ms, ray.first / units::cm, ray.second / units::cm);
-        }
+        IDepo::vector face_depos = Aux::sensitive(*depos, face);
+        ndepos_used += face_depos.size();
 
         int iplane = -1;
         for (auto plane : face->planes()) {
@@ -232,7 +205,8 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
     }
 
     auto frame = make_shared<SimpleFrame>(m_frame_count, m_start_time, traces, m_tick);
-    log->debug("call={} frame={} ntraces={}", m_frame_count, m_count, traces.size());
+    log->debug("call={} frame={} ndepos_in={} ndepos_used={} ntraces={}",
+               m_count, m_frame_count, depos->size(), ndepos_used, traces.size());
 
     ++m_frame_count;
     ++m_count;

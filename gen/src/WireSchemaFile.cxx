@@ -20,13 +20,16 @@ void Gen::WireSchemaFile::configure(const WireCell::Configuration& cfg)
     if (m_fname.empty()) {
         THROW(ValueError() << errmsg{"must give a wire schema filename"});
     }
-    m_store = WireSchema::load(m_fname.c_str());
+    int cor = (int)WireSchema::Correction::pitch;
+    cor = get<int>(cfg, "correction", cor);
+    m_store = WireSchema::load(m_fname.c_str(), (WireSchema::Correction) cor);
 }
 
 WireCell::Configuration Gen::WireSchemaFile::default_configuration() const
 {
     Configuration cfg;
     cfg["filename"] = m_fname;
+    cfg["correction"] = (int)WireSchema::Correction::pitch;
     return cfg;
 }
 

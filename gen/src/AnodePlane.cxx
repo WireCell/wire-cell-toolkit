@@ -180,7 +180,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
 
             // (wire,pitch) directions
             auto wire_pitch_dirs = ws_store.wire_pitch(ws_plane);
-            auto ecks_dir = wire_pitch_dirs.first.cross(wire_pitch_dirs.second);
+            // auto ecks_dir = wire_pitch_dirs.first.cross(wire_pitch_dirs.second);
 
             std::vector<int> plane_chans = ws_store.channels(ws_plane);
             m_channels.insert(m_channels.end(), plane_chans.begin(), plane_chans.end());
@@ -306,7 +306,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
         log->debug("face:{} with {} planes and sensvol: {}",
                    ws_face.ident, planes.size(), sensvol.bounds());
 
-        m_faces[iface] = make_shared<AnodeFace>(ws_face.ident, planes, sensvol);
+        m_faces[iface] = make_shared<AnodeFace>(ws_face.ident, planes, sensvol, iface, m_ident);
     }  // face
 
     // remove any duplicate channels

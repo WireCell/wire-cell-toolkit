@@ -209,7 +209,6 @@ namespace WireCell {
         /// Return the smallest, most frequent value to appear in vector.
         short most_frequent(const std::vector<short>& vals);
 
-
     }  // namespace Waveform
 }  // namespace WireCell
 

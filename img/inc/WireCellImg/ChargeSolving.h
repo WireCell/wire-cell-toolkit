@@ -47,21 +47,30 @@ namespace WireCell {
             // (central+uncertainty).
             using value_t = ISlice::value_t;
 
-            // Config: meas_{value,error}_threshold. Only measures
-            // with central value strictly less than this or with
-            // uncertainty greater than this are not considered.
-            // Note, this threshold is placed on the sum of channels
-            // in a measure, not on the individual channel values.
-            // Units are numbers of electrons.
+            // Config: meas_{value,error}_threshold.  The value
+            // threshold is a lower bound and the error threshold is
+            // an upper bound to which measures are accepted for
+            // solving.  The bound is inclusive.  A threshold of 0
+            // will retain measures of value 0.  Note, this threshold
+            // is placed on the sum of channels in a measure, not on
+            // the individual channel components.  Units are numbers
+            // of electrons.
             value_t m_meas_thresh{0,1e9};
-            // Config: blob_{value,error}_threshold. A blob with
-            // central value less than this is dropped.  The
-            // uncertainty is not currently considered.
-            value_t m_blob_thresh{0,1};
+
+            // Config: blob_{value,error}_threshold. The value
+            // threshold is a lower bound on the solved blob charge
+            // for that blob to be output.  The value threshold is
+            // inclusive.  Blobs with signal value equal or larger
+            // than the threshold are output.  Note, the uncertainty
+            // is not currently considered.
+            value_t m_blob_thresh{-1,0};
+
             // config. The tolerance passed to LassoModel solver.
             double m_lasso_tolerance{1e-3};
+
             // config. The minimum norm passed to LassoModel solver.
             double m_lasso_minnorm{1e-6};
+
             // config. The blob weighting strategies for each of a
             // number of solving rounds.  This is an arbitrary long
             // sequence of strategy names from the set: "uniform" (all
@@ -73,12 +82,14 @@ namespace WireCell {
             // m_minimum_charge.
             //std::vector<std::string> m_weighting_strategies{"uniform", "simple"};
             std::vector<std::string> m_weighting_strategies{"uniform"};
+
             // Config: if false, any measurement uncertainty is
             // ignored.  If true, the measurement covariance matrix is
             // formed on the measurement uncertainties and is
             // "whitened" via Cholesky decomposition.
             bool m_whiten{true};
 
+            int m_count{0};
         };
 
     }  // namespace Img

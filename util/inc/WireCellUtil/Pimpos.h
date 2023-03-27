@@ -80,7 +80,7 @@ namespace WireCell {
         /// Return given 3-point origin for plane pitch.
         const Point& origin() const { return m_origin; }
 
-        /// Return an axis of the plan.  0=normal to plane (aka
+        /// Return an axis of the plane.  0=normal to plane (aka
         /// anti-drift), 1=wire direction, 2=pitch direction.
         const Vector& axis(int i) const { return m_axis[i]; }
 

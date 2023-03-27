@@ -21,8 +21,6 @@
 #include <vector>
 #include <iostream>
 
-#include "config.h"
-
 #if HAVE_FFTWTHREADS_LIB
 #include <fftw3.h>
 #endif
@@ -50,8 +48,8 @@ Main::~Main() { finalize(); }
 int Main::cmdline(int argc, char* argv[])
 {
     // clang-format off
-    po::options_description desc("Options");
-    desc.add_options()("help,h", "wire-cell [options] [arguments]")
+    po::options_description desc("Command line interface to the Wire-Cell Toolkit\n\nUsage:\n\twire-cell [options] [configuration ...]\n\nOptions");
+    desc.add_options()("help,h", "produce help message")
 
         ("logsink,l", po::value<vector<string> >(),
          "set log sink as <filename> or 'stdout' or 'stderr', "
@@ -96,9 +94,15 @@ int Main::cmdline(int argc, char* argv[])
         ;
     // clang-format on
 
+    po::positional_options_description pos;
+    pos.add("config", -1);
+
     po::variables_map opts;
-    po::store(po::parse_command_line(argc, argv, desc), opts);
+    // po::store(po::parse_command_line(argc, argv, desc), opts);
+    po::store(po::command_line_parser(argc, argv).
+              options(desc).positional(pos).run(), opts);
     po::notify(opts);
+
 
     if (opts.count("help")) {
         std::cout << desc << "\n";
@@ -254,6 +258,7 @@ void Main::initialize()
         log->debug("loading config file {}", filename);
         Persist::Parser p(m_load_path, m_extvars, m_extcode, m_tlavars, m_tlacode);
         Json::Value one = p.load(filename);  // throws
+        //log->debug(one.toStyledString());
         m_cfgmgr.extend(one);
     }
 

@@ -1,16 +1,20 @@
 #ifndef WIRECELL_AUX_TENSORTOOLS
 #define WIRECELL_AUX_TENSORTOOLS
 
-#include "WireCellIface/ITensor.h"
+#include "WireCellIface/ITensorSet.h"
 #include "WireCellIface/IDFT.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/PointCloud.h"
+
 
 #include <Eigen/Core>
 #include <complex>
 
 namespace WireCell::Aux {
 
-    bool is_row_major(const ITensor::pointer& ten) {
+    inline
+    bool is_row_major(const ITensor::pointer& ten)
+    {
         if (ten->order().empty() or ten->order()[0] == 1) {
             return true;
         }

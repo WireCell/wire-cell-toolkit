@@ -42,6 +42,9 @@ namespace WireCell {
         /// The size in bytes of an element
         virtual size_t element_size() const = 0;
 
+        /// Helper to divine the dtype string, i4, f8, etc.
+        virtual std::string dtype() const;
+
         /// The shape of the tensor.
         virtual shape_t shape() const = 0;
 

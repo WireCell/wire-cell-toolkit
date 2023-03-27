@@ -15,7 +15,7 @@ local gen = function(grpnum, nsamples, period, fpeak, rms, nsave) {
     local fsigma = fpeak*fnyquist,
     local nstep = std.floor(nsamples/(2*nsave)),
 
-    // only up to Nyquist frequency, and then double
+    // only up to Nyquist frequency, and then double.  Note, should -1 the range max
     local half_freqs = [ind*frayleigh for ind in std.range(0, nsamples/2)],
     local half_Rk = [rayleigh(freq, fsigma) for freq in half_freqs],
 

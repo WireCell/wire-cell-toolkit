@@ -43,6 +43,26 @@ bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t spo
     const std::string tname = demangle(tail->signature());
     const std::string hname = demangle(head->signature());
 
+    {                           // check WCT interface level info
+        const auto& ttypes = tail->output_types();
+        if (sport < 0 || ttypes.size() <= sport) {
+            log->critical("bad tail port index: {} out of {} for {}", sport, ttypes.size(), tname);
+            return false;
+        }
+        const auto& htypes = head->input_types();
+        if (rport < 0 || htypes.size() <= rport) {
+            log->critical("bad head port index: {} out of {} for {}", rport, htypes.size(), hname);
+            return false;
+        }
+
+        if (ttypes[sport] != htypes[rport]) {
+            log->critical("edge type mismatch: tail:{}[{}]={} head={}[{}]={}",
+                          tname, sport, demangle(ttypes[sport]),
+                          hname, rport, demangle(htypes[rport]));
+            return false;
+        }
+    }
+
     Node mytail = m_factory(tail);
     if (!mytail) {
         log->critical("no tail node wrapper for {}", tname);

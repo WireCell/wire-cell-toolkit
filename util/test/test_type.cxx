@@ -11,6 +11,9 @@ int main()
     int i;
     vector<int> vi;
 
+    Assert(typeid(int) == typeid(i));
+
+
     cerr << "int: " << type(i) << endl;
     cerr << "vector<int>: \"" << type(vi) << "\"\n";
 

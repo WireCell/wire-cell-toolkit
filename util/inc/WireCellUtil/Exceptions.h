@@ -19,6 +19,16 @@
 #define WIRECELL_EXCEPTIONS
 
 #include <boost/exception/all.hpp>
+
+// Defining this will give more info in the back trace but requires
+// linking to -lbacktrace which is usually provided by the compiler.
+// This library is fairly prevalent but not everywhere.  The main
+// wscript auto-detects if it is available.
+#include "WireCellUtil/BuildConfig.h"
+#ifdef HAVE_BACKTRACE_LIB
+#define BOOST_STACKTRACE_USE_BACKTRACE
+#endif
+
 #include <boost/stacktrace.hpp>
 #include <exception>
 #include <string>

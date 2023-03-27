@@ -1,4 +1,4 @@
-// This is the base for *uboone* variant parameter objects. 
+// This provides the variant "overlay" for *uboone* parameters.
 
 // Do NOT place any "if" in this file!  If a new variant is needed,
 // make an empty, new file in this directory and either import/inherit
@@ -40,4 +40,10 @@ nominal {
             scaleMC_perplane: std.extVar("scaleMC_perplane"),
         }
     }, 
+
+    misconfigured : super.misconfigured {
+        channels: std.range(2016,2095) + std.range(2192,2303) + std.range(2352,2399),
+        gain: 4.7*wc.mV/wc.fC,
+        shaping: 1.1*wc.us,
+    },
 }

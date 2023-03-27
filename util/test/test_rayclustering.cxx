@@ -26,6 +26,7 @@ const double border = 10;
 const double width = 100;
 const double height = 100;
 
+
 // local helper codes
 #include "raygrid.h"
 
@@ -105,6 +106,12 @@ static activities_t make_activities(Coordinates& coords, std::vector<measure_t>&
     for (int ilayer = 0; ilayer < nlayers; ++ilayer) {
         auto& m = measures[ilayer];
         info("Make activity for layer: {}: {}", ilayer, m.size());
+        std::stringstream ss;
+        for (const auto& v : m) {
+            ss << v << " ";
+        }
+        info("\t{}", ss.str());
+
         Activity activity(ilayer, {m.begin(), m.end()});
         Assert(!activity.empty());
         activities.push_back(activity);
@@ -227,6 +234,11 @@ static void test_blobs(const blobs_t& blobs)
 {
     for (const auto& blob : blobs) {
         const auto& strips = blob.strips();
+        std::cerr << "blob: " << blob << "\n";
+        for (size_t ind=0; ind<5; ++ind) {
+            std::cerr << "\tbb["<<ind<<"]: " << strips[ind].bounds << "\n";
+        }
+
         Assert(strips[0].bounds.first == 0);
         Assert(strips[0].bounds.second == 1);
         Assert(strips[1].bounds.first == 0);
@@ -234,13 +246,26 @@ static void test_blobs(const blobs_t& blobs)
     }
 }
 
+
 int main(int argc, char* argv[])
 {
     auto raypairs = make_raypairs(width, height, pitch_magnitude);
 
     Coordinates coords(raypairs);
+    Assert(coords.nlayers() == 5);
 
-    Tiling tiling(coords);
+    {
+        Coordinates empty;
+    }
+    {
+        Coordinates copy;
+        copy = coords;
+    }
+    {
+        Coordinates copy(coords);
+    }
+
+    Tiling tiling(coords, 1e-6);
 
     std::default_random_engine generator;
     std::vector<Point> pts1 = make_points(generator, 10.0);

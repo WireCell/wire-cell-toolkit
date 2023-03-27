@@ -1,0 +1,293 @@
+#+title: Blob-Depo Fill
+#+startup: beamer
+#+setupfile: setup-beamer.org
+
+* Topics
+  
+- /Blobs/ and /depos/
+- True blob charge
+- Open problems/project needing it
+- ~BlobDepoFill~ WCT flow graph node
+
+* What is a blob?
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth,page=2]{dpf-raytiling.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+- Partition the transverse area for one /time-slice/ by removing all wires with signal below some threshold.
+- The remaining contiguous regions are identified as /blobs./
+- A blob is bound by a pair of wires from each plane.
+  - Plus two "virtual" planes to provide overall bounds.
+- Not all blobs actually have ionization electrons - /ghost blobs/.
+
+** 
+
+Things get little more complicated when we must consider dead channels.
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=4]{dpf-raytiling.pdf}
+#+end_center
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=5]{dpf-raytiling.pdf}
+#+end_center
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=6]{dpf-raytiling.pdf}
+#+end_center
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=7]{dpf-raytiling.pdf}
+#+end_center
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=8]{dpf-raytiling.pdf}
+#+end_center
+
+
+* 
+
+#+begin_center
+\includegraphics[height=\textheight,page=10]{dpf-raytiling.pdf}
+#+end_center
+
+
+* What is a depo?
+
+- A 7-tuple: $(q,t,x,y,z,L,T)$
+  - 1-D longitudinal ($L$) and 2-D transverse ($T$) Gaussian sigma.
+- Pre-drift $t\approx0,\ L=T=0$ (point)
+- Post-drift $x=x_r,\ \{t,L,T\}>0$ (3D Gaussian)
+  - $x_r$ defines the /response plane/ at which all depos pile up
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+[[file:bdf-slices.pdf]]
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+[[file:bdf-blobs.pdf]]
+
+
+
+* What is the true charge of a blob?
+
+#+begin_quote
+The integral of the simulated, drifted ionization electron
+distribution over the pre-determined volume of one blob.
+#+end_quote
+
+Potentially expensive integral
+- Large numbers of depos and blobs in typical events.
+- Must precisely account for mutual time alignment.
+- Blob volumes shapes are irregular polygon extrusions.
+- Highly connected many-to-many volume overlaps.
+
+Some help:
+- Truncate depos to at least $3\cdot\sigma_{\{L,T\}}$.
+- Depo extent is symmetric in transverse plane.
+- Longitudinal and transverse blob bounds orthogonal.
+- Transverse /ray grid/ coordinate system is fast.
+
+* Some eager users of true blob charge
+
+Graph Constraint Networks (GCoN), truth for \textbf{validation}
+
+- Engineered "constraint functions" to update graph iterative until
+  some convergence condition is met.
+- Ultimately, hope to "encode" the many heuristics in WCP in a general way and apply them all together.
+- Brandon Feder's topic for the summer.
+
+Graph Neural Network (GNN), truth for \textbf{training}
+
+- Apply GNN techniques to blob-measure (or larger) graphs.
+- Expect higher precision and also sim/det bias compared to GCoN.
+- Dmitrii, Haiwang and me, still ramping up.
+
+
+* ~BlobDepoFill~ is an ~IClusterFilter~
+
+3D integrates of \textbf{depos} over \textbf{blobs} in order:
+1. drift direction (for one chosen time slice),
+2. pitch direction (for one chosen plane),
+3. wire direction (bound by each blob).
+
+
+Progressively /narrows/ the scope of depos and blobs to fight combinatorics:
+
+1. Narrow to a single ~IAnodeFace~
+2. Narrow to a single ~ISlice~
+3. Produce an "~s-d-w~" graph (described below)
+4. Narrow to a single ~IDepo~
+5. Narrow to a single ~IWire~
+6. Iterate over (the narrowed) blob set finding those with current wire
+7. Find bounds on this wire from other two blob layers.
+
+* Slice-depo-wire graph
+
+Result of each integration (drift, pitch, wire) is stored in a graph
+with three types of nodes:
+
+#+begin_quote
+/slice/, /depo/ and /wire/
+#+end_quote
+
+- slice-depo :: edges hold the 1D Gaussian integral of the depo over the slice time span, ($w_{drift}$).
+- depo-wire :: edges hold the 1D Gaussian integral of the depo over the pitch direction, ($w_{pitch}$).
+
+Last integral is along wire direction and gives $w_{wire}$.
+
+In that context we know the blob and the /graph path/ and can then
+accumulate:
+
+\[q_{blob} \mathrel{+}= w_{drift} \cdot w_{pitch} \cdot w_{wire} \cdot q_{depo}\]
+
+The $w_{drift}$ and $w_{pitch}$ graph edge weights get reused many
+times so no integral needs repeating and lookup is fast.
+
+* Validation
+
+Three samples of deposets in noise-free simulated PDSP detector.
+
+- point :: a single depo
+- muon :: a single muon which happens to be very /isochronus/
+- cosmics :: many cosmic muons
+
+Look at:
+
+- Hand made plots in ~wire-cell-python~ with depos and blobs.
+- Export WCT data to VTK format and view in ~paraview~.
+- (todo: Bee export)
+
+* Single depo
+
+#+begin_center
+\includegraphics[height=0.9\textheight]{depo-ssi-viz/point/debls-tru-a5-outlines.pdf}
+#+end_center
+
+* Single depo - paraview (depo is point)
+
+#+begin_center
+\includegraphics[height=0.9\textheight]{point-tru.png}
+#+end_center
+
+
+* Single muon
+
+#+begin_center
+\includegraphics[height=0.9\textheight]{depo-ssi-viz/muon/debls-tru-a5-outlines.pdf}
+#+end_center
+
+* Single muon - paraview
+
+#+begin_center
+\includegraphics[height=0.9\textheight]{muon-tru.png}
+#+end_center
+
+* Cosmics - paraview
+
+#+begin_center
+\includegraphics[height=0.9\textheight]{cosmics-tru.png}
+#+end_center
+
+* Data flow graph
+
+#+begin_center
+\includegraphics[width=\textwidth]{depo-ssi-viz-flow-graph.pdf}
+#+end_center
+
+\footnotesize
+Must bring depos from front of graph and tap into imaging pipeline grab cluster and feed both to ~BlobDepoFill~.
+
+* Data flow graph - zoom
+
+#+begin_center
+\includegraphics[width=\textwidth,clip,trim=150cm 0 0 40cm]{depo-ssi-viz-flow-graph.pdf}
+#+end_center
+
+
+* Performance
+
+~BlobDepoFill~ on one PDSP APA worth of blobs (no noise)
+
+- No depos :: $\approx$ 1 ms 
+- Single depo :: $\approx$ 5 ms
+- Single muon :: $\approx$ 240 ms
+  - Empty neighbor APAs $\approx$ 5 ms
+- Surface cosmics :: $\approx$ 2-10 sec
+
+\footnotesize
+Notes:
+
+- Using a relatively slow Xeon E5-2630 2.2 GHz
+- The \textbf{surface cosmics} sample uncovers that ~BlobGrouping~ scales very poorly with #blobs:
+  - Across the 6 PDSP APAs: \textbf{10-400 sec}.  The single muon: 200 ms worse case.
+  - Replaced use of ~IndexedGraph~ with more targeted indexing gives $5\times$ speedup
+
+* Exercising
+
+#+begin_example
+  wire-cell \
+      -A 'detector={detector}' \
+      -A 'variant={variant}' \
+      -A 'indepos={indepos}' \
+      -A 'outdepos={outdepos}' \
+      -A 'frames={frames}' \
+      -A 'clusters={clusters}' \
+      -c img/test/depo-ssi-viz.jsonnet
+#+end_example
+
+Or, edit/consult ~img/test/depo-ssi-viz.yaml~ and run workflow:
+
+#+begin_example
+snakemake -jall -s img/test/depo-ssi-viz.smake all
+#+end_example
+
+Runs on several depo set files, make WCT data, plots and paraview files.
+
+* Next steps
+
+The ~BlobDepoFill~ is ready to use to make "true charge" blobs.
+
+- Please keep eyes open for any problems.
+
+We should include production of "true charge" blobs for GNN/GCoN data.
+
+
+
+# Local Variables:
+# eval: (fix-latex-previews)
+# End:

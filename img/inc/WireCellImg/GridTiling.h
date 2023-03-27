@@ -34,10 +34,28 @@ namespace WireCell {
             virtual bool operator()(const input_pointer& slice, output_pointer& blobset);
 
            private:
-            size_t m_blobs_seen;
+            /** Config: threshold
+
+                Channel activity in slice must have at least this
+                value (charge) to be considered in the tiling.
+            */
+            double m_threshold{0.0};
+            /** Config: nudge
+
+                Effectively move any 2-layer crossing point toward the
+                center of the existing blob by this fraction of a
+                pitch in a 3rd layer prior to testing if that crossing
+                point is inside the strip of that 3rd layer.  This
+                fights floating-point imprecision in wire geometry.
+            */
+            double m_nudge{1e-3};
+
+            // Count blobs in each contiguous stream to assign blob
+            // ident numbers.
+            size_t m_blobs_seen{0};
+
             IAnodePlane::pointer m_anode;
             IAnodeFace::pointer m_face;
-            double m_threshold;
 
             IBlobSet::pointer make_empty(const input_pointer& slice);
 

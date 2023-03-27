@@ -153,15 +153,6 @@ local wc = import "wirecell.jsonnet";
         },
         // Optimize use of randoms
         replacement_percentage: 0.02,
-
-        // For channel status
-        channel_deviants: [ {
-            chid: ch,
-            gain: 4.7*wc.mV/wc.fC,
-            shaping: 1.1*wc.us,
-        } for ch in std.range(2016,2095) + std.range(2192,2303) + std.range(2352,2399) ],
-
-
     },
 
     digi : {
@@ -186,13 +177,49 @@ local wc = import "wirecell.jsonnet";
     nf: {
         field_file: "ub-10-half.json.bz2",
         binning: $.binning,
+        chresp_file: "microboone-channel-responses-v1.json.bz2",
 
+        // The MicroBooNE noise filtering spectra runs with a
+        // different number of bins in frequency space than the
+        // nominal number of ticks (binning.nticks) in time.
+        nsamples: 9592,
+
+        // to change these, make new variants
+        // wct, wcls, wcls_multi
+        chndb_type: "wct",
+        // dynamic, before, after, perfect
+        chndb_epoch: "perfect",
     },        
+
+    // Describe misconfigured channels.  Used by NF's chndb and sim's
+    // static channel status.  Nominally, everything is perfect.  See
+    // other variants for non-perfect content.
+    misconfigured: {
+        // The list of misconfigured channel IDs 
+        channels: [],           
+        // Misconfigured parameters, only relevant if there are
+        // channels.  Nominal case is there is no misconfig so set
+        // same as nominal config.
+        gain: $.elec.gain,
+        shaping: $.elec.shaping,
+    },
 
     sp: {
         field_file: "ub-10-half.json.bz2",
-
     },        
+
+    // Imaging paramter pack
+    img : {
+        charge_error_file: "microboone-charge-error.json.bz2",
+
+        // Number of ticks to collect into one time slice span
+        span: 4,
+
+        binning : $.binning,
+
+        // fixme: remove old tiling strategy "perfect" and add slicing strategies
+    },
+
 }
 
 

@@ -10,19 +10,20 @@ local chndbs = {
 local filters = import "noise-filters.jsonnet";
 local frs = import "frs.jsonnet";
 
-function(services, params) function(anode)
+function(services, params, options) function(anode)
+    local pars = std.mergePatch(params, std.get(options, "params", {}));
 
     local ident = low.util.idents(anode);
 
     // nf uses same fr as sp
-    local fr = frs(params).nf;
+    local fr = frs(pars).nf;
 
-    local chndb = chndbs[params.nf.chndb](anode, params.nf.binning,
+    local chndb = chndbs[pars.nf.chndb](anode, pars.nf.binning,
                                           fr, services.dft);
 
     // filter look up
-    local flu = filters(services, params, anode, chndb);
-    local fls = params.nf.filters;
+    local flu = filters(services, pars, anode, chndb);
+    local fls = pars.nf.filters;
 
     local fobj = {
         channel: [flu[nam] for nam in fls.channel],

@@ -50,6 +50,14 @@ namespace WireCell {
             }
         }
 
+        // Pad the BB by adding the vector relative * diagonal_vector
+        // to max BB point and subtracting it from min.  Negative
+        // "relative" value causes the BB to shrink.
+        void pad_rel(double relative);
+        // Pad the BB by the vector distance * diagonal_unit_vector
+        // otherwise as pad_rel().
+        void pad_abs(double distance);
+
         bool empty() const { return !m_initialized; }
     };
 

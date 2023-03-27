@@ -1,0 +1,62 @@
+#+title: Example activities 3
+
+The file [[file:activities3.txt]] represents activities run through
+~check_act2viz~ to produce [[file:activities3-act2viz.txt]] and through the
+full imaging to produce [[activities3-full.txt]].  Both should have used a
+nudge of 0.01.
+
+* Issues
+
+As discovered by Haiwang, several issues are found
+
+- Many of the blobs have a layer L1 bounds of ~[1,1]~.  Both L0 and L1 should always have bounds ~[0,1]~.
+
+- 3 more blobs are found in "full" than "act2viz".
+
+- Some blobs found by "act2viz" have more corners than those in "full"
+
+* Suspicions
+
+- "act2viz" uses wires that were generated from angles/pitches
+  matching(?) microboone while "full" uses the microboone wires file
+  (plus corrections).  Differences in these two wire sets may be
+  implicated in some of the differences.
+
+- The missing L1 boundary may be getting lost due it being pruned when
+  it does not contribute to any corners.  If so, pruning should
+  probably simply not touch L0 and L1.
+
+* Tests
+
+Here holds some notes on the tests.  All may be run with:
+
+#+begin_example
+bats util/test/test_tiling.bats
+bats util/test/test_tiling_uboone.bats
+#+end_example
+
+First uses ideal, generated wires and second uses microboone wires
+file with corrections.
+
+Or, each test can be run individually by giving the test title
+
+#+begin_example
+bats -f "the listed test name" util/test/test_tiling.bats
+#+end_example
+
+** reproduce act2vis blob finding
+
+Just works
+
+** reproduce full blob finding
+
+This is approximately 
+
+** no missing bounds
+
+All strips should have finite width.  In particular, L0 and L1 were
+having bounds like ~[0,0]~ or ~[1,1]~.
+
+- fix: simply do not prune on L0/L1
+- fix: extend ~Blob::valid()~ to fail any blobs with width-less strips.
+

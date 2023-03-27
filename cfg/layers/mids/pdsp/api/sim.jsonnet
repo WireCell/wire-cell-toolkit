@@ -65,26 +65,9 @@ function(services, params, options={}) {
         ]),
         
 
-    // API method sim.signal: subgraph making pure signal voltage from
-    // depos.
-    signal :: function(anode)
-        pg.pipeline([pg.pnode({
-            type: 'DepoTransform',
-            name: idents(anode),
-            data: {
-                rng: wc.tn(services.random),
-                dft: wc.tn(services.dft),
-                anode: wc.tn(anode),
-                pirs: [wc.tn(p) for p in pirs],
-                fluctuate: true,
-                drift_speed: params.lar.drift_speed,
-                first_frame_number: 0,
-                readout_time: params.ductor.readout_time,
-                start_time: params.ductor.start_time,
-                tick: sig_binning.tick,
-                nsigma: 3,
-            },
-        }, nin=1, nout=1, uses = pirs + [anode, services.random, services.dft]), pg.pnode({
+    // API method sim.reframer
+    reframer :: function(anode)
+        pg.pnode({
             type: 'Reframer',
             name: idents(anode),
             data: {
@@ -95,7 +78,30 @@ function(services, params, options={}) {
                 tbin: params.ductor.tbin,
                 nticks: sig_binning.nticks - self.tbin,
             },
-        }, nin=1, nout=1, uses=[anode])]),
+        }, nin=1, nout=1, uses=[anode]),
+    
+    // API method sim.signal: subgraph making pure signal voltage from
+    // depos.
+    signal :: function(anode)
+        pg.pipeline([
+            pg.pnode({
+                type: 'DepoTransform',
+                name: idents(anode),
+                data: {
+                    rng: wc.tn(services.random),
+                    dft: wc.tn(services.dft),
+                    anode: wc.tn(anode),
+                    pirs: [wc.tn(p) for p in pirs],
+                    fluctuate: true,
+                    drift_speed: params.lar.drift_speed,
+                    first_frame_number: 0,
+                    readout_time: params.ductor.readout_time,
+                    start_time: params.ductor.start_time,
+                    tick: sig_binning.tick,
+                    nsigma: 3,
+                },
+            }, nin=1, nout=1, uses = pirs + [anode, services.random, services.dft]),
+            $.reframer(anode)]),
 
     // API method sim.noise: subgraph adding noise to voltage
     noise :: function(anode)

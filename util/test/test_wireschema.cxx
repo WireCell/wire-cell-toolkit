@@ -10,7 +10,7 @@ void test_read(const char* filename)
 {
     /// BIG FAT NOTE: don't directly load() from user code.  Use
     /// IWireSchema component named WireSchemaFile instead.
-    cerr << "Loading twice, should read but once\n";
+    cerr << "Test loading file twice, should read but once\n";
     auto store1 = WireSchema::load(filename);
     auto store2 = WireSchema::load(filename);
 
@@ -47,14 +47,23 @@ void test_read(const char* filename)
                 auto wp = store1.wire_pitch(plane);
                 auto ex = wp.first.cross(wp.second);
 
+                auto wires = store1.wires(plane);
+                std::set<int> channels;
+                for (const auto& w : wires) {
+                    channels.insert(w.channel);
+                }
+                auto mm = std::minmax_element(channels.begin(), channels.end());
+
                 cerr << "anode:" << anode.ident << " face:" << face.ident << " plane:" << plane.ident << ":\n"
                      << "\tdrift: " << ex << "\n"
                      << "\twire:  " << wp.first << "\n"
                      << "\tpitch: " << wp.second << "\n"
-                     << "\tbb: " << bb.bounds() / units::cm << "cm\n";
+                     << "\tbb: " << bb.bounds() / units::cm << "cm\n"
+                     << "\tchids: "<<channels.size()<<" in [" << *mm.first << "..." << *mm.second << "] reading "<<wires.size()<<" wires\n";
             }
             auto wplane = store1.planes(face).back();
             auto wires = store1.wires(wplane);
+
             const double zmax = wires.back().head.z();
             const double zmin = wires.front().head.z();
             const double dd = zmax - zmin;
@@ -62,6 +71,7 @@ void test_read(const char* filename)
             cerr << "\tW plane: " << n << " wires, "
                  << "[" << zmin / units::m << "," << zmax / units::m << "]m, "
                  << "extent=" << dd / units::cm << "cm, pitch=" << dd / (n - 1) / units::mm << "mm\n";
+
         }
     }
 }

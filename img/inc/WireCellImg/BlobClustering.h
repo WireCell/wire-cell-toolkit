@@ -1,7 +1,7 @@
 /** Cluster blobs.
 
     This takes a stream of IBlobSets and mints a new ICluster on EOS
-    when the frame ident changes.
+    or when the frame ident changes.
 
     An output ICluster will have the same ident number as the frame
     from which the input blobsets originated.
@@ -72,6 +72,11 @@ namespace WireCell {
 
             // Return true if newbs is from a new frame
             bool new_frame(const input_pointer& newbs) const;
+
+            // Return the ident from the frame of the first cached blob or 0 if empty.
+            int cur_ident() const;
+
+            int m_count{0};
 
         };
     }  // namespace Img

@@ -129,11 +129,11 @@ namespace WireCell {
         }
 
         template <typename ElementType>
-        inline SimpleTensor<ElementType> *eigen_array_to_simple_tensor(
+        inline SimpleTensor *eigen_array_to_simple_tensor(
             const Eigen::Array<ElementType, Eigen::Dynamic, Eigen::Dynamic> &arr)
         {
             std::vector<size_t> shape = {(size_t) arr.rows(), (size_t) arr.cols()};
-            SimpleTensor<ElementType> *st = new SimpleTensor<ElementType>(shape);
+            SimpleTensor *st = new SimpleTensor(shape, (ElementType*)nullptr);
             auto dst = (ElementType *) st->data();
             auto src = (ElementType *) arr.data();
             size_t size = sizeof(ElementType) * arr.rows() * arr.cols();

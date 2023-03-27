@@ -5,6 +5,7 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/range.hpp>
+#include <boost/graph/graphviz.hpp>
 
 namespace WireCell::GraphTools {
 
@@ -28,6 +29,8 @@ namespace WireCell::GraphTools {
            for (const auto& vtx : vertex_range(g)) { ... };
 
      */
+
+    // fixme: these are more generic than just to graphs...
     template <typename It> boost::iterator_range<It> mir(std::pair<It, It> const& p) {
         return boost::make_iterator_range(p.first, p.second);
     }
@@ -38,6 +41,19 @@ namespace WireCell::GraphTools {
     template <typename Gr> 
     boost::iterator_range<typename boost::graph_traits<Gr>::vertex_iterator> vertex_range(Gr& g) {
         return mir(boost::vertices(g));
+    }
+
+    // Return graph as string holding GraphViz dot representation.
+    template<typename Gr>
+    std::string dotify(const Gr& gr)
+    {
+        using vertex_t = typename boost::graph_traits<Gr>::vertex_descriptor;
+        std::stringstream ss;
+        boost::write_graphviz(ss, gr, [&](std::ostream& out, vertex_t v) {
+            const auto& dat = gr[v];
+            out << "[label=\"" << dat.code << dat.id << "\"]";
+        });
+        return ss.str() + "\n";
     }
 
 }

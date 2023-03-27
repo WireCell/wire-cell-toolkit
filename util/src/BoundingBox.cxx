@@ -58,3 +58,16 @@ bool WireCell::BoundingBox::inside(const Point& point) const
     }
     return true;
 }
+
+void WireCell::BoundingBox::pad_rel(double relative)
+{
+    auto vec = ray_vector(m_bounds)*relative;
+    m_bounds.first = m_bounds.first - vec;
+    m_bounds.second = m_bounds.second + vec;
+}
+void WireCell::BoundingBox::pad_abs(double distance)
+{
+    auto vec = ray_unit(m_bounds)*distance;
+    m_bounds.first = m_bounds.first - vec;
+    m_bounds.second = m_bounds.second + vec;
+}

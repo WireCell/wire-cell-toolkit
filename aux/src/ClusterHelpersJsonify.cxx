@@ -80,7 +80,10 @@ Json::Value blob_jsoner(const cluster_node_t& n)
     ret["ident"] = iblob->ident();
     ret["value"] = iblob->value();
     ret["error"] = iblob->uncertainty();
-    ret["faceid"] = iblob->face()->ident();
+    {
+        WirePlaneId afid(kUnknownLayer, iface->which(), iface->anode());
+        ret["faceid"] = afid.ident();
+    }
     ret["sliceid"] = iblob->slice()->ident();
     Json::Value jcorners = Json::arrayValue;
     const auto& blob = iblob->shape();
@@ -151,7 +154,7 @@ Json::Value measurement_jsoner(const cluster_node_t& n)
     return ret;
 }
 
-Json::Value WireCell::Aux::jsonify(const ICluster& cluster)
+Json::Value WireCell::Aux::jsonify(const cluster_graph_t& gr)
 {
     std::vector<std::function<Json::Value(const cluster_node_t& ptr)> > jsoners{
         size_stringer, channel_jsoner, wire_jsoner, blob_jsoner, slice_jsoner, measurement_jsoner};
@@ -169,7 +172,6 @@ Json::Value WireCell::Aux::jsonify(const ICluster& cluster)
      * An edge is a pair of vertex ident numbers.
      *
      */
-    const auto& gr = cluster.graph();
 
     Json::Value jvertices = Json::arrayValue;
     for (auto vtx : boost::make_iterator_range(boost::vertices(gr))) {

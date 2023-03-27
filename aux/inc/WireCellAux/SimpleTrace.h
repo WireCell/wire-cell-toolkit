@@ -14,12 +14,11 @@ namespace WireCell::Aux {
      * is trivially (exactly) zero suppressed but only at the ends.  Any
      * zeros bounded by non-zero charge are kept.
      */
-    class SimpleTrace : public ITrace {
+    struct SimpleTrace : public ITrace {
         int m_chid;
         int m_tbin;
         ChargeSequence m_charge;
 
-       public:
         SimpleTrace(int chid, int tbin, const ChargeSequence& charge);
         SimpleTrace(int chid, int tbin, size_t ncharges);
 

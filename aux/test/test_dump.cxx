@@ -14,7 +14,7 @@ int main()
     for (auto s : shape) {
         nele *= s;
     }
-    auto st = std::make_shared<Aux::SimpleTensor<float> >(shape);
+    auto st = std::make_shared<Aux::SimpleTensor >(shape, (float*)nullptr);
     Assert(st->size() == sizeof(float) * nele);
     auto& d = st->store();
     Assert(d.size() == st->size());

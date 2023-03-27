@@ -133,7 +133,8 @@ namespace WireCell {
                        [](const auto& e) { return e.asDouble(); });
         return ret;
     }
-    // for Point and Ray converters, see Point.h
+    // For Point and Ray converters, see Point.h 
+
 
     /// Follow a dot.separated.path and return the branch there.
     Configuration branch(Configuration cfg, const std::string& dotpath);
@@ -168,6 +169,33 @@ namespace WireCell {
         return convert(branch(cfg, dotpath), def);
     }
 
+    /// Set a configuration value with a typed value
+    template <typename T>
+    void assign(Configuration& cfg, const T& val)
+    {
+        cfg = val;
+    }
+
+    template <typename T>
+    void assign(Configuration& cfg, const std::vector<T>& val)
+    {
+        const size_t size = val.size();
+        cfg = Json::arrayValue;
+        cfg.resize(size);
+        for (size_t ind=0; ind<size; ++ind) {
+            assign(cfg[(int)ind], val[ind]);
+        }
+    }
+
+    template <typename KeyType, typename ValueType>
+    void assign(Configuration& cfg, const std::map<KeyType, ValueType>& val)
+    {
+        cfg = Json::objectValue;
+        for (const auto& [k,v] : val) {
+            assign(cfg[k], v);
+        }
+    }
+
     /// Put value in configuration at the dotted path.
     template <typename T>
     void put(Configuration& cfg, const std::string& dotpath, const T& val)
@@ -178,7 +206,7 @@ namespace WireCell {
         for (auto name : path) {
             ptr = &(*ptr)[name];
         }
-        *ptr = val;
+        assign(*ptr, val);
     }
 
 }  // namespace WireCell

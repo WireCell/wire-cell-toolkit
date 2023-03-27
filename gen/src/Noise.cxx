@@ -72,5 +72,9 @@ void Gen::NoiseBase::configure(const WireCell::Configuration& cfg)
 
     m_nsamples = get<int>(cfg, "nsamples", m_nsamples);
     m_rep_percent = get<double>(cfg, "replacement_percentage", m_rep_percent);
+    m_bug202 = get<double>(cfg, "bug202", 0.0);
+    if (m_bug202>0) {
+        log->warn("BUG 202 IS ACTIVATED: {}", m_bug202);
+    }
 }
 

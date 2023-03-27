@@ -67,7 +67,7 @@ namespace WireCell::Spectrum {
             std::reverse_copy(beg+1, mid+1, mid+1);
         }
         else {                  // even, mid is Nyquist bin
-            *mid = std::abs(*mid);
+            *mid = std::real(*mid);
             std::reverse_copy(beg+1, mid, mid+1);
         }
 

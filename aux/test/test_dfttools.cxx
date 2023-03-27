@@ -145,8 +145,8 @@ void test_hs1d()
         assert(std::abs(evens[ind].imag()) < 1e-6);
     }
 
-    assert(std::abs(even[0]) == evens[0]);
-    assert(std::abs(odd[0]) == odds[0]);
+    assert(std::real(even[0]) == evens[0]);
+    assert(std::real(odd[0]) == odds[0]);
 
     for (size_t ind=1; ind<3; ++ind) {
         assert(even[ind] == evens[ind]);
@@ -193,8 +193,8 @@ void test_hs2d_axis1()
     dump("odds", odds);
     std::cerr << odds << std::endl;
 
-    assert(std::abs(even(0,0)) == evens(0,0));
-    assert(std::abs(odd(0,0)) == odds(0,0));
+    assert(std::real(even(0,0)) == evens(0,0));
+    assert(std::real(odd(0,0)) == odds(0,0));
 
     for (size_t ind=1; ind<3; ++ind) {
         assert(even(0,ind) == evens(0,ind));
@@ -242,8 +242,8 @@ void test_hs2d_axis0()
     dump("odds", odds);
     std::cerr << odds << std::endl;
 
-    assert(std::abs(even(0,0)) == evens(0,0));
-    assert(std::abs(odd(0,0)) == odds(0,0));
+    assert(std::real(even(0,0)) == evens(0,0));
+    assert(std::real(odd(0,0)) == odds(0,0));
 
     for (size_t ind=1; ind<3; ++ind) {
         assert(even(ind,0) == evens(ind,0));

@@ -9,21 +9,32 @@
 namespace WireCell::Aux {
 
 
-    template <typename ElementType>
     class SimpleTensor : public WireCell::ITensor {
       public:
-        typedef ElementType element_t;
 
-        // Create simple tensor, allocating space for data.  If
-        // data given it must have at least as many elements as
-        // implied by shape and that span will be copied into
-        // allocated memory.
+        // Create a simple tensor with a null array and type, just metadata, if any
+        explicit SimpleTensor(const Configuration& md = Configuration())
+            : m_md(md)
+            , m_typeinfo(typeid(void))
+        {
+        }
+
+        // Create simple tensor, allocating space for data.  If data
+        // given it must have at least as many elements as implied by
+        // shape and that span will be copied into allocated memory.
+        // The SimpleTensor will allocate memory if a null data
+        // pointer is given but note the type is required so pass call like:
+        //   SimpleTensor(shape, (Type*)nullptr)
+        template <typename ElementType>
         SimpleTensor(const shape_t& shape,
-                     const element_t* data=nullptr,
+                     const ElementType* data,
                      const Configuration& md = Configuration())
+            : m_shape(shape)
+            , m_md(md)
+            , m_typeinfo(typeid(ElementType))
+            , m_sizeof(sizeof(ElementType))
         {
             size_t nbytes = element_size();
-            m_shape = shape;
             for (const auto& s : m_shape) {
                 nbytes *= s;
             }
@@ -51,8 +62,8 @@ namespace WireCell::Aux {
         Configuration& metadata() { return m_md; }
 
         // ITensor const interface.
-        virtual const std::type_info& element_type() const { return typeid(element_t); }
-        virtual size_t element_size() const { return sizeof(element_t); }
+        virtual const std::type_info& element_type() const { return m_typeinfo; }
+        virtual size_t element_size() const { return m_sizeof; }
 
         virtual shape_t shape() const { return m_shape; }
 
@@ -65,6 +76,8 @@ namespace WireCell::Aux {
         std::vector<std::byte> m_store;
         std::vector<size_t> m_shape;
         Configuration m_md;
+        const std::type_info& m_typeinfo;
+        size_t m_sizeof{0};
     };
 
 }  // namespace WireCell::Aux

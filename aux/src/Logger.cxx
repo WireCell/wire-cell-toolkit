@@ -42,7 +42,7 @@ void Aux::Logger::set_name(const std::string& name)
 
     log->set_pattern(ss.str());
 
-    log->debug("logging to \"{}\"", lname);
+    log->debug("log name: \"{}\"", lname);
 }
 
 std::string Aux::Logger::get_name() const

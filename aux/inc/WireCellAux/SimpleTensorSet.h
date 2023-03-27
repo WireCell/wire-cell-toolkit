@@ -7,6 +7,10 @@ namespace WireCell::Aux {
 
     class SimpleTensorSet : public WireCell::ITensorSet {
       public:
+        explicit SimpleTensorSet(int ident)
+            : m_ident(ident)
+        {
+        }
         SimpleTensorSet(int ident, Configuration md, ITensor::shared_vector tv)
             : m_ident(ident)
             , m_md(md)

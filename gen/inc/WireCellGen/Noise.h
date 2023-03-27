@@ -35,6 +35,7 @@ namespace WireCell::Gen {
         double m_rep_percent{0.02};
         size_t m_count{0};
 
+        double m_bug202{0.0};   // non-zero emulates issue #202
     };
 
     /// Incoherent and coherent noise each have their own type of

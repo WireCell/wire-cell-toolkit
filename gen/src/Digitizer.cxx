@@ -53,6 +53,7 @@ WireCell::Configuration Gen::Digitizer::default_configuration() const
         bl[ind] = m_baselines[ind];
     }
     cfg["baselines"] = bl;
+    cfg["round"] = m_round;
 
     cfg["frame_tag"] = m_frame_tag;
     return cfg;
@@ -67,6 +68,7 @@ void Gen::Digitizer::configure(const Configuration& cfg)
     m_gain = get(cfg, "gain", m_gain);
     m_fullscale = get(cfg, "fullscale", m_fullscale);
     m_baselines = get(cfg, "baselines", m_baselines);
+    m_round = get(cfg, "round", m_round);
     m_frame_tag = get(cfg, "frame_tag", m_frame_tag);
 
     std::stringstream ss;
@@ -76,7 +78,8 @@ void Gen::Digitizer::configure(const Configuration& cfg)
        << "gain=" << m_gain << ", "
        << "fullscale=[" << m_fullscale[0] / units::mV << "," << m_fullscale[1] / units::mV << "] mV, "
        << "baselines=[" << m_baselines[0] / units::mV << "," << m_baselines[1] / units::mV << ","
-       << m_baselines[2] / units::mV << "] mV";
+       << m_baselines[2] / units::mV << "] mV "
+       << "round=" << m_round;
     log->debug(ss.str());
 }
 
@@ -91,7 +94,11 @@ double Gen::Digitizer::digitize(double voltage)
         return adcmaxval;
     }
     const double relvoltage = (voltage - m_fullscale[0]) / (m_fullscale[1] - m_fullscale[0]);
-    return relvoltage * adcmaxval;
+    const double fp_adc = relvoltage * adcmaxval;
+    if (m_round) {
+        return round(fp_adc);
+    }
+    return fp_adc;
 }
 
 bool Gen::Digitizer::operator()(const input_pointer& vframe, output_pointer& adcframe)
@@ -129,6 +136,8 @@ bool Gen::Digitizer::operator()(const input_pointer& vframe, output_pointer& adc
 
     ITrace::vector adctraces(nrows);
 
+    double totadc = 0;
+
     for (size_t irow = 0; irow < nrows; ++irow) {
         int ch = channels[irow];
         WirePlaneId wpid = m_anode->resolve(ch);
@@ -143,6 +152,7 @@ bool Gen::Digitizer::operator()(const input_pointer& vframe, output_pointer& adc
             double voltage = m_gain * arr(irow, icol) + baseline;
             const float adcf = digitize(voltage);
             adcwave[icol] = adcf;
+            totadc += adcf;
         }
         adctraces[irow] = make_shared<SimpleTrace>(ch, tbinmm.first, adcwave);
     }
@@ -152,9 +162,9 @@ bool Gen::Digitizer::operator()(const input_pointer& vframe, output_pointer& adc
     }
     adcframe = sframe;
 
-    log->debug("call={} traces={} frame={} outtag=\"{}\"",
+    log->debug("call={} traces={} frame={} totadc={} outtag=\"{}\"",
                m_count,
-               adctraces.size(), vframe->ident(), m_frame_tag);
+               adctraces.size(), vframe->ident(), totadc, m_frame_tag);
     ++m_count;
     return true;
 }

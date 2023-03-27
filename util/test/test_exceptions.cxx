@@ -15,6 +15,7 @@ int main()
     const double number = 6.9;
 
     cerr << format("something") << endl;
+    // cerr << format("no percent", value) << endl;
     cerr << format("value=%d", value) << endl;
     cerr << format("value=%d, omg=\"%s\", number=%f", value, omg, number) << endl;
 

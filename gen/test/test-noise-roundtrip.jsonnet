@@ -20,6 +20,7 @@ local tns = import "test-noise-spectra.jsonnet";
 local tng = {
     inco: import "test-noise-groups-incoherent.jsonnet",
     cohe: import "test-noise-groups-coherent.jsonnet",
+    empno: import "test-noise-groups-incoherent.jsonnet",
 };
 
 // Size of original (fictional) waveforms
@@ -96,10 +97,16 @@ local digidata = {
 };
 
 
-// The graph will have two major pipelines split based on coherent nad
+local tick = 0.5*wc.us;
+
+// The graph will have two major pipelines split based on coherent and
 // incoherent noise.  Here are the short nick names to ID each:
-local nicks = ["inco", "cohe"];
-local adder_types = { inco: "IncoherentAddNoise", cohe: "CoherentAddNoise" };
+local group_nicks = ["inco", "cohe"];
+local adder_types = {
+    inco: "IncoherentAddNoise",
+    cohe: "CoherentAddNoise",
+    empno: "IncoherentAddNoise",
+};
 local models = {
     [one]: {
         type: "GroupNoiseModel",
@@ -110,20 +117,38 @@ local models = {
                          rms=1*wc.mV), // PDSP is eg 1.3 mV
             groups: tng[one],
             nsamples: nsamples_generate,
-            tick: 0.5*wc.us,
+            tick: tick,
         }
-    } for one in nicks};
-local pipes = {
+    }
+    for one in group_nicks} + {
+        empno: {
+            type: "EmpiricalNoiseModel",
+            name: "empno",
+            data: {
+                anode: wc.tn(anode),
+                chanstat: "",
+                spectra_file: "protodune-noise-spectra-v1.json.bz2",
+                nsamples: nsamples_generate,
+                period: tick,
+                wire_length_scale: 1*wc.cm,
+            }, uses: [anode]
+        },
+    };
+
+
+local pipes(round=true, bug202 = 0.0) = {
     [one]: [
 
         // add noise
         pg.pnode({
             type: adder_types[one],
+            name: one,
             data: {
                 dft: wc.tn(svcs.dft),
                 rng: wc.tn(svcs.rng),
                 model: wc.tn(models[one]),
                 nsamples: nsamples_generate,
+                bug202: bug202,
             }}, nin=1, nout=1, uses=[models[one], svcs.dft, svcs.rng]),
 
         // tap input to modeler
@@ -140,7 +165,8 @@ local pipes = {
         pg.pnode({
             type: "Digitizer",
             name: one,
-            data: digidata}, nin=1, nout=1, uses=[anode]),
+            data: digidata + {round: round}
+        }, nin=1, nout=1, uses=[anode]),
 
         // tap generated noise
         pg.fan.tap('FrameFanout',  pg.pnode({
@@ -181,29 +207,33 @@ local pipes = {
                 outname: "test-noise-roundtrip-%s-spectra.json.bz2"%one
             },
         }, nin=1, nout=0, uses=[svcs.dft, isnoise])] // one pipe
-    for one in nicks
+    for one in std.objectFields(models)
 };                              // pipes
 
+function(round=true, bug202=0.0) 
+    local bool_round = round == true || round == "true" || round == "round";
+    local number_bug202 = if std.type(bug202) == "number" then bug202 else std.parseJson(bug202);
 
-local fanout = pg.fan.fanout('FrameFanout', [
-    pg.pipeline(pipes.inco),
-    pg.pipeline(pipes.cohe)
-]);
-local graph = pg.pipeline([absurd, reframer, fanout]);
+    local nicks_to_use = ["empno", "cohe", "inco"];
+    local fanout = pg.fan.fanout('FrameFanout', [
+        pg.pipeline(pipes(bool_round, number_bug202)[nick]) for nick in nicks_to_use
+    ]);
+    local graph = pg.pipeline([absurd, reframer, fanout]);
 
-local app = {
-    type: 'Pgrapher',
-    data: {
-        edges: pg.edges(graph),
-    },
-};
-local cmdline = {
-    type: "wire-cell",
-    data: {
-        plugins: ["WireCellAux", "WireCellSigProc", "WireCellGen", "WireCellApps", "WireCellPgraph", "WireCellSio"],
-        apps: [app.type]
-    }
-};
-[cmdline] + pg.uses(graph) + [app]
+    local app = {
+        type: 'Pgrapher',
+        data: {
+            edges: pg.edges(graph),
+        },
+    };
+    local cmdline = {
+        type: "wire-cell",
+        data: {
+            plugins: ["WireCellAux", "WireCellSigProc", "WireCellGen",
+                      "WireCellApps", "WireCellPgraph", "WireCellSio"],
+            apps: [app.type]
+        }
+    };
+    [cmdline] + pg.uses(graph) + [app]
 
                                  

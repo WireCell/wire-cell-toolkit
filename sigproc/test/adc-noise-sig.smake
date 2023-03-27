@@ -1,0 +1,296 @@
+#!/usr/bin/env snakemake
+
+# Render the full DAG:
+# snakemake -p -jall -s sigproc/test/adc-noise-sig.smake all --dag > adc-noise-sig.dot
+#
+# Or, for one generator:
+# snakemake -p -jall -s sigproc/test/adc-noise-sig.smake all_UVCGAN --dag > adc-noise-sig-UVCGAN.dot
+#
+# Drop "--dag" to run.  Replace "all" with a target file name for focused run.
+
+import os
+from pathlib import Path
+from adc_noise_sig import *
+from snakemake.remote.HTTP import RemoteProvider as HTTPRemoteProvider
+HTTP = HTTPRemoteProvider()
+
+# The input files.
+# Note, we reuse UVCGAN's "real" samples by doing this in all non-UVCGAN dirs:
+# cd ../selected_translations_UGATIT/
+# ln -s ../selected_translations_UVCGAN/real_{a,b} .
+sample_urlbase = 'https://www.phy.bnl.gov/~bviren/tmp/ls4gan/data/samples_sigproc'
+sample_file = sample_urlbase+'/selected_translations_{generator}/{source}_{domain}/sample_{event}.npz'
+
+# set this to where {fake,real}_{a,b}/sample_*.npz live
+# datadir = Path(os.path.expanduser("~/selected_translations"))
+
+# the WCT response file providing 2D model
+wcdata_url = "https://github.com/WireCell/wire-cell-data/raw/master"
+resp_file_remote = "dune-garfield-1d565.json.bz2"
+
+# where things are and go relative to this file
+tstdir = Path(workflow.basedir).absolute()
+imgdir = tstdir.parent
+topdir = imgdir.parent
+blddir = topdir / "build"
+outdir = blddir / "sigproc/test/adc-noise-sig/{generator}"
+
+generators = [                  # match stub in sample subdir name
+    "UVCGAN", "UGATIT", "CycleGAN", "ACLGAN", 
+]
+sources = [
+    "real",              # directly simulated
+    "fake",              # UVCGAN-translated
+]
+domains = [
+    "a",                  # q1d
+    "b",                  # 2d
+]
+all_events = [ 2, 4, 19, 22, 29, 41, 42, 44, 66, 77, 104, 107, 116, 121,
+               122, 164, 173, 174, 190, 213, 214, 215, 227, 231, 255, 257,
+               258, 266, 269, 274, 303, 614 ] 
+# events shown in the presentation
+sel_events = [2, 19, 66]
+# events = sel_events
+events = all_events
+
+## things we want to plot
+# tiers = ['raw', 'rnd', 'vlt', 'src', 'ref', 'noi', 'dig', 'sig']
+tiers = ['raw', 'rnd', 'noi', 'dig', 'sig']
+npzs = expand('{tier}.npz', tier=tiers)
+pngs = expand('{tier}.png', tier=tiers)
+pdfs = expand('{tier}.pdf', tier=tiers)
+filenames = npzs + pngs + pdfs
+# ['raw.png','vlt.npz', 'sig.npz']
+eventdir = f'{outdir}/{{source}}/{{domain}}/{{event}}'
+rule all:
+    input:
+        expand(f'{outdir}/dfp.pdf',
+               generator=generators),
+        expand(eventdir + '/{filename}',
+               generator=generators,
+               source=sources, domain=domains, event=events,
+               filename=filenames)
+
+
+        # expand(eventdir + '/{filename}',
+        #        generator=generators,
+        #        source=["frdp"], domain=domains, event=events,
+        #        filename=pngs+pdfs),
+        # expand(eventdir + '/{filename}',
+        #        generator=generators,
+        #        source=["xddp"], domain=sources, event=events,
+        #        filename=pngs+pdfs),
+        
+rule all_UVCGAN:
+    input:
+        expand(f'{outdir}/dfp.pdf',
+               generator=generators[:1]),
+        expand(eventdir + '/{filename}',
+               generator=generators[:1],
+               source=sources, domain=domains, event=events,
+               filename=filenames)
+
+        # expand(eventdir + '/{filename}',
+        #        generator=generators[:1],
+        #        source=["frdp"], domain=domains, event=events,
+        #        filename=pngs+pdfs),
+        # expand(eventdir + '/{filename}',
+        #        generator=generators[:1],
+        #        source=["xddp"], domain=sources, event=events,
+        #        filename=pngs+pdfs),
+        
+               
+rule get_resp_b:
+    input:
+        HTTP.remote(f'{wcdata_url}/{resp_file_remote}', keep_local=True)
+    output:
+        f'{outdir}/resp-b.json.bz2'
+    run:
+        shell("cp {input} {output}")
+
+
+rule gen_resp_a:
+    input:
+        rules.get_resp_b.output
+    output:
+        f'{outdir}/resp-a.json.bz2'
+    shell: '''
+    wirecell-sigproc frzero -n 0 -o {output} {input}
+    '''
+                  
+# input: f'{datadir}/{{source}}_{{domain}}/sample_{{event}}.npz'
+rule import_raw:
+    input:
+        HTTP.remote(sample_file, keep_local=True)
+    output:
+        eventdir + '/raw.npz'
+    wildcard_constraints:
+        source = "real|fake"
+    run:
+        transform_array(input[0], output[0], lambda a: -a, 'f4')
+                  
+
+rule render:
+    input:
+        eventdir + '/{tier}.npz'
+    output:
+        eventdir + "/{tier}.{ext}"
+    wildcard_constraints:
+        ext = "png|pdf"
+    params: render_params
+    shell: """
+    wirecell-util npz-to-img {params} -o {output} {input}
+    """
+
+
+def raw_rounder(raw):
+    raw = numpy.round(raw)
+    raw[raw==-0] = 0
+    return raw
+
+rule round_raw:
+    input:
+        rules.import_raw.output
+    output:
+        eventdir + "/rnd.npz"
+    wildcard_constraints:
+        source = "real|fake"
+    run:
+        transform_array(input[0], output[0], raw_rounder, 'f4')
+
+# arbitrarily place patch at tbin=1000 ticks.
+tbin=1000
+rule convert_raw:
+    input:
+        rules.import_raw.output
+    output:
+        eventdir + "/vlt.npz"
+    wildcard_constraints:
+        source = "real|fake"
+    params:
+        vpa=voltageperadc,
+        tbin=tbin
+    shell: """
+    wirecell-util npz-to-wct -d f4 -n raw -o {output} \
+              -s {params.vpa} -t '0,0.5*us,{params.tbin}' {input}
+    """
+           
+rule process_vlt:
+    input:
+        vlt = rules.convert_raw.output,
+        res = f'{outdir}/resp-a.json.bz2',
+        cfg = f'{tstdir}/adc-noise-sig.jsonnet'
+    output:
+        sig = eventdir + "/sig.npz",
+        src = eventdir + "/src.npz",
+        dig = eventdir + "/dig.npz",
+        noi = eventdir + "/noi.npz",
+        ref = eventdir + "/ref.npz",
+        log = eventdir + "/wct.log"
+    wildcard_constraints:
+        source = "real|fake"
+    params: eventdir
+    shell: """
+    wire-cell -l {output.log} -L debug \
+              -A adcvoltfile={input.vlt} \
+              -A spfrfile={input.res} \
+              -A outprefix={params}/ \
+              {input.cfg}
+    """
+
+rule process_dot:
+    input:
+        f'{tstdir}/adc-noise-sig.jsonnet'
+    output:
+        f'{outdir}/dfp.pdf'
+    params:
+        cfgdir = f'{topdir}/cfg'
+    shell: """
+    wirecell-pgraph dotify -J {params.cfgdir} --no-params \
+              -A adcvoltfile=adcvoltfile \
+              -A spfrfile=resfile \
+              -A outprefix=prefix/ \
+              {input} {output}
+    """
+
+rule coalesce:
+    input:
+        expand('{outdir}/{source}/{{domain}}/{event}/{{tier}}.npz',
+               outdir=[outdir], source=sources, event=events)
+    output:
+        f'{outdir}/coal/{{domain}}/all/{{tier}}.npz'
+    run:
+        coalesce(input, output[0])
+
+
+# fake real diff plot
+rule frdplot:
+    input:
+        images = rules.coalesce.output
+    output:
+        plot = f'{outdir}/{{source}}/{{domain}}/{{event}}/{{tier}}.{{ext}}'
+    wildcard_constraints:
+        source = "frdp"
+    params:
+        wc = lambda wc: wc
+    run:
+        plot_frdp(params.wc, input.images, output.plot)
+
+# cross-domain diff plot
+rule xddplot:
+    input:
+        a = f'{outdir}/{{source}}/a/{{event}}/{{tier}}.npz',
+        b = f'{outdir}/{{source}}/b/{{event}}/{{tier}}.npz'
+    output:
+        plot = f'{outdir}/xddp/{{source}}/{{event}}/{{tier}}.{{ext}}'
+    wildcard_constraints:
+        source = "fake|real",
+        ext = "png|pdf"
+    params:
+        wc = lambda wc: wc
+    run:
+        plot_xddp(params.wc, input.a, input.b, output.plot)
+
+
+# Paired image metric for comparing real/fake
+rule pimp:
+    input:
+        coal = rules.coalesce.output
+    output:
+        expand('{outdir}/pimp/{{domain}}/{{tier}}.npz',
+               outdir=[outdir], event=events)
+    wildcard_constraints:
+        ext = "png|pdf"
+    params:
+        wc = lambda wc: wc
+    run:
+        pimp(params.wc, input.coal[0], output[0])
+        
+
+rule pimp_all:
+    input:
+        expand(rules.pimp.output,
+               generator=generators,
+               domain=['a','b'],
+               tier=['raw','sig'])
+
+rule pimplot:
+    input:
+        rules.pimp.output
+    output:
+        f'{outdir}/pimp/{{domain}}/{{tier}}.{{ext}}'
+    wildcard_constraints:
+        ext = "png|pdf"
+    params:
+        wc = lambda wc: wc
+    run:
+        plot_pimp(params.wc, input[0], output[0]);
+           
+rule pimplot_all:
+    input:
+        expand(rules.pimplot.output,
+               generator=generators,
+               domain=['a','b'],
+               tier=['raw','sig'],
+               ext=['png','pdf'])
