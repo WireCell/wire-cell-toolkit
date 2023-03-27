@@ -210,7 +210,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
             const double pitchmin = wire_pitch_dirs.second.dot(wires[0]->center() - plane_center);
             const double pitchmax = wire_pitch_dirs.second.dot(wires[nwires - 1]->center() - plane_center);
             // const Vector pimpos_origin(response_x, plane_center.y(), plane_center.z());
-            const Vector pimpos_origin(plane_center.x(), plane_center.y(), plane_center.z());
+            Vector pimpos_origin(plane_center.x(), plane_center.y(), plane_center.z());
             if (std::fabs(ecks_dir.x()) > 0.999) { pimpos_origin.x(response_x); } // drift in x-axis
             else if (std::fabs(ecks_dir.y()) > 0.999) { pimpos_origin.y(response_x); } // y-axis
 
