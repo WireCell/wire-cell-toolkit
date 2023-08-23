@@ -120,7 +120,7 @@ struct FromActivity {
             activity[ich->ident()] = act;
         }
 
-        double qtot=0;
+        // double qtot=0;
 
         // check each layer of the blob
         for (const auto& strip : blob.strips()) {
@@ -145,7 +145,7 @@ struct FromActivity {
                 auto strace = std::make_shared<SimpleTrace>(chid, tbin, charge);
                 traces.push_back(strace);
 
-                qtot += act_charge;
+                // qtot += act_charge;
             }
         }
         return traces;

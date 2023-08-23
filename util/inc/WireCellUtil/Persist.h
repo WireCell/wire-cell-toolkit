@@ -27,8 +27,11 @@
 //
 // ./wcb configure --with-jsonnet-libs=gojsonnet [...as usual...]
 //
+// extern "C" {
+// #include "libjsonnet.h"
+// }
 extern "C" {
-#include "libjsonnet.h"
+    struct JsonnetVm;
 }
 #include <boost/filesystem.hpp>
 #include <vector>
