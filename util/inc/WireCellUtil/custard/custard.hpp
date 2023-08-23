@@ -95,8 +95,7 @@ namespace custard {
         return sum;
     }
 
-    class Header
-    {                         /* byte offset */
+    struct TarHeader {
         char name_[100];               /*   0 */
         char mode_[8];                 /* 100 */
         char uid_[8];                  /* 108 */
@@ -114,6 +113,10 @@ namespace custard {
         char devminor_[8];             /* 337 */
         char prefix_[155];             /* 345 */
         char padding_[12];             /* 500 */
+    };
+
+    class Header : private TarHeader
+    {                         /* byte offset */
                                        /* 512 */
       public:
         Header(std::string filename="", size_t siz=0)

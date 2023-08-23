@@ -15,6 +15,22 @@
 #include <sstream>
 #include <fstream>
 
+// see #239 for why this is here.
+extern "C" {
+    struct JsonnetVm;
+    struct JsonnetVm* jsonnet_make();
+    char *jsonnet_realloc(struct JsonnetVm *vm, char *buf, size_t sz);
+    void jsonnet_destroy(struct JsonnetVm* vmRef);
+    void jsonnet_jpath_add(struct JsonnetVm* vmRef, char* path);
+    void jsonnet_ext_var(struct JsonnetVm* vmRef, char* key, char* value);
+    void jsonnet_ext_code(struct JsonnetVm* vmRef, char* key, char* value);
+    void jsonnet_tla_var(struct JsonnetVm* vmRef, char* key, char* value);
+    void jsonnet_tla_code(struct JsonnetVm* vmRef, char* key, char* value);
+    char* jsonnet_evaluate_file(struct JsonnetVm* vmRef, char* filename, int* e);
+    char* jsonnet_evaluate_snippet(struct JsonnetVm* vmRef, char* filename, char* code, int* e);
+}
+
+
 using spdlog::debug;
 using spdlog::error;
 using spdlog::info;
