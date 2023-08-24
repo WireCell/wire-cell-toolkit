@@ -652,12 +652,12 @@ WireCell::Waveform::ChannelMaskMap Protodune::StickyCodeMitig::apply(int ch, sig
         }
     }
 
-    int ent_stkylen = 0;
+    // int ent_stkylen = 0;
     for (auto rng : sticky_rng_list) {
         int stkylen = rng.second - rng.first;
         if (stkylen > m_stky_max_len) {
             ret["sticky"][ch].push_back(rng);
-            ent_stkylen += stkylen;
+            // ent_stkylen += stkylen;
         }
     }
     // std::cerr << "[wgu] ch: " << ch << " long_stkylen: " << long_stkylen << std::endl;

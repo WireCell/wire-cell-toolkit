@@ -262,7 +262,7 @@ void ROI_formation::create_ROI_connect_info(int plane)
                     int start2 = self_rois_u.at(i + 2).at(k).first;
                     int end2 = self_rois_u.at(i + 2).at(k).second;
                     int length2 = end2 - start2 + 1;
-                    if (fabs(length2 - length1) < (length2 + length1) * asy) {
+                    if (std::abs(length2 - length1) < (length2 + length1) * asy) {
                         int start3 = (start1 + start2) / 2.;
                         int end3 = (end1 + end2) / 2.;
                         if (start3 < end3 && start3 <= end1 && start3 <= end2 && end3 >= start1 && end3 >= start2) {
@@ -298,7 +298,7 @@ void ROI_formation::create_ROI_connect_info(int plane)
                     int start2 = self_rois_v.at(i + 2).at(k).first;
                     int end2 = self_rois_v.at(i + 2).at(k).second;
                     int length2 = end2 - start2 + 1;
-                    if (fabs(length2 - length1) < (length2 + length1) * asy) {
+                    if (std::abs(length2 - length1) < (length2 + length1) * asy) {
                         int start3 = (start1 + start2) / 2.;
                         int end3 = (end1 + end2) / 2.;
                         if (start3 < end3 && start3 <= end1 && start3 <= end2 && end3 >= start1 && end3 >= start2) {
@@ -334,7 +334,7 @@ void ROI_formation::create_ROI_connect_info(int plane)
                     int start2 = self_rois_w.at(i + 2).at(k).first;
                     int end2 = self_rois_w.at(i + 2).at(k).second;
                     int length2 = end2 - start2 + 1;
-                    if (fabs(length2 - length1) < (length2 + length1) * asy) {
+                    if (std::abs(length2 - length1) < (length2 + length1) * asy) {
                         int start3 = (start1 + start2) / 2.;
                         int end3 = (end1 + end2) / 2.;
                         if (start3 < end3 && start3 <= end1 && start3 <= end2 && end3 >= start1 && end3 >= start2) {

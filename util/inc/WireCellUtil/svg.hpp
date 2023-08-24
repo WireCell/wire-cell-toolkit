@@ -632,6 +632,9 @@ namespace svg
             for (unsigned i = 0; i < polylines.size(); ++i)
                 polylines[i].offset(offset);
         }
+
+        double unused_scale() const { return scale; }
+
     private:
         Stroke axis_stroke;
         Dimensions margin;

@@ -48,6 +48,7 @@ int main()
 
         em("done with chunked test");
     }
+    cerr << "dummy value: " << dummy << endl; // to avoid warning of used var
 
     cerr << em.summary() << endl;
     return 0;

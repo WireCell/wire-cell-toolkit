@@ -78,18 +78,18 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
 
     std::vector<ITrace::vector> tracesvin;
 
-    size_t ntraces = 0;
+    // size_t ntraces = 0;
     size_t ntags = m_tags.size();
     if (!ntags) {
         tracesvin.push_back(Aux::untagged_traces(in));
-        ntraces += tracesvin[0].size();
+        // ntraces += tracesvin[0].size();
     }
     else {
         tracesvin.resize(ntags);
         for (size_t ind = 0; ind < ntags; ++ind) {
             std::string tag = m_tags[ind];
             tracesvin[ind] = Aux::tagged_traces(in, tag);
-            ntraces += tracesvin[ind].size();
+            // ntraces += tracesvin[ind].size();
         }
     }
     

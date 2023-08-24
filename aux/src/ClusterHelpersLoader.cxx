@@ -253,7 +253,7 @@ cluster_graph_t ClusterLoader::load(const Json::Value& jgraph,
     }
 
     frid2iframe_t frames;
-    for (const auto kf : known_frames) {
+    for (const auto& kf : known_frames) {
         frames[kf->ident()] = kf;
     }
     slid2islice_t slices;

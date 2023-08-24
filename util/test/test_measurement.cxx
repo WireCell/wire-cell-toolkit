@@ -15,7 +15,7 @@ int main()
     {
         float32 f1;
         float32 f2(42);
-        float32 f3(42,6.9);
+        // float32 f3(42,6.9);
         float64 d1;
         float64 d2(42);
         float64 d3(42,6.9);

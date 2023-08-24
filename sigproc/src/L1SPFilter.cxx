@@ -599,10 +599,10 @@ int L1SPFilter::L1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
         }
 
         double sum1 = 0;
-        double sum2 = 0;
+        // double sum2 = 0;
         for (int i = 0; i != nbin_fit; i++) {
             sum1 += final_beta(i);
-            sum2 += final_beta(nbin_fit + i);
+            // sum2 += final_beta(nbin_fit + i);
         }
 
         if (sum1 > adc_l1_threshold) {

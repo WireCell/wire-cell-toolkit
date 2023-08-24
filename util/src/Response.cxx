@@ -187,10 +187,10 @@ Response::Schema::FieldResponse Response::wire_region_average(const Response::Sc
             int region = it.first;
             realseq_t& response = it.second;
 
-            double sum = 0;
-            for (int k = 0; k != nsamples; k++) {
-                sum += response.at(k);
-            }
+            // double sum = 0;
+            // for (int k = 0; k != nsamples; k++) {
+            //     sum += response.at(k);
+            // }
 
             // pack up everything for return.
             newpaths.push_back(PathResponse(response, region * pitch, 0.0));

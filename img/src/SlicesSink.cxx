@@ -27,14 +27,14 @@ bool Img::SlicesSink::operator()(const ISliceFrame::pointer& sf)
         return true;
     }
 
-    auto slices = sf->slices();
+    // auto slices = sf->slices();
 
-    for (auto slice : slices) {
-        auto cvmap = slice->activity();
-        double qtot = 0;
-        for (const auto& cv : cvmap) {
-            qtot += cv.second;
-        }
-    }
+    // for (auto slice : slices) {
+    //     auto cvmap = slice->activity();
+    //     double qtot = 0;
+    //     for (const auto& cv : cvmap) {
+    //         qtot += cv.second;
+    //     }
+    // }
     return true;
 }

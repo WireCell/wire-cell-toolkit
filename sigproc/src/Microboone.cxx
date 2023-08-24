@@ -1183,7 +1183,7 @@ WireCell::Waveform::ChannelMaskMap Microboone::ADCBitShift::apply(int ch, signal
                 for (auto it = fillings.begin(); it != fillings.end(); it++) {
                     int y = WireCell::Bits::shift_right(x_orig[i], nshift, (*it), 12);
                     // when to switch ...
-                    if (fabs(y - exp_value) < fabs(x[i] - exp_value)) {
+                    if (std::abs(y - exp_value) < std::abs(x[i] - exp_value)) {
                         x[i] = y;  // hs->SetBinContent(i+1,y);
                     }
                 }

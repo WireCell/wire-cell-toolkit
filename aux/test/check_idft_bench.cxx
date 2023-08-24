@@ -105,7 +105,10 @@ int main(int argc, char* argv[])
         {2400, 9595}, {3456, 9595}, // uboone u/v daq size
         {1024, 1024}, {2048, 2048}, {4096, 4096}, // perfect powers of 2
     };
-    for (auto& [nrows,ncols] : twod_sizes) {
+    for (const auto& p : twod_sizes) {
+        // [nrows,ncols]
+        const int nrows = p.first;
+        const int ncols = p.second;
 
         doit(sw, "fwd2d", nrows, ncols, [&](const complex_t* in, complex_t* out) {
             idft->fwd2d(in, out, nrows, ncols);

@@ -106,6 +106,7 @@ void test_speed_iface(size_t ndraws)
     for (size_t ind=0; ind<ndraws; ++ind) {
         x += rng->normal(0, 1);
     }
+    cerr << "speed iface value " << x << endl; // to avoid warning of unused var.
 }
 
 // before implementing closure in Random:
@@ -124,7 +125,7 @@ void test_speed_closure(size_t ndraws)
     for (size_t ind=0; ind<ndraws; ++ind) {
         x += norm();
     }
-
+    cerr << "speed closure value " << x << endl; // to avoid warning of unused var.
 }
 
 
@@ -137,6 +138,7 @@ void test_speed_direct(size_t ndraws)
     for (size_t ind=0; ind<ndraws; ++ind) {
         x +=  distribution(rng);
     }
+    cerr << "speed direct value " << x << endl; // to avoid warning of unused var.
 }
 
 #include <limits>
@@ -171,6 +173,7 @@ void test_speed_custom(size_t ndraws)
     for (size_t ind=0; ind<ndraws; ++ind) {
         x +=  distribution(rng);
     }
+    cerr << "speed custom value " << x << endl; // to avoid warning of unused var.
 }
 
 

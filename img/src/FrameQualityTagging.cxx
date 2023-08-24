@@ -244,7 +244,7 @@ bool FrameQualityTagging::operator()(const input_pointer& in, output_pointer& ou
       int n_fire = 0;
       int start_time =0;
       int end_time = 0;
-      int acc_cover = 0;
+      // int acc_cover = 0;
       int acc_total = 0;
       int acc_fire = 0;
 
@@ -263,7 +263,7 @@ bool FrameQualityTagging::operator()(const input_pointer& in, output_pointer& ou
 	  }
 	  n_cover = 0;
 	  n_fire = 0;
-	  acc_cover = 0;
+	  // acc_cover = 0;
 	  acc_total = 0;
 	  acc_fire = 0;
 	  start_time = time;
@@ -275,7 +275,7 @@ bool FrameQualityTagging::operator()(const input_pointer& in, output_pointer& ou
 	if (ncover * percentage > m_threshold2[iplane]){
 	  n_fire ++;
 	  acc_total += nchannels[iplane];
-	  acc_cover += ncover;
+	  // acc_cover += ncover;
 	  acc_fire  += ncover*percentage;
 	}
 	prev_time = time;

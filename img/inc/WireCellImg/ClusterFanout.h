@@ -29,7 +29,6 @@ namespace WireCell::Img {
         size_t m_multiplicity{0};
         size_t m_count{0};
 
-        bool m_trivial{false};
         tagrules::Context m_ft;
 
     };
