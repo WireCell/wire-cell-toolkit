@@ -150,8 +150,9 @@ struct TFSTensor : public WireCell::ITensor {
         , m_shape(pig.header().shape())
         , m_cfg(cfg)
     {
+        const size_t size = pig.data().size();
         const std::byte* data = reinterpret_cast<const std::byte*>(pig.data().data());
-        m_store.insert(m_store.end(), data, data + pig.data().size());
+        m_store.insert(m_store.end(), data, data + size);
     }
 
     // An ITensor may not have an array part.
