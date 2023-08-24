@@ -43,7 +43,8 @@ void doit_map(bool common)
         ++count;
         if (common) --count;
     }
-    std::cerr << im << std::endl;
+    // the ostream operator for  std::set<long unsigned int> seems to have gone missing
+    // std::cerr << im << std::endl;
 }
 
 template<typename Key>
