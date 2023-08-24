@@ -79,7 +79,8 @@ void test_2d_eigen_transpose(IDFT::pointer dft)
     auto c = fwd(dft, rt.cast<complex_t>());
     dump("c", c);
 
-    auto r2 = inv(dft, c).real();
+    auto cinv = inv(dft, c);
+    auto r2 = cinv.real();
     dump("r2",r2);
 
     // transpose access
