@@ -76,8 +76,6 @@ int main(int argc,const char *argv[])
 #    print(cfg.env)
 
 def build(bld):
-    bld.env.CXXFLAGS += ['-Wc99-extensions']
-
     bld.load('wcb')
 
 

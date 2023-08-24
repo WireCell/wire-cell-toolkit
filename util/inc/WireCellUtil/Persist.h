@@ -19,17 +19,20 @@
 #define WIRECELL_PERSIST
 
 #include <json/json.h>
-//#include "libjsonnet++.h"
+
+// WCT can use the C bindings to either the Go or C++ Jsonnet library.
+// The Go version is much better optimized and strongly recomended
+// over the C++ version though the C++ is default so as to not require
+// a dependency on the Go ecosystem.  You may tell the WCT build
+// system to use the Go version with a command like:
 //
-// Note, you can build WCT against the C-bindings to the Go jsonnet
-// library which will provide substantial speed up ver the native C
-// implementation.  To do this, configure code like:
+// ./wcb configure --with-jsonnet-libs=gojsonnet [...etc...]
 //
-// ./wcb configure --with-jsonnet-libs=gojsonnet [...as usual...]
-//
-// extern "C" {
-// #include "libjsonnet.h"
-// }
+// The C bindings to both C++ and Go provide the same C API.  Only the
+// shared library is required (not headers).  The portion of the C API
+// used is declared in Persist.cxx and is not exposed to external code
+// compiling against WCT.
+// 
 extern "C" {
     struct JsonnetVm;
 }
