@@ -80,8 +80,6 @@ int main(int argc,const char *argv[])
 
 
 def build(bld):
-    bld.env.CXXFLAGS += ['-Wc99-extensions']
-
     bld.load('wcb')
 
 def dumpenv(bld):
