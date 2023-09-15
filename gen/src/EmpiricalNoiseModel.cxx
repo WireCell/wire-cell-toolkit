@@ -80,6 +80,8 @@ WireCell::Configuration Gen::EmpiricalNoiseModel::default_configuration() const
     cfg["nsamples"] = m_nsamples;  // number of samples up to Nyquist frequency
     cfg["period"] = m_period;
     cfg["wire_length_scale"] = m_wlres;  //
+    cfg["gain_scale"] = m_gres;
+    cfg["shaping_scale"] = m_sres;
     // cfg["time_scale"] = m_tres;
     // cfg["gain_scale"] = m_gres;
     // cfg["freq_scale"] = m_fres;
@@ -323,9 +325,13 @@ Gen::EmpiricalNoiseModel::get_spectrum_data(int iplane, int ilen) const
 const IChannelSpectrum::amplitude_t&
 Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
 {
-    auto cacit = m_channel_amp_cache.find(chid);
-    if (cacit != m_channel_amp_cache.end()) {
-        return cacit->second;
+    auto packkeyit = m_channel_packkey_cache.find(chid);
+    if (packkeyit != m_channel_packkey_cache.end()) {
+        unsigned int packkey = packkeyit->second;
+        auto cacit = m_channel_amp_cache.find(packkey);
+        if (cacit != m_channel_amp_cache.end()) {
+            return cacit->second;
+        }
     }
 
     // get truncated wire length for cache
@@ -409,6 +415,24 @@ Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
         val = sqrt(val*val + constant_squared); // units still in mV
     }
 
-    m_channel_amp_cache[chid] = amp;
+    struct PWGS {
+        unsigned int p;
+        unsigned int w;
+        unsigned int g;
+        unsigned int s;
+        unsigned int operator() () {
+            return (
+                ((p & 0b111) << 29) // 0 - 65535 length steps
+                | ((w & 0b111111111111) << 16) // 0 - 65535 length steps
+                | ((g & 0xFF) << 8) // 0 - 255 gain steps
+                | (s & 0xFF)
+                ); // 0 - 255 shaping steps
+        } 
+    } pack{(unsigned int)iplane, (unsigned int)ilen, (unsigned int)(ch_gain/m_gres), (unsigned int)(ch_shaping/m_sres)};
+
+    unsigned int packkey = pack();
+    m_channel_packkey_cache[chid] = packkey;
+    // m_channel_amp_cache.clear();
+    m_channel_amp_cache[packkey] = amp;
     return channel_spectrum(chid);
 }
