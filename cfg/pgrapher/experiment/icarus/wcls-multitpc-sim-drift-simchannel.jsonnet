@@ -295,22 +295,22 @@ local digitizers = [
     for n in std.range(0,3)];
 
 //local reframer = [
-//    sim.reframers(mega_anode, name="reframer-%d-" %n + mega_anode.name, tag="TPC%s"%volname[n])
+//    sim.make_reframer(name="reframer-%d-" %n + mega_anode.name, mega_anode, tag="TPC%s"%volname[n])
 //    for n in std.range(0,3)];
 
-//local reframer = [
-//    g.pnode({
-//            type: 'Reframer',
-//            name: 'reframer-%d-'%n+mega_anode.name,
-//            data: {
-//                anode: wc.tn(mega_anode),
-//                tags: [],           // ?? what do?
-//                fill: 0.0,
-//                tbin: params.sim.reframer.tbin,
-//                toffset: 0,
-//                nticks: params.sim.reframer.nticks,
-//            },
-//       }, nin=1, nout=1) for n in std.range(0, 3)];
+local reframer = [
+    g.pnode({
+            type: 'Reframer',
+            name: 'reframer-%d-'%n+mega_anode.name,
+            data: {
+                anode: wc.tn(mega_anode),
+                tags: "TPC%s"%volname[n],           // ?? what do?
+                fill: 0.0,
+                tbin: params.sim.reframer.tbin, 
+                toffset: 0,
+                nticks: params.sim.reframer.nticks,
+            },
+       }, nin=1, nout=1) for n in std.range(0, 3)];
    
 local retaggers = [
 g.pnode({
@@ -337,8 +337,7 @@ local frame_summers = [
         type: 'FrameSummer',
         name: 'framesummer%d' %n,
         data: {
-            align: true,
-            offset: 0.0*wc.s,
+	      multiplicity: 90
         },
     }, nin=90, nout=1) for n in std.range(0, 3)];
 
@@ -358,10 +357,10 @@ local deposetfilteryz = [ g.pnode({
             type: 'DepoSetFilterYZ',
    	    name: 'deposetfilteryz_resp%d-'%std.mod(r,15)+'plane%d-'%std.mod(std.floor(r/15),3)+tools.anodes[std.floor(r/45)].name,
             data: {
-		yzmap_filename: 'pgrapher/experiment/icarus/yzmap_icarus.jsonnet',
-		bin_width:  100*wc.mm,
+		yzmap_filename: 'pgrapher/experiment/icarus/yzmap_icarus_v0.json',
+		bin_width:  10*wc.cm,
 		tpc_width: 1500*wc.mm,
-		bin_height: 100*wc.mm,
+		bin_height: 10*wc.cm,
 		resp: std.mod(r,15),	
                 anode: wc.tn(tools.anodes[std.floor(r/45)]),
 		plane: std.mod(std.floor(r/15),3)	
@@ -370,8 +369,8 @@ local deposetfilteryz = [ g.pnode({
         uses=tools.anodes)
 	for r in std.range(0,359)];
 
-//local actpipes = [g.pipeline([reframer[n], noises[n], coh_noises[n], digitizers[n], /*retaggers[n],*/ wcls_output.sim_digits[n]], name="noise-digitizer%d" %n) for n in std.range(0,3)];
-local actpipes = [g.pipeline([noises[n], coh_noises[n], digitizers[n], /*retaggers[n],*/ wcls_output.sim_digits[n]], name="noise-digitizer%d" %n) for n in std.range(0,3)];
+local actpipes = [g.pipeline([reframer[n], noises[n], coh_noises[n], digitizers[n], /*retaggers[n],*/ wcls_output.sim_digits[n]], name="noise-digitizer%d" %n) for n in std.range(0,3)];
+//local actpipes = [g.pipeline([noises[n], coh_noises[n], digitizers[n], /*retaggers[n],*/ wcls_output.sim_digits[n]], name="noise-digitizer%d" %n) for n in std.range(0,3)];
 local util = import 'pgrapher/experiment/icarus/funcs.jsonnet';
 
 
@@ -382,7 +381,7 @@ local pipe_reducer = util.fansummer('DepoSetFanout', analog_pipes, frame_summers
 //local driftpipes = [g.pipeline([deposetfilter[n],setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,7)];
 //local driftpipes = [g.pipeline([deposetfilteryz[n],setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
 
-local driftpipes = [g.pipeline([setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
+local driftpipes = [g.pipeline([deposetfilteryz[n],setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
 local pipe_drift = util.fandrifter('DepoSetFanout',driftpipes,analog_pipes, frame_summers, actpipes, 'FrameFanin', 'fandrifter', outtags);
 
 // local retagger = g.pnode({

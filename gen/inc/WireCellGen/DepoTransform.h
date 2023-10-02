@@ -15,6 +15,9 @@
 #include "WireCellIface/WirePlaneId.h"
 #include "WireCellIface/IDepo.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace WireCell {
     namespace Gen {
 
@@ -47,7 +50,7 @@ namespace WireCell {
             double m_nsigma;
             int m_frame_count;
             size_t m_count{0};
-
+	    std::vector<int> m_process_planes {0,1,2};
         };
     }  // namespace Gen
 }  // namespace WireCell

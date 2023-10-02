@@ -5,25 +5,33 @@
 #define WIRECELL_GEN_FRAMESUMMER
 
 #include "WireCellIface/IConfigurable.h"
-#include "WireCellIface/IFrameJoiner.h"
+#include "WireCellIface/IFrameFanin.h"
+
+#include "WireCellAux/Logger.h"
+
+#include <vector>
+#include <string>
 
 namespace WireCell {
     namespace Gen {
-        class FrameSummer : public IFrameJoiner, public IConfigurable {
+      class FrameSummer : Aux::Logger, public IFrameFanin, public IConfigurable {
            public:
-            FrameSummer();
+            FrameSummer(size_t multiplicity = 2);
             virtual ~FrameSummer();
 
+	    virtual std::vector<std::string> input_types();
+	    
             // IJoinNode
-            virtual bool operator()(const input_tuple_type& intup, output_pointer& out);
+            virtual bool operator()(const input_vector& intup, output_pointer& out);
 
             // IConfigurable
             virtual void configure(const WireCell::Configuration& config);
             virtual WireCell::Configuration default_configuration() const;
 
            private:
-            double m_toffset;
-            bool m_align;
+	    size_t m_multiplicity; 
+	    int m_count{0};
+			
         };
     }  // namespace Gen
 }  // namespace WireCell

@@ -16,7 +16,7 @@ function(params, tools) {
 
     local zippers = [sim.make_depozipper("depozipper-"+tools.anodes[n].name, tools.anodes[n], tools.pirs[0])
                      for n in std.range(0, nanodes-1)],
-    local transforms = [sim.make_depotransform("depotransform-%d-"%n+tools.anodes[std.floor(n/45)].name, tools.anodes[std.floor(n/45)], tools.pirs[0])
+    local transforms = [sim.make_depotransform("depotransform-%d-"%n+tools.anodes[std.floor(n/45)].name+"-plane%d"%std.mod(std.floor(n/15),3), tools.anodes[std.floor(n/45)], [std.mod(std.floor(n/15),3)],tools.pirs[0])
                         for n in std.range(0, 359)],
     local depos2traces = transforms,
     //local depos2traces = zippers,
@@ -77,7 +77,7 @@ function(params, tools) {
     ret : {
 
         
-        analog_pipelines: [g.pipeline([depos2traces[n],reframers[n]],
+        analog_pipelines: [g.pipeline([depos2traces[n]],
                                       name="simanalogpipe-%d-"%n + tools.anodes[std.floor(n/45)].name) for n in std.range(0, 359)],
 
         signal_pipelines: [g.pipeline([depos2traces[n], reframers[n],  digitizers[n]],

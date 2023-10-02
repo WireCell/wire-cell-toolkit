@@ -64,7 +64,7 @@ void DepoSetFilterYZ::configure(const WireCell::Configuration& cfg)
     plane =      get<int>   (cfg, "plane");
     //std::cout << "Here is my issue? " << std::endl;
     anode_name = get<std::string>(cfg, "anode");
-    //std::cout << "Nope!" << std::endl;
+    //std::cout << "Nope!" << std::endl;    
     jmap = WireCell::Persist::load(filename);
 
 }
@@ -79,49 +79,45 @@ bool DepoSetFilterYZ::operator()(const input_pointer& in, output_pointer& out)
     IDepo::vector output_depos;
     
     for (auto idepo : *(in->depos())) {
-      log->debug("I GOT A DEPO IN DepoSetFilterYZ!");
-        bool pass_resp = false;
-	bool pass_anod = false;
-
-	//double depo_x = idepo->pos().x();
-	double depo_y = idepo->pos().y();
-	double depo_z = idepo->pos().z();
-
-	//int depo_bin_x = std::round(depo_x/tpc_width);
-	int depo_bin_y = std::round(depo_y/bin_height);
-	int depo_bin_z = std::round(depo_z/bin_width);
-
-	log->debug(" DepoSetFilterYZ depo_bin_y: ", depo_bin_y);
-	log->debug(" DepoSetFilterYZ depo_bin_z: ", depo_bin_z);
-
-	for (const auto& node : jmap) {
-	  
-	  std::cout << "Next string : " << node["anode"].asString() << std::endl; 
-	  if(node["anode"].asString() == anode_name &&
-	     node["plane"].asInt() == plane){
+      bool pass_resp = false;
+      bool pass_anod = false;
+      
+      for (auto box : m_boxes) {
+	WireCell::Ray r = box.bounds();
 	
-	    auto map_resp = node["map"][depo_bin_y][depo_bin_z];
-	    
-	    if (map_resp.asInt() == resp) {
-	      pass_resp = true;
-	      break;
-	    }
-	  }
+	if (box.inside(idepo->pos())) {
+	  pass_anod = true;
+	  break;
 	}
-	
-	for (auto box : m_boxes) {
-	  WireCell::Ray r = box.bounds();
-	  
-	  if (box.inside(idepo->pos())) {
-	    pass_anod = true;
-	    break;
-	  }
-        }	
-
-        if (pass_resp && pass_anod) {
-	  output_depos.push_back(idepo);
-        }
+      }	
+      
+      if(pass_anod == false){
+	continue;}
+      
+      //double depo_x = idepo->pos().x();
+      double depo_y = idepo->pos().y()*units::mm;
+      double depo_z = idepo->pos().z()*units::mm;
+      double yoffset = 180*units::cm;	
+      double zoffset = 900*units::cm;
+      
+      //int depo_bin_x = std::round(depo_x/tpc_width);
+      
+      int depo_bin_y = std::round((depo_y+yoffset)/bin_height);	
+      int depo_bin_z = std::round((depo_z+zoffset)/bin_width);
+      
+      if(depo_bin_y < 0 || depo_bin_z < 0){
+	log->debug(" DepoSetFilterYZ depo_bin_y {} = depo_y {} + yoffset {} / bin_height {} ", depo_bin_y, depo_y, yoffset, bin_height);
+	log->debug(" DepoSetFilterYZ depo_bin_z {} = depo_z {} + zoffset {} / bin_width  {} ", depo_bin_z, depo_z, zoffset, bin_width);
+      }
+      
+      if (jmap[anode_name][std::to_string(plane)][depo_bin_y][depo_bin_z].asInt() == resp) {pass_resp = true;}
+      
+      if (pass_resp && pass_anod) {
+	log->debug(" Passed! Resp {}", resp);
+	output_depos.push_back(idepo);
+      }
     }
+
     log->debug("call={} Number of Depos for a give APA={}", m_count, output_depos.size());
     out = std::make_shared<WireCell::Aux::SimpleDepoSet>(m_count, output_depos);
     ++m_count;

@@ -64,7 +64,7 @@ function(params, tools)
         },
     }, nin=1,nout=1,uses=[tools.random, anode] + pir_trio),
     
-    make_depotransform :: function(name, anode, pirs) g.pnode({
+    make_depotransform :: function(name, anode, plane, pirs) g.pnode({
         type:'DepoTransform',
         name:name,
         data: {
@@ -79,6 +79,7 @@ function(params, tools)
             start_time: params.sim.ductor.start_time,
             tick: params.daq.tick,
             nsigma: 3,
+	    process_planes: plane
         },
     }, nin=1, nout=1, uses=[anode, tools.random, tools.dft] + pirs),
 

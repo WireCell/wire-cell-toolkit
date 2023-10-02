@@ -5,7 +5,10 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellAux/SimpleFrame.h"
 
-WIRECELL_FACTORY(FrameSummer, WireCell::Gen::FrameSummer, WireCell::IFrameJoiner, WireCell::IConfigurable)
+#include <iostream>
+
+
+WIRECELL_FACTORY(FrameSummer, WireCell::Gen::FrameSummer, WireCell::IFrameFanin, WireCell::IConfigurable)
 
 using namespace WireCell;
 using WireCell::Aux::SimpleFrame;
@@ -13,55 +16,69 @@ using WireCell::Aux::SimpleFrame;
 Configuration Gen::FrameSummer::default_configuration() const
 {
     // fixme: maybe add operators, scaleing, offsets.
-
     Configuration cfg;
 
-    // if true, the time of the second frame is ignored in favor of
-    // the first.  Does not affect "tbin" values of individual traces.
-    cfg["align"] = m_align;
-
-    // Amount of time offset to apply to the time of the second frame.
-    // If frame two is "aligned" then this offset is applied to frame
-    // two relative to the time of frame one
-    cfg["offset"] = m_toffset;
+   cfg["multiplicity"] = (int) m_multiplicity;
 
     return cfg;
 }
 
+std::vector<std::string> Gen::FrameSummer::input_types()
+{
+    const std::string tname = std::string(typeid(input_type).name());
+    std::vector<std::string> ret(m_multiplicity,tname);    
+    return ret;
+}
+
 void Gen::FrameSummer::configure(const Configuration& cfg)
 {
-    m_align = get(cfg, "align", m_align);
-    m_toffset = get(cfg, "offset", m_toffset);
+  int m = get<int>(cfg, "multiplicity", (int) m_multiplicity);
+  if (m <= 0) {
+    log->critical("illegal multiplicity: {}", m);
+    THROW(ValueError() << errmsg{"FrameFanin multiplicity must be positive"});
+  }
+  m_multiplicity = m;
+  
 }
 
-bool Gen::FrameSummer::operator()(const input_tuple_type& intup, output_pointer& out)
+bool Gen::FrameSummer::operator()(const input_vector& invec, output_pointer& out)
 {
-    auto one = std::get<0>(intup);
-    auto two = std::get<1>(intup);
-    if (!one or !two) {
-        // assume eos
-        out = nullptr;
-        return true;
+  out = nullptr;
+  size_t neos = 0;
+
+  for (const auto& fr : invec) {
+    if (!fr) {
+      ++neos;
     }
-
-    double t2 = two->time();
-    if (m_align) {
-        t2 = one->time();
-    }
-    t2 += m_toffset;
-
-    auto vtraces2 = two->traces();
-    ITrace::vector out_traces(vtraces2->begin(), vtraces2->end());
-    auto newtwo = std::make_shared<SimpleFrame>(two->ident(), t2, out_traces, two->tick());
-
-    out = Aux::sum(IFrame::vector{one, two}, one->ident());
+  }
+  
+  if (neos) {
+    log->debug("EOS at call={} with {}", m_count, neos);
+    ++m_count;
     return true;
+  }
+
+  if (invec.size() != m_multiplicity) {
+    log->critical("input vector size={} my multiplicity={}", invec.size(), m_multiplicity);
+    THROW(ValueError() << errmsg{"input vector size mismatch"});
+  }
+
+  /*
+  auto one = std::get<0>(intup);
+  auto two = std::get<1>(intup);
+  if (!one or !two) {
+    // assume eos
+    out = nullptr;
+    return true;
+  }
+  */
+  out = Aux::sum(invec, invec[0]->ident());
+  return true;
 }
 
-Gen::FrameSummer::FrameSummer()
-  : m_toffset(0.0)
-  , m_align(false)
-
+Gen::FrameSummer::FrameSummer(size_t multiplicity)
+  :Aux::Logger("FrameSummer", "glue")
+  , m_multiplicity(multiplicity)
 {
 }
 

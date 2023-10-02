@@ -52,6 +52,9 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/NamedFactory.h"
 
+#include <algorithm>
+#include <vector>
+
 
 WIRECELL_FACTORY(DepoTransform, WireCell::Gen::DepoTransform, WireCell::IDepoFramer, WireCell::IConfigurable)
 
@@ -75,37 +78,46 @@ Gen::DepoTransform::~DepoTransform() {}
 
 void Gen::DepoTransform::configure(const WireCell::Configuration& cfg)
 {
-    auto anode_tn = get<string>(cfg, "anode", "");
-    m_anode = Factory::find_tn<IAnodePlane>(anode_tn);
+  auto anode_tn = get<string>(cfg, "anode", "");
+  m_anode = Factory::find_tn<IAnodePlane>(anode_tn);
+  
+  m_nsigma = get<double>(cfg, "nsigma", m_nsigma);
+  bool fluctuate = get<bool>(cfg, "fluctuate", false);
+  m_rng = nullptr;
+  if (fluctuate) {
+    auto rng_tn = get<string>(cfg, "rng", "");
+    m_rng = Factory::find_tn<IRandom>(rng_tn);
+  }
+  std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
+  m_dft = Factory::find_tn<IDFT>(dft_tn);
+  
+  m_readout_time = get<double>(cfg, "readout_time", m_readout_time);
+  m_tick = get<double>(cfg, "tick", m_tick);
+  m_start_time = get<double>(cfg, "start_time", m_start_time);
+  m_drift_speed = get<double>(cfg, "drift_speed", m_drift_speed);
+  m_frame_count = get<int>(cfg, "first_frame_number", m_frame_count);
 
-    m_nsigma = get<double>(cfg, "nsigma", m_nsigma);
-    bool fluctuate = get<bool>(cfg, "fluctuate", false);
-    m_rng = nullptr;
-    if (fluctuate) {
-        auto rng_tn = get<string>(cfg, "rng", "");
-        m_rng = Factory::find_tn<IRandom>(rng_tn);
+  m_process_planes = {0,1,2};
+  
+  if (cfg.isMember("process_planes")) {
+    m_process_planes.clear();
+    for (auto jplane : cfg["process_planes"]) {
+      m_process_planes.push_back(jplane.asInt());
     }
-    std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
-    m_dft = Factory::find_tn<IDFT>(dft_tn);
+  }
 
-    m_readout_time = get<double>(cfg, "readout_time", m_readout_time);
-    m_tick = get<double>(cfg, "tick", m_tick);
-    m_start_time = get<double>(cfg, "start_time", m_start_time);
-    m_drift_speed = get<double>(cfg, "drift_speed", m_drift_speed);
-    m_frame_count = get<int>(cfg, "first_frame_number", m_frame_count);
-
-    auto jpirs = cfg["pirs"];
-    if (jpirs.isNull() or jpirs.empty()) {
-        std::string msg = "must configure with some plane impact response components";
-        log->error(msg);
-        THROW(ValueError() << errmsg{"Gen::Ductor: " + msg});
-    }
-    m_pirs.clear();
-    for (auto jpir : jpirs) {
-        auto tn = jpir.asString();
-        auto pir = Factory::find_tn<IPlaneImpactResponse>(tn);
-        m_pirs.push_back(pir);
-    }
+  auto jpirs = cfg["pirs"];
+  if (jpirs.isNull() or jpirs.empty()) {
+    std::string msg = "must configure with some plane impact response components";
+    log->error(msg);
+    THROW(ValueError() << errmsg{"Gen::Ductor: " + msg});
+  }
+  m_pirs.clear();
+  for (auto jpir : jpirs) {
+    auto tn = jpir.asString();
+    auto pir = Factory::find_tn<IPlaneImpactResponse>(tn);
+    m_pirs.push_back(pir);
+  }
 }
 WireCell::Configuration Gen::DepoTransform::default_configuration() const
 {
@@ -145,6 +157,8 @@ WireCell::Configuration Gen::DepoTransform::default_configuration() const
     // type-name for the DFT to use
     cfg["dft"] = "FftwDFT";
 
+    cfg["process_planes"] = Json::arrayValue;
+
     return cfg;
 }
 
@@ -170,6 +184,16 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
         int iplane = -1;
         for (auto plane : face->planes()) {
             ++iplane;
+
+	    int plane_index = plane->planeid().index();
+	    
+	    log->debug("Checking: Plane Testing {} and looking For {}", plane_index, m_process_planes[0]);
+	   
+	    if (std::find(m_process_planes.begin(),  m_process_planes.end(), plane_index) == m_process_planes.end()) {   	      
+	      continue;
+	    }
+	    
+	    log->debug("Working on: Plane Testing {} and looking For {}", plane_index, m_process_planes[0]);
 
             const Pimpos* pimpos = plane->pimpos();
 
