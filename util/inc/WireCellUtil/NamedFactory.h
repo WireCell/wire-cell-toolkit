@@ -8,6 +8,7 @@
 #include "WireCellUtil/Type.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/TupleHelpers.h"
 #include "WireCellUtil/Logging.h"
 #include <unordered_map>
 
@@ -20,6 +21,7 @@ namespace WireCell {
 
     struct FactoryException : virtual public Exception {
     };
+
 
     /** A templated factory of objects of type Type that associates a
      * name to an object, returning a preexisting one if it exists. */
@@ -68,31 +70,65 @@ namespace WireCell {
         std::string m_classname;
     };
 
+    class NamedFactoryRegistryBase  {
+      public:
+        
+        struct TypeInfo {
+            std::string cppname;
+            std::set<std::string> intnames;
+        };
+        using TypeInfoMap = std::map<std::string, TypeInfo>;
+        
+        static
+        const TypeInfoMap& known_type_info() { return m_typeinfo; }
+
+      protected:
+
+        inline static TypeInfoMap m_typeinfo{};
+    };
+
     /** A registry of factories that produce instances which implement
      * a given interface. */
     template <class IType>
-    class NamedFactoryRegistry {
+    class NamedFactoryRegistry : public NamedFactoryRegistryBase {
         Log::logptr_t l;
 
-       public:
+      public:
         typedef IType interface_type;
         typedef std::shared_ptr<IType> interface_ptr;
         typedef WireCell::INamedFactory* factory_ptr;
         typedef std::unordered_map<std::string, factory_ptr> factory_lookup;
+
+        // The known WCT types
         typedef std::set<std::string> known_type_set;
 
         NamedFactoryRegistry()
           : l(Log::logger("factory"))
         {
         }
-        size_t hello(const std::string& classname)
+
+        size_t hello(const std::string& wctname, const std::string& cppname,
+                     const std::string& intname)
         {
-            m_known_types.insert(classname);
+            m_known_types.insert(wctname);
+
+            m_typeinfo[wctname].cppname = cppname;
+            m_typeinfo[wctname].intnames.insert(intname);
+            
+            m_interface_name = intname;
             return m_known_types.size();
         }
-        known_type_set known_types() const { return m_known_types; }
 
-        /// Register an existing factory by the "class" name of the instance it can create.
+        const std::string& interface_name() const {
+            return m_interface_name;
+        }
+
+        known_type_set known_types() const {
+            return m_known_types;
+        }
+
+        /// Register an existing factory by the "class" name of the instance it
+        /// can create.
         bool associate(const std::string& classname, factory_ptr factory)
         {
             m_lookup[classname] = factory;
@@ -209,6 +245,7 @@ namespace WireCell {
        private:
         factory_lookup m_lookup;
         known_type_set m_known_types;
+        std::string m_interface_name;
     };
 
     /// Singleton interface
@@ -324,7 +361,7 @@ namespace WireCell {
 }  // namespace WireCell
 
 template <class Concrete, class... Interface>
-void* make_named_factory_factory(std::string name)
+void* make_named_factory_factory(const std::string& name)
 {
     static void* void_factory = nullptr;
     if (!void_factory) {
@@ -335,15 +372,40 @@ void* make_named_factory_factory(std::string name)
     return void_factory;
 }
 
-template <class Concrete, class... Interface>
-size_t namedfactory_hello(std::string name)
+template <class Concrete>
+size_t namedfactory_hello(const std::string& name,
+                          const std::string& concrete,
+                          std::vector<std::string> interfaces)
 {
-    std::vector<size_t> ret{WireCell::Singleton<WireCell::NamedFactoryRegistry<Interface> >::Instance().hello(name)...};
-    return ret.size();
+    return 0;
+}
+
+template <class Concrete, class Interface, class ...Inters>
+size_t namedfactory_hello(const std::string& name,
+                          const std::string& concrete,
+                          std::vector<std::string> interfaces)
+{
+    const size_t number = WireCell::Singleton<WireCell::NamedFactoryRegistry<Interface> >::Instance().hello(name, concrete, interfaces.back());
+    interfaces.pop_back();
+    if (interfaces.empty()) {
+        return number;
+    }
+    return number + namedfactory_hello<Concrete, Inters...>(name, concrete, interfaces);
+}
+
+inline
+std::vector<std::string> namedfactory_parse_reverse(const std::string& lst)
+{
+    auto ret = WireCell::String::split(lst, ",");
+    for (size_t ind=0; ind<ret.size(); ++ind) {
+        ret[ind] = WireCell::String::strip(ret[ind]);
+    }
+    std::reverse(ret.begin(), ret.end());
+    return ret;
 }
 
 #define WIRECELL_FACTORY(NAME, CONCRETE, ...)                                                          \
-    static size_t hello_##NAME##_me = namedfactory_hello<CONCRETE, __VA_ARGS__>(#NAME);                \
+    static size_t hello_##NAME##_me = namedfactory_hello<CONCRETE, __VA_ARGS__>(#NAME, #CONCRETE, namedfactory_parse_reverse( #__VA_ARGS__ )); \
     extern "C" {                                                                                       \
     void* make_##NAME##_factory() { return make_named_factory_factory<CONCRETE, __VA_ARGS__>(#NAME); } \
     }
