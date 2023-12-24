@@ -27,6 +27,9 @@ namespace WireCell {
 
         std::vector<std::string> split(const std::string& in, const std::string& delim = ":");
 
+        // Return s with any leading or trailing white space removed.
+        std::string strip(std::string s);
+
         std::pair<std::string, std::string> parse_pair(const std::string& in, const std::string& delim = ":");
 
         // format_flatten converts from "%"-list to variadic function call.
