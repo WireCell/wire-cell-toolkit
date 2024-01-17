@@ -144,6 +144,8 @@ namespace WireCell {
             double m_speed;    // drift speeds
             double m_toffset;  // time offset
 
+	    double m_scale_factor;
+
             int n_dropped, n_drifted;
 
             // keep the depos sorted by time
