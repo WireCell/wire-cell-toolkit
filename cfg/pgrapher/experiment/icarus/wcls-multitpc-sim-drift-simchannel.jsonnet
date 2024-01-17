@@ -40,9 +40,9 @@ local params = base {
     // Electron drift speed, assumes a certain applied E-field
     // drift_speed: std.extVar('driftSpeed') * wc.mm / wc.us,
   },
-  files: super.files {
-    fields: [ std.extVar('files_fields'), ],
-  },
+// files: super.files {
+//    fields: [ std.extVar('files_fields'), ],
+//  },
 
   rc_resp: if std.extVar('file_rcresp') != "" then
   {
@@ -174,7 +174,7 @@ local drifters = [{
         local xregions = wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes])),
 
         type: "Drifter",
-	name: "drifter%d" %n,
+	name: "drifter%d" %n, //%std.floor(n/45),
         data: params.lar {
             rng: wc.tn(tools.random),
             xregions: xregions,
@@ -185,21 +185,47 @@ local drifters = [{
 
             DL: params.lar.DL,
             DT: params.lar.DT,
-            lifetime: localeLiftime[n],
-
+            lifetime: localeLiftime[std.floor(n/45)],
+	    charge_scale: 1
         },
     } 
-	for n in std.range(0,7)];
+	for n in std.range(0,359)];
 
 local setdrifter = [g.pnode({
             type: 'DepoSetDrifter',
 	    name: 'setdrifter%d' %n,
             data: {
-                drifter: wc.tn(drifters[std.floor(n/45)])
+                drifter: wc.tn(drifters[n])
             }
         }, nin=1, nout=1,
-        uses=[drifters[std.floor(n/45)]])
+        uses=[drifters[n]])
 	for n in std.range(0,359)];
+
+local scalers = [{
+
+        type: "Scaler",
+	name: "scaler%d" %std.floor(n/45),
+        data: params.lar {
+	        yzmap_scale_filename: 'yzmap_gain_icarus_v0.json',
+		bin_width:  10*wc.cm,
+		tpc_width: 1500*wc.mm,
+		bin_height: 10*wc.cm,
+                anode: wc.tn(tools.anodes[std.floor(n/45)]),
+		plane: std.mod(std.floor(n/15),3)	
+        },
+    } 
+         for n in std.range(0,359)];
+
+local setscaler = [g.pnode({
+            type: 'DepoSetScaler',
+	    name: 'setscaler%d' %n,
+            data: {
+                scaler: wc.tn(scalers[n])
+            }
+        }, nin=1, nout=1,
+        uses=[scalers[n]])
+	for n in std.range(0,359)];
+
 local bagger = sim.make_bagger();
 
 // signal plus noise pipelines
@@ -256,6 +282,7 @@ local wcls_simchannel_sink = [ g.pnode({
 
     g4_ref_time: -1500 * wc.us, // G4RefTime from detectorclocks_icarus.fcl
     use_energy: true,
+    process_planes: [std.mod(std.floor(n/15),3)]
   },
 }, nin=1, nout=1, uses=tools.anodes)
 for n in std.range(0,359)];
@@ -357,7 +384,7 @@ local deposetfilteryz = [ g.pnode({
             type: 'DepoSetFilterYZ',
    	    name: 'deposetfilteryz_resp%d-'%std.mod(r,15)+'plane%d-'%std.mod(std.floor(r/15),3)+tools.anodes[std.floor(r/45)].name,
             data: {
-		yzmap_filename: 'pgrapher/experiment/icarus/yzmap_icarus_v0.json',
+		yzmap_filename: 'yzmap_icarus_v0.json',
 		bin_width:  10*wc.cm,
 		tpc_width: 1500*wc.mm,
 		bin_height: 10*wc.cm,
@@ -381,7 +408,7 @@ local pipe_reducer = util.fansummer('DepoSetFanout', analog_pipes, frame_summers
 //local driftpipes = [g.pipeline([deposetfilter[n],setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,7)];
 //local driftpipes = [g.pipeline([deposetfilteryz[n],setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
 
-local driftpipes = [g.pipeline([deposetfilteryz[n],setdrifter[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
+local driftpipes = [g.pipeline([deposetfilteryz[n],setdrifter[n], setscaler[n], wcls_simchannel_sink[n]], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
 local pipe_drift = util.fandrifter('DepoSetFanout',driftpipes,analog_pipes, frame_summers, actpipes, 'FrameFanin', 'fandrifter', outtags);
 
 // local retagger = g.pnode({

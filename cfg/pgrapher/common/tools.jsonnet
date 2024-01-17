@@ -108,7 +108,7 @@ function(params)
     // there is one trio of PIRs (one per wire plane in a face) for
     // each field response.  WARNING/fixme: this sets the default DFT
     // with no way to override!  This config structure needs a redo!
-    pirs : std.mapWithIndex(function (n, fr) [
+    pirs : [std.mapWithIndex(function (n, fr) [
         {
             type: "PlaneImpactResponse",
             name : "PIR%splane%d" % [fr.name, plane],
@@ -133,7 +133,8 @@ function(params)
 		long_padding: 1.5*wc.ms,
 	    },
             uses: [$.dft, fr, $.elec_resp, $.rc_resp, $.sys_resp],
-        } for plane in [0,1,2]], $.fields),
+        } for plane in [0,1,2]], $.fields[r])
+	for r in std.range(0,14) ],
 
     // One anode per detector "volume"
     anodes : [{

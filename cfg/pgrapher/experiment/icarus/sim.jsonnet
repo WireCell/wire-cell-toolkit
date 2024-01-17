@@ -16,7 +16,7 @@ function(params, tools) {
 
     local zippers = [sim.make_depozipper("depozipper-"+tools.anodes[n].name, tools.anodes[n], tools.pirs[0])
                      for n in std.range(0, nanodes-1)],
-    local transforms = [sim.make_depotransform("depotransform-%d-"%n+tools.anodes[std.floor(n/45)].name+"-plane%d"%std.mod(std.floor(n/15),3), tools.anodes[std.floor(n/45)], [std.mod(std.floor(n/15),3)],tools.pirs[0])
+    local transforms = [sim.make_depotransform("depotransform-%d-"%n+tools.anodes[std.floor(n/45)].name+"-plane%d"%std.mod(std.floor(n/15),3), tools.anodes[std.floor(n/45)], [std.mod(std.floor(n/15),3)],tools.pirs[std.mod(n,15)]) //tools.pirs[0])
                         for n in std.range(0, 359)],
     local depos2traces = transforms,
     //local depos2traces = zippers,
