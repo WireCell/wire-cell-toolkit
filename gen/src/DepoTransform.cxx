@@ -164,6 +164,7 @@ WireCell::Configuration Gen::DepoTransform::default_configuration() const
 
 bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out)
 {
+
     if (!in) {
         log->debug("EOS at call={}", m_count);
         ++m_count;
@@ -171,15 +172,17 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
         return true;
     }
 
+
     auto depos = in->depos();
     size_t ndepos_used=0;
 
     Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
     ITrace::vector traces;
+
     for (auto face : m_anode->faces()) {
         // Select the depos which are in this face's sensitive volume
         IDepo::vector face_depos = Aux::sensitive(*depos, face);
-        ndepos_used += face_depos.size();
+	ndepos_used += face_depos.size();       
 
         int iplane = -1;
         for (auto plane : face->planes()) {
@@ -219,6 +222,7 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
                     continue;
                 }
 
+
                 int chid = wires[iwire]->channel();
                 int tbin = mm.first;
 
@@ -237,5 +241,6 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
     ++m_frame_count;
     ++m_count;
     out = frame;
+
     return true;
 }

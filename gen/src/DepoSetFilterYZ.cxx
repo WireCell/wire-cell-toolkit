@@ -57,14 +57,12 @@ void DepoSetFilterYZ::configure(const WireCell::Configuration& cfg)
         m_boxes.push_back(face->sensitive());
     }
     //    log->debug("Rest...");
-    bin_width =  get<double>(cfg, "bin_width") * units::cm;
-    tpc_width =  get<double>(cfg, "tpc_width") * units::cm;
-    bin_height = get<double>(cfg, "bin_height") * units::cm;
+    bin_width =  get<double>(cfg, "bin_width") * units::mm;
+    tpc_width =  get<double>(cfg, "tpc_width") * units::mm;
+    bin_height = get<double>(cfg, "bin_height") * units::mm;
     resp =       get<int>   (cfg, "resp");
     plane =      get<int>   (cfg, "plane");
-    //std::cout << "Here is my issue? " << std::endl;
     anode_name = get<std::string>(cfg, "anode");
-    //std::cout << "Nope!" << std::endl;    
     jmap = WireCell::Persist::load(filename);
 
 }
@@ -94,26 +92,30 @@ bool DepoSetFilterYZ::operator()(const input_pointer& in, output_pointer& out)
       if(pass_anod == false){
 	continue;}
       
-      //double depo_x = idepo->pos().x();
       double depo_y = idepo->pos().y()*units::mm;
       double depo_z = idepo->pos().z()*units::mm;
       double yoffset = 180*units::cm;	
       double zoffset = 900*units::cm;
       
-      //int depo_bin_x = std::round(depo_x/tpc_width);
+      int depo_bin_y = std::floor((depo_y+yoffset)/bin_height);	
+      int depo_bin_z = std::floor((depo_z+zoffset)/bin_width);
       
-      int depo_bin_y = std::round((depo_y+yoffset)/bin_height);	
-      int depo_bin_z = std::round((depo_z+zoffset)/bin_width);
+      if(depo_bin_y < 0)
+	depo_bin_y = 0;
       
-      if(depo_bin_y < 0 || depo_bin_z < 0){
-	log->debug(" DepoSetFilterYZ depo_bin_y {} = depo_y {} + yoffset {} / bin_height {} ", depo_bin_y, depo_y, yoffset, bin_height);
-	log->debug(" DepoSetFilterYZ depo_bin_z {} = depo_z {} + zoffset {} / bin_width  {} ", depo_bin_z, depo_z, zoffset, bin_width);
-      }
+      if(depo_bin_z < 0)
+	depo_bin_z = 0;
+
+      if(depo_bin_y > 31)
+	depo_bin_y = 31;
+
+      if(depo_bin_z > 180)
+	depo_bin_z = 180;
       
-      if (jmap[anode_name][std::to_string(plane)][depo_bin_y][depo_bin_z].asInt() == resp) {pass_resp = true;}
+      if (jmap[anode_name][std::to_string(plane)][depo_bin_y][depo_bin_z].asInt() == resp+1) {pass_resp = true;}
       
       if (pass_resp && pass_anod) {
-	log->debug(" Passed! Resp {}", resp);
+	log->debug(" Passed! Resp {} at Y : {} and Z : {} on Plane {} and Anode {} ", resp+1, depo_y, depo_z, plane, anode_name);
 	output_depos.push_back(idepo);
       }
     }
