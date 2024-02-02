@@ -73,7 +73,7 @@ fields_bde="${fields_name}-${FIELDS_BDE_TICK}ns.json.bz2"
 
     # default PDSP fr.period is not exactly 100ns so we rewrite it with 100ns
     # forced and also put the result locally.
-    run_idempotently -s "$files_original" -t "$fields_sampled" -- \
+    run_idempotently -s "$files_original" -t "$fields_tde" -- \
                      wirecell-resp condition \
                      -P "$FIELDS_TDE_TICK"'*ns' \
                      -o "$fields_tde" \
@@ -111,8 +111,6 @@ tier_name () {
     do
         log="$(tier_name wct-sim $tick log)"
         out="$(tier_name digits $tick)"
-        rm -f "$log"
-
         run_idempotently -s depos.npz -t "$log" -t "$out" -- \
                          wire-cell -l "$log" -L debug \
                          -A input="depos.npz" \
@@ -144,13 +142,17 @@ tier_name () {
                      $digin
 }
 
-select_channels_near='335:350,1500:1548,2080:2100'
-select_channels_far='0:20,1200:1220,2540:2560'
+# fixme: should move this into a hear document
+# select_channels_near='335:350,1500:1548,2080:2100'
+select_channels_near='348,1547,2080'
+# select_channels_far='0:20,1200:1220,2540:2560'
+select_channels_far='0,1200,2559'
 
-signal_trange_near='175*us,300*us'
-signal_trange_far='2.3*ms,2.5*ms'
-digit_trange_near='175*us,300*us'
-digit_trange_far='2.3*ms,2.5*ms'
+digit_trange_near='200*us,300*us'
+digit_trange_far='2500*us,2600*us'
+
+signal_trange_near='180*us,210*us'
+signal_trange_far='2450*us,2490*us'
 
 @test "lmn fr adc plots" {
     cd_tmp file
@@ -159,12 +161,20 @@ digit_trange_far='2.3*ms,2.5*ms'
     dig2=$(tier_name digits $ADC_BDE_TICK)
     dig3=$(tier_name digits-$ADC_BDE_TICK $ADC_TDE_TICK)
 
-    out=channels-adc.pdf
+    out=channels-adc-near.pdf
     run_idempotently -s "$dig1" -s "$dig2" -s "$dig3" -t "$out" -- \
                      wirecell-plot channels \
                      -o "$out" \
-                     --trange '300*us,400*us' \
-                     --channel 335,1500,2100 \
+                     --trange "$digit_trange_near" \
+                     --channel "$select_channels_near" \
+                     "$dig1" "$dig2" "$dig3"
+                  
+    out=channels-adc-far.pdf
+    run_idempotently -s "$dig1" -s "$dig2" -s "$dig3" -t "$out" -- \
+                     wirecell-plot channels \
+                     -o "$out" \
+                     --trange "$digit_trange_far" \
+                     --channel "$select_channels_far" \
                      "$dig1" "$dig2" "$dig3"
                   
 }
@@ -200,12 +210,20 @@ digit_trange_far='2.3*ms,2.5*ms'
     sig1=$(tier_name signals-$ADC_TDE_TICK $ADC_TDE_TICK)
     sig2=$(tier_name signals-$ADC_BDE_TICK $ADC_TDE_TICK)
 
-    out=channels-sig.pdf
+    out=channels-sig-near.pdf
     run_idempotently -s "$sig1" -s "$sig2" -t "$out" -- \
                      wirecell-plot channels \
                      -o "$out" \
-                     --trange '250*us,300*us' \
-                     --channel 335,1500,2100 \
+                     --trange "$signal_trange_near" \
+                     --channel "$select_channels_near" \
+                     "$sig1" "$sig2"
+
+    out=channels-sig-far.pdf
+    run_idempotently -s "$sig1" -s "$sig2" -t "$out" -- \
+                     wirecell-plot channels \
+                     -o "$out" \
+                     --trange "$signal_trange_far" \
+                     --channel "$select_channels_far" \
                      "$sig1" "$sig2"
                   
 }

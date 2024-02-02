@@ -10,14 +10,26 @@ Requires:
 - ~wire-cell-python~ installed and in environment.
 - ~wire-cell-data~ repo in ~WIRECELL_PATH~.
 
-Run ~lmn-fr-plots.sh~ to generate ~.pdf~ and ~.org~ files in same directory as this
-file and export to beamer PDF (~C-c C-e l P~).
+To produce the files required to build this presentation run:
 
-* Overview
+#+begin_example
+$ WCT_BATS_TMPDIR=$(pwd)/. bats   ../../../test/test-lmn-fr-pdsp.bats
+#+end_example
 
-We want to test LMN resampling on realistic waveforms 
+For more verbosity add:
+
+#+begin_example
+$ WCT_BATS_LOG_SINK=terminal WCT_BATS_LOG_LEVEL=debug ....
+#+end_example
+
+Then, visit this org file and type ~C-c C-e l P~ to export to latex/beamer/PDF.
+
+* Content overview
+
+For the paper, we want to test LMN resampling on realistic waveforms.
 
 - Need "full simulation" but want to avoid new field calculations.
+
 - Apply LMN resampling to existing field responses (FRs):
 
 |   <r> |            <r> |          <r> |      <r> |
@@ -30,9 +42,43 @@ We want to test LMN resampling on realistic waveforms
 
 - Understand FR related units and normalization.
 
-- PDSP FR issues
+  - Sampling "interpretations" added to paper draft.
 
-- Apply to resampled FR in WCT simulation
+  - Uncover some PDSP-specific FR issues not directly related.
+
+- Apply resampled FR in WCT simulation + ADC resampling + signal processing.
+
+* Procedure overview - bundled into a BATS test.
+
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+\includegraphics[height=0.9\textheight]{job-overview.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+~gen/test/test-lmn-fr-pdsp.bats~
+
+- Resample \qty{100}{ns} FR to \qty{64}{ns} FR.
+- Generate "diagonal line track" depos.
+- Simulate \qty{500}{ns} ADCs and \qty{512}{ns} ADCs.
+- Resample \qty{512}{ns} ADCs to \qty{500}{ns} ADCs.
+  - \small Currently done by ~wire-cell-python~, a WCT C++ component is WIP.  Target: 1s/APA.
+- Run SP at \qty{500}{ns} on both sets of \qty{500}{ns} ADCs.
+- Various plotters.
+
+
 
 
 * Sampling interpretation and resampling normalization $N_s \to N_r$
@@ -58,7 +104,7 @@ Samples provide "probability amplitude" or "field" values, signal Parseval energ
 ** Initial discussion details are in the paper draft.
 
 
-* Resampling current field response ($I$)
+* Resampling electric current field response ($I$)
 
 **                                                                :B_columns:
 :PROPERTIES:
@@ -78,7 +124,7 @@ Samples provide "probability amplitude" or "field" values, signal Parseval energ
 :END:
 
 
-We interpret $I$ as an *instantaneous electric current*.
+We interpret FR as an *instantaneous electric current*.
 
 - \small Resampling is an *interpolation*.
 - \small Normalize the DFT round trip by the *initial size*.
@@ -105,9 +151,9 @@ We interpret $I$ as an *instantaneous electric current*.
 :BEAMER_col: 0.4
 :END:
 
-*Small ringing* in the time-domain.
+See *high-frequency ringing* in the time-domain after fast transitions.
 - \small Due to non-zero power at the original Nyquist frequency (\qty{5}{MHz}).
-- Indicates the $I$ is *undersampled* at the original \qty{100}{ns}.
+- Indicates that $I$ is *undersampled* at the original \qty{100}{ns}.
 - The eventual convolution with the slower *electronics response* attenuates the ringing.
 - Note, frequency-domain wiggles are actual features, not ringing.
 
@@ -161,7 +207,7 @@ $E$ is an *instantaneous* signal.
 :END:
 
 
-We say *detector response* is $I \otimes E$.
+We /say/ *detector response* is $I \otimes E$.
 
 - \small Naively, we get "weird units" which are not $[voltage]$.
 - \small The sim multiplies by the sample period to give the missing $[time]$.
@@ -190,7 +236,7 @@ What normalization is correct?
 
 
 
-We should have defined detector response as: \[I \to Q = I \cdot  T\]
+Better to define "detector response" as: \[I \to Q = I \cdot  T\]
 Resampling $Q$ requires an *integral interpretation*.
 - \small Time-domain samples are scaled to preserve total integral.
 - Trivially,
@@ -234,6 +280,8 @@ It has $T=\qty{99.998998998999}{ns}$ which fails LMN "rationality condition".
 - \small For here/now, *force* $T = \qty{100}{ns}$.
 
 Already mentioned that our FRs are in general *undersampled*.
+- \small Leads to ringing in resampled.
+- Does not matter in end due to convolution with slow ER.
 
 * PDSP FR issue: time domain is too short
 
@@ -258,7 +306,7 @@ Already mentioned that our FRs are in general *undersampled*.
  
 Early response is ignored.
 
-- \small FR starts low with a down step.
+- \small FR starts low, plus weird down step.
 - Non-zero DC component.
 - (ringing in the resampled).
 
@@ -268,21 +316,107 @@ Note, FR sign opposite from ADC.
 
 \scriptsize This problem was recently "discovered" by UVCGAN.
 
-* WCT ~DepoTransform~ simulation
+* ADC with different samplings.
 
-Folds multiple responses:
-- field, electronics and RC (or RCRC).
-- *downsamples* in time domain from ~fr.period~ to ~tick~.
-Should naturally handle \qty{64}{ns} FR.
+Will show ADC *waveform* and *spectrum* from:
 
-* TODO
+- Native ADC at \qty{500}{ns}
+- Native ADC at \qty{512}{ns}  
+- Resample native ADC at \qty{512}{ns} $\to$ \qty{500}{ns}  
 
-- [ ] write 64ns FR file
-- [ ] "diagonal" track sim with 512ns and 500ns ADC
-- [ ] resample 512ns to 500ns and compare to native 500ns
-- [ ] sigproc on resampled-500ns and native-500ns
+Using "diagonal track" and a select channel/time relative to U, V, W plane:
+
+- activity near to planes
+- activity far from planes
+
+Noise is effectively unique for both native ADC sets.
 
 
+* ADC near U-plane
+
+\includegraphics[height=0.9\textheight,page=1]{channels-adc-near.pdf}
+
+* ADC near V-plane
+
+\includegraphics[height=0.9\textheight,page=2]{channels-adc-near.pdf}
+
+* ADC near W-plane
+
+\includegraphics[height=0.9\textheight,page=3]{channels-adc-near.pdf}
+
+* ADC far U-plane
+
+\includegraphics[height=0.9\textheight,page=1]{channels-adc-far.pdf}
+* ADC far V-plane
+
+\includegraphics[height=0.9\textheight,page=2]{channels-adc-far.pdf}
+
+* ADC far W-plane
+
+\includegraphics[height=0.9\textheight,page=3]{channels-adc-far.pdf}
+
+
+
+* SP on the two \qty{500}{ns} ADCs.
+
+Essentially same plots as ADC case
+
+- Native signal at \qty{500}{ns}
+- Signal from  \qty{512}{ns} $\to$ \qty{500}{ns}  resampled ADCs.
+
+Using "diagonal track" and a select channel/time relative to U, V, W plane:
+
+- activity near to planes
+- activity far from planes
+
+
+
+* Signal near U-plane
+
+\includegraphics[height=0.9\textheight,page=1]{channels-sig-near.pdf}
+
+* Signal near V-plane
+
+\includegraphics[height=0.9\textheight,page=2]{channels-sig-near.pdf}
+
+* Signal near W-plane
+
+\includegraphics[height=0.9\textheight,page=3]{channels-sig-near.pdf}
+
+* Signal far U-plane
+
+\includegraphics[height=0.9\textheight,page=1]{channels-sig-far.pdf}
+* Signal far V-plane
+
+\includegraphics[height=0.9\textheight,page=2]{channels-sig-far.pdf}
+
+* Signal far W-plane
+
+\includegraphics[height=0.9\textheight,page=3]{channels-sig-far.pdf}
+
+
+
+
+* Recent WCT resampling issues.
+
+Initially we thought to put resampling in NF.
+- Leverage existing FFTs to get "for free".
+- Will requires substantial code refactoring.
+- Might be good to do this anyways/eventually.
+
+Numpy FFT roundtrip: $2560 \times 6000 \to 2560 \times 6114$ takes $\approx\qty{1}{s}$.
+- Can we can achieve this "for cheap" speed in WCT C++?
+- If so, much easier to implement in WCT.
+
+* WCT C++ resampling status
+
+1. ~OmnibusNoiseFilter~ and all its filters would will run at \qty{512}{ns}.
+2. ~WireCellAux/Resampler.h~ a "frame filter" to apply resampling.
+  - ~WireCellUtil/LMN.h~ spectrum resampling, "rational resize", etc.
+3. All the remaining downstream processing "sees" \qty{500}{ns}.
+  - Freedom of choice to run WCT sim with FR/ADC at \qty{100}{ns}/\qty{500}{ns} or \qty{64}{ns}/\qty{512}{ns}.
+ 
+WCT C++ resampling is implemented but still needs performance/correctness testing.
 
 * 
 
@@ -291,7 +425,7 @@ Should naturally handle \qty{64}{ns} FR.
 #+end_center
 
 
-* ICARUS
+* ICARUS FR issue
 
 I see ~garfield-icarus-fnal-rev2.json.bz2~ mentioned in ~cfg/~ but only
 ~garfield-icarus-fnal-rev1.json.bz2~ exists in ~wire-cell-data~.
