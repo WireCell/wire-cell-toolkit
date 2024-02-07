@@ -35,23 +35,24 @@ WireCell::Configuration Aux::Resampler::default_configuration() const
 {
     Configuration cfg;
 
-    cfg["tags"] = Json::arrayValue;
     cfg["period"] = m_period;
-    cfg["nticks"] = m_nticks;
     cfg["dft"] = "FftwDFT";
-
-    // fixme: padding strategy string may be added in future
-
+    cfg["time_pad"] = m_time_pad;
+    cfg["time_sizing"] = m_time_sizing;
     return cfg;
 }
 
 void Aux::Resampler::configure(const WireCell::Configuration& cfg)
 {
     m_period = get(cfg, "period", m_period);
-    m_nticks = get(cfg, "nticks", m_nticks);
+    m_time_pad = get(cfg, "time_pad", m_time_pad);
+    m_time_sizing = get(cfg, "time_sizing", m_time_sizing);
     auto dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
+    log->debug("resample period={}, time_pad={} time_sizing={}",
+               m_period, m_time_pad, m_time_sizing);
 }
+
 
 
 bool Aux::Resampler::operator()(const input_pointer& inframe, output_pointer& outframe)
@@ -65,6 +66,14 @@ bool Aux::Resampler::operator()(const input_pointer& inframe, output_pointer& ou
 
     const double Ts = inframe->tick();
     const double Tr = m_period;
+
+    if (Ts == Tr) {
+        log->warn("same periods: Ts={} Tr={} at call={} is probably not what you want", Ts, Tr, m_count);
+        outframe = inframe;
+        ++m_count;
+        return true;
+    }
+
     const size_t Nrat = LMN::rational(Ts, Tr);
 
     std::unordered_map< std::string, IFrame::trace_list_t> tag_indicies;
@@ -84,15 +93,47 @@ bool Aux::Resampler::operator()(const input_pointer& inframe, output_pointer& ou
         const size_t Nr = duration / Tr; // check for error?
 
         wave = LMN::resize(wave, Ns_pad);
+        if (Ns_pad > Ns_orig) {
+            const float first = wave[0];
+            const float last = wave[Ns_orig-1];
+
+            auto start = wave.begin()+Ns_orig;
+
+            if (m_time_pad == "linear") {
+                LMN::fill_linear(start, wave.end(), last, first);
+            }
+            // else if (m_time_pad == "cosine") {
+            //     LMN::fill_cosine(start, wave.end(), last, first);
+            // }
+            else {
+                float pad = 0;      // "zero"
+                if (m_time_pad == "first") {
+                    pad = first;
+                }
+                else if (m_time_pad == "last") {
+                    pad = last;
+                }
+                LMN::fill_constant(start, wave.end(), pad);
+            }
+        }
+
         auto spec = fwd_r2c(m_dft, wave);
         spec = LMN::resample(spec, Nr);
         wave = inv_c2r(m_dft, spec);
 
         // Interpolation interpretation.
-        double norm = wave.size() / (double)Ns_orig; 
+        double norm = wave.size() / (double)Ns_pad; 
         Waveform::scale(wave, norm);
 
+        if (m_time_sizing == "duration") {
+            const size_t Nr_unpadded = (int)(Ns_orig * (Ts / Tr));
+            wave = LMN::resize(wave, Nr_unpadded);
+        }
+        // else: "padded" is as-is
+
         out_traces.push_back(std::make_shared<SimpleTrace>(trace->channel(), 0, wave));
+        // log->debug("ch={} Nrat={} Ns={} Ns_pad={} Nr={}",
+        //            trace->channel(), Nrat, Ns_orig, Ns_pad, Nr);
     }
 
     auto sf = std::make_shared<SimpleFrame>(inframe->ident(), inframe->time(), out_traces, Tr);
@@ -106,6 +147,8 @@ bool Aux::Resampler::operator()(const input_pointer& inframe, output_pointer& ou
         sf->tag_traces(trace_tag, tl, ts);
     }
     outframe = sf;
+    log->debug("resample {} traces at call={}", out_traces.size(), m_count);
+
     ++m_count;
     return true;
 }

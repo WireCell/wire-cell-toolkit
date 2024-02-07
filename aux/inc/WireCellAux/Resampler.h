@@ -46,26 +46,30 @@ namespace WireCell::Aux {
         // See nticks for more.
         double m_period{0};
 
-        // Configure: nticks
-        //
-        // The target number of samples.  If zero then the period is the target.
-        // If both nticks and period are nonzero then the period is the target and
-        // the output waveform will be truncated or zero-padded (see fixme
-        // below).
-        int m_nticks{0};
-
         // Configure: dft
         //
         // Name of the DFT component
         IDFT::pointer m_dft;
 
-        // Fixme: a "padding" config may be added in the future to provide the
-        // name of time and/or frequency domain padding.  In time we may pad
-        // with zeros, extend last sample or join last and first sample values
-        // linearly, half-cosine or other means.  When an upsampling is needed,
-        // in frequency we may zero pad or extend last sample value or even
-        // extrapolate some model fit to the spectrum tail.
+        // Configure: time_pad
+        //
+        // Name for a strategy for padding in the time domain when needed to
+        // reach rationality condition.
+        //
+        // - zero :: pad with zero values (default)
+        // - first :: pad with first time sample value
+        // - last :: pad with last time sample value
+        // - median :: pad with median value
+        // - linear :: pad with linear between first and last sample values
+        std::string m_time_pad{"zero"};
 
+        // Configure: time_sizing
+        //
+        // Name a strategy for truncating the final time domain waveform
+        //
+        // - duration :: approximately retain duration (deafult).
+        // - padded :: include rationality condition padding, duration may change.
+        std::string m_time_sizing{"duration"};
 
         size_t m_count{0};
         

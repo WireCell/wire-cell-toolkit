@@ -43,7 +43,8 @@ size_t LMN::rational(double Ts, double Tr, double eps)
     return rNs;    
 }
 
-Array::array_xxf LMN::resize(const Array::array_xxf& in, size_t Nr, size_t axis)
+Array::array_xxf LMN::resize(const Array::array_xxf& in, size_t Nr,
+                             size_t axis)
 {
     size_t Nr_rows, Nr_cols;
     size_t Ns = 0;
@@ -74,13 +75,38 @@ Array::array_xxf LMN::resize(const Array::array_xxf& in, size_t Nr, size_t axis)
     return rs;
 }
 
+void LMN::fill_constant(std::vector<float>::iterator begin,
+                        std::vector<float>::iterator end,
+                        float value)
+{
+    while (begin != end) {
+        *begin = value;
+        ++begin;
+    }
+}
+
+void LMN::fill_linear(std::vector<float>::iterator begin,
+                      std::vector<float>::iterator end,
+                      float first, float last)
+{
+    size_t N = std::distance(begin, end);
+    for (size_t ind=0; ind<N; ++ind) {
+        *(begin+ind) = first + ind*((last-first)/N);
+    }
+}
+
+
 std::vector<float> LMN::resize(const std::vector<float>& in, size_t Nr)
 {
     size_t Ns = in.size();
     if (Ns == Nr) return in;
     size_t N_min = std::min(Nr,Ns);
-    std::vector<float> rs(Nr);
+    float pad = 0;
+
+
+    std::vector<float> rs(Nr, pad);
     std::copy(in.begin(), in.begin()+N_min, rs.begin());
+
     return rs;
 }
 

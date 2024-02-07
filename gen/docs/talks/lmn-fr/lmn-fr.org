@@ -406,6 +406,7 @@ Initially we thought to put resampling in NF.
 
 Numpy FFT roundtrip: $2560 \times 6000 \to 2560 \times 6114$ takes $\approx\qty{1}{s}$.
 - Can we can achieve this "for cheap" speed in WCT C++?
+  - Yes: takes less than \qty{0.5}{s} in WCT.
 - If so, much easier to implement in WCT.
 
 * WCT C++ resampling status
@@ -425,10 +426,12 @@ WCT C++ resampling is implemented but still needs performance/correctness testin
 #+end_center
 
 
-* ICARUS FR issue
+* Meta
 
-I see ~garfield-icarus-fnal-rev2.json.bz2~ mentioned in ~cfg/~ but only
-~garfield-icarus-fnal-rev1.json.bz2~ exists in ~wire-cell-data~.
+The source to this talk may be found at
+
+\tiny
+https://github.com/WireCell/wire-cell-toolkit/blob/lmn-resampling/gen/docs/talks/lmn-fr/lmn-fr.org
 
 
 # Local Variables:

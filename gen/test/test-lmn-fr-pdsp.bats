@@ -135,11 +135,20 @@ tier_name () {
     # order to save one FFT round trip per channel.
     digin=$(tier_name digits $ADC_BDE_TICK)
     digout=$(tier_name digits-$ADC_BDE_TICK $ADC_TDE_TICK)
-    run_idempotently -s $digin -t $digout -- \
-                     wirecell-util resample \
-                     -t "$ADC_TDE_TICK"'*ns' \
-                     -o $digout \
-                     $digin
+
+    # run_idempotently -s $digin -t $digout -- \
+    #                  wirecell-util resample \
+    #                  -t "$ADC_TDE_TICK"'*ns' \
+    #                  -o $digout \
+    #                  $digin
+
+    # default period is 500 ns
+    log="wct-resample.log"
+    run_idempotently -s $digin -t $digout -t $log -- \
+                     wire-cell -l "$log" -L debug \
+                     -A input=$digin \
+                     -A output=$digout \
+                     layers/resample.jsonnet
 }
 
 # fixme: should move this into a hear document

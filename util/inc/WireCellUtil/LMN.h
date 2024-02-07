@@ -38,8 +38,17 @@ namespace WireCell::LMN {
     }
 
     /// Return a new array with size Nr on axis.
-    Array::array_xxf resize(const Array::array_xxf& in, size_t Nr, size_t axis=1);
+    Array::array_xxf resize(const Array::array_xxf& in, size_t Nr,
+                            size_t axis=1);
     std::vector<float> resize(const std::vector<float>& in, size_t Nr);
+
+    void fill_constant(std::vector<float>::iterator begin,
+                       std::vector<float>::iterator end,
+                       float value = 0);
+    void fill_linear(std::vector<float>::iterator begin,
+                     std::vector<float>::iterator end,
+                     float first, float last);
+
 
     /// Resample a complex array interpreted as a frequency-domain spectrum
     /// along the given axis so that it has Nr samples.  The layout is assumed

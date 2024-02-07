@@ -1,19 +1,57 @@
-// This is a top level config file given to wire-cell to run segments of
-// processing to calcualte the "standard" SP metrics (eff, bias, res) vs
-// direction of ideal tracks.
+// This is a top level config file given to wire-cell.
 //
-// The caller defines a pipeline of tasks that default to sim,nf,sp.  A subset
-// of this task list may be given.  Eg, UVCGAN may be inserted to perform domain
-// translations and that may reasonably be done before or after the nf stage.
+// It can configure a wide variety of types of WCT job graphs for a variety
+// of supported detectors.  A detector is supported if it has configuration
+// under the so called "layers" schema (wire-cell-toolkit/cfg/layers/).
+// 
+// CAVEAT and FIXME: the configuration currently configures a single-APA detector.
+//
+// This configuration produces a "top level function" with its arguments
+// ("TLA"s) exposed to the "wire-cell" command line.  The user must provide one
+// input file.  Each stage (or "task") in the pipeline may be a source of output
+// files that the user may supply.
 //
 // Example usage:
 // 
-// wire-cell -c spdir-metric.jsonnet \
+// wire-cell -c omnijob.jsonnet \
 //           -A detector=pdsp \
 //           -A variant=nominal \
 //           -A input=depos.npz \
 //           -A output=sp.npz \
 //           -A tasks=sim,nf,sp
+//
+// - detector :: canonical name of supported detector (pdsp, uboone, etc).
+// - variant :: the layers "mids" detector variant name .
+// - input :: name of file provding data to input to first task.
+// - ouput :: describe the output file(s) (see below).
+// - tasks :: array or comma separated list of task names (see below).
+//
+// The "output" can be a string giving a single file name which will receive
+// output from the end of the pipeline or it may be a map from "task" (see
+// below) to an output file name.
+//
+// For example:
+//
+// wire-cell [...] \
+//           --tla-code output="{sim:\"digits.npz\",sp:\"signals.npz\"}" \
+//           -A tasks=sim,nf,sp \
+//           [...]
+//
+// will produce "digits.npz" output from the simulation "sim" task and
+// "signals.npz" from the signal processing "sp" task.  
+//
+// The available "task" pipeline items are:
+//
+// - drift :: drift depos through the bulk TPC volume
+// - splat :: apply the "splat" sim+sigproc model to depos to produce frame
+// - sim :: apply full simulation to depos to produce frame, include noise and digitization
+// - sig :: apply signal simulation alone to convert depo to frame
+// - noi :: apply noise simulation alone to frame
+// - dig :: apply digitization alone to frame
+// - nf :: apply noise filtering to frame
+// - sp :: apply signal processing to frame
+//
+// Tasks are aplied in the order given by the "tasks" list.  
 
 local high = import "layers/high.jsonnet";
 local wc = high.wc;
@@ -112,12 +150,6 @@ local output_objectify(stages, output) =
     else output;
 
 // Return configuration for single-APA job.
-// - detector :: canonical name of supported detector (pdsp, uboone, etc)
-// - input :: name of file provding data to input to first task
-// - ouput :: name of file to receive output of last task or object mapping task to output file 
-// - tasks :: array or comma separated list of task names
-// - dense :: if false, save frames sparsely, else add reframers to make dense 
-// - variant :: the layers mids detector variant name 
 function (detector, input, output, tasks="drift,splat,sim,nf,sp", dense=true, variant="nominal")
     local mid = high.mid(detector, variant);
     local stages = wc.listify(tasks);
