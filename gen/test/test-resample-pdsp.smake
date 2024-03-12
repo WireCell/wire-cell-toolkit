@@ -70,7 +70,6 @@ for k,v in dict(
         sp_trange_near='180*us,210*us',
         sp_trange_far='2450*us,2490*us',
 
-
 ).items():
     config.setdefault(k,v)
 
