@@ -8,6 +8,7 @@
 
 #include "WireCellUtil/Testing.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Spectrum.h" // hermitian_mirror
 #include "WireCellUtil/FFTBestLength.h"
 
 
@@ -84,6 +85,58 @@ void Gen::PlaneImpactResponse::configure(const WireCell::Configuration& cfg)
 
     m_dftname = get<std::string>(cfg, "dft", m_dftname);
     build_responses();
+
+    log->debug("fr={} plane={} short={} long={} tick={} nticks={}",
+               m_frname, m_plane_ident,
+               m_overall_short_padding, m_long_padding,
+               m_tick, m_nbins);
+}
+
+static
+WireCell::Waveform::compseq_t
+spectrum_resize(const Waveform::compseq_t& spec, size_t newsize, double norm)
+{
+    const size_t oldsize = spec.size();
+
+    if (oldsize == newsize) {
+        return spec;
+    }
+
+    // Count zero bin, complex half spectrum and Nyquist bin when N is even.
+    const size_t oldhalf = 1 + floor(oldsize/2);
+    const size_t newhalf = 1 + floor(newsize/2);
+
+    // when upsampling, copy no more than old half.
+    // when downsampling, copy no more than newhalf.
+    const size_t safesize = std::min(oldhalf, newhalf);
+    Waveform::compseq_t ret(newsize);
+    std::copy(spec.begin(), spec.begin()+safesize, ret.begin());
+    // Fill in the upper part
+    Spectrum::hermitian_mirror(ret.begin(), ret.end());
+
+    if (norm != 1.0) {
+        // Norm is a bit tricky.  There are two cases:
+        //
+        // 1. If the original samples are values of an instantaneous function
+        // then the resize should be an interpolation and the norm should be
+        // newsize/oldsize.  This is to "pre-re-normalize" the implicit
+        // 1/newsize that a subsequent inv_dft() will apply.
+        //
+        // 2. If the original samples are integrals over the original period,
+        // then the implicit 1/newsize normalization done by the eventual
+        // inv_dft() is correct.
+        //
+        // Corollary: if "spec" holds instantaneous samples (type 1) but the
+        // user wants to get out resampled integrated samples (type 2) then norm
+        // can be the value of "old tick".  This saves from having to do an
+        // prior loop to scale from instantaneous to integrated.
+
+        for (auto& one : ret) {
+            one *= norm;
+        }
+    }
+
+    return ret;
 }
 
 void Gen::PlaneImpactResponse::build_responses()
@@ -134,7 +187,7 @@ void Gen::PlaneImpactResponse::build_responses()
         auto wave = iw->waveform_samples();  // copy
         if (wave.size() != n_long_length) {
             log->debug("long response {} has different number of samples ({}) than expected ({})", name, wave.size(),
-                     n_long_length);
+                       n_long_length);
             wave.resize(n_long_length, 0);
         }
         // note: we are ignoring waveform_start which will introduce
@@ -179,7 +232,18 @@ void Gen::PlaneImpactResponse::build_responses()
     // native response time binning
     const int rawresp_size = pr.paths[0].current.size();
     const double rawresp_min = fr.tstart;
-    const double rawresp_tick = fr.period;
+    const double rawresp_tick_ns = fr.period/units::ns;
+    // Some FRs have a period that is likely a bug.  Eg the period in
+    // dune-garfield-1d565.json.bz2 is 99.998998998999 ns.  Allowing this
+    // particular period will lead to non-rational resampling.  However, in the
+    // future it is conceivable that some correct FR has a period that deviates
+    // from integer on purpose.  We tune this check only warn when deviation
+    // from non-integer is larger than this known case.  Of course, we could
+    // just fix that damn file.....
+    if (std::abs(int(rawresp_tick_ns)/rawresp_tick_ns - 1) > 0.00001) {
+        log->warn("FR period is not integer number of ns ({} ns), rounding", rawresp_tick_ns);
+    }
+    const double rawresp_tick = round(rawresp_tick_ns)*units::ns;
     const double rawresp_max = rawresp_min + rawresp_size * rawresp_tick;
     Binning rawresp_bins(rawresp_size, rawresp_min, rawresp_max);
 
@@ -194,6 +258,24 @@ void Gen::PlaneImpactResponse::build_responses()
     // epsilon factor of the pitch.
     const double oopsilon = 1e-15*pr.pitch;
 
+    // FR size in slow basis
+    const size_t fr_slow_size = rawresp_size * rawresp_tick / m_tick;
+
+    // The extended size in the slow basis for linear convolution.
+    const size_t extend_size = fr_slow_size + short_spec.size();
+
+    // The extended size in the fast basis.
+    const size_t fr_extend_size = extend_size * m_tick / rawresp_tick;
+
+    // Resize the short spec.
+    auto extend_wave = inv_c2r(dft, short_spec);
+    extend_wave.resize(extend_size);
+    auto extend_spec = fwd_r2c(dft, extend_wave);
+
+    log->debug("Nfr={} Nfr_slow={} Nfr_ext={} Ner={} Nfrxer={} Tfr={} Ter={} {}",
+               rawresp_size, fr_slow_size, fr_extend_size, n_short_length, extend_size,
+               rawresp_tick, m_tick, m_frname);
+
     // collect paths and index by wire and impact position.
     std::map<int, region_indices_t> wire_to_ind;
     for (int ipath = 0; ipath < npaths; ++ipath) {
@@ -204,43 +286,61 @@ void Gen::PlaneImpactResponse::build_responses()
         //          ipath, wirenum, path.pitchpos, pr.pitch);
 
         // match response sampling to digi and zero-pad
-        WireCell::Waveform::realseq_t wave(n_short_length, 0.0);
-        for (int rind = 0; rind < rawresp_size; ++rind) {  // sample at fine bins of response function
-            const double time = rawresp_bins.center(rind);
 
-            // fixme: assumes field response appropriately centered
-            const size_t bin = time / m_tick;
+        /// Properly do a filtered downsample to tick.
+        auto wave = path.current; // copy
 
-            if (bin >= n_short_length) {
-                log->error("out of bounds field response "
-                         "bin={}, ntbins={}, time={} us, tick={} us",
-                         bin, n_short_length, time / units::us,
-                         m_tick / units::us);
-                THROW(ValueError() << errmsg{"Response config not consistent"});
+        /// We want to end up with V = T*resample(FR)(x)ER.  Norm here by the
+        /// tick and also so that the resampling of FR acts as an interpolation.
+        /// We must zero-pad resize but should not use that count as it adds no
+        /// power.
+        const double norm = (m_tick * extend_size) / wave.size();
 
-            }
+        // Assure post-downsample size 
+        wave.resize( fr_extend_size );
+        // Do the downsampling in frequency domain.  Read comments in that function.
+        auto spec = spectrum_resize(fwd_r2c(dft, wave), extend_size, norm);
 
-            // Here we have sampled, instantaneous induced *current*
-            // (in WCT system-of-units for current) due to a single
-            // drifting electron from the field response function.
-            const double induced_current = path.current[rind];
+        /// Original code is an unfiltered decimate which causes aliasing of the HF FR power.
+        /// This is no significant compared to later noise + digitization but is still less than perfect.
+        // WireCell::Waveform::realseq_t wave(n_short_length, 0.0);
+        // for (int rind = 0; rind < rawresp_size; ++rind) {  // sample at fine bins of response function
+        //     const double time = rawresp_bins.center(rind);
 
-            // Integrate across the fine time bin to get the element
-            // of induced *charge* over this bin.
-            const double induced_charge = induced_current * rawresp_tick;
+        //     // fixme: assumes field response appropriately centered
+        //     const size_t bin = time / m_tick;
 
-            // sum up over coarse ticks.
-            wave[bin] += induced_charge;
-        }
-        WireCell::Waveform::compseq_t spec = fwd_r2c(dft, wave);
+        //     if (bin >= n_short_length) {
+        //         log->error("out of bounds field response "
+        //                  "bin={}, ntbins={}, time={} us, tick={} us",
+        //                  bin, n_short_length, time / units::us,
+        //                  m_tick / units::us);
+        //         THROW(ValueError() << errmsg{"Response config not consistent"});
+
+        //     }
+
+        //     // Here we have sampled, instantaneous induced *current*
+        //     // (in WCT system-of-units for current) due to a single
+        //     // drifting electron from the field response function.
+        //     const double induced_current = path.current[rind];
+
+        //     // Integrate across the fine time bin to get the element
+        //     // of induced *charge* over this bin.
+        //     const double induced_charge = induced_current * rawresp_tick;
+
+        //     // sum up over coarse ticks.
+        //     wave[bin] += induced_charge;
+        // }
+        // WireCell::Waveform::compseq_t spec = fwd_r2c(dft, wave);
 
         // Convolve with short responses
         if (nshort) {
-            for (size_t find = 0; find < n_short_length; ++find) {
-                spec[find] *= short_spec[find];
+            for (size_t find = 0; find < extend_size; ++find) {
+                spec[find] *= extend_spec[find];
             }
         }
         Waveform::realseq_t wf = inv_c2r(dft, spec);
+        wf.resize(n_short_length);
 
         wf.resize(m_nbins, 0);
         spec = fwd_r2c(dft, wf);
@@ -248,7 +348,7 @@ void Gen::PlaneImpactResponse::build_responses()
         IImpactResponse::pointer ir =
             std::make_shared<Gen::ImpactResponse>(
                 ipath,
-                spec, wf, m_overall_short_padding / m_tick,
+                spec, wf, n_short_length,
                 long_wf, m_long_padding / m_tick);
         m_ir.push_back(ir);
     }

@@ -24,6 +24,12 @@ $ WCT_BATS_LOG_SINK=terminal WCT_BATS_LOG_LEVEL=debug ....
 
 Then, visit this org file and type ~C-c C-e l P~ to export to latex/beamer/PDF.
 
+Also,
+
+#+begin_example
+./gen/test/test-resample-pdsp.smake all
+#+end_example
+
 * Content overview
 
 For the paper, we want to test LMN resampling on realistic waveforms.

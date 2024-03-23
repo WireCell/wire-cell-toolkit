@@ -61,7 +61,7 @@ for k,v in dict(
         # voltage_trange_far='2450*us,2490*us',
         voltage_trange_near='200*us,300*us',
         voltage_trange_far='2500*us,2550*us',
-        voltage_trange_begin='0,150*us',
+        voltage_trange_begin='240*us,280*us',
         voltage_trange_end='2700*us,3025*us',
         voltage_trange_full='0*us,3025*us',
 
@@ -75,41 +75,63 @@ for k,v in dict(
 
 path = 'wirecell-util resolve -k fields {detector} | head -1'
 path = Path(check_output(path.format(**config), shell=True).decode().strip())
-derived = dict(
-    fields_original_path = str(path.absolute()),
-    fields_name = path.stem,
-    fields_tde_path = '{name}-{fields_tde_tick}ns.json.bz2'.format(
-        name=path.stem, **config),
-    fields_bde_path = '{name}-{fields_bde_tick}ns.json.bz2'.format(
-        name=path.stem, **config)
-)
-config["derived"] = derived
+fields_original_path = str(path.absolute()),
+fields_base = path.name.replace(".json.bz2","")
+fields_pat = fields_base + '-{fields_tick}ns.json.bz2'
+# derived = dict(
+#     fields_original_path = str(path.absolute()),
+#     fields_name = path.stem,
+#     fields_tde_path = '{name}-{fields_tde_tick}ns.json.bz2'.format(
+#         name=path.stem, **config),
+#     fields_bde_path = '{name}-{fields_bde_tick}ns.json.bz2'.format(
+#         name=path.stem, **config)
+# )
+# config["derived"] = derived
 
+# break out to use in f-strings
+fields_tde_tick = config["fields_tde_tick"]
+fields_bde_tick = config["fields_bde_tick"]
+fields_tde_file = fields_pat.format(fields_tick=fields_tde_tick)
+fields_bde_file = fields_pat.format(fields_tick=fields_bde_tick)
 adc_ticks = [config["adc_tde_tick"], config["adc_bde_tick"]]
 adc_tde_tick = config["adc_tde_tick"]
 adc_bde_tick = config["adc_bde_tick"]
 
+def fields(w):
+    for key in w.keys():
+        val = getattr(w, key)
+        print(f'fields: {key} {val} {type(val)}')
+    if w.tick == "500":
+        ret = fields_pat.format(fields_tick=fields_tde_tick)
+        print(ret)
+        return ret
+    if w.tick == "512":
+        ret = fields_pat.format(fields_tick=fields_bde_tick)
+        print(ret)
+        return ret
+    raise ValueError(f'no such tick: {w.tick} in {w}')
+
 rule fix_fr_period:
     input:
-        derived['fields_original_path']
-    output: 
-        derived['fields_tde_path']
+        fields_original_path
+    output:
+        fields_tde_file
     params:
-        tick=config['fields_tde_tick']
+        field_tick = fields_tde_tick
     shell: '''
-    wirecell-resp condition -P {params.tick}*ns -o {output} {input}
+    wirecell-resp condition -P {params.field_tick}*ns -o {output} {input}
     '''
 
 rule resample_fr:
     input:
-        rules.fix_fr_period.output
+        fields_tde_file
     output:
-        derived['fields_bde_path']
+        fields_bde_file
     params:
-        tick=config['fields_bde_tick'],
-        pad=config['time_pad']
+        field_tick = fields_bde_tick,
+        pad = config['time_pad']
     shell: '''
-    wirecell-resp resample -p {params.pad} -t {params.tick}*ns -o {output} {input}
+    wirecell-resp resample -p {params.pad} -t {params.field_tick}*ns -o {output} {input}
     '''
 
 rule gen_depos:
@@ -117,12 +139,16 @@ rule gen_depos:
     params: depogen=config['depogen']
     shell: '{params.depogen} {output}'
 
+
 rule nul_depos:
     output: "empty-depos.npz"
     shell: 'wirecell-gen depo-point -n 0 -o {output}'
 
+
 rule sim_signal:
-    input: rules.gen_depos.output
+    input:
+        depos=rules.gen_depos.output,
+        fr=fields
     output:
         log="voltage_signal_native_{tick}ns.log",
         npz="voltage_signal_native_{tick}ns.npz"
@@ -131,13 +157,15 @@ rule sim_signal:
     -A detector={config[detector]} \
     -A variant=resample_{wildcards.tick}ns \
     -A tasks="drift,sig" \
-    -A input={input} \
+    -A input={input.depos} \
     -A output={output.npz} \
     layers/omnijob.jsonnet    
     '''
 
 rule sim_noise:
-    input: rules.nul_depos.output
+    input:
+        depos=rules.nul_depos.output,
+        fr=fields
     output:
         log="voltage_noise_native_{tick}ns.log",
         npz="voltage_noise_native_{tick}ns.npz"
@@ -146,7 +174,7 @@ rule sim_noise:
     -A detector={config[detector]} \
     -A variant=resample_{wildcards.tick}ns \
     -A tasks="drift,sig,noi" \
-    -A input={input} \
+    -A input={input.depos} \
     -A output={output.npz} \
     layers/omnijob.jsonnet    
     '''
@@ -287,7 +315,8 @@ rule all_adc_resample:
 
 rule sigproc:
     input:
-        "adc_signoi_{sampling}_{tick}ns.npz"
+        frames="adc_signoi_{sampling}_{tick}ns.npz",
+        fr=fields
     output:
         log="sp_signoi_{sampling}_{tick}ns.log",
         npz="sp_signoi_{sampling}_{tick}ns.npz"
@@ -296,7 +325,7 @@ rule sigproc:
     -A detector={config[detector]} \
     -A variant=resample_{wildcards.tick}ns \
     -A tasks="sp" \
-    -A input={input} \
+    -A input={input.frames} \
     -A output={output.npz} \
     layers/omnijob.jsonnet
     '''
@@ -308,7 +337,7 @@ rule all_sigproc:
     
 rule fr_plots:
     input:
-        derived["fields_original_path"]
+        fields_original_path
     output:
         pdf="lmn-fr-pdsp-0.pdf",
         org="lmn-fr-pdsp-0.org"
@@ -329,7 +358,7 @@ rule voltage_plots:
         "voltage_signal_native_{newtick}ns.npz",
         "voltage_signal_voltageresample_{tick}ns_{newtick}ns.npz",
     output:
-        "voltage_signal_{drift}_{trange}_{tick}ns_{newtick}ns.pdf"
+        "voltage_signal_{drift}_{trange}_{tick}ns_{newtick}ns_{drawstyle}.pdf"
     wildcard_constraints:
         tick=adc_bde_tick,
         newtick=adc_tde_tick
@@ -339,6 +368,7 @@ rule voltage_plots:
     shell:'''
     wirecell-plot channels \
     -o {output} \
+    --drawstyle {wildcards.drawstyle} \
     --trange {params.trange} \
     --channel {params.channels} \
     {input}
@@ -367,6 +397,7 @@ rule wct_plots:
     {input}
     '''
 
+
 # specialized plots intended for LMN paper
 rule paper_plots_voltage:
     input:
@@ -378,19 +409,17 @@ rule paper_plots_voltage:
     shell:'''
     wirecell-plot channels \
     -o {output} \
-    --yrange -2e-15,2e-15 \
-    --trange 0,150*us \
+    --trange "240*us,280*us" \
     --channel 348,1547,2080 \
     {input}
     '''
-
-
 
 rule all_plots:
     input:
         expand(rules.voltage_plots.output,
                tick=[adc_bde_tick],
                newtick=[adc_tde_tick],
+               drawstyle=["steps-mid", "progressive"],
                trange=["begin","end","full","near","far"],
                drift=["near","far"]),
         expand(rules.wct_plots.output,
