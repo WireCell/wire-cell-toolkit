@@ -229,8 +229,8 @@ Aux::channel_list Aux::fill(Array::array_xxf& array,
     auto tbinmm = Aux::tbin_range(traces);
     const size_t ncols = tbinmm.second - tbinmm.first;
     const size_t nrows = std::distance(ch.begin(), ch.end());
-    Array::array_xxf arr = Array::array_xxf::Zero(nrows, ncols);
-    Aux::fill(arr, traces, ch.begin(), ch.end(), tbinmm.first);
+    array = Array::array_xxf::Zero(nrows, ncols);
+    Aux::fill(array, traces, ch.begin(), ch.end(), tbinmm.first);
     return ch;
 }
 

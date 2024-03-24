@@ -21,7 +21,7 @@ void Gen::RCResponse::configure(const WireCell::Configuration& cfg)
 
     // fixme: why give SimpleRC tick twice?  Once in ctor and once in
     // generate()?
-    m_rc = new Response::SimpleRC(m_cfg["width"].asDouble(), waveform_period(), waveform_start());
+    m_rc = std::make_unique<Response::SimpleRC>(m_cfg["width"].asDouble(), waveform_period(), waveform_start());
 
     const int nbins = m_cfg["nticks"].asInt();
     const double t0 = waveform_start();

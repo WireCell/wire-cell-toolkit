@@ -102,10 +102,13 @@ bool Gen::Digitizer::operator()(const input_pointer& vframe, output_pointer& adc
     }
 
     // fixme: maybe make this honor a tag
-    auto vtraces = Aux::untagged_traces(vframe);
+    // auto vtraces = Aux::untagged_traces(vframe);
+    const auto& vtraces = *vframe->traces();
     if (vtraces.empty()) {
         log->error("no traces in input frame {} at call={}",
                    vframe->ident(), m_count);
+        Aux::dump_frame(vframe, log);
+        log->debug(Aux::taginfo(vframe));
         ++m_count;
         return false;
     }

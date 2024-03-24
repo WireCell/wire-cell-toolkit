@@ -214,7 +214,7 @@ function run_idempotently () {
         do
             if [ ! -f "$one" ] ; then
                 need_to_run="yes"
-                debug "running because of missing target: $one"
+                debug "running because of missing target: \"$one\""
             fi
         done
     fi

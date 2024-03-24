@@ -25,7 +25,7 @@ void Gen::ColdElecResponse::configure(const WireCell::Configuration& cfg)
 {
     m_cfg = cfg;
 
-    m_coldresp = new Response::ColdElec(m_cfg["gain"].asDouble(), m_cfg["shaping"].asDouble());
+    m_coldresp = std::make_unique<Response::ColdElec>(m_cfg["gain"].asDouble(), m_cfg["shaping"].asDouble());
 
     const int nbins = m_cfg["nticks"].asInt();
     const double t0 = waveform_start();

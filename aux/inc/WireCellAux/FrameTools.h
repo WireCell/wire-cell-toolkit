@@ -65,7 +65,7 @@ namespace WireCell {
                   channel_list::iterator ch_begin,
                   channel_list::iterator ch_end, int tbin = 0);
 
-        /// Full feature fill.  Fill array with change from traces as
+        /// Full feature fill.  Fill array with charge from traces as
         /// above Return ordered, unique list of channel, each channel
         /// corresponding to one row.  Columns will span the
         /// tbin_range().

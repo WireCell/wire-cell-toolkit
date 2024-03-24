@@ -1,0 +1,235 @@
+#+title: LMN on FR
+#+subtitle: Part 2
+#+setupfile: ~/sync/talks/setup.org
+#+LATEX_HEADER: \usepackage{siunitx}
+
+* Content overview
+
+Continuation of [[file:lmn-fr.org]]
+
+- Add a new branch to the DAG to resample *signal voltage*.
+- Allows same noise to be used in native \qty{500}{ns} and resampled \qty{500}{ns}.
+- Of course, not physical but help to find any bugs.
+- Include results using new WCT C++ ~Resampler~ using ~WireCell::LMN~.
+
+Indeed, also fix some bugs and looks at DFT artifacts.
+
+
+* Process illustrated
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+\includegraphics[height=0.9\textheight]{job-overview-resample-signal-voltage.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+3 pipelines: signal+noise+digitize+sigproc pipelines
+- \small Native \qty{500}{ns} all the way down.
+- Native\qty{512}{ns}, resample to \qty{500}{ns} at *signal voltage*.
+  - \scriptsize followed by adding \qty{500}{ns} noise, digitizer + sigproc.
+- Native\qty{512}{ns}, resample to \qty{500}{ns} at *signal+noise ADC*.
+  - \scriptsize followed by sigproc.
+- SigProc always at \qty{500}{ns}
+
+* Snakemake DAG
+
+\includegraphics[width=\textwidth]{smake-dag.pdf}
+
+Got sufficiently complex to move from *BATS* to *Snakemake*.
+- \small Note, this only shows node types, not instances (there are 34 tasks).
+- Runs all in about 45 seconds on $8 \times 3.5$ GHz.
+- Run once for *zero padding* and once for *linear padding*.
+
+* Artifact mitigation example - start of U-plane signal voltage waveform
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.49
+:END:
+
+\includegraphics[width=\textwidth,page=1]{zero-padding/paper_voltage_near.pdf}
+
+Time-domain *zero padding*.
+- \small Artifacts swamp start of waveform.
+- \small Note uptick at high frequency.
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.49
+:END:
+
+\includegraphics[width=\textwidth,page=1]{linear-padding/paper_voltage_near.pdf}
+
+*Linearly connect* time domain endpoints.
+- \small \textcolor{blue}{Blue} is almost perfectly covered by \textcolor{green}{green}.
+- Works as well as half-cosine, and simpler.
+
+**                                                                 :B_column:
+:PROPERTIES:
+:BEAMER_env: column
+:END:
+
+#+begin_center
+Will use *linear connect* as default.
+#+end_center
+
+* Signal voltage (no noise) - U/V/W planes
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=1]{linear-padding/voltage_signal_near_near_512ns_500ns.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=2]{linear-padding/voltage_signal_near_near_512ns_500ns.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=3]{linear-padding/voltage_signal_near_near_512ns_500ns.pdf}
+
+
+
+* ADC level
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=1]{linear-padding/adc_near_512ns_500ns.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=2]{linear-padding/adc_near_512ns_500ns.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=3]{linear-padding/adc_near_512ns_500ns.pdf}
+
+** 
+
+Common noise for \textcolor{blue}{blue} and \textcolor{green}{green} at \qty{500}{ns}.
+\textcolor{orange}{Orange} is resampled from \qty{512}{ns} after noise.
+
+- Effects from noise dominate over minute changes in resampled vs native voltage. 
+
+* SP level
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=1]{linear-padding/sp_near_512ns_500ns.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=2]{linear-padding/sp_near_512ns_500ns.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.32
+:END:
+
+\includegraphics[width=\textwidth,page=3]{linear-padding/sp_near_512ns_500ns.pdf}
+
+** 
+
+Visible difference between \textcolor{blue}{blue} \textbf{native} and \textcolor{green}{green} \textbf{resampled at signal voltage}.
+- Cause not yet understood.
+- Insignificant compared to changes due to noise.
+
+
+* 
+
+#+begin_center
+\Huge $\mathcal{FIN}$
+#+end_center
+
+
+* Meta
+
+The source to this talk may be found at
+
+\tiny
+https://github.com/WireCell/wire-cell-toolkit/blob/lmn-resampling/gen/docs/talks/lmn-fr/lmn-fr.org
+
+* Reproduce
+
+Requires:
+- ~wire-cell-python~ installed and in environment.
+- ~wire-cell-data~ repo in ~WIRECELL_PATH~.
+- ~pip install snakemake~ 
+
+To produce the files required to build this presentation run:
+
+#+begin_example
+export T=$(pwd)/wire-cell-toolkit/gen/test/test-resample-pdsp.smake
+cd wire-cell-toolkit/gen/docs/talks/lmn-fr/
+$T --config time_pad=linear --directory linear-padding
+$T --config time_pad=zero --directory zero-padding
+#+end_example
+
+Each should take less than one minute.  Also, need:
+
+#+begin_example
+$T --dag | dot -Tpdf > smake-dag.pdf
+dot -Tpdf -o job-overview-resample-signal-voltage.pdf \
+             job-overview-resample-signal-voltage.dot 
+#+end_example
+
+Then, visit this org file and type ~C-c C-e l P~ to export to latex/beamer/PDF.
+
+
+# Local Variables:
+# eval: (fix-latex-previews)
+# End:
