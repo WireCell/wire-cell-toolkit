@@ -150,8 +150,8 @@ local output_objectify(stages, output) =
     else output;
 
 // Return configuration for single-APA job.
-function (detector, input, output, tasks="drift,splat,sim,nf,sp", dense=true, variant="nominal")
-    local mid = high.mid(detector, variant);
+function (detector, input, output, tasks="drift,splat,sim,nf,sp", dense=true, variant="nominal", options={})
+    local mid = high.mid(detector, variant, options=options); // there is also "services"
     local stages = wc.listify(tasks);
     local outfiles = output_objectify(stages, output); // stage->filename
 

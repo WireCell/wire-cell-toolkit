@@ -8,10 +8,10 @@ local sp = import "sp.jsonnet";
 function(services, params, options={}) {
 
     // API method
-    nf :: nf(services, params, options),
+    nf :: nf(services, params),
 
     // API method
-    sp :: sp(services, params, options),
+    sp :: sp(services, params, std.get(options, 'sparse', true)),
 
     // API method
     dnnroi :: function(anode)

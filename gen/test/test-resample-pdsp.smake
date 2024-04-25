@@ -9,23 +9,11 @@
 # Full run takes less than 1 minute on 8 x 3.5 GHz.
 
 #############
-# This file naming scheme is used:
+# The name of the file output by each rule is build from input file names by
+# pre-pending a label.  Labels are composed of an "tier" identifier and a clock
+# tick in ns.  Eg, fr100 is field response sampled at 100ns.  
 #
-# before any resampling
-# 
-#     '{units}_{content}_native_{original_tick}ns'
-#
-# after any resampling
-# 
-#     '{units}_{content}_{sampling}_{original_tick}ns_{final_tick}ns'
-#
-# With:
-#
-# - units :: voltage, adc, sp
-# - content :: signal, noise, signoi (signal+noise)
-# - sampling :: native, voltageresample (re sample a voltage), adcresample (at adc)
-# - original_tick :: 500 or 512
-# - final_tick :: always 500
+# File names end in {detector}.{ext}.
 #############
 
 
@@ -37,21 +25,19 @@ from subprocess import check_output
 for k,v in dict(
         # Run things for LMN FR resampling test for detector:
         detector="pdsp",
-        # The field sampling period in ns which we want.
-        fields_tde_tick=100,
-        # ADC sampling period in ns that we want.
-        adc_tde_tick=500,
-        # The field sampling period in ns that we will resample.
-        fields_bde_tick=64,
-        # Original ADC sampling period in ns that we will resample.
-        adc_bde_tick=512,
+        # The field sampling periods in ns.  The first one MUST be the native fr tick.  Note, strings, not numbers.
+        frticks=["100", "64"],
+        # The ADC sampling periods in ns corresponding to fr ticks.  Note, strings, not numbers.
+        adcticks=["500", "512"],
         # depo generator, file name will be appended
         depogen="wirecell-gen depo-line "
         "--electron-density -5000 --first -3578.36*mm,76.1*mm,3.3497*mm "
         "--last -1.5875*mm,6060*mm,2303.37*mm --sigma 1*mm,1*mm --output ",
-
         # padding strategy (zero, linear, first, last)
-        time_pad = 'linear',
+        time_pad = 'zero',
+
+        # variations of the FRs, "full" must be first.
+        spans=["full","oned"],
 
         # control plots
         select_channels_near='348,1547,2080',
@@ -73,116 +59,159 @@ for k,v in dict(
 ).items():
     config.setdefault(k,v)
 
+# import the original FR
 path = 'wirecell-util resolve -k fields {detector} | head -1'
 path = Path(check_output(path.format(**config), shell=True).decode().strip())
 fields_original_path = str(path.absolute()),
-fields_base = path.name.replace(".json.bz2","")
-fields_pat = fields_base + '-{fields_tick}ns.json.bz2'
-# derived = dict(
-#     fields_original_path = str(path.absolute()),
-#     fields_name = path.stem,
-#     fields_tde_path = '{name}-{fields_tde_tick}ns.json.bz2'.format(
-#         name=path.stem, **config),
-#     fields_bde_path = '{name}-{fields_bde_tick}ns.json.bz2'.format(
-#         name=path.stem, **config)
-# )
-# config["derived"] = derived
 
-# break out to use in f-strings
-fields_tde_tick = config["fields_tde_tick"]
-fields_bde_tick = config["fields_bde_tick"]
-fields_tde_file = fields_pat.format(fields_tick=fields_tde_tick)
-fields_bde_file = fields_pat.format(fields_tick=fields_bde_tick)
-adc_ticks = [config["adc_tde_tick"], config["adc_bde_tick"]]
-adc_tde_tick = config["adc_tde_tick"]
-adc_bde_tick = config["adc_bde_tick"]
 
-def fields(w):
-    for key in w.keys():
-        val = getattr(w, key)
-        print(f'fields: {key} {val} {type(val)}')
-    if w.tick == "500":
-        ret = fields_pat.format(fields_tick=fields_tde_tick)
-        print(ret)
-        return ret
-    if w.tick == "512":
-        ret = fields_pat.format(fields_tick=fields_bde_tick)
-        print(ret)
-        return ret
-    raise ValueError(f'no such tick: {w.tick} in {w}')
+# 'fields-{frtick}-{span}-{detector}.{ext}'
 
 rule fix_fr_period:
     input:
         fields_original_path
     output:
-        fields_tde_file
-    params:
-        field_tick = fields_tde_tick
+        f"fields-{config['frticks'][0]}-full-{config['detector']}.json.bz2"
     shell: '''
-    wirecell-resp condition -P {params.field_tick}*ns -o {output} {input}
+    wirecell-resp condition -P {config[frticks][0]}*ns -o {output} {input}
     '''
 
 rule resample_fr:
     input:
-        fields_tde_file
+        rules.fix_fr_period.output
     output:
-        fields_bde_file
-    params:
-        field_tick = fields_bde_tick,
-        pad = config['time_pad']
+        "fields-{frtick}-full-{detector}.json.bz2"
     shell: '''
-    wirecell-resp resample -p {params.pad} -t {params.field_tick}*ns -o {output} {input}
+    wirecell-resp resample -p {config[time_pad]} -t {wildcards.frtick}*ns -o {output} {input}
     '''
 
+def respan_fr_args(w):
+    if w.span == "quasi":
+        return ""               # default for frzero
+    if w.span == "oned":
+        return "--uniform 3"    # use a least-extreme ipulse
+    if w.span == "coarse":
+        return "--uniform 3 --number 10"
+    raise ValueError(f'respanning to "{w.span}" would be a no-op, not supported')
+rule respan_fr:
+    input:
+        'fields-{frtick}-full-{detector}.json.bz2'
+    output:
+        'fields-{frtick}-{span}-{detector}.json.bz2'
+    params:
+        args = respan_fr_args
+    shell: '''
+    wirecell-sigproc frzero {params.args} --output {output} {input}
+    '''
+
+rule plot_response:
+    input:
+        'fields-{frtick}-{span}-{detector}.json.bz2'
+    output:
+        'fields-{frtick}-{span}-{detector}.png'
+    shell: '''
+    wirecell-sigproc plot-response --title "{wildcards.span} {wildcards.frtick}ns" {input} {output}
+    '''
+
+
+rule all_plot_response:
+    input:
+        expand(rules.plot_response.output, span=config['spans'],
+               frtick=config['frticks'], detector=[config['detector']])
+
+
 rule gen_depos:
-    output: "diagonal-depos.npz"
-    params: depogen=config['depogen']
-    shell: '{params.depogen} {output}'
+    output:
+        "diagonal-depos-{detector}.npz"
+    params:
+        depogen=config['depogen']
+    shell:
+        '{params.depogen} {output}'
 
 
 rule nul_depos:
-    output: "empty-depos.npz"
-    shell: 'wirecell-gen depo-point -n 0 -o {output}'
+    output:
+        "empty-depos.npz"
+    shell:
+        'wirecell-gen depo-point -n 0 -o {output}'
 
+rule loc_depos:
+    '''use detlinegen to make localized depos in one wire region for each plane so we do no trigger any interpolation across regions'''
 
-rule sim_signal:
+rule all_depos:
+    input:
+        expand(rules.gen_depos.output, detector=[config['detector']]),
+        rules.nul_depos.output
+
+def wc_field_arg(w):
+    ff = f'fields-{w.frtick}-{w.span}-{w.detector}.json.bz2'
+    return """--tla-code 'options={params:{ductor:{field_file:"%s"}}}'""" % ff
+    
+rule signal:
     input:
         depos=rules.gen_depos.output,
-        fr=fields
+        fr='fields-{frtick}-{span}-{detector}.json.bz2'
     output:
-        log="voltage_signal_native_{tick}ns.log",
-        npz="voltage_signal_native_{tick}ns.npz"
+        log="signal-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="signal-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    params:
+        field = wc_field_arg
     shell:'''
     wire-cell -l {output.log} -L debug \
-    -A detector={config[detector]} \
-    -A variant=resample_{wildcards.tick}ns \
+    -A detector={wildcards.detector} \
+    -A variant=resample_{wildcards.adctick}ns \
     -A tasks="drift,sig" \
     -A input={input.depos} \
     -A output={output.npz} \
+    {params.field} \
     layers/omnijob.jsonnet    
     '''
 
-rule sim_noise:
+def expand_ticks(pattern):
+    ret = list();
+    for ind in range(len(config['frticks'])):
+        ret += expand(pattern,
+                      frtick=[config['frticks'][ind]],
+                      adctick=[config['adcticks'][ind]],
+                      allow_missing=True)
+    return ret
+    
+rule all_signal:
+    input:
+        expand(expand_ticks(rules.signal.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
+
+
+# Note, we make noise as if it is signal+noise but with "null" depos.  The
+# "fields" label it gets is kind of pointless and we use more CPU than we need.
+# But, it helps keep the naming consistent without complicating the rules.
+# Laziness wins today.
+rule noise:
     input:
         depos=rules.nul_depos.output,
-        fr=fields
+        fr='fields-{frtick}-{span}-{detector}.json.bz2'
     output:
-        log="voltage_noise_native_{tick}ns.log",
-        npz="voltage_noise_native_{tick}ns.npz"
+        log="noise-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="noise-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    params:
+        field = wc_field_arg
     shell:'''
     wire-cell -l {output.log} -L debug \
     -A detector={config[detector]} \
-    -A variant=resample_{wildcards.tick}ns \
+    -A variant=resample_{wildcards.adctick}ns \
     -A tasks="drift,sig,noi" \
     -A input={input.depos} \
     -A output={output.npz} \
+    {params.field} \
     layers/omnijob.jsonnet    
     '''
 
-rule all_sim_voltage:
+rule all_noise:
     input:
-        signal=expand(rules.sim_signal.output, tick=adc_ticks),
-        noise=expand(rules.sim_noise.output, tick=adc_ticks)
+        expand(expand_ticks(rules.noise.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
 
 
 def sum_frames(fins, fout):
@@ -204,208 +233,68 @@ def sum_frames(fins, fout):
     f0[fname] = frame
     numpy.savez_compressed(fout[0], **f0)
 
-rule sum_voltage:
+rule signoi:
     input:
-        signal = rules.sim_signal.output.npz,
-        noise = rules.sim_noise.output.npz
-    output: "voltage_signoi_native_{tick}ns.npz"
+        signal = rules.signal.output.npz,
+        noise = rules.noise.output.npz
+    output:
+        npz="signoi-{adctick}-fields-{frtick}-{span}-{detector}.npz",
     run: sum_frames(input, output)
 
-rule voltage_resample:
+rule all_signoi:
     input:
-        rules.sim_signal.output.npz
+        expand(expand_ticks(rules.signoi.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
+
+
+rule signal_resample:
+    input:
+        rules.signal.output.npz
     output:
-        log="voltage_signal_voltageresample_{tick}ns_{newtick}ns.log",
-        npz="voltage_signal_voltageresample_{tick}ns_{newtick}ns.npz"
-    wildcard_constraints:
-        tick=adc_bde_tick,
-        newtick=adc_tde_tick
+        log="resample-{newtick}-signal-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="resample-{newtick}-signal-{adctick}-fields-{frtick}-{span}-{detector}.npz"
     params:
         time_pad = config['time_pad']
     shell:'''
     wire-cell -l {output.log} -L debug \
     -A period_ns={wildcards.newtick} \
     -A input={input} -A output={output.npz} \
-    -A time_pad={params.time_pad} \
+    -A time_pad={config[time_pad]} \
     -c layers/resample.jsonnet
     '''
 
-rule all_voltage_resample:
+def expand_upsamplings(pattern):
+    ret = list()
+    ticks = config['adcticks']
+    for tind, tick in enumerate(ticks):
+        for new_tick in ticks:
+            if new_tick >= tick:  # not downsample
+                continue
+            ret += expand(pattern,
+                          frtick=[config['frticks'][tind]],
+                          adctick=[config['adcticks'][tind]],
+                          newtick=[new_tick],
+                          allow_missing=True)
+    return ret;
+
+
+
+rule all_signal_resample:
     input:
-        expand(rules.voltage_resample.output.npz,
-               tick=[adc_bde_tick],
-               newtick=[adc_tde_tick])
+        expand(expand_upsamplings(rules.signal_resample.output.npz),
+               detector=[config['detector']],
+               span=config['spans'])
 
-rule sum_voltage_voltageresample:
+
+
+
+rule signal_plots:
     input:
-        signal = expand(rules.voltage_resample.output.npz,
-                        tick=[adc_bde_tick], newtick=[adc_tde_tick]),
-        noise = expand(rules.sim_noise.output.npz,
-                       tick=[adc_tde_tick])
-    output:
-        "voltage_signoi_voltageresample_512ns_500ns.npz"
-    run: sum_frames(input, output)
-    
-        
-rule all_sum_voltage:
-    input:
-        expand(rules.sum_voltage.output, tick=adc_ticks),
-        rules.sum_voltage_voltageresample.output
-
-
-
-rule digitize:
-    input:
-        "voltage_signoi_{sampling}_{tick}ns.npz"
-    output:
-        log="adc_signoi_{sampling}_{tick}ns.log",
-        npz="adc_signoi_{sampling}_{tick}ns.npz"
-    wildcard_constraints:
-        sampling="native"
-    shell: '''
-    wire-cell -l {output.log} -L debug \
-    -A detector={config[detector]} \
-    -A variant=resample_{wildcards.tick}ns \
-    -A tasks="dig" \
-    -A input={input} \
-    -A output={output.npz} \
-    layers/omnijob.jsonnet
-    '''
-
-# make special case instead of fighting smake's pattern recog.
-rule digitize_resampled:
-    input:
-        "voltage_signoi_voltageresample_512ns_500ns.npz"
-    output:
-        log="adc_signoi_voltageresample_512ns_500ns.log",
-        npz="adc_signoi_voltageresample_512ns_500ns.npz"
-    shell: '''
-    wire-cell -l {output.log} -L debug \
-    -A detector={config[detector]} \
-    -A variant=resample_500ns \
-    -A tasks="dig" \
-    -A input={input} \
-    -A output={output.npz} \
-    layers/omnijob.jsonnet
-    '''
-
-rule all_digitize:
-    input:
-        adcresample = expand(rules.digitize.output.npz,
-                             sampling=["native"], tick=adc_ticks),
-        voltageresample = rules.digitize_resampled.output.npz
-        
-rule adc_resample:
-    input:
-        expand(rules.digitize.output.npz, sampling=["native"], 
-               tick=[adc_bde_tick], newtick=[adc_tde_tick])
-    output:
-        log="adc_signoi_adcresample_512ns_500ns.log",
-        npz="adc_signoi_adcresample_512ns_500ns.npz"
-    shell:'''
-    wire-cell -l {output.log} -L debug \
-    -A period_ns=500 \
-    -A input={input} -A output={output.npz} \
-    -c layers/resample.jsonnet
-    '''
-
-rule all_adc_resample:
-    input:
-        rules.adc_resample.output.npz
-
-rule sigproc:
-    input:
-        frames="adc_signoi_{sampling}_{tick}ns.npz",
-        fr=fields
-    output:
-        log="sp_signoi_{sampling}_{tick}ns.log",
-        npz="sp_signoi_{sampling}_{tick}ns.npz"
-    shell: '''
-    wire-cell -l {output.log} -L debug \
-    -A detector={config[detector]} \
-    -A variant=resample_{wildcards.tick}ns \
-    -A tasks="sp" \
-    -A input={input.frames} \
-    -A output={output.npz} \
-    layers/omnijob.jsonnet
-    '''
-
-rule all_sigproc:
-    input:
-        expand("sp_signoi_{sampling}_500ns.npz",
-               sampling=["native", "adcresample_512ns", "voltageresample_512ns"])
-    
-rule fr_plots:
-    input:
-        fields_original_path
-    output:
-        pdf="lmn-fr-pdsp-0.pdf",
-        org="lmn-fr-pdsp-0.org"
-    shell: '''
-    wirecell-resp lmn-fr-plots  \
-    --period 100*ns \
-    --zoom-start 50*us \
-    --plane 0 \
-    --detector-name pdsp \
-    -o {output.pdf} \
-    -O {output.org}
-
-    '''
-
-rule voltage_plots:
-    input:
-        "voltage_signal_native_{tick}ns.npz",
-        "voltage_signal_native_{newtick}ns.npz",
-        "voltage_signal_voltageresample_{tick}ns_{newtick}ns.npz",
-    output:
-        "voltage_signal_{drift}_{trange}_{tick}ns_{newtick}ns_{drawstyle}.pdf"
-    wildcard_constraints:
-        tick=adc_bde_tick,
-        newtick=adc_tde_tick
-    params:
-        trange = lambda w: config[f'voltage_trange_{w.trange}'],
-        channels = lambda w: config[f'select_channels_{w.drift}'],
-    shell:'''
-    wirecell-plot channels \
-    -o {output} \
-    --drawstyle {wildcards.drawstyle} \
-    --trange {params.trange} \
-    --channel {params.channels} \
-    {input}
-    '''
-
-
-rule wct_plots:
-    input:
-        "{tier}_signoi_native_{newtick}ns.npz",
-        "{tier}_signoi_adcresample_{tick}ns_{newtick}ns.npz",
-        "{tier}_signoi_voltageresample_{tick}ns_{newtick}ns.npz"
-    output:
-        "{tier}_{nearfar}_{tick}ns_{newtick}ns.pdf"
-    wildcard_constraints:
-        tick=adc_bde_tick,
-        newtick=adc_tde_tick,
-        tier="adc|sp"
-    params:
-        trange = lambda w: config[f'{w.tier}_trange_{w.nearfar}'],
-        channels = lambda w: config[f'select_channels_{w.nearfar}'],
-    shell:'''
-    wirecell-plot channels \
-    -o {output} \
-    --trange {params.trange} \
-    --channel {params.channels} \
-    {input}
-    '''
-
-
-# specialized plots intended for LMN paper
-rule paper_plots_voltage:
-    input:
-        "voltage_signal_native_512ns.npz",
-        "voltage_signal_native_500ns.npz",
-        "voltage_signal_voltageresample_512ns_500ns.npz"
-    output:
-        "paper_voltage_near.pdf"
+        expand_ticks("signal-{adctick}-fields-{frtick}-{span}-{detector}.npz"),
+        expand_upsamplings("resample-{newtick}-signal-{adctick}-fields-{frtick}-{span}-{detector}.npz")
+    output:        
+        "signal-{span}-{detector}.pdf"
     shell:'''
     wirecell-plot channels \
     -o {output} \
@@ -414,35 +303,202 @@ rule paper_plots_voltage:
     {input}
     '''
 
-rule all_plots:
+rule all_signal_plots:
     input:
-        expand(rules.voltage_plots.output,
-               tick=[adc_bde_tick],
-               newtick=[adc_tde_tick],
-               drawstyle=["steps-mid", "progressive"],
-               trange=["begin","end","full","near","far"],
-               drift=["near","far"]),
-        expand(rules.wct_plots.output,
-               tick=[adc_bde_tick],
-               newtick=[adc_tde_tick],
-               tier=["adc","sp"], nearfar=["near","far"]),
-        rules.fr_plots.output,
-        rules.paper_plots_voltage.output
+        expand(rules.signal_plots.output, span=config['spans'], detector=[config['detector']])
 
-rule all:
-    default_target: True
-    input:
-        rules.all_sim_voltage.input,
-        rules.all_voltage_resample.input,
-        rules.all_sum_voltage.input,
-        rules.all_digitize.input,
-        rules.all_adc_resample.input,
-        rules.all_sigproc.input,
-        rules.all_plots.input
 
-rule dump_config:
-    output: "config-resample-pdsp.dump"
-    params: config
-    run: open(output[0],"w").write(json.dumps(params[0], indent=4))
+# rule sum_voltage_voltageresample:
+#     input:
+#         signal = expand(rules.voltage_resample.output.npz,
+#                         tick=[adc_bde_tick], newtick=[adc_tde_tick]),
+#         noise = expand(rules.sim_noise.output.npz,
+#                        tick=[adc_tde_tick])
+#     output:
+#         "voltage_signoi_voltageresample_512ns_500ns.npz"
+#     run: sum_frames(input, output)
+    
+        
+# rule all_sum_voltage:
+#     input:
+#         expand(rules.sum_voltage.output, tick=adc_ticks),
+#         rules.sum_voltage_voltageresample.output
+
+
+
+# rule digitize:
+#     input:
+#         "voltage_signoi_{sampling}_{tick}ns.npz"
+#     output:
+#         log="adc_signoi_{sampling}_{tick}ns.log",
+#         npz="adc_signoi_{sampling}_{tick}ns.npz"
+#     wildcard_constraints:
+#         sampling="native"
+#     shell: '''
+#     wire-cell -l {output.log} -L debug \
+#     -A detector={config[detector]} \
+#     -A variant=resample_{wildcards.tick}ns \
+#     -A tasks="dig" \
+#     -A input={input} \
+#     -A output={output.npz} \
+#     layers/omnijob.jsonnet
+#     '''
+
+# # make special case instead of fighting smake's pattern recog.
+# rule digitize_resampled:
+#     input:
+#         "voltage_signoi_voltageresample_512ns_500ns.npz"
+#     output:
+#         log="adc_signoi_voltageresample_512ns_500ns.log",
+#         npz="adc_signoi_voltageresample_512ns_500ns.npz"
+#     shell: '''
+#     wire-cell -l {output.log} -L debug \
+#     -A detector={config[detector]} \
+#     -A variant=resample_500ns \
+#     -A tasks="dig" \
+#     -A input={input} \
+#     -A output={output.npz} \
+#     layers/omnijob.jsonnet
+#     '''
+
+# rule all_digitize:
+#     input:
+#         adcresample = expand(rules.digitize.output.npz,
+#                              sampling=["native"], tick=adc_ticks),
+#         voltageresample = rules.digitize_resampled.output.npz
+        
+# rule adc_resample:
+#     input:
+#         expand(rules.digitize.output.npz, sampling=["native"], 
+#                tick=[adc_bde_tick], newtick=[adc_tde_tick])
+#     output:
+#         log="adc_signoi_adcresample_512ns_500ns.log",
+#         npz="adc_signoi_adcresample_512ns_500ns.npz"
+#     shell:'''
+#     wire-cell -l {output.log} -L debug \
+#     -A period_ns=500 \
+#     -A input={input} -A output={output.npz} \
+#     -c layers/resample.jsonnet
+#     '''
+
+# rule all_adc_resample:
+#     input:
+#         rules.adc_resample.output.npz
+
+# rule sigproc:
+#     input:
+#         frames="adc_signoi_{sampling}_{tick}ns.npz",
+#         fr=fields
+#     output:
+#         log="sp_signoi_{sampling}_{tick}ns.log",
+#         npz="sp_signoi_{sampling}_{tick}ns.npz"
+#     shell: '''
+#     wire-cell -l {output.log} -L debug \
+#     -A detector={config[detector]} \
+#     -A variant=resample_{wildcards.tick}ns \
+#     -A tasks="sp" \
+#     -A input={input.frames} \
+#     -A output={output.npz} \
+#     layers/omnijob.jsonnet
+#     '''
+
+# rule all_sigproc:
+#     input:
+#         expand("sp_signoi_{sampling}_500ns.npz",
+#                sampling=["native", "adcresample_512ns", "voltageresample_512ns"])
+    
+# rule fr_plots:
+#     input:
+#         fields_original_path
+#     output:
+#         pdf="lmn-fr-pdsp-0.pdf",
+#         org="lmn-fr-pdsp-0.org"
+#     shell: '''
+#     wirecell-resp lmn-fr-plots  \
+#     --period 100*ns \
+#     --zoom-start 50*us \
+#     --plane 0 \
+#     --detector-name pdsp \
+#     -o {output.pdf} \
+#     -O {output.org}
+
+#     '''
+
+# rule voltage_plots:
+#     input:
+#         "voltage_signal_native_{tick}ns-{span}.npz",
+#         "voltage_signal_native_{newtick}ns-{span}.npz",
+#         "voltage_signal_voltageresample_{tick}ns_{newtick}ns-{span}.npz",
+#     output:
+#         "voltage_signal_{drift}_{trange}_{tick}ns_{newtick}ns-{span}_{drawstyle}.pdf"
+#     wildcard_constraints:
+#         tick=adc_bde_tick,
+#         newtick=adc_tde_tick
+#     params:
+#         trange = lambda w: config[f'voltage_trange_{w.trange}'],
+#         channels = lambda w: config[f'select_channels_{w.drift}'],
+#     shell:'''
+#     wirecell-plot channels \
+#     -o {output} \
+#     --drawstyle {wildcards.drawstyle} \
+#     --trange {params.trange} \
+#     --channel {params.channels} \
+#     {input}
+#     '''
+
+
+# rule wct_plots:
+#     input:
+#         "{tier}_signoi_native_{newtick}ns-{span}.npz",
+#         "{tier}_signoi_adcresample_{tick}ns-{span}_{newtick}ns.npz",
+#         "{tier}_signoi_voltageresample_{tick}ns-{span}_{newtick}ns.npz"
+#     output:
+#         "{tier}_{nearfar}_{tick}ns_{newtick}ns-{snap}.pdf"
+#     wildcard_constraints:
+#         tick=adc_bde_tick,
+#         newtick=adc_tde_tick,
+#         tier="adc|sp"
+#     params:
+#         trange = lambda w: config[f'{w.tier}_trange_{w.nearfar}'],
+#         channels = lambda w: config[f'select_channels_{w.nearfar}'],
+#     shell:'''
+#     wirecell-plot channels \
+#     -o {output} \
+#     --trange {params.trange} \
+#     --channel {params.channels} \
+#     {input}
+#     '''
+
+# rule all_plots:
+#     input:
+#         expand(rules.voltage_plots.output,
+#                tick=[adc_bde_tick],
+#                newtick=[adc_tde_tick],
+#                span=spans,
+#                drawstyle=["steps-mid", "progressive"],
+#                trange=["begin","end","full","near","far"],
+#                drift=["near","far"]),
+#         expand(rules.wct_plots.output,
+#                tick=[adc_bde_tick],
+#                newtick=[adc_tde_tick],
+#                tier=["adc","sp"], nearfar=["near","far"]),
+#         rules.fr_plots.output,
+#         rules.paper_plots_voltage.output
+
+# rule all:
+#     default_target: True
+#     input:
+#         rules.all_sim_voltage.input,
+#         rules.all_voltage_resample.input,
+#         rules.all_sum_voltage.input,
+#         rules.all_digitize.input,
+#         rules.all_adc_resample.input,
+#         rules.all_sigproc.input,
+#         rules.all_plots.input
+
+# rule dump_config:
+#     output: "config-resample-pdsp.dump"
+#     params: config
+#     run: open(output[0],"w").write(json.dumps(params[0], indent=4))
 
 

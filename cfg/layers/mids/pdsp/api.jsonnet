@@ -8,21 +8,23 @@ local img = import "api/img.jsonnet";
 // Create a mid API object.  No options supported.
 function(services, params, options={}) {
 
+    local pars = std.mergePatch(params, std.get(options, "params", {})),
+
     anodes :: function()
-        low.anodes(params.geometry.drifts, params.geometry.wires_file),
+        low.anodes(pars.geometry.drifts, pars.geometry.wires_file),
 
     drifter :: function(name="")
         low.drifter(services.random,
-                    low.util.driftsToXregions(params.geometry.drifts),
-                    params.lar, name=name),
+                    low.util.driftsToXregions(pars.geometry.drifts),
+                    pars.lar, name=name),
 
     // track_depos, signal, noise, digitizer
-    sim :: sim(services, params),
+    sim :: sim(services, pars),
 
     // nf, sp, dnnroi
-    sigproc :: sigproc(services, params, options),
+    sigproc :: sigproc(services, pars, options),
 
-    img :: img(services, params),
+    img :: img(services, pars),
 }
 
     

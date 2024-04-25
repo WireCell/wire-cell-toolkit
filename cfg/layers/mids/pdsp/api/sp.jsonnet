@@ -11,12 +11,11 @@ local resps = import "resps.jsonnet";
 
 // Allow an optional argument "sparse" as this is really an end-user
 // decision.  Higher layers may expose this option to the TLA.
-function(services, params, options={}) function(anode)
-    local pars = std.mergePatch(params, std.get(options, "params", {}));
-    local opts = {sparse:true} + options;
+function(services, params, sparse=true) function(anode)
+
     local ident = low.util.idents(anode);
-    local resolution = pars.digi.resolution;
-    local fullscale = pars.digi.fullscale[1] - pars.digi.fullscale[0];
+    local resolution = params.digi.resolution;
+    local fullscale = params.digi.fullscale[1] - params.digi.fullscale[0];
     local ADC_mV_ratio = ((1 << resolution) - 1 ) / fullscale;
 
     local res = resps(params).sp;
@@ -75,6 +74,6 @@ function(services, params, options={}) function(anode)
             mp2_roi_tag: 'mp2_roi' + ident,
             
             isWrapped: false,
-            sparse : opts.sparse,
+            sparse : sparse,
         },
     }, nin=1, nout=1, uses=[anode, services.dft, res.fr, res.er] + spfilt)

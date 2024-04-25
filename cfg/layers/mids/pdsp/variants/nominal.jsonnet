@@ -21,9 +21,11 @@
 local wc = import "wirecell.jsonnet";
 
 local detectors = import "detectors.jsonnet";
-local mydet = detectors.pdsp;
+local mydet =  detectors.pdsp;
+
 
 {
+
     // Define the LAr properties.  In principle, this is NOT subject
     // to variance though in principle it could be (eg, top/bottom of
     // DUNE-VD may have different LAr temps?).  We include this here
