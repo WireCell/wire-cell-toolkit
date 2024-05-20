@@ -18,7 +18,7 @@ function(services, params, options={}) {
     // Signal binning may be extended from nominal.
     local sig_binning = params.ductor.binning,
 
-    local res = resps(params).sim,
+    local res = resps(params, options).sim,
 
     // some have more than one
     local short_responses = [ res.er, ],

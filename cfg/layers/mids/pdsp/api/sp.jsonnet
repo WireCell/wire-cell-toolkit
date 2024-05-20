@@ -11,14 +11,16 @@ local resps = import "resps.jsonnet";
 
 // Allow an optional argument "sparse" as this is really an end-user
 // decision.  Higher layers may expose this option to the TLA.
-function(services, params, sparse=true) function(anode)
+function(services, params, options = {}) function(anode)
 
+    local sparse = std.get(options, 'sparse', true);
     local ident = low.util.idents(anode);
+
     local resolution = params.digi.resolution;
     local fullscale = params.digi.fullscale[1] - params.digi.fullscale[0];
     local ADC_mV_ratio = ((1 << resolution) - 1 ) / fullscale;
 
-    local res = resps(params).sp;
+    local res = resps(params, options).sp;
 
     low.pg.pnode({
         type: 'OmnibusSigProc',

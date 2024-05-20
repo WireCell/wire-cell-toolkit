@@ -42,8 +42,7 @@ namespace WireCell::Aux {
 
         // Configure: period
         //
-        // The target sampling period.  If zero then the nticks is the target.
-        // See nticks for more.
+        // The target sampling period.
         double m_period{0};
 
         // Configure: dft

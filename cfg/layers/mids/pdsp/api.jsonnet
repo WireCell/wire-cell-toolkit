@@ -19,7 +19,7 @@ function(services, params, options={}) {
                     pars.lar, name=name),
 
     // track_depos, signal, noise, digitizer
-    sim :: sim(services, pars),
+    sim :: sim(services, pars, options),
 
     // nf, sp, dnnroi
     sigproc :: sigproc(services, pars, options),

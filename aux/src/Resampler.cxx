@@ -131,9 +131,11 @@ bool Aux::Resampler::operator()(const input_pointer& inframe, output_pointer& ou
         }
         // else: "padded" is as-is
 
+        if (out_traces.empty()) {
+            log->debug("first ch={} Ts={} Ns={} Ns_pad={} Nrat={} Tr={} Nr={} Nout={} padding:{}",
+                       trace->channel(), Ts, Ns_orig, Ns_pad, Nrat, Tr, Nr, wave.size(), m_time_pad);
+        }
         out_traces.push_back(std::make_shared<SimpleTrace>(trace->channel(), 0, wave));
-        // log->debug("ch={} Nrat={} Ns={} Ns_pad={} Nr={}",
-        //            trace->channel(), Nrat, Ns_orig, Ns_pad, Nr);
     }
 
     auto sf = std::make_shared<SimpleFrame>(inframe->ident(), inframe->time(), out_traces, Tr);

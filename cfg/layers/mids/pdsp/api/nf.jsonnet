@@ -8,14 +8,15 @@ local chndbs = {
     "perfect": import "chndb-perfect.jsonnet",
 };
 local filters = import "noise-filters.jsonnet";
-local frs = import "frs.jsonnet";
+local resps = import "resps.jsonnet";
 
-function(services, params) function(anode)
+
+function(services, params, options={}) function(anode)
 
     local ident = low.util.idents(anode);
 
     // nf uses same fr as sp
-    local fr = frs(params).nf;
+    local fr = resps(params, options).nf.fr;
 
     local chndb = chndbs[params.nf.chndb](anode, params.nf.binning,
                                           fr, services.dft);
