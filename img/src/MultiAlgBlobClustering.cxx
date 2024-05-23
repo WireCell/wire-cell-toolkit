@@ -12,7 +12,6 @@
 
 #include "WireCellUtil/Graph.h"
 
-
 #include <fstream>
 
 WIRECELL_FACTORY(MultiAlgBlobClustering, WireCell::Img::MultiAlgBlobClustering, WireCell::INamed,
@@ -142,7 +141,7 @@ namespace {
         if (file.is_open()) {
             Json::StreamWriterBuilder writer;
             writer["indentation"] = "    ";
-            writer["precision"] = 6; // significant digits
+            writer["precision"] = 6;  // significant digits
             std::unique_ptr<Json::StreamWriter> jsonWriter(writer.newStreamWriter());
             jsonWriter->write(bee, &file);
             file.close();
@@ -162,7 +161,8 @@ namespace {
         float y;
     };
 
-    bool angular_less(const Point2D& a, const Point2D& b, const Point2D& center) {
+    bool angular_less(const Point2D& a, const Point2D& b, const Point2D& center)
+    {
         double angleA = std::atan2(a.y - center.y, a.x - center.x);
         double angleB = std::atan2(b.y - center.y, b.x - center.x);
         return angleA < angleB;
@@ -240,7 +240,7 @@ namespace {
                 const auto& z = pc_corner.get("z")->elements<float_t>();
                 std::vector<Point2D> points;
                 for (size_t i = 0; i < y.size(); ++i) {
-                    points.push_back({(float)y[i] / (float)units::cm, (float)z[i] / (float)units::cm});
+                    points.push_back({(float) y[i] / (float) units::cm, (float) z[i] / (float) units::cm});
                 }
                 // Remove duplicate points with xxx cm tolerance
                 auto unique_points = unique(points, 0.1);
@@ -263,7 +263,7 @@ namespace {
         if (file.is_open()) {
             Json::StreamWriterBuilder builder;
             builder.settings_["indentation"] = "    ";
-            builder.settings_["precision"] = 6; // significant digits
+            builder.settings_["precision"] = 6;  // significant digits
             // option available in jsoncpp 1.9.0
             // https://github.com/open-source-parsers/jsoncpp/blob/1.9.0/src/lib_json/json_writer.cpp#L128
             // builder.settings_["precisionType"] = "decimal";
@@ -283,28 +283,34 @@ struct Perf {
     ExecMon em;
 
     Perf(bool e, Log::logptr_t l, const std::string& t = "starting MultiAlgBlobClustering")
-        : enable(e), log(l), em(t) {}
+      : enable(e)
+      , log(l)
+      , em(t)
+    {
+    }
 
-
-    ~Perf() {
+    ~Perf()
+    {
         if (!enable) return;
         log->debug("MultiAlgBlobClustering performance summary:\n{}", em.summary());
     }
 
-    void operator()(const std::string& ctx) {
+    void operator()(const std::string& ctx)
+    {
         if (!enable) return;
         em(ctx);
     }
 
-    void dump(const std::string& ctx, const Grouping& grouping, bool shallow = true, bool mon=true) {
+    void dump(const std::string& ctx, const Grouping& grouping, bool shallow = true, bool mon = true)
+    {
         if (!enable) return;
         if (mon) (*this)(ctx);
         log->debug("{} grouping {}", ctx, grouping);
         if (shallow) return;
-        auto children = grouping.children(); // copy
+        auto children = grouping.children();  // copy
         sort_clusters(children);
-        size_t count=0;
-        for(const auto* cluster : children) {
+        size_t count = 0;
+        for (const auto* cluster : children) {
             bool sane = cluster->sanity(log);
             log->debug("{} cluster {} {} sane:{}", ctx, count++, *cluster, sane);
         }
@@ -355,9 +361,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         perf("loaded dump live clusters to bee");
     }
 
-    
     cluster_set_t cluster_connected_dead;
-    
+
     // initialize clusters ...
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
     Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
@@ -366,54 +371,54 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     perf.dump("original dead clusters", dead_grouping, false, false);
 
     // dead_live
-    clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, 
-                         m_dead_live_overlap_offset);
+    clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
     perf.dump("clustering live-dead", live_grouping);
 
     // second function ...
-    clustering_extend(live_grouping, cluster_connected_dead, 4,60*units::cm,0,15*units::cm,1 );
+    clustering_extend(live_grouping, cluster_connected_dead, 4, 60 * units::cm, 0, 15 * units::cm, 1);
     perf.dump("clustering extend", live_grouping);
-    
+
     // first round clustering
-    clustering_regular(live_grouping, cluster_connected_dead, 60*units::cm, false);
+    clustering_regular(live_grouping, cluster_connected_dead, 60 * units::cm, false);
     perf.dump("clustering regular no extension", live_grouping);
 
-    clustering_regular(live_grouping, cluster_connected_dead, 30*units::cm, true); // do extension
+    clustering_regular(live_grouping, cluster_connected_dead, 30 * units::cm, true);  // do extension
     perf.dump("clustering regular with extension", live_grouping);
 
-    //dedicated one dealing with parallel and prolonged track
-    clustering_parallel_prolong(live_grouping, cluster_connected_dead,35*units::cm);
+    // dedicated one dealing with parallel and prolonged track
+    clustering_parallel_prolong(live_grouping, cluster_connected_dead, 35 * units::cm);
     perf.dump("clustering parallel prolong", live_grouping);
-    
-    //clustering close distance ones ... 
-    clustering_close(live_grouping, cluster_connected_dead, 1.2*units::cm);
+
+    // clustering close distance ones ...
+    clustering_close(live_grouping, cluster_connected_dead, 1.2 * units::cm);
     perf.dump("clustering close", live_grouping);
 
-    int num_try =3;
-    // for very busy events do less ... 
-    if (live_grouping.nchildren() > 1100 ) num_try = 1;
-    for (int i=0;i!= num_try ;i++){
-      //extend the track ...
+    int num_try = 3;
+    // for very busy events do less ...
+    if (live_grouping.nchildren() > 1100) num_try = 1;
+    for (int i = 0; i != num_try; i++) {
+        // extend the track ...
 
-      // deal with prolong case
-      clustering_extend(live_grouping, cluster_connected_dead,1,150*units::cm,0);
-      perf.dump("clustering extend 1", live_grouping);
+        // deal with prolong case
+        clustering_extend(live_grouping, cluster_connected_dead, 1, 150 * units::cm, 0);
+        perf.dump("clustering extend 1", live_grouping);
 
-      // deal with parallel case 
-      clustering_extend(live_grouping, cluster_connected_dead,2,30*units::cm,0);
-      perf.dump("clustering extend 2", live_grouping);
-      
-      // extension regular case
-      clustering_extend(live_grouping, cluster_connected_dead,3,15*units::cm,0);
-      perf.dump("clustering extend 3", live_grouping);
+        // deal with parallel case
+        clustering_extend(live_grouping, cluster_connected_dead, 2, 30 * units::cm, 0);
+        perf.dump("clustering extend 2", live_grouping);
 
-      // extension ones connected to dead region ...
-      if (i==0){
-	clustering_extend(live_grouping, cluster_connected_dead,4,60*units::cm,i);
-      }else{
-	clustering_extend(live_grouping, cluster_connected_dead,4,35*units::cm,i);
-      }
-      perf.dump("clustering extend 4", live_grouping);
+        // extension regular case
+        clustering_extend(live_grouping, cluster_connected_dead, 3, 15 * units::cm, 0);
+        perf.dump("clustering extend 3", live_grouping);
+
+        // extension ones connected to dead region ...
+        if (i == 0) {
+            clustering_extend(live_grouping, cluster_connected_dead, 4, 60 * units::cm, i);
+        }
+        else {
+            clustering_extend(live_grouping, cluster_connected_dead, 4, 35 * units::cm, i);
+        }
+        perf.dump("clustering extend 4", live_grouping);
     }
 
     // BEE debug dead-live
@@ -430,7 +435,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     auto outtens = as_tensors(*root_live.get(), outpath + "/live");
     perf("output live clusters to tensors");
     auto outtens_dead = as_tensors(*root_dead.get(), outpath + "/dead");
-    perf("output dead clusters to tensors");    
+    perf("output dead clusters to tensors");
     // Merge
     outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
     outts = as_tensorset(outtens, ident);
