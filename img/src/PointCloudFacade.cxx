@@ -264,10 +264,7 @@ const Cluster::wire_indices_t& Cluster::wire_indices()
     const auto& sv = m_node->value.scoped_view<int_t>(scope_wire_index);
     const auto& skd = sv.kd();
     const auto& points = skd.points();
-    std::cout
-    << "points size: " << points.size()
-    << " points[0] size: " << points[0].size()
-    << std::endl;
+    std::cout << "points size: " << points.size() << " points[0] size: " << points[0].size() << std::endl;
     return points;
 }
 
@@ -841,8 +838,8 @@ void Cluster::Create_graph()
     Establish_close_connected_graph();
 }
 
-void Cluster::Establish_close_connected_graph() {
-
+void Cluster::Establish_close_connected_graph()
+{
     std::map<const Blob*, std::map<int, std::set<int>>> map_mcell_uindex_wcps;
     std::map<const Blob*, std::map<int, std::set<int>>> map_mcell_vindex_wcps;
     std::map<const Blob*, std::map<int, std::set<int>>> map_mcell_windex_wcps;
@@ -851,10 +848,7 @@ void Cluster::Establish_close_connected_graph() {
 
     const auto& points = this->points();
     const auto& winds = this->wire_indices();
-    std::cout
-    << "points[0].size(): " << points[0].size()
-    << " winds[0].size(): " << winds[0].size()
-    << std::endl;
+    std::cout << "points[0].size(): " << points[0].size() << " winds[0].size(): " << winds[0].size() << std::endl;
 
     for (Blob* mcell : this->children()) {
         std::map<int, std::set<int>> map_uindex_wcps;
@@ -984,8 +978,9 @@ void Cluster::Establish_close_connected_graph() {
                         // add edge ...
                         auto edge = add_edge(pind1, pind2, *graph);
                         if (edge.second) {
-                            (*graph)[edge.first].dist =
-                                sqrt(pow(points[0][pind1] - points[0][pind2], 2) + pow(points[1][pind1] - points[1][pind2], 2) + pow(points[2][pind1] - points[2][pind2], 2));
+                            (*graph)[edge.first].dist = sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                                                             pow(points[1][pind1] - points[1][pind2], 2) +
+                                                             pow(points[2][pind1] - points[2][pind2], 2));
                             num_edges++;
                         }
                     }
@@ -1015,7 +1010,8 @@ void Cluster::Establish_close_connected_graph() {
                     it2p++;
                     for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
                         auto mcell2 = *(it3);
-                        if (mcell1->overlap_fast(*mcell2, 2)) connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                        if (mcell1->overlap_fast(*mcell2, 2))
+                            connected_mcells.push_back(std::make_pair(mcell1, mcell2));
                     }
                 }
             }
@@ -1147,19 +1143,17 @@ void Cluster::Establish_close_connected_graph() {
                 for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
                     const int pind2 = *it4;
                     if (pind1 != pind2) {
-                        double dis = sqrt(pow(points[0][pind1] - points[0][pind2], 2) + pow(points[1][pind1] - points[1][pind2], 2) + pow(points[2][pind1] - points[2][pind2], 2));
+                        double dis = sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                                          pow(points[1][pind1] - points[1][pind2], 2) +
+                                          pow(points[2][pind1] - points[2][pind2], 2));
                         auto b2 = blob_with_point(pind2);
                         auto key = std::make_pair(pind1, b2->slice_index_min());
 
-                        if (closest_index.find(key) ==
-                            closest_index.end()) {
-                            closest_index[key] =
-                                std::make_pair(pind2, dis);
+                        if (closest_index.find(key) == closest_index.end()) {
+                            closest_index[key] = std::make_pair(pind2, dis);
                         }
                         else {
-                            if (dis < closest_index[key].second)
-                                closest_index[key] =
-                                    std::make_pair(pind2, dis);
+                            if (dis < closest_index[key].second) closest_index[key] = std::make_pair(pind2, dis);
                         }
                     }
                 }
@@ -1247,19 +1241,17 @@ void Cluster::Establish_close_connected_graph() {
                 for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
                     const int pind2 = *it4;
                     if (pind1 != pind2) {
-                        double dis = sqrt(pow(points[0][pind1] - points[0][pind2], 2) + pow(points[1][pind1] - points[1][pind2], 2) + pow(points[2][pind1] - points[2][pind2], 2));
+                        double dis = sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                                          pow(points[1][pind1] - points[1][pind2], 2) +
+                                          pow(points[2][pind1] - points[2][pind2], 2));
                         auto b2 = blob_with_point(pind2);
                         auto key = std::make_pair(pind1, b2->slice_index_min());
 
-                        if (closest_index.find(key) ==
-                            closest_index.end()) {
-                            closest_index[key] =
-                                std::make_pair(pind2, dis);
+                        if (closest_index.find(key) == closest_index.end()) {
+                            closest_index[key] = std::make_pair(pind2, dis);
                         }
                         else {
-                            if (dis < closest_index[key].second)
-                                closest_index[key] =
-                                    std::make_pair(pind2, dis);
+                            if (dis < closest_index[key].second) closest_index[key] = std::make_pair(pind2, dis);
                         }
                     }
                 }
