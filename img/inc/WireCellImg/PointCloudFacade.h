@@ -60,6 +60,11 @@ namespace WireCell::PointCloud::Facade {
         int_t w_wire_index_min() const { return w_wire_index_min_; }
         int_t w_wire_index_max() const { return w_wire_index_max_; }
 
+        int get_max_wire_interval() const { return m_max_wire_interval;}
+        int get_min_wire_interval() const { return m_min_wire_interval;}
+        int get_max_wire_type() const { return m_max_wire_type;}
+        int get_min_wire_type() const { return m_min_wire_type;}
+
         // Return a value representing the content of this blob.
         size_t hash() const;
 
@@ -86,6 +91,12 @@ namespace WireCell::PointCloud::Facade {
         int_t v_wire_index_max_{0};
         int_t w_wire_index_min_{0};
         int_t w_wire_index_max_{0};
+
+        // FIXME: dummy values for now
+        int m_max_wire_interval{2}; 
+        int m_min_wire_interval{1};
+        int m_max_wire_type{2}; // 0: u, 1: v, 2: w
+        int m_min_wire_type{0}; // 0: u, 1: v, 2: w
 
        protected:
         // Receive notification when this facade is created on a node.

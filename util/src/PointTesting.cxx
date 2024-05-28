@@ -20,9 +20,9 @@ PointCloud::Dataset PointTesting::make_janky_track(const Ray& box, double step_s
         x[step] = step_size * ( (int) ( 0.5 + ( pt.x() / step_size ) ) );
         y[step] = step_size * ( (int) ( 0.5 + ( pt.y() / step_size ) ) );
         z[step] = step_size * ( (int) ( 0.5 + ( pt.z() / step_size ) ) );
-        uwire_index[step] = step*1;
-        vwire_index[step] = step*2;
-        wwire_index[step] = step*3;
+        uwire_index[step] = x[step]*10;
+        vwire_index[step] = 100+x[step]*10;
+        wwire_index[step] = 200+x[step]*10;
 
         // Accumulte relative distance away from line to the grid
         // point as some meaningless value to fill in for charge.
