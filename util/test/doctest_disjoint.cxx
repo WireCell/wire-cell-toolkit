@@ -85,7 +85,7 @@ TEST_CASE("disjoint constness")
     using collection = std::vector<std::vector<value_type>>;
 
     collection col = { {0,1,2}, {3}, {4} };
-    SUBCASE("const test skipped") { WARN(false); }
+    //SUBCASE("const test skipped") { WARN(false); }
     // disjoint_const_correctness(col);
 
 

@@ -127,37 +127,100 @@ The *datatype* of *pcnamedset* indicates a tensor representing a ~std::map<std::
 
 - items :: an object representing the named point cloud set.  Each attribute name provides the name of the point cloud and the value provides the *datapath* to a *pcdataset*.
 
-** pctreenode
+** pctree
 
-The *datatype* of *pctreenode* indicates a tensor representing an $n$-ary tree node such as represented in C++ with ~WireCell::NaryTree::Node~ with a value type of ~WireCell::PointCloud::Tree::Points~.  The tensor has no array part and shall provide these metadata attributes:
+#+begin_note
+All node-local point clouds of a given name must be comprised of arrays of the same names and types.  An earlier data model called *pctreenode* did not carry this restriction but results in many small records which led to ruinously slow conversions.
+#+end_note
 
-- parent :: a string which either holds a *datapath* to the parent *pctreenode* or is empty indicating the node is the root of the tree.
+The *datatype* of *pctree* indicates a tensor representing an \(n\)-ary tree such as represented in C++ with ~WireCell::NaryTree::Node~ with a value type of ~WireCell::PointCloud::Tree::Points~.
 
-- children :: a list of string with each element providing the *datapath* of a *pctreenode* constructed from a child node.  The order of this list reflects the sibling order.  The list may be empty if the node is a leaf.
+The *pctree* has an array part that represents the tree structure as a flattened *parentage map*.  
+The metadata of *pctree* has these attributes:
 
-- pointclouds :: the "local" point cloud datasets held as a *pcnamedset*
+- pointclouds :: the point cloud datasets of the tree held as a *pcnamedset*
+- lpcmaps :: the local point cloud mapping into the concatenated *pointclouds* as a *dataset*.
 
-The tree structure shall be definitely represented by the *datapath* values held in the *parent* and *children* attributes.  The tree structure may additionally be reflected in a hierarchical *datapath* naming convention.  If such a convention is used it shall reflect the descending order from root to leaf.  For example a tree with three nodes, one root and two children and the children have named point cloud sets each with a single point cloud named "3d" and each of those have arrays named "x", "y", "z", and "q":
+#+begin_src dot :width 200pt :file tdm-pctree.svg :exports none :results none
+  graph {
+      node[shape=circle]
+      0 1 2 3 4 5
+      node[shape=plaintext,label=<
+           <TABLE BORDER="0" CELLPADDING="3" CELLBORDER="1" CELLSPACING="3">
+           <TR>
+           <TD>a </TD><TD>w </TD>
+           </TR>
+           <TR>
+           <TD rowspan="2">b </TD><TD>x </TD>
+           </TR>
+           <TR>
+           <TD>y </TD>
+           </TR>
+           <TR>
+           <TD>c </TD><TD>z </TD>
+           </TR>
+           </TABLE>>];
+      lpc0 lpc1 lpc2 lpc3 lpc4 lpc5
 
-#+begin_example
-datatype             datapath
-----------           ---------
-pctreenode           root
-pctreenode           root/0
-pcnamedset           root/0/pointclouds
-pcdataset            root/0/pointclouds/namedpcs/3d
-pcarray              root/0/pointclouds/namedpcs/3d/arrays/q
-pcarray              root/0/pointclouds/namedpcs/3d/arrays/x
-pcarray              root/0/pointclouds/namedpcs/3d/arrays/y
-pcarray              root/0/pointclouds/namedpcs/3d/arrays/z
-pctreenode           root/1
-pcnamedset           root/1/pointclouds
-pcdataset            root/1/pointclouds/namedpcs/3d
-pcarray              root/1/pointclouds/namedpcs/3d/arrays/q
-pcarray              root/1/pointclouds/namedpcs/3d/arrays/x
-pcarray              root/1/pointclouds/namedpcs/3d/arrays/y
-pcarray              root/1/pointclouds/namedpcs/3d/arrays/z
-#+end_example
+      {rank=same 0 lpc0}
+      {rank=same 1 lpc1}
+      {rank=same 2 lpc2}
+      {rank=same 3 lpc3}
+      {rank=same 4 lpc4}
+      {rank=same 5 lpc5}
+
+      0 -- 1
+      0 -- 2
+      0 -- 3
+      3 -- 4
+      3 -- 5
+
+      0 -- lpc0
+      1 -- lpc1
+      2 -- lpc2
+      3 -- lpc3
+      4 -- lpc4
+      5 -- lpc5
+  }
+#+end_src
+
+
+To describe the *parentage map* array and the *pointclouds* and *lpcmaps* elements of a *pctree*
+consider the point cloud tree shown in figure [[fig:pctree-example]].  It consists of six nodes which are labeled in the order they are visited in a depth-first descent.  Each node has two local point clouds of zero or more points.  When represented as a ~NaryTree::Node~ with ~Tree::Points~ type, any PC with zero points are omitted but these empty point clouds may be conceptually included.  
+
+#+name: fig:pctree-example
+#+caption: Example point cloud tree with nodes labeled in order of depth-first descent.  Each node has a three local points clouds ("a", "b" and "c")
+#+attr_latex: :width 0.5\textwidth
+[[file:tdm-pctree.svg]]
+
+This tree will have a *parentage map* array as shown in table [[tab:parentage-example]].  Each element of the array represents a node as visited in depth-first descent order.  The value of the element is the index of the parent of the node.  To indicate the non-existent parent of a root node, the element value is set to the element index.
+This representation allows for a tree to have multiple roots (disjoint subtrees).
+
+#+name: tab:parentage-example
+#+caption: Example parentage map for the six-node example pctree.   
+#+ATTR_LATEX: :align |c|c|c|c|c|c|l|
+|---+---+---+---+---+---+--------------|
+| 0 | 1 | 2 | 3 | 4 | 5 | node index   |
+|---+---+---+---+---+---+--------------|
+| 0 | 0 | 0 | 0 | 3 | 3 | parent index |
+|---+---+---+---+---+---+--------------|
+ 
+If we assume that only node 0 has non-empty PC "a", only nodes 1, 2 and 3 have non-empty PC "b" and only nodes 4 and 5 have non-empty PC "c" the *lpcmaps* *dataset* will be as illustrated in table [[tab:lpcmaps-example]].  For simplicity, this example associates (non-empty) PCs with a "layer" in the tree.  However, the representation is not limited and can represent point clouds of a given name that span layers.
+
+#+name: tab:lpcmaps-example
+#+caption: Example local point clouds map for the six-node example pctree assuming a distribution of sizes of local point clouds across the nodes.
+#+ATTR_LATEX: :align |c|c|c|c|c|c|l|
+|-------+-------+-------+-------+-------+-------+--------------|
+|     0 |     1 |     2 |     3 |     4 |     5 | (node index) |
+|-------+-------+-------+-------+-------+-------+--------------|
+| $n_0$ |     0 |     0 |     0 |     0 |     0 | a (sizes)    |
+|     0 | $n_1$ | $n_2$ | $n_3$ |     0 |     0 | b (sizes)    |
+|     0 |     0 |     0 |     0 | $n_4$ | $n_5$ | c (sizes)    |
+|-------+-------+-------+-------+-------+-------+--------------|
+ 
+
+This example will have an entry "a" in *pointclouds* consisting of array "w" that has total size $n_0$, entry "b" with arrays "x" and "y" of total size $n_1 + n_2 + n_3$ and entry "c" with array "z" with total size "$n_4 + n_5$.  From these concatenated *pointclouds* and the *lpcmaps* and the depth-first descent ordering of the *parentage map* the individual local point clouds may be reconstructed.
+
 
 ** trace
 

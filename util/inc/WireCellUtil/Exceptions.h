@@ -80,6 +80,10 @@ namespace WireCell {
     struct ValueError : virtual public Exception {
     };
 
+    /// Thrown when a wrong type is encountered (function argument, calculated value).
+    struct TypeError : virtual public Exception {
+    };
+
     /// Thrown when a wrong value is to be used as an index.
     struct IndexError : virtual public ValueError {
     };

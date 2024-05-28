@@ -108,9 +108,10 @@ Points::node_ptr make_simple_pctree()
     return root;
 }
 
-TEST_CASE("test PointTree API")
+TEST_CASE("clustering point tree")
 {
-    auto root = make_simple_pctree();
+    // this test does not touch the facades so needs to Grouping root
+    auto root = make_simple_pctree(); //  a cluster node.
     CHECK(root.get());
 
     // from WireCell::NaryTree::Node to WireCell::PointCloud::Tree::Points
@@ -185,32 +186,100 @@ TEST_CASE("test PointTree API")
               points[0][index], points[1][index], points[2][index], metric);
     }
     CHECK(rad.size() == 2);
-
 }
 
 
-TEST_CASE("test PointCloudFacade")
+TEST_CASE("clustering facade")
 {
-    auto root = make_simple_pctree();
-    REQUIRE(root);
-    Cluster pcc(root.get());
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    REQUIRE(pccptr != nullptr);
+    REQUIRE(pccptr->grouping() == grouping);
+    Cluster& pcc = *pccptr;
+
+    CHECK(pcc.sanity());
+
+    auto& blobs = pcc.children();
+
     // (0.5 * 1 + 1.5 * 2) / 3 = 1.1666666666666665
-    debug("expecting 1.1666666666666665");
-    auto ave_pos_alg0 = pcc.calc_ave_pos({1,0,0}, 1, 0);
-    debug("ave_pos_alg0: {}", ave_pos_alg0);
-    auto ave_pos_alg1 = pcc.calc_ave_pos({1,0,0}, 1, 1);
-    debug("ave_pos_alg1: {}", ave_pos_alg1);
-    debug("expecting around {1, 0, 0}");
-    const auto vdir_alg0 = pcc.vhough_transform({1,0,0}, 1, 0);
-    debug("vdir_alg0: {}", vdir_alg0);
-    const auto vdir_alg1 = pcc.vhough_transform({1,0,0}, 1, 1);
-    debug("vdir_alg1: {}", vdir_alg1);
-    // sqrt(3*3*2*2 + 3*3*2*2 + 3*3*2*2 + 3.2*3.2*1*1) = 10.8738217753
-    debug("expecting 10.8738217753");
-    const auto length = pcc.get_length({});
-    debug("length: {}", length);
+    debug("blob 0: q={}, r={}", blobs[0]->charge(), blobs[0]->center_x());
+    debug("blob 1: q={}, r={}", blobs[1]->charge(), blobs[1]->center_x());
+    double expect = 0;
+    expect += blobs[0]->charge() * blobs[0]->center_x();
+    expect += blobs[1]->charge() * blobs[1]->center_x();
+    expect /= blobs[0]->charge() + blobs[1]->charge();
+    debug("expect average pos {}", expect);
+    auto ave_pos = pcc.calc_ave_pos({1,0,0}, 1);
+    debug("ave_pos: {} | expecting (1.1666666666666665 0 0)", ave_pos);
+    auto l1 = fabs(ave_pos[0] - 1.1666666666666665) + fabs(ave_pos[1]) + fabs(ave_pos[2]);
+    CHECK(l1 < 1e-3);
+
+    const auto vdir_alg0 = pcc.vhough_transform({1,0,0}, 1, Cluster::HoughParamSpace::costh_phi);
+    debug("vdir_alg0: {} | expecting around {{1, 0, 0}}", vdir_alg0);
+    l1 = fabs(vdir_alg0[0] - 1) + fabs(vdir_alg0[1]) + fabs(vdir_alg0[2]);
+    CHECK(l1 < 1e-1);
+    const auto vdir_alg1 = pcc.vhough_transform({1,0,0}, 1, Cluster::HoughParamSpace::theta_phi);
+    debug("vdir_alg1: {} | expecting around {{1, 0, 0}}", vdir_alg1);
+    l1 = fabs(vdir_alg1[0] - 1) + fabs(vdir_alg1[1]) + fabs(vdir_alg1[2]);
+    CHECK(l1 < 1e-1);
+
+    // sqrt(2./3.*(3*3*2*2*3)+(0.5*1.101)^2) = 8.50312003032
+    const auto length = pcc.get_length();
+    debug("length: {} | expecting 8.50312003032", length);
+    l1 = fabs(length - 8.50312003032);
+    CHECK(l1 < 1e-3);
+
     const auto [earliest, latest] = pcc.get_earliest_latest_points();
     debug("earliest_latest_points: {} {} | expecting (0 0 0) (1.9 0 0)", earliest, latest);
-    const auto [num1, num2] = pcc.get_num_points({0.5,0,0}, {1,0,0});
+    l1 = fabs(earliest[0]) + fabs(earliest[1]) + fabs(earliest[2]);
+    CHECK(l1 < 1e-3);
+    l1 = fabs(latest[0] - 1.9) + fabs(latest[1]) + fabs(latest[2]);
+    CHECK(l1 < 1e-3);
+
+    const auto [num1, num2] = pcc.ndipole({0.5,0,0}, {1,0,0});
     debug("num_points: {} {} | expecting 15, 5", num1, num2);
+    CHECK(num1 == 15);
+    CHECK(num2 == 5);
+}
+
+
+static void print_MCUGraph(const MCUGraph& g) {
+    std::cout << "MCUGraph:" << std::endl;
+    std::cout << "Vertices: " << num_vertices(g) << std::endl;
+    std::cout << "Edges: " << num_edges(g) << std::endl;
+
+    std::cout << "Vertex Properties:" << std::endl;
+    auto vrange = boost::vertices(g);
+    for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+        auto v = *vit;
+        std::cout << "Vertex " << v << ": Index = " << g[v].index << std::endl;
+    }
+
+    std::cout << "Edge Properties:" << std::endl;
+    auto erange = boost::edges(g);
+    for (auto eit = erange.first; eit != erange.second; ++eit) {
+        auto e = *eit;
+        std::cout << "Edge " << e << ": Distance = " << g[e].dist << std::endl;
+    }
+}
+
+
+TEST_CASE("create cluster graph")
+{
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    REQUIRE(pccptr != nullptr);
+    REQUIRE(pccptr->grouping() == grouping);
+    Cluster& pcc = *pccptr;
+
+    CHECK(pcc.sanity());
+
+    pcc.Create_graph();
+    print_MCUGraph(*pcc.graph);
 }

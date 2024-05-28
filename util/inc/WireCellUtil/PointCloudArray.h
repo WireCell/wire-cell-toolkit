@@ -50,6 +50,22 @@ namespace WireCell::PointCloud {
         template<typename ElementType, size_t NumDims>
         using const_indexed_t = boost::const_multi_array_ref<ElementType, NumDims>;
 
+        // Default constructor.
+        Array();
+
+        // Copy constructor
+        Array(const Array& rhs);
+
+        // Move constructor
+        Array(Array&& rhs);
+
+        // special case, 1D constructor using vector-like
+        template<typename Range>
+        explicit Array(const Range& r)
+        {
+            assign(&*std::begin(r), {r.size()}, false);
+        }
+
         /** Store a point array given in flattened, row-major aka
             C-order.  If share is true then no copy of elements is
             done.  See assure_mutable().
@@ -71,21 +87,17 @@ namespace WireCell::PointCloud {
             assign(&*std::begin(r), shape, share);
         }
 
-        // special case, 1D constructor using vector-like
-        template<typename Range>
-        explicit Array(const Range& r)
-        {
-            assign(&*std::begin(r), {r.size()}, false);
+        /// Construct with bytes, shape, element size and whether to share the data or not.
+        Array(const std::byte* data, const std::string& dtype, const shape_t& shape);
+        Array(std::byte* data, const std::string& dtype, const shape_t& shape, bool share);
+
+
+        /// Special constructor on initializer list
+        template<typename ElementType>
+        Array(std::initializer_list<ElementType> il) {
+            assign(&*il.begin(), {il.size()}, false);
         }
 
-        // Want defaults for all the rest.
-        Array();
-
-        // Copy constructor
-        Array(const Array& rhs);
-
-        // Move constructor
-        Array(Array&& rhs);
 
         // Copy assignment 
         Array& operator=(const Array& rhs);
@@ -95,17 +107,18 @@ namespace WireCell::PointCloud {
 
         ~Array();
 
-        /// Special constructor on initializer list
-        template<typename ElementType>
-        Array(std::initializer_list<ElementType> il) {
-            assign(&*il.begin(), {il.size()}, false);
-        }
 
-        /** Discard any held data and assign new data.  See
-            constructor for arguments.
-        */
+        /** The various assign() methods will discard any held data and assign new data provided as bytes.
+         */
+
+        // Const byte data, will copy.
+        void assign(const std::byte* data, const std::string& dtype, const shape_t& shape);
+
+        /// Mutable byte data, shareable.
+        void assign(std::byte* data, const std::string& dtype, const shape_t& shape, bool share);
+
         template<typename ElementType>
-        void assign(ElementType* elements, shape_t shape, bool share)
+        void assign(ElementType* elements, const shape_t& shape, bool share)
         {
             clear();
             m_dtype = WireCell::dtype<ElementType>();
@@ -126,13 +139,13 @@ namespace WireCell::PointCloud {
 
         /// Assign via typed pointer.
         template<typename ElementType>
-        void assign(const ElementType* elements, shape_t shape, bool share) {
+        void assign(const ElementType* elements, const shape_t& shape, bool share) {
             assign((ElementType*)elements, shape, share);
         }
 
         /// Assign via iterator.
         template<typename Itr>
-        void assign(Itr beg, Itr end, shape_t shape, bool share) {
+        void assign(Itr beg, Itr end, const shape_t& shape, bool share) {
             assign((typename Itr::pointer*)&*beg, std::distance(beg,end), shape, share);
         }
 
@@ -157,6 +170,30 @@ namespace WireCell::PointCloud {
             }
         }
 
+        /// The slice() methods return subset of this array starting at given
+        /// major axis position and spanning given count major axis elements.
+
+        /// The returned slice may possibly share the underlying array data.
+        Array slice(size_t position, size_t count, bool share);
+        /// The slice holds a copy.
+        Array slice(size_t position, size_t count) const;
+
+        template<typename ElementType, size_t NumDims>
+        void check_dims() const {
+            if (NumDims != m_shape.size()) {
+                raise<ValueError>("ndims mismatch %d != %d",
+                                  NumDims, m_shape.size());
+            }
+        }
+
+        template<typename ElementType>
+        void check_size() const {
+            if (sizeof(ElementType) != m_ele_size) {
+                raise<ValueError>("element size mismatch %d != %d",
+                                  sizeof(ElementType), m_ele_size);
+            }
+        }
+
         /** Return object that allows type-full indexing of N-D array
             (a Boost const multi array reference).  Note, user must
             assure type is consistent with the originally provided
@@ -167,25 +204,16 @@ namespace WireCell::PointCloud {
         template<typename ElementType, size_t NumDims>
         indexed_t<ElementType, NumDims> indexed() 
         {
-            if (sizeof(ElementType) != m_ele_size) {
-                THROW(ValueError() << errmsg{"element size mismatch in indexed"});
-            }
-            if (NumDims != m_shape.size()) {
-                THROW(ValueError() << errmsg{"ndims mismatch in indexed"});
-            }
+            check_size<ElementType>();
+            check_dims<ElementType, NumDims>();
 
             return indexed_t<ElementType, NumDims>(elements<ElementType>().data(), m_shape);
         }
         template<typename ElementType, size_t NumDims>
         const_indexed_t<ElementType, NumDims> indexed() const
         {
-            if (sizeof(ElementType) != m_ele_size) {
-                THROW(ValueError() << errmsg{"element size mismatch in indexed"});
-            }
-            if (NumDims != m_shape.size()) {
-                THROW(ValueError() << errmsg{"ndims mismatch in indexed"});
-            }
-
+            check_size<ElementType>();
+            check_dims<ElementType, NumDims>();
             return const_indexed_t<ElementType, NumDims>(elements<const ElementType>().data(), m_shape);
         }
 
@@ -195,9 +223,7 @@ namespace WireCell::PointCloud {
         template<typename ElementType=double>
         span_t<const ElementType> elements() const
         {
-            if (sizeof(ElementType) != m_ele_size) {
-                THROW(ValueError() << errmsg{"element size mismatch in elements"});
-            }
+            check_size<ElementType>();
             const ElementType* edata = 
                 reinterpret_cast<const ElementType*>(m_bytes.data());
             return span_t<const ElementType>(edata, m_bytes.size()/sizeof(ElementType));
@@ -205,9 +231,7 @@ namespace WireCell::PointCloud {
         template<typename ElementType=double>
         span_t<ElementType> elements() 
         {
-            if (sizeof(ElementType) != m_ele_size) {
-                THROW(ValueError() << errmsg{"element size mismatch in elements"});
-            }
+            check_size<ElementType>();
             ElementType* edata = 
                 reinterpret_cast<ElementType*>(m_bytes.data());
             return span_t<ElementType>(edata, m_bytes.size()/sizeof(ElementType));
@@ -250,9 +274,7 @@ namespace WireCell::PointCloud {
         template<typename ElementType>
         void append(const ElementType* data, size_t nele) 
         {
-            if (sizeof(ElementType) != m_ele_size) {
-                THROW(ValueError() << errmsg{"element size mismatch in append"});
-            }
+            check_size<ElementType>();
 
             append(reinterpret_cast<const std::byte*>(data),
                    nele * sizeof(ElementType));
@@ -302,6 +324,10 @@ namespace WireCell::PointCloud {
                 return false;
             }
             return WireCell::dtype<ElementType>() == m_dtype;
+        }
+
+        size_t element_size() const {
+            return m_ele_size;
         }
 
         metadata_t& metadata() { return m_metadata; }

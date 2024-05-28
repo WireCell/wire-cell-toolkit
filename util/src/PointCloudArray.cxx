@@ -1,5 +1,6 @@
 #include "WireCellUtil/PointCloudArray.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Dtype.h"
 
 using namespace WireCell::PointCloud;
 
@@ -33,6 +34,39 @@ Array::Array(Array&& rhs)
 {
 }
 
+Array::Array(const std::byte* data, const std::string& dtype, const shape_t& shape)
+{
+    assign(data,dtype,shape);
+}
+Array::Array(std::byte* data, const std::string& dtype, const shape_t& shape, bool share)
+{
+    assign(data,dtype,shape,share);
+}
+
+void Array::assign(const std::byte* data, const std::string& dtype, const shape_t& shape)
+{
+    assign(const_cast<std::byte*>(data), dtype, shape, false);
+}
+
+void Array::assign(std::byte* data, const std::string& dtype, const shape_t& shape, bool share)
+{
+    m_store.clear();
+    m_shape = shape;
+    m_dtype = dtype;
+    size_t nbytes = m_ele_size = dtype_size(dtype);
+
+    for (const auto& n : shape) {
+        nbytes *= n;
+    }
+    if (share) {
+        m_bytes = span_t<std::byte>(data, nbytes);
+    }
+    else {
+        m_store.assign(data, data+nbytes);
+        update_span();
+    }
+}
+
 // Assignment 
 Array& Array::operator=(const Array& rhs)
 {
@@ -60,6 +94,39 @@ Array& Array::operator=(Array&& rhs)
     std::swap(m_bytes, rhs.m_bytes);
     std::swap(m_metadata, rhs.m_metadata);
     return *this;
+}
+
+Array Array::slice(size_t position, size_t count, bool share) 
+{
+    const size_t ndims = m_shape.size();
+    shape_t shape = m_shape;
+    shape[0] = count;
+
+    // The number of bytes into the flattened (possibly N-d) array where major
+    // axis element position starts.
+    size_t start_bytes = m_ele_size * position;
+    for (size_t idim=1; idim < ndims; ++idim) {
+        start_bytes *= m_shape[idim];
+    }
+
+    // Build array on the slice 
+    return Array(m_store.data() + start_bytes, m_dtype, shape, share);
+}
+Array Array::slice(size_t position, size_t count) const
+{
+    const size_t ndims = m_shape.size();
+    shape_t shape = m_shape;
+    shape[0] = count;
+
+    // The number of bytes into the flattened (possibly N-d) array where major
+    // axis element position starts.
+    size_t start_bytes = m_ele_size * position;
+    for (size_t idim=1; idim < ndims; ++idim) {
+        start_bytes *= m_shape[idim];
+    }
+
+    // Build array on the slice 
+    return Array(m_store.data() + start_bytes, m_dtype, shape);
 }
 
 Array Array::zeros_like(size_t nmaj)

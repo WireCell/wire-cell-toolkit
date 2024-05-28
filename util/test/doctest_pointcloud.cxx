@@ -6,6 +6,7 @@
 #include <vector>
 #include <iostream>
 #include <memory>
+#include <numeric>              // iota
 
 using namespace WireCell;
 using namespace WireCell::PointCloud;
@@ -20,6 +21,7 @@ Dataset make_one()
     ds.add("arr",arr);
     return ds;
 }
+
 
 TEST_CASE("point cloud ownership")
 {
@@ -49,6 +51,111 @@ TEST_CASE("point cloud ownership")
     }
 }
 
+template<typename ElementType=double>
+void check_a_slice(const Array& a)
+{
+    auto bytes = a.bytes();
+
+    debug("a slice size_major={} ndims={} shape=({}) nbytes={} ele_size={}({})",
+          a.size_major(), a.shape().size(), a.shape()[0], bytes.size(), a.element_size(), sizeof(ElementType));
+
+    REQUIRE(a.element_size() == sizeof(ElementType));
+
+    CHECK(a.size_major() == 1);
+    auto sa = a.elements<ElementType>();
+    CHECK(sa.size() == 1);
+    CHECK(sa[0] == 2.0);
+
+    auto ma = a.indexed<ElementType, 1>();
+    CHECK(ma.num_dimensions() == 1);
+    CHECK(ma.num_elements() == 1);
+}
+
+template<typename ElementType=int>
+void check_b_slice(const Array& b)
+{
+    REQUIRE(b.element_size() == sizeof(ElementType));
+
+    CHECK(b.size_major() == 1);
+    auto bshape = b.shape();
+    CHECK(bshape.size() == 3);
+    CHECK(bshape[0] == 1);
+    CHECK(bshape[1] == 2);
+    CHECK(bshape[2] == 4);
+
+    // flattened
+    auto ba = b.elements<ElementType>();
+    CHECK(ba.size() == 1*2*4);
+    CHECK(ba[0] == 8);
+    CHECK(ba[1] == 9);
+    CHECK(ba[2] == 10);
+    CHECK(ba[3] == 11);
+    CHECK(ba[4] == 12);
+    CHECK(ba[5] == 13);
+    CHECK(ba[6] == 14);
+    CHECK(ba[7] == 15);
+    
+    // indexed
+    auto ma = b.indexed<ElementType, 3>();
+    CHECK(ma.num_dimensions() == 3);
+    CHECK(ma.num_elements() == 1*2*4);
+
+    auto mshape = ma.shape();
+    CHECK(mshape[0] == 1);
+    CHECK(mshape[1] == 2);
+    CHECK(mshape[2] == 4);
+    CHECK(ma[0][0][0] == 8);
+    CHECK(ma[0][0][1] == 9);
+    CHECK(ma[0][0][2] == 10);
+    CHECK(ma[0][0][3] == 11);
+    CHECK(ma[0][1][0] == 12);
+    CHECK(ma[0][1][1] == 13);
+    CHECK(ma[0][1][2] == 14);
+    CHECK(ma[0][1][3] == 15);
+}
+
+TEST_CASE("point cloud slice")
+{
+    Array aa({1.0, 2.0, 3.0});
+    auto aas = aa.slice(1,1);
+    check_a_slice(aas);
+    CHECK(aas.dtype() == aa.dtype());
+    
+
+    // major
+    // axis
+    // 0   [[[ 0  1  2  3] [ 4  5  6  7]]
+    // 1    [[ 8  9 10 11] [12 13 14 15]]
+    // 2    [[16 17 18 19] [20 21 22 23]]]
+    //
+    // Will slice out m.a. index 1 to get:
+    //
+    // [[[ 8  9 10 11] [12 13 14 15]]]
+    std::vector<size_t> shape = {3,2,4};
+    std::vector<int> counts(24);
+    std::iota(counts.begin(), counts.end(), 0);
+    Array bb(counts, shape, false);
+    auto bbs = bb.slice(1,1);
+    check_b_slice(bbs);
+    CHECK(bbs.dtype() == bb.dtype());
+
+    Dataset ds({
+            {"a", aa},
+            {"b", bb}});
+
+    Dataset slc = ds.slice(1,1);
+    CHECK(slc.size_major() == 1);
+    CHECK(slc.has("a"));
+    CHECK(slc.has("b"));
+
+    auto a = slc.get("a");
+    REQUIRE(a);
+    check_a_slice(*a);
+
+    auto b = slc.get("b");
+    REQUIRE(b);
+    check_b_slice(*b);
+}
 
 template<typename ElementType>
 void assure_equal(const Array& a, const std::vector<ElementType>& v)

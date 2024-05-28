@@ -1,5 +1,6 @@
 #include "WireCellImg/PointTreeBuilding.h"
 #include "WireCellImg/Projection2D.h"
+#include "WireCellImg/PointCloudFacade.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
 #include "WireCellUtil/GraphTools.h"
@@ -20,6 +21,7 @@ using namespace WireCell::Img;
 using WireCell::Img::Projection2D::get_geom_clusters;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
+using namespace WireCell::PointCloud;
 using namespace WireCell::PointCloud::Tree;
 using WireCell::PointCloud::Dataset;
 using WireCell::PointCloud::Array;
@@ -71,6 +73,9 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         log->debug("point cloud \"{}\" will be made by sampler \"{}\"",
                    name, tn);
         m_samplers[name] = Factory::find_tn<IBlobSampler>(tn); 
+    }
+    if (m_samplers.find("3d") == m_samplers.end()) {
+        raise<ValueError>("m_samplers must have \"3d\" sampler");
     }
 
 }
@@ -146,7 +151,7 @@ namespace {
         return ret;
     }
     /// TODO: add more info to the dataset
-  Dataset make_scaler_dataset(const IBlob::pointer iblob, const Point& center, const int npoints = 0, const double tick_span = 0.5*units::us)
+    Dataset make_scaler_dataset(const IBlob::pointer iblob, const Point& center, const int npoints = 0, const double tick_span = 0.5*units::us)
     {
         using float_t = double;
         using int_t = int;
@@ -157,6 +162,7 @@ namespace {
         ds.add("center_z", Array({(float_t)center.z()}));
 	ds.add("npoints", Array({(int_t)npoints}));
         const auto& islice = iblob->slice();
+        // fixme: possible risk of roundoff error + truncation makes _min == _max?
         ds.add("slice_index_min", Array({(int_t)(islice->start()/tick_span)})); // unit: tick
         ds.add("slice_index_max", Array({(int_t)((islice->start()+islice->span())/tick_span)}));
         const auto& shape = iblob->shape();
@@ -216,12 +222,9 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
-    if (m_samplers.find("3d") == m_samplers.end()) {
-        raise<ValueError>("m_samplers must have \"3d\" sampler");
-    }
     auto& sampler = m_samplers.at("3d");
     for (auto& [cluster_id, vdescs] : clusters) {
-        auto cnode = root->insert(std::make_unique<Points::node_t>());
+        auto cnode = root->insert();
         for (const auto& vdesc : vdescs) {
             const char code = gr[vdesc].code();
             if (code != 'b') {
@@ -229,26 +232,18 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             }
             const IBlob::pointer iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
             named_pointclouds_t pcs;
-            /// TODO: use nblobs or iblob->ident()?
+            /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
             pcs.emplace("3d", sampler->sample_blob(iblob, nblobs));
             const Point center = calc_blob_center(pcs["3d"]);
-            const auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->elements<Point::coordinate_t>().size(), m_tick);
+            const auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), m_tick);
             pcs.emplace("scalar", std::move(scaler_ds));
-            // log->debug("nblobs {} center {{{} {} {}}}", nblobs, center.x(), center.y(), center.z());
-            // log->debug("pcs {} cnode {}", pcs.size(), dump_children(cnode));
-            // for (const auto& [name, pc] : pcs) {
-            //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());
-            // }
             cnode->insert(Points(std::move(pcs)));
+
             ++nblobs;
         }
-        /// DEBUGONLY
-        // if (nblobs > 1) {
-        //     break;
-        // }
     }
     
-    log->debug("sampled {} blobs",nblobs);
+    log->debug("sampled {} live blobs to tree with {} children", nblobs, root->nchildren());
     return root;
 }
 
@@ -279,7 +274,7 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             // for (const auto& [name, pc] : pcs) {
             //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());
             // }
-            cnode->insert(std::move(Points(std::move(pcs))));
+            cnode->insert(Points(std::move(pcs)));
             ++nblobs;
         }
         /// DEBUGONLY
@@ -288,7 +283,7 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
         // }
     }
     
-    log->debug("sampled {} blobs",nblobs);
+    log->debug("sampled {} dead blobs to tree with {} children", nblobs, root->nchildren());
     return root;
 }
 
@@ -326,6 +321,16 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
 
     Points::node_ptr root_live = sample_live(iclus_live);
+    // {
+    //     auto grouping = root_live->value.facade<Facade::Grouping>();
+    //     auto children = grouping->children(); // copy
+    //     sort_clusters(children);
+    //     size_t count=0;
+    //     for(const auto* cluster : children) {
+    //         bool sane = cluster->sanity(log);
+    //         log->debug("live cluster {} {} sane:{}", count++, *cluster, sane);
+    //     }
+    // }
     auto tens_live = as_tensors(*root_live.get(), datapath+"/live");
     log->debug("Made {} live tensors", tens_live.size());
     for(const auto& ten : tens_live) {

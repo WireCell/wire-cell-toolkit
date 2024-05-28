@@ -46,6 +46,23 @@ Dataset::Dataset(Dataset&& other)
    debug(this, "move constructor");
 }
 
+Dataset Dataset::slice(size_t position, size_t count) const
+{
+    Dataset dslc;
+    for (const auto& name : keys()) {
+        dslc.add(name, get(name)->slice(position, count));
+    }
+    return dslc;
+}
+Dataset Dataset::slice(size_t position, size_t count, bool share)
+{
+    Dataset dslc;
+    for (const auto& name : keys()) {
+        dslc.add(name, get(name)->slice(position, count, share));
+    }
+    return dslc;
+}
+
 Dataset& Dataset::operator=(const Dataset& other)
 {
     m_store = other.m_store;

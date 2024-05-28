@@ -3,7 +3,7 @@
 #ifndef WIRECELLUTIL_NARYTESTING
 #define WIRECELLUTIL_NARYTESTING
 
-#include "WireCellUtil/NaryTree.h"
+#include "WireCellUtil/NaryTreeNotified.h"
 
 namespace WireCell::NaryTesting {
 

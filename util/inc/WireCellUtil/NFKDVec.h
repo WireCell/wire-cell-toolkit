@@ -62,7 +62,6 @@ namespace WireCell::NFKDVec {
 
       public:
 
-
         using self_type = Tree<ElementType, IndexTraits, DistanceTraits>;
 
         // scalar point element type
@@ -92,15 +91,14 @@ namespace WireCell::NFKDVec {
         // Must not use this for static, may use for dynamic.
         explicit Tree(size_t dimensionality)
             : m_points(dimensionality)
-            , m_nfkdindex(dimensionality, *this)
         {
         }
 
         // Must use this for static, may use it for dynamic.
         explicit Tree(const points_type& points)
-            : m_points(points)
-            , m_nfkdindex(points.size(), *this)
+            : m_points(points.size())
         {
+            append(points);
         }
 
         ~Tree()
@@ -122,7 +120,7 @@ namespace WireCell::NFKDVec {
             const size_t ndims = ndim();
             std::vector<element_type> ret(ndims);
             for (size_t dim=0; dim<ndims; ++dim) {
-                ret[0] = m_points.at(dim).at(index);
+                ret[dim] = m_points.at(dim).at(index);
             }
             return ret;
         }
@@ -131,7 +129,6 @@ namespace WireCell::NFKDVec {
             if (ndim() != 3) {
                 raise<LogicError>("NFKD::Tree: point3d requires 3 dimension, have %d", ndim());
             }
-
             return Point(m_points.at(0).at(index),
                          m_points.at(1).at(index),
                          m_points.at(2).at(index));
@@ -141,10 +138,12 @@ namespace WireCell::NFKDVec {
         const block_indices_type& major_indices() const { return m_major_indices; }
         const block_indices_type& minor_indices() const { return m_minor_indices; }
 
-        // Number of blocks that have been appended.
+        // Number of blocks that have been appended.  Note, this is not
+        // necessarily the value of the last element of major_indices.  Empty
+        // blocks can be appended and they are counted but have no entries in
+        // the {major,minor_indices.
         size_t nblocks() const {
-            if (m_major_indices.empty()) { return 0; }
-            return 1 + m_major_indices.back();
+            return m_nblocks;
         }
 
         // Return the number of the block that provided the point at the given index
@@ -159,36 +158,59 @@ namespace WireCell::NFKDVec {
 
         // Append one PointCloud::Dataset selection (vector of PC arrays)
         void append(const PointCloud::Dataset::selection_t& sel) {
+            const size_t block_index = m_nblocks++;
+
+            if (sel.empty()) {
+                return;
+            }
+            const size_t adding = sel[0]->size_major();
+            if (!adding) {
+                return;
+            }
+
+            // Extend the coordinate points vectors
             const size_t ndims = ndim();
             for (size_t dim=0; dim<ndims; ++dim) {
                 auto& vdim = m_points[dim];
                 auto sdim = sel[dim]->elements<element_type>();
                 vdim.insert(vdim.end(), sdim.begin(), sdim.end());
             }
+            const size_t newsize = m_points[0].size();
+
+            // Update the major/minor map
             const size_t oldsize = m_major_indices.size();
-            const size_t adding = sel[0]->size_major();
-            const size_t block_index = nblocks();
-            m_minor_indices.resize(m_points[0].size());
+            m_major_indices.resize(newsize, block_index);
+            m_minor_indices.resize(newsize);
             std::iota(m_minor_indices.begin() + oldsize, m_minor_indices.end(), 0);
-            m_major_indices.resize(m_points[0].size(), block_index);
             this->addn<nfkdindex_type>(oldsize, adding);
         }
 
         // Append with vector of vector of element.
-        void append(const points_type& sel) {
+        void append(const points_type& pts) {
+            const size_t block_index = m_nblocks++;
+
+            if (pts.empty()) {
+                return;
+            }
+            const size_t adding = pts[0].size();
+            if (!adding) {
+                return;
+            }
+
+            // Extend the coordinate vectors
             const size_t ndims = ndim();
             for (size_t dim=0; dim<ndims; ++dim) {
                 auto& vdim = m_points[dim];
-                const auto& sdim = sel[dim];
+                const auto& sdim = pts[dim];
                 vdim.insert(vdim.end(), sdim.begin(), sdim.end());
             }
-            const size_t oldsize = m_major_indices.size();
-            const size_t adding = sel[0].size();
-            const size_t block_index = nblocks();
+            const size_t newsize = m_points[0].size();
 
-            m_minor_indices.resize(m_points[0].size());
+            // Update the major/minor map
+            const size_t oldsize = m_major_indices.size();
+            m_major_indices.resize(newsize, block_index);
+            m_minor_indices.resize(newsize);
             std::iota(m_minor_indices.begin() + oldsize, m_minor_indices.end(), 0);
-            m_major_indices.resize(m_points[0].size(), block_index);
             this->addn<nfkdindex_type>(oldsize, adding);
         }
 
@@ -200,16 +222,17 @@ namespace WireCell::NFKDVec {
         template<typename VectorLike>
         results_type knn(size_t kay, const VectorLike& query_point) const {
             results_type ret;
-            if (!kay or query_point.size() != ndim()) {
+            if (kay==0 || !npoints() || query_point.size() != ndim()) {
                 return ret;
             }
+            this->prepquery<nfkdindex_type>();
 
             std::vector<size_t> indices(kay,0);
             std::vector<distance_type> distances(kay, 0);
             nanoflann::KNNResultSet<element_type> nf(kay);
             nf.init(&indices[0], &distances[0]);
-            m_nfkdindex.findNeighbors(nf, query_point.data(),
-                                      nanoflann::SearchParameters());
+            m_nfkdindex->findNeighbors(nf, query_point.data(),
+                                       nanoflann::SearchParameters());
             const size_t nfound = nf.size();
             ret.resize(nfound);
             for (size_t ind=0; ind<nfound; ++ind) {
@@ -222,13 +245,14 @@ namespace WireCell::NFKDVec {
         template<typename VectorLike>
         results_type radius(distance_type rad, const VectorLike& query_point) const {
             results_type ret;
-            if (query_point.size() != ndim()) {
+            if (rad==0 || !npoints() || query_point.size() != ndim()) {
                 return ret;
             }
+            this->prepquery<nfkdindex_type>();
 
             std::vector<nanoflann::ResultItem<size_t, element_type>> res;
             nanoflann::RadiusResultSet<element_type, size_t> rs(rad, res);
-            m_nfkdindex.findNeighbors(rs, query_point.data());
+            m_nfkdindex->findNeighbors(rs, query_point.data());
 
             const size_t nfound = res.size();
             ret.resize(nfound);
@@ -239,14 +263,17 @@ namespace WireCell::NFKDVec {
             return ret;
         }
 
-        // nanoflann dataset adaptor API.
+        // nanoflann API.  Total number of points.
         inline size_t kdtree_get_point_count() const {
             return npoints();
         }
+
+        // nanoflann API.  Must provide, but return false to let nanoflann
+        // calculate.
         template <class BBOX>
         bool kdtree_get_bbox(BBOX& /* bb */) const { return false; }
 
-        // unwantedly, nanoflan deals in indices
+        // nanoflann API.  Value of a point's dimension coordinate.
         inline element_type kdtree_get_pt(size_t idx, size_t dim) const {
             ++m_point_calls;
             return m_points.at(dim).at(idx);
@@ -254,7 +281,9 @@ namespace WireCell::NFKDVec {
 
       private:
         points_type m_points;
-        nfkdindex_type m_nfkdindex;
+        size_t m_nblocks{0};     // how many times we have been appended to.
+        // The index is made lazily
+        mutable std::unique_ptr<nfkdindex_type> m_nfkdindex;
         block_indices_type m_major_indices, m_minor_indices;
 
         mutable size_t m_point_calls{0};
@@ -271,22 +300,42 @@ namespace WireCell::NFKDVec {
         // Dynamic index case
         template <class T, std::enable_if_t<has_addpoints<T>::value>* = nullptr>
         void addn(size_t beg, size_t n) {
-            if (n) {
-                this->m_nfkdindex.addPoints(beg, beg+n-1);
+            if (!n) {
+                return;
             }
+            // No query yet so no index, so nothing to add.
+            if (!m_nfkdindex) {
+                return;
+            }
+            // nanoflann takes an inclusive range of indices and NOT the usual
+            // C++ begin/end convention!
+            m_nfkdindex->addPoints(beg, beg+n-1);
+        }
+        // Dynamic
+        template <class T, std::enable_if_t<has_addpoints<T>::value>* = nullptr>
+        void prepquery() const {
+            if (m_nfkdindex) {
+                return;
+            }
+            m_nfkdindex = std::make_unique<nfkdindex_type>(ndim(), *this);
         }
 
         // Static index case
         template <class T, std::enable_if_t<!has_addpoints<T>::value>* = nullptr>
         void addn(size_t beg, size_t n) {
-            raise<LogicError>("NFKD::Tree: static index can not have points added");
-            return; // no-op
-            // Note, we could instead clear and rebuild the k-d tree
+            // Appending after we have made a k-d tree invalidates the k-d tree.
+            if (m_nfkdindex) {
+                m_nfkdindex = nullptr;
+            }
         }
-
-    };
-     
-
-}
+        template <class T, std::enable_if_t<!has_addpoints<T>::value>* = nullptr>
+        void prepquery() const {
+            if (m_nfkdindex) {
+                return;
+            }
+            m_nfkdindex = std::make_unique<nfkdindex_type>(ndim(), *this);
+        }
+    }; // Tree
+} // WireCell::NFKDVec
 
 #endif

@@ -40,7 +40,8 @@ ITensor::pointer WireCell::Aux::TensorDM::as_tensor(const PointCloud::Array& arr
     if (array.is_type<std::complex<float>>()) return make_array_tensor<std::complex<float>>(array, datapath);
     if (array.is_type<std::complex<double>>()) return make_array_tensor<std::complex<double>>(array, datapath);
 
-    THROW(ValueError() << errmsg{"unsupported point cloud array type: " + array.dtype()});
+    raise<ValueError>("unsupported point cloud array type: \"%s\"", array.dtype());
+    return nullptr;             // quell compiler warning
 }
 
 ITensor::vector
@@ -72,7 +73,7 @@ WireCell::Aux::TensorDM::as_tensors(const PointCloud::Dataset& dataset,
 template<typename ElementType>
 PointCloud::Array make_array(const ITensor::pointer& ten, bool share)
 {
-    ElementType* data = (ElementType*)ten->data();
+    ElementType* data = (ElementType*)ten->data(); // break const, but honor share.
     PointCloud::Array arr(data, ten->shape(), share);
     arr.metadata() = ten->metadata();
     return arr;
@@ -118,7 +119,14 @@ WireCell::Aux::TensorDM::as_dataset(const TensorIndex& ti,
                                     bool share)
 {
     auto top = ti.at(datapath, "pcdataset");
+    return as_dataset(ti, top, share);
+}
 
+PointCloud::Dataset
+WireCell::Aux::TensorDM::as_dataset(const TensorIndex& ti,
+                                    ITensor::pointer top,
+                                    bool share)
+{
     PointCloud::Dataset ret;
     auto topmd = top->metadata();
     ret.metadata() = topmd;
@@ -132,7 +140,6 @@ WireCell::Aux::TensorDM::as_dataset(const TensorIndex& ti,
 
     return ret;    
 }
-
 
 PointCloud::Dataset
 WireCell::Aux::TensorDM::as_dataset(const ITensorSet::pointer& tens,

@@ -71,7 +71,7 @@ std::unordered_map<int, std::set<cluster_vertex_t> > WireCell::Img::Projection2D
         }
     }
     // debug
-    std::cout << "nblobs: " << nblobs << std::endl;
+    // std::cout << "nblobs: " << nblobs << std::endl;
 
     if (!nblobs) {
         return groups;

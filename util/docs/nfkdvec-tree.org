@@ -1,0 +1,80 @@
+#+title: Wire-Cell vector interface to nanoflann K-D Tree
+#+include: ../../docs/include-topic.org
+
+* Overview
+
+The ~NFKDVec::Tree~ provides an interface to the nanoflann package.  This API provides simplification and uniformity compared to the native nanoflann API and provides some of these additional features:
+
+- Compile time template choice of k-d metric and coordinate value type.
+- Compile-time template choice of static or dynamic nanoflann k-d tree.
+  - Both can be extended (static trees are remade).
+- Filled with blocks of points and able to resolve from which block a point came.
+- Supports N-dimensional points with special support for 3D points.
+- k nearest neighbor and radius searches.
+- Lazy construction of the underlying nanoflann k-d tree.
+
+Unlike the ~NFKD::Tree~, (see [[file:nfkd-tree.org]]) this interface holds a copy of the blocks of points in a monolithic collection.  This results in a far faster k-d tree construction and query at the cost of somewhat more memory.
+
+* Construction
+
+Default metric is L2.  This means "radius" is in units of ~[length]^2~.
+
+#+begin_src c++
+    #include "WireCellUtil/NFKDVec.h"
+    using namespace WireCell;
+    const int ndim = 3;
+    auto points = ...;
+    using KDIndex = NFKDVec::IndexStatic; // or IndexDynamic
+    using KDTree = NFKDVec::Tree<double, KDIndex>;
+    KDTree kd1(points);
+    KDTree kd2(ndim);
+    kd2.append(points);
+#+end_src
+One may fill the k-d tree with points at construction or via one or more calls to ~append()~ for both dynamic and static indices.  When a static k-d tree is appended, the underlying nanoflann object is deleted and constructed anew on all points appended.  For a dynamic k-d tree, nanoflann handles being extended.
+
+In both cases, the underlying k-d tree is not constructed until needed.  Thus, it is possible to ~append()~ one or more times while the final nanoflann k-d tree may get all points as a monolithic collection.
+
+* Query
+
+#+begin_src c++
+
+  const double radius2 = pow(5*units::cm, 2);
+  const int nn = 10;
+  std::vector<double> origin = {0.0, 0.0, 0.0};
+
+  auto rad_res = kd.radius(radius2, origin);
+  auto knn_res = kd.knn(nn, origin);
+#+end_src
+Both ~radius()~ and ~knn()~ queries return the same type, a collection of a pair giving the index and distance metric value for each point.  Here is an example iterate a result and get info out of the ~NFKDVec::Tree~ object:
+
+#+begin_src c++
+
+  // arrays of point arrays
+  const auto& points = kd.points();
+
+  // Two ways to get the array shape of the full set of points
+  std::vector<size_t> total_shape = { kd.ndims(), kd.npoints()};
+  std::vector<size_t> total_shape2 = { points.size(), points[0].size() };
+
+  // Number of blocks, or times append() was called:
+  const nblocks = kd.nblocks();
+
+  for (const auto& [index, metric] : res) {
+      const size_t block_index = kd.major_index(index);
+      const size_t index_in_block = kd.minor_index(index);
+
+      // special case if points are 3D
+      const Point pt3d = kd.point3d(index);
+
+      // get point at the index
+      std::vector<double> vpt = kd.point(index);
+
+      // or unpack manually:
+      std::vector<double> vpt2 = {
+          points[0][index],
+          points[1][index],
+          points[2][index]
+      }
+      //...
+#+end_src
+

@@ -9,6 +9,11 @@
 using spdlog::debug;
 using namespace WireCell::PointCloud;
 
+Tree::Points::~Points()
+{
+}
+
+
 //
 //  Scope
 //
@@ -87,16 +92,51 @@ static void assure_arrays(const std::vector<std::string>& have, // ds keys
 void Tree::ScopedBase::append(ScopedBase::node_t* node)
 {
     m_nodes.push_back(node);
-    
-    const Scope& s = scope();
-
-    Dataset& pc = node->value.local_pcs()[s.pcname];
-    assure_arrays(pc.keys(), s); // sanity check
-    m_pcs.push_back(std::ref(pc));
-    m_npoints += pc.size_major();
-    m_selections.emplace_back(std::make_unique<selection_t>(pc.selection(s.coords)));
 }
 
+void Tree::ScopedBase::fill_cache() const
+{
+    const_cast<ScopedBase*>(this)->fill_cache();
+}
+
+void Tree::ScopedBase::fill_cache()
+{
+    if (m_node_count == m_nodes.size()) return;
+
+    m_node_count = 0;
+    m_pcs.clear();
+    m_npoints=0;
+    m_selections.clear();
+
+    const Scope& s = scope();
+    for (auto* node : m_nodes) {
+        Dataset& pc = node->value.local_pcs()[s.pcname];
+        assure_arrays(pc.keys(), s); // sanity check
+        m_pcs.push_back(std::ref(pc));
+        m_npoints += pc.size_major();
+        ++m_node_count;
+        m_selections.emplace_back(std::make_unique<selection_t>(pc.selection(s.coords)));
+    }
+}
+
+const Tree::ScopedBase::pointclouds_t& Tree::ScopedBase::pcs() const
+{
+    fill_cache();
+    return m_pcs;
+}
+
+
+size_t Tree::ScopedBase::npoints() const
+{
+    fill_cache();
+    return m_npoints;
+}
+
+const Tree::ScopedBase::selections_t& Tree::ScopedBase::selections() const
+{
+    fill_cache();
+    return m_selections;
+}
 
 //
 //  Points
@@ -126,36 +166,36 @@ const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
 
 Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) 
 {
-    auto it = m_scoped.find(scope);
-    if (it == m_scoped.end()) {
-        return nullptr;
-    }
-    return it->second.get();
+    return const_cast<Tree::ScopedBase*>(
+        const_cast<const self_t*>(this)->get_scoped(scope));
+
+    // auto it = m_scoped.find(scope);
+    // if (it == m_scoped.end()) {
+    //     return nullptr;
+    // }
+    // return it->second.get();
 }
 
 
 
+// Called new scoped view is created.
 void WireCell::PointCloud::Tree::Points::init(const WireCell::PointCloud::Tree::Scope& scope) const
 {
     auto& sv = m_scoped[scope];
-    for (auto& node : m_node->depth(scope.depth)) {
+    // Walk the tree in scope, adding in-scope nodes.
+    for (auto& node : m_node->depth(scope.depth)) { // depth part of sceop.
         auto& value = node.value;
-        auto it = value.m_lpcs.find(scope.pcname);
+        auto it = value.m_lpcs.find(scope.pcname); // PC name part of scope.
         if (it == value.m_lpcs.end()) {
             continue;           // it is okay if node lacks PC
         }
 
         // Check for coordintate arrays on first construction. 
         Dataset& pc = it->second;
-        assure_arrays(pc.keys(), scope);
+        assure_arrays(pc.keys(), scope); // throws if user logic error detected
+        // Tell scoped view about its new node.
         sv->append(&node);
     }
-}
-
-
-void Tree::Points::on_construct(Tree::Points::node_t* node)
-{
-    m_node = node;
 }
 
 
@@ -200,21 +240,22 @@ bool in_scope(const Tree::Scope& scope, const Tree::Points::node_t* node, size_t
     return true;    
 }
 
-bool Tree::Points::on_insert(const Tree::Points::node_path_t& path)
+bool Tree::Points::on_insert(const std::vector<node_type*>& path)
 {
     auto* node = path.back();
 
-    for (auto& [scope,scoped] : m_scoped) {
+    // Give node to any views for which the node is in scope.
+    for (auto& [scope,sv] : m_scoped) {
         if (! in_scope(scope, node, path.size())) {
             continue;
         }
-        scoped->append(node);
+        sv->append(node);
     }
     return true;
 }
 
 
-bool Tree::Points::on_remove(const Tree::Points::node_path_t& path)
+bool Tree::Points::on_remove(const std::vector<node_type*>& path)
 {
     auto* leaf = path.front();
     size_t psize = path.size();

@@ -33,12 +33,10 @@
 
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/indirect_iterator.hpp>
-// Telling the truth
 #include <boost/type_traits/is_convertible.hpp>
 #include <boost/utility/enable_if.hpp>
 
-// fixme: move to WireCellUtil/DetectionIdiom.h
-// https://blog.tartanllama.xyz/detection-idiom/
+// #include <iostream>             // debug
 
 namespace WireCell::NaryTree {
 
@@ -55,6 +53,17 @@ namespace WireCell::NaryTree {
     
     /** Depth first traverse, parent then children, as range */
     template<typename Value> class depth_range;
+
+    // Notify this node's VALUE that a tree action took place on the NODE.  To
+    // catch an action, a node value must implement a method with signature:
+    // notify(NODE,ACTION).  See NaryTree::Notified for an interstitial base
+    // class that manages notifications.
+    enum Action {
+        constructed,            // the node is constructed
+        inserted,               // the node has been inserted into a parent's children list
+        removing,               // the node has been removed from a parent's children list
+    };
+
 
     /** A tree node.
 
@@ -91,53 +100,59 @@ namespace WireCell::NaryTree {
         ~Node() = default;
 
         Node() {
-            notify<Value>("constructed", this);
+            notify<Value>(Action::constructed, this);
         }
 
         // Copy value.
         Node(const value_type& val) : value(val) {
-            notify<Value>("constructed", this);
+            notify<Value>(Action::constructed, this);
         }
 
         // Move value.
         Node(value_type&& val) : value(std::move(val)) {
-            notify<Value>("constructed", this);
+            notify<Value>(Action::constructed, this);
+        }
+
+        // Insert a child node of default value
+        Node* insert(bool notify_value=true) {
+            owned_ptr nptr = std::make_unique<self_type>();
+            return insert(std::move(nptr), notify_value);
         }
 
         // Insert a child by its value copy.
-        Node* insert(const value_type& val) {
+        Node* insert(const value_type& val, bool notify_value=true) {
             owned_ptr nptr = std::make_unique<self_type>(val);
-            return insert(std::move(nptr));
+            return insert(std::move(nptr), notify_value);
         }
 
         // Insert a child by its value move.
-        Node* insert(value_type&& val) {
+        Node* insert(value_type&& val, bool notify_value=true) {
             owned_ptr nptr = std::make_unique<self_type>(std::move(val));
-            return insert(std::move(nptr));
+            return insert(std::move(nptr), notify_value);
         }
 
         // Insert, reparent and take ownership of a bare node pointer.  The
         // Node* MUST be on the heap.  A lent pointer is returned.
-        Node* insert(Node* node) {
+        Node* insert(Node* node, bool notify_value=true) {
             owned_ptr nptr;
             if (node->parent) {
-                nptr = node->parent->remove(node);
+                nptr = node->parent->remove(node, notify_value);
             }
             else {
                 nptr.reset(node);
             }
-            return insert(std::move(nptr));
+            return insert(std::move(nptr), notify_value);
         }
 
         // Insert, reparent and take ownership of a unique node pointer.  A lent
         // pointer is returned.
-        Node* insert(owned_ptr node) {
+        Node* insert(owned_ptr node, bool notify_value=true) {
             if (!node or !node.get()) {
                 throw std::runtime_error("NaryTree::Node insert on null node");
             }
 
             if (node->parent) {
-                node = node->parent->remove(node.get());
+                node = node->parent->remove(node.get(), notify_value);
             }
             node->parent = this;
             nursery_.push_back(std::move(node));
@@ -146,7 +161,9 @@ namespace WireCell::NaryTree {
             if (!child) {
                 throw std::runtime_error("NaryTree::Node insert on null child node");
             }
-            notify<Value>("inserted", child);
+            if (notify_value) {
+                notify<Value>(Action::inserted, child);
+            }
             return child;
         }
 
@@ -165,11 +182,13 @@ namespace WireCell::NaryTree {
         }
         
         // Remove and return child node.
-        owned_ptr remove(sibling_iter sib) {
+        owned_ptr remove(sibling_iter sib, bool notify_value=true) {
             if (sib == nursery_.end()) return nullptr;
 
             Node* child = (*sib).get();
-            notify<Value>("removing", child);
+            if (notify_value) {
+                notify<Value>(Action::removing, child);
+            }
 
             owned_ptr ret = std::move(*sib);
             nursery_.erase(sib);
@@ -181,9 +200,37 @@ namespace WireCell::NaryTree {
 
         // Remove child node.  Searches children.  Return child node
         // in owned pointer if found else nullptr.
-        owned_ptr remove(const Node* node) {
+        owned_ptr remove(const Node* node, bool notify_value=true) {
             auto it = find(node);
-            return remove(it);
+            return remove(it, notify_value);
+        }
+
+        // Return a nursery of all children, leaving the one in this node empty.
+        // If notify_child is true, notify the children of their removal.
+        nursery_type remove_children(bool notify_value=true) {
+            // std::cerr << "NaryTree::Node::remove_children() removing " << nursery_.size() << "\n";
+            nursery_type ret;
+            while (nursery_.begin() != nursery_.end()) {
+                auto orphan = remove(nursery_.begin(), notify_value);
+                ret.emplace_back(std::move(orphan));
+            }
+            return ret;         // this is a move.
+        }            
+
+        // Insert children in given nursery, depleting it.
+        void adopt_children(nursery_type& kids, bool notify_value=true) {
+            // std::cerr << "NaryTree::Node::adopt_children() adopting " << kids.size() << "\n";
+            for (auto it = kids.begin(); it != kids.end(); ++it) {
+                insert(std::move(*it), notify_value);
+            }
+            kids.clear();
+        }
+
+        // Transfer children from other to self.
+        void take_children(self_type& other, bool notify_value = true) {
+            // std::cerr << "NaryTree::Node::take_children() taking " << other.nchildren() << "\n";
+            auto kids = other.remove_children(notify_value);
+            adopt_children(kids, notify_value);
         }
 
         // Iterator locating self in list of siblings.  If parent is
@@ -303,27 +350,31 @@ namespace WireCell::NaryTree {
                 
         // Iterable range for depth first traversal, parent then children.
         // Iterators yield a reference to the node.
+        // Level=0 will traverse to the leaves.
+        // Level=1 will only visit the current node.
+        // Level=2 will visit current node and children nodes
+        // Level=3 etc
         range depth(size_t level=0) { return range(this, level); }
         const_range depth(size_t level=0) const { return const_range(this, level); }
 
       private:
 
-        // Detect Value::notify(const Node<Value>* node, const std::string& action)
+        // Detect Value::notify(const Node<Value>* node, Action action)
 
         template <typename T, typename ...Ts>
         using notify_type = decltype(std::declval<T>().notify(std::declval<Ts>()...));
 
         template<typename T>
-        using has_notify = is_detected<notify_type, T, Node*, const std::string&>;
+        using has_notify = is_detected<notify_type, T, Node*, Action>;
 
         template <class T, std::enable_if_t<has_notify<T>::value>* = nullptr>
-        void notify(const std::string& action, Node* node) const {
+        void notify(Action action, Node* node) {
             // std::cerr << "sending action: "<<action<<" \n";
             node->value.notify(node, action);
         }
 
         template <class T, std::enable_if_t<!has_notify<T>::value>* = nullptr>
-        void notify(const std::string& action, Node* node) const {
+        void notify(Action action, Node* node) {
             // std::cerr << "missing action: "<<action<<" \n";
             return; // no-op
         }
@@ -543,75 +594,6 @@ namespace WireCell::NaryTree {
       private:
         node_type* root{nullptr};
         size_t depth{0};
-    };
-
-    // A base class for a Node Value type that helps dispatch actions
-    // to an inheriting subclass.  See NaryTesting::Introspective for
-    // an example.
-    template<typename Data>
-    class Notified {
-      public:
-
-        using node_type = Node<Data>;
-
-      protected:
-
-        // Subclasses should implement at least one of these protected
-        // methods to recieve notification.
-
-
-        // Called when a Node is constructed on a Notified.
-        virtual void on_construct(node_type* node) {
-            // std::cerr << "defaulting action: constructed\n";
-        }
-
-        // Called when a Node with a Notified is inserted.  The path
-        // holds a sequence of Nodes starting with the inserted node
-        // and ending with the Node holding the Notified being called.
-        // Return true to continue propagating toward the root node.
-        virtual bool on_insert(const std::vector<node_type*>& path) {
-            // std::cerr << "defaulting action: inserted\n";
-            return true;
-        }
-
-        // Called when a Node with a Notified is removed.  The path
-        // holds a sequence of Nodes starting with the removed node
-        // and ending with the Node holding the Notified being called. 
-        // Return true to continue propagating toward the root node.
-        virtual bool on_remove(const std::vector<node_type*>& path) {
-            // std::cerr << "defaulting action: removing\n";
-            return true;
-        }
-
-      public:
-        // This is the hook that Node will call.
-        void notify(node_type* node, const std::string& action) {
-            // std::cerr << "catching action: " << action << "\n";
-            if (action == "constructed") {
-                on_construct(node);
-                return;
-            }
-            std::vector<node_type*> path = { node };
-            if (action == "inserted") propagate_insert_(path);
-            if (action == "removing") propagate_remove_(path);
-        }
-
-      private:
-        void propagate_insert_(std::vector<node_type*> path) {
-            if (! on_insert(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_insert_(path);
-        }
-
-        void propagate_remove_(std::vector<node_type*> path) {
-            if (! on_remove(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_remove_(path);
-        }
     };
 
 

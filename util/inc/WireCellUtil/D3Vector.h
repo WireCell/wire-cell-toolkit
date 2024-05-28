@@ -43,7 +43,7 @@ namespace WireCell {
         D3Vector(const D3Vector& o)
             : m_v(3,0)
         {
-            if (o) {
+            if (o.size() == 3) {
                 this->set(o.x(), o.y(), o.z());
             }
             else {
@@ -65,7 +65,7 @@ namespace WireCell {
         // Assignment.
         D3Vector& operator=(const D3Vector& o)
         {
-            if (o) {
+            if (o.size()) {
                 this->set(o.x(), o.y(), o.z());
             }
             else {
@@ -188,8 +188,11 @@ namespace WireCell {
             return *this;
         }
 
-        bool operator!() const { return m_v.size() != 3; }
-        operator bool() const { return m_v.size() == 3; }
+        /// defining these opens a fairly nightmarish door.
+        /// https://www.artima.com/articles/the-safe-bool-idiom
+        // bool operator!() const { return m_v.size() != 3; }
+        // operator bool() const { return m_v.size() == 3; }
+
         // can call set(x,y,z) to revalidate.
         void invalidate()
         {

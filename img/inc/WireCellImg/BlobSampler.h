@@ -118,6 +118,13 @@ namespace WireCell::Img {
                 step may take.  If non-positive, then all steps are
                 min_step_size.  default=1/12.
 
+              - offset :: How far along the diagonal from a crossing point to
+                the crossing point of the next neighbor rays to place the point.
+                A value of 0 places the point at the ray crossing.  A value of
+                0.5 (default) places the point at the crossing of the ray's
+                wires and makes this sampling equivalent to what Wire-Cell
+                prototype uses.
+
             - bounds :: points sampled along the blob boundry edges.
 
               This accepts the following options:

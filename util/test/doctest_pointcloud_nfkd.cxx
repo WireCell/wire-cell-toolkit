@@ -145,7 +145,7 @@ TEST_CASE("nfkd dataset atomic")
 
 
 // Smallest point cloud to consider
-static const size_t start_size = 1024;
+static const size_t start_size = 128;
 
 // How many times we double the point cloud size in tests.  Want to
 // keep this somewhat small to allow the test to run quickly.  Feel

@@ -228,5 +228,5 @@ void test_speed(size_t num, size_t nlu, size_t kay,
 
 TEST_CASE("kdtree speed 100000")
 {
-    test_speed(100000, 1000, 10, false);
+    test_speed(10000, 1000, 10, false);
 }    

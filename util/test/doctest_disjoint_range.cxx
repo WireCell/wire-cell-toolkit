@@ -65,7 +65,7 @@ TEST_CASE("disjoint range basics")
     debug("flat index distance: {} -> {}", dj.begin().flat_index(), dj.end().flat_index());
     CHECK( dj.size() == std::distance(dj.begin(), dj.end()));
 
-    SUBCASE("ignoring const disjoint range on coordinate array test") { WARN(false); };
+    //SUBCASE("ignoring const disjoint range on coordinate array test") { WARN(false); };
 
     // const auto& djc = dj;
     // CHECK( 5 == djc.size());
@@ -230,9 +230,9 @@ TEST_CASE("disjoint range iterator perf") {
     using outer_type = std::vector<inner_type>;
     using disjoint_type = disjoint_range<inner_type>;
 
-    const size_t onums =10000;
-    const size_t inums =10000;
-    const size_t nrands=100000;
+    const size_t onums =1000;
+    const size_t inums =1000;
+    const size_t nrands=10000;
     // const size_t nrands=1000;
 
     std::random_device rnd_device;

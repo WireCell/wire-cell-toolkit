@@ -1,3 +1,11 @@
 #+SETUPFILE: ../../docs/setup-topic.org
 #+html: <center><a href="../README.html">(top)</a> <a href="README.html">(pkg)</a></center>
 
+#+HTML_HEAD_EXTRA:  <style>.note {50px; background-color:LightSkyBlue;}</style>
+#+HTML_HEAD_EXTRA:  <style>.warning {color: yellow; background-color:HotPink;}</style>
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+LATEX_HEADER: \usepackage{framed}
+#+LATEX_HEADER: \usepackage{svg}
+#+LATEX_HEADER: \newenvironment{warning}{\color{red}\begin{framed}}{\ignorespacesafterend\end{framed}}
+#+LATEX_HEADER: \newenvironment{note}{\itshape\begin{framed}}{\ignorespacesafterend\end{framed}}

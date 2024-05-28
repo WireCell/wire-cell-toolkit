@@ -1,6 +1,8 @@
-util_inc_dir = bld.path.find_dir('inc')
-bld.install_files('${PREFIX}/include',
-                  util_inc_dir.ant_glob('custard/**/*.hpp'),
+util_inc_dir = bld.path.find_dir('inc/WireCellUtil')
+bld.install_files('${PREFIX}/include/WireCellUtil',
+                  util_inc_dir.ant_glob('*.hpp')+
+                  util_inc_dir.ant_glob('custard/**/*.hpp')+
+                  util_inc_dir.ant_glob('boost/**/*.hpp'),
                   cwd = util_inc_dir, relative_trick=True)
 
 # util is the base WC library and must not "use" other WC libraries.

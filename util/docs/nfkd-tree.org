@@ -1,5 +1,7 @@
 #+title: Wire-Cell interface to nanoflann K-D Tree
 
+See [[file:nfkdvec-tree.org]] for another interface that is more performant..
+
 * Overview
 
 WCT provides ~WireCellUtil/NFKD.h~ API in the ~WireCell::NFKD~ namespace

@@ -347,7 +347,7 @@ TEST_CASE("point tree example simple tree operations")
   
       // Find three nearest neighbors.
       const size_t nnn = 10;    
-      REQUIRE(skd.points().size() >= nnn);
+      REQUIRE(points[0].size() >= nnn);
 
       auto knn = skd.knn(nnn, origin);
       CHECK( knn.size() == nnn );

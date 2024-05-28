@@ -12,7 +12,6 @@
 
 #include "WireCellUtil/Graph.h"
 
-
 #include <fstream>
 
 WIRECELL_FACTORY(MultiAlgBlobClustering, WireCell::Img::MultiAlgBlobClustering, WireCell::INamed,
@@ -35,8 +34,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_inpath = get(cfg, "inpath", m_inpath);
     m_outpath = get(cfg, "outpath", m_outpath);
     m_bee_dir = get(cfg, "bee_dir", m_bee_dir);
+    m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
+    m_perf = get(cfg, "perf", m_perf);
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -45,6 +46,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["inpath"] = m_inpath;
     cfg["outpath"] = m_outpath;
     cfg["bee_dir"] = m_bee_dir;
+    cfg["save_deadarea"] = m_save_deadarea;
 
     cfg["dead_live_overlap_offset"] = m_dead_live_overlap_offset;
     return cfg;
@@ -57,7 +59,7 @@ namespace {
         using WireCell::PointCloud::Facade::float_t;
         using WireCell::PointCloud::Facade::int_t;
 
-        Configuration bee;
+        Json::Value bee;
         bee["runNo"] = 0;
         bee["subRunNo"] = 0;
         bee["eventNo"] = 0;
@@ -139,6 +141,7 @@ namespace {
         if (file.is_open()) {
             Json::StreamWriterBuilder writer;
             writer["indentation"] = "    ";
+            writer["precision"] = 6;  // significant digits
             std::unique_ptr<Json::StreamWriter> jsonWriter(writer.newStreamWriter());
             jsonWriter->write(bee, &file);
             file.close();
@@ -158,25 +161,11 @@ namespace {
         float y;
     };
 
-    bool anglular_less(const Point2D& a, const Point2D& b, const Point2D& center)
+    bool angular_less(const Point2D& a, const Point2D& b, const Point2D& center)
     {
-        if (a.x - center.x >= 0 && b.x - center.x < 0) return true;
-        if (a.x - center.x < 0 && b.x - center.x >= 0) return false;
-        if (a.x - center.x == 0 && b.x - center.x == 0) {
-            if (a.y - center.y >= 0 || b.y - center.y >= 0) return a.y > b.y;
-            return b.y > a.y;
-        }
-
-        // compute the cross product of vectors (center -> a) x (center -> b)
-        int det = (a.x - center.x) * (b.y - center.y) - (b.x - center.x) * (a.y - center.y);
-        if (det < 0) return true;
-        if (det > 0) return false;
-
-        // points a and b are on the same line from the center
-        // check which point is closer to the center
-        int d1 = (a.x - center.x) * (a.x - center.x) + (a.y - center.y) * (a.y - center.y);
-        int d2 = (b.x - center.x) * (b.x - center.x) + (b.y - center.y) * (b.y - center.y);
-        return d1 > d2;
+        double angleA = std::atan2(a.y - center.y, a.x - center.x);
+        double angleB = std::atan2(b.y - center.y, b.x - center.x);
+        return angleA < angleB;
     }
 
     std::vector<Point2D> sort_angular(const std::vector<Point2D>& points)
@@ -195,10 +184,44 @@ namespace {
 
         std::vector<Point2D> sorted = points;
         std::sort(sorted.begin(), sorted.end(),
-                  [&](const Point2D& a, const Point2D& b) { return anglular_less(a, b, center); });
+                  [&](const Point2D& a, const Point2D& b) { return angular_less(a, b, center); });
         return sorted;
     }
-
+    std::vector<Point2D> unique(const std::vector<Point2D>& points, const float tolerance = 0.1)
+    {
+        auto less_with_tolerance = [&](const Point2D& a, const Point2D& b) {
+            if (std::abs(a.x - b.x) > tolerance) return a.x < b.x;
+            if (std::abs(a.y - b.y) > tolerance) return a.y < b.y;
+            return false;
+        };
+        std::set<Point2D, decltype(less_with_tolerance)> unique_points(less_with_tolerance);
+        for (const auto& point : points) {
+            unique_points.insert(point);
+        }
+        std::vector<Point2D> unique_points_vec;
+        for (const auto& point : unique_points) {
+            unique_points_vec.push_back(point);
+        }
+        return unique_points_vec;
+    }
+#if 0
+    bool valid(const std::vector<Point2D>& points, const float threshold = 1.)
+    {
+        if (points.size() < 3) return false;
+        float min_x = points[0].x;
+        float max_x = points[0].x;
+        float min_y = points[0].y;
+        float max_y = points[0].y;
+        for (const auto& point : points) {
+            if (point.x < min_x) min_x = point.x;
+            if (point.x > max_x) max_x = point.x;
+            if (point.y < min_y) min_y = point.y;
+            if (point.y > max_y) max_y = point.y;
+        }
+        if (max_x - min_x < threshold && max_y - min_y < threshold) return false;
+        return true;
+    }
+#endif
     void dumpe_deadarea(const Points::node_t& root, const std::string& fn)
     {
         using WireCell::PointCloud::Facade::float_t;
@@ -209,19 +232,26 @@ namespace {
         for (const auto cnode : root.children()) {
             for (const auto bnode : cnode->children()) {
                 const auto& lpcs = bnode->value.local_pcs();
-                const auto& pc_scalar = lpcs.at("corner");
-                const auto& y = pc_scalar.get("y")->elements<float_t>();
-                const auto& z = pc_scalar.get("z")->elements<float_t>();
+                const auto& pc_scalar = lpcs.at("scalar");
+                const auto& slice_index_min = pc_scalar.get("slice_index_min")->elements<int_t>()[0];
+                if (slice_index_min != 0) continue;
+                const auto& pc_corner = lpcs.at("corner");
+                const auto& y = pc_corner.get("y")->elements<float_t>();
+                const auto& z = pc_corner.get("z")->elements<float_t>();
                 std::vector<Point2D> points;
                 for (size_t i = 0; i < y.size(); ++i) {
-                    points.push_back({(float)y[i], (float)z[i]});
+                    points.push_back({(float) y[i] / (float) units::cm, (float) z[i] / (float) units::cm});
                 }
-                auto sorted = sort_angular(points);
+                // Remove duplicate points with xxx cm tolerance
+                auto unique_points = unique(points, 0.1);
+                // if (!valid(unique_points, 1.0)) continue;
+                if (unique_points.size() < 3) continue;
+                auto sorted = sort_angular(unique_points);
                 Json::Value jarea(Json::arrayValue);
                 for (const auto& point : sorted) {
                     Json::Value jpoint(Json::arrayValue);
-                    jpoint.append(point.x / units::cm);
-                    jpoint.append(point.y / units::cm);
+                    jpoint.append(point.x);
+                    jpoint.append(point.y);
                     jarea.append(jpoint);
                 }
                 jdead.append(jarea);
@@ -231,7 +261,14 @@ namespace {
         // Output jsonArray to file
         std::ofstream file(fn);
         if (file.is_open()) {
-            file << jdead.toStyledString();
+            Json::StreamWriterBuilder builder;
+            builder.settings_["indentation"] = "    ";
+            builder.settings_["precision"] = 6;  // significant digits
+            // option available in jsoncpp 1.9.0
+            // https://github.com/open-source-parsers/jsoncpp/blob/1.9.0/src/lib_json/json_writer.cpp#L128
+            // builder.settings_["precisionType"] = "decimal";
+            std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
+            writer->write(jdead, &file);
             file.close();
         }
         else {
@@ -239,6 +276,46 @@ namespace {
         }
     }
 }  // namespace
+
+struct Perf {
+    bool enable;
+    Log::logptr_t log;
+    ExecMon em;
+
+    Perf(bool e, Log::logptr_t l, const std::string& t = "starting MultiAlgBlobClustering")
+      : enable(e)
+      , log(l)
+      , em(t)
+    {
+    }
+
+    ~Perf()
+    {
+        if (!enable) return;
+        log->debug("MultiAlgBlobClustering performance summary:\n{}", em.summary());
+    }
+
+    void operator()(const std::string& ctx)
+    {
+        if (!enable) return;
+        em(ctx);
+    }
+
+    void dump(const std::string& ctx, const Grouping& grouping, bool shallow = true, bool mon = true)
+    {
+        if (!enable) return;
+        if (mon) (*this)(ctx);
+        log->debug("{} grouping {}", ctx, grouping);
+        if (shallow) return;
+        auto children = grouping.children();  // copy
+        sort_clusters(children);
+        size_t count = 0;
+        for (const auto* cluster : children) {
+            bool sane = cluster->sanity(log);
+            log->debug("{} cluster {} {} sane:{}", ctx, count++, *cluster, sane);
+        }
+    }
+};
 
 bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointer& outts)
 {
@@ -248,8 +325,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         return true;
     }
 
-    bool flag_print = false;
-    ExecMon em("starting MultiAlgBlobClustering");
+    Perf perf{m_perf, log};
 
     const int ident = ints->ident();
     std::string inpath = m_inpath;
@@ -258,178 +334,116 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
     const auto& intens = *ints->tensors();
-    log->debug("Input {} tensors", intens.size());
     auto root_live = std::move(as_pctree(intens, inpath + "/live"));
     if (!root_live) {
-        log->error("Failed to get point cloud tree from \"{}\"", inpath);
-        return false;
+        log->error("Failed to get dead point cloud tree from \"{}\"", inpath);
+        raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inpath);
     }
-    log->debug("Got live pctree with {} children", root_live->nchildren());
-    log->debug(em("got live pctree"));
+    perf("loaded live clusters");
 
+    // log->debug("Got live pctree with {} children", root_live->nchildren());
+    // log->debug(em("got live pctree"));
     auto root_dead = as_pctree(intens, inpath + "/dead");
     if (!root_dead) {
-        log->error("Failed to get point cloud tree from \"{}\"", inpath + "/dead");
-        return false;
+        log->error("Failed to get dead point cloud tree from \"{}\"", inpath + "/dead");
+        raise<ValueError>("Failed to get dead point cloud tree from \"%s\"", inpath);
     }
-    log->debug("Got dead pctree with {} children", root_dead->nchildren());
-    log->debug(em("got dead pctree"));
+    perf("loaded dead clusters");
 
     // BEE debug direct imaging output and dead blobs
     if (!m_bee_dir.empty()) {
         std::string sub_dir = String::format("%s/%d", m_bee_dir, ident);
         Persist::assuredir(sub_dir);
         dump_bee(*root_live.get(), String::format("%s/%d-img.json", sub_dir, ident));
-        dumpe_deadarea(*root_dead.get(), String::format("%s/%d-channel-deadarea.json", sub_dir, ident));
+        if (m_save_deadarea) {
+            dumpe_deadarea(*root_dead.get(), String::format("%s/%d-channel-deadarea.json", sub_dir, ident));
+        }
+        perf("loaded dump live clusters to bee");
     }
-    log->debug(em("dump live+dead to bee"));
 
-    if (flag_print) std::cout << em("Finish PC/Facade Conversion ") << std::endl;
-    
-    /// TODO: how to pass the parameters? for now, using default params
-    WireCell::PointCloud::Facade::TPCParams tp;
+    cluster_set_t cluster_connected_dead;
 
-    // Calculate the length of all the clusters and save them into a map
-    std::map<const Cluster::const_pointer, double> cluster_length_map;
-    std::set<Cluster::const_pointer > cluster_connected_dead;
-    
     // initialize clusters ...
-    live_clusters_t live_clusters;
-    for (auto cnode : root_live->children()) {
-        live_clusters.push_back(std::make_shared<Cluster>(cnode));
-    }
-    log->debug(em("make live clusters"));
+    Grouping& live_grouping = *root_live->value.facade<Grouping>();
+    Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
 
-    {  // ATTENTION, this block is just for debugging.
-        // This is here just to trigger k-d tree building so that we can separate
-        // that out its time/memory from those of the first algorithm
-        size_t npts=0;
-        for (const auto& cl : live_clusters) {
-            cl->get_closest_point_mcell(geo_point_t(0,0,0));
-            npts += cl->get_num_points();
-        }
-        log->debug("made {} live clusters with {} points", live_clusters.size(), npts);
-        log->debug(em("make live k-d tree"));
-    }
-
-    // loop over all the clusters, and calculate length ...
-    for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-        const auto& live = live_clusters[ilive];
-        cluster_length_map[live] = live->get_length(tp);
-        // std::cout << ilive << " xin " << live->get_length(tp)/units::cm << std::endl;
-    }
-    log->debug(em("get live lengths"));
-    
-    Cluster::const_vector dead_clusters;
-    for (auto cnode : root_dead->children()) {
-        dead_clusters.push_back(std::make_shared<Cluster>(cnode));
-    }
-    log->debug(em("make dead clusters"));
-
-    {                           // trigger k-d tree building early for perf testing
-        size_t npts=0;
-        for (const auto& cl : dead_clusters) {
-            cl->get_closest_point_mcell(geo_point_t(0,0,0));
-            npts += cl->get_num_points();
-        }
-        log->debug("made {} dead clusters with {} points", dead_clusters.size(), npts);
-        log->debug(em("make dead k-d tree"));
-    }
+    perf.dump("original live clusters", live_grouping, false, false);
+    perf.dump("original dead clusters", dead_grouping, false, false);
 
     // dead_live
-    clustering_live_dead(root_live, live_clusters, dead_clusters, cluster_length_map, cluster_connected_dead, tp,
-                         m_dead_live_overlap_offset);
-    log->debug(em("clustering_live_dead"));
+    clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
+    perf.dump("clustering live-dead", live_grouping);
 
-    if (flag_print) std::cout << em("live_dead") << std::endl;
     // second function ...
-    clustering_extend(root_live, live_clusters, cluster_length_map, cluster_connected_dead, tp, 4,60*units::cm,0,15*units::cm,1 );
-    log->debug(em("clustering_extend"));
-    if (flag_print) std::cout << em("first extend") << std::endl;
-    
+    clustering_extend(live_grouping, cluster_connected_dead, 4, 60 * units::cm, 0, 15 * units::cm, 1);
+    perf.dump("clustering extend", live_grouping);
+
     // first round clustering
-    clustering_regular(root_live, live_clusters, cluster_length_map,cluster_connected_dead,tp, 60*units::cm, false);
-    log->debug(em("clustering_regular 1st"));
-    if (flag_print) std::cout << em("1st regular") << std::endl;
-    clustering_regular(root_live, live_clusters, cluster_length_map,cluster_connected_dead,tp, 30*units::cm, true); // do extension
-    log->debug(em("clustering_regular 2nd"));
-    if (flag_print) std::cout << em("2nd regular") << std::endl;
+    clustering_regular(live_grouping, cluster_connected_dead, 60 * units::cm, false);
+    perf.dump("clustering regular no extension", live_grouping);
 
-    
-    //dedicated one dealing with parallel and prolonged track
-    clustering_parallel_prolong(root_live, live_clusters, cluster_length_map,cluster_connected_dead,tp,35*units::cm);
-    log->debug(em("clustering_parallel_prolong"));
-    if (flag_print) std::cout << em("parallel prolong") << std::endl;
-    
-    //clustering close distance ones ... 
-    clustering_close(root_live, live_clusters, cluster_length_map,cluster_connected_dead,tp, 1.2*units::cm);
-    log->debug(em("clustering_close"));
-    if (flag_print) std::cout << em("close") << std::endl;
-    
+    clustering_regular(live_grouping, cluster_connected_dead, 30 * units::cm, true);  // do extension
+    perf.dump("clustering regular with extension", live_grouping);
 
-    int num_try =3;
-    // for very busy events do less ... 
-    if (live_clusters.size() > 1100 ) num_try = 1;
-    for (int i=0;i!= num_try ;i++){
-      //extend the track ...
-      // deal with prolong case
-      clustering_extend(root_live,live_clusters, cluster_length_map,cluster_connected_dead,tp,1,150*units::cm,0);
-      log->debug(em("clustering_extend prolong"));
-      if (flag_print) std::cout << em("extend prolong") << std::endl;
-      // deal with parallel case 
-      clustering_extend(root_live,live_clusters, cluster_length_map,cluster_connected_dead,tp,2,30*units::cm,0);
-      log->debug(em("clustering_extend parallel"));
-      if (flag_print) std::cout << em("extend parallel") << std::endl;
-      
-      
-      // extension regular case
-      clustering_extend(root_live,live_clusters, cluster_length_map,cluster_connected_dead,tp,3,15*units::cm,0);
-      log->debug(em("clustering_extend regular"));
-      
-      if (flag_print) std::cout << i << std::endl;
-      
-      if (flag_print) std::cout << em("extend regular") << std::endl;
-      // extension ones connected to dead region ...
-      if (i==0){
-	clustering_extend(root_live,live_clusters, cluster_length_map,cluster_connected_dead,tp,4,60*units::cm,i);
-      }else{
-	clustering_extend(root_live,live_clusters, cluster_length_map,cluster_connected_dead,tp,4,35*units::cm,i);
-      }
-      log->debug(em("clustering_extend dead"));
-      if (flag_print) std::cout << em("extend dead") << std::endl;
+    // dedicated one dealing with parallel and prolonged track
+    clustering_parallel_prolong(live_grouping, cluster_connected_dead, 35 * units::cm);
+    perf.dump("clustering parallel prolong", live_grouping);
+
+    // clustering close distance ones ...
+    clustering_close(live_grouping, cluster_connected_dead, 1.2 * units::cm);
+    perf.dump("clustering close", live_grouping);
+
+    int num_try = 3;
+    // for very busy events do less ...
+    if (live_grouping.nchildren() > 1100) num_try = 1;
+    for (int i = 0; i != num_try; i++) {
+        // extend the track ...
+
+        // deal with prolong case
+        clustering_extend(live_grouping, cluster_connected_dead, 1, 150 * units::cm, 0);
+        perf.dump("clustering extend 1", live_grouping);
+
+        // deal with parallel case
+        clustering_extend(live_grouping, cluster_connected_dead, 2, 30 * units::cm, 0);
+        perf.dump("clustering extend 2", live_grouping);
+
+        // extension regular case
+        clustering_extend(live_grouping, cluster_connected_dead, 3, 15 * units::cm, 0);
+        perf.dump("clustering extend 3", live_grouping);
+
+        // extension ones connected to dead region ...
+        if (i == 0) {
+            clustering_extend(live_grouping, cluster_connected_dead, 4, 60 * units::cm, i);
+        }
+        else {
+            clustering_extend(live_grouping, cluster_connected_dead, 4, 35 * units::cm, i);
+        }
+        perf.dump("clustering extend 4", live_grouping);
     }
-        
+
     // BEE debug dead-live
     if (!m_bee_dir.empty()) {
         std::string sub_dir = String::format("%s/%d", m_bee_dir, ident);
         dump_bee(*root_live.get(), String::format("%s/%d-dead-live.json", sub_dir, ident));
+        perf("dump live clusters to bee");
     }
-    log->debug(em("dump bee dead-live"));
 
     std::string outpath = m_outpath;
     if (outpath.find("%") != std::string::npos) {
         outpath = String::format(outpath, ident);
     }
     auto outtens = as_tensors(*root_live.get(), outpath + "/live");
-    log->debug(em("as tensors live"));
-
+    perf("output live clusters to tensors");
     auto outtens_dead = as_tensors(*root_dead.get(), outpath + "/dead");
-    log->debug(em("as tensors dead"));
-
-    if (flag_print) std::cout << em("dump bee") << std::endl;
-    
+    perf("output dead clusters to tensors");
     // Merge
     outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
-    log->debug("Total outtens {} tensors", outtens.size());
     outts = as_tensorset(outtens, ident);
-    log->debug(em("as tensors set output"));
+    perf("combine tensors");
 
-    live_clusters.clear();
-    dead_clusters.clear();
     root_live = nullptr;
     root_dead = nullptr;
-
-    log->debug(em("clear memory"));
+    perf("clear pc tree memory");
 
     return true;
 }

@@ -23,6 +23,7 @@ TEST_CASE("bee dead area") {
         jsonArray.append(one); // Add each parsed JSON object to the array
     }
 
-    // Print the JSON array
-    std::cout << jsonArray.toStyledString() << std::endl;
+    // Print the JSON array.
+    //// -- no, don't leave prints in tests! instead, sprinkle CHECK()'s (bv)
+    // std::cout << jsonArray.toStyledString() << std::endl;
 }

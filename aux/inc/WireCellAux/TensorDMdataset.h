@@ -49,6 +49,9 @@ namespace WireCell::Aux::TensorDM {
     PointCloud::Dataset as_dataset(const TensorIndex& tensors,
                                    const std::string& datapath="",
                                    bool share=false);
+    PointCloud::Dataset as_dataset(const TensorIndex& tensors,
+                                   ITensor::pointer top,
+                                   bool share=false);
 
     /// Convenience function calling above using the tensors from the
     /// ITensorSet.  Note the dataset level metadata is taken from the

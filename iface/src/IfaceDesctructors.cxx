@@ -95,6 +95,7 @@
 #include "WireCellIface/IStripeSet.h"
 #include "WireCellIface/ITensorForward.h"
 #include "WireCellIface/ITensorPacker.h"
+#include "WireCellIface/ITensorSetFanin.h"
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/ITensorSetUnpacker.h"
 #include "WireCellIface/ITerminal.h"
@@ -199,6 +200,7 @@ IStripe::~IStripe() {}
 IStripeSet::~IStripeSet() {}
 ITensorForward::~ITensorForward() {}
 ITensorPacker::~ITensorPacker() {}
+ITensorSetFanin::~ITensorSetFanin() {}
 ITensorSetFilter::~ITensorSetFilter() {}
 ITensorSetUnpacker::~ITensorSetUnpacker() {}
 ITerminal::~ITerminal() {}

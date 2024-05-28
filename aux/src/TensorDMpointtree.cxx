@@ -31,45 +31,89 @@ WireCell::Aux::TensorDM::as_pcnamedset(const TensorIndex& ti, const std::string&
     return ret;
 }
 
+// Type for storing the parentage indices.
+using parentage_index_type = int;
+// Type for major axis size of local PCs.  2 gigapoints is enough for anyone.
+using lpcmaps_index_type = int;
+
 
 ITensor::vector WireCell::Aux::TensorDM::as_tensors(
     const WireCell::PointCloud::Tree::Points::node_t& root,
-    const std::string& datapath,
-    const std::string& parent_datapath)
+    const std::string& datapath)
 {
-    // Metadata for "this" node, returned with first tensor
+    auto descent = root.depth();
+
+    // Lookup from node to index.
+    std::unordered_map<const WireCell::PointCloud::Tree::Points::node_t*, size_t> nodesindex;
+
+    // Store the flattened tree structure.  Each element represents a node in
+    // the DFS order and holds index representing parent or self-index if root.
+    std::vector<parentage_index_type> parentage;
+
+    // Concatenated local point clouds in DFS order.  Key is PC name.
+    PointCloud::Tree::named_pointclouds_t pointclouds;
+
+    // Sizes of local PC contribution to the pointclouds.  Key is PC name.  Will
+    // become a pcdataset.
+    std::map<std::string, std::vector<lpcmaps_index_type>> lpcmaps;
+
+    // Visit each node in tree in depth-first descent order.
+    for (const auto& noderef : descent) {
+        const auto* node = &noderef;
+        const size_t index = nodesindex.size();
+        nodesindex[node] = index;
+
+        // Extend parentage map
+        parentage.resize(index + 1);
+        if (node->parent) {
+            // DFS: we've already seen this parent so no need to find().
+            parentage[index] = nodesindex[node->parent];
+        }
+        else {
+            // No parent, root nodes have their own self as "parent".
+            parentage[index] = index;
+        }
+
+        // Extend pointclouds and lpcmaps
+        for (const auto& [pcname,pcds] : node->value.local_pcs()) {
+            auto& lpcmap = lpcmaps[pcname];
+            lpcmap.resize(index + 1, 0);
+            lpcmap[index] = pcds.size_major();
+
+            auto& cpc = pointclouds[pcname];
+            cpc.append(pcds);
+        }
+    }
+
+    // Metadata for the pctree.
     Configuration md;
     md["datapath"] = datapath;
-    md["datatype"] = "pctreenode";
-    // datapath to parent tensor
-    md["parent"] = parent_datapath;
-    // list of datapaths to children tensors
-    md["children"] = Json::arrayValue;
-    // datapath to pcnamedset holding any local PCs
+    md["datatype"] = "pctree";
+    // datapath to pcnamedset holding the concatenated local PC
     md["pointclouds"] = "";
+    // datapath to pcdataset holding the local PC size maps
+    md["lpcmaps"] = "";
 
     ITensor::vector ret;
     ret.push_back(nullptr);     // fill in below
 
-    const auto& lpcs = root.value.local_pcs();
-    if (lpcs.size()) {
-        auto tens = pcnamedset_as_tensors(lpcs.begin(), lpcs.end(),
+    if (pointclouds.size()) {
+        auto tens = pcnamedset_as_tensors(pointclouds.begin(), pointclouds.end(),
                                           datapath + "/pointclouds");
         md["pointclouds"] = tens[0]->metadata()["datapath"];
         ret.insert(ret.end(), tens.begin(), tens.end());
-    }
 
-    size_t nchild = 0;
-    for (const auto& node : root.child_nodes()) {
-        std::string childpath = datapath + "/" + std::to_string(nchild);
-        ++nchild;
-        auto tens = as_tensors(node, childpath, datapath); // recur
-        md["children"].append(tens[0]->metadata()["datapath"]);
-
+        PointCloud::Dataset ds;
+        for (auto& [pcname, lpcmap] : lpcmaps) {
+            ds.add(pcname, PointCloud::Array(lpcmap));
+        }
+        tens = as_tensors(ds, datapath + "/lpcmaps");
+        md["lpcmaps"] = tens[0]->metadata()["datapath"];
         ret.insert(ret.end(), tens.begin(), tens.end());
     }
 
-    ret[0] = std::make_shared<SimpleTensor>(md);
+    ITensor::shape_t shape = { parentage.size() };
+    ret[0] = std::make_shared<SimpleTensor>(shape, parentage.data(), md);
     return ret;
 }
 
@@ -87,44 +131,54 @@ WireCell::Aux::TensorDM::as_pctree(const TensorIndex& ti,
 {
     using WireCell::PointCloud::Tree::Points;
 
-    std::unordered_map<std::string, Points::node_t*> nodes_by_datapath;
-    Points::node_t::owned_ptr root;
+    auto top = ti.at(datapath, "pctree");
+    const auto parentage = reinterpret_cast<const parentage_index_type*>(top->data());
+    const size_t nnodes = top->size() / sizeof(parentage_index_type);
 
-    std::function<void(const std::string& dpath)> dochildren;
-    dochildren = [&](const std::string& dpath) -> void {
+    std::vector<Points::node_t*> nodes;
 
-        auto top = ti.at(dpath, "pctreenode");
-
-        auto const& md = top->metadata();        
-
-        named_pointclouds_t pcns;
-        if (! md["pointclouds"].asString().empty() ) {
-            pcns = as_pcnamedset(ti, md["pointclouds"].asString());
+    // Build the tree
+    Points::node_t::owned_ptr root = std::make_unique<Points::node_t>();
+    nodes.push_back(root.get());
+    for (size_t index=1; index<nnodes; ++index) {
+        size_t parent_index = parentage[index];
+        if (parent_index == index) {
+            // while multi-root trees are supported in general, this function
+            // only returns the first.
+            break;
         }
+        auto* parent = nodes[parent_index];
+        auto* node = parent->insert();
+        nodes.push_back(node);
+    }
 
-        std::string ppath = md["parent"].asString();
-        if ( ppath.empty() ) {
-            if (root) {
-                raise<ValueError>("more than one root in pctree encountered");
+    auto const& md = top->metadata();        
+    auto pointclouds = as_pcnamedset(ti, md["pointclouds"].asString());
+    auto lpcmaps_ds = as_dataset(ti, md["lpcmaps"].asString());
+
+    // Loop cross product of (PC name,node)
+    for (const auto& [pcname, pcds] : pointclouds) {
+
+        // Get local PC map vector as a span on DS array.
+        auto lpcmap = lpcmaps_ds.get(pcname)->elements<lpcmaps_index_type>();
+
+        // Count number of points seen as we walk through the node list.
+        int offset = 0;
+        for (size_t index=0; index < nnodes; ++index) {
+            const int npoints = lpcmap[index];
+            if (!npoints) {
+                continue;       // omit an empty local PC
             }
-            root = std::make_unique<Points::node_t>(Points(pcns));
-            nodes_by_datapath[dpath] = root.get();
-        }
-        else {
+            
+            auto node = nodes[index];
 
-            auto* parent = nodes_by_datapath[ppath];
-            if (!parent) {
-                raise<ValueError>("failed to find parent for \"%s\"", ppath);
-            }
-            auto* node = parent->insert(Points(pcns));
-            nodes_by_datapath[dpath] = node;
-        }
+            // make the local PC from slice of the aggregate.
+            auto& lpcs = node->value.local_pcs();
+            lpcs[pcname] = pcds.slice(offset, npoints);
 
-        for (auto const& jcpath : md["children"]) {
-            dochildren(jcpath.asString());
+            offset += npoints;
         }
-    };
-    dochildren(datapath);
-        
+    }
+
     return root;
 }

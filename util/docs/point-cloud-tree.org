@@ -4,9 +4,9 @@
 * Conceptual Overview
 
 In WCT, a /point cloud tree/ (pctree) builds upon the N-ary tree (see
-[[file:nary-tree.org]]) by providing a node value type that holds a set of
-/point clouds/ (PCs, see [[file:point-cloud.org]]) that are referenced by
-key names.
+[[file:nary-tree.org]]) by providing a node value type that holds a set of /point
+clouds/ (PCs, see [[file:point-cloud.org]]) that are referenced by key names.  The
+value type also provides the ability to produce a facade.
 
 The PCs of a given name held locally by a set of nodes may be
 aggregated into a larger PC by requesting it by the same name through

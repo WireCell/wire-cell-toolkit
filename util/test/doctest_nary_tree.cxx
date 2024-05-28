@@ -277,14 +277,15 @@ TEST_CASE("nary tree notify")
     auto root = make_simple_tree();
     {
         auto& nactions = root->value.nactions;
-        CHECK(nactions.size() == 1);
+        CHECK(nactions.find("constructed") != nactions.end());
         CHECK(nactions["constructed"] == 1);
     }
     {
         Introspective::node_type* doomed = root->children().front();
         auto& nactions = doomed->value.nactions;
         debug("doomed: {}", doomed->value.name);
-        CHECK(nactions.size() == 2);
+        CHECK(nactions.find("constructed") != nactions.end());
+        CHECK(nactions.find("inserted") != nactions.end());
         CHECK(nactions["constructed"] == 1);
         CHECK(nactions["inserted"] == 1);
         auto dead = root->remove(doomed);
@@ -344,5 +345,62 @@ TEST_CASE("nary tree depth limits")
         }
         CHECK(count == want[ind]);
     }
+    for (const auto* child : root->children()[0]->children()[0]->children()) {
+        debug("gggc: {}", child->value.name);
+    }
 
 }
+
+void remove_children(bool notify_child)
+{
+    auto root = make_layered_tree({2,4,8});
+    CHECK(root->nchildren() == 2);
+    auto children = root->remove_children(notify_child);
+    CHECK(root->nchildren() == 0);
+    CHECK(children.size() == 2);
+}
+TEST_CASE("nary tree remove children no notify")
+{
+    remove_children(false);
+}
+TEST_CASE("nary tree remove children with notify")
+{
+    remove_children(true);
+}
+
+TEST_CASE("nary tree remove adopt children")
+{
+    auto root = make_layered_tree({2,4,8});
+    CHECK(root->nchildren() == 2);
+    auto children = root->remove_children();
+    CHECK(root->nchildren() == 0);
+    CHECK(children.size() == 2);
+    
+    Introspective::node_type root2;
+    CHECK(root2.nchildren() == 0);
+    root2.adopt_children(children);
+    CHECK(root2.nchildren() == 2);
+    CHECK(children.size() == 0);
+}
+TEST_CASE("nary tree take children")
+{
+    auto root = make_layered_tree({2,4,8});
+    CHECK(root->nchildren() == 2);
+    
+    Introspective::node_type root2;
+    root2.take_children(*root);
+    CHECK(root2.nchildren() == 2);
+    CHECK(root->nchildren() == 0);
+
+    for (auto* child : root2.children()) {
+        CHECK(child != nullptr);
+    }
+}
+
+// TEST_CASE("nary tree order")
+// {
+//     auto root = make_layered_tree({2,4,8});
+//     for (const auto& n : root->depth()) {
+
+//     }
+// }

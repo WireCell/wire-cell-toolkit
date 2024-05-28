@@ -69,25 +69,53 @@ respectively.
 
 * Notification
 
-The ~Value~ of a ~Node~ will be informed of major state changes in the
-~Node~ that is holding it if the following method is defined:
+The ~Value~ of a ~Node~ will be informed of major state changes in the ~Node~ that is holding the ~Value~ if the ~Value~ defines a method matching this signature:
 
 #+begin_example
-void Value::notify(Node<Value>* node, const std::string& action);
+void Value::notify(Node<Value>* node, Action action);
 #+end_example
 
-The ~action~ string determines the state change:
+The ~action~ is an enum determines the state change:
 
 - *constructed* :: the node was just constructed.  
 - inserted :: the node is a child that was just inserted to a parent.  
 - removing :: the node is a child that will next be removed from its parent.
 
-If an insert is performed by value copy or move then a "constructed"
-action will be notified in addition and prior to the "inserted".
-
 The ~Value~ type may wish to propagate notifications up the parentage.
 For example, to freshen or invalidate caches held by a parent and that
 span child nodes.
 
-The ~NaryTree::Notified~ class provides a base class for a ~Value~ type
-that helps dispatch actions.
+The ~NaryTree::Notified<Value>~ class defined in ~NaryTreeNotified.h~ provides a base class for a ~Value~ type
+([[https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern][CRTP]]) that helps dispatch an action by hits value to a matching method call.
+A ~Value~ type may inherit from this type and define zero or more of these methods:
+
+#+begin_src c++
+virtual void on_construct(node_type* node);
+virtual bool on_insert(const std::vector<node_type*>& path);
+virtual bool on_remove(const std::vector<node_type*>& path);
+#+end_src
+The ~path~ argument gives the tree path to the node that triggered the notification.
+
+* Facade
+
+The ~NaryTree::~ name space provides additional classes to facilitate building a tree of nodes with some heterogeneity of ~Value~ types.  It does this through the idea of a "facade" which represents some code that is "attached" to a node.  Code that is both external or internal to *facade*, *value* and *node* can all inter-navigate between these objects.  A facade instance is held by ~std::unique_ptr~.  This means the lifetime of the facade is bound to that of the node (and the value).  It also means the facade may be of a polymorphic type and this is what allows for heterogeneity of type across the tree nodes.  Note, these all follow the CRTP.
+
+- ~Facade<Value>~ is a ~Notified<Value>~ and will use the ~on_construct()~ notification to collect the node pointer and make it available to external code or a sub class.
+
+- ~Faced<Value>~ functionality to hold a facade instance.  A ~Value~ that inherits from this type enables a tree nodes to hold a variety of unique facade types inheriting from ~Facade<Value>~.  A ~Faced~ is itself a ~Facade~ which, in principle, allows for chaining of types.
+
+- ~FacadeParent<Child,Value>~ base is a ~Facade<Value>~ that provides code to deal with its node's child nodes via their ~Facade<Child>~ types.  A tree using this facade can be seen as homogeneous across each layer and heterogeneous down the layers.
+Putting this together, here is an example excerpted from ~doctest-pointtree-facade.cxx~ with ~L0~ providing the type of facade for the root layer node, ~L1~ the middle layer and ~L2~ the leaf layer.
+
+#+begin_src c++
+  struct Value : public Faced<Value> { ... };
+  struct L2 : public Facade<Value> { ... };
+  struct L1 : public FacadeParent<L2, Value> { ... };
+  struct L0 : public FacadeParent<L1, Value> { ... };
+
+  auto root = build_tree();
+  auto* l0 = root->facade<L0>();
+  auto* l1 = l0->children()[0];    // an L1 facade
+  auto* l2 = l1->children()[0];    // an L2 facade
+#+end_src
+
