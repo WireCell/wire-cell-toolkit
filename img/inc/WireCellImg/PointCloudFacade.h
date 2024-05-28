@@ -10,6 +10,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 
+#include <boost/graph/adjacency_list.hpp>
+
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
 namespace WireCell::PointCloud::Facade {
@@ -20,6 +22,8 @@ namespace WireCell::PointCloud::Facade {
     using geo_vector_t = WireCell::Vector;
 
     // FIXME: why define these out?
+    // Haiwang: these are to make changing the underlying types easier and more consistent.
+    // Probably need to move this to a better place.
     using float_t = double;
     using int_t = int;
 
@@ -102,10 +106,25 @@ namespace WireCell::PointCloud::Facade {
 
     class Grouping;
 
+    struct VertexProp {
+        int index;
+        // WCPointCloud<double>::WCPoint wcpoint;
+        //  add pointer to merged cell
+    };
+    struct EdgeProp {
+        float dist;  // edge distance
+    };
+
+    using namespace boost;
+    typedef adjacency_list<vecS, vecS, undirectedS, VertexProp, EdgeProp> MCUGraph;
+    typedef graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
+    typedef graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
+
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
     class Cluster : public NaryTree::FacadeParent<Blob, points_t> {
         // The expected scope.
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
+        const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
 
        public:
         Cluster() = default;
@@ -246,6 +265,16 @@ namespace WireCell::PointCloud::Facade {
 
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
+        
+        // FIXME: move to private after debugging
+        // graph
+        MCUGraph* graph;
+        void Create_graph();
+        void Establish_close_connected_graph();
+        
+        // TODO: relying on scoped_view to do the caching?
+        using wire_indices_t = std::vector<std::vector<int_t>>;
+        const wire_indices_t& wire_indices();
 
        private:
         // start slice index (tick number) to blob facade pointer can be
@@ -255,6 +284,10 @@ namespace WireCell::PointCloud::Facade {
         using time_blob_map_t = std::multimap<int, const Blob*>;
         const time_blob_map_t& time_blob_map() const;
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
+
+        std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
+        std::vector<int> get_blob_indices(const Blob*);
+
 
         // Cached and lazily calculated in get_length().
         // Getting a new node invalidates by setting to 0.

@@ -256,6 +256,18 @@ size_t Cluster::nbpoints() const
     return ret;
 }
 
+const Cluster::wire_indices_t& Cluster::wire_indices()
+{
+    const auto& sv = m_node->value.scoped_view<int_t>(scope_wire_index);
+    const auto& skd = sv.kd();
+    const auto& points = skd.points();
+    std::cout
+    << "points size: " << points.size()
+    << " points[0] size: " << points[0].size()
+    << std::endl;
+    return points;
+}
+
 int Cluster::nnearby(const geo_point_t& point, double radius) const
 {
     auto res = kd_radius(radius, point);
@@ -804,6 +816,82 @@ size_t Cluster::hash() const
         boost::hash_combine(h, blob->hash());
     }
     return h;
+}
+
+std::vector<int> Cluster::get_blob_indices(const Blob* blob)
+{
+    if (m_map_mcell_indices.empty()) {
+        const auto& skd = kd3d();
+        for (size_t ind = 0; ind < skd.npoints(); ++ind) {
+            const auto* blob = blob_with_point(ind);
+            m_map_mcell_indices[blob].push_back(ind);
+        }
+    }
+    return m_map_mcell_indices[blob];
+}
+
+void Cluster::Create_graph()
+{
+    std::cout << "Create Graph! " << graph << std::endl;
+    if (graph != (MCUGraph*) 0) return;
+    graph = new MCUGraph(nbpoints());
+    Establish_close_connected_graph();
+}
+
+void Cluster::Establish_close_connected_graph() {
+
+    std::map<Blob*, std::map<int, std::set<int>>> map_mcell_uindex_wcps;
+    std::map<Blob*, std::map<int, std::set<int>>> map_mcell_vindex_wcps;
+    std::map<Blob*, std::map<int, std::set<int>>> map_mcell_windex_wcps;
+
+    std::map<Blob*, std::set<int>> map_mcell_indices;
+
+    const auto& points = this->points();
+    const auto& winds = this->wire_indices();
+    std::cout
+    << "points[0].size(): " << points[0].size()
+    << " winds[0].size(): " << winds[0].size()
+     << std::endl;
+    for (Blob* mcell : children()) {
+        std::map<int, std::set<int>> map_uindex_wcps;
+        std::map<int, std::set<int>> map_vindex_wcps;
+        std::map<int, std::set<int>> map_windex_wcps;
+
+        std::vector<int> pinds = get_blob_indices(mcell);
+        for (int pind : pinds) {
+            auto v = vertex(pind, *graph);  // retrieve vertex descriptor
+            (*graph)[v].index = pind;
+            if (map_uindex_wcps.find(winds[0][pind]) == map_uindex_wcps.end()) {
+                std::set<int> wcps;
+                wcps.insert(pind);
+                map_uindex_wcps[winds[0][pind]] = wcps;
+            }
+            else {
+                map_uindex_wcps[winds[0][pind]].insert(pind);
+            }
+
+            if (map_vindex_wcps.find(winds[1][pind]) == map_vindex_wcps.end()) {
+                std::set<int> wcps;
+                wcps.insert(pind);
+                map_vindex_wcps[winds[1][pind]] = wcps;
+            }
+            else {
+                map_vindex_wcps[winds[1][pind]].insert(pind);
+            }
+
+            if (map_windex_wcps.find(winds[2][pind]) == map_windex_wcps.end()) {
+                std::set<int> wcps;
+                wcps.insert(pind);
+                map_windex_wcps[winds[2][pind]] = wcps;
+            }
+            else {
+                map_windex_wcps[winds[2][pind]].insert(pind);
+            }
+        }
+        map_mcell_uindex_wcps[mcell] = map_uindex_wcps;
+        map_mcell_vindex_wcps[mcell] = map_vindex_wcps;
+        map_mcell_windex_wcps[mcell] = map_windex_wcps;
+    }
 }
 
 size_t Grouping::hash() const

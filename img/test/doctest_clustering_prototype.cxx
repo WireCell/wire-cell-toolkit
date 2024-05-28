@@ -244,3 +244,42 @@ TEST_CASE("clustering facade")
     CHECK(num1 == 15);
     CHECK(num2 == 5);
 }
+
+
+static void print_MCUGraph(const MCUGraph& g) {
+    std::cout << "MCUGraph:" << std::endl;
+    std::cout << "Vertices: " << num_vertices(g) << std::endl;
+    std::cout << "Edges: " << num_edges(g) << std::endl;
+
+    std::cout << "Vertex Properties:" << std::endl;
+    auto vrange = boost::vertices(g);
+    for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+        auto v = *vit;
+        std::cout << "Vertex " << v << ": Index = " << g[v].index << std::endl;
+    }
+
+    std::cout << "Edge Properties:" << std::endl;
+    auto erange = boost::edges(g);
+    for (auto eit = erange.first; eit != erange.second; ++eit) {
+        auto e = *eit;
+        std::cout << "Edge " << e << ": Distance = " << g[e].dist << std::endl;
+    }
+}
+
+
+TEST_CASE("create cluster graph")
+{
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    REQUIRE(pccptr != nullptr);
+    REQUIRE(pccptr->grouping() == grouping);
+    Cluster& pcc = *pccptr;
+
+    CHECK(pcc.sanity());
+
+    pcc.Create_graph();
+    print_MCUGraph(*pcc.graph);
+}
