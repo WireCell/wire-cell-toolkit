@@ -52,15 +52,12 @@ void FrameFileSource::configure(const WireCell::Configuration& cfg)
     m_in.clear();
     input_filters(m_in, m_inname);
     if (m_in.size() < 1) {
-        THROW(ValueError() << errmsg{"FrameFileSource: unsupported inname: " + m_inname});
+        raise<ValueError>("FrameFileSource: unsupported inname: %s", m_inname);
     }
 
     m_tags.clear();
     for (auto jtag : cfg["tags"]) {
         m_tags.push_back(jtag.asString());
-    }
-    if (m_tags.empty()) {
-        m_tags.push_back("*");
     }
 
     m_frame_tags.clear();
@@ -69,12 +66,26 @@ void FrameFileSource::configure(const WireCell::Configuration& cfg)
     }
 }
 
-bool FrameFileSource::matches(const std::string& tag)
+bool FrameFileSource::is_excluded(const std::string& tag)
 {
+    if (is_tagged(tag)) return false;
+    if (is_untagged(tag)) return false;
+    return true;
+}
+
+bool FrameFileSource::is_untagged(const std::string& tag)
+{
+    return tag.empty() or tag == "*";
+}
+
+bool FrameFileSource::is_tagged(const std::string& tag)
+{
+    if (is_untagged(tag)) {
+        // avoid misinterpreting "" or "*" in m_tags
+        return false;
+    }
+
     for (const auto& maybe : m_tags) {
-        if (maybe == "*") {
-            return true;
-        }
         if (maybe == tag) {
             return true;
         }
@@ -106,6 +117,8 @@ bool FrameFileSource::read()
     m_cur.type = parts[0];
     m_cur.tag = parts[1];
     m_cur.ext = rparts[1];
+    log->debug("read type={} tag={} ident={} ext={} at call={}",
+               m_cur.type, m_cur.tag, m_cur.ident, m_cur.ext, m_count);
     return true;
 }
 
@@ -140,6 +153,8 @@ IFrame::pointer FrameFileSource::load()
     ChannelMaskMap cmm;
 
     while (true) {
+
+        // Loop over arrays, falling through until we recognize the array type.
 
         // fixme: throw on errors but return nullptr on EOF.
 
@@ -205,9 +220,8 @@ IFrame::pointer FrameFileSource::load()
             continue;
         }
     
-
-        if (! matches(m_cur.tag)) {
-            log->trace("call={}, skipping unmatched tag=\"{}\" file={}",
+        if (is_excluded(m_cur.tag)) {
+            log->debug("call={}, skipping tag=\"{}\" file={}",
                        m_count, m_cur.tag, m_inname);
             clear();
             continue;
@@ -316,7 +330,8 @@ IFrame::pointer FrameFileSource::load()
             auto itrace = std::make_shared<Aux::SimpleTrace>(chid, tbin0, charges);
             all_traces.push_back(itrace);
         }
-        log->trace("call={}, add {} traces to total {}", m_count, nrows, all_traces.size());
+        log->trace("call={}, add {} traces from \"{}\" to total {}",
+                   m_count, nrows, framelet.tag, all_traces.size());
     }
 
     const double time = framelets[0].tickinfo[0];
@@ -329,19 +344,25 @@ IFrame::pointer FrameFileSource::load()
 
     // Tag traces of each framelet
     size_t last_index=0;
-    for (const auto& tag : m_tags) {
-        auto& framelet = get_framelet(tag);
+    for (auto& framelet : framelets) {
         const size_t size = framelet.channels.size();
+
+        if (is_untagged(framelet.tag)) {
+            log->trace("call={}, {} untagged with (\"{}\")", m_count, size, framelet.tag);
+            last_index += size;
+            continue;
+        }
+
         std::vector<size_t> inds(size);
         std::iota(inds.begin(), inds.end(), last_index);
         last_index += size;
         if (framelet.summary.empty()) {
-            sframe->tag_traces(tag, inds);
+            sframe->tag_traces(framelet.tag, inds);
         }
         else {
-            sframe->tag_traces(tag, inds, framelet.summary);
+            sframe->tag_traces(framelet.tag, inds, framelet.summary);
         }
-        log->trace("call={}, tag {} traces with \"{}\"", m_count, size, tag);
+        log->trace("call={}, tag {} traces with \"{}\"", m_count, size, framelet.tag);
     }        
 
     log->trace("call={}, loaded frame with {} tags, {} traces",
@@ -363,13 +384,7 @@ bool FrameFileSource::operator()(IFrame::pointer& frame)
         return false;
     }
 
-    try {
-        frame = load();
-    }
-    catch (IOError& err) {
-        log->error("call={}: {}", m_count++, err.what());
-        return false;
-    }
+    frame = load();             // throws
 
     if (frame) {
         log->debug("call={} load frame: {}", m_count++, Aux::taginfo(frame));

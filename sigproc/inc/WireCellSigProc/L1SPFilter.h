@@ -11,13 +11,14 @@
 #include "WireCellIface/IDFT.h"
 
 #include "WireCellAux/SimpleTrace.h"
+#include "WireCellAux/Logger.h"
 #include "WireCellUtil/Interpolate.h"
 
 
 namespace WireCell {
     namespace SigProc {
 
-        class L1SPFilter : public IFrameFilter, public IConfigurable {
+        class L1SPFilter : public Aux::Logger, public IFrameFilter, public IConfigurable {
            public:
             L1SPFilter(double gain = 14.0 * units::mV / units::fC, double shaping = 2.2 * units::microsecond,
                        double postgain = 1.2, double ADC_mV = 4096 / (2000. * units::mV),
@@ -52,6 +53,8 @@ namespace WireCell {
 
             linterp<double>* lin_V;
             linterp<double>* lin_W;
+
+            size_t m_count{0};
         };
     }  // namespace SigProc
 }  // namespace WireCell

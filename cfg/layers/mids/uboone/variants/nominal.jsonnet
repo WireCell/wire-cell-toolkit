@@ -1,12 +1,10 @@
-// This sort of follows
-// uboonedata/WireCellData/pgrapher/experiment/uboone/*.jsonnet
-// v08_00_00.  However, it assumes a "pure" WCT implementation.  See
-// the "overlay" variant for what is needed to configure the official
-// MicroBooNE "overlay simulation".
+// Nominal is in name only.  See actual for more realistic.
 
 local wc = import "wirecell.jsonnet";
+local base_variants = import "../../base/variants.jsonnet";
 
-{
+base_variants.nominal {
+
     lar : {
         // Longitudinal diffusion constant
         DL : 6.4 * wc.cm2/wc.s,
@@ -19,38 +17,25 @@ local wc = import "wirecell.jsonnet";
         drift_speed : 1.098*wc.mm/wc.us,
     },
 
-    geometry: {
-        wires_file: "microboone-celltree-wires-v2.1.json.bz2",
-        drifts: [{
-            wires: 0,
-            name: "uboone",
-            faces: [
-                {
-                    // drop any depos w/in this plane.  The exact
-                    // choice represents some trade off in
-                    // approximations.
-                    anode: 0.0*wc.mm, 
-                    // plane, arbitrary choice.  Microboone wires
-                    // put collection plane at absolute x=-6mm,
-                    // response.plane_dx is measured relative to
-                    // collection plane wires.
-                    response: $.ductor.response_plane - 6*wc.mm,
-                    // Location of cathode measured from
-                    // collection is based on a dump of
-                    // ubcore/v06_83_00/gdml/microboonev11.gdml by
-                    // Matt Toups
-                    cathode: 2.5480*wc.m,
-                },
-                null
-            ],
-        }]
+    // $ wirecell-util wires-volumes uboone \
+    //   | jsonnetfmt -n 4 --max-blank-lines 1 - \
+    //   > cfg/layers/mids/uboone/geometry.jsonnet
+    geometry_data : import "geometry.jsonnet",
+    geometry : $.geometry_data + {
+        xplanes: {
+            // Distances between collection plane and a logical plane.
+            danode: 0.0,
+            dresponse: 10*wc.cm,
+            // Location of cathode measured from collection is based on a dump
+            // of ubcore/v06_83_00/gdml/microboonev11.gdml by Matt Toups
+            dcathode: 2.5480*wc.m,
+        }
     },
 
     // The nominal time binning for data produced by the detector.
     binning : {
         tick: 0.5*wc.us,
-        // Real detector makes 9595.
-        nticks: 9595,
+        nticks: 8192,
     },
 
     elec : {   
@@ -63,78 +48,24 @@ local wc = import "wirecell.jsonnet";
         width: 1.0*wc.ms,
     },
 
-    // These parameters only make sense for running WCT simulation on
-    // microboone in larsoft.  The "trigger" section is not
-    // "standard".  This section is just a set up for use below in
-    // "sim".  There is no trigger, per se, in the simulation but
-    // rather a contract between the generators of energy depositions
-    // (ie, LarG4) and the drift and induction simulation (WCT).  For
-    // details of this contract see:
-    // https://microboone-docdb.fnal.gov/cgi-bin/private/ShowDocument?docid=12290
-    trigger : {
-
-        // A hardware trigger occurs at some "absolute" time but near
-        // 0.0 for every "event".  It is measured in "simulation" time
-        // which is the same clock used for expressing energy
-        // deposition times.  The following values are from table 3 of
-        // DocDB 12290.
-        hardware_times: {
-            none: 0.0,
-            
-            // BNB hardware trigger time.  Note interactions
-            // associated with BNB neutrinos should all be produced
-            // starting in the beam gate which begins at 3125ns and is
-            // 1600ns in duration.
-            bnb : -31.25*wc.ns,
-
-            // Like above but for NUMI.  It's gate is 9600ns long starting
-            // at 4687.5ns.
-            numi : -54.8675*wc.ns,
-            ext : -414.0625*wc.ns,
-            mucs: -405.25*wc.ns,
-        },
-        hw_time: self.hardware_times["bnb"],
-
-        // Measured relative to the hardware trigger time above is a
-        // time offset to the time that the first tick of the readout
-        // should sample.  This is apparently fixed for all hardware
-        // trigger types (?).
-        time_offset: -1.6*wc.ms,
-
-        time: self.hw_time + self.time_offset,
-    },
-
-    ductor: {
-
+    ductor: super.ductor {
+        // These tickle the API
         transform: "standard",  // see overlay
+        universe: "single",     // no super-position of different FRs
 
-        // We trifurcate the detector to deal with different
-        // problematic wire regions.
-        field_files: ["ub-10-half.json.bz2",
-                      "ub-10-uv-ground-tuned-half.json.bz2",
-                      "ub-10-vy-ground-tuned-half.json.bz2"],
+        // MB uses one or three field files.  The standard variable is
+        // "field_file" (singular) but to simplify structure we define the full
+        // set even for nominal.  For nominal ("single" universe) the first in
+        // the list is used.
+        field_files: $.detector_data.fields,
 
-        response_plane : 10*wc.cm,
-
-
-        local tzero = 0*wc.us,
-        drift_dt : self.response_plane / $.lar.drift_speed,
-        tbin : wc.roundToInt(self.drift_dt / self.binning.tick),
-        binning: {
-            tick : $.binning.tick,
-
-            nticks : $.ductor.tbin + $.binning.nticks,
-        },
-        start_time : tzero - self.drift_dt + $.trigger.time,
-        readout_time : self.binning.nticks * self.binning.tick,
     },
 
-    // nominal: "sys_status" is FALSE and there is no "sys_resp".
-    
-    reframer : {
-        tbin: (81*wc.us)/($.binning.tick),
-        nticks: $.binning.nticks,
-        toffset: $.ductor.drift_dt - 81*wc.us,
+    splat : {
+        sparse: true,
+        tick: $.ductor.binning.tick,
+        window_start: $.ductor.start_time,
+        window_duration: $.ductor.readout_time,
     },
 
     // Simulating noise
@@ -147,7 +78,7 @@ local wc = import "wirecell.jsonnet";
             // The MicroBooNE noise filtering spectra runs with a
             // different number of bins in frequency space than the
             // nominal number of ticks in time.
-            nsamples: 9592,
+            nsamples: 8192,
             // Optimize binning 
             wire_length_scale: 1.0*wc.cm,
         },
@@ -175,9 +106,9 @@ local wc = import "wirecell.jsonnet";
     },
 
     nf: {
-        field_file: "ub-10-half.json.bz2",
+        field_file: $.detector_data.field, // "ub-10-half.json.bz2",
         binning: $.binning,
-        chresp_file: "microboone-channel-responses-v1.json.bz2",
+        chresp_file: $.detector_data.chresp,
 
         // The MicroBooNE noise filtering spectra runs with a
         // different number of bins in frequency space than the
@@ -191,6 +122,11 @@ local wc = import "wirecell.jsonnet";
         chndb_epoch: "perfect",
     },        
 
+    sp: {
+        field_file: $.detector_data.field, // "ub-10-half.json.bz2",
+    },        
+
+    // FIXME: excise this from nominal.
     // Describe misconfigured channels.  Used by NF's chndb and sim's
     // static channel status.  Nominally, everything is perfect.  See
     // other variants for non-perfect content.
@@ -204,20 +140,11 @@ local wc = import "wirecell.jsonnet";
         shaping: $.elec.shaping,
     },
 
-    sp: {
-        field_file: "ub-10-half.json.bz2",
-    },        
-
     // Imaging paramter pack
     img : {
-        charge_error_file: "microboone-charge-error.json.bz2",
-
-        // Number of ticks to collect into one time slice span
-        span: 4,
-
+        charge_error_file: $.detector_data.qerr,
+        span: 4,          // Number of ticks to collect into one time slice span
         binning : $.binning,
-
-        // fixme: remove old tiling strategy "perfect" and add slicing strategies
     },
 
 }

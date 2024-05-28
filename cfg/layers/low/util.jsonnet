@@ -8,4 +8,11 @@
     driftsToXregions :: function(vols)
         std.set(std.prune(std.flattenArrays([v.faces for v in vols])),
             function(o) std.toString(o)),
+
+    assure_name :: function(name, obj) 
+        if std.type(name) == "null"
+        then $.idents(obj)
+        else name,
+
+
 }

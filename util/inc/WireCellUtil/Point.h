@@ -125,5 +125,12 @@ namespace WireCell {
 //     return WireCell::Ray(ray.first*scale, ray.second*scale);
 // }
 
+#include <fmt/core.h>
+#if FMT_VERSION >= 90000
+#include <fmt/ostream.h>
+template <> struct fmt::formatter<WireCell::Point> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::Ray> : fmt::ostream_formatter {};
+#endif
+
 
 #endif

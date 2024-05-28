@@ -388,6 +388,11 @@
         
     },
 
+
+    // This is std.get from 0.18.0
+    get(o, f, default=null, inc_hidden=true)::
+        if std.objectHasEx(o, f, inc_hidden) then o[f] else default,
+
 }
 
 

@@ -211,4 +211,10 @@ namespace WireCell {
 
 }  // namespace WireCell
 
+#include <fmt/core.h>
+#if FMT_VERSION >= 90000
+#include <fmt/ostream.h>
+template <> struct fmt::formatter<WireCell::Configuration> : fmt::ostream_formatter {};
+#endif
+
 #endif

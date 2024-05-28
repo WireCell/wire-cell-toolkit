@@ -3,12 +3,12 @@
 
 * TODO
 
+- [ ] move the emerging common pattern of ~mids/*/variants.jsonnet~ files into ~mids.jsonnet~.
 - [ ] add ~mains~ section
 - [ ] add ~options~
 - [ ] generate dots by cross product of detector type, variants and mains
 - [ ] add ~uboone~
 - [ ] remove ~helpers~
-
 
 * Introduction
 

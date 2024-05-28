@@ -906,6 +906,7 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
     // sanity check data/config match.
     const size_t nsiglen = signal.size();
     int nmismatchlen = 0;
+    static bool warn_once{true};
 
     // fixme: some channels are just bad can should be skipped.
 
@@ -978,10 +979,11 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
         }
     }
 
-    if (nmismatchlen) {
+    if (warn_once && nmismatchlen) {
         std::cerr << "OneChannelNoise: WARNING: " << nmismatchlen << " config/data mismatches. "
                   << "#spec=" << nspec << ", #wave=" << nsiglen << ".\n"
-                  << "\tResults may be suspect." << std::endl;
+                  << "\tResults may be suspect.  Only one warning given but there may be many suppressed, one per channel" << std::endl;
+        warn_once = false;
     }
 
     // remove the DC component

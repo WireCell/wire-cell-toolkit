@@ -1,9 +1,9 @@
 /**
-   A reframer takes makes a "rectangular" frame filled with samples
-   from the tagged traces of its input.  This new frame has exactly
-   one trace for each channel and each trace is padded to span a
-   uniform duration.  These configuration paramters control how the
-   new frame is shaped:
+   A reframer makes a "rectangular" frame filled with samples from the tagged
+   traces of its input.  This new frame has exactly one trace for each pair of
+   (tag, channel) and each trace is padded to span the channel and time range.
+
+   These configuration paramters control how the new frame is shaped:
 
    - tags :: list of trace tags to consider.  an empty list means to
      use all traces.  Default: [].

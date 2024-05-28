@@ -5,10 +5,7 @@ local util = import "util.jsonnet";
 local pg = import "pgraph.jsonnet";
 local wc = import "wirecell.jsonnet";
 
-function (anode) {
-
-    local ident = util.idents(anode),
-    
+function (anode, name) {
 
     // The recommended slicer.  There is almost no reasonable default
     // to each detector variant may as well create the MaskSlices
@@ -17,11 +14,11 @@ function (anode) {
                         span=4, active_planes=[0,1,2], masked_planes=[], dummy_planes=[]) 
         pg.pnode({
             type: "MaskSlices",
-            name: ident+ext,
+            name: name+ext,
             data: {
-                wiener_tag: "wiener"+ident,
-                charge_tag: "gauss"+ident,
-                error_tag: "gauss_error"+ident,
+                wiener_tag: "wiener"+ext,
+                charge_tag: "gauss"+ext,
+                error_tag: "gauss_error"+ext,
                 tick_span: span,
                 anode: wc.tn(anode),
                 min_tbin: min_tbin,
@@ -36,7 +33,7 @@ function (anode) {
     // This slicing does not handle charge uncertainty nor bad channels.
     simple_slicing :: function(span=4, tag="") pg.pnode({
         type: "SumSlices",
-        name: ident,
+        name: name,
         data: {
             tag: tag,
             tick_span: span,
@@ -49,7 +46,7 @@ function (anode) {
     // unique name extension "ext" must be given.
     single_tiling :: function(face, ext="") pg.pnode({
         type: "GridTiling",
-        name: "%s-%d%s"%[ident, face, ext],
+        name: "%s-%d%s"%[name, face, ext],
         data: {
             anode: wc.tn(anode),
             face: face,
@@ -63,7 +60,7 @@ function (anode) {
 
         local slice_fanout = pg.pnode({
             type: "SliceFanout",
-            name: ident+ext,
+            name: name+ext,
             data: { multiplicity: 2 },
         }, nin=1, nout=2),
 
@@ -71,7 +68,7 @@ function (anode) {
 
         local blobsync = pg.pnode({
             type: "BlobSetSync",
-            name: ident+ext,
+            name: name+ext,
             data: { multiplicity: 2 }
         }, nin=2, nout=1),
 
@@ -82,7 +79,7 @@ function (anode) {
             edges=
                 [pg.edge(slice_fanout, tilings[n], n, 0) for n in [0,1]] +
                 [pg.edge(tilings[n], blobsync, 0, n) for n in [0,1]],
-            name=ident+ext),
+            name=name+ext),
     }.ret,
 
     // A tiling subgraph matching the anode faces.  The "uname" must
@@ -229,7 +226,7 @@ function (anode) {
     // of slice spans.  Makes blob-blob edges
     clustering :: function(spans=1.0) pg.pnode({
         type: "BlobClustering",
-        name: ident,
+        name: name,
         data:  { spans : spans }
     }, nin=1, nout=1),    
     
@@ -237,7 +234,7 @@ function (anode) {
     // blob-measure edges.
     grouping :: function() pg.pnode({
         type: "BlobGrouping",
-        name: ident,
+        name: name,
         data:  { }
     }, nin=1, nout=1),
 
@@ -248,7 +245,7 @@ function (anode) {
                                whiten=true)
         pg.pnode({
             type: "ChargeSolving",
-            name: ident,
+            name: name,
             data:  {
                 "meas_value_threshold": meas_val_thresh,
                 "meas_error_threshold": meas_err_thresh,
@@ -260,14 +257,14 @@ function (anode) {
     // This solver is simplistic, prefer charge solving.
     blob_solving :: function(threshold=0.0) pg.pnode({
         type: "BlobSolving",
-        name: ident,
+        name: name,
         data:  { threshold: threshold }
     }, nin=1, nout=1),    
 
     // A function that projects blobs back to frames.  
     reframing :: function(tag="") pg.pnode({
         type: "BlobReframer",
-        name: ident,
+        name: name,
         data: {
             frame_tag: tag,
         }

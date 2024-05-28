@@ -40,6 +40,9 @@ def options(opt):
                    choices = log_levels,
                    help="The compiled minimum log level for SPDLOG_<LEVEL>() macros (def=info)")
 
+    opt.add_option('--cxxstd', default='c++17',
+                   help="Set the value for the compiler's --std= option, default 'c++17'")
+
 def configure(cfg):
     # Save to BuildConfig.h and env
     cfg.define("WIRECELL_VERSION", VERSION)
@@ -72,6 +75,9 @@ int main(int argc,const char *argv[])
                   mandatory=False)
 
 
+    # cfg.env.CXXFLAGS += ['-Wpedantic', '-Werror']
+    cfg.env.CXXFLAGS += ['-std='+cfg.options.cxxstd.lower()]
+    
     cfg.env.CXXFLAGS += ['-std=c++17']
 
 

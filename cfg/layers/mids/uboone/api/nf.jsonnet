@@ -6,8 +6,7 @@ local wc = low.wc;
 local pg = low.pg;
 local chndb = import "details/chndb.jsonnet";
 
-function(services, params) function(anode)
-    local name = "%d"%anode.data.ident;
+function(services, params) function(anode, name)
 
     local chndbobj = chndb(services, params, anode);
 
@@ -78,8 +77,8 @@ function(services, params) function(anode)
                 wc.tn(status),
             ],
             noisedb: wc.tn(chndbobj),
-            intraces: "orig",
-            outtraces: "quiet",
+            intraces: "",
+            outtraces: "",
         }
     }, uses=[chndbobj, anode, single, grouped, bitshift, status], nin=1, nout=1);
 
@@ -87,8 +86,8 @@ function(services, params) function(anode)
         type: "OmnibusPMTNoiseFilter",
         name:name,
         data: {
-            intraces: "quiet",
-            outtraces: "raw",
+            intraces: "",
+            outtraces: "",
             anode: wc.tn(anode),
         }
     }, nin=1, nout=1, uses=[anode]);

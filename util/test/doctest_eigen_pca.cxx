@@ -2,10 +2,6 @@
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/doctest.h"
 
-
-
-#include <iostream>
-
 using namespace Eigen;
 
 void dump(std::string msg,

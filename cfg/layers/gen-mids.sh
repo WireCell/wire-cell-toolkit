@@ -17,10 +17,16 @@ cat <<EOF > "$out"
 EOF
 
 # this loop should keep path relative
-for one in mids/*/mids.jsonnet
+for api in mids/*/api.jsonnet
 do
-    det=$(basename $(dirname $one))
-    echo "    $det : import \"$one\"," >> "$out"
+    det=$(basename $(dirname $api))
+    var="$(dirname $api)/variants.jsonnet"
+    cat <<EOF >> "$out"
+    $det : {
+        api: import "$api",
+        variants: import "$var",
+    },
+EOF
 done
 echo "}" >> "$out"
 

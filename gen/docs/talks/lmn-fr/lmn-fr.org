@@ -1,0 +1,302 @@
+#+title: LMN on FR
+#+setupfile: ~/sync/talks/setup.org
+#+LATEX_HEADER: \usepackage{siunitx}
+
+#+setupfile: "./lmn-fr-pdsp-0.org"
+
+* Meta :noexport:
+
+Requires:
+- ~wire-cell-python~ installed and in environment.
+- ~wire-cell-data~ repo in ~WIRECELL_PATH~.
+
+Run ~lmn-fr-plots.sh~ to generate ~.pdf~ and ~.org~ files in same directory as this
+file and export to beamer PDF (~C-c C-e l P~).
+
+* Overview
+
+We want to test LMN resampling on realistic waveforms 
+
+- Need "full simulation" but want to avoid new field calculations.
+- Apply LMN resampling to existing field responses (FRs):
+
+|   <r> |            <r> |          <r> |      <r> |
+|       | Field response |   simulation |      ADC |
+|       |       sampling | downsampling | sampling |
+|-------+----------------+--------------+----------|
+| have: |  \qty{100}{ns} |     \times 5 |   500 ns |
+| want: |   \qty{64}{ns} |     \times 8 |   512 ns |
+
+
+- Understand FR related units and normalization.
+
+- PDSP FR issues
+
+- Apply to resampled FR in WCT simulation
+
+
+* Sampling interpretation and resampling normalization $N_s \to N_r$
+
+** Instantaneous
+
+Samples are continuous function values, resampling is *interpolation*, signal strength preserved.
+
+- Norm: $A_0 = \frac{N_r}{N_s}$ (normalizing on forward $DFT$ is correct)
+
+** Integrating
+
+Samples integrate continuous function over sample period, signal sum preserved.
+
+- Norm: $A_1 = \frac{N_s}{N_r}A_0 = 1$ (normalizing on inverse $DFT^{-1}$ is correct)
+
+** Energy
+
+Samples provide "probability amplitude" or "field" values, signal Parseval energy (sum of squares) is preserved.
+
+- Norm: $A_2 = \sqrt{\frac{N_r}{N_s}}$ (symmetric $DFT$ normalization is correct)
+
+** Initial discussion details are in the paper draft.
+
+
+* Resampling current field response ($I$)
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-fr-pdsp-0}}}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+
+We interpret $I$ as an *instantaneous electric current*.
+
+- \small Resampling is an *interpolation*.
+- \small Normalize the DFT round trip by the *initial size*.
+
+
+** Note, all frequency spectra here are $|DFT(x)|$ with no normalization applied.
+
+* Zoom in - time-domain ringing
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-fr-zoom-pdsp-0}}}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+*Small ringing* in the time-domain.
+- \small Due to non-zero power at the original Nyquist frequency (\qty{5}{MHz}).
+- Indicates the $I$ is *undersampled* at the original \qty{100}{ns}.
+- The eventual convolution with the slower *electronics response* attenuates the ringing.
+- Note, frequency-domain wiggles are actual features, not ringing.
+
+** *We must be cognizant of ringing when applying LMN to ADC waveforms.*
+
+* Cold electronics response ($E$)
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-cer-pdsp-0}}}
+
+#+begin_center
+\small $gain=\qty{14}{mV/fC},\ shaping=\qty{2}{us}$
+#+end_center
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+$E$ is an *instantaneous* signal.
+- \small Resampling is an *interpolation*.
+
+- \small Gain sets peak value and must be retained by the resampling.
+
+* Detector response ($I \otimes E$)
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-fr-er-pdsp-0}}}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+
+We say *detector response* is $I \otimes E$.
+
+- \small Naively, we get "weird units" which are not $[voltage]$.
+- \small The sim multiplies by the sample period to give the missing $[time]$.
+
+What normalization is correct?
+- \small Do we resample before we convolve or vice versa?
+
+* Charge field response resampling
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-q-pdsp-0}}}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+
+
+We should have defined detector response as: \[I \to Q = I \cdot  T\]
+Resampling $Q$ requires an *integral interpretation*.
+- \small Time-domain samples are scaled to preserve total integral.
+- Trivially,
+  
+\small  $[charge]\cdot[voltage/charge]=[voltage]$.
+
+* Detector voltage response ($Q \otimes E$)
+
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-v-pdsp-0}}}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+Normalization is now clear.
+- \small $Q$ is integral-resampled.
+- \small $E$ is interpolated-resampled.
+- \small $V$ is (effectively) interpolated-resampled.
+WCT ~Digitizer~ component will then produce interpolated ADC.
+
+
+* PDSP FR issue: sample period not exactly \qty{100}{ns}
+
+The file ~dune-garfield-1d565.json.bz2~ seems to be current ProtoDUNE-SP
+- \small Is it still best?
+
+It has $T=\qty{99.998998998999}{ns}$ which fails LMN "rationality condition".
+- \small This is not FP round-off or JSON munging (100.0 is exact in JSON).
+- \small For here/now, *force* $T = \qty{100}{ns}$.
+
+Already mentioned that our FRs are in general *undersampled*.
+
+* PDSP FR issue: time domain is too short
+
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+{{{fig-fr-front-pdsp-0}}}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+ 
+Early response is ignored.
+
+- \small FR starts low with a down step.
+- Non-zero DC component.
+- (ringing in the resampled).
+
+Note, FR sign opposite from ADC.
+- \small Induction has positive net signal.
+- $\sum Q / \sum |Q| \approx \qty{0.3}{\%}$
+
+\scriptsize This problem was recently "discovered" by UVCGAN.
+
+* WCT ~DepoTransform~ simulation
+
+Folds multiple responses:
+- field, electronics and RC (or RCRC).
+- *downsamples* in time domain from ~fr.period~ to ~tick~.
+Should naturally handle \qty{64}{ns} FR.
+
+* TODO
+
+- [ ] write 64ns FR file
+- [ ] "diagonal" track sim with 512ns and 500ns ADC
+- [ ] resample 512ns to 500ns and compare to native 500ns
+- [ ] sigproc on resampled-500ns and native-500ns
+
+
+
+* 
+
+#+begin_center
+\Huge $\mathcal{FIN}$
+#+end_center
+
+
+* ICARUS
+
+I see ~garfield-icarus-fnal-rev2.json.bz2~ mentioned in ~cfg/~ but only
+~garfield-icarus-fnal-rev1.json.bz2~ exists in ~wire-cell-data~.
+
+
+# Local Variables:
+# eval: (fix-latex-previews)
+# End:

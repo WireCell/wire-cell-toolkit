@@ -16,8 +16,8 @@
 // #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_DEBUG
 #include "WireCellUtil/BuildConfig.h"
 
-#include "spdlog/spdlog.h"
-#include "spdlog/fmt/ostr.h"
+#include <spdlog/spdlog.h>
+#include <spdlog/fmt/ostr.h>
 
 #include <memory>
 #include <string>

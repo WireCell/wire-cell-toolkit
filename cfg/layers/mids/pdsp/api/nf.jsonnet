@@ -2,6 +2,7 @@
 
 local low = import "../../../low.jsonnet";
 local tn = low.wc.tn;
+local get = low.wc.get;
 
 local chndbs = {
     "actual": import "chndb-actual.jsonnet",
@@ -10,16 +11,11 @@ local chndbs = {
 local filters = import "noise-filters.jsonnet";
 local frs = import "frs.jsonnet";
 
-function(services, params, options) function(anode)
-    local pars = std.mergePatch(params, std.get(options, "params", {}));
-
-    local ident = low.util.idents(anode);
-
-    // nf uses same fr as sp
-    local fr = frs(pars).nf;
+function(services, params, options) function(anode, name)
+    local pars = std.mergePatch(params, get(options, "params", {}));
 
     local chndb = chndbs[pars.nf.chndb](anode, pars.nf.binning,
-                                          fr, services.dft);
+                                        frs(pars).nf, services.dft);
 
     // filter look up
     local flu = filters(services, pars, anode, chndb);
@@ -34,7 +30,7 @@ function(services, params, options) function(anode)
     // the NF
     low.pg.pnode({
         type: 'OmnibusNoiseFilter',
-        name: ident,
+        name: name,
         data: {
 
             // Nonzero forces the number of ticks in the waveform
@@ -47,8 +43,10 @@ function(services, params, options) function(anode)
             grouped_filters:        [tn(obj) for obj in fobj.grouped],
             channel_status_filters: [tn(obj) for obj in fobj.status],
             noisedb: tn(chndb),
-            intraces: 'orig' + ident,
-            outtraces: 'raw' + ident,
+            intraces: '',
+            outtraces: '',
+            // intraces: 'orig' + ident,
+            // outtraces: 'raw' + ident,
         },
     }, nin=1, nout=1, uses = fobj.channel + fobj.grouped + fobj.status)
     

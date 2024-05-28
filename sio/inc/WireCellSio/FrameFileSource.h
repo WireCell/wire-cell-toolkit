@@ -41,14 +41,21 @@ namespace WireCell::Sio {
 
         /** Config: "tags".
 
-            A set of tags to match against the tag portion of the .npy
-            file names to determine the array should be input.  If the
-            set is empty or a tag "*" is given then all arrays with
-            the current frame ident are accepted.  All matched arrays
-            of types {frame, channel, tickinfo} are interpreted as
-            providing tagged traces and the frame and channel arrays
-            are appended to the IFrame traces and channels
-            collections.
+            A set of tags selecting "framelet" array to include as tagged
+            traces.
+
+            If the <tag> portion of the framelet array file name, eg
+
+                frame_<tag>_<ident>
+
+            is found in this set the framelet will provide tagged traces with
+            the tag <tag>.
+
+            Note, the use of a <tag> that is empty "" or the special "*" is
+            intended for use only for the context of a frame file to indicate
+            untagged traces.  In the context of an IFrame, it is against
+            convention to explicitly tag traces with either label.
+
         */
         std::vector<std::string> m_tags;
 
@@ -62,7 +69,11 @@ namespace WireCell::Sio {
         boost::iostreams::filtering_istream m_in;
 
         IFrame::pointer load();
-        bool matches(const std::string& tag);
+
+        // Classify a <tag> label from a framelet array name. 
+        bool is_tagged(const std::string& tag);
+        bool is_untagged(const std::string& tag);
+        bool is_excluded(const std::string& tag);
 
         size_t m_count{0};
         bool m_eos_sent{false};

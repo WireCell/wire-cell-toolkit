@@ -21,7 +21,7 @@ local fcl_params = {
     wires: 'dunevd10kt_3view_30deg_v5_refactored_1x8x6ref.json.bz2',
     ncrm: 24,
     use_dnnroi: false,
-    process_crm: 'test1',
+    process_crm: 'full',
 };
 local params_maker =
 if fcl_params.ncrm ==320 then import 'pgrapher/experiment/dune-vd/params-10kt.jsonnet'
@@ -164,6 +164,37 @@ local tag_rules = {
         + {['dnnsp%d' % anode.data.ident]: ['dnnsp%d' % anode.data.ident] for anode in tools.anodes},
 };
 
+local make_switch_pipe = function(d2f, anode ) {
+    local ds_filter = g.pnode({
+        type: "DepoSetFilter",
+        name: "ds-filter-switch-%d" % anode.data.ident,
+        data: {anode: wc.tn(anode)},
+        }, nin=1, nout=1, uses=[anode]),
+    local dorb = g.pnode({
+        type: "DeposOrBust",
+        name: "dorb-switch-%d" % anode.data.ident,
+        }, nin=1, nout=2),
+    local frame_sync = g.pnode({
+        type: "FrameSync",
+        name: "frame-sync-switch-%d" % anode.data.ident,
+        }, nin=2, nout=1),
+    ret1: g.intern(
+        innodes=[ds_filter],
+        outnodes=[frame_sync],
+        centernodes=[dorb, d2f],
+        edges=
+            [g.edge(ds_filter, dorb, 0, 0),
+            g.edge(dorb, d2f, 0, 0),
+            g.edge(d2f, frame_sync, 0, 0),
+            g.edge(dorb, frame_sync, 1, 1)]),
+    ret2: g.pipeline([ds_filter, d2f]),
+}.ret1;
+
+local switch_pipes = [
+    g.pipeline([make_switch_pipe(parallel_pipes[n], tools.anodes[n]), img_pipes[n]])
+    for n in std.range(0, std.length(tools.anodes) - 1)
+];
+
 // local parallel_graph = f.multifanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', [1,4], [4,1], [1,4], [4,1], 'sn_mag', outtags, tag_rules);
 local parallel_graph = 
 if fcl_params.process_crm == "test1"
@@ -171,7 +202,9 @@ if fcl_params.process_crm == "test1"
 then f.multifanout('DepoSetFanout', parallel_pipes, [1,4], [4,1], 'sn_mag', tag_rules)
 else if fcl_params.process_crm == "test2"
 then f.multifanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', [1,8], [8,1], [1,8], [8,1], 'sn_mag', outtags, tag_rules)
-else f.multifanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', [1,2,8,32], [2,4,4,10], [1,2,8,32], [2,4,4,10], 'sn_mag', outtags, tag_rules);
+// else f.multifanout('DepoSetFanout', switch_pipes, [1,4], [4,6], 'sn_mag', tag_rules);
+else f.multifanout('DepoSetFanout', parallel_pipes, [1,4], [4,6], 'sn_mag', tag_rules);
+// else f.multifanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', [1,2,8,32], [2,4,4,10], [1,2,8,32], [2,4,4,10], 'sn_mag', outtags, tag_rules);
 
 
 // Only one sink ////////////////////////////////////////////////////////////////////////////

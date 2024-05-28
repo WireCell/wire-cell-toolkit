@@ -231,4 +231,12 @@ namespace WireCell {
     }  // namespace RayGrid
 }  // namespace WireCell
 
+#include <fmt/core.h>
+#if FMT_VERSION >= 90000
+#include <fmt/ostream.h>
+template <> struct fmt::formatter<WireCell::RayGrid::Activity> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::RayGrid::Blob> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::RayGrid::Strip> : fmt::ostream_formatter {};
+#endif
+
 #endif

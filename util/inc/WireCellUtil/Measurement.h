@@ -23,4 +23,11 @@ namespace WireCell::Measurement {
 
 }
 
+#include <fmt/core.h>
+#if FMT_VERSION >= 90000
+#include <fmt/ostream.h>
+template <> struct fmt::formatter<WireCell::Measurement::float32> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::Measurement::float64> : fmt::ostream_formatter {};
+#endif
+
 #endif
