@@ -292,7 +292,8 @@ namespace WireCell::PointCloud::Facade {
         // duplicated, example usage:
         // https://github.com/HaiwangYu/learn-cpp/blob/main/test-multimap.cxx
 
-        using time_blob_map_t = std::multimap<int, const Blob*>;
+        using BlobSet = std::set<const Blob*>;
+        using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
 
