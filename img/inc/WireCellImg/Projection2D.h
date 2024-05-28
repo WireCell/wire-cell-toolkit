@@ -11,8 +11,8 @@
 #include "WireCellIface/ISlice.h"
 #include "WireCellIface/ISliceFrame.h"
 #include "WireCellIface/ICluster.h"
-#include <Eigen/Core>
-#include <Eigen/Sparse>
+#include "WireCellUtil/Eigen.h"
+
 
 namespace WireCell {
     namespace Img {

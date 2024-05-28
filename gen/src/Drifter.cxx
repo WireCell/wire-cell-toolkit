@@ -111,7 +111,12 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
         THROW(ValueError() << errmsg{"no xregions given"});
     }
     for (auto jone : jxregions) {
-        m_xregions.push_back(Xregion(jone));
+        Xregion xr(jone);
+        m_xregions.push_back(xr);
+        log->debug("xregion: anode: {} mm, response: {} mm, cathode: {} mm",
+                   xr.anode / units::mm,
+                   xr.response / units::mm,
+                   xr.cathode / units::mm);
     }
     log->debug("time offset: {} ms, drift speed: {} mm/us", m_toffset / units::ms,
              m_speed / (units::mm / units::us));
@@ -184,7 +189,8 @@ bool Gen::Drifter::insert(const input_pointer& depo)
         dT = sqrt(2.0 * m_DT * dt + dT * dT);
     }
 
-    auto newdepo = make_shared<Aux::SimpleDepo>(depo->time() + direction * dt + m_toffset, pos, Qf, depo, dL, dT);
+    auto newdepo = make_shared<Aux::SimpleDepo>(depo->time() + direction * dt + m_toffset,
+                                                pos, Qf, depo, dL, dT, depo->id());
     xrit->depos.insert(newdepo);
     return true;
 }
@@ -195,8 +201,6 @@ bool by_time(const IDepo::pointer& lhs, const IDepo::pointer& rhs) { return lhs-
 void Gen::Drifter::flush(output_queue& outq)
 {
     for (auto& xr : m_xregions) {
-        log->debug("xregion: anode: {} mm, response: {} mm, cathode: {} mm, flushing {}", xr.anode / units::mm,
-                 xr.response / units::mm, xr.cathode / units::mm, xr.depos.size());
         outq.insert(outq.end(), xr.depos.begin(), xr.depos.end());
         xr.depos.clear();
     }

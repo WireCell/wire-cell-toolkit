@@ -68,13 +68,14 @@ void Sig::Decon2DResponse::configure(const WireCell::Configuration &cfg)
     m_dft = Factory::find_tn<IDFT>(dft_tn);
 }
 
+// unused
+#if 0
 namespace {
     std::string dump(const ITensorSet::pointer &itens)
     {
         std::stringstream ss;
         ss << "ITensorSet: ";
-        Json::FastWriter jwriter;
-        ss << itens->ident() << ", " << jwriter.write(itens->metadata());
+        ss << itens->ident() << ", " << itens->metadata();
         for (auto iten : *itens->tensors()) {
             ss << "shape: [";
             for (auto l : iten->shape()) {
@@ -85,6 +86,7 @@ namespace {
         return ss.str();
     }
 }  // namespace
+#endif
 
 std::vector<Waveform::realseq_t> Sig::Decon2DResponse::init_overall_response(const ITensorSet::pointer &in) const
 {

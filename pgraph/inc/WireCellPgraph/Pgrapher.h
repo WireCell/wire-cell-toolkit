@@ -46,6 +46,10 @@
     As when configuraing a component itself, the name need only be
     specified in an edge pair if not using the default (empty string).
 
+    A "verbosity" sets how much info is printed about the graph execution.  0 is
+    none, 1 is default and gives summary of time, 2 also includes ExecMon
+    tracing.
+
  */
 
 #ifndef WIRECELL_PGRAPH_PGRAPHER
@@ -75,7 +79,7 @@ namespace WireCell::Pgraph {
 
       private:
         Graph m_graph;
-
+        int m_verbosity{1};
     };
 
 }  // namespace WireCell::Pgraph

@@ -51,8 +51,7 @@ void Img::InSliceDeghosting::configure(const WireCell::Configuration& cfg)
     m_deghost_th = get<float>(cfg, "deghost_th", m_deghost_th);
     m_deghost_th1 = get<float>(cfg, "deghost_th1", m_deghost_th1);
 
-    Json::FastWriter jwriter;
-    log->debug("{}", jwriter.write(cfg));
+    log->debug("{}", cfg);
 }
 
 namespace {

@@ -1,6 +1,6 @@
 #include "WireCellUtil/ElasticNetModel.h"
 
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
 using namespace Eigen;
 
 #include <iostream>

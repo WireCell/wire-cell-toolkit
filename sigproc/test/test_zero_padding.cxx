@@ -8,8 +8,8 @@
 #include <algorithm>
 
 // for FFT
-#include <Eigen/Core>
-#include <unsupported/Eigen/FFT>
+
+#include "WireCellUtil/EigenFFT.h"
 
 #include <complex>
 #include <iostream>

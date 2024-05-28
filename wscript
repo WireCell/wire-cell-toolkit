@@ -72,12 +72,9 @@ int main(int argc,const char *argv[])
                   mandatory=False)
 
 
-    # boost 1.59 uses auto_ptr and GCC 5 deprecates it vociferously.
-    cfg.env.CXXFLAGS += ['-Wno-deprecated-declarations']
-    cfg.env.CXXFLAGS += ['-Wall', '-Wno-unused-local-typedefs', '-Wno-unused-function']
-    # cfg.env.CXXFLAGS += ['-Wpedantic', '-Werror']
     cfg.env.CXXFLAGS += ['-std=c++17']
-    
+
+
     if cfg.options.with_spdlog_static.lower() in ("yes","on","true"):
         cfg.env.CXXFLAGS += ['-DSPDLOG_COMPILED_LIB=1']
 
@@ -92,6 +89,10 @@ int main(int argc,const char *argv[])
 
 
 def build(bld):
+    ### we used to be set sloppiness globally.  Now we use #pragma to
+    ### selectively quell warnings.  See util/docs/pragma.org for some info.
+    bld.env.CXXFLAGS += '-Wall -Wpedantic -Werror'.split()
+
     bld.load('wcb')
 
 def dumpenv(bld):

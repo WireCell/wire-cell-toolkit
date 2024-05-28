@@ -5,7 +5,7 @@
 #include "WireCellIface/IDFT.h"
 #include "WireCellUtil/Exceptions.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 #include <complex>
 
 namespace WireCell::Aux {

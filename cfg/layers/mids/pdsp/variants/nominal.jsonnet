@@ -1,12 +1,27 @@
-// This is the base for *pdsp* variant parameter objects. 
+// This is the file cfg/layers/mids/pdsp/variant/nominal.jsonnet.
+// If this file is found at any other path, I will delete it without notice.
 
-// Do NOT place any "if" in this file!  If a new variant is needed,
-// make an empty, new file in this directory and either import/inherit
-// from this structure overiding only the new values.  Do not
-// copy-paste.  Refactor this file if needed to achieve breif
-// variants.
+// This is the BASE configuration for *pdsp* variant parameter objects.  It
+// yields an object of a schema expected throughout cfg/layers/mids/pdsp/.
+
+// Do NOT change this file.
+
+// If the nominal parameter do not suit your needs, follow these steps:
+//
+// 1. Pick a single, short name that describes your needs.
+//
+// 2. Start an EMPTY file in cfg/layers/mids/pdsp/variant/<name>.jsonnet
+//
+// 3. Import the nominal.jsonnet object
+//
+// 4. Yield the nominal object with any values overridden.
+//
+// 5. Add this new object to the variants object in mids.jsonnet.
 
 local wc = import "wirecell.jsonnet";
+
+local detectors = import "detectors.jsonnet";
+local mydet = detectors.pdsp;
 
 {
     // Define the LAr properties.  In principle, this is NOT subject
@@ -54,7 +69,8 @@ local wc = import "wirecell.jsonnet";
 
         // The exhaustive list of the location of every single wire
         // (or strip) segment.
-        wires_file: "protodune-wires-larsoft-v4.json.bz2",
+        // wires_file: "protodune-wires-larsoft-v4.json.bz2",
+        wires_file: mydet.wires,
 
         // Comments on how to chose the "anode" plane location: The
         // "anode" cut off plane, here measured from APA centerline,
@@ -162,7 +178,8 @@ local wc = import "wirecell.jsonnet";
     // The ductor transforms drifted depos to currents
     ductor: {
 
-        field_file: "dune-garfield-1d565.json.bz2",
+        # field_file: "dune-garfield-1d565.json.bz2",
+        field_file: mydet.fields,
 
         // The distance from the anode centerline to where the field
         // response calculation begins drifting.  Take care that field
@@ -198,10 +215,23 @@ local wc = import "wirecell.jsonnet";
         readout_time : self.binning.nticks * self.binning.tick,
     },
 
+    // A "splat" (DepoFluxSplat) is an approximation to the combination of
+    // ductor+sigproc
+    splat : {
+        sparse: true,
+        tick: $.ductor.binning.tick,
+        window_start: $.ductor.start_time,
+        window_duration: $.ductor.readout_time,
+        reference_time: 0.0,
+
+    },
+
     // Simulating noise
     noise : {
         model: {
-            spectra_file: "protodune-noise-spectra-v1.json.bz2",
+            #spectra_file: "protodune-noise-spectra-v1.json.bz2",
+            spectra_file: mydet.noise,
+
             // These are frequency space binning which are not necessarily
             // same as some time binning - but here they are.
             period: $.binning.tick,     // 1/frequency
@@ -274,7 +304,8 @@ local wc = import "wirecell.jsonnet";
     // Imaging paramter pack
     img : {
         // For now we use MicroBooNE's
-        "charge_error_file": "microboone-charge-error.json.bz2",
+        #"charge_error_file": "microboone-charge-error.json.bz2",
+        "charge_error_file": mydet.qerr,
 
         // Number of ticks to collect into one time slice span
         span: 4,

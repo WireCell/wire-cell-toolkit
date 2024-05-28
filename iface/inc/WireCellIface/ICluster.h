@@ -28,9 +28,9 @@
 
 #include "WireCellUtil/IndexedGraph.h"
 
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/connected_components.hpp>
+#include "WireCellUtil/Graph.h"
+
+
 
 #include <variant>
 

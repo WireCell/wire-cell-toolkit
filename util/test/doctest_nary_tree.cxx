@@ -75,58 +75,63 @@ TEST_CASE("nary tree simple tree tests") {
     const size_t live_count = Introspective::live_count;
     CHECK(live_count == 0);
 
+    SUBCASE("scope for tree live")
     {   // scope for tree life.
         auto root = make_simple_tree();
 
-        const auto& childs = root->children();
-        auto chit = childs.begin();
+        SUBCASE("children make sense") {
 
-        {
-            CHECK ( (*chit)->parent == root.get() );
+            auto childs = root->children();
+            auto chit = childs.begin();
 
-            auto& d = (*chit)->value;
+            {
+                CHECK ( (*chit)->parent == root.get() );
 
-            CHECK( d.name == "0.0" );
-            CHECK( d.nctor == 1);
-            CHECK( d.nmove == 0);
-            CHECK( d.ncopy == 1);
-            CHECK( d.ndef == 0);
+                auto& d = (*chit)->value;
 
-            ++chit;
+                CHECK( d.name == "0.0" );
+                CHECK( d.nctor == 1);
+                CHECK( d.nmove == 0);
+                CHECK( d.ncopy == 1);
+                CHECK( d.ndef == 0);
+
+                ++chit;
+            }
+            {
+                CHECK ( (*chit)->parent == root.get() );
+
+                auto& d = (*chit)->value;
+
+                CHECK( d.name == "0.1" );
+                CHECK( d.nctor == 1);
+                CHECK( d.nmove == 1);
+                CHECK( d.ncopy == 0);
+                CHECK( d.ndef == 0);
+
+                ++chit;
+            }
+            {
+                CHECK ( (*chit)->parent == root.get() );
+
+                auto& d = (*chit)->value;
+
+                CHECK( d.name == "0.2" );
+                CHECK( d.nctor == 1);
+                CHECK( d.nmove == 1);
+                CHECK( d.ncopy == 0);
+                CHECK( d.ndef == 0);
+
+                ++chit;
+            }
+
+            CHECK(chit == childs.end());
+
+            CHECK( childs.front()->next()->value.name == "0.1" );
+            CHECK( childs.back()->prev()->value.name == "0.1" );
         }
-        {
-            CHECK ( (*chit)->parent == root.get() );
 
-            auto& d = (*chit)->value;
 
-            CHECK( d.name == "0.1" );
-            CHECK( d.nctor == 1);
-            CHECK( d.nmove == 1);
-            CHECK( d.ncopy == 0);
-            CHECK( d.ndef == 0);
-
-            ++chit;
-        }
-        {
-            CHECK ( (*chit)->parent == root.get() );
-
-            auto& d = (*chit)->value;
-
-            CHECK( d.name == "0.2" );
-            CHECK( d.nctor == 1);
-            CHECK( d.nmove == 1);
-            CHECK( d.ncopy == 0);
-            CHECK( d.ndef == 0);
-
-            ++chit;
-        }
-
-        CHECK(chit == childs.end());
-
-        CHECK( childs.front()->next()->value.name == "0.1" );
-        CHECK( childs.back()->prev()->value.name == "0.1" );
-
-        // Iterate the depth firs search.
+        SUBCASE("Iterate the depth firs search") 
         {
             size_t nnodes = 0;
             std::vector<Introspective> data;
@@ -194,21 +199,22 @@ TEST_CASE("nary tree remove node")
         // size_t niut = nodes_in_uniform_tree(layer_sizes);
         auto root = make_layered_tree(layer_sizes);
 
-        auto& children = root->children();
+        auto children = root->children();
 
-        Introspective::node_type* doomed = children.front().get();
+        Introspective::node_type* doomed = children.front();
         CHECK(doomed);
 
         {                       // test find by itself.
             Introspective::node_type::sibling_iter sit = root->find(doomed);
-            CHECK(sit == children.begin());
+            // iterator of list of unique_ptr
+            CHECK(sit->get() == doomed);
         }
 
-        const size_t nbefore = children.size();
+        const size_t nbefore = root->nchildren();
         auto dead = root->remove(doomed);
         CHECK(dead.get() == doomed);
         CHECK( ! dead->parent );
-        const size_t nafter = children.size();
+        const size_t nafter = root->nchildren();
         CHECK(nbefore == nafter + 1);
 
     } // root and children all die
@@ -218,10 +224,10 @@ TEST_CASE("nary tree remove node")
     { // insert node that is in another tree
         auto r1 = make_simple_tree("0");
         auto r2 = make_simple_tree("1");
-        Introspective::node_type* traitor = r2->children().front().get();
+        Introspective::node_type* traitor = r2->children().front();
         r1->insert(traitor);
-        CHECK(r1->children().size() == 4);
-        CHECK(r2->children().size() == 2);
+        CHECK(r1->nchildren() == 4);
+        CHECK(r2->nchildren() == 2);
         CHECK(r1->children().back()->value.name == "1.0");
         CHECK(r2->children().front()->value.name == "1.1");
     }
@@ -275,7 +281,7 @@ TEST_CASE("nary tree notify")
         CHECK(nactions["constructed"] == 1);
     }
     {
-        Introspective::node_type* doomed = root->children().front().get();
+        Introspective::node_type* doomed = root->children().front();
         auto& nactions = doomed->value.nactions;
         debug("doomed: {}", doomed->value.name);
         CHECK(nactions.size() == 2);

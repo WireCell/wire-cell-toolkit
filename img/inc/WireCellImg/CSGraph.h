@@ -11,8 +11,8 @@
 #include "WireCellIface/ICluster.h"
 #include "WireCellUtil/IndexedSet.h"
 #include "WireCellUtil/Ress.h"
-#include <Eigen/Core>
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
+
 #include <iterator>
 
 namespace WireCell::Img::CS {

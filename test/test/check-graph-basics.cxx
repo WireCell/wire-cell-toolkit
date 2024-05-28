@@ -1,7 +1,7 @@
 #include <iostream>
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/copy.hpp>
+#include "WireCellUtil/Graph.h"
+
+
 
 // Define the vertex properties
 struct VertexProperties {

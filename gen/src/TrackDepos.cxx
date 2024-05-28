@@ -72,14 +72,6 @@ void Gen::TrackDepos::configure(const Configuration& cfg)
     m_depos = grouped;
 }
 
-static std::string dump(IDepo::pointer d)
-{
-    std::stringstream ss;
-    ss << "q=" << d->charge() / units::eplus << "eles, t=" << d->time() / units::us << "us, r=" << d->pos() / units::mm
-       << "mm";
-    return ss.str();
-}
-
 void Gen::TrackDepos::add_track(double time, const WireCell::Ray& ray, double charge)
 {
     log->debug("add_track({} us, ({} -> {})cm, {})", time / units::us, ray.first / units::cm, ray.second / units::cm,

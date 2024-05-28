@@ -1,0 +1,13 @@
+bld.smplpkg('WireCellPatRec', use='WireCellAux GLPK')
+
+# By default smplpkg only installs top-level *.h files.  Our "vendored" copy of
+# PAAL is kept in its pristine tree.
+util_inc_dir = bld.path.find_dir('inc')
+bld.install_files('${PREFIX}/include',
+                  util_inc_dir.ant_glob('paal/**/*.hpp'),
+                  cwd = util_inc_dir, relative_trick=True)
+# Add this so #include "paal/..." inside paal headers get resolved
+bld.env['INCLUDES_WireCellPatRec'] += [util_inc_dir.find_node("WireCellPatRec")]
+
+
+

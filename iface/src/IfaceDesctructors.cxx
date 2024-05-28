@@ -39,6 +39,7 @@
 #include "WireCellIface/IDepoFilter.h"
 #include "WireCellIface/IDepoFramer.h"
 #include "WireCellIface/IDepoMerger.h"
+#include "WireCellIface/IDepos2DeposOrFrame.h"
 #include "WireCellIface/IDepoSet.h"
 #include "WireCellIface/IDepoSetFanin.h"
 #include "WireCellIface/IDepoSetFanout.h"
@@ -60,6 +61,7 @@
 #include "WireCellIface/IFrameFanout.h"
 #include "WireCellIface/IFrameFilter.h"
 #include "WireCellIface/IFrameJoiner.h"
+#include "WireCellIface/IFrameMerge.h"
 #include "WireCellIface/IFrameSink.h"
 #include "WireCellIface/IFrameSlicer.h"
 #include "WireCellIface/IFrameSlices.h"
@@ -142,6 +144,7 @@ IDepoFanout::~IDepoFanout() {}
 IDepoFilter::~IDepoFilter() {}
 IDepoFramer::~IDepoFramer() {}
 IDepoMerger::~IDepoMerger() {}
+IDepos2DeposOrFrame::~IDepos2DeposOrFrame() {}
 IDepoSet::~IDepoSet() {}
 IDepoSetFanin::~IDepoSetFanin() {}
 IDepoSetFanout::~IDepoSetFanout() {}
@@ -163,6 +166,7 @@ IFrameFanin::~IFrameFanin() {}
 IFrameFanout::~IFrameFanout() {}
 IFrameFilter::~IFrameFilter() {}
 IFrameJoiner::~IFrameJoiner() {}
+IFrameMerge::~IFrameMerge() {}
 IFrameSink::~IFrameSink() {}
 IFrameSlicer::~IFrameSlicer() {}
 IFrameSlices::~IFrameSlices() {}

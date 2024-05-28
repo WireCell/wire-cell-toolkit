@@ -5,11 +5,11 @@
 #ifndef WIRECELL_RAYSOLVING_H
 #define WIRECELL_RAYSOLVING_H
 
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/connected_components.hpp>
+#include "WireCellUtil/Graph.h"
 
-#include <Eigen/Dense>
+
+
+#include "WireCellUtil/Eigen.h"
 
 #include <vector>
 #include <unordered_map>

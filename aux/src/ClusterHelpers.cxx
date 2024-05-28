@@ -9,8 +9,8 @@
 
 #include "WireCellUtil/GraphTools.h"
 
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/copy.hpp>
+#include "WireCellUtil/Graph.h"
+
 
 using namespace WireCell;
 using WireCell::GraphTools::mir;

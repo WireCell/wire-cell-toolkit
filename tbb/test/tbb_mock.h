@@ -4,31 +4,44 @@
 #include "WireCellIface/IDepoSource.h"
 #include "WireCellIface/IDrifter.h"
 #include "WireCellIface/IDepoSink.h"
+#include "WireCellAux/Logger.h"
 #include "WireCellAux/SimpleDepo.h"
 #include "WireCellUtil/Units.h"
 
 #include <iostream>
+#include <chrono>
+#include <thread>
 
 namespace WireCellTbb {
 
-    class MockDepoSource : public WireCell::IDepoSource {
+    using namespace std::chrono_literals;
+
+    class MockDepoSource : public WireCell::IDepoSource, public WireCell::Aux::Logger {
         int m_count;
         const int m_maxdepos;
 
-       public:
-        MockDepoSource(int maxdepos = 10000)
-          : m_count(0)
-          , m_maxdepos(maxdepos)
+      public:
+        MockDepoSource(int maxdepos = 1000)
+            : WireCell::Aux::Logger("MockDepoSource","test")
+            , m_count(0)
+            , m_maxdepos(maxdepos)
         {
         }
         virtual ~MockDepoSource() {}
 
         virtual bool operator()(output_pointer& out)
         {
+            out = nullptr;
+
+            if (m_count == m_maxdepos) {
+                std::cerr << "Source: EOS\n";
+                ++m_count;
+                return true;
+            }
             if (m_count > m_maxdepos) {
                 return false;
             }
-            ++m_count;
+            std::this_thread::sleep_for(1ms);
             double dist = m_count * WireCell::units::millimeter;
             double time = m_count * WireCell::units::microsecond;
             WireCell::Point pos(dist, dist, dist);
@@ -38,14 +51,20 @@ namespace WireCellTbb {
         }
     };
 
-    class MockDrifter : public WireCell::IDrifter {
+    class MockDrifter : public WireCell::IDrifter, public WireCell::Aux::Logger {
         std::deque<input_pointer> m_depos;
 
-       public:
+      public:
+        MockDrifter ()
+            : WireCell::Aux::Logger("MockDrifter","test")
+        {
+        }
         virtual ~MockDrifter() {}
 
         virtual bool operator()(const input_pointer& in, output_queue& outq)
         {
+            std::this_thread::sleep_for(2ms);
+
             m_depos.push_back(in);
 
             // simulate some buffering condition
@@ -58,19 +77,35 @@ namespace WireCellTbb {
                 auto depo = m_depos.front();
                 m_depos.pop_front();
                 outq.push_back(depo);
-                std::cerr << "Drift: " << depo->time() / WireCell::units::millimeter << std::endl;
+                if (!depo) {
+                    std::cerr << "Drift: EOS\n";
+                }
+                else {
+                    std::cerr << "Drift: " << depo->time() / WireCell::units::microsecond << std::endl;
+                }
             }
 
             return true;
         }
     };
 
-    class MockDepoSink : public WireCell::IDepoSink {
-       public:
+    class MockDepoSink : public WireCell::IDepoSink, public WireCell::Aux::Logger {
+      public:
+        MockDepoSink()
+            : WireCell::Aux::Logger("MockDepoSink","test")
+        {
+        }
         virtual ~MockDepoSink() {}
         virtual bool operator()(const input_pointer& depo)
         {
-            std::cerr << "Sink: " << depo->time() / WireCell::units::millimeter << std::endl;
+            //std::this_thread::sleep_for(1ms);
+
+            if (!depo) {
+                std::cerr << "Sink: EOS\n";
+            }
+            else {
+                std::cerr << "Sink: " << depo->time() / WireCell::units::microsecond << std::endl;
+            }
             return true;
         }
     };

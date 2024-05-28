@@ -68,6 +68,9 @@ namespace WireCell::NaryTree {
 
         using value_type = Value;
         using self_type = Node<Value>;
+        // User access to ordered collection of children
+        using children_vector = std::vector<self_type*>;
+        using children_const_vector = std::vector<self_type const*>;
         // node owns child nodes
         using owned_ptr = std::unique_ptr<self_type>;
         // holds the children
@@ -113,8 +116,8 @@ namespace WireCell::NaryTree {
             return insert(std::move(nptr));
         }
 
-        // Insert as bare node pointer.  This takes ownership and will
-        // remove the Node from its existing parent.
+        // Insert, reparent and take ownership of a bare node pointer.  The
+        // Node* MUST be on the heap.  A lent pointer is returned.
         Node* insert(Node* node) {
             owned_ptr nptr;
             if (node->parent) {
@@ -126,16 +129,20 @@ namespace WireCell::NaryTree {
             return insert(std::move(nptr));
         }
 
-        // Insert a child by owned node pointer.  Return lent child pointer.
+        // Insert, reparent and take ownership of a unique node pointer.  A lent
+        // pointer is returned.
         Node* insert(owned_ptr node) {
             if (!node or !node.get()) {
                 throw std::runtime_error("NaryTree::Node insert on null node");
             }
 
+            if (node->parent) {
+                node = node->parent->remove(node.get());
+            }
             node->parent = this;
-            children_.push_back(std::move(node));
-            children_.back()->sibling_ = std::prev(children_.end());
-            Node* child = children_.back().get();
+            nursery_.push_back(std::move(node));
+            nursery_.back()->sibling_ = std::prev(nursery_.end());
+            Node* child = nursery_.back().get();
             if (!child) {
                 throw std::runtime_error("NaryTree::Node insert on null child node");
             }
@@ -145,13 +152,13 @@ namespace WireCell::NaryTree {
 
         // Return iterator to node or end.  This is a linear search.
         sibling_iter find(const Node* node) {
-            return std::find_if(children_.begin(), children_.end(),
+            return std::find_if(nursery_.begin(), nursery_.end(),
                                 [&](const owned_ptr& up) {
                                     return up.get() == node;
                                 });
         }
         sibling_const_iter find(const Node* node) const {
-            return std::find_if(children_.cbegin(), children_.cend(),
+            return std::find_if(nursery_.cbegin(), nursery_.cend(),
                                 [&](const owned_ptr& up) {
                                     return up.get() == node;
                                 });
@@ -159,14 +166,14 @@ namespace WireCell::NaryTree {
         
         // Remove and return child node.
         owned_ptr remove(sibling_iter sib) {
-            if (sib == children_.end()) return nullptr;
+            if (sib == nursery_.end()) return nullptr;
 
             Node* child = (*sib).get();
             notify<Value>("removing", child);
 
             owned_ptr ret = std::move(*sib);
-            children_.erase(sib);
-            ret->sibling_ = children_.end();
+            nursery_.erase(sib);
+            ret->sibling_ = nursery_.end();
             ret->parent = nullptr;
             
             return ret;
@@ -194,7 +201,7 @@ namespace WireCell::NaryTree {
         // an O(nchildren) call and will throw if we have no parent.
         size_t sibling_index() const {
             auto me = sibling(); // throws
-            auto first_born = parent->children().begin();
+            auto first_born = parent->nursery_.begin();
             return std::distance(first_born, me);
         }
         // Call sibling_index recursively up toward root, returning
@@ -214,19 +221,19 @@ namespace WireCell::NaryTree {
 
 
         self_type* first() const {
-            if (children_.empty()) return nullptr;
-            return children_.front().get();
+            if (nursery_.empty()) return nullptr;
+            return nursery_.front().get();
         }
 
         self_type* last() const {
-            if (children_.empty()) return nullptr;
-            return children_.back().get();
+            if (nursery_.empty()) return nullptr;
+            return nursery_.back().get();
         }
 
         // Return left/previous/older sibling, nullptr if we are first.
         self_type* prev() const {
             if (!parent) return nullptr;
-            const auto& sibs = parent->children_;
+            const auto& sibs = parent->nursery_;
             if (sibs.empty()) return nullptr;
 
             if (sibling_ == sibs.begin()) {
@@ -239,7 +246,7 @@ namespace WireCell::NaryTree {
         // Return right/next/newerr sibling, nullptr if we are last.
         self_type* next() const {
             if (!parent) return nullptr;
-            const auto& sibs = parent->children_;
+            const auto& sibs = parent->nursery_;
             if (sibs.empty()) return nullptr;
 
             auto sib = sibling_;
@@ -250,32 +257,48 @@ namespace WireCell::NaryTree {
             return sib->get();
         }
 
-        // Access list of child nodes.
-        const nursery_type& children() const { return children_; }
-        nursery_type& children() { return children_; }
+        // Access collection of child nodes as bare pointers.
+        size_t nchildren() const { return nursery_.size(); }
+        children_const_vector children() const {
+            children_const_vector ret(nursery_.size());
+            std::transform(nursery_.begin(), nursery_.end(), ret.begin(),
+                           [](const auto& up) { return up.get(); });
+            return ret;
+        }
+        children_vector children() {
+            children_vector ret(nursery_.size());
+            std::transform(nursery_.begin(), nursery_.end(), ret.begin(),
+                           [](const auto& up) { return up.get(); });
+            return ret;
+        }
+
+        // FIXME TEMPORARY ACCESS WHILE FIXING CLUSTERING 
+        // Access the owning nursery of children directly.
+        // const nursery_type& nursery() const { return nursery_; }
+        // nursery_type& nursery() { return nursery_; }
 
         using child_value_range = iter_range<child_value_iter<Value>>;
         auto child_values() {
             return child_value_range{
-                child_value_iter<Value>(children_.begin()),
-                child_value_iter<Value>(children_.end()) };
+                child_value_iter<Value>(nursery_.begin()),
+                child_value_iter<Value>(nursery_.end()) };
         }
         using child_value_const_range = iter_range<child_value_const_iter<Value>>;
         auto child_values() const {
             return child_value_const_range{
-                child_value_const_iter<Value>(children_.cbegin()),
-                child_value_const_iter<Value>(children_.cend()) };
+                child_value_const_iter<Value>(nursery_.cbegin()),
+                child_value_const_iter<Value>(nursery_.cend()) };
         }
 
         using child_node_iter = boost::indirect_iterator<sibling_iter>;
         using child_node_range = iter_range<child_node_iter>;
         auto child_nodes() {
-            return child_node_range{ children_.begin(), children_.end() };
+            return child_node_range{ nursery_.begin(), nursery_.end() };
         }
         using child_node_const_iter = boost::indirect_iterator<sibling_const_iter>;
         using child_node_const_range = iter_range<child_node_const_iter>;
         auto child_nodes() const {
-            return child_node_const_range{ children_.cbegin(), children_.cend() };
+            return child_node_const_range{ nursery_.cbegin(), nursery_.cend() };
         }
                 
         // Iterable range for depth first traversal, parent then children.
@@ -308,7 +331,7 @@ namespace WireCell::NaryTree {
       private:
 
         // friend class child_value_iter<Value>;
-        nursery_type children_;
+        nursery_type nursery_;
 
     };                          // Node
 
@@ -346,7 +369,7 @@ namespace WireCell::NaryTree {
                    , enabler
                    >::type = enabler()
             )
-            : child_value_iter::iterator_adaptor_(other->children().begin())
+            : child_value_iter::iterator_adaptor_(other->nursery_.begin())
         {}
 
       private:
@@ -388,7 +411,7 @@ namespace WireCell::NaryTree {
                    , enabler
                    >::type = enabler()
             )
-            : child_value_const_iter::iterator_adaptor_(other->children().begin())
+            : child_value_const_iter::iterator_adaptor_(other->nursery_.begin())
         {}
 
       private:

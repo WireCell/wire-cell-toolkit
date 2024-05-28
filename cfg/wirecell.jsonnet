@@ -330,6 +330,16 @@
     unique_list(l):: std.foldl($.unique_helper, l, []),
 
 
+    // Return an array.  If l is array, return it.  If string, split it, if object return field names
+    listify(l, d=',') ::
+        local t = std.type(l);
+        if t == "string" then
+            std.split(l, d)
+        else if t == "object" then
+            std.objectValues(l)
+        else
+            l,
+
     // Round a floating point to nearest integer.  It's a bit weird to
     // go through a format/parse.  Maybe there's a better way?
     roundToInt(x):: std.parseInt("%d" % (x+0.5)),

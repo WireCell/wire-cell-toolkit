@@ -167,6 +167,7 @@ function check () {
     info "RUNNING: $*"
     local status
     run "$@"
+
     if [ -n "$output" ] ; then
         info "OUTPUT:\n$output"
     else
@@ -1088,6 +1089,29 @@ function download_file () {
 
     wget -O "$path" "$url" 1>&2 || return
     echo "$path"
+}
+
+
+# mv_if_diff <src> <dst>
+#
+# Move <src> to <dst> if they differ.
+#
+# This can be useful to initate a chain of run_idempotently steps.
+mv_if_diff () {
+    local src="$1" ; shift
+    local dst="$1" ; shift
+    
+    if [ ! -f "$dst" ] ; then
+        echo "dst does not exist $dst moving $src" 1>&3
+        mv "$src" "$dst"
+        return
+    fi
+    if [ -n "$( diff "$src" "$dst" )" ] ; then
+        echo "differ: $dst and $src" 1>&3
+        mv "$src" "$dst"
+        return
+    fi
+    rm -f "$src"
 }
 
 

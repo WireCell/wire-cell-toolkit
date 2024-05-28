@@ -1,6 +1,6 @@
 #include "WireCellUtil/LinearModel.h"
 
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
 using namespace Eigen;
 
 WireCell::LinearModel::LinearModel() {}

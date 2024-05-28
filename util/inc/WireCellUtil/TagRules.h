@@ -68,7 +68,15 @@ namespace WireCell {
         class Context {
             std::unordered_map<std::string, std::vector<ruleset_t> > m_rulesets;
 
-           public:
+          public:
+
+            // Return the number of rulesets under a given rule name.
+            size_t nrules(const std::string& name) const {
+                auto it = m_rulesets.find(name);
+                if (it == m_rulesets.end()) return 0;
+                return it->second.size();
+            }
+
             // This should be an array of objects each keyed by a
             // context name and with values providing a ruleset.
             void configure(const Configuration& cfg);

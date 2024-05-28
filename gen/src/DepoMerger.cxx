@@ -15,7 +15,7 @@ Gen::DepoMerger::DepoMerger()
 }
 Gen::DepoMerger::~DepoMerger() {}
 
-bool Gen::DepoMerger::operator()(input_queues_type& inqs, output_queues_type& outqs)
+bool Gen::DepoMerger::operator()(input_queues& inqs, output_queues& outqs)
 {
     if (m_eos) {  // already closed off all our outputs
         return false;

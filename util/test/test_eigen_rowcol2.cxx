@@ -1,4 +1,4 @@
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 #include <cassert>
 
 using Scalar = int;

@@ -14,6 +14,7 @@ namespace WireCellTbb {
     template <typename TupleType>
     class FaninBody {
         WireCell::IFaninNodeBase::pointer m_wcnode;
+        NodeInfo& m_info;
 
         mutable seqno_t m_seqno{0};
 
@@ -21,9 +22,10 @@ namespace WireCellTbb {
         typedef typename WireCell::IFaninNodeBase::any_vector any_vector;
         typedef typename WireCell::tuple_helper<TupleType> helper_type;
 
-        FaninBody(WireCell::INode::pointer wcnode)
+        FaninBody(WireCell::INode::pointer wcnode, NodeInfo& info)
+            : m_wcnode(std::dynamic_pointer_cast<WireCell::IFaninNodeBase>(wcnode))
+            , m_info(info)
         {
-            m_wcnode = std::dynamic_pointer_cast<WireCell::IFaninNodeBase>(wcnode);
             Assert(m_wcnode);
         }
 
@@ -35,7 +37,9 @@ namespace WireCellTbb {
                 in.push_back(msg.second);
             }
             wct_t out;
+            m_info.start();
             bool ok = (*m_wcnode)(in, out);
+            m_info.stop();
             if (!ok) {
                 std::cerr << "TbbFlow: fanin node return false ignored\n";
             }
@@ -46,7 +50,8 @@ namespace WireCellTbb {
     template <std::size_t N>
     receiver_port_vector build_faniner(tbb::flow::graph& graph,
                                        WireCell::INode::pointer wcnode,
-                                       std::vector<tbb::flow::graph_node*>& nodes)
+                                       std::vector<tbb::flow::graph_node*>& nodes,
+                                       NodeInfo& info)
     {
         typedef typename WireCell::type_repeater<N, msg_t>::type TupleType;
 
@@ -56,7 +61,8 @@ namespace WireCellTbb {
 
         // this node takes user WC body and runs it after converting input tuple to vector
         typedef tbb::flow::function_node<TupleType, msg_t> joining_node;
-        joining_node* fn = new joining_node(graph, 1 /*wcnode->concurrency()*/, FaninBody<TupleType>(wcnode));
+        joining_node* fn = new joining_node(graph, 1 /*wcnode->concurrency()*/,
+                                            FaninBody<TupleType>(wcnode, info));
 
         tbb::flow::make_edge(*jn, *fn);
 
@@ -74,22 +80,23 @@ namespace WireCellTbb {
         std::vector<tbb::flow::graph_node*> m_nodes;
         receiver_port_vector m_receiver_ports;
 
-       public:
+      public:
         FaninWrapper(tbb::flow::graph& graph, WireCell::INode::pointer wcnode)
         {
+            m_info.set(wcnode);
             int nin = wcnode->input_types().size();
             // an exhaustive switch to convert from run-time to compile-time types and enumerations.
             Assert(nin > 0 && nin <= 10);  // fixme: exception instead?
-            if (1 == nin) m_receiver_ports = build_faniner<1>(graph, wcnode, m_nodes);
-            if (2 == nin) m_receiver_ports = build_faniner<2>(graph, wcnode, m_nodes);
-            if (3 == nin) m_receiver_ports = build_faniner<3>(graph, wcnode, m_nodes);
-            if (4 == nin) m_receiver_ports = build_faniner<4>(graph, wcnode, m_nodes);
-            if (5 == nin) m_receiver_ports = build_faniner<5>(graph, wcnode, m_nodes);
-            if (6 == nin) m_receiver_ports = build_faniner<6>(graph, wcnode, m_nodes);
-            if (7 == nin) m_receiver_ports = build_faniner<7>(graph, wcnode, m_nodes);
-            if (8 == nin) m_receiver_ports = build_faniner<8>(graph, wcnode, m_nodes);
-            if (9 == nin) m_receiver_ports = build_faniner<9>(graph, wcnode, m_nodes);
-            if (10 == nin) m_receiver_ports = build_faniner<10>(graph, wcnode, m_nodes);
+            if (1 == nin) m_receiver_ports = build_faniner<1>(graph, wcnode, m_nodes, m_info);
+            if (2 == nin) m_receiver_ports = build_faniner<2>(graph, wcnode, m_nodes, m_info);
+            if (3 == nin) m_receiver_ports = build_faniner<3>(graph, wcnode, m_nodes, m_info);
+            if (4 == nin) m_receiver_ports = build_faniner<4>(graph, wcnode, m_nodes, m_info);
+            if (5 == nin) m_receiver_ports = build_faniner<5>(graph, wcnode, m_nodes, m_info);
+            if (6 == nin) m_receiver_ports = build_faniner<6>(graph, wcnode, m_nodes, m_info);
+            if (7 == nin) m_receiver_ports = build_faniner<7>(graph, wcnode, m_nodes, m_info);
+            if (8 == nin) m_receiver_ports = build_faniner<8>(graph, wcnode, m_nodes, m_info);
+            if (9 == nin) m_receiver_ports = build_faniner<9>(graph, wcnode, m_nodes, m_info);
+            if (10 == nin) m_receiver_ports = build_faniner<10>(graph, wcnode, m_nodes, m_info);
         }
 
         virtual receiver_port_vector receiver_ports() { return m_receiver_ports; }

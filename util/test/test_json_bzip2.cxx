@@ -47,8 +47,7 @@ int main(int argc, char* argv[])
         string fname = name + ".json";
         cout << "writing " << fname << endl;
         ofstream jout(fname.c_str());
-        Json::FastWriter jwriter;
-        jout << jwriter.write(jroot);
+        jout << jroot;
     }
 
     {
@@ -76,8 +75,7 @@ int main(int argc, char* argv[])
         string fname = name + "2.json";
         cout << "writing " << fname << endl;
         ofstream jout2(fname.c_str());
-        Json::FastWriter jwriter2;
-        jout2 << jwriter2.write(jroot2);
+        jout2 << jroot2;
     }
 
     return 0;

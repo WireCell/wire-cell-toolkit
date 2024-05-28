@@ -11,37 +11,27 @@ local wc = low.wc;
 local pg = low.pg;
 local idents = low.util.idents;
 
-local frs = import "frs.jsonnet";
+local resps = import "resps.jsonnet";
 
 function(services, params, options={}) {
 
     // Signal binning may be extended from nominal.
     local sig_binning = params.ductor.binning,
 
-    local fr = frs(params).sim,
-
-    local cer = {
-        type: "ColdElecResponse",
-        data: params.elec + sig_binning,
-    },
-
-    local rc = {
-        type: 'RCResponse',
-        data: sig_binning { width: params.rc.width }
-    },
+    local res = resps(params).sim,
 
     // some have more than one
-    local short_responses = [ cer, ],
-    local long_responses = [ rc, ],
+    local short_responses = [ res.er, ],
+    local long_responses = [ res.rc, ],
         
     local pirs = [{
         type: 'PlaneImpactResponse',
         name: std.toString(plane),
-        uses: [fr, services.dft] + short_responses + long_responses,
+        uses: [res.fr, services.dft] + short_responses + long_responses,
         data: sig_binning {
             plane: plane,
             dft: wc.tn(services.dft),
-            field_response: wc.tn(fr),
+            field_response: wc.tn(res.fr),
             short_responses: [wc.tn(sr) for sr in short_responses],
             long_responses: [wc.tn(lr) for lr in long_responses],
             overall_short_padding: 100*wc.us,
@@ -64,15 +54,14 @@ function(services, params, options={}) {
                            params.ductor.start_time)
         ]),
         
-
     // API method sim.reframer
-    reframer :: function(anode)
+    reframer :: function(anode, tags=[], name=null)
         pg.pnode({
             type: 'Reframer',
-            name: idents(anode),
+            name: if std.type(name) == "null" then idents(anode) else name,
             data: {
                 anode: wc.tn(anode),
-                tags: [],
+                tags: tags,
                 fill: 0.0,
                 toffset: 0,
                 tbin: params.ductor.tbin,
@@ -82,7 +71,7 @@ function(services, params, options={}) {
     
     // API method sim.signal: subgraph making pure signal voltage from
     // depos.
-    signal :: function(anode)
+    signal :: function(anode, tags=[])
         pg.pipeline([
             pg.pnode({
                 type: 'DepoTransform',
@@ -101,7 +90,7 @@ function(services, params, options={}) {
                     nsigma: 3,
                 },
             }, nin=1, nout=1, uses = pirs + [anode, services.random, services.dft]),
-            $.reframer(anode)]),
+            $.reframer(anode, tags=tags, name=idents(anode))]),
 
     // API method sim.noise: subgraph adding noise to voltage
     noise :: function(anode)
@@ -138,4 +127,45 @@ function(services, params, options={}) {
             }
         }, nin=1, nout=1, uses=[anode]),
 
+    // The approximated sim+sigproc
+    splat :: function(anode, name=null)
+        pg.pnode({
+            type: 'DepoFluxSplat',
+            name: if std.type(name) == "null" then idents(anode) else name,
+            data: params.splat {
+                anode: wc.tn(anode),
+                field_response: wc.tn(res.fr),
+            },
+        }, nin=1, nout=1, uses=[anode, res.fr]),
+
+
+    // Construct obsolete single-depo, not generic "splat"
+    singledeposplat :: function(anode)
+        pg.pnode({
+            type: 'DuctorFramer',
+            name: idents(anode),
+            data: {
+                ductor: 'DepoSplat:' + idents(anode),
+                fanin: 'FrameFanin:' + idents(anode),
+            },
+        }, nin=1, nout=1, uses=[ {
+            type: 'FrameFanin',
+            name: idents(anode),
+            data: {
+                multiplicity: 0, // "dynamic"
+            }
+        }, {
+            type: 'DepoSplat',
+            name: idents(anode),
+            data: {
+                anode: wc.tn(anode),
+                nsigma: 3.0,
+                start_time: params.ductor.start_time,
+                readout_time: params.ductor.readout_time,
+                tick: params.ductor.binning.tick,
+                continuous: true, // see DepoSplat comments
+                fixed: false,
+                drift_speed: params.lar.drift_speed,
+            } }]),
+    
 }

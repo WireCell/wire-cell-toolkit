@@ -62,6 +62,7 @@ Points::node_ptr make_simple_pctree()
             {"center_x", Array({(fa_float_t)0.5})},
             {"center_y", Array({(fa_float_t)0.})},
             {"center_z", Array({(fa_float_t)0.})},
+            {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
             {"u_wire_index_min", Array({(fa_int_t)0})},
@@ -85,6 +86,7 @@ Points::node_ptr make_simple_pctree()
             {"center_x", Array({(fa_float_t)1.5})},
             {"center_y", Array({(fa_float_t)0.})},
             {"center_z", Array({(fa_float_t)0.})},
+            {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
             {"u_wire_index_min", Array({(fa_int_t)1})},
@@ -148,6 +150,7 @@ TEST_CASE("test PointTree API")
     print_dds(pccenter);
 
     const auto& kd = s3d.kd();
+    const auto& points = kd.points();
 
     /// QUESTION: how to get it -> node?
     ///
@@ -158,29 +161,28 @@ TEST_CASE("test PointTree API")
 
     std::vector<fa_float_t> some_point = {1, 0, 0};
     auto knn = kd.knn(2, some_point);
-    for (auto [it,dist] : knn) {
-        auto& pt = *it;
-        debug("knn: pt=({},{},{}) dist={}",
-              pt[0], pt[1], pt[2], dist);
+    for (const auto& [index, metric] : knn) {
+        debug("knn: pt=({},{},{}) metric={}",
+              points[0][index], points[1][index], points[2][index], metric);
     }
     CHECK(knn.size() == 2);
 
-    for (size_t pt_ind = 0; pt_ind<knn.size(); ++pt_ind) {
-        auto& [pit,dist] = knn[pt_ind];
-        const auto [maj_ind,min_ind] = pit.index();
-        debug("knn point {} at distance {} from query is in local point cloud {} at index {}",
-              pt_ind, dist, maj_ind, min_ind);
-        const Dataset& pc = pc3d[maj_ind];
+    for (const auto& [index, metric] : knn) {
+        auto node_index = kd.major_index(index);
+        // point-in-node index
+        auto pin_index = kd.minor_index(index);
+        debug("knn point {} at distance {} from query is in local point cloud {} at local point {}",
+              index, metric, node_index, pin_index);
+        const Dataset& pc = pc3d[node_index];
         for (const auto& name : scope.coords) {
-            debug("\t{} = {}", name, pc.get(name)->element<fa_float_t>(min_ind));
+            debug("\t{} = {}", name, pc.get(name)->element<fa_float_t>(pin_index));
         }
     }
 
     auto rad = kd.radius(.01, some_point);
-    for (auto [it,dist] : rad) {
-        auto& pt = *it;
-        debug("rad: pt=({},{},{}) dist={}",
-              pt[0], pt[1], pt[2], dist);
+    for (const auto& [index, metric] : rad) {
+        debug("rad: pt=({},{},{}) metric={}",
+              points[0][index], points[1][index], points[2][index], metric);
     }
     CHECK(rad.size() == 2);
 
@@ -191,7 +193,7 @@ TEST_CASE("test PointCloudFacade")
 {
     auto root = make_simple_pctree();
     REQUIRE(root);
-    Cluster pcc(root);
+    Cluster pcc(root.get());
     // (0.5 * 1 + 1.5 * 2) / 3 = 1.1666666666666665
     debug("expecting 1.1666666666666665");
     auto ave_pos_alg0 = pcc.calc_ave_pos({1,0,0}, 1, 0);
@@ -207,4 +209,8 @@ TEST_CASE("test PointCloudFacade")
     debug("expecting 10.8738217753");
     const auto length = pcc.get_length({});
     debug("length: {}", length);
+    const auto [earliest, latest] = pcc.get_earliest_latest_points();
+    debug("earliest_latest_points: {} {} | expecting (0 0 0) (1.9 0 0)", earliest, latest);
+    const auto [num1, num2] = pcc.get_num_points({0.5,0,0}, {1,0,0});
+    debug("num_points: {} {} | expecting 15, 5", num1, num2);
 }

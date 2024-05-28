@@ -1,7 +1,7 @@
 #ifndef WIRECELLUTIL_LINEARMODEL_H
 #define WIRECELLUTIL_LINEARMODEL_H
 
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
 #include <string>
 #include <vector>
 

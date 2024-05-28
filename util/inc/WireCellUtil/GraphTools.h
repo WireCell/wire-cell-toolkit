@@ -1,11 +1,9 @@
 #ifndef WIRECELLUTIL_GRAPHTOOLS
 #define WIRECELLUTIL_GRAPHTOOLS
 
-#define BOOST_DISABLE_PRAGMA_MESSAGE 1
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/graph_traits.hpp>
+#include "WireCellUtil/Graph.h"
+
 #include <boost/range.hpp>
-#include <boost/graph/graphviz.hpp>
 
 namespace WireCell::GraphTools {
 

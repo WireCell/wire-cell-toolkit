@@ -94,6 +94,10 @@ void Gen::DepoTransform::configure(const WireCell::Configuration& cfg)
     m_drift_speed = get<double>(cfg, "drift_speed", m_drift_speed);
     m_frame_count = get<int>(cfg, "first_frame_number", m_frame_count);
 
+    log->debug("tick={} us, start={} us, readin={} us, drift_speed={} mm/us",
+               m_tick/units::us, m_start_time/units::us,
+               m_readout_time/units::us, m_drift_speed/(units::mm/units::us));
+
     auto jpirs = cfg["pirs"];
     if (jpirs.isNull() or jpirs.empty()) {
         std::string msg = "must configure with some plane impact response components";
@@ -118,11 +122,11 @@ WireCell::Configuration Gen::DepoTransform::default_configuration() const
     put(cfg, "fluctuate", false);
 
     /// The open a gate.  This is actually a "readin" time measured at
-    /// the input ("reference") plane.
+    /// the input ("response") plane.
     put(cfg, "start_time", m_start_time);
 
     /// The time span for each readout.  This is actually a "readin"
-    /// time span measured at the input ("reference") plane.
+    /// time span measured at the input ("response") plane.
     put(cfg, "readout_time", m_readout_time);
 
     /// The sample period
@@ -202,6 +206,9 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
                 auto trace = make_shared<SimpleTrace>(chid, tbin, charge);
                 traces.push_back(trace);
             }
+            // fixme: use SPDLOG_LOGGER_DEBUG
+            log->debug("plane={} face={} depos={} total traces={}",
+                       iplane, face->ident(), face_depos.size(), traces.size());
         }
     }
 

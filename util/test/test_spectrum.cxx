@@ -1,7 +1,7 @@
 #include "WireCellUtil/Spectrum.h"
 
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 #include <numeric>
 #include <cassert>

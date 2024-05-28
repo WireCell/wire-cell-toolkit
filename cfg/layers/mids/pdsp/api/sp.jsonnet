@@ -7,7 +7,7 @@ local spfilt = import "sp-filters.jsonnet";
 local low = import "../../../low.jsonnet";
 local wc = low.wc;
 
-local frs = import "frs.jsonnet";
+local resps = import "resps.jsonnet";
 
 // Allow an optional argument "sparse" as this is really an end-user
 // decision.  Higher layers may expose this option to the TLA.
@@ -19,12 +19,7 @@ function(services, params, options={}) function(anode)
     local fullscale = pars.digi.fullscale[1] - pars.digi.fullscale[0];
     local ADC_mV_ratio = ((1 << resolution) - 1 ) / fullscale;
 
-    local fr = frs(pars).sp;
-
-    local cer = pars.ductor.binning {
-        type: "ColdElecResponse",
-        data: pars.elec,
-    };
+    local res = resps(params).sp;
 
     low.pg.pnode({
         type: 'OmnibusSigProc',
@@ -38,8 +33,8 @@ function(services, params, options={}) function(anode)
             anode: wc.tn(anode),
             dft: wc.tn(services.dft),
             per_chan_resp: "",
-            field_response: wc.tn(fr),
-            elecresponse: wc.tn(cer),
+            field_response: wc.tn(res.fr),
+            elecresponse: wc.tn(res.er),
             ftoffset: 0.0, // default 0.0
             ctoffset: 1.0*wc.microsecond, // default -8.0
             fft_flag: 0,  // 1 is faster but higher memory, 0 is slightly slower but lower memory
@@ -82,4 +77,4 @@ function(services, params, options={}) function(anode)
             isWrapped: false,
             sparse : opts.sparse,
         },
-    }, nin=1, nout=1, uses=[anode, services.dft, fr, cer] + spfilt)
+    }, nin=1, nout=1, uses=[anode, services.dft, res.fr, res.er] + spfilt)

@@ -7,8 +7,8 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
-#include <Eigen/Core>
-#include <unsupported/Eigen/FFT>
+
+#include "WireCellUtil/EigenFFT.h"
 
 #include <iostream>
 

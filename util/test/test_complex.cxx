@@ -18,7 +18,8 @@ int main()
     dvec d1={0,1};
 
     complex_t* c2 = reinterpret_cast<complex_t*>(d1.data());
-    cvec c3(c2, c2+2);
+    // cvec c3(c2, c2+2); OOB!!
+    cvec c3(c2, c2+1);
 
     double* d2 = reinterpret_cast<double*>(c1.data());
     dvec d3(d2, d2+2);

@@ -29,10 +29,10 @@ In file included from ../../../../../opt/boost-1-76-0/include/boost/smart_ptr/de
 
 #define BOOST_DISABLE_PRAGMA_MESSAGE 1
 
-#include <boost/graph/connected_components.hpp>
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/adjacency_list.hpp>
-// #include <boost/graph/copy.hpp>
+#include "WireCellUtil/Graph.h"
+
+
+
 // #include "WireCellUtil/IndexedGraph.h"
 
 int main()

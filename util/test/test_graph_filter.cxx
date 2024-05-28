@@ -22,11 +22,11 @@
 
 
 
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/graphviz.hpp>
-#include <boost/graph/copy.hpp>
+#include "WireCellUtil/Graph.h"
+
+
+
+
 
 #include <functional>
 #include <iostream>

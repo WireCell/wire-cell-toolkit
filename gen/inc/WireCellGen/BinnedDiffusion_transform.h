@@ -9,7 +9,7 @@
 #include "WireCellGen/ImpactData.h"
 
 #include <deque>
-#include <Eigen/Sparse>
+#include "WireCellUtil/Eigen.h"
 
 namespace WireCell {
     namespace Gen {

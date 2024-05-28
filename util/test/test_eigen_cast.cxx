@@ -1,4 +1,4 @@
-#include "Eigen/Core"
+#include "WireCellUtil/Eigen.h"
 
 #include <vector>
 #include <iostream>

@@ -73,8 +73,7 @@ void Img::ProjectionDeghosting::configure(const WireCell::Configuration& cfg)
         }
     }
 
-    Json::FastWriter jwriter;
-    log->debug("{}", jwriter.write(cfg));
+    log->debug("{}", cfg);
 }
 
 namespace {

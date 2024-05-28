@@ -1,9 +1,13 @@
 #include "WireCellPgraph/Port.h"
+#include "WireCellUtil/Type.h"
+
+#include <sstream>
 
 #include <iostream>
 
 using namespace std;
 using namespace WireCell::Pgraph;
+using WireCell::demangle;
 
 Port::Port(Node* node, Type type, std::string signature, std::string name)
   : m_node(node)
@@ -14,10 +18,10 @@ Port::Port(Node* node, Type type, std::string signature, std::string name)
 {
 }
 
-bool Port::isinput() { return m_type == Port::input; }
-bool Port::isoutput() { return m_type == Port::output; }
+bool Port::isinput() const { return m_type == Port::input; }
+bool Port::isoutput() const { return m_type == Port::output; }
 
-Edge Port::edge() { return m_edge; }
+Edge Port::edge() const { return m_edge; }
 
 // Connect an edge, returning any previous one.
 Edge Port::plug(Edge edge)
@@ -28,7 +32,7 @@ Edge Port::plug(Edge edge)
 }
 
 // return edge queue size or 0 if no edge has been plugged
-size_t Port::size()
+size_t Port::size() const
 {
     if (!m_edge) {
         return 0;
@@ -37,7 +41,7 @@ size_t Port::size()
 }
 
 // Return true if queue is empty or no edge has been plugged.
-bool Port::empty()
+bool Port::empty() const
 {
     if (!m_edge or m_edge->empty()) {
         return true;
@@ -77,5 +81,21 @@ void Port::put(Data& data)
     m_edge->push_back(data);
 }
 
-const std::string& Port::name() { return m_name; }
-const std::string& Port::signature() { return m_sig; }
+const std::string& Port::name() const { return m_name; }
+const std::string& Port::signature() const { return m_sig; }
+
+std::string Port::ident() const
+{
+    std::stringstream ss;
+    ss << "<Port"
+       << " \"" << m_name << "\""
+       << " sig:" << demangle(m_sig);
+    if (isinput()) {
+        ss << " (input)";
+    }
+    if (isoutput()) {
+        ss << " (output)";
+    }
+    ss << ">";
+    return ss.str();
+}

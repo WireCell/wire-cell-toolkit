@@ -397,7 +397,7 @@ namespace WireCell {
                     // We are inside a minor range.
 
                     // Our jump keeps us in our minor range.  Make last jump.
-                    if (-n <= djind.second) {
+                    if (-n <= (int)djind.second) {
                         djind.second += n;
                         n = 0;
                         continue;
@@ -416,7 +416,7 @@ namespace WireCell {
                         throw std::out_of_range("advace beyond end");
                     }
 
-                    const size_t n_left = minor_size() - djind.second;
+                    const int n_left = minor_size() - djind.second;
 
                     // Our jump keeps us in the minor range.  Make last jump.
                     if (n < n_left) {

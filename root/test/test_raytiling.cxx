@@ -12,7 +12,7 @@
 #include "TArrow.h"
 #include "TH1F.h"
 
-#include <boost/graph/graphviz.hpp>
+#include "WireCellUtil/Graph.h"
 
 #include <math.h>
 

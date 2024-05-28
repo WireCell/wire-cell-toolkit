@@ -47,6 +47,7 @@ void dump_array(const PC::Dataset& ds, const std::string& name, const std::strin
 
 }
 
+#if 0
 static void dump_tensor(ITensor::pointer iten, const std::string& prefix = "")
 {
     std::stringstream ss;
@@ -67,6 +68,7 @@ static void dump_tensor(ITensor::pointer iten, const std::string& prefix = "")
     ss << " ]\n";
     debug(ss.str());
 }
+#endif
 
 void test_tensor(IFrame::pointer frame, FrameTensorMode mode, bool truncate,
                  const size_t ntraces, const size_t nchans, const std::string& frame_tag)

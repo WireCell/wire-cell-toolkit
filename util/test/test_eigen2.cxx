@@ -1,7 +1,7 @@
 #include "WireCellUtil/Testing.h"
 #include "WireCellUtil/ExecMon.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 #include <iostream>
 
 using namespace std;

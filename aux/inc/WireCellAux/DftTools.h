@@ -48,7 +48,7 @@
 
 #include "WireCellIface/IDFT.h"
 #include <vector>
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 namespace WireCell::Aux::DftTools {
 

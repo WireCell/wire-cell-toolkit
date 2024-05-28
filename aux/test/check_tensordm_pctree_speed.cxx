@@ -1,10 +1,18 @@
 #include "WireCellAux/TensorDMpointtree.h"
-#include "WireCellUtil/PointTree.h"
-#include "WireCellUtil/NamedFactory.h"
+
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/ITensorSetSource.h"
 
+#include "WireCellUtil/PointTree.h"
+#include "WireCellUtil/PointTesting.h"
+#include "WireCellUtil/ExecMon.h"
+
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/PluginManager.h"
 #include "WireCellUtil/Logging.h"
+
+#include <cassert>
+
 using spdlog::debug;
 using spdlog::info;
 using spdlog::error;
@@ -14,45 +22,82 @@ using namespace WireCell::PointCloud;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Tree;
 
+static
+Points::node_ptr make_simple_pctree(const size_t nnodes = 1000000)
+{
+    Points::node_ptr root = std::make_unique<Points::node_t>();
+
+
+    for (size_t count=0; count<nnodes; ++count) {
+        root->insert(Points({ {"3d", PointTesting::make_janky_track()} }));
+    }
+    return root;
+}
+
+int test_gen()
+{
+    ExecMon em("pc tree tensor DM round trip");
+
+    auto root = make_simple_pctree();
+    info(em("made pctree"));
+    assert(root);
+
+    const std::string datapath = "root";
+    auto tens = as_tensors(*root.get(), datapath);
+    info(em("convert to tensordm"));
+    assert(tens.size() > 0);
+
+    TensorIndex ti(tens);
+    info(em("indexed tensors"));
+
+    auto root2 = as_pctree(ti, datapath);
+    info(em("convert to pctree"));
+    assert(root2);
+    
+    return 0;
+}
+
+int test_file(const std::string& fname,
+              const std::string& prefix,
+              const std::string& datapath)
+{
+    ExecMon em("pc tree from tensor DM file");
+
+    auto& pm = PluginManager::instance();
+    assert(pm.add("WireCellSio"));
+
+    auto cobj = Factory::lookup_tn<IConfigurable>("TensorFileSource");
+    auto cfg = cobj->default_configuration();
+    cfg["inname"] = fname;
+    cfg["prefix"] = prefix;
+    cobj->configure(cfg);
+    auto in = Factory::find_tn<ITensorSetSource>("TensorFileSource");
+    info(em("initialize components"));
+
+    ITensorSet::pointer tensp;
+    (*in)(tensp);
+    info(em("exec TensorFileSource"));
+
+    TensorIndex ti(*tensp->tensors());
+    info(em("indexed tensors"));
+
+    auto root = as_pctree(ti, datapath);
+    info(em("as pctree"));
+
+    return 0;
+}
+
 int main(int argc, char* argv[])
 {
     Log::default_logging();
 
-    if (argc < 4) {
-        error("usage: check_tensordm_pctree_speed filename prefix datapath");
-        return 1;
+    if (argc == 1) {
+        return test_gen();
     }
 
-    auto cobj = Factory::find_tn<IConfigurable>("TensorFileSource");
-    auto cfg = cobj->default_configuration();
-    cfg["inname"] = argv[1];
-    cfg["prefix"] = argv[2];
-    std::string datapath = argv[3];
-    cobj->configure(cfg);
-    auto in = Factory::find_tn<ITensorSetSource>("TensorFileSource");
-
-    ITensorSet::pointer ts;
-    (*in)(ts);
-
-
-    // auto pct = as_pctree(*tens, datapath);
-    // auto root = make_simple_pctree();
-    // const std::string datapath = "root";
-    // auto tens = as_tensors(*root.get(), datapath);
-    // CHECK(tens.size() > 0);
-
-    // debug("{:20} {}", "datatype", "datapath");
-    // for (auto ten : tens) {
-    //     auto md = ten->metadata();
-    //     debug("{:20} {}", md["datatype"].asString(), md["datapath"].asString());
-    // }
-
-    auto tensp = ts->tensors();
-    auto start = std::chrono::high_resolution_clock::now();
-    auto root = as_pctree(*tensp, datapath);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    info("as_pctree for {} took {} ms", datapath, duration.count());
-
-    return 0;
+    if (argc == 4) {
+        return test_file(argv[1], argv[2], argv[3]);
+    }
+    
+    return 1;
 }

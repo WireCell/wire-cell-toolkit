@@ -1,3 +1,5 @@
+// Caution: this file is generated.  See the .org file of the same name.
+
 #include "WireCellUtil/PointTree.h"
 
 #include "WireCellUtil/PointTesting.h"
@@ -113,7 +115,7 @@ using node_ptr = std::unique_ptr<Points::node_t>;
 static void dump_children(const node_ptr& node)
 {
     // Loop over children node "Points" values 
-    for (auto& cval : node->child_values()) {
+    for (const auto& cval : node->child_values()) {
         // The named point clouds held by this node value.
         const auto& pcs = cval.local_pcs();
 
@@ -134,19 +136,19 @@ TEST_CASE("point tree example simple tree operations")
     dump_children(root);
 
     // Find iterator to first child in child list
-    CHECK( root->children().size() == 2 );
-    auto cit = root->children().begin();
+    CHECK( root->nchildren() == 2 );
+    auto cptr = root->children().front();
 
     // Remove it as a child and we get ownership as unique_ptr.
-    auto cuptr = root->remove(cit);
-    CHECK( root->children().size() == 1 );
+    auto cuptr = root->remove(cptr);
+    CHECK( root->nchildren() == 1 );
 
     // We can add that orphaned child back.  This transfers ownership.
-    auto* cptr = root->insert(std::move(cuptr));
-    CHECK( root->children().size() == 2 );
+    auto* cptr2 = root->insert(std::move(cuptr));
+    CHECK( root->nchildren() == 2 );
 
     // But, we caught the return and now have a loaned bare pointer
-    CHECK( cptr );
+    CHECK( cptr2 );
 
     // We should now see the reverse order as above dump.
     dump_children(root);
@@ -338,7 +340,8 @@ TEST_CASE("point tree example simple tree operations")
       Scope scope = { "3d", {"x","y","z"} };
       const auto& sv = root->value.scoped_view(scope);
       const auto& skd = sv.kd();
-  
+      const auto& points = skd.points();
+
       // Some query point.
       const std::vector<double> origin = {0,0,0};
   
@@ -349,72 +352,25 @@ TEST_CASE("point tree example simple tree operations")
       auto knn = skd.knn(nnn, origin);
       CHECK( knn.size() == nnn );
   
-      // Get the underlying scoped PC.
-      const auto& spc = sv.pcs();
+      // Get the underlying scoped PC if you want to go back to the full dataset.
+      // const auto& spc = sv.pcs();
   
       // Loop over results and refrence back to original 
       // scoped PC at both major and minor range level.
-      for (size_t pt_ind = 0; pt_ind<knn.size(); ++pt_ind) {
-          auto& [pit,dist] = knn[pt_ind];
-  
-          const auto [maj_ind,min_ind] = pit.index();
-          debug("knn point {} at distance {} from query is in local point cloud {} at index {}",
-                pt_ind, dist, maj_ind, min_ind);
-          const Dataset& pc = spc[maj_ind];
+      for (const auto& [point_index, metric] : knn) {
+          const auto node_index = skd.major_index(point_index);
+          // point-in-node
+          const auto pin_index = skd.minor_index(point_index);
+          /// if you want to get back to the full dataset
+          // const Dataset& pc = spc[node_index];
           const size_t ndim = scope.coords.size();
           // Iterate over the point's dimensions and compare 
           // what is in the PC and what is in the iterator.
           for (size_t dim=0; dim<ndim; ++dim) {
               std::string const& name = scope.coords[dim];
-              auto arr_from_pc = pc.get(name);
-              double ele_from_pc = arr_from_pc->element(min_ind);
-              double ele_from_it = pit->at(dim);
-              CHECK(ele_from_it == ele_from_pc);
-              debug("\t{} = {}", name, ele_from_pc);
+              debug("\tdim={} is named {} and holds value {} at point_index {} from node {} local point {}",
+                    dim, name, points[dim][point_index], point_index, node_index, pin_index);
           }
-      }
-  }
-
-  // a little helper
-  static const Dataset& get_local_pc(const Points& pval, const std::string& pcname)
-  {
-      const auto& pcs = pval.local_pcs();
-      auto pcit = pcs.find(pcname);
-      if (pcit == pcs.end()) {
-          raise<KeyError>("no pc named " + pcname);
-      }
-      return pcit->second;
-  }
-  
-  TEST_CASE("point tree example scoped k-d tree to n-ary nodes")
-  {
-      auto root = make_simple_pctree();
-  
-      // Form a k-d tree query over a scoped point cloud.
-      Scope scope = { "3d", {"x","y","z"} };
-  
-  
-      // Get the scoped view parts
-      const auto& sv = root->value.scoped_view(scope);
-      const auto& skd = sv.kd();
-      const auto& snodes = sv.nodes();
-  
-      // Some query point.
-      const std::vector<double> origin = {0,0,0};
-  
-      // Find three nearest neighbors.
-      auto knn = skd.knn(3, origin);
-      CHECK( knn.size() == 3 );
-  
-      for (size_t pt_ind = 0; pt_ind<knn.size(); ++pt_ind) {
-          auto& [pit,dist] = knn[pt_ind];
-  
-          // This time use major index to get node.
-          const auto djind = pit.index();
-          const auto* node = snodes[djind.first];
-  
-          debug("knn point {} at distance {} from query at node {} with {} children",
-                pt_ind, dist, djind.first, node->children().size());
       }
   }
 

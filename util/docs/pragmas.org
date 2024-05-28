@@ -1,0 +1,32 @@
+#+title: Use of compiler pragmas in WCT code
+#+include: ../../docs/include-topic.org
+
+* Compiler warnings
+
+WCT is build with the strictness of: ~-Wall -Wpedantic -Werror~.
+
+The ~-Werror~ will "upgrade" a warning to an error leading to error messages like:
+
+#+begin_example
+../util/src/Persist.cxx:67:26: error: ‘FastWriter’ is deprecated: Use StreamWriterBuilder instead [-Werror=deprecated-declarations]
+   67 |         Json::FastWriter jwriter;
+      |                          ^~~~~~~
+#+end_example
+
+To explicitly ignore this, wrap the offending code in:
+
+#+begin_example
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        Json::FastWriter jwriter;
+#pragma GCC diagnostic pop
+#+end_example
+
+Notes:
+
+- The ~#pragma~ should be accepted by both GCC and Clang despite the "GCC" label
+
+- Because of the ~-Werror~ uplift, one must transform the hint in the error message by prepending ~-W~ to the part after the ~=~.
+
+- This direct use of ~#pragma~ is very verbose.  If someone knows a way to bundle away some verbosity in a CPP macro, do tell!

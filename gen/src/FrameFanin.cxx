@@ -14,7 +14,6 @@ using namespace WireCell;
 
 Gen::FrameFanin::FrameFanin(size_t multiplicity)
     : Aux::Logger("FrameFanin", "glue")
-    , m_multiplicity(multiplicity)
 {
 }
 Gen::FrameFanin::~FrameFanin() {}
@@ -22,6 +21,9 @@ Gen::FrameFanin::~FrameFanin() {}
 WireCell::Configuration Gen::FrameFanin::default_configuration() const
 {
     Configuration cfg;
+
+    // The number of input ports.  If set to zero the fanin will have DYNAMIC
+    // MULTIPLICITY and simply accept what it is given.  
     cfg["multiplicity"] = (int) m_multiplicity;
 
     // A non-null entry in this array is taken as a string and used to
@@ -29,6 +31,10 @@ WireCell::Configuration Gen::FrameFanin::default_configuration() const
     // they are placed to the output frame.  This creates a tagged
     // subset of output traces corresponding to the entire set of
     // traces in the input frame from the associated port.
+    //
+    // When DYNAMIC MULTIPLICITY is used (multiplicity=0) the last tag in this
+    // array is applied to the all ports numbered greater or equal to the size
+    // of the tag array.
     cfg["tags"] = Json::arrayValue;
 
     // Tag rules are an array, one element per input port.  Each
@@ -36,24 +42,45 @@ WireCell::Configuration Gen::FrameFanin::default_configuration() const
     // their values are an object keyed by a regular expression
     // (regex) and with values that are a single tag or an array of
     // tags. See util/test_tagrules for examples.
+    //
+    // When DYNAMIC MULTIPLICITY (multiplicity=0) the last tag rule in this
+    // array is applied to all ports numbered greater or equal to the size of
+    // the tag rules array.
     cfg["tag_rules"] = Json::arrayValue;
+
+    // See also comments at top of FrameFanin.h
 
     return cfg;
 }
+std::string Gen::FrameFanin::tag(size_t port) const
+{
+    if (m_tags.empty()) return "";
+    if (port < m_tags.size()) return m_tags.at(port);
+    return m_tags.back();
+}
+
 void Gen::FrameFanin::configure(const WireCell::Configuration& cfg)
 {
     int m = get<int>(cfg, "multiplicity", (int) m_multiplicity);
-    if (m <= 0) {
+    if (m < 0) {
         log->critical("illegal multiplicity: {}", m);
         THROW(ValueError() << errmsg{"FrameFanin multiplicity must be positive"});
     }
-    m_multiplicity = m;
-    m_tags.resize(m);
+    if (m == 0) {
+        log->debug("FrameFanin using dynamic multiplicity");
+    }
 
-    // Tag entire input frame worth of traces in the output frame.
-    auto jtags = cfg["tags"];
-    for (int ind = 0; ind < m; ++ind) {
-        m_tags[ind] = convert<std::string>(jtags[ind], "");
+    m_multiplicity = m;
+
+    // If tag is not empty string it will be used to tag the traces from the
+    // corresponding input port.
+    for (const auto& jtag : cfg["tags"]) {
+        if (jtag.isNull()) {
+            m_tags.push_back("");
+        }
+        else {
+            m_tags.push_back(jtag.asString());
+        }
     }
 
     // frame/trace tagging at the port level
@@ -62,6 +89,9 @@ void Gen::FrameFanin::configure(const WireCell::Configuration& cfg)
 
 std::vector<std::string> Gen::FrameFanin::input_types()
 {
+    if (!m_multiplicity) {
+        return std::vector<std::string>();
+    }
     const std::string tname = std::string(typeid(input_type).name());
     std::vector<std::string> ret(m_multiplicity, tname);
     return ret;
@@ -83,12 +113,13 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
         return true;
     }
 
-    if (invec.size() != m_multiplicity) {
-        log->critical("input vector size={} my multiplicity={}", invec.size(), m_multiplicity);
+    const size_t multiplicity = invec.size();
+    if (m_multiplicity && multiplicity != m_multiplicity) {
+        log->critical("input vector size={} my multiplicity={}", multiplicity, m_multiplicity);
         THROW(ValueError() << errmsg{"input vector size mismatch"});
     }
 
-    std::vector<IFrame::trace_list_t> by_port(m_multiplicity);
+    std::vector<IFrame::trace_list_t> by_port(multiplicity);
 
     std::vector<std::tuple<tagrules::tag_t, IFrame::trace_list_t, IFrame::trace_summary_t> > stash;
 
@@ -103,7 +134,7 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
     // creating an empty name map; only want combine the two maskmaps from each APA into a single maskmap, NOT merge masks
     std::map<std::string, std::string> empty_name_map;
 
-    for (size_t iport = 0; iport < m_multiplicity; ++iport) {
+    for (size_t iport = 0; iport < multiplicity; ++iport) {
         const size_t trace_offset = out_traces.size();
 
         const auto& fr = invec[iport];
@@ -120,7 +151,8 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
            // tag based on user rules.
             auto fintags = fr->frame_tags();
             fintags.push_back("");
-            auto fo = m_ft.transform(iport, "frame", fintags);
+            const size_t n = m_ft.nrules("frame");
+            auto fo = m_ft.transform(iport >= n ? n-1 : iport, "frame", fintags);
             fouttags.insert(fo.begin(), fo.end());
         }
 
@@ -128,7 +160,8 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
         // collect transformed trace tags, any trace summary and their
         // offset trace indeices. annoying_factor *= 10;
         for (auto inttag : fr->trace_tags()) {
-            tagrules::tagset_t touttags = m_ft.transform(iport, "trace", inttag);
+            const size_t n = m_ft.nrules("frame");
+            tagrules::tagset_t touttags = m_ft.transform(iport >= n ? n-1 : iport, "trace", inttag);
             if (touttags.empty()) {
                 continue;
             }
@@ -144,20 +177,22 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
             }
         };
 
-        if (!m_tags[iport].empty()) {
+        if (tag(iport).size()) {
             IFrame::trace_list_t tl(traces->size());
             std::iota(tl.begin(), tl.end(), trace_offset);
             by_port[iport] = tl;
         }
 
         // Insert one intput frames traces.
-        out_traces.insert(out_traces.end(), traces->begin(), traces->end());
+        if (traces) {
+            out_traces.insert(out_traces.end(), traces->begin(), traces->end());
+        }
     }
 
     auto sf = new Aux::SimpleFrame(one->ident(), one->time(), out_traces, one->tick(), out_cmm);
-    for (size_t iport = 0; iport < m_multiplicity; ++iport) {
-        if (m_tags[iport].size()) {
-            sf->tag_traces(m_tags[iport], by_port[iport]);
+    for (size_t iport = 0; iport < multiplicity; ++iport) {
+        if (tag(iport).size()) {
+            sf->tag_traces(tag(iport), by_port[iport]);
         }
     }
 

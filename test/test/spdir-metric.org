@@ -1,0 +1,40 @@
+#+title: The SP directional metric test
+#+setupfile: ../../docs/setup-topic.org
+
+* Overview
+
+The full "spdir-metric" test runs the following chain:
+
+  1) *Generate* ideal line tracks at different angles in the detector volume. (~wirecell-*~)
+  2) *Simulate* noise and ADC waveform from the tracks. (~wire-cell~)
+  3) *Translate* apply an optional ADC waveform transform. (external)
+  4) *Filter* apply WCT noise filtering. (~wire-cell~)
+  5) *Signals* apply WCT signal processing. (~wire-cell~)
+  6) *Metrics* for each track, calculate and output the metrics. (~wirecell-*~)
+  7) *Plots* consume all metrics and make standardized plots. (~wirecell-*~)
+
+Comments:
+
+- The main command used to execute each step is given in parenthesis.
+
+- The *translate* step is supported by the infrastructure for this test but is exercised outside the scope of WCT testing.  With no translate stage, *simulate*, *filter* and *signals* stages can be run in a single call to ~wire-cell~.
+
+- The output of the *metrics* stage will be stored into the WCT test data repository to allow for historical tests.
+
+* Meta
+
+  The source for this document is in org markup.  You may read that form directly or you may use Emacs to /export/ the org content to HTML with ~C-c C-e h h~ or to PDF with ~C-c C-e l p~.  The org content may also be /tangled/ with ~C-c C-v t~ to produce the individual BATS test files which of which executes the stages for a given supported detector.
+Depending on where you are reading this document you may find these links provide it in the different formats: [[file:spdir-metric.html][HTML]], [[file:spdir-metric.pdf][PDF]].
+
+* The WCT configuration
+
+A single top level ~wire-cell~ configuration file configures how to run the *simulate*, *filter* and *signals* stages.  It requires specifying the detector, input and output file names and optional list of tasks.  Eg,
+
+#+begin_example
+wire-cell \
+  -A detector=pdsp \
+  -A input=depos.npz \
+  -A output=sig.npz \
+  test/test/spdir-metric.jsonnet 
+#+end_example
+

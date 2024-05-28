@@ -72,7 +72,9 @@ def _configure(ctx, name, incs=(), libs=(), bins=(), pcname=None, mandatory=True
 
     if mandatory:
         if instdir:
-            assert (instdir.lower() not in ['no','off','false'])
+            if instdir.lower() in ['no','off','false']:
+                raise ValueError(f'{name} is mandatory, "{instdir}" not allowed')
+
     else:                       # optional
         if instdir and instdir.lower() in ['no','off','false']:
             debug ("%s: skipping non mandatory %s, use --with-%s=[yes|<dir>] to force" % (lower, name, lower))

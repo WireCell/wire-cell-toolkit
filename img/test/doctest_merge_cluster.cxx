@@ -4,7 +4,7 @@
 
 #include "WireCellAux/ClusterHelpers.h"
 
-#include <boost/graph/adjacency_list.hpp>
+#include "WireCellUtil/Graph.h"
 
 #include <unordered_map>
 

@@ -170,6 +170,9 @@ namespace WireCell {
         /// The cold electronics response function.
         double coldelec(double time, double gain = 7.8, double shaping = 1.0 * units::us);
 
+	/// The parameterized cold electronics response function.
+	double paramscoldelec(double time, double gain = 7.8, double shaping = 1.0 * units::us, double k3=0.1, double k4=0.1, double k5=0.0, double k6=0.0);
+
         /// The warm electronics response function.
         double warmelec(double time, double gain = 30, double shaping = 1.3 * units::us);
 
@@ -205,6 +208,23 @@ namespace WireCell {
             // system of units.
             virtual double operator()(double time) const;
         };
+
+        /// A functional object caching gain, shape and other params
+        class ParamsColdElec : public Generator {
+            const double _g, _s, _k3, _k4, _k5, _k6;
+
+           public:
+            // Create parameterized cold electronics response function.  Gain is an
+            // arbitrary scale, typically in [voltage/charge], and
+            // shaping time in WCT system of units.
+            ParamsColdElec(double gain = 14 * units::mV / units::fC, double shaping = 2.0 * units::us, double k3=0.1, double k4=0.1, double k5=0.0, double k6=0.0);
+            virtual ~ParamsColdElec();
+
+            // Return the response at given time.  Time is in WCT
+            // system of units.
+            virtual double operator()(double time) const;
+        };
+
 
         /// A functional object caching gain and shape.
         /// ICARUS warm electronics

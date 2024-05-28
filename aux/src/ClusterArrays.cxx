@@ -25,8 +25,8 @@
 #include "WireCellAux/SimpleBlob.h"
 #include "WireCellAux/SimpleMeasure.h"
 
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/copy.hpp>
+#include "WireCellUtil/Graph.h"
+
 
 
 using namespace WireCell;
@@ -157,40 +157,40 @@ static bool is_old_chan(const cluster_node_t& node)
     return false;
 }
 
-static
-void dump(const cluster_graph_t& graph)
-{
-    size_t nold_chan=0;
-    std::unordered_map<char, std::unordered_set<int>> code2idents;
-    for (const auto& vdesc : vertex_range(graph)) {
-        const auto& node = graph[vdesc];
-        if (is_old_chan(node)) {
-            ++nold_chan;
-            continue;
-        }
-        char code = node.code();
-        int ident = node.ident();
-        code2idents[code].insert(ident);
-    }
-
-    const std::map<std::string, size_t>& counts = count(graph);
-    std::cerr << "nodes: ";
-    for (const auto& [code,num] : counts) {
-        if (code.size() != 1) { continue; }
-        if (code[0] == 'c') {
-            std::cerr << code << ":" << num-nold_chan << "(" << nold_chan << ") " ;
-            continue;
-        }
-        std::cerr << code << ":" << num << " " ;
-    }
-    std::cerr << "edges: ";
-    for (const auto& [code,num] : counts) {
-        if (code.size() == 2) {
-            std::cerr << code << ":" << num << " ";
-        }
-    }
-    std::cerr << "\n";
-}
+///// used only in commented out debugging.  Comment it out to avoid -Werror=unused-function
+// static
+// void dump(const cluster_graph_t& graph)
+// {
+//     size_t nold_chan=0;
+//     std::unordered_map<char, std::unordered_set<int>> code2idents;
+//     for (const auto& vdesc : vertex_range(graph)) {
+//         const auto& node = graph[vdesc];
+//         if (is_old_chan(node)) {
+//             ++nold_chan;
+//             continue;
+//         }
+//         char code = node.code();
+//         int ident = node.ident();
+//         code2idents[code].insert(ident);
+//     }
+//     const std::map<std::string, size_t>& counts = count(graph);
+//     std::cerr << "nodes: ";
+//     for (const auto& [code,num] : counts) {
+//         if (code.size() != 1) { continue; }
+//         if (code[0] == 'c') {
+//             std::cerr << code << ":" << num-nold_chan << "(" << nold_chan << ") " ;
+//             continue;
+//         }
+//         std::cerr << code << ":" << num << " " ;
+//     }
+//     std::cerr << "edges: ";
+//     for (const auto& [code,num] : counts) {
+//         if (code.size() == 2) {
+//             std::cerr << code << ":" << num << " ";
+//         }
+//     }
+//     std::cerr << "\n";
+// }
 
 using node_row_t = node_array_t::array_view<1>::type;
 

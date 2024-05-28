@@ -1,0 +1,20 @@
+#+title: Wire-Cell Pattern Recognition  
+#+include: ../docs/include-readme.org
+
+This sub-package holds Wire-Cell toolkit pattern recognition components.
+
+* PAAL
+
+A major part forms Steiner tree using the PAAL package from https://paal.mimuw.edu.pl/ and the headers of which are interned into [[inc/WireCellPatRec/paal/]].
+
+When developing ~patrec~, it is best not to directly include files from there but instead use:
+
+#+begin_src c++
+  #include "WireCellPatRec/paal.h"
+#+end_src
+
+This header takes care of some compiler warnings mostly from the ~#include~ of Boost headers.  However, it only includes select headers.  More may be added unless up to that becoming a bottleneck to compilation speed.
+
+The copy of PAAL is "pristine" from 2017-01-30 git hash ~e537b58d50e93d4a72709821b9ea413008970c6b~.  Nominally it was taken from ~git clone http://siekiera.mimuw.edu.pl:8082/paal~ however that server was non-responsive and so the copy here was cloned from ~git clone https://salsa.debian.org/maxzor/paal~.
+
+It has some fixes are applied to the pristine copy to get it to compile.

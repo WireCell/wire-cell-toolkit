@@ -12,7 +12,7 @@
 #include "WireCellIface/ICluster.h"
 #include "WireCellIface/IAnodePlane.h"
 
-#include <boost/graph/graphviz.hpp>
+#include "WireCellUtil/Graph.h"
 #include <sstream>
 #include <functional>
 #include <unordered_set>

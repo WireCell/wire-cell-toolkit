@@ -3,8 +3,7 @@
  * It is approximately equivalent to combined simulation and sigproc
  * using the same response.
  *
- * FIXME: A new DepoSetSplat needs to be written as an IDepoFramer to
- * avoid the high cost of sending individual depos to N APAs.
+ * See DepoSetSplat for a version that input depo sets.
  */
 
 #ifndef WIRECELLGEN_DEPOSPLAT

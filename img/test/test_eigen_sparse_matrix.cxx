@@ -1,6 +1,6 @@
 
-#include <Eigen/Core>
-#include <Eigen/Sparse>
+#include "WireCellUtil/Eigen.h"
+
 
 #include <iostream>
 

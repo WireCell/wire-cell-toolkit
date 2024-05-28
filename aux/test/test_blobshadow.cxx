@@ -3,7 +3,7 @@
 #include "WireCellIface/ICluster.h"
 #include "WireCellUtil/Exceptions.h"
 
-#include <boost/graph/graphviz.hpp>
+#include "WireCellUtil/Graph.h"
 
 #include <iostream>
 
@@ -81,7 +81,7 @@ cluster_vertex_t add_node(char code, int ident, cluster_graph_t& cg)
 std::string dotify(const BlobShadow::graph_t& gr, const cluster_graph_t& cg)
 {
     std::stringstream ss;
-    using vertex_t = boost::graph_traits<BlobShadow::graph_t>::vertex_descriptor;
+    // using vertex_t = boost::graph_traits<BlobShadow::graph_t>::vertex_descriptor;
 
     boost::write_graphviz(ss, gr,
                           [&](std::ostream& out, cluster_vertex_t v) {

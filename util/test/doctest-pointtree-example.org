@@ -5,29 +5,19 @@
 
 * Overview
 
-  A *point tree* refers to an [[https://en.wikipedia.org/wiki/M-ary_tree][n-ary tree]] with *nodes* that hold a set of "local" *point clouds*.  It is a data structure with many features and layers built upon these node-local point clouds.  We start here with a summary of its parts and then dive into each in more detail in subsequent section.
-
-The caller may construct, prune, split, merge and navigate over the point tree manually or with a depth-first descent iteration.  This descent can be complete or limited to a particular depth.
-
-Given any point tree node, the caller may request a node-local point cloud by *name* (~pcname~).  Any ~PointCloud::Dataset~ operations can be performed.  In particular, a *selection* of the point cloud arrays in the cloud may be created and  this selection may be viewed through a *coordinate array*.  This effectively applies a transpose of the selection so that an individual point may be accessed at a given index as an N-dimension vector-like *coordinate point*.
-
-A broader *view* of a subset of the point tree information can be formed.  The view is defined by a *scope* that selects nodes based on a descent depth limit relative to a root/seed node, by a point cloud of a particular name and by the name of point cloud arrays from this point cloud to be used as a selection.  In a scope one may access these per-node values in a flattened manner by viewing them through a *disjoint range*.
-
-Across the *coordinate arrays* in the scope a k-d tree may be formed.  The k-d tree may be queried to find the k-nearest-neighbors (~knn~) to a query point or all neighbors within some radius of a query point.  The query result returns a collection of pairs.  Each pair consists of an iterator from which the result point may be accessed and a distance between that point and the query point.
-
-The iterator also provides a *major index* and a *minor index*.  The major index identifies the node in order defined by the scoped view descent and the minor index identifies the point in the original node-local point cloud.  
+A *point tree* refers to an [[https://en.wikipedia.org/wiki/M-ary_tree][n-ary tree]] with *nodes* that hold a set of "local" *point clouds*.  A subset of the tree called a "scoped view" can be constructed.  The view is limited to certain nodes, a point cloud local to the nodes and a subset of arrays within those local point clouds.  On the points in the view a k-d tree may be constructed.  Each point in a set returned by a k-d tree query can be associated back to the node that provided it.
 
 * Meta
 
-This document is meant to be read linearly but one may also jump around to find specific examples.  In addition to prose describing various aspects, it provides working C++ code examples in the form of doctest test cases.  
-
-  The source for this document is in org markup.  You may read that form directly or you may use Emacs to /export/ the org content to HTML with ~C-c C-e h h~ or to PDF with ~C-c C-e l p~.  The org content may also be /tangled/ to produce the ~doctest-pointtree-example.cxx~ source file with ~C-c C-v t~.  Depending on where you are reading this document the following links may take you to different formats: [[file:doctest-pointtree-example.html][HTML]], [[file:doctest-pointtree-example.pdf][PDF]], [[file:doctest-pointtree-example.cxx][C++]].
+The examples given in this document have been extracted to source code files.  These are then compiled and run as part of WCT testing to assure correctness.  To remake the source files (tangle), open this original org file with Emacs and type ~C-c C-v t~.  To export this document HTML type ~C-c C-e h h~ or to PDF type ~C-c C-e l p~.  Depending on where you are reading this document the following links may take you to different formats: [[file:doctest-pointtree-example.html][HTML]], [[file:doctest-pointtree-example.pdf][PDF]], [[file:doctest-pointtree-example.cxx][C++]].
 
 * Preamble
 
-  The main entry point is the API in ~PointTree.h~.  Additional headers are for the doctest framework.
+The main entry point is the API in ~PointTree.h~.  Additional headers are for the doctest framework.
 
 #+begin_src c++ :tangle doctest-pointtree-example.cxx
+// Caution: this file is generated.  See the .org file of the same name.
+
 #include "WireCellUtil/PointTree.h"
 
 #include "WireCellUtil/PointTesting.h"
@@ -124,6 +114,8 @@ using node_ptr = std::unique_ptr<Points::node_t>;
   Children in this list are called *sibling* nodes.  By default, the order of siblings in this list is determined by the order in which the child node was inserted to the list.  The ordering implies that a child may have a *left sibling* (an "older child") and may have a *right sibling* (a "younger child").  This ordering is reflected in the order that nodes are seen in a depth-first descent of the tree.
 
   A child may be inserted to or removed from a parent.  When removed, the caller is given ownership by accepting a ~node_ptr~ as the return value from the node's ~remove()~ method.  If the caller drops this ~node_ptr~ the child node and any descendant nodes it may hod are destructed.  In either case (insertion or removal) the parent node, its parent, etc up to the root node, can receive notification of the change.  The ordering of any of the child list may be changed by the user but this will not (currently) trigger such notification.
+
+  A user of a tree need not worry about ~node_ptr~ except when ~remove()~ is invoked.  Most of the time the user will deal in bare pointers ~Points::node_t*~.  For example, accessing the children via ~children()~ returns a vector of bare pointers.  These are *lent pointers* and do not transfer ownership.  Ownership resides with the parent.  Transfer of owner ship from the tree to the caller is always done via the unique pointer ~node_ptr~.  OTOH, using ~insert()~ on either bare or unique pointer types transfers ownership to the tree.  In the case of ~insert()~ of a bare pointer, the pointer must be to heap and not stack memory.
 
 
 * What is a node
@@ -245,7 +237,7 @@ With this simple tree we may show off some of the functionality.
 static void dump_children(const node_ptr& node)
 {
     // Loop over children node "Points" values 
-    for (auto& cval : node->child_values()) {
+    for (const auto& cval : node->child_values()) {
         // The named point clouds held by this node value.
         const auto& pcs = cval.local_pcs();
 
@@ -266,19 +258,19 @@ TEST_CASE("point tree example simple tree operations")
     dump_children(root);
 
     // Find iterator to first child in child list
-    CHECK( root->children().size() == 2 );
-    auto cit = root->children().begin();
+    CHECK( root->nchildren() == 2 );
+    auto cptr = root->children().front();
 
     // Remove it as a child and we get ownership as unique_ptr.
-    auto cuptr = root->remove(cit);
-    CHECK( root->children().size() == 1 );
+    auto cuptr = root->remove(cptr);
+    CHECK( root->nchildren() == 1 );
 
     // We can add that orphaned child back.  This transfers ownership.
-    auto* cptr = root->insert(std::move(cuptr));
-    CHECK( root->children().size() == 2 );
+    auto* cptr2 = root->insert(std::move(cuptr));
+    CHECK( root->nchildren() == 2 );
 
     // But, we caught the return and now have a loaned bare pointer
-    CHECK( cptr );
+    CHECK( cptr2 );
 
     // We should now see the reverse order as above dump.
     dump_children(root);
@@ -551,9 +543,9 @@ And alternative element access mechanism is available for disjoint ranges.  It i
 
 * Scoped k-d tree
 
-The scoped view also provides a *k-d tree* formed on the scoped point cloud (specifically the coordinate array formed on its selections).  The k-d tree "knows" about the disjoint nature of the scoped point cloud and it can grow as nodes are added in scope.
+The scoped view also provides a *k-d tree* formed on the scoped point cloud.  Specifically, and for performance reasons, it concatenates the selected coordinate arrays into flattened copies.
 
-A k-nearest-neighbor (knn) and radius search is implemented by the k-d tree interface.  Results of either query are in the form of a vector of a pair consisting of a disjoint iterator (see ~disjoint_range~ above) and the distance from the point referenced by the iterator and the query point.  The iterator yields a vector-like point as well as a *major index* and a *minor index*.  The major index counts into the vectors provided by the scoped view and the minor index counts to the point within the local point cloud at that index.  These two indices allow the caller to navigate from each point in a k-d tree query result to the node that provided the point or to get point attributes in the point cloud that provided the point other than those that were used for k-d tree coordinates.
+A k-nearest-neighbor (knn) and radius search is implemented by the k-d tree interface.  Results of either query are in the form of a vector of a pair consisting of a point index and a distance.  *Attention* the distance is in the metric used.  In particularly, it is common to use an L2 metric and thus the "distance" is a measure of the *square* of a Cartesian distance.  Each point index may be used to recover a "major" and "minos" index.  The major index indicates from which node in the scoped view the point was provided and the minor index locates that point inside the node's local point cloud.
 
 We will see some of this navigation below but lets first just exercise a k-d tree query.
 
@@ -566,7 +558,8 @@ We will see some of this navigation below but lets first just exercise a k-d tre
       Scope scope = { "3d", {"x","y","z"} };
       const auto& sv = root->value.scoped_view(scope);
       const auto& skd = sv.kd();
-  
+      const auto& points = skd.points();
+
       // Some query point.
       const std::vector<double> origin = {0,0,0};
   
@@ -577,95 +570,28 @@ We will see some of this navigation below but lets first just exercise a k-d tre
       auto knn = skd.knn(nnn, origin);
       CHECK( knn.size() == nnn );
   
-      // Get the underlying scoped PC.
-      const auto& spc = sv.pcs();
+      // Get the underlying scoped PC if you want to go back to the full dataset.
+      // const auto& spc = sv.pcs();
   
       // Loop over results and refrence back to original 
       // scoped PC at both major and minor range level.
-      for (size_t pt_ind = 0; pt_ind<knn.size(); ++pt_ind) {
-          auto& [pit,dist] = knn[pt_ind];
-  
-          const auto [maj_ind,min_ind] = pit.index();
-          debug("knn point {} at distance {} from query is in local point cloud {} at index {}",
-                pt_ind, dist, maj_ind, min_ind);
-          const Dataset& pc = spc[maj_ind];
+      for (const auto& [point_index, metric] : knn) {
+          const auto node_index = skd.major_index(point_index);
+          // point-in-node
+          const auto pin_index = skd.minor_index(point_index);
+          /// if you want to get back to the full dataset
+          // const Dataset& pc = spc[node_index];
           const size_t ndim = scope.coords.size();
           // Iterate over the point's dimensions and compare 
           // what is in the PC and what is in the iterator.
           for (size_t dim=0; dim<ndim; ++dim) {
               std::string const& name = scope.coords[dim];
-              auto arr_from_pc = pc.get(name);
-              double ele_from_pc = arr_from_pc->element(min_ind);
-              double ele_from_it = pit->at(dim);
-              CHECK(ele_from_it == ele_from_pc);
-              debug("\t{} = {}", name, ele_from_pc);
+              debug("\tdim={} is named {} and holds value {} at point_index {} from node {} local point {}",
+                    dim, name, points[dim][point_index], point_index, node_index, pin_index);
           }
       }
   }
 #+end_src  
-Suppressing some of the logging output, one may see lines like:
-
-#+begin_example
- knn point 9 at distance 0.020000000000000004 from query is in local point cloud 0 at index 39
- 	x = 0
- 	y = 0.1
- 	z = 0.1
-#+end_example
-
-This example shows a k-nn query over a scope for the three points nearest the given query point (~origin~).  It ends in a loop over the results.  Each result provides an iterator and a distance (from point to query point).  The iterator is over the ~disjoint_range~ that the k-d tree uses to hold a ~coordinate_range~ representation of each local point cloud.  We convert the iterator to a corresponding major and minor index.  We use the major index to locate the point cloud that provided the point.  The minor index is used to index arrays in the point cloud.  In this example, we merely access the same attributes that supplied the coordinates ("x", "y" and "z").  Had the point cloud provided additional arrays we could off course access their attributes with the minor index as well.
-
-* From k-d tree to n-ary tree 
-
-Very similarly, we may navigate from the k-d tree result iterator via the major index to get the node that provided the point cloud that provided the point.
-
-#+begin_src c++ :tangle doctest-pointtree-example.cxx
-  // a little helper
-  static const Dataset& get_local_pc(const Points& pval, const std::string& pcname)
-  {
-      const auto& pcs = pval.local_pcs();
-      auto pcit = pcs.find(pcname);
-      if (pcit == pcs.end()) {
-          raise<KeyError>("no pc named " + pcname);
-      }
-      return pcit->second;
-  }
-  
-  TEST_CASE("point tree example scoped k-d tree to n-ary nodes")
-  {
-      auto root = make_simple_pctree();
-  
-      // Form a k-d tree query over a scoped point cloud.
-      Scope scope = { "3d", {"x","y","z"} };
-  
-  
-      // Get the scoped view parts
-      const auto& sv = root->value.scoped_view(scope);
-      const auto& skd = sv.kd();
-      const auto& snodes = sv.nodes();
-  
-      // Some query point.
-      const std::vector<double> origin = {0,0,0};
-  
-      // Find three nearest neighbors.
-      auto knn = skd.knn(3, origin);
-      CHECK( knn.size() == 3 );
-  
-      for (size_t pt_ind = 0; pt_ind<knn.size(); ++pt_ind) {
-          auto& [pit,dist] = knn[pt_ind];
-  
-          // This time use major index to get node.
-          const auto djind = pit.index();
-          const auto* node = snodes[djind.first];
-  
-          debug("knn point {} at distance {} from query at node {} with {} children",
-                pt_ind, dist, djind.first, node->children().size());
-      }
-  }
-#+end_src  
-
-Notes:
-- scope is more restrictive than ~depth()~.  Misalignment between the major index (~djind.first~) and the depth iterator will occur if nodes otherwise in scope may lack a local point cloud of the name given by ~scope.pcname~.
-
 
 * Helper functions
 
@@ -706,18 +632,6 @@ Weighted and unweighted means can be produced.
       CHECK(wmu[2] == 1.75);
   }
 #+end_src  
-
-* Caveats
-
-There are some C++ things to be careful of in using this complex data structure.
-
-** Coordinate array points are references.
-
-A ~coordinate_array~ produces its transpose on a selection by returning a *reference* to a ~coordinate_array::point~.  To save memory, this point maintains invasive information about the ~coordinate_array~ from which it came.  It can not be copied or else it will sever that connection.
-
-** Disjoint ranges are views
-
-When forming a *disjoint range* the caller is required to keep alive the collection-of-collections alive and stable in memory.  The disjoint range operates through iterators and if those iterators are made invalid by the caller then the disjoint range will be left holding garbage.  In particular be aware that ~std::vector~ is *not stable* if it is appended.  Producing a ~disjoint_range~ on a vector and then calling ~push_back()~ or similar on that vector will very likely leave garbage in the ~disjoint_range~.  Best to fill the vector entirely before forming any disjoint range, including the one formed inside a *k-d tree*.  A ~std::map~ can be enlarged and its previous memory will remain stable and its iterators not invalidated.  Likewise, a disjoint range formed through a scoped view will be stable upon subsequent node insertion.
 
 * File local variables                                     :noexport:
 

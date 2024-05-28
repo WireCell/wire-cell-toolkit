@@ -12,7 +12,7 @@
 #include "WireCellUtil/Testing.h"
 #include "WireCellUtil/Logging.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 using namespace WireCell;
 using WireCell::Aux::SimpleTrace;

@@ -3,8 +3,7 @@
 
 #include "WireCellIface/IDiffusion.h"
 #include "WireCellIface/IDepo.h"
-
-#include <boost/multi_array.hpp>
+#include "WireCellUtil/MultiArray.h"
 
 namespace WireCell {
 

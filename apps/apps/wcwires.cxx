@@ -12,23 +12,23 @@
 using namespace WireCell;
 using namespace WireCell::WireSchema;
 
-static void
-parse_param(std::string name,
-            const std::vector<std::string>& args,
-            std::map<std::string,std::string>& store)
-{
-    for (auto one : args) {
-        auto two = String::split(one, "=");
-        if (two.size() != 2) {
-            std::cerr
-                << name
-                << ": parameters are set as <name>=<value>, got "
-                << one << std::endl;
-            throw CLI::CallForHelp();
-        }
-        store[two[0]] = two[1];
-    }
-}
+// static void
+// parse_param(std::string name,
+//             const std::vector<std::string>& args,
+//             std::map<std::string,std::string>& store)
+// {
+//     for (auto one : args) {
+//         auto two = String::split(one, "=");
+//         if (two.size() != 2) {
+//             std::cerr
+//                 << name
+//                 << ": parameters are set as <name>=<value>, got "
+//                 << one << std::endl;
+//             throw CLI::CallForHelp();
+//         }
+//         store[two[0]] = two[1];
+//     }
+// }
 
 int main(int argc, char** argv)
 {

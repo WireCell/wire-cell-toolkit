@@ -58,6 +58,22 @@ namespace WireCell {
                 return true;
             }
 
+            std::vector<Port> disconnected_ports()
+            {
+                std::vector<Port> ret;
+                for (auto& p : input_ports()) {
+                    if (!p.edge()) {
+                        ret.push_back(p);
+                    }
+                }
+                for (auto& p : output_ports()) {
+                    if (!p.edge()) {
+                        ret.push_back(p);
+                    }
+                }
+                return ret;
+            }
+
            protected:
             // Concrete class should fill during construction
             PortList m_ports[Port::ntypes];

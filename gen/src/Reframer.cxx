@@ -21,10 +21,6 @@ using WireCell::Aux::SimpleFrame;
 
 Gen::Reframer::Reframer()
     : Aux::Logger("Reframer", "gen")
-  , m_toffset(0.0)
-  , m_fill(0.0)
-  , m_tbin(0)
-  , m_nticks(0)
 {
 }
 
@@ -39,11 +35,12 @@ WireCell::Configuration Gen::Reframer::default_configuration() const
     // tags to find input traces/frames
     cfg["tags"] = Json::arrayValue;
     // tag to apply to output frame
-    cfg["frame_tag"] = "";
+    cfg["frame_tag"] = m_frame_tag;
     cfg["tbin"] = m_tbin;
     cfg["nticks"] = m_nticks;
     cfg["toffset"] = m_toffset;
     cfg["fill"] = m_fill;
+    cfg["ignore_tags"] = m_ignore_tags;
 
     return cfg;
 }
@@ -58,11 +55,15 @@ void Gen::Reframer::configure(const WireCell::Configuration& cfg)
     for (auto jtag : cfg["tags"]) {
         m_input_tags.push_back(jtag.asString());
     }
-    m_frame_tag = get<std::string>(cfg, "frame_tag", "");
+    m_frame_tag = get<std::string>(cfg, "frame_tag", m_frame_tag);
     m_toffset = get(cfg, "toffset", m_toffset);
     m_tbin = get(cfg, "tbin", m_tbin);
     m_fill = get(cfg, "fill", m_fill);
     m_nticks = get(cfg, "nticks", m_nticks);
+    m_ignore_tags = get(cfg, "ignore_tags", m_ignore_tags);
+    if ( m_ignore_tags && m_input_tags.size() ) {
+        raise<ValueError>("providing and ignoring tags is not consistent");
+    }
 }
 
 std::pair<ITrace::vector, IFrame::trace_summary_t> Gen::Reframer::process_one(const ITrace::vector& itraces, const IFrame::trace_summary_t& isummary) {
@@ -149,6 +150,16 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
     std::unordered_map< std::string, IFrame::trace_summary_t> tag_summary;
 
     if (m_input_tags.empty()) {
+        auto ttags = inframe->trace_tags();
+        if (! ttags.empty()) {
+            std::stringstream ss;
+            for (const auto& tag : ttags) {
+                ss << " " << tag;
+            }
+            if (! m_ignore_tags) {
+                log->warn("will combine traces from {} trace tags in frame:{}", ttags.size(), ss.str());
+            }
+        }
         out_traces = process_one(*(inframe->traces()));
     }
     else {

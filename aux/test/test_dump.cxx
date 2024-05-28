@@ -1,8 +1,7 @@
 #include "WireCellAux/SimpleTensor.h"
 #include "WireCellAux/Util.h"
 #include "WireCellUtil/Testing.h"
-
-#include <boost/multi_array.hpp>
+#include "WireCellUtil/MultiArray.h"
 #include <iostream>
 
 using namespace WireCell;

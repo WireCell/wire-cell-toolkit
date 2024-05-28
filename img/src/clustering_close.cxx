@@ -1,6 +1,9 @@
 #include <WireCellImg/ClusteringFuncs.h>
 #include "WireCellUtil/ExecMon.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
 using namespace WireCell;
 using namespace WireCell::Img;
 using namespace WireCell::Aux;
@@ -9,25 +12,25 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_close(
     Points::node_ptr& root_live,                                   // in/out
-    Cluster::vector& live_clusters,
-    std::map<const Cluster::pointer, double>& cluster_length_map,  // in/out
-    std::set<Cluster::pointer>& cluster_connected_dead,            // in/out
+    live_clusters_t& live_clusters,
+    cluster_length_map_t& cluster_length_map,  // in/out
+    const_cluster_set_t& cluster_connected_dead,            // in/out
     const TPCParams& tp,                                           // common params
     const double length_cut                                        //
 )
 {
 
-  //  bool flag_print = false;
-  //ExecMon em("starting");
+  // bool flag_print = false;
+  // ExecMon em("starting");
 
-  std::set<std::shared_ptr<const WireCell::PointCloud::Facade::Cluster> > used_clusters;
-  std::set<std::shared_ptr<const WireCell::PointCloud::Facade::Cluster> > cluster_to_be_deleted;
+  std::set<Cluster::const_pointer > used_clusters;
+  std::set<Cluster::const_pointer > cluster_to_be_deleted;
 
   // prepare graph ...
-  typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS, int> Graph;
+  typedef cluster_connectivity_graph_t Graph;
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const std::shared_ptr<const WireCell::PointCloud::Facade::Cluster>, int> map_cluster_index;
+  std::map<const Cluster::const_pointer, int> map_cluster_index;
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     const auto& live = live_clusters[ilive];
     map_cluster_index[live] = ilive;
@@ -72,16 +75,16 @@ void WireCell::PointCloud::Facade::clustering_close(
 
 
 
-bool WireCell::PointCloud::Facade::Clustering_3rd_round( const std::shared_ptr<const WireCell::PointCloud::Facade::Cluster> cluster1,
-							 const std::shared_ptr<const WireCell::PointCloud::Facade::Cluster> cluster2,
+bool WireCell::PointCloud::Facade::Clustering_3rd_round( const Cluster::const_pointer cluster1,
+							 const Cluster::const_pointer cluster2,
 							 double length_1,
 							 double length_2,
 							 double length_cut){
-  std::shared_ptr<const WireCell::PointCloud::Facade::Blob> prev_mcell1 = 0;
-  std::shared_ptr<const WireCell::PointCloud::Facade::Blob> prev_mcell2 = 0;
-  std::shared_ptr<const WireCell::PointCloud::Facade::Blob> mcell1 = 0;
+  Blob::const_pointer prev_mcell1 = 0;
+  Blob::const_pointer prev_mcell2 = 0;
+  Blob::const_pointer mcell1 = 0;
   geo_point_t p1;
-  std::shared_ptr<const WireCell::PointCloud::Facade::Blob> mcell2 = 0;
+  Blob::const_pointer mcell2 = 0;
   geo_point_t p2;
 
   bool flag_print = false;
@@ -92,7 +95,7 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round( const std::shared_ptr<c
   //  if (flag_print) std::cout << em("Find Closest Points") << std::endl;
 
   geo_point_t dir1, dir2;
-  int num_p1, num_p2, num_tp1, num_tp2;
+  int num_p1{0}, num_p2{0}, num_tp1{0}, num_tp2{0};
 
   // if very close merge anyway???
   if (dis < 0.5*units::cm){
@@ -195,3 +198,9 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round( const std::shared_ptr<c
   return false;
   
  }
+#pragma GCC diagnostic pop
+
+// Local Variables:
+// mode: c++
+// c-basic-offset: 2
+// End:

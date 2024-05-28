@@ -10,8 +10,10 @@ namespace WireCell {
      * inputs is left to the implementation.
      */
     class IFrameFanin : public IFaninNode<IFrame, IFrame, 0> {
-       public:
+      public:
         virtual ~IFrameFanin();
+
+        typedef std::shared_ptr<IFrameFanin> pointer;
 
         virtual std::string signature() { return typeid(IFrameFanin).name(); }
 

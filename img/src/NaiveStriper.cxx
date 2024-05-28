@@ -3,9 +3,9 @@
 
 #include "WireCellUtil/NamedFactory.h"
 
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/connected_components.hpp>
+#include "WireCellUtil/Graph.h"
+
+
 
 WIRECELL_FACTORY(NaiveStriper, WireCell::Img::NaiveStriper, WireCell::ISliceStriper, WireCell::IConfigurable)
 

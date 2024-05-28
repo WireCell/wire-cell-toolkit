@@ -4,7 +4,7 @@
 #include "ClusterHelpers.h"
 #include "WireCellIface/ICluster.h"
 #include "WireCellIface/ITensorSet.h"
-#include <boost/multi_array.hpp>
+#include "WireCellUtil/MultiArray.h"
 #include <boost/range/counting_range.hpp>
 
 #include <vector>

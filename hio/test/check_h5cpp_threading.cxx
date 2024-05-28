@@ -5,7 +5,7 @@
 #include <mutex>
 
 #include "WireCellUtil/String.h"
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 // h5cpp NEED to be placed after Eigen to use h5::read<Eigen::Matrix>
 #include <h5cpp/all>

@@ -1,7 +1,7 @@
 #include "WireCellUtil/LassoModel.h"
 
-#include <Eigen/Dense>
-#include <Eigen/Sparse>
+#include "WireCellUtil/Eigen.h"
+
 using namespace Eigen;
 
 #include <iostream>

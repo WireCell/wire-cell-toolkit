@@ -13,7 +13,7 @@ namespace WireCell {
             virtual ~DepoMerger();
 
             // IDepoMerger
-            virtual bool operator()(input_queues_type& inqs, output_queues_type& outqs);
+            virtual bool operator()(input_queues& inqs, output_queues& outqs);
 
             // IConfigurable
             virtual void configure(const WireCell::Configuration& config);

@@ -38,11 +38,12 @@ svggpp::view_t WireCell::RaySvg::project(const Ray& bbray)
 
 // convert raygrid to svggpp
 
-static
-svggpp::xml_t to_point(const Point& pt)
-{
-    return point(project(pt));
-}
+/// unused
+// static
+// svggpp::xml_t to_point(const Point& pt)
+// {
+//     return point(project(pt));
+// }
 static
 std::vector<svggpp::point_t> to_points(const std::vector<Point>& pts)
 {

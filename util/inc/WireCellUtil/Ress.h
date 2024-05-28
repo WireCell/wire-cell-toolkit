@@ -17,7 +17,7 @@
 #ifndef WIRECELL_RESS_HEADER_SEEN
 #define WIRECELL_RESS_HEADER_SEEN
 
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
 
 namespace WireCell {
 

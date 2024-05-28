@@ -32,18 +32,18 @@ namespace WireCell {
 
             Port(Node* node, Type type, std::string signature, std::string name = "");
 
-            bool isinput();
-            bool isoutput();
-            Edge edge();
+            bool isinput() const;
+            bool isoutput() const;
+            Edge edge() const;
 
             // Connect an edge, returning any previous one.
             Edge plug(Edge edge);
 
             // return edge queue size or 0 if no edge has been plugged
-            size_t size();
+            size_t size() const;
 
             // Return true if queue is empty or no edge has been plugged.
-            bool empty();
+            bool empty() const;
 
             // Get the next data.  By default this pops the data off
             // the queue.  To "peek" at the data, pas false.
@@ -54,9 +54,12 @@ namespace WireCell {
 
             // Get back the associated Node.
             Node* node();
+            const Node* node() const;
 
-            const std::string& name();
-            const std::string& signature();
+            const std::string& name() const;
+            const std::string& signature() const;
+
+            std::string ident() const;
 
            private:
             Node* m_node;  // node to which port belongs

@@ -13,6 +13,7 @@ namespace WireCellTbb {
 
     class QueuedoutBody {
         WireCell::IQueuedoutNodeBase::pointer m_wcnode;
+        NodeInfo& m_info;
 
         seqno_t m_seqno{0};
 
@@ -20,14 +21,17 @@ namespace WireCellTbb {
         using mfunc_port = mfunc_node::output_ports_type;
 
         ~QueuedoutBody() {}
-        QueuedoutBody(WireCell::INode::pointer wcnode)
+        QueuedoutBody(WireCell::INode::pointer wcnode, NodeInfo& info)
+            : m_wcnode(std::dynamic_pointer_cast<WireCell::IQueuedoutNodeBase>(wcnode))
+            , m_info(info)
         {
-            m_wcnode = std::dynamic_pointer_cast<WireCell::IQueuedoutNodeBase>(wcnode);
         }
         void operator()(const msg_t& in, mfunc_port& out)
         {
             WireCell::IQueuedoutNodeBase::queuedany outq;
+            m_info.start();
             bool ok = (*m_wcnode)(in.second, outq);
+            m_info.stop();
             if (!ok) {
                 std::cerr << "TbbFlow: queuedout node return false ignored\n";
                 return;
@@ -49,7 +53,8 @@ namespace WireCellTbb {
 
         QueuedoutWrapper(tbb::flow::graph& graph, WireCell::INode::pointer wcnode)
         {
-            auto fn = new mfunc_node(graph, wcnode->concurrency(), QueuedoutBody(wcnode));
+            m_info.set(wcnode);
+            auto fn = new mfunc_node(graph, wcnode->concurrency(), QueuedoutBody(wcnode, m_info));
             auto qn = new seq_node(graph, [](const msg_t& m) {return m.first;});
             tbb::flow::make_edge(*fn, *qn);
             m_fn = fn;

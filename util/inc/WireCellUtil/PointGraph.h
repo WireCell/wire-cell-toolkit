@@ -3,7 +3,7 @@
 
 #include "WireCellUtil/KDTree.h"
 
-#include <boost/graph/adjacency_list.hpp>
+#include "WireCellUtil/Graph.h"
 
 namespace WireCell {
 

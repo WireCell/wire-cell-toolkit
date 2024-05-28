@@ -1,4 +1,4 @@
-#include <boost/multi_array.hpp>
+#include "WireCellUtil/MultiArray.h"
 
 #include <iostream>
 
@@ -21,7 +21,7 @@ int main()
     const int ndim = 3;
 
     typedef boost::multi_array<double, ndim> array_type;
-    typedef array_type::index index;
+    // typedef array_type::index index;
 
     array_type ar3(boost::extents[3][4][5]);
     resize(ar3,{3,4,5});

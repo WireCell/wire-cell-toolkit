@@ -83,8 +83,8 @@ function(tools, outputfile) {
       data: {
         output_filename: outputfile,
         root_file_mode: 'UPDATE',
-        summaries: ['threshold%d' % anode.data.ident],  // note that if tag set, each apa should have a tag set for FrameFanin
-        summary_operator: { ['threshold%d' % anode.data.ident]: 'set' },  // []: obj comprehension
+        summaries: ['wiener%d' % anode.data.ident],  // note that if tag set, each apa should have a tag set for FrameFanin
+        summary_operator: { ['wiener%d' % anode.data.ident]: 'set' },  // []: obj comprehension
         anode: wc.tn(anode),
       },
     }, nin=1, nout=1)

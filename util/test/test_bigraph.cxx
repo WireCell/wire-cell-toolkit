@@ -1,7 +1,7 @@
 // https://stackoverflow.com/a/45850742
 
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/filtered_graph.hpp>
+#include "WireCellUtil/Graph.h"
+
 #include <boost/intrusive/set_hook.hpp>
 #include <boost/intrusive/set.hpp>
 #include <boost/any.hpp>
@@ -41,7 +41,7 @@ typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS, V
 
 int main()
 {
-    using vertex_t = Graph::vertex_descriptor;
+    // using vertex_t = Graph::vertex_descriptor;
 
     Graph g;
     for (auto label : {

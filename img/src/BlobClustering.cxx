@@ -10,7 +10,7 @@
 
 #include "WireCellUtil/IndexedGraph.h"
 
-// #include <boost/graph/graphviz.hpp>
+// #include "WireCellUtil/Graph.h"
 
 WIRECELL_FACTORY(BlobClustering, WireCell::Img::BlobClustering,
                  WireCell::INamed,

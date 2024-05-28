@@ -60,11 +60,21 @@ void WireCell::Persist::dump(const std::string& filename, const Json::Value& jro
     }
     outfilt.push(fp);
     if (pretty) {
+// All of JsonCPP is deprecated in my but I don't want to deal with the details
+// until we make the full jump to nlohmann::json.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         Json::StyledWriter jwriter;
+#pragma GCC diagnostic pop
         outfilt << jwriter.write(jroot);
     }
     else {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         Json::FastWriter jwriter;
+#pragma GCC diagnostic pop
         outfilt << jwriter.write(jroot);
     }
 }

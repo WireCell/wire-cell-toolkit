@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+#include <unordered_set>
 
 namespace WireCellTbb {
 
@@ -36,6 +37,10 @@ namespace WireCellTbb {
         WrapperFactory m_factory;
 
         int m_thread_limit{0};  // 0 means no limit
+
+        // if 0, no summary logged, else log at level 1=debug, 2=info
+        int m_summary{1};
+        std::unordered_set<WireCellTbb::Node> m_nodes;
     };
 
 }  // namespace WireCellTbb

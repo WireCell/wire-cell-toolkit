@@ -8,7 +8,7 @@
 
 #include "WireCellUtil/Array.h"
 
-#include <Eigen/Sparse>
+#include "WireCellUtil/Eigen.h"
 
 namespace WireCell {
     namespace Gen {

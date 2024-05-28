@@ -2844,6 +2844,13 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
 
                     for (auto pitch_target = index - wire_resolution + 1; pitch_target < index + wire_resolution;
                          ++pitch_target) {
+                        if (map_wireid_roichid[target_plane].find(pitch_target) ==
+                            map_wireid_roichid[target_plane].end()) {
+                            LogDebug("no roichid found for pitch_target: " << pitch_target << " layer: " << layer
+                                                                           << " pitch: " << pitch
+                                                                           << " index: " << index);
+                            continue;
+                        }
                         std::pair<int, int> key = {map_wireid_roichid[target_plane][pitch_target], 0};
                         int sta = tick * tick_resolution;
                         int end = sta + tick_resolution;

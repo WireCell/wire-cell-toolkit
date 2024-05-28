@@ -6,7 +6,7 @@
 #include <complex>
 #include <algorithm>
 
-#include "Eigen/Core"           // for version test
+#include "WireCellUtil/Eigen.h"           // for version test
 
 namespace WireCell::Spectrum {
 

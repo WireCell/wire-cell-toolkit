@@ -25,14 +25,14 @@ namespace {
         return std::make_shared<Aux::SimpleTensorSet>(seqno, md, ITensor::shared_vector(itv));
     }
 
-    void print(const ITensorSet::pointer itens)
-    {
-        Assert(itens);
-        Assert(itens->tensors()->size() == 1);
-        auto iten = itens->tensors()->front();
-        auto oarr = Aux::itensor_to_eigen_array<std::complex<float>>(iten);
-        std::cout << oarr << "\n";
-    }
+    // void print(const ITensorSet::pointer itens)
+    // {
+    //     Assert(itens);
+    //     Assert(itens->tensors()->size() == 1);
+    //     auto iten = itens->tensors()->front();
+    //     auto oarr = Aux::itensor_to_eigen_array<std::complex<float>>(iten);
+    //     std::cout << oarr << "\n";
+    // }
 }  // namespace
 
 int main()

@@ -1,0 +1,128 @@
+#+title: DepoFluxSplat
+#+subtitle: Converting Drifted Depos to Signal-like waveforms
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+options: ':t
+#+BIND: org-latex-prefer-user-labels t
+
+* Overview
+
+The ~DepoFluxSplat~ component transforms depos from an input ~IDepoSet~ to an output ~IFrame~.  The transform involves adding in quadrature additional Gaussian extent to any extent the depos may posses (eg, as gained during drifting) and essentially binning the result onto a grid formed by the wires of each plane and time sampling.  The resulting waveforms can be considered "true signals" and may be meaningfully compared to the "reconstructed signals" that result in the same ~IDepoSet~ passing through the simulation (~DepoTransform~) and signal processing (~OmnibusSigProc~).
+
+See also ~DepoFluxWriter~ component that resides in LArSoft's ~larwirecell~.  It performs a similar transform but outputs to the ~art::Event~ a collection of ~SimChannel::IDE~ objects.  ~DepoFluxWriter~ operates on multiple ~AnodePlane~ together while ~DepoFluxSplat~ operates on a per-anode context.  In WCT there is also an older ~DepoSplat~ that operates on a stream of individual ~IDepo~.  This component is deprecated by ~DepoFluxSplat~.
+
+* Interpreting the output
+
+The ~DepoFluxSplat~ can produce a *sparse* or a *dense* frame.  A sparse frame will consist of a set of distinct traces for each depo.  These traces contribute a portion of the true signal due to their associated depo.  This means multiple traces may be found in the frame for any given channel ident.  A dense frame will accumulate these contributes so that no more than one trace will be present for any given channel ident.
+
+Whether sparse or dense, the resulting true signal waveforms represent a measure of the "true" flux of ionization electrons through a particular *measurement plane* (MP) that is perpendicular to the nominal drift direction.  The MP is identified with the *collection plane* (CP) by default.  Options are described below to define another location for the MP.
+
+Another logical plane that is of importance here is the *response plane* (RP).  It is at the RP where the drift simulation (~Drifter~) piles up depos prior to these depos being output and passed to the detector response simulation (~DepoTransform~) in the full simulation.  These same depos are typically input to ~DepoTransform~ which will further drift them from the RP to the MP assuming a constant electric field.
+
+At the MP, the distribution of depo charge is binned in drift time and spatially in the MP.  In time, the flux is integrated over small sample periods ("ticks").  In space, the flux is integrated over the region near all the electrodes that are connected to a common electronics channel.  A region is taken to run the length of an electrode (wire or strip) and extend on either side of its center line by one half pitch.
+
+* Nominal time
+
+The *nominal time* is defined such that it measures when the depo charge distribution passes through the MP.  It is the sum of the following times:
+
+- absolute kinematics time :: of the initial kinematics objects (eg "Geant4 time").
+- interaction time :: to create a particular charged particle
+- tracking time :: to reach a given step of that particle track that produces a depo.
+- drifting time :: to drift that depo to the RP.
+- transport time :: to transport that depo to the MP.
+
+Thus, the *nominal time* measures when a portion of a depo passes through the *measurement plane*.  This time is absolute, physical and correct given the physics models.  The nominal time is independent from any man-made times.  In particular it is unrelated to any "trigger time".
+
+* Acceptance window
+
+An *acceptance window* governs what depos will be considered and is reflected in the *frame time*.  It is defined in the *nominal time* clock.  As such, it must be made to bracket the expected arrival times to the MP for all depos that the user wishes to include.  In defining the *acceptance window* the user must carefully consider how *nominal time* is defined above
+
+For example, if Geant4 is given an "event start time" of T0 and assuming interaction and tracking times are neglected, one may pick a window starting from T0 with a duration of one maximum drift time.  This will exactly capture all depos throughout the drift volume.
+
+The acceptance window is configured using:
+
+- ~tick~ :: The sample time over which to integrate depo flux into time bins.
+- ~window_start~ :: The start of the acceptance window in *nominal time* measured at the MR.
+- ~window_duration~ :: The duration of the acceptance window.
+
+The actual acceptance window will truncate ~window_duration~ so that it is an integral number of ~tick~.  By default, the ~window_start~ will be used to set the frame reference time.
+
+* Incorrecting time offsets
+
+To provide users with questionable flexibility, ~DepoFluxSplat~ accepts two types of arbitrary time offsets.  These are applied by arbitrarily adjusting either the frame reference time or the ~tbin~ times of traces.  These time offsets are not considered when applying the *acceptance window*.  The configuration parameters are:
+
+- ~reference_time~ :: an absolute time *subtracted* from the *nominal time* in setting the frame time.  Default is 0.
+
+- ~time_offsets~ :: a 3-array providing a relative time *added* to the *nominal time* on a per-plane basis.  Default is empty.  If defined, the time offsets are converted to integer number of ticks and added to the ~tbin~ value of all traces on a per-plane basis.
+
+* Additional smearing
+
+~DepoFluxSplat~ can apply additional smearing to depos independently in the longitudinal (time) and the transverse direction of each plane with the following options:
+
+- ~smear_long~ :: a unitless, scalar value giving the number of ticks over which to smear. It forms a second Gaussian sigma that is added in quadrature with the original longitudinal sigma of the depo.
+
+- ~smear_tran~ :: is a unitless, scalar or 3-array giving number of pitches over which to smear.  If scalar, the same smearing is applied regardless of the plane.
+
+- ~nsigma~ :: the cut-off of the Gaussian extent of a depo in units of number-of-sigma.
+
+* Anode and field response
+
+- ~anode~ :: names an ~IAnodePlane~ giving the context for the instance of ~DepoFluxSplat~.
+
+- ~field_response~ :: names an ~IFieldResponse~ giving the field response data to assume.  Only the ~origin~ and ~speed~ values are used to calculate the *transport time* defined above.
+
+* Example
+
+The test ~test/test/test-ssss-pdsp.bats~ uses the ~pdsp~ "simple" detector variant (not the "nominal" which meant to be close to reality) to perform splat, sim and sigproc (ssss).  
+
+The sensitive volume bounding box for anode 0 face 0 is described in table [[tab:diagonal-endpoints]].
+The two X coordinated are on the "anode" and "cathode" planes.   
+Consider an ideal line track of ionization charge connecting these two corners.
+The range in the time and X coordinates for the original depos dotting this line and after drifting are showin in table [[tab:depo-tx-ranges]].
+
+#+include: depofluxsplat-summary.org 
+
+Before drifting, depos are "piled up" in time due to the particle moving at the speed of light and their X coordinates span the full drift distance as the track is diagonal through the entire drift volume.  After drifting, the depos are "piled up" on the response plane and their times are spread due to differing drift lengths.  The negative times are due to original depos between the response and anode planes being "backed up" to the respone plane.
+
+
+Figure [[fig:comp]] visualizes the ionized electron charge distribution in the three views as determined by the ~DepoFluxSplat~ ("splat") and full simulation and signal processing reconstruction ("signal").  Figure [[fig:zoom]] shows the regions at the beginning and ending of the track for the V-plane view for splat and signal and their difference.
+
+#+attr_latex:
+#+caption: Comparison of the diagonal line track for ~DepoFluxSplat~ (top, "splat") and full simulation and signal processing (bottom, "signal").  The images show channel vs time and the inset plots show activity integrated along each axis.
+#+name: fig:comp
+[[file:depofluxsplat/plots-nosmear0000.png]]
+
+#+caption: The splat and signal activity near the two ends of the track and their pixel-wise difference.
+#+name: fig:zoom
+#+begin_center
+#+attr_latex: :width 0.4\textwidth :center
+[[file:depofluxsplat/plots-nosmear0003.png]]
+#+attr_latex: :width 0.4\textwidth :center
+[[file:depofluxsplat/plots-nosmear0004.png]]
+#+end_center
+
+The substantial difference indicates a mismatch between the two.  
+Figure [[fig:wf]] selects particular channels from these two regions and show their time domain waveforms.
+
+#+caption: The splat and signal activity near the end points of the track for select channels.
+#+name: fig:wf
+#+begin_center
+#+attr_latex: :width 0.4\textwidth :center
+[[file:depofluxsplat/plots-nosmear0005.png]]
+#+attr_latex: :width 0.4\textwidth :center
+[[file:depofluxsplat/plots-nosmear0006.png]]
+#+end_center
+
+
+These clearly show differences.  Some difference is expected.  The splat shape comes from integrating regions of purely Gaussian-distributed charge from the depos while simulation applies a convolution and sum over the field response which a very non-Gaussian kernel.  Furthermore, the signal processing applies a low-pass filter which adds width to the resulting signal.  The fact that their integrals do not match is not understood.
+
+The ~DepoFluxSplat~ allows two arbitrary Gaussian widths (transverse and longitudinal) to be added in quadrature to those carried by the drifted depos.  The figure [[fig:wfss]] illustrate an approximation of what these additional 2D Gaussians can do to the waveforms by directly convolving a Gaussian along only the time dimension (not channel).  The "smear" value is the Gaussian sigma measured in units of ticks.  The "scale" value is multiplicative.
+
+
+#+caption: The splat and signal activity near the end points of the track for select channels with smearing and scaling applied.
+#+name: fig:wfss
+#+begin_center
+#+attr_latex: :width 0.4\textwidth :center
+[[file:depofluxsplat/plots-smear0005.png]]
+#+attr_latex: :width 0.4\textwidth :center
+[[file:depofluxsplat/plots-smear0006.png]]
+#+end_center

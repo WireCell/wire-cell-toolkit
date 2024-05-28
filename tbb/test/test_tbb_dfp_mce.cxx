@@ -35,7 +35,7 @@ WireCell::INode::pointer get_node(const std::string& node_desc)
     return nullptr;
 }
 
-WireCellTbb::Node make_node(tbb::flow::graph& graph, const std::string& node_desc)
+WireCellTbb::Node make_node(tbb::flow::graph& graph, const std::string& node_desc, const std::string& name)
 {
     using namespace WireCell;
     using namespace WireCellTbb;
@@ -44,6 +44,10 @@ WireCellTbb::Node make_node(tbb::flow::graph& graph, const std::string& node_des
     if (!wcnode) {
         cerr << "Failed to get node for " << node_desc << endl;
         return nullptr;
+    }
+    auto inamed = std::dynamic_pointer_cast<INamed>(wcnode);
+    if (inamed) {
+        inamed->set_name(name);
     }
 
     cerr << "Getting node from category: " << wcnode->category() << endl;
@@ -90,11 +94,11 @@ int main()
     using namespace WireCellTbb;
 
     tbb::flow::graph graph;
-    Node source = make_node(graph, "source");
+    Node source = make_node(graph, "source", "source1");
     Assert(source);
-    Node drift = make_node(graph, "drift");
+    Node drift = make_node(graph, "drift", "drift1");
     Assert(drift);
-    Node sink = make_node(graph, "sink");
+    Node sink = make_node(graph, "sink", "sink1");
     Assert(sink);
 
     Assert(connect(source, drift));
@@ -105,5 +109,11 @@ int main()
 
     graph.wait_for_all();
 
+    auto source_info = source->info();
+    std::cerr << source_info << std::endl;
+    auto drift_info = drift->info();
+    std::cerr << drift_info << std::endl;
+    auto sink_info = sink->info();
+    std::cerr << sink_info << std::endl;
     return 0;
 }

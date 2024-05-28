@@ -397,7 +397,7 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
             continue;
         }
 
-        std::string oper = get<std::string>(m_cfg["summary_operator"], tag, "sum");
+        std::string oper = get<std::string>(m_cfg["summary_operator"], tag, "set");
 
         log->debug("MagnifySink: saving summaries tagged with \"{}\" into per-plane hists", tag);
 

@@ -9,7 +9,7 @@
 #include "WireCellAux/SimpleTensor.h"
 #include "WireCellUtil/Exceptions.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 #include <iostream>
 
@@ -76,7 +76,11 @@ namespace WireCell {
         {
             std::stringstream ss;
             ss << "ITensor: ";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
             Json::FastWriter jwriter;
+#pragma GCC diagnostic pop
             ss << "shape: [";
             for (auto l : iten->shape()) {
                 ss << l << " ";
@@ -92,7 +96,11 @@ namespace WireCell {
         {
             std::stringstream ss;
             ss << "ITensorSet: ";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
             Json::FastWriter jwriter;
+#pragma GCC diagnostic pop
             ss << itens->ident() << ", " << jwriter.write(itens->metadata());
             for (auto iten : *itens->tensors()) {
                 const auto &md = iten->metadata();

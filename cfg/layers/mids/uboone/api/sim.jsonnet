@@ -98,6 +98,13 @@ function(services, params, options={}) {
         local pirs = make_pirs(index);
         pg.pipeline([
             pg.pnode({
+                // despite the name, just calls whatever its "drifter" is
+                type: 'DepoSetDrifter',
+                name: broken_detector[index].name,
+                data: {
+                    drifter: 'WireBoundedDepos:' + broken_detector[index].name,
+                }
+            }, nin=1, nout=1, uses=[pg.pnode({
                 type: 'WireBoundedDepos',
                 name: broken_detector[index].name,
                 data: {
@@ -105,15 +112,7 @@ function(services, params, options={}) {
                     regions: broken_detector[index].regions,
                     mode: broken_detector[index].mode,
                 },
-            }, nin=1, nout=1, uses = [anode]),
-            pg.pnode({
-                type: 'Bagger',
-                name: broken_detector[index].name,
-                data: {
-                    gate: [params.ductor.start_time,
-                           params.ductor.start_time+params.ductor.readout_time],
-                },
-            }, nin=1, nout=1),
+            }, nin=1, nout=1, uses = [anode])]),
             transforms(anode, index, pirs)[params.ductor.transform],
         ]),
 
@@ -145,10 +144,9 @@ function(services, params, options={}) {
     local ubsigtags = ['ubsig%d'%n for n in [0,1,2]],
 
     // API method sim.signal: subgraph making pure signal voltage from
-    // depos.  Note, you MUST provide a stream of individial depos,
-    // not a stream of deposets!
+    // depos.  
     signal :: function(anode) pg.pipeline([
-        pg.fan.pipe('DepoFanout', [make_branch(anode, index) for index in [0,1,2]],
+        pg.fan.pipe('DepoSetFanout', [make_branch(anode, index) for index in [0,1,2]],
                     'FrameFanin', 'ubsigraph', ubsigtags),
         pg.pnode({
             type: 'Reframer',

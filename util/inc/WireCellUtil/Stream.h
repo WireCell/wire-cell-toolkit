@@ -15,12 +15,12 @@
 #include "WireCellUtil/custard/pigenc_eigen.hpp"
 #include "WireCellUtil/custard/pigenc_stl.hpp"
 #include "WireCellUtil/custard/pigenc_multiarray.hpp"
+#include "WireCellUtil/MultiArray.h"
 
 #define CUSTARD_BOOST_USE_MINIZ
 #include "WireCellUtil/custard/custard_boost.hpp"
 
 #include <boost/iostreams/filtering_stream.hpp>
-#include <boost/multi_array.hpp>
 
 #include <string>
 #include <vector>

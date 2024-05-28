@@ -9,7 +9,7 @@
 
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellUtil/PointCloudCoordinates.h"
-#include "WireCellUtil/NFKD.h"
+#include "WireCellUtil/NFKDVec.h"
 #include "WireCellUtil/NaryTree.h"
 #include "WireCellUtil/KDTree.h"
 
@@ -242,6 +242,7 @@ namespace WireCell::PointCloud::Tree {
       protected:
         friend class Points;
         // Add a node that has been added to the tree in our scope.
+        // This will also append to this scope's selections.
         virtual void append(node_t* node);
 
       private:
@@ -260,14 +261,7 @@ namespace WireCell::PointCloud::Tree {
     class ScopedView : public ScopedBase {
       public:
         
-        // Transpose of one selection.
-        using point_array = coordinate_array<ElementType>;
-
-        // The type of a point "column vector" of the selection.
-        using point_type = typename point_array::value_type;
-
-        // The underlying type of kdtree.
-        using nfkd_t = NFKD::Tree<point_array>; // dynamic index        
+        using nfkd_t = NFKDVec::Tree<double>; // dynamic
 
         explicit ScopedView(const Scope& scope)
             : ScopedBase(scope)
@@ -308,16 +302,17 @@ namespace WireCell::PointCloud::Tree {
         }
 
         virtual void append(selection_t& sel) const {
-            auto got = m_pas.emplace(m_pas.size(), sel);
-            if (m_nfkd) {
-                m_nfkd->append(got.first->second);
-            }
+            // auto got = m_pas.emplace(m_pas.size(), sel);
+            // if (m_nfkd) {
+            //     m_nfkd->append(got.first->second);
+            // }
+            m_nfkd->append(sel);
         }
 
       private:
 
         mutable std::unique_ptr<nfkd_t> m_nfkd;
-        mutable std::map<size_t, point_array> m_pas;
+        // mutable std::map<size_t, point_array> m_pas;
     };
 
 

@@ -58,14 +58,54 @@ namespace WireCell {
             ITrace::vector process_one(const ITrace::vector& itraces); /// no summary version
             IAnodePlane::pointer m_anode;
 
-            // Consider traces with these tags.  No tags mean all traces.
+            /// Configure: tags
+            ///
+            /// Will reframe each set of tagged traces separately, carrying
+            /// forward the tag to the output.
+            ///
+            /// If empty, then all traces in the frame are reframed regardless
+            /// of any trace tagging.
             std::vector<std::string> m_input_tags;
-            // If not empty, apply this tag to output frame
-            std::string m_frame_tag;
 
-            double m_toffset, m_fill;
-            int m_tbin, m_nticks;
+            /// Configure: ignore_tags
+            ///
+            /// If input_tags is empty and yet tagged traces are found in the
+            /// frame it signifies the user likely made an error and a warning
+            /// is printed.  Set this to true to supress the warning.  A true
+            /// value is inconsistent with a non-empty "tags" array.
+            bool m_ignore_tags{false};
 
+            /// Configure: frame_tag
+            ///
+            /// If set, apply as a frame tag on the output frame.
+            std::string m_frame_tag{""};
+
+            /// Configure: toffset
+            ///
+            /// The output frame reference time is nominally set to the the
+            /// input frame reference time and extended by "tbin" worth of
+            /// "tick" in the output traces.  The "toffset" time will be
+            /// arbitrarily added to that nominal time.
+            double m_toffset{0};
+
+            /// Configure: fill
+            ///
+            /// The value to assign to output trace samples that are not
+            /// represented in the input frame.
+            double m_fill{0};
+
+            /// Configure: tbin
+            ///
+            /// The starting time bin (tick) of the traces.  This effectively
+            /// truncates the output frame array.
+            int m_tbin{0};
+
+            /// Configure: nticks
+            ///
+            /// The size of the output frame array along the time dimension.
+            int m_nticks{0};
+
+            // count calls for more useful log messages.
             size_t m_count{0};
         };
     }  // namespace Gen

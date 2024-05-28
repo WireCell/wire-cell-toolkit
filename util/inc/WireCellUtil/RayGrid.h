@@ -11,9 +11,7 @@
 
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/ObjectArray2d.h"
-
-#include <boost/multi_array.hpp>
-
+#include "WireCellUtil/MultiArray.h"
 #include <vector>
 #include <map>
 

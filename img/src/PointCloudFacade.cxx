@@ -10,6 +10,8 @@ using namespace WireCell::PointCloud::Tree; // for "Points" node value type
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;
 
+/// unused
+#if 0
 namespace {
     // helper to dump a dataset
     std::string dump_ds(const WireCell::PointCloud::Dataset& ds) {
@@ -32,9 +34,10 @@ namespace {
         return ss.str();
     }
 }
+#endif
 
-Blob::Blob(const node_ptr& n)
-  : m_node(n.get())
+Blob::Blob(node_t* n)
+    : m_node(n)
 {
     const auto& lpcs = m_node->value.local_pcs();
     const auto& pc_scalar = lpcs.at("scalar");
@@ -73,56 +76,52 @@ geo_point_t Blob::center_pos() const {
 }
 
 int_t Blob::num_points() const{
-  return npoints;
+    return npoints;
 }
 
 
-Cluster::Cluster(const node_ptr& n)
-  : m_node(n.get())
+Cluster::Cluster(node_t*n)
+    : m_node(n)
 {
     // build blobs
-    for (const auto& child : m_node->children()) {
+    for (auto child : m_node->children()) {
         auto blob = std::make_shared<Blob>(child);
+
         m_blobs.push_back(blob);
-        for (int slice_index = blob->slice_index_min; slice_index < blob->slice_index_max; ++slice_index) {
-            m_time_blob_map.insert({slice_index, blob});
-        }
+        m_time_blob_map.insert({blob->slice_index_min, blob});
     }
 }
 
-Blob::vector Cluster::is_connected(const Cluster& c, const int offset) const
+Blob::const_vector Cluster::is_connected(const Cluster& c, const int offset) const
 {
-    Blob::vector ret;
-    // loop m_time_blob_map
-    for (const auto& [time, blob] : m_time_blob_map) {
-        // loop c.m_time_blob_map
-        auto range = c.m_time_blob_map.equal_range(time);
-	bool flag_save = false;
-        for (auto it = range.first; it != range.second; ++it) {
-	  const auto& cblob = it->second;
-	  if (blob->overlap_fast(*cblob, offset)) {
-	    //ret.push_back(cblob); // dead clusters ... 
-	    //ret.push_back(blob); // live clusters ...
-	    flag_save = true;
-	    break;
-	  }
+
+    Blob::const_vector ret;
+    for (const auto& [badtime, badblob] : c.m_time_blob_map) {
+        auto bad_start = badtime;
+        auto bad_end = badblob->slice_index_max; // not inclusive
+        for (const auto& [good_start, goodblob] : m_time_blob_map) {
+            auto good_end = goodblob->slice_index_max; // not inclusive
+            if (good_end < bad_start || good_start >= bad_end) {
+                continue;
+            }
+            if (goodblob->overlap_fast(*badblob, offset)) {
+                ret.push_back(goodblob);
+            }
         }
-	if (flag_save) ret.push_back(blob); // live clusters ...
     }
     return ret;
 }
 
-std::shared_ptr<const WireCell::PointCloud::Facade::Blob> Cluster::get_first_blob() const{
-  return m_time_blob_map.begin()->second;
+Blob::const_pointer Cluster::get_first_blob() const{
+    return m_time_blob_map.begin()->second;
 }
-std::shared_ptr<const WireCell::PointCloud::Facade::Blob> Cluster::get_last_blob() const{
-  return m_time_blob_map.rbegin()->second;
+Blob::const_pointer Cluster::get_last_blob() const{
+    return m_time_blob_map.rbegin()->second;
 }
 
 
 std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t& p_test1, geo_point_t dir, double test_dis, double dis_step, double angle_cut, double dis_cut) const{
 
-  bool flag = false;
   geo_point_t p_test;
   
   double min_dis = 1e9;
@@ -150,153 +149,146 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
   return std::make_pair(min_point,min_dis1);
 }
 
+
 int Cluster::get_num_points() const{
-  Scope scope = { "3d", {"x","y","z"} };
   const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
-  // const auto& spcs = sv.pcs();
-  // debug("sv {}", dump_pcs(sv.pcs()));
   const auto& skd = sv.kd();
-  
-  return skd.points().size();
+  return skd.npoints();
 }
 
-std::pair<int, int> Cluster::get_num_points(const geo_point_t& point, const geo_point_t& dir) const{
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
-  // const auto& spcs = sv.pcs();
-  // debug("sv {}", dump_pcs(sv.pcs()));
-  const auto& skd = sv.kd();
 
-  int num_p1 = 0;
-  int num_p2 = 0;
+int Cluster::get_num_points(const geo_point_t& point, double dis) const
+{
+    const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
+    const auto& skd = sv.kd();
 
-  auto& points = skd.points();
+    // following the definition in https://github.com/BNLIF/wire-cell-data/blob/5c9fbc4aef81c32b686f7c2dc7b0b9f4593f5f9d/src/ToyPointCloud.cxx#L656C10-L656C30
+    auto rad = skd.radius(dis*dis, point);
+    return rad.size();
+}
 
-  for (auto it = points.begin(); it!=points.end(); it++){
-    geo_point_t dir1(it->at(0) - point.x(), it->at(1) - point.y(), it->at(2) - point.z());
-    if (dir1.dot(dir)>=0){
-      num_p1 ++;
-    }else{
-      num_p2 ++;
+
+std::pair<int, int> Cluster::get_num_points(const geo_point_t& point, const geo_point_t& dir) const
+{
+    const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
+    const auto& skd = sv.kd();
+    const auto& points = skd.points();
+    const size_t npoints = points.size();
+
+    int num_p1 = 0;
+    int num_p2 = 0;
+
+    for (size_t ind=0; ind<npoints; ++ind) {
+        geo_point_t dir1(points[0][ind] - point.x(),
+                         points[1][ind] - point.y(),
+                         points[2][ind] - point.z());
+        if (dir1.dot(dir)>=0){
+            ++num_p1;
+        }
+        else{
+            ++num_p2;
+        }
+    }  
+
+    return std::make_pair(num_p1, num_p2);
+}
+
+
+std::pair<int, int> Cluster::get_num_points(const geo_point_t& point, const geo_point_t& dir, double dis) const
+{
+    const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
+    const auto& skd = sv.kd();
+    const auto& points = skd.points();
+
+    int num_p1 = 0;
+    int num_p2 = 0;
+
+    auto rad = skd.radius(dis*dis, point);
+    for (const auto& [index,_] : rad) {
+      
+        geo_point_t dir1(points[0][index] - point.x(),
+                         points[1][index] - point.y(),
+                         points[2][index] - point.z());
+
+        if (dir1.dot(dir) >= 0) {
+            ++num_p1;
+        }
+        else{
+            ++num_p2;
+        }
+
     }
-  }
 
-  return std::make_pair(num_p1, num_p2);
+    return std::make_pair(num_p1, num_p2);
 }
 
-std::pair<int, int> Cluster::get_num_points(const geo_point_t& point, const geo_point_t& dir, double dis) const{
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
-  // const auto& spcs = sv.pcs();
-  // debug("sv {}", dump_pcs(sv.pcs()));
-  const auto& skd = sv.kd();
 
-  int num_p1 = 0;
-  int num_p2 = 0;
 
-  auto rad = skd.radius(pow(dis,2), point);
-  for (size_t pt_ind = 0; pt_ind<rad.size(); ++pt_ind) {
-    auto& [pit,dist2] = rad[pt_ind];
+std::map<Blob::const_pointer, geo_point_t> Cluster::get_closest_mcell(const geo_point_t& point, double radius) const
+{
+    const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
+    const auto& skd = sv.kd();
+    const auto& points = skd.points();
 
-    geo_point_t dir1(pit->at(0)-point.x(), pit->at(1)-point.y(), pit->at(2)-point.z());
+    // following the definition in https://github.com/BNLIF/wire-cell-data/blob/5c9fbc4aef81c32b686f7c2dc7b0b9f4593f5f9d/src/ToyPointCloud.cxx#L656C10-L656C30
+    auto rad = skd.radius(radius*radius, point);
 
-    if (dir1.dot(dir)>=0){
-      num_p1 ++;
-    }else{
-      num_p2 ++;
+    std::map<Blob::const_pointer, geo_point_t> mcell_point_map; // return
+    std::map<Blob::const_pointer, double> mcell_dis2_map;       // temp
+  
+
+    // fixme: we could reduce the number of calls to map lookups if this loop
+    // ends up being a hot spot.
+    for (const auto& [index, dist2] : rad) {
+
+        geo_point_t p1(points[0][index],
+                       points[1][index],
+                       points[2][index]);
+
+        const auto blob_index = skd.major_index(index);
+        const auto blob = m_blobs[blob_index];    // this must be the blob ...
+
+        auto it = mcell_dis2_map.find(blob);
+        if (it == mcell_dis2_map.end()) { // first time
+            mcell_dis2_map[blob] = dist2;
+            mcell_point_map[blob] = p1;
+        }
+        else {
+            if (dist2 < it->second) { // check for yet closer
+                it->second = dist2;
+                mcell_point_map[blob] = p1;
+            }
+        }
     }
-    
-  }
-
-
-  return std::make_pair(num_p1, num_p2);
-}
-
-
-
-int Cluster::get_num_points(const geo_point_t& point, double dis) const{
-  //return point_cloud->get_closest_points(p_test, dis).size();
-
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
-  // const auto& spcs = sv.pcs();
-  // debug("sv {}", dump_pcs(sv.pcs()));
-  const auto& skd = sv.kd();
-
-  // following the definition in https://github.com/BNLIF/wire-cell-data/blob/5c9fbc4aef81c32b686f7c2dc7b0b9f4593f5f9d/src/ToyPointCloud.cxx#L656C10-L656C30
-  auto rad = skd.radius(pow(dis,2), point);
-  return rad.size();
-}
-
-std::map<std::shared_ptr<const WireCell::PointCloud::Facade::Blob>, geo_point_t> Cluster::get_closest_mcell(const geo_point_t& p, double search_radius) const{
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
-  // const auto& spcs = sv.pcs();
-  // debug("sv {}", dump_pcs(sv.pcs()));
-  const auto& skd = sv.kd();
-
-  // following the definition in https://github.com/BNLIF/wire-cell-data/blob/5c9fbc4aef81c32b686f7c2dc7b0b9f4593f5f9d/src/ToyPointCloud.cxx#L656C10-L656C30
-  auto rad = skd.radius(pow(search_radius,2), p);
-
-  std::map<std::shared_ptr<const WireCell::PointCloud::Facade::Blob>, geo_point_t> mcell_point_map;
-  std::map<std::shared_ptr<const WireCell::PointCloud::Facade::Blob>, double> mcell_dis_map;
   
-  for (size_t pt_ind = 0; pt_ind<rad.size(); ++pt_ind) {
-    auto& [pit,dist2] = rad[pt_ind];                    // what is the pit (point?)
-    const auto [maj_ind,min_ind] = pit.index();        // maj_ind --> section, min_ind (within a section, what is the index)
-    //  maj_inds.insert(maj_ind);
+    return mcell_point_map;
+}
 
-    geo_point_t p1(pit->at(0), pit->at(1), pit->at(2));
-    const auto blob = m_blobs[maj_ind];    // this must be the blob ...
-    //  auto charge = blob->charge;
-    // set a minimal charge
-    // following: https://github.com/BNLIF/wire-cell-data/blob/5c9fbc4aef81c32b686f7c2dc7b0b9f4593f5f9d/inc/WCPData/SlimMergeGeomCell.h#L59
-    //    if (charge == 0) charge = 1;
+std::pair<geo_point_t, Blob::const_pointer > Cluster::get_closest_point_mcell(const geo_point_t& point) const
+{
+    const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
+    const auto& skd = sv.kd();
+    const auto& points = skd.points();
 
-    if (mcell_dis_map.find(blob) == mcell_dis_map.end()){
-      mcell_dis_map[blob] = dist2;
-      mcell_point_map[blob] = p1;
-    }else{
-      if (dist2 < mcell_dis_map[blob]){
-	mcell_dis_map[blob] = dist2;
-	mcell_point_map[blob] = p1;
-      }
+    auto rad = skd.knn(1, point);
+    if (rad.size() == 0) {
+        return std::make_pair(geo_point_t(), nullptr);
     }
-    
-  }
 
-  
-  return mcell_point_map;
+    const auto& [index, dist2] = rad[0];
+
+    const auto blob_index = skd.major_index(index);
+    const auto blob = m_blobs[blob_index];
+
+    geo_point_t closest(points[0][index],
+                        points[1][index],
+                        points[2][index]);
+
+    return std::make_pair(closest, blob);
 }
 
-std::pair<geo_point_t, std::shared_ptr<const WireCell::PointCloud::Facade::Blob> > Cluster::get_closest_point_mcell(const geo_point_t& origin) const{
-  
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
-  // const auto& spcs = sv.pcs();
-  // debug("sv {}", dump_pcs(sv.pcs()));
-  const auto& skd = sv.kd();
-  auto rad = skd.knn(1, origin);
-
-  geo_point_t ret(0,0,0);
-  std::shared_ptr<const WireCell::PointCloud::Facade::Blob> blob = 0;
-  
-  if (rad.size()==0)
-    return std::make_pair(ret,blob);
-
-  //  const auto& snodes = sv.nodes();
-  auto& [pit,dist] = rad[0];                    // what is the pit (point?)
-  const auto [maj_ind,min_ind] = pit.index();        // maj_ind --> section, min_ind (within a section, what is the index)
-
-  ret.set( pit->at(0), pit->at(1), pit->at(2));
-  
-  blob = m_blobs[maj_ind];    // this must be the blob ...
-
-  return std::make_pair(ret,blob);
-}
-
-geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis, const int alg) const {
-    spdlog::set_level(spdlog::level::debug); // Set global log level to debug
+geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis, const int alg) const
+{
     /// FIXME: there are many assumptions made, shoud we check these assumptions?
     /// a bit worriying about the speed.
     //    Scope scope = { "3d", {"x","y","z"} };
@@ -317,9 +309,7 @@ geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis, c
     //    const auto& snodes = sv.nodes();
 
 
-    
-    
-    std::map<std::shared_ptr<const WireCell::PointCloud::Facade::Blob>, geo_point_t> pts = get_closest_mcell(origin, dis);
+    std::map<Blob::const_pointer, geo_point_t> pts = get_closest_mcell(origin, dis);
     
     // average position
     geo_point_t pt(0,0,0);
@@ -342,92 +332,6 @@ geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis, c
       //      if(dis1<1.0*units::mm) std::cout << origin << " " << blob->center_pos() << " " << q << " " << pts.size() << std::endl;
     }
     
-    //std::set<size_t> maj_inds;                           //set, no duplications ...
-    //    for (size_t pt_ind = 0; pt_ind<rad.size(); ++pt_ind) {
-    //  auto& [pit,dist2] = rad[pt_ind];                    // what is the pit (point?)
-    //  const auto [maj_ind,min_ind] = pit.index();        // maj_ind --> section, min_ind (within a section, what is the index)
-      //  maj_inds.insert(maj_ind);
-
-    //  const auto blob = m_blobs[maj_ind];    // this must be the blob ...
-    //  auto charge = blob->charge;
-
-      // set a minimal charge
-      // following: https://github.com/BNLIF/wire-cell-data/blob/5c9fbc4aef81c32b686f7c2dc7b0b9f4593f5f9d/inc/WCPData/SlimMergeGeomCell.h#L59
-    //  if (charge == 0) charge = 1;
-
-     
-      
-    // ret += blob->center_pos() * charge;
-    //  total_charge += charge;
-      
-    //}
-
-    
-
-    // if (dis1 < 0.1*units::mm){
-    //   const auto &spcs = sv.pcs();
-    //   std::vector<float_t> x;
-    //   std::vector<float_t> y;
-    //   std::vector<float_t> z;
-    //   for(const auto& spc : spcs) {   // each little 3D pc --> (blobs)   spc represents x,y,z in a blob
-    // 	const auto& x_ = spc.get().get("x")->elements<float_t>();
-    // 	const auto& y_ = spc.get().get("y")->elements<float_t>();
-    // 	const auto& z_ = spc.get().get("z")->elements<float_t>();
-    // 	const size_t n = x_.size();
-	
-    // 	x.insert(x.end(), x_.begin(), x_.end()); // Append x_ to x
-    // 	y.insert(y.end(), y_.begin(), y_.end());
-    // 	z.insert(z.end(), z_.begin(), z_.end());
-    //   }
-    //   for (size_t i=0;i!=x.size();i++){
-    // 	std::cout << "all " <<  i << " " << x.at(i) << " " << y.at(i) << " " << z.at(i) << std::endl;
-    //   }
-      
-
-    //   for (size_t pt_ind = 0; pt_ind<rad.size(); ++pt_ind) {
-    // 	auto& [pit,dist] = rad[pt_ind];
-    // 	std::cout << "kd " << pt_ind << " " << pit->at(0) << " " << pit->at(1) << " " << pit->at(2) << " " << dist << std::endl;
-    //   }
-      
-    //   //  for (size_t i=0;i!=skd.points().size();i++){
-    //   //	std::cout << i << " " << skd.points()
-    // }
-    
-
-    // this algorithm was not correctly translated !!!
-    
-    // debug("maj_inds.size() {} ", maj_inds.size());
-
-    /*
-    for (size_t maj_ind : maj_inds) {
-        if (alg == 0) {
-            const auto* node = snodes[maj_ind];
-            const auto& lpcs = node->value.local_pcs();
-            const auto& pc_scalar = lpcs.at("scalar");
-            const auto charge = pc_scalar.get("charge")->elements<float_t>()[0];   // is this the blob?
-            const auto center_x = pc_scalar.get("center_x")->elements<float_t>()[0];
-            const auto center_y = pc_scalar.get("center_y")->elements<float_t>()[0];
-            const auto center_z = pc_scalar.get("center_z")->elements<float_t>()[0];
-            // debug("charge {} center {{{} {} {}}}", charge, center_x, center_y, center_z);
-            geo_point_t inc(center_x, center_y, center_z);
-            inc = inc * charge;
-            ret += inc;
-            total_charge += charge;
-        } else {
-	  const auto blob = m_blobs[maj_ind];    // this must be the blob ...
-	  const auto charge = blob->charge;
-
-
-	  
-
-
-	  ret += blob->center_pos() * charge;
-	  total_charge += charge;
-        }
-    }
-    */
-   
-
     
     if (charge != 0) {
         pt = pt / charge;
@@ -442,14 +346,18 @@ namespace bh = boost::histogram;
 namespace bha = boost::histogram::algorithm;
 
 
-std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, const double dis, const int alg) const {
-    Scope scope = { "3d", {"x","y","z"} };
+std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, const double dis, const int alg) const
+{
+    // Scope scope = { "3d", {"x","y","z"} };
     const auto& sv = m_node->value.scoped_view(scope);
     const auto& skd = sv.kd();
+    const auto& points = skd.points();
+
     auto rad = skd.radius(dis*dis, origin);
     /// FIXME: what if rad is empty?
     if(rad.size() == 0) {
         // raise<ValueError>("empty point cloud");
+        // (bv) why not raise?  we do below.
         return {0,0};
     }
     // const auto& spc = sv.pcs();
@@ -464,21 +372,24 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
         auto hist = bh::make_histogram(bh::axis::regular<>( 180, -1.0, 1.0 ),
                                        bh::axis::regular<>( 360, -pi, pi ) );
 
-        for (size_t pt_ind = 0; pt_ind<rad.size(); ++pt_ind) {
-            auto& [pit,dist2] = rad[pt_ind];
+        for (const auto& [index, dist2] : rad) {
 
-	    // get average charge information ...
-	    const auto [maj_ind,min_ind] = pit.index();        // maj_ind --> section, min_ind (within a section, what is the index)
-	    const auto blob = m_blobs[maj_ind];    // this must be the blob ...
+            const auto blob_index = skd.major_index(index);
+            const auto blob = m_blobs[blob_index];    // this must be the blob ...
             auto charge = blob->charge;
 	    // protection against the charge=0 case ...
 	    if (charge ==0) charge = 1;
+            // fixme: what about change < 1?
+
+            // fixme: alg==1 has this line, why not here?
+	    // if (charge <=0) continue;
+            
 	    const auto npoints = blob->num_points();
-            // debug("pt {{{} {} {}}}", pit->at(0), pit->at(1), pit->at(2));
-            // auto pt = *pit;
-            // debug("pt {{{} {} {}}}", pt[0], pt[1], pt[2]);
-	    
-            const geo_point_t pt(pit->at(0), pit->at(1), pit->at(2));
+
+            geo_point_t pt(points[0][index],
+                           points[1][index],
+                           points[2][index]);
+
             Vector dir = (pt-origin).norm();
             const double cth = Z.dot(dir);
             const double phi = atan2(Y.dot(dir), X.dot(dir));
@@ -504,20 +415,23 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
         auto hist = bh::make_histogram(bh::axis::regular<>( 180, 0, pi ),
                                        bh::axis::regular<>( 360, -pi, pi ) );
 
-        for (size_t pt_ind = 0; pt_ind<rad.size(); ++pt_ind) {
-            auto& [pit,dist2] = rad[pt_ind];
+        for (const auto& [index, dist2] : rad) {
 
-	    // get average charge information
-	    const auto [maj_ind,min_ind] = pit.index();        // maj_ind --> section, min_ind (within a section, what is the index)
-	    const auto blob = m_blobs[maj_ind];    // this must be the blob ...
-	    auto charge = blob->charge;
-	    // protection against charge = 0 case ...
+            const auto blob_index = skd.major_index(index);
+            const auto blob = m_blobs[blob_index];    // this must be the blob ...
+            auto charge = blob->charge;
+	    // protection against the charge=0 case ...
 	    if (charge ==0) charge = 1;
+            // fixme: what about change < 1?
+
 	    const auto npoints = blob->num_points();
 
 	    if (charge <=0) continue;
 	    
-            const geo_point_t pt(pit->at(0), pit->at(1), pit->at(2));
+            geo_point_t pt(points[0][index],
+                           points[1][index],
+                           points[2][index]);
+
             Vector dir = (pt-origin).norm();
             const double th = acos(Z.dot(dir));
             const double phi = atan2(Y.dot(dir), X.dot(dir));
@@ -529,9 +443,12 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
         return {cell.bin(0).center(), cell.bin(1).center()};
     }
     raise<ValueError>("unknown alg %d", alg);
+    return std::pair<double, double>{}; // keep compiler happy
 }
 
-geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, const int alg) const {
+
+geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, const int alg) const
+{
     if (alg == 0) {
         const auto [cth, phi] = hough_transform(origin, dis, alg);
         const double sth = sqrt(1-cth*cth);
@@ -542,9 +459,12 @@ geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double di
         return {sin(th)*cos(phi), sin(th)*sin(phi), cos(th)};
     }
     raise<ValueError>("unknown alg %d", alg);
+    return geo_point_t{};       // keep compiler happy
 }
 
-std::tuple<int, int, int, int> Cluster::get_uvwt_range() const {
+
+std::tuple<int, int, int, int> Cluster::get_uvwt_range() const
+{
     std::set<int> u_set;
     std::set<int> v_set;
     std::set<int> w_set;
@@ -566,7 +486,9 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_range() const {
     return {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
 }
 
-double Cluster::get_length(const TPCParams& tp) const {
+
+double Cluster::get_length(const TPCParams& tp) const
+{
     const auto [u, v, w, t] = get_uvwt_range();
 
     // t is in tick
@@ -578,45 +500,43 @@ double Cluster::get_length(const TPCParams& tp) const {
     return length;
 }
 
-std::pair<geo_point_t, geo_point_t> Cluster::get_highest_lowest_points() const{
-   // how to get all the points???
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);
-  const auto& skd = sv.kd();
-  
-  auto& points = skd.points();
+std::pair<geo_point_t, geo_point_t> Cluster::get_highest_lowest_points(size_t axis) const
+{
+    const auto& sv = m_node->value.scoped_view(scope);
+    const auto& skd = sv.kd();
+    const auto& points = skd.points();
+    const size_t npoints = points.size();
 
-  geo_point_t highest_point(points.at(0).at(0),points.at(0).at(1),points.at(0).at(2));
-  geo_point_t lowest_point = highest_point;
+    geo_point_t lowest_point, highest_point;
 
-  for (auto it = points.begin(); it!=points.end(); it++){
-    if (it->at(1) > highest_point.y()) // find highest Y ...
-      highest_point.set(it->at(0), it->at(1), it->at(2));
-    if (it->at(1) < lowest_point.y()) // find lowest Y point ...
-      lowest_point.set(it->at(0), it->at(1), it->at(2));
-  }
+    for (size_t ind=0; ind<npoints; ++ind) {
+        geo_point_t pt(points[0][ind],
+                       points[1][ind],
+                       points[2][ind]);
+        if (!ind) {
+            lowest_point = highest_point = pt;
+            continue;
+        }
+        if (pt[axis] > highest_point[axis]) {
+            highest_point = pt;
+        }
+        if (pt[axis] < lowest_point[axis]) {
+            lowest_point = pt;
+        }
+    }
 
-  return std::make_pair(highest_point, lowest_point);
+    return std::make_pair(highest_point, lowest_point);
 }
 
 
-std::pair<geo_point_t, geo_point_t> Cluster::get_earliest_latest_points() const{
-  // how to get all the points???
-  Scope scope = { "3d", {"x","y","z"} };
-  const auto& sv = m_node->value.scoped_view(scope);
-  const auto& skd = sv.kd();
-  
-  auto& points = skd.points();
-
-  geo_point_t highest_point(points.at(0).at(0),points.at(0).at(1),points.at(0).at(2));
-  geo_point_t lowest_point = highest_point;
-
-  for (auto it = points.begin(); it!=points.end(); it++){
-    if (it->at(0) > highest_point.x()) // find highest X ...
-      highest_point.set(it->at(0), it->at(1), it->at(2));
-    if (it->at(0) < lowest_point.x()) // find lowest X point ...
-      lowest_point.set(it->at(0), it->at(1), it->at(2));
-  }
-
-  return std::make_pair(lowest_point, highest_point);
+std::pair<geo_point_t, geo_point_t> Cluster::get_earliest_latest_points() const
+{
+    auto backwards = get_highest_lowest_points(0);
+    return std::make_pair(backwards.second, backwards.first);
 }
+
+
+// Local Variables:
+// mode: c++
+// c-basic-offset: 4
+// End:

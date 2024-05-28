@@ -54,7 +54,7 @@ TEST_CASE("point cloud hough janky track")
     const Vector Z(0,0,1);
 
     const double r2min = 0.01;
-    size_t nhistbins = 100;
+    // size_t nhistbins = 100;
     auto hist = bh::make_histogram(bh::axis::regular<>( 180, -1.0, 1.0 ),
                                    bh::axis::regular<>( 360,  -pi, pi ) );
 

@@ -78,7 +78,7 @@ local nf_maker = import 'pgrapher/experiment/pdsp/nf.jsonnet';
 local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n) for n in anode_iota];
 
 local sp_maker = import 'pgrapher/experiment/pdsp/sp.jsonnet';
-local sp = sp_maker(params, tools);
+local sp = sp_maker(params, tools, {sparse: false});
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
 
 local magoutput = 'protodune-sim-check-wct.root';
@@ -101,6 +101,8 @@ local multipass = [
         // sio_sinks[n],
         // nf_pipes[n],
         sp_pipes[n],
+        // sinks.decon_pipe[n],
+        // sinks.threshold_pipe[n],
     ], 'multipass%d' % n)
   for n in anode_iota
 ];

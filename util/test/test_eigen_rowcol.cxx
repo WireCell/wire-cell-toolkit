@@ -1,4 +1,4 @@
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 #include <iostream>
 
 using DEFM = Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic>; // should be ColMajor

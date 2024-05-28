@@ -1,13 +1,13 @@
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Persist.h"
 #include "WireCellUtil/doctest.h"
-
-#include <json/json.h>
 
 #include <iostream> 
 #include <vector>
 #include <string>
 
 using spdlog::debug;
+using WireCell::Persist::loads;
 
 //int main() {  
 TEST_CASE("bee dead area") {
@@ -19,9 +19,7 @@ TEST_CASE("bee dead area") {
     Json::Value jsonArray(Json::arrayValue); // Create a JSON array
 
     for (auto& s : v) {
-        Json::Value one;
-        Json::Reader reader;
-        reader.parse(s, one);
+        Json::Value one = loads(s);
         jsonArray.append(one); // Add each parsed JSON object to the array
     }
 

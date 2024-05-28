@@ -3,7 +3,7 @@
 #include <vector>
 #include <iostream>
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 #include <unsupported/Eigen/Splines>
 
 using namespace Eigen;

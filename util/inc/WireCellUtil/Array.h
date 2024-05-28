@@ -26,9 +26,7 @@
 #define WIRECELL_ARRAY
 
 #include "WireCellUtil/Waveform.h"
-
-#include <Eigen/Core>
-#include <Eigen/Eigenvalues> 
+#include "WireCellUtil/Eigen.h"
 
 #include <memory>
 #include <vector>

@@ -187,7 +187,7 @@ Dataset make_dataset(size_t npts,
 TEST_CASE("point cloud disjoint serialized construction")
 {
     using coords_type = coordinate_array<double>;
-    using point_type = coords_type::point;
+    // using point_type = coords_type::point;
 
     std::vector<Dataset> ds_store;
     std::vector<Dataset::selection_t> se_store;
@@ -264,7 +264,7 @@ TEST_CASE("point cloud disjoint serialized construction")
 TEST_CASE("point cloud disjoint staged construction")
 {
     using coords_type = coordinate_array<double>;
-    using point_type = coords_type::point;
+    // using point_type = coords_type::point;
 
     const size_t nper = 74;
     const size_t ndses = 2;
@@ -385,7 +385,7 @@ TEST_CASE("point cloud disjoint iteration")
 {
     ExecMon em("point cloud disjoint iteration");
 
-    using point_type = std::vector<double>;
+    // using point_type = std::vector<double>;
 
     for (size_t npts = start_size; npts <= (1<<max_doubling)*start_size; npts *= 2) {
 
@@ -413,7 +413,7 @@ void do_monolithic(const std::string& index_name)
     ExecMon em("nfkd dataset monolithic " + index_name);
 
     using coords_type = coordinate_array<double>;
-    using point_type = coords_type::point;
+    // using point_type = coords_type::point;
     using kdtree_type = NFKD::Tree<coords_type, IndexType>;
 
     std::vector<double> origin = {0,0,0};
@@ -465,7 +465,7 @@ TEST_CASE("nfkd dataset performance disjoint")
     ExecMon em("nfkd dataset disjoint");
 
     using coords_type = coordinate_array<double>;
-    using point_type = coords_type::point;
+    // using point_type = coords_type::point;
     using kdtree_type = NFKD::Tree<coords_type, NFKD::IndexDynamic>;
     const std::vector<double> origin = {0,0,0};
 

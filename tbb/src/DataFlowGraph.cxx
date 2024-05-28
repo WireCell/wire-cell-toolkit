@@ -26,6 +26,7 @@ Configuration DataFlowGraph::default_configuration() const
 {
     Configuration cfg;
     cfg["max_threads"] = 0;
+    cfg["summary"] = m_summary;
     return cfg;
 }
 
@@ -34,6 +35,7 @@ void DataFlowGraph::configure(const Configuration& cfg)
     if (! cfg["max_threads"].isNull()) {
         m_thread_limit = cfg["max_threads"].asInt();
     }
+    m_summary = get(cfg, "summary", m_summary);
 }
 
 bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t sport, size_t rport)
@@ -100,6 +102,8 @@ bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t spo
     }
 
     make_edge(*s, *r);
+    m_nodes.insert(mytail);
+    m_nodes.insert(myhead);
     return true;
 }
 
@@ -117,6 +121,24 @@ bool DataFlowGraph::run()
             m_thread_limit);
     }
     m_graph.wait_for_all();
+
+    if (m_summary) {
+        std::vector<WireCellTbb::Node> nodes(m_nodes.begin(), m_nodes.end());
+        std::sort(nodes.begin(), nodes.end(),
+                  [](const WireCellTbb::Node& a, const WireCellTbb::Node& b) {
+                      return a->info().runtime() > b->info().runtime();
+                  });
+        for (const auto& node : nodes) {
+            std::stringstream ss;
+            ss << node->info();
+            if (m_summary < 2) {
+                log->debug(ss.str());
+            }
+            else {
+                log->info(ss.str());
+            }
+        }
+    }
 
     return true;
 }

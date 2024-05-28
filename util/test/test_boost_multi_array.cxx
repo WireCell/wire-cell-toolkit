@@ -1,6 +1,6 @@
 #include "WireCellUtil/Testing.h"
 
-#include <boost/multi_array.hpp>
+#include "WireCellUtil/MultiArray.h"
 
 #include <iostream>
 
@@ -9,7 +9,7 @@ using namespace std;
 int main()
 {
     typedef boost::multi_array<double, 2> array_type;
-    typedef array_type::index index;
+    // typedef array_type::index index;
 
     size_t l_size = 10;
     size_t t_size = 3;

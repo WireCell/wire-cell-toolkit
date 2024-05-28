@@ -13,6 +13,7 @@ namespace WireCellTbb {
     template <typename TupleType>
     class JoinBody {
         WireCell::IJoinNodeBase::pointer m_wcnode;
+        NodeInfo& m_info;
 
         mutable seqno_t m_seqno{0};
 
@@ -20,9 +21,10 @@ namespace WireCellTbb {
         typedef typename WireCell::IJoinNodeBase::any_vector any_vector;
         typedef typename WireCell::tuple_helper<TupleType> helper_type;
 
-        JoinBody(WireCell::INode::pointer wcnode)
+        JoinBody(WireCell::INode::pointer wcnode, NodeInfo& info)
+            : m_wcnode(std::dynamic_pointer_cast<WireCell::IJoinNodeBase>(wcnode))
+            , m_info(info)
         {
-            m_wcnode = std::dynamic_pointer_cast<WireCell::IJoinNodeBase>(wcnode);
             Assert(m_wcnode);
         }
 
@@ -34,7 +36,9 @@ namespace WireCellTbb {
                 in.push_back(msg.second);
             }
             wct_t out;
+            m_info.start();
             bool ok = (*m_wcnode)(in, out);
+            m_info.stop();
             if (!ok) {
                 std::cerr << "TbbFlow: join node return false ignored\n";
             }
@@ -45,13 +49,15 @@ namespace WireCellTbb {
     template <std::size_t N>
     receiver_port_vector build_joiner(tbb::flow::graph& graph,
                                       WireCell::INode::pointer wcnode,
-                                      std::vector<tbb::flow::graph_node*>& nodes)
+                                      std::vector<tbb::flow::graph_node*>& nodes,
+                                      NodeInfo& info)
     {
         typedef typename WireCell::type_repeater<N, msg_t>::type TupleType;
 
         // this node takes user WC body and runs it after converting input tuple to vector
         typedef tbb::flow::function_node<TupleType, msg_t> joining_node;
-        auto* fn = new joining_node(graph, 1 /*wcnode->concurrency()*/, JoinBody<TupleType>(wcnode));
+        auto* fn = new joining_node(graph, 1 /*wcnode->concurrency()*/,
+                                    JoinBody<TupleType>(wcnode, info));
 
         // this node is fully TBB and joins N receiver ports into a tuple
         typedef tbb::flow::join_node<TupleType> tbb_join_node_type;
@@ -76,12 +82,13 @@ namespace WireCellTbb {
        public:
         JoinWrapper(tbb::flow::graph& graph, WireCell::INode::pointer wcnode)
         {
+            m_info.set(wcnode);
             int nin = wcnode->input_types().size();
             // an exhaustive switch to convert from run-time to compile-time types and enumerations.
             Assert(nin > 0 && nin <= 3);  // fixme: exception instead?
-            if (1 == nin) m_receiver_ports = build_joiner<1>(graph, wcnode, m_nodes);
-            if (2 == nin) m_receiver_ports = build_joiner<2>(graph, wcnode, m_nodes);
-            if (3 == nin) m_receiver_ports = build_joiner<3>(graph, wcnode, m_nodes);
+            if (1 == nin) m_receiver_ports = build_joiner<1>(graph, wcnode, m_nodes, m_info);
+            if (2 == nin) m_receiver_ports = build_joiner<2>(graph, wcnode, m_nodes, m_info);
+            if (3 == nin) m_receiver_ports = build_joiner<3>(graph, wcnode, m_nodes, m_info);
         }
 
         virtual receiver_port_vector receiver_ports() {

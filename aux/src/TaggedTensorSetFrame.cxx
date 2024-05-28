@@ -4,7 +4,7 @@
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellUtil/NamedFactory.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 WIRECELL_FACTORY(TaggedTensorSetFrame, WireCell::Aux::TaggedTensorSetFrame, WireCell::ITensorSetFrame,
                  WireCell::IConfigurable)

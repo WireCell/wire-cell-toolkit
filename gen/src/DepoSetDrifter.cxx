@@ -64,7 +64,7 @@ bool DepoSetDrifter::operator()(const input_pointer& in, output_pointer& out)
     // The EOS comes through
     all_depos.pop_back();
         
-    log->debug("call={} drifted ndepos={} in={} out={}", m_count, all_depos.size(), charge_in, charge_out);
+    log->debug("call={} drifted ndepos={} Qout={} ({}%)", m_count, all_depos.size(), charge_out, 100.0*charge_out/charge_in);
     out = std::make_shared<Aux::SimpleDepoSet>(m_count, all_depos);
     ++m_count;
     return true;

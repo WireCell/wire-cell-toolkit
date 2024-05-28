@@ -1,6 +1,6 @@
-#include <Eigen/Dense>
 
-#include <unsupported/Eigen/FFT>
+
+#include "WireCellUtil/EigenFFT.h"
 
 #include <iostream>
 using namespace std;

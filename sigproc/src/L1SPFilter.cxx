@@ -9,7 +9,7 @@
 #include "WireCellUtil/LassoModel.h"
 #include "WireCellUtil/NamedFactory.h"
 
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
 
 #include <numeric>
 #include <iostream>

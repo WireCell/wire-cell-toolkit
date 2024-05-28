@@ -3,7 +3,7 @@
 
 #include "LinearModel.h"
 #include <vector>
-#include <Eigen/Dense>
+#include "WireCellUtil/Eigen.h"
 
 namespace WireCell {
 

@@ -5,9 +5,9 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/GraphTools.h"
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/copy.hpp>
-#include <boost/graph/connected_components.hpp>
+#include "WireCellUtil/Graph.h"
+
+
 
 WIRECELL_FACTORY(BlobGrouping, WireCell::Img::BlobGrouping,
                  WireCell::INamed,

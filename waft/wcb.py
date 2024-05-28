@@ -30,6 +30,8 @@ package_descriptions = [
 
     ('Eigen',    dict(incs=["Eigen/Dense"], pcname='eigen3')),
 
+    ('GLPK',    dict(incs=["glpk.h"], libs=["glpk"], mandatory=False)),
+
     # for faster parsing, consider:
     # ./wcb configure --with-jsonnet-libs=gojsonnet 
     ('Jsonnet',  dict(incs=["libjsonnet.h"], libs=['jsonnet'])),
@@ -104,12 +106,6 @@ def configure(cfg):
     else:
         cfg.load('rootsys')
 
-    ### not yet used
-    # if cfg.options.with_protobuf is False:
-    #     print ("sans protobuf")
-    # else:
-    #     cfg.load('protobuf')
-
 
     # Check for stuff not found in the wcb-generic way
     #
@@ -142,8 +138,8 @@ def configure(cfg):
     # Remove WCT packages if they an optional dependency wasn't found
     for pkg,ext in [
             ("root","HAVE_ROOTSYS"),
-            ("tbb","HAVE_TBB"),
-            ("tbb","LIB_FFTWTHREADS"),
+            ("tbb","HAVE_TBB LIB_FFTWTHREADS"),
+            ("patrec", "HAVE_GLPK"),
             ("cuda","HAVE_CUDA"),
             ("hio", "INCLUDES_H5CPP"),
             ("pytorch", "LIB_LIBTORCH"),
@@ -166,7 +162,8 @@ def configure(cfg):
 
     # Define env vars for wire-cell-python CLI's.
     # Extend this list manually as more are developed!
-    for one in to_list("aux gen img pgraph plot pytorch resp sigproc test util validate"):
+    # ls -l wire-cell-python/wirecell/*/__main__.py
+    for one in to_list("aux gen img ls4gan pgraph plot pytorch resp sigproc test util validate"):
         cmd = 'wirecell-' + one
         var = 'WC' + one.upper()
         cfg.find_program(cmd, var=var, mandatory=False)

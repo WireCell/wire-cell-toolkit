@@ -9,7 +9,7 @@
 
 #include "WireCellUtil/cnpy.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 using ntype = short;
 

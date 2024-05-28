@@ -4,7 +4,7 @@
 #include "WireCellUtil/GraphTools.h"
 #include "WireCellUtil/Exceptions.h"
 
-#include <boost/graph/adjacency_list.hpp>
+#include "WireCellUtil/Graph.h"
 #include <boost/graph/breadth_first_search.hpp>
 
 #include <unordered_map>
@@ -104,7 +104,7 @@ namespace {
 BlobShadow::graph_t BlobShadow::shadow(const cluster_graph_t& cgraph, char leaf_code)
 {
     using dvertex_t = cluster::directed::vertex_t;
-    using dedge_t = cluster::directed::edge_t;
+    // using dedge_t = cluster::directed::edge_t;
 
     BlobShadow::graph_t bsgraph; // will return
 

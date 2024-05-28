@@ -1,7 +1,7 @@
 #include "WireCellAux/ClusterShadow.h"
 #include "WireCellUtil/GraphTools.h"
 
-#include <boost/graph/filtered_graph.hpp>
+#include "WireCellUtil/Graph.h"
 
 using namespace WireCell;
 using namespace WireCell::GraphTools;

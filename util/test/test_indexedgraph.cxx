@@ -1,7 +1,7 @@
 #include "WireCellUtil/IndexedGraph.h"
 #include "WireCellUtil/Testing.h"
 
-#include <boost/graph/graphviz.hpp>
+#include "WireCellUtil/Graph.h"
 
 
 using namespace WireCell;

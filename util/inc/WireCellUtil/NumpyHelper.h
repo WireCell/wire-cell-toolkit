@@ -17,7 +17,7 @@
 #include "WireCellUtil/cnpy.h"
 #include "WireCellUtil/Persist.h"
 
-#include <Eigen/Core>
+#include "WireCellUtil/Eigen.h"
 
 #include <string>
 #include <vector>

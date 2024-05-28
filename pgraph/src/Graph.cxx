@@ -1,5 +1,6 @@
 #include "WireCellPgraph/Graph.h"
 #include "WireCellUtil/Type.h"
+#include "WireCellUtil/String.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -7,6 +8,7 @@
 #include <boost/algorithm/string.hpp>
 
 using WireCell::demangle;
+using WireCell::String::format;
 using namespace WireCell::Pgraph;
 
 Graph::Graph()
@@ -39,8 +41,9 @@ bool Graph::connect(Node* tail, Node* head, size_t tpind, size_t hpind)
     m_edges_forward[tail].push_back(head);
     m_edges_backward[head].push_back(tail);
 
-    SPDLOG_LOGGER_TRACE(l, "connect {}:({}:{}) -> {}({}:{})", tail->ident(), demangle(tport.signature()), tpind,
-                        head->ident(), demangle(hport.signature()), hpind);
+    // was at in TRACE macro, maybe deserves a bit more prominence 
+    l->debug("connect {}:({}:{}) -> {}({}:{})", tail->ident(), demangle(tport.signature()), tpind,
+             head->ident(), demangle(hport.signature()), hpind);
 
     return true;
 }
@@ -101,8 +104,9 @@ bool Graph::execute()
     auto nodes = sort_kahn();
     l->debug("executing with {} nodes", nodes.size());
 
-    std::clock_t start;
-    double duration = 0;
+    for (Node* node : nodes) {
+        m_nodes_timer[node] = 0.0;
+    }
 
     while (true) {
         int count = 0;
@@ -111,19 +115,14 @@ bool Graph::execute()
         for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit, ++count) {
             Node* node = *nit;
 
-            start = std::clock();
+            auto start = std::clock();
 
             bool ok = call_node(node);
 
-            duration = (std::clock() - start) / (double) CLOCKS_PER_SEC;
-            if (m_nodes_timer.find(node) != m_nodes_timer.end()) {
-                m_nodes_timer[node] += duration;
-            }
-            else {
-                m_nodes_timer[node] = duration;
-            }
+            m_nodes_timer[node] += (std::clock() - start) / (double) CLOCKS_PER_SEC;
 
             if (ok) {
+                m_em(format("called %d: %s", count, node->ident()));
                 SPDLOG_LOGGER_TRACE(l, "ran node {}: {}", count, node->ident());
                 did_something = true;
                 break;  // start again from bottom of graph
@@ -154,30 +153,38 @@ bool Graph::call_node(Node* node)
 
 bool Graph::connected()
 {
-    int nerrors = 0;
+    bool okay = true;
     for (auto n : m_nodes) {
-        if (!n->connected()) {
-            l->warn("disconnected node: {}", n->ident());
-            ++nerrors;
+        auto bad = n->disconnected_ports();
+        if (bad.empty()) continue;
+        okay = false;
+        l->warn("disconnected node: {}", n->ident());
+        for (const auto& p : bad) {
+            l->warn("\tport: {}", p.ident());
         }
     }
-    return nerrors == 0;
+    return okay;
 }
 
-void Graph::print_timers() const
+void Graph::print_timers(bool include_execmon) const
 {
     std::multimap<float, Node*> m;
     double total_time = 0;
     for (auto it : m_nodes_timer) {
         m.emplace(it.second, it.first);
     }
+    std::vector<Node*> ordered;
     for (auto it = m.rbegin(); it != m.rend(); ++it) {
+        ordered.push_back(it->second);
         std::string iden = it->second->ident();
         std::vector<std::string> tags;
         boost::split(tags, iden, [](char c) { return c == ' '; });
         l_timer->info("Timer: {} : {} sec", tags[2].substr(5), it->first);
         total_time += it->first;
     }
-
     l_timer->info("Timer: Total node execution : {} sec", total_time);
+
+    if (include_execmon) {
+        l_timer->debug("ExecMon:\n{}", m_em.summary());
+    }
 }

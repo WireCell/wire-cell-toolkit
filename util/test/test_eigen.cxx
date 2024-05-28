@@ -1,8 +1,8 @@
 #include "WireCellUtil/Testing.h"
 #include "WireCellUtil/ExecMon.h"
 
-#include <Eigen/Core>
-#include <unsupported/Eigen/FFT>
+
+#include "WireCellUtil/EigenFFT.h"
 
 #include <cmath>
 #include <vector>

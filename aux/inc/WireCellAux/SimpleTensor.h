@@ -2,8 +2,7 @@
 #define WIRECELL_AUX_SIMPLETENSOR
 
 #include "WireCellIface/ITensor.h"
-
-#include <boost/multi_array.hpp>
+#include "WireCellUtil/MultiArray.h"
 #include <cstring>
 
 namespace WireCell::Aux {
@@ -12,10 +11,15 @@ namespace WireCell::Aux {
     class SimpleTensor : public WireCell::ITensor {
       public:
 
+        // Create a null tensor.
+        SimpleTensor()
+            : m_typeinfo(typeid(void))
+        {
+        }
         // Create a simple tensor with a null array and type, just metadata, if any
-        explicit SimpleTensor(const Configuration& md = Configuration())
-            : m_md(md)
-            , m_typeinfo(typeid(void))
+        explicit SimpleTensor(const Configuration& md)
+            : m_typeinfo(typeid(void))
+            , m_mdptr(std::make_unique<Configuration>(md))
         {
         }
 
@@ -26,13 +30,37 @@ namespace WireCell::Aux {
         // pointer is given but note the type is required so pass call like:
         //   SimpleTensor(shape, (Type*)nullptr)
         template <typename ElementType>
+        SimpleTensor(const shape_t& shape, const ElementType* data)
+            : m_typeinfo(typeid(ElementType))
+            , m_sizeof(sizeof(ElementType))
+            , m_shape(shape)
+        {
+            size_t nbytes = element_size();
+            for (const auto& s : m_shape) {
+                nbytes *= s;
+            }
+            if (data) {
+                const std::byte* bytes = reinterpret_cast<const std::byte*>(data);
+                m_store.assign(bytes, bytes+nbytes);
+            }
+            else {
+                m_store.resize(nbytes);
+            }
+        }
+        // Create simple tensor, allocating space for data.  If data
+        // given it must have at least as many elements as implied by
+        // shape and that span will be copied into allocated memory.
+        // The SimpleTensor will allocate memory if a null data
+        // pointer is given but note the type is required so pass call like:
+        //   SimpleTensor(shape, (Type*)nullptr)
+        template <typename ElementType>
         SimpleTensor(const shape_t& shape,
                      const ElementType* data,
-                     const Configuration& md = Configuration())
-            : m_shape(shape)
-            , m_md(md)
-            , m_typeinfo(typeid(ElementType))
+                     const Configuration& md)
+            : m_typeinfo(typeid(ElementType))
             , m_sizeof(sizeof(ElementType))
+            , m_shape(shape)
+            , m_mdptr(std::make_unique<Configuration>(md))
         {
             size_t nbytes = element_size();
             for (const auto& s : m_shape) {
@@ -59,7 +87,14 @@ namespace WireCell::Aux {
          md[1][2][3] = 42.0;
         */
         std::vector<std::byte>& store() { return m_store; }
-        Configuration& metadata() { return m_md; }
+        Configuration& metadata() {
+            if (!m_mdptr) {
+                // lazy construction.
+                m_mdptr = std::make_unique<Configuration>();
+            }
+            return *m_mdptr;
+        }
+
 
         // ITensor const interface.
         virtual const std::type_info& element_type() const { return m_typeinfo; }
@@ -70,14 +105,14 @@ namespace WireCell::Aux {
         virtual const std::byte* data() const { return m_store.data(); }
         virtual size_t size() const { return m_store.size(); }
 
-        virtual Configuration metadata() const { return m_md; }
+        virtual Configuration metadata() const { return *m_mdptr; }
 
       private:
-        std::vector<std::byte> m_store;
-        std::vector<size_t> m_shape;
-        Configuration m_md;
         const std::type_info& m_typeinfo;
         size_t m_sizeof{0};
+        std::vector<size_t> m_shape;
+        std::vector<std::byte> m_store;
+        std::unique_ptr<Configuration> m_mdptr; // avoid constructor if empty
     };
 
 }  // namespace WireCell::Aux

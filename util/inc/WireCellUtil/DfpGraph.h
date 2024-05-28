@@ -3,7 +3,7 @@
 
 #include "WireCellUtil/Configuration.h"
 #include "WireCellUtil/String.h"
-#include <boost/graph/adjacency_list.hpp>
+#include "WireCellUtil/Graph.h"
 
 #include <tuple>
 #include <vector>

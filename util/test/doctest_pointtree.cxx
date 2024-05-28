@@ -103,7 +103,7 @@ TEST_CASE("point tree with points")
 
     Points& rval = root->value;
 
-    CHECK(root->children().size() == 2);
+    CHECK(root->nchildren() == 2);
     CHECK(root.get() == rval.node());
     CHECK(rval.local_pcs().empty());
     
@@ -137,45 +137,35 @@ TEST_CASE("point tree with points")
     ScopedView<double>::nfkd_t& kd = sview.kd();
     debug("got scoped k-d tree at scope = {} at {}", scope, (void*)&kd);
 
-    using points_type = coordinate_array<double>::value_type;
+    CHECK(kd.ndim() == 3);      // 
+    CHECK(kd.nblocks() == 2);   // 2 blocks of 3 points
+    CHECK(kd.npoints() ==  6);  // 
 
-    std::vector<double> origin = {0,0,0};
+    const auto& pts = kd.points();
     {
-        ScopedView<double>::nfkd_t::points_t& pts = kd.points();
-        size_t npts = pts.size();
-        debug("kd has {} points", npts);
-        {
-            for (auto pit=pts.begin(); pit!=pts.end(); ++pit) {
-                CHECK(pit->size() == 3);
-            }
+        const size_t ndim = pts.size();
+        debug("kd has {} dimensions", ndim);
 
-            size_t count = 0;
-            for (const points_type& pt : pts) {
-                REQUIRE(count < npts);
-                ++count;
-                CHECK(pt.size() == 3);
-            }
-        }
-        for (size_t ind=0; ind<npts; ++ind) {
-            auto pt = pts.at(ind);
-            CHECK(pt.size() == 3);
+        CHECK(ndim == 3);
+
+        for (const auto& dim : pts) {
+            CHECK(dim.size() == 6);
         }
     }
 
+    const std::vector<double> origin = {0,0,0};
     auto knn = kd.knn(6, origin);
-    for (auto [it,dist] : knn) {
-        auto& pt = *it;
+    for (const auto& [index, metric] : knn) {
         debug("knn: pt=({},{},{}) dist={}",
-              pt[0], pt[1], pt[2], dist);
+              pts[0][index], pts[1][index], pts[2][index], metric);
     }
     CHECK(knn.size() == 6);
 
 
     auto rad = kd.radius(.001, origin);
-    for (auto [it,dist] : rad) {
-        auto& pt = *it;
+    for (const auto& [index, metric] : rad) {
         debug("rad: pt=({},{},{}) dist={}",
-              pt[0], pt[1], pt[2], dist);
+              pts[0][index], pts[1][index], pts[2][index], metric);
     }
     CHECK(rad.size() == 6);
 
@@ -196,11 +186,11 @@ TEST_CASE("point tree remove node")
     
     SUBCASE("remove child one") {
         const size_t nleft = pc3d_two.size_major();
-        auto it = root->children().begin();
+        auto cptr = root->children()[0];
         // We get back as unique_ptr so node "dead" stays alive for the context.
-        auto dead = root->remove(it);
+        auto dead = root->remove(cptr);
         CHECK(dead);
-        CHECK(root->children().size() == 1);
+        CHECK(root->nchildren() == 1);
 
         const auto& pc3d = rval.scoped_view(scope).pcs();
         CHECK(pc3d.size() == 1);
@@ -211,12 +201,11 @@ TEST_CASE("point tree remove node")
     }
     SUBCASE("remove child two") {
         const size_t nleft = pc3d_one.size_major();
-        auto it = root->children().begin();
-        ++it;
+        auto cptr = root->children()[1];
         // We get back as unique_ptr so node "dead" stays alive for the context.
-        auto dead = root->remove(it);
+        auto dead = root->remove(cptr);
         CHECK(dead);
-        CHECK(root->children().size() == 1);
+        CHECK(root->nchildren() == 1);
 
         const auto& pc3d = rval.scoped_view(scope).pcs();
         CHECK(pc3d.size() == 1);
