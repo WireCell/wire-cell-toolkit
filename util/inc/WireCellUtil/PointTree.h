@@ -319,10 +319,6 @@ namespace WireCell::PointCloud::Tree {
 
 }
 
-#include <fmt/core.h>
-#if FMT_VERSION >= 90000
-#include <fmt/ostream.h>
 template <> struct fmt::formatter<WireCell::PointCloud::Tree::Scope> : fmt::ostream_formatter {};
-#endif
 
 #endif

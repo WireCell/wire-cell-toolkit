@@ -14,6 +14,8 @@
 #ifndef WIRECELLUTIL_MEASUREMENT
 #define WIRECELLUTIL_MEASUREMENT
 
+#include "WireCellUtil/Spdlog.h"
+
 #include "WireCellUtil/boost_units_measurement.h"
 
 namespace WireCell::Measurement {
@@ -23,11 +25,7 @@ namespace WireCell::Measurement {
 
 }
 
-#include <fmt/core.h>
-#if FMT_VERSION >= 90000
-#include <fmt/ostream.h>
 template <> struct fmt::formatter<WireCell::Measurement::float32> : fmt::ostream_formatter {};
 template <> struct fmt::formatter<WireCell::Measurement::float64> : fmt::ostream_formatter {};
-#endif
 
 #endif

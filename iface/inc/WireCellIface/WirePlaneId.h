@@ -3,6 +3,7 @@
 
 // fixme: should move into WirePlaneIdCfg.h or similar. (more below)
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/Spdlog.h"
 #include <ostream>
 #include <functional>
 
@@ -71,10 +72,6 @@ namespace std {
     };
 }  // namespace std
 
-#include <fmt/core.h>
-#if FMT_VERSION >= 90000
-#include <fmt/ostream.h>
 template <> struct fmt::formatter<WireCell::WirePlaneId> : fmt::ostream_formatter {};
-#endif
 
 #endif

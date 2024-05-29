@@ -9,6 +9,7 @@
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellUtil/Spdlog.h"
 
 #include "WireCellUtil/Graph.h"
 
@@ -393,12 +394,8 @@ namespace WireCell::PointCloud::Facade {
 
 }  // namespace WireCell::PointCloud::Facade
 
-#include <fmt/core.h>
-#if FMT_VERSION >= 90000
-#include <fmt/ostream.h>
 template <> struct fmt::formatter<WireCell::PointCloud::Facade::Blob> : fmt::ostream_formatter {};
 template <> struct fmt::formatter<WireCell::PointCloud::Facade::Cluster> : fmt::ostream_formatter {};
 template <> struct fmt::formatter<WireCell::PointCloud::Facade::Grouping> : fmt::ostream_formatter {};
-#endif
 
 #endif

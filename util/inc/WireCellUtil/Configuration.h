@@ -1,6 +1,8 @@
 #ifndef WIRECELL_CONFIGURATION
 #define WIRECELL_CONFIGURATION
 
+#include "WireCellUtil/Spdlog.h"
+
 #include <json/json.h>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
@@ -211,10 +213,6 @@ namespace WireCell {
 
 }  // namespace WireCell
 
-#include <fmt/core.h>
-#if FMT_VERSION >= 90000
-#include <fmt/ostream.h>
 template <> struct fmt::formatter<WireCell::Configuration> : fmt::ostream_formatter {};
-#endif
 
 #endif
