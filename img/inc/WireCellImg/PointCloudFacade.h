@@ -10,7 +10,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 
-#include <boost/graph/adjacency_list.hpp>
+#include "WireCellUtil/Graph.h"
+
 
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
