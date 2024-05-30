@@ -80,3 +80,5 @@ configure
 styles
 *.heap
 *.prof
+*.debug
+*.svg
