@@ -124,5 +124,9 @@ namespace WireCell::PointCloud::Facade {
 			       double length_2,
 			       double length_cut = 1*units::cm);
 
-    
+    void clustering_separate(Grouping& live_grouping,
+                             std::map<int, std::pair<double, double>>& dead_u_index,
+                             std::map<int, std::pair<double, double>>& dead_v_index,
+                             std::map<int, std::pair<double, double>>& dead_w_index);
+
 }  // namespace WireCell::PointCloud::Facade

@@ -11,6 +11,13 @@ using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;
 
+// #define __DEBUG__
+#ifdef __DEBUG__
+#define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
+#else
+#define LogDebug(x)
+#endif
+
 /// unused
 #if 0
 namespace {
@@ -264,7 +271,7 @@ const Cluster::wire_indices_t& Cluster::wire_indices()
     const auto& sv = m_node->value.scoped_view<int_t>(scope_wire_index);
     const auto& skd = sv.kd();
     const auto& points = skd.points();
-    std::cout << "points size: " << points.size() << " points[0] size: " << points[0].size() << std::endl;
+    LogDebug("points size: " << points.size() << " points[0] size: " << points[0].size());
     return points;
 }
 
@@ -832,7 +839,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob)
 
 void Cluster::Create_graph()
 {
-    std::cout << "Create Graph! " << graph << std::endl;
+    LogDebug("Create Graph! " << graph)
     if (graph != (MCUGraph*) 0) return;
     graph = new MCUGraph(nbpoints());
     Establish_close_connected_graph();
@@ -848,7 +855,7 @@ void Cluster::Establish_close_connected_graph()
 
     const auto& points = this->points();
     const auto& winds = this->wire_indices();
-    std::cout << "points[0].size(): " << points[0].size() << " winds[0].size(): " << winds[0].size() << std::endl;
+    LogDebug("points[0].size(): " << points[0].size() << " winds[0].size(): " << winds[0].size());
 
     for (Blob* mcell : this->children()) {
         std::map<int, std::set<int>> map_uindex_wcps;
@@ -989,7 +996,7 @@ void Cluster::Establish_close_connected_graph()
         }
     }
 
-    std::cout << "Xin: " << num_edges << std::endl;
+    LogDebug("in-blob: " << num_edges)
 
     std::vector<int> time_slices;
     for (auto [time, _] : this->time_blob_map()) {
@@ -1049,7 +1056,6 @@ void Cluster::Establish_close_connected_graph()
     // establish edge ...
     std::map<std::pair<int, int>, std::pair<int, double>> closest_index;
 
-    // std::cout << connected_mcells.size() << std::endl;
     for (auto it = connected_mcells.begin(); it != connected_mcells.end(); it++) {
         auto mcell1 = (*it).first;
         auto mcell2 = (*it).second;
@@ -1128,17 +1134,10 @@ void Cluster::Establish_close_connected_graph()
                 wcps_set2.insert((*it3)->begin(), (*it3)->end());
             }
 
-            //   for (auto it2 = max_wcps_set.begin(); it2!=max_wcps_set.end(); it2++){
-            //	for (auto it3 = min_wcps_set.begin(); it3!=min_wcps_set.end(); it3++){
             {
                 std::set<int> common_set;
                 set_intersection(wcps_set1.begin(), wcps_set1.end(), wcps_set2.begin(), wcps_set2.end(),
                                  std::inserter(common_set, common_set.begin()));
-
-                //	std::cout << "S1: " << common_set.size() << std::endl;
-                //	  std::cout << common_set.size() << std::endl;
-
-                //	std::map<int,std::pair<int,double> > closest_index;
 
                 for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
                     const int pind2 = *it4;
@@ -1227,16 +1226,10 @@ void Cluster::Establish_close_connected_graph()
                 wcps_set2.insert((*it3)->begin(), (*it3)->end());
             }
 
-            // for (auto it2 = max_wcps_set.begin(); it2!=max_wcps_set.end(); it2++){
-            // 	for (auto it3 = min_wcps_set.begin(); it3!=min_wcps_set.end(); it3++){
             {
                 std::set<int> common_set;
                 set_intersection(wcps_set1.begin(), wcps_set1.end(), wcps_set2.begin(), wcps_set2.end(),
                                  std::inserter(common_set, common_set.begin()));
-
-                //	std::cout << "S2: " << common_set.size() << std::endl;
-
-                //	std::map<int,std::pair<int,double> > closest_index;
 
                 for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
                     const int pind2 = *it4;
@@ -1270,6 +1263,8 @@ void Cluster::Establish_close_connected_graph()
         }
     }
     // end of copying ...
+
+    LogDebug("between-blob: " << num_edges)
 }
 
 size_t Grouping::hash() const
