@@ -7,6 +7,7 @@
 #include "WireCellIface/IClusterFaninTensorSet.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IAnodePlane.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Units.h"
@@ -31,14 +32,23 @@ namespace WireCell::Img {
 
       private:
         // sampling for live/dead
-        WireCell::PointCloud::Tree::Points::node_ptr sample_live(const WireCell::ICluster::pointer cluster) const;
-        WireCell::PointCloud::Tree::Points::node_ptr sample_dead(const WireCell::ICluster::pointer cluster) const;
+        using node_ptr = WireCell::PointCloud::Tree::Points::node_ptr;
+        node_ptr sample_live(const WireCell::ICluster::pointer cluster) const;
+        node_ptr sample_dead(const WireCell::ICluster::pointer cluster) const;
+        // add CT point cloud to the root/Grouping
+        void add_ctpc(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
 
         size_t m_multiplicity {2};
         std::vector<std::string> m_tags;
         size_t m_count{0};
 
+
         double m_tick {0.5*units::us};
+        double m_drift_speed {1.101*units::millimeter/units::us};
+        double m_time_offset {-1600 * units::us};
+        double m_dead_threshold {1e10};
+        IAnodePlane::pointer m_anode;
+        double time2drift(IAnodeFace::pointer anodeface, double time) const;
         
         /** Configuration: "samplers"
 
