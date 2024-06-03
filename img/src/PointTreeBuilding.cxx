@@ -300,19 +300,20 @@ double PointTreeBuilding::time2drift(IAnodeFace::pointer anodeface, double time)
     return xorig + xsign*drift;
 }
 
+// face (ident? which?) -> plane (index) -> Dataset
+template<typename T> using mapfp_t = std::unordered_map<int, std::unordered_map<int, T>>;
+
 void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
     using slice_t = WireCell::cluster_node_t::slice_t;
     using float_t = Facade::float_t;
     using int_t = Facade::int_t;
-    std::unordered_map<int, std::vector<Dataset>> ctpcs;
     const int ndummy_layers = 2;
 
     const auto& cg = icluster->graph();
     log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
 
-    using map_i2vd_t = std::unordered_map<int, std::vector<double>>;
-    map_i2vd_t proj_centers;
-    map_i2vd_t pitch_mags;
+    mapfp_t<double> proj_centers;
+    mapfp_t<double> pitch_mags;
     for (const auto& face : m_anode->faces()) {
         const auto& coords = face->raygrid();
         // skip dummy layers so the vector matches 0, 1, 2 plane order
@@ -320,22 +321,23 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             const auto& pitch_dir = coords.pitch_dirs()[layer];
             const auto& center = coords.centers()[layer];
             double proj_center = center.dot(pitch_dir);
-            proj_centers[face->which()].push_back(proj_center);
-            pitch_mags[face->which()].push_back(coords.pitch_mags()[layer]);
+            proj_centers[face->which()][layer-ndummy_layers] = proj_center;
+            pitch_mags[face->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
         }
     }
     for(const auto& [face, mags] : pitch_mags) {
-        for(size_t ind=0; ind<mags.size(); ++ind) {
-            log->debug("face {} layer {} pitch_mag {}", face, ind, mags[ind]);
+        for(const auto& [pind, mag] : mags) {
+            log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
         }
     }
     for (const auto& [face, centers] : proj_centers) {
-        for(size_t ind=0; ind<centers.size(); ++ind) {
-            log->debug("face {} layer {} center {}", face, ind, centers[ind]);
+        for(const auto& [pind, center] : centers) {
+            log->debug("face {} pind {} center {}", face, pind, center);
         }
     }
 
-    std::unordered_map<int, std::vector<float_t>> x, y;
+    mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
+    mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
 
     size_t nslices = 0;
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
@@ -358,14 +360,42 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     /// FIXME: is this the way to get face?
                     const auto& x = time2drift(m_anode->face(face), slice->start());
                     const double y = pitch_mags[face][plane]*wind + proj_centers[face][plane];
-                    log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
-                               wind, plane, face, x, y);
+                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                    //            wind, plane, face, x, y);
+                    ds_x[face][plane].push_back(x);
+                    ds_y[face][plane].push_back(y);
+                    ds_charge[face][plane].push_back(charge.value());
+                    ds_charge_err[face][plane].push_back(charge.uncertainty());
+                    ds_cident[face][plane].push_back(cident);
+                    ds_wind[face][plane].push_back(wind);
+                    ds_slice_index[face][plane].push_back(slice_index);
                 }
             }
-            exit(0);
+            // log->debug("ds_x.size() {}", ds_x.size());
         }
     }
     log->debug("got {} slices", nslices);
+
+    for (const auto& [face, planes] : ds_x) {
+        for (const auto& [plane, x] : planes) {
+            Dataset ds;
+            ds.add("x", Array(x));
+            ds.add("y", Array(ds_y[face][plane]));
+            ds.add("charge", Array(ds_charge[face][plane]));
+            ds.add("charge_err", Array(ds_charge_err[face][plane]));
+            ds.add("cident", Array(ds_cident[face][plane]));
+            ds.add("wind", Array(ds_wind[face][plane]));
+            ds.add("slice_index", Array(ds_slice_index[face][plane]));
+            const std::string ds_name = String::format("ctpc_f%dp%d", face, plane);
+            // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
+            root->value.local_pcs().emplace(ds_name, ds);
+            log->debug("added point cloud {} with {} points", ds_name, x.size());
+        }
+    }
+    for (const auto& [name, pc] : root->value.local_pcs()) {
+        log->debug("added point cloud {} with {} points", name, pc.get("x")->size_major());
+    }
+    // exit(0);
 }
 
 bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& tensorset)
