@@ -300,9 +300,6 @@ double PointTreeBuilding::time2drift(IAnodeFace::pointer anodeface, double time)
     return xorig + xsign*drift;
 }
 
-// face (ident? which?) -> plane (index) -> Dataset
-template<typename T> using mapfp_t = std::unordered_map<int, std::unordered_map<int, T>>;
-
 void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
     using slice_t = WireCell::cluster_node_t::slice_t;
     using float_t = Facade::float_t;
@@ -312,8 +309,8 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     const auto& cg = icluster->graph();
     log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
 
-    mapfp_t<double> proj_centers;
-    mapfp_t<double> pitch_mags;
+    Facade::mapfp_t<double> proj_centers;
+    Facade::mapfp_t<double> pitch_mags;
     for (const auto& face : m_anode->faces()) {
         const auto& coords = face->raygrid();
         // skip dummy layers so the vector matches 0, 1, 2 plane order
@@ -336,8 +333,8 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
         }
     }
 
-    mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
-    mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
+    Facade::mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
+    Facade::mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
 
     size_t nslices = 0;
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
@@ -378,6 +375,9 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
 
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {
+            // log->debug("ds_x {} ds_y {} ds_charge {} ds_charge_err {} ds_cident {} ds_wind {} ds_slice_index {}",
+            //            x.size(), ds_y[face][plane].size(), ds_charge[face][plane].size(), ds_charge_err[face][plane].size(),
+            //            ds_cident[face][plane].size(), ds_wind[face][plane].size(), ds_slice_index[face][plane].size());
             Dataset ds;
             ds.add("x", Array(x));
             ds.add("y", Array(ds_y[face][plane]));
@@ -393,7 +393,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
         }
     }
     for (const auto& [name, pc] : root->value.local_pcs()) {
-        log->debug("added point cloud {} with {} points", name, pc.get("x")->size_major());
+        log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
     }
     // exit(0);
 }
@@ -433,16 +433,19 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
 
     Points::node_ptr root_live = sample_live(iclus_live);
     add_ctpc(root_live, iclus_live);
-    {
-        auto grouping = root_live->value.facade<Facade::Grouping>();
-        auto children = grouping->children(); // copy
-        sort_clusters(children);
-        size_t count=0;
-        for(const auto* cluster : children) {
-            bool sane = cluster->sanity(log);
-            log->debug("live cluster {} {} sane:{}", count++, *cluster, sane);
-        }
+    for (const auto& [name, pc] : root_live->value.local_pcs()) {
+        log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
     }
+    // {
+    //     auto grouping = root_live->value.facade<Facade::Grouping>();
+    //     auto children = grouping->children(); // copy
+    //     sort_clusters(children);
+    //     size_t count=0;
+    //     for(const auto* cluster : children) {
+    //         bool sane = cluster->sanity(log);
+    //         log->debug("live cluster {} {} sane:{}", count++, *cluster, sane);
+    //     }
+    // }
     auto tens_live = as_tensors(*root_live.get(), datapath+"/live");
     log->debug("Made {} live tensors", tens_live.size());
     for(const auto& ten : tens_live) {
