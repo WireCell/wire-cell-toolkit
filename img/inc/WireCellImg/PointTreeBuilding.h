@@ -37,6 +37,8 @@ namespace WireCell::Img {
         node_ptr sample_dead(const WireCell::ICluster::pointer cluster) const;
         // add CT point cloud to the root/Grouping
         void add_ctpc(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
+        // wind -> xbeg, xend
+        void add_dead_winds(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
 
         size_t m_multiplicity {2};
         std::vector<std::string> m_tags;

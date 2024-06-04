@@ -332,8 +332,15 @@ namespace WireCell::PointCloud::Facade {
 
         // Return a value representing the content of this grouping.
         size_t hash() const;
-       private:
 
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int plane)
+        {
+            // make one if not exist
+            return m_dead_winds[face][plane];
+        }
+
+       private:
+        mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 
