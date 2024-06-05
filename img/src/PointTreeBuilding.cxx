@@ -479,14 +479,14 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     Points::node_ptr root_live = sample_live(iclus_live);
     add_ctpc(root_live, iclus_live);
     /// FIXME: remove after debugging
-    {
-        const auto& iclus_dead = invec[1];
-        add_dead_winds(root_live, iclus_dead);
-        for (const auto& [name, pc] : root_live->value.local_pcs()) {
-            log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
-        }
-        exit(0);
-    }
+    // {
+    //     const auto& iclus_dead = invec[1];
+    //     add_dead_winds(root_live, iclus_dead);
+    //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
+    //         log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    //     }
+    //     exit(0);
+    // }
     // {
     //     auto grouping = root_live->value.facade<Facade::Grouping>();
     //     auto children = grouping->children(); // copy
