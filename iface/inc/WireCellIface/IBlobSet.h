@@ -19,16 +19,17 @@ namespace WireCell {
         /// Return some identifier number that is unique to this set.
         virtual int ident() const = 0;
 
-        /// A slice relevant to this set.  This may be given even if
-        /// there are no blobs (which have their own pointer to a
-        /// slice).
+        /// A slice relevant to this set.  This may be given even if there are
+        /// no blobs (which have their own pointer to a slice).  It may also be
+        /// nullptr.  Blobs in the set may span multiple slices.
         virtual ISlice::pointer slice() const = 0;
 
         /// Return the blobs in this set.  There is no ordering
         /// requirement.
         virtual IBlob::vector blobs() const = 0;
 
-        /// Return a vector of the underlying IBlob::shape() in order (sugar).
+        /// Return a vector of the underlying IBlob::shape() in order of
+        /// blobs(), (this method is just some sugar).
         virtual RayGrid::blobs_t shapes() const;
     };
 }  // namespace WireCell
