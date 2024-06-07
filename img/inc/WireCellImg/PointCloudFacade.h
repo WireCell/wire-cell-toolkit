@@ -23,6 +23,10 @@ namespace WireCell::PointCloud::Facade {
     using geo_point_t = WireCell::Point;
     using geo_vector_t = WireCell::Vector;
 
+    // map for face, plane to something
+    /// TODO: face (ident? which?) -> plane (index) -> Dataset
+    template<typename T> using mapfp_t = std::unordered_map<int, std::unordered_map<int, T>>;
+
     // FIXME: why define these out?
     // Haiwang: these are to make changing the underlying types easier and more consistent.
     // Probably need to move this to a better place.
@@ -330,6 +334,15 @@ namespace WireCell::PointCloud::Facade {
 
         // Return a value representing the content of this grouping.
         size_t hash() const;
+
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int plane)
+        {
+            // make one if not exist
+            return m_dead_winds[face][plane];
+        }
+
+       private:
+        mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 

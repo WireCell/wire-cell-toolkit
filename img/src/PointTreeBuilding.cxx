@@ -60,6 +60,9 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
     }
 
     m_datapath = get(cfg, "datapath", m_datapath);
+
+    m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
+
     auto samplers = cfg["samplers"];
     if (samplers.isNull()) {
         raise<ValueError>("add at least one entry to the \"samplers\" configuration parameter");
@@ -153,8 +156,8 @@ namespace {
     /// TODO: add more info to the dataset
     Dataset make_scaler_dataset(const IBlob::pointer iblob, const Point& center, const int npoints = 0, const double tick_span = 0.5*units::us)
     {
-        using float_t = double;
-        using int_t = int;
+        using float_t = Facade::float_t;
+        using int_t = Facade::int_t;
         Dataset ds;
         ds.add("charge", Array({(float_t)iblob->value()}));
         ds.add("center_x", Array({(float_t)center.x()}));
@@ -287,6 +290,159 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
     return root;
 }
 
+
+double PointTreeBuilding::time2drift(IAnodeFace::pointer anodeface, double time) const {
+    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
+    double xsign = colpimpos->axis(0)[0];
+    double xorig = anodeface->planes()[2]->wires().front()->center().x();
+    const double drift = (time + m_time_offset)*m_drift_speed;
+    /// TODO: how to determine xsign?
+    return xorig + xsign*drift;
+}
+
+void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
+    using slice_t = WireCell::cluster_node_t::slice_t;
+    using float_t = Facade::float_t;
+    using int_t = Facade::int_t;
+    const int ndummy_layers = 2;
+
+    const auto& cg = icluster->graph();
+    log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
+
+    Facade::mapfp_t<double> proj_centers;
+    Facade::mapfp_t<double> pitch_mags;
+    for (const auto& face : m_anode->faces()) {
+        const auto& coords = face->raygrid();
+        // skip dummy layers so the vector matches 0, 1, 2 plane order
+        for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+            const auto& pitch_dir = coords.pitch_dirs()[layer];
+            const auto& center = coords.centers()[layer];
+            double proj_center = center.dot(pitch_dir);
+            proj_centers[face->which()][layer-ndummy_layers] = proj_center;
+            pitch_mags[face->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+        }
+    }
+    for(const auto& [face, mags] : pitch_mags) {
+        for(const auto& [pind, mag] : mags) {
+            log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
+        }
+    }
+    for (const auto& [face, centers] : proj_centers) {
+        for(const auto& [pind, center] : centers) {
+            log->debug("face {} pind {} center {}", face, pind, center);
+        }
+    }
+
+    Facade::mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
+    Facade::mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
+
+    size_t nslices = 0;
+    for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
+        const auto& cgnode = cg[vdesc];
+        if (cgnode.code() == 's') {
+            auto& slice = std::get<slice_t>(cgnode.ptr);
+            ++nslices;
+            const auto& slice_index = slice->start()/m_tick;
+            const auto& activity = slice->activity();
+            for (const auto& [ichan, charge] : activity) {
+                if(charge.uncertainty() > m_dead_threshold) {
+                    continue;
+                } 
+                const auto& cident = ichan->ident();
+                const auto& wires = ichan->wires();
+                for (const auto& wire : wires) {
+                    const auto& wind = wire->index();
+                    const auto& plane = wire->planeid().index();
+                    const auto& face = wire->planeid().face();
+                    /// FIXME: is this the way to get face?
+                    const auto& x = time2drift(m_anode->face(face), slice->start());
+                    const double y = pitch_mags[face][plane]*wind + proj_centers[face][plane];
+                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                    //            wind, plane, face, x, y);
+                    ds_x[face][plane].push_back(x);
+                    ds_y[face][plane].push_back(y);
+                    ds_charge[face][plane].push_back(charge.value());
+                    ds_charge_err[face][plane].push_back(charge.uncertainty());
+                    ds_cident[face][plane].push_back(cident);
+                    ds_wind[face][plane].push_back(wind);
+                    ds_slice_index[face][plane].push_back(slice_index);
+                }
+            }
+            // log->debug("ds_x.size() {}", ds_x.size());
+        }
+    }
+    log->debug("got {} slices", nslices);
+
+    for (const auto& [face, planes] : ds_x) {
+        for (const auto& [plane, x] : planes) {
+            // log->debug("ds_x {} ds_y {} ds_charge {} ds_charge_err {} ds_cident {} ds_wind {} ds_slice_index {}",
+            //            x.size(), ds_y[face][plane].size(), ds_charge[face][plane].size(), ds_charge_err[face][plane].size(),
+            //            ds_cident[face][plane].size(), ds_wind[face][plane].size(), ds_slice_index[face][plane].size());
+            Dataset ds;
+            ds.add("x", Array(x));
+            ds.add("y", Array(ds_y[face][plane]));
+            ds.add("charge", Array(ds_charge[face][plane]));
+            ds.add("charge_err", Array(ds_charge_err[face][plane]));
+            ds.add("cident", Array(ds_cident[face][plane]));
+            ds.add("wind", Array(ds_wind[face][plane]));
+            ds.add("slice_index", Array(ds_slice_index[face][plane]));
+            const std::string ds_name = String::format("ctpc_f%dp%d", face, plane);
+            // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
+            root->value.local_pcs().emplace(ds_name, ds);
+            log->debug("added point cloud {} with {} points", ds_name, x.size());
+        }
+    }
+    for (const auto& [name, pc] : root->value.local_pcs()) {
+        log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    }
+}
+
+void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
+    using slice_t = WireCell::cluster_node_t::slice_t;
+    using float_t = Facade::float_t;
+    using int_t = Facade::int_t;
+    const int ndummy_layers = 2;
+    const auto& cg = icluster->graph();
+    auto grouping = root->value.facade<Facade::Grouping>();
+    for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
+        const auto& cgnode = cg[vdesc];
+        if (cgnode.code() != 's') continue;
+        auto& slice = std::get<slice_t>(cgnode.ptr);
+        const auto& slice_index = slice->start()/m_tick;
+        const auto& activity = slice->activity();
+        for (const auto& [ichan, charge] : activity) {
+            if(charge.uncertainty() < m_dead_threshold) continue;
+            const auto& cident = ichan->ident();
+            const auto& wires = ichan->wires();
+            for (const auto& wire : wires) {
+                const auto& wind = wire->index();
+                const auto& plane = wire->planeid().index();
+                const auto& face = wire->planeid().face();
+                /// FIXME: is this the way to get face?
+                const auto& x = time2drift(m_anode->face(face), slice->start());
+                // log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                //            wind, plane, face, x, y);
+                double xbeg = x;
+                double xend = time2drift(m_anode->face(face), slice->start() + slice->span());
+                if (cident == 903) {
+                    log->debug("chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
+                               slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
+                }
+                auto & dead_winds = grouping->get_dead_winds(face, plane);
+                if (dead_winds.find(wind) == dead_winds.end()) {
+                    dead_winds[wind] = {xbeg, xend};
+                } else {
+                    const auto& [xbeg_now, xend_now] = dead_winds[wind];
+                    dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
+                }
+                if (cident == 903) {
+                    log->debug("wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
+                }
+            }
+        }
+    }
+}
+
 bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& tensorset)
 {
     tensorset = nullptr;
@@ -321,6 +477,16 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
 
     Points::node_ptr root_live = sample_live(iclus_live);
+    add_ctpc(root_live, iclus_live);
+    /// FIXME: remove after debugging
+    // {
+    //     const auto& iclus_dead = invec[1];
+    //     add_dead_winds(root_live, iclus_dead);
+    //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
+    //         log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    //     }
+    //     exit(0);
+    // }
     // {
     //     auto grouping = root_live->value.facade<Facade::Grouping>();
     //     auto children = grouping->children(); // copy
@@ -340,6 +506,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
 
     if (m_multiplicity == 2) {
         const auto& iclus_dead = invec[1];
+        add_dead_winds(root_live, iclus_dead);
         /// FIXME: what do we expect?
         if(ident != iclus_dead->ident()) {
             raise<ValueError>("ident mismatch between live and dead clusters");
