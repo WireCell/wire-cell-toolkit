@@ -399,9 +399,9 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
 
 void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
     using slice_t = WireCell::cluster_node_t::slice_t;
-    using float_t = Facade::float_t;
-    using int_t = Facade::int_t;
-    const int ndummy_layers = 2;
+    // using float_t = Facade::float_t;
+    // using int_t = Facade::int_t;
+    // const int ndummy_layers = 2;
     const auto& cg = icluster->graph();
     auto grouping = root->value.facade<Facade::Grouping>();
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
