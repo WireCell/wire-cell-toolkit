@@ -1,0 +1,101 @@
+// This loads the Uboone ROOT file with Trun, TC and TDC TTrees to produce
+// "live" and "dead" blob sets with two UbooneBlobSource nodes.  It then runs a
+// version of wct-uboone-img.jsonnet which can the be followed with
+// wct-uboone-clustering from https://github.com/HaiwangYu/wcp-porting-img/.
+
+local high = import "layers/high.jsonnet";
+local wc = high.wc;
+local pg = high.pg;
+local detector = "uboone";
+local params = high.params(detector);
+local mid = high.api(detector, params);
+local anodes = mid.anodes();
+local anode = anodes[0];
+
+// live/dead symmetries
+local UbooneBlobSource(fname, kind /*TC or TDC*/) = pg.pnode({
+    type: 'UbooneBlobSource',
+    name: fname,
+    data: {
+        input: fname,
+        anode: anode,
+        kind: kind
+    }
+}, nin=0, nout=1, uses=[anode]);
+local BlobClustering(name) = pg.pnode({
+    type: 'BlobClustering',
+    name: name,
+    data: {
+        policy: "uboone",
+    },
+}, nin=1, nout=1);
+local ClusterFileSink(fname) = pg.pnode({
+    type: 'ClusterFileSink',
+    name: fname,
+    data: {
+        format: "numpy",
+        outname: fname,
+    },
+}, nin=1, nout=0);
+
+
+// generators of the live pipeline elements
+local ProjectionDeghosting(name) = pg.pnode({
+    type: 'ProjectionDeghosting',
+    name: name,
+    data: {},
+}, nin=1, nout=1);
+local InSliceDeghosting(name, round /*1,2,3*/) = pg.pnode({
+    type: "InSliceDeghosting",
+    name: name,
+    data:  {
+        config_round: round,
+    }
+}, nin=1, nout=1);
+local BlobGrouping(name) = pg.pnode({
+    type: "BlobGrouping",
+    name: name,
+    data:  { }
+}, nin=1, nout=1);
+local ChargeSolving(name, weighting /* uniform, uboone */) = pg.pnode({
+    type: "ChargeSolving",
+    name: name,
+    data:  {
+        weighting_strategies: [weighting],
+    }
+}, nin=1, nout=1);
+local LocalGeomClustering(name) = pg.pnode({
+    type: "LocalGeomClustering",
+    name: name,
+    data:  { },
+}, nin=1, nout=1);
+local GlobalGeomClustering(name) = pg.pnode({
+    type: "GlobalGeomClustering",
+    name: name,
+    data:  { },
+}, nin=1, nout=1);
+
+local live(iname, oname) = pg.pipeline([
+    UbooneBlobSource(iname, "TC"), BlobClustering("live"),
+    ProjectionDeghosting("1"),
+    BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
+    InSliceDeghosting("1","1"),
+    ProjectionDeghosting("2"),
+    BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
+    InSliceDeghosting("2",2),
+    BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
+    InSliceDeghosting("3",3),
+    GlobalGeomClustering(""),
+    ClusterFileSink(oname),
+]);
+
+
+local dead(iname, oname) = pg.pipeline([
+    UbooneBlobSource(iname, "TDC"), BlobClustering("dead"), ClusterFileSink(oname),
+]);
+
+function(iname, oname, kind /*TC or TDC*/)
+    if kind == "TC"
+    then high.main(live(iname, oname), "Pgrapher")
+    else high.main(dead(iname, oname), "Pgrapher")
+
