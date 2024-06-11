@@ -324,6 +324,7 @@ namespace WireCell::PointCloud::Facade {
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
     // nodes that are related in some way.
     class Grouping : public NaryTree::FacadeParent<Cluster, points_t> {
+
        public:
         // MUST call this sometimes after construction if non-default value needed.
         void set_params(const TPCParams& tp) { m_tp = tp; }
@@ -340,6 +341,24 @@ namespace WireCell::PointCloud::Facade {
             // make one if not exist
             return m_dead_winds[face][plane];
         }
+        using sv2d_t = Tree::ScopedView<float_t>;
+        using kd2d_t = sv2d_t::nfkd_t;
+        using kd_results_t = kd2d_t::results_type;
+
+        const kd2d_t& kd2d(const int face, const int pind) const;
+
+        // Perform a k-d tree radius query.  This radius is linear distance
+        // kd_results_t kd_radius(double radius_not_squared, const geo_point_t& query_point, const int face, const int pind) const;
+        // Perform a k-d tree NN query.
+        // kd_results_t kd_knn(int nnearest, const geo_point_t& query_point, const int face, int pind) const;
+
+        /// @brief 
+        /// @param point
+        /// @param radius
+        /// @param face
+        /// @param pind plane index
+        /// @return 
+        kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int face, int pind) const;
 
        private:
         mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;

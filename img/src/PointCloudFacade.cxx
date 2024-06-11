@@ -1285,6 +1285,26 @@ size_t Grouping::hash() const
     return h;
 }
 
+const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
+{
+    const auto sname = String::format("ctpc_f%dp%d", face, pind);
+    Tree::Scope scope = {sname, {"x", "y"}, 1};
+    const auto& sv = m_node->value.scoped_view(scope);
+    std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
+    return sv.kd();
+}
+
+Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int face,
+                                                    int pind) const
+{
+    double x = point[0];
+    const auto [angle_u,angle_v,angle_w] = wire_angles();
+    std::vector<double> angles = {angle_u, angle_v, angle_w};
+    double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
+    const auto& skd = kd2d(face, pind);
+    return skd.radius<std::vector<double>>(radius * radius, {x, y});
+}
+
 bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
 {
     if (a == b) return false;

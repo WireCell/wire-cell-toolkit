@@ -357,8 +357,10 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     /// FIXME: is this the way to get face?
                     const auto& x = time2drift(m_anode->face(face), slice->start());
                     const double y = pitch_mags[face][plane]*wind + proj_centers[face][plane];
-                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
-                    //            wind, plane, face, x, y);
+                    if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
+                        log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                                   wind, plane, face, x, y);
+                    }
                     ds_x[face][plane].push_back(x);
                     ds_y[face][plane].push_back(y);
                     ds_charge[face][plane].push_back(charge.value());
@@ -479,14 +481,35 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     Points::node_ptr root_live = sample_live(iclus_live);
     add_ctpc(root_live, iclus_live);
     /// FIXME: remove after debugging
-    // {
-    //     const auto& iclus_dead = invec[1];
-    //     add_dead_winds(root_live, iclus_dead);
-    //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
-    //         log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
-    //     }
-    //     exit(0);
-    // }
+    {
+        const auto& iclus_dead = invec[1];
+        add_dead_winds(root_live, iclus_dead);
+        for (const auto& [name, pc] : root_live->value.local_pcs()) {
+            log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+        }
+        auto grouping = root_live->value.facade<Facade::Grouping>();
+        /// test ctpc_f0p0 exists
+        grouping->kd2d(0,0);
+        /// find test point on ctpc
+        const auto ctest = grouping->children().front();
+        const auto p3ds = ctest->points();
+        log->debug("p3ds.size() {}", p3ds[0].size());
+        const auto winds = ctest->wire_indices();
+        log->debug("winds.size() {}", winds[0].size());
+        log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
+        log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
+        auto ret = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 3 * units::mm, 0, 0);
+        log->debug("closest points {}", ret.size());
+        const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
+        const auto& x = ctpc.get("x")->elements<Facade::float_t>();
+        const auto& y = ctpc.get("y")->elements<Facade::float_t>();
+        const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
+        const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
+        for (const auto& [ind, dist] : ret) {
+            log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
+        }
+        exit(0);
+    }
     // {
     //     auto grouping = root_live->value.facade<Facade::Grouping>();
     //     auto children = grouping->children(); // copy
