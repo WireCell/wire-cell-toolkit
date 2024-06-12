@@ -290,24 +290,6 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
     return root;
 }
 
-// dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
-double PointTreeBuilding::time2drift(IAnodeFace::pointer anodeface, double time) const {
-    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
-    double xsign = colpimpos->axis(0)[0];
-    double xorig = anodeface->planes()[2]->wires().front()->center().x();
-    const double drift = (time + m_time_offset)*m_drift_speed;
-    /// TODO: how to determine xsign?
-    return xorig + xsign*drift;
-}
-
-// time = (drift - xorig) / (xsign * m_drift_speed) - m_time_offset
-double PointTreeBuilding::drift2time(IAnodeFace::pointer anodeface, double drift) const {
-    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
-    double xsign = colpimpos->axis(0)[0];
-    double xorig = anodeface->planes()[2]->wires().front()->center().x();
-    return (drift - xorig) / (xsign * m_drift_speed) - m_time_offset;
-}
-
 void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
     using slice_t = WireCell::cluster_node_t::slice_t;
     using float_t = Facade::float_t;
@@ -363,7 +345,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     const auto& plane = wire->planeid().index();
                     const auto& face = wire->planeid().face();
                     /// FIXME: is this the way to get face?
-                    const auto& x = time2drift(m_anode->face(face), slice->start());
+                    const auto& x = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start());
                     const double y = pitch_mags[face][plane]*wind + proj_centers[face][plane];
                     if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
                         log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
@@ -429,11 +411,8 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 const auto& plane = wire->planeid().index();
                 const auto& face = wire->planeid().face();
                 /// FIXME: is this the way to get face?
-                const auto& x = time2drift(m_anode->face(face), slice->start());
-                // log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
-                //            wind, plane, face, x, y);
-                double xbeg = x;
-                double xend = time2drift(m_anode->face(face), slice->start() + slice->span());
+                const auto& xbeg = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start());
+                const auto& xend = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start() + slice->span());
                 if (cident == 903) {
                     log->debug("chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);

@@ -50,8 +50,6 @@ namespace WireCell::Img {
         double m_time_offset {-1600 * units::us};
         double m_dead_threshold {1e10};
         IAnodePlane::pointer m_anode;
-        double time2drift(IAnodeFace::pointer anodeface, double time) const;
-        double drift2time(IAnodeFace::pointer anodeface, double time) const;
         
         /** Configuration: "samplers"
 
