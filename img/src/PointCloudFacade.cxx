@@ -1294,6 +1294,36 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
     return sv.kd();
 }
 
+void Grouping::fill_proj_centers_pitch_mags()
+{
+    const int ndummy_layers = 2;
+    for (const auto& face : m_anode->faces()) {
+        const auto& coords = face->raygrid();
+        // skip dummy layers so the vector matches 0, 1, 2 plane order
+        for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+            const auto& pitch_dir = coords.pitch_dirs()[layer];
+            const auto& center = coords.centers()[layer];
+            double proj_center = center.dot(pitch_dir);
+            m_proj_centers[face->which()][layer-ndummy_layers] = proj_center;
+            m_pitch_mags[face->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+        }
+    }
+}
+
+const Facade::mapfp_t<double>& Grouping::proj_centers()
+{
+    if (!m_proj_centers.empty()) return m_proj_centers;
+    fill_proj_centers_pitch_mags();
+    return m_proj_centers;
+}
+
+const Facade::mapfp_t<double>& Grouping::pitch_mags()
+{
+    if (!m_pitch_mags.empty()) return m_pitch_mags;
+    fill_proj_centers_pitch_mags();
+    return m_pitch_mags;
+}
+
 Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int face,
                                                     int pind) const
 {
@@ -1303,6 +1333,34 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     const auto& skd = kd2d(face, pind);
     return skd.radius<std::vector<double>>(radius * radius, {x, y});
+}
+
+
+// dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
+double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
+    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
+    double xsign = colpimpos->axis(0)[0];
+    double xorig = anodeface->planes()[2]->wires().front()->center().x();
+    const double drift = (time + time_offset)*drift_speed;
+    /// TODO: how to determine xsign?
+    return xorig + xsign*drift;
+}
+
+// time = (drift - xorig) / (xsign * m_drift_speed) - m_time_offset
+double Facade::drift2time(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double drift) {
+    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
+    double xsign = colpimpos->axis(0)[0];
+    double xorig = anodeface->planes()[2]->wires().front()->center().x();
+    return (drift - xorig) / (xsign * drift_speed) - time_offset;
+}
+std::tuple<double, int> Facade::convert_3Dpoint_time_wind(const IAnodeFace::pointer anodeface, const double time_offset,
+                                                          const double drift_speed, const int pind, geo_point_t& point)
+{
+    if (!anodeface) {
+        raise<ValueError>("anodeface is null");
+    }
+    double time = Facade::drift2time(anodeface, time_offset, drift_speed, point[0]);
+    return {time, 0};
 }
 
 bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)

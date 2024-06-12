@@ -290,7 +290,7 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
     return root;
 }
 
-
+// dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
 double PointTreeBuilding::time2drift(IAnodeFace::pointer anodeface, double time) const {
     const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
     double xsign = colpimpos->axis(0)[0];
@@ -298,6 +298,14 @@ double PointTreeBuilding::time2drift(IAnodeFace::pointer anodeface, double time)
     const double drift = (time + m_time_offset)*m_drift_speed;
     /// TODO: how to determine xsign?
     return xorig + xsign*drift;
+}
+
+// time = (drift - xorig) / (xsign * m_drift_speed) - m_time_offset
+double PointTreeBuilding::drift2time(IAnodeFace::pointer anodeface, double drift) const {
+    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
+    double xsign = colpimpos->axis(0)[0];
+    double xorig = anodeface->planes()[2]->wires().front()->center().x();
+    return (drift - xorig) / (xsign * m_drift_speed) - m_time_offset;
 }
 
 void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
@@ -498,14 +506,17 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         log->debug("winds.size() {}", winds[0].size());
         log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
         log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
-        auto ret = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 3 * units::mm, 0, 0);
-        log->debug("closest points {}", ret.size());
+        const double radius = 3 * units::mm;
+        auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
+        auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
+        auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
+        log->debug("closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
         const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
         const auto& x = ctpc.get("x")->elements<Facade::float_t>();
         const auto& y = ctpc.get("y")->elements<Facade::float_t>();
         const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
         const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
-        for (const auto& [ind, dist] : ret) {
+        for (const auto& [ind, dist] : ret0) {
             log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
         }
         exit(0);

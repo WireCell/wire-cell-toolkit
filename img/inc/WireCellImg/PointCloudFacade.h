@@ -10,6 +10,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Spdlog.h"
+#include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IAnodeFace.h"
 
 #include "WireCellUtil/Graph.h"
 
@@ -119,6 +121,8 @@ namespace WireCell::PointCloud::Facade {
         float_t angle_v{-1.0472};                     //-60 degrees   uboone geometry ...
         float_t angle_w{0};                           // 0 degrees    uboone geometry ...
         float_t tick_drift{0.5 * 1.101 * units::mm};  // tick * speed
+        float_t drift_speed{1.101 * units::mm / units::us};
+        float_t time_offset{-1600 * units::us};
     };
 
     class Grouping;
@@ -325,13 +329,17 @@ namespace WireCell::PointCloud::Facade {
     // nodes that are related in some way.
     class Grouping : public NaryTree::FacadeParent<Cluster, points_t> {
 
+        TPCParams m_tp{};  // use default value by default.
+        /// TODO: replace TPCParams with this in the future?
+        IAnodePlane::pointer m_anode{nullptr};
+
        public:
         // MUST call this sometimes after construction if non-default value needed.
         void set_params(const TPCParams& tp) { m_tp = tp; }
         const TPCParams& get_params() const { return m_tp; }
         std::tuple<double, double, double> wire_angles() const { return {m_tp.angle_u, m_tp.angle_v, m_tp.angle_w}; }
 
-        TPCParams m_tp{};  // use default value by default.
+        void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
 
         // Return a value representing the content of this grouping.
         size_t hash() const;
@@ -347,10 +355,8 @@ namespace WireCell::PointCloud::Facade {
 
         const kd2d_t& kd2d(const int face, const int pind) const;
 
-        // Perform a k-d tree radius query.  This radius is linear distance
-        // kd_results_t kd_radius(double radius_not_squared, const geo_point_t& query_point, const int face, const int pind) const;
-        // Perform a k-d tree NN query.
-        // kd_results_t kd_knn(int nnearest, const geo_point_t& query_point, const int face, int pind) const;
+        const mapfp_t<double>& proj_centers(); // lazy, do not access directly.
+        const mapfp_t<double>& pitch_mags();  // lazy, do not access directly.
 
         /// @brief 
         /// @param point
@@ -361,9 +367,20 @@ namespace WireCell::PointCloud::Facade {
         kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int face, int pind) const;
 
        private:
+        void fill_proj_centers_pitch_mags();
+        mapfp_t<double> m_proj_centers;
+        mapfp_t<double> m_pitch_mags;
         mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
+
+    double time2drift(const IAnodeFace::pointer anodeface, const double time_offset,
+                      const double drift_speed, const double time);
+    double drift2time(const IAnodeFace::pointer anodeface, const double time_offset,
+                      const double drift_speed, const double drift);
+
+    std::tuple<double, int> convert_3Dpoint_time_wind(const IAnodeFace::pointer anodeface, const double time_offset,
+                                                      const double drift_speed, const int pind, geo_point_t& point);
 
     // Return true if a is less than b.  May be used as 3rd arg in std::sort to
     // get ascending order.  For descending, pass to sort() rbegin()/rend()
