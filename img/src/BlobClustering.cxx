@@ -170,6 +170,25 @@ bool Img::BlobClustering::operator()(const input_pointer& blobset,
         ++m_count;
         return true;
     }
+    
+    {                           // sanity check
+        size_t nmissing = 0;
+        for (const auto& iblob : blobset->blobs()) {
+            if (! iblob->slice()) {
+                ++nmissing;
+                log->debug("blob {} missing slice {} out of {}",
+                           iblob->ident(), nmissing, blobset->blobs().size());
+                continue;
+            }
+            // log->debug("blob {} slice {} at time={}",
+            //            iblob->ident(), iblob->slice()->ident(),
+            //            iblob->slice()->start());
+        }
+        if (nmissing) {
+            log->critical("{} blobs missing their slice, this job is not valid", nmissing);
+            raise<ValueError>("blobs missing their slice");
+        }
+    }
 
     if (new_frame(blobset)) {
         flush(clusters);
