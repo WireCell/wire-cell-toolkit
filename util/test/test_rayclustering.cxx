@@ -1,6 +1,5 @@
 #include "WireCellUtil/RayClustering.h"
 #include "WireCellUtil/RayTiling.h"
-#include <fmt/core.h>
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/Testing.h"
 #include "WireCellUtil/Logging.h"
