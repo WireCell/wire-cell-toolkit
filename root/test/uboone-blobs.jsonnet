@@ -18,7 +18,7 @@ local UbooneBlobSource(fname, kind /*TC or TDC*/) = pg.pnode({
     name: fname,
     data: {
         input: fname,
-        anode: anode,
+        anode: wc.tn(anode),
         kind: kind
     }
 }, nin=0, nout=1, uses=[anode]);
@@ -79,7 +79,7 @@ local live(iname, oname) = pg.pipeline([
     UbooneBlobSource(iname, "TC"), BlobClustering("live"),
     ProjectionDeghosting("1"),
     BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
-    InSliceDeghosting("1","1"),
+    InSliceDeghosting("1",1),
     ProjectionDeghosting("2"),
     BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
     InSliceDeghosting("2",2),
@@ -94,8 +94,10 @@ local dead(iname, oname) = pg.pipeline([
     UbooneBlobSource(iname, "TDC"), BlobClustering("dead"), ClusterFileSink(oname),
 ]);
 
+local extra_plugins = ["WireCellRoot"];
+
 function(iname, oname, kind /*TC or TDC*/)
     if kind == "TC"
-    then high.main(live(iname, oname), "Pgrapher")
-    else high.main(dead(iname, oname), "Pgrapher")
+    then high.main(live(iname, oname), "Pgrapher", extra_plugins)
+    else high.main(dead(iname, oname), "Pgrapher", extra_plugins)
 

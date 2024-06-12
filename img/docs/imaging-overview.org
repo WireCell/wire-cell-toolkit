@@ -4,12 +4,15 @@
 * Concepts, data and processes
 
 ** Prototype 
+:PROPERTIES:
+:CUSTOM_ID: prototype
+:END:
 
 The figure below holds an initial, high-level prototype conceptual flow graph showing the top-level algorithms as implemented in the [[https://github.com/BNLIF/wire-cell/][Wire-Cell Prototype code base]].  
 
 [[file:imaging_flow.pdf]]
 
-Some notes and interpretations on this are collected here.  Please not, *these are WCP terms* and not fully carried over to WCT.
+Some notes and interpretations on this are collected here.  Please note, *these are WCP terms* and not fully carried over to WCT.
 
 - slice :: a [[https://github.com/BNLIF/wire-cell-data/blob/master/inc/WireCellData/Slice.h][Slice]] is filled by a [[https://github.com/BNLIF/wire-cell-sst/blob/d25ebf82b3d580588e3d527ec8258f96ee28bb30/src/ToyuBooNESliceDataSourceg.cxx][ToyuBooNESliceDataSource]].  A slice represents a set of charge measurements (waveform samples) at a common time in a set of electronics channels.  The "time" (~tbin~) of the slice is an integer, implicitly some bin index across the readout time.   The duration of the slice is left fully implicit.
 
@@ -25,7 +28,11 @@ Some notes and interpretations on this are collected here.  Please not, *these a
 
 - parent-wire :: in the process of tiling, a blob may have smaller transverse extent than originally determined by a merged-wire.  The original merged-wire is called a parent-wire to the final, smaller merged-wire.
 
+
 ** Toolkit Interfaces
+:PROPERTIES:
+:CUSTOM_ID: interfaces
+:END:
 
 The ~wire-cell-img~ package provides components supplying the conceptual elements of the prototype described above.  They are developed following this general strategy:
 
@@ -44,6 +51,9 @@ Details on each member of this zoo follow.
 
 
 ** Toolkit Data Interfaces
+:PROPERTIES:
+:CUSTOM_ID: data-iface
+:END:
 
 The WCP implementation was developed in the context of the MicroBooNE detector which has one wire (segment) per channel (wire and channels are degenerate) while a general detector (an in particular, ProtoDUNE/DUNE APAs) has multiple wires per channel due to wrapping a continuous wire conductor around a supporting frame.  
 In WCT supports wrapped wires so this degeneracy must be broken.  At the start of "tiling", one must necessarily begin with a "channel-centric" view and ultimately end with "segments-centric" one.  This is reflected in the differentiation of "strip" and "blob".
@@ -73,8 +83,11 @@ The first two interfaces above are "activity-independent" in the sense that they
 
 
 ** Toolkit Component Interfaces
+:PROPERTIES:
+:CUSTOM_ID: comp-iface
+:END:
 
-The WCP component (conceptual) interfaces shown in [[./imaging_flow.pdf]].
+The WCP component (conceptual) interfaces is shown in the above figure in section [[Prototype]].
 The current WCP implementation is also used to deconstruct algorithms
 into more granular parts and define their interfaces.  Some existing
 interfaces are already applicable.
@@ -95,7 +108,11 @@ The new interfaces:
 
 - ~IBlobClustering~ :: produces an ~ICluster~ from a set of blobs
 
+
 ** Implementation notes
+:PROPERTIES:
+:CUSTOM_ID: imp
+:END:
 
 This section holds notes on implementations.
 
@@ -182,6 +199,10 @@ Next, it all zero blobs can be removed which removes wires and ultimately
 
 
 * Tiling
+:PROPERTIES:
+:CUSTOM_ID: tiling
+:END:
+
 
 The ~img/test/test-pdsp.jsonnet~ file can configure to run either full or fast sim+sigproc (fast is the new ~DepoSplat~ component).  
 
@@ -242,3 +263,47 @@ background which is unreadable.  [[https://community.slickedit.com/index.php/top
 
 
 
+* Live vs dead
+:PROPERTIES:
+:CUSTOM_ID: live-dead
+:END:
+
+
+Channels are considered "live" if they are functioning properly or they are "dead".  A live channel may produce zero signal for some period of time.  That is interpreted as measuring an absence of activity.  A dead channel may produce non-zero signal for some period of time.  That is interpreted as inconclusive and ignored.  A channel may change between live and dead state throughout a given frame.
+
+There are many ways to determine "live" or "dead".  Statically configured "bad channel lists" or dynamically determined regions of "badness" are two general ways.  These judgments on the space of channel and tick are represented by a "bad" channel mask map provided in an ~IFrame~ /eg/ as constructed by ~ChargeErrorFrameEstimator~.
+
+Given the tomographic nature of wire-readout it is not feasible to deal with "dead" channels with some kind of ficducial cut.  Instead, the distinction of "live" vs "dead" channels are propagated through the WC imaging stage.  This leads to seven, mutually-exclusive types of blobs:
+
+- *3-view live blobs* formed from three views each providing live channels.
+- *2-view live blobs* as above but one view consists of dead channels.  There are three sub-types of 2-view live blobs, one for each plane supplying the dead channels.
+- *2-view dead blobs* or simply *dead blobs*.  The measures of two views consist of dead channels.  Again, there are three sub-types where depending on which view provides the live view.
+
+Both live and dead blobs are interpreted as "likely contains ionization signal" while any volume not contained by a blob is considered "likely does not contain ionization signal".  
+2-view live blobs are largely considered as somewhat more ambiguous but otherwise generally similar to 3-view live blobs.   Dead blobs are used differently than live blobs.  For example, later clustering may allow two otherwise disconnected live blobs to become connected if the path between them goes through a dead blob but not form a connection between those two live blobs if no dead blob intercedes.
+
+The ~GridTiling~ component that performs tiling is ignorant of any of this live vs dead interpretation.  It merely consumes the /activity map/ of an ~ISlice~.  This maps a channel to a charge value and a charge uncertainty.  The amount of charge is ignored in tiling and only the existence of the channel in this map and knowledge of the locations of the wires feeding each channel is considered in tiling.  
+
+An instance of the component ~MaskSlices~ is added as a predecessor to ~GridTiling~ in the DFP graph.  ~MaskSlices~ applies a live/dead interpretation in the process of consuming an input ~IFrame~ and of preparing an output stream of ~ISlice~ instances and in particular generating their activity maps.  A signal sample from a live channel that is within the span of slice being created is added to that channels entry in the activithy map.  A signal value is taken from one named set of tagged traces and the signal uncertainty from another.  Any channel that is determined to be "dead" in a slice has its entry in the activity map set to a special activity of $0 \pm 10^{12}$, by convention.  This determination of "dead" may override an otherwise previously counted "live" channel.
+
+A ~MaskSlices~ is further configured with three lists of plane indices:
+
+- ~active_planes~ :: the planes considered to generally be alive
+- ~masked_planes~ :: planes to ignore when checking for entries in the "bad" channel mask map.
+- ~dummy_planes~ :: planes for which all channels are set to the special activity value
+
+* Meta :noexport:
+
+
+#+begin_src sh :results output drawer
+scp imaging-overview.html imaging-overview.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src
+
+#+RESULTS:
+:results:
+:end:
+
+
+# Local Variables:
+# eval: (setq org-html-self-link-headlines t)
+# End:
