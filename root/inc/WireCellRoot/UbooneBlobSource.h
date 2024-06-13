@@ -54,33 +54,21 @@ namespace WireCell::Root {
 
         /** Configuration: views
 
-            A list of strings of plane letters describing the wire planes
-            combinations to load.
+            Required.
 
-            For the "live" kind, "uvw" outputs 3-view blobs with all live
-            channels while "uv" outputs 2-view blobs with live channels where
-            "w" view is ignored.  Etc for "vw" and "wu".  
+            A string of two or three plane letters (any order of "u", "v" or
+            "w") stating which planes are considered to have built the blobs.
 
-            For dead kind, "uv" produces 2-view blobs with dead channels and "w"
-            channels ignored.  Etc for "vw" and "wu".
+            Blobs from file which are not consistent with kind+views are ignored.
 
-            There is no ordering requirement on the letters in each string.
+            The "live" kind may take 3-views ("uvw") or any 2-views ("uv", "vw",
+            "wu") and "dead" kind may take only 2-views.
 
-            To replicate typical output from WCT for "live" kind, the views list
-            would be:
+            Default is "uvw" if kind is "live" else default is "uv".
 
-              views=["uvw","uv","vw","wu"]
-
-            And to replicate typical output from WCT for "dead" kind, the views
-            list would be:
-
-              views=["uv","vw","wu"]
-
-            The default value is an empty list which is interpreted to be the
-            above full lists.
         */
         // Encode a view as OR'ed bits {u=1,v=2,w=4}
-        std::vector<char> m_views;
+        char m_views{7};
 
         /** Configuration: anode
 

@@ -65,40 +65,26 @@ void Root::UbooneBlobSource::configure(const WireCell::Configuration& cfg)
     std::reverse(m_input.begin(), m_input.end());
 
     // See in_views().
+    m_views = 0;
     auto jviews = cfg["views"];
-    if (jviews.isArray() && jviews.size()) {
-        m_views.clear();
-        for (const auto& jone : jviews) {
-            std::string view = jone.asString();
-            char cone=0;
-            for (char letter : view) {
-                if (letter > 'Z') letter -= 32; // upper case
-                if (letter == 'U') cone |= 1;
-                if (letter == 'V') cone |= 2;
-                if (letter == 'W') cone |= 4;
-            }
-            if (cone) {
-                m_views.push_back(cone);
-            }
+    if (jviews.isString() && jviews.size()) {
+        std::string views = jviews.asString();
+        for (char letter : views) {
+            if (letter > 'Z') letter -= 32; // upper case
+            if (letter == 'U') m_views |= 1;
+            if (letter == 'V') m_views |= 2;
+            if (letter == 'W') m_views |= 4;
         }
     }
     else {
         if (m_kind == "live") {
-            m_views = {3,5,6,7}; // 3x2-way + 3-way
+            m_views = 7;
         }
         else {
-            m_views = {3,5,6};  // 3x2-way
+            m_views = 3;
         }
     }
-    std::stringstream ss;
-    ss << m_kind << " kind views: ";
-    for (auto one: m_views) {
-        ss << one << " ";
-    }
-    log->debug(ss.str());
-
-    // ROOT does not always have this one predefined
-    gInterpreter->GenerateDictionary("vector<vector<int> >", "vector");
+    log->debug("loading {} blobs of views bits {}", m_kind, m_views);
 }
 
 WireCell::Configuration Root::UbooneBlobSource::default_configuration() const
@@ -364,10 +350,7 @@ bool Root::UbooneBlobSource::in_views(int bind)
         }
     }
 
-    for (char one : m_views) {
-        if (cone == one) return true;
-    }
-    return false;
+    return cone == m_views;
 }
 
 
