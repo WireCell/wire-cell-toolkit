@@ -13,13 +13,14 @@ local anodes = mid.anodes();
 local anode = anodes[0];
 
 // live/dead symmetries
-local UbooneBlobSource(fname, kind /*TC or TDC*/) = pg.pnode({
+local UbooneBlobSource(fname, kind /*live or dead*/) = pg.pnode({
     type: 'UbooneBlobSource',
     name: fname,
     data: {
         input: fname,
         anode: wc.tn(anode),
-        kind: kind
+        kind: kind,
+        // "views" can be set to micromanage which types of blobs are output, 3-view, 2-vew
     }
 }, nin=0, nout=1, uses=[anode]);
 local BlobClustering(name) = pg.pnode({
@@ -76,7 +77,7 @@ local GlobalGeomClustering(name) = pg.pnode({
 }, nin=1, nout=1);
 
 local live(iname, oname) = pg.pipeline([
-    UbooneBlobSource(iname, "TC"), BlobClustering("live"),
+    UbooneBlobSource(iname, "live"), BlobClustering("live"),
     ProjectionDeghosting("1"),
     BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
     InSliceDeghosting("1",1),
@@ -91,13 +92,13 @@ local live(iname, oname) = pg.pipeline([
 
 
 local dead(iname, oname) = pg.pipeline([
-    UbooneBlobSource(iname, "TDC"), BlobClustering("dead"), ClusterFileSink(oname),
+    UbooneBlobSource(iname, "dead"), BlobClustering("dead"), ClusterFileSink(oname),
 ]);
 
 local extra_plugins = ["WireCellRoot"];
 
-function(iname, oname, kind /*TC or TDC*/)
-    if kind == "TC"
+function(iname, oname, kind /*live or dead*/)
+    if kind == "live"
     then high.main(live(iname, oname), "Pgrapher", extra_plugins)
     else high.main(dead(iname, oname), "Pgrapher", extra_plugins)
 
