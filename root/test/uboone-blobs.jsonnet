@@ -13,9 +13,9 @@ local anodes = mid.anodes();
 local anode = anodes[0];
 
 // live/dead symmetries
-local UbooneBlobSource(fname, kind /*live or dead*/, views="" /* uvw, uv, vw, wu */) = pg.pnode({
+local UbooneBlobSource(fname, kind /*live or dead*/, views /* uvw, uv, vw, wu */) = pg.pnode({
     type: 'UbooneBlobSource',
-    name: fname,
+    name: kind+'-'+views,
     data: {
         input: fname,
         anode: wc.tn(anode),
@@ -76,29 +76,43 @@ local GlobalGeomClustering(name) = pg.pnode({
     data:  { },
 }, nin=1, nout=1);
 
-local live(iname, oname, views="") = pg.pipeline([
-    UbooneBlobSource(iname, "live", views), BlobClustering("live"),
-    ProjectionDeghosting("1"),
-    BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
-    InSliceDeghosting("1",1),
-    ProjectionDeghosting("2"),
-    BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
-    InSliceDeghosting("2",2),
-    BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
-    InSliceDeghosting("3",3),
-    GlobalGeomClustering(""),
+local multi_source = function(iname, kind, views)
+    local nviews = std.length(views);
+    local srcs = [ UbooneBlobSource(iname, kind, view), for view in views ];
+    local bsm = pg.pnode({
+        type: "BlobSetMerge",
+        name: kind,
+        data: { multiplicity: nviews, },
+    }, nin=4, nout=1);
+    pg.intern(innodes = srcs, outnodes=[bsm],
+              edges = [ pg.edge(srcs[ind], bsm, 0, ind),
+                        for ind in std.range(0, nviews-1) ]);
+    
+
+local live(iname, oname) = pg.pipeline([
+    multi_source(iname, "live", ["uvw","uv","vw","wu"]), BlobClustering("live"),
+    // ProjectionDeghosting("1"),
+    // BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
+    // InSliceDeghosting("1",1),
+    // ProjectionDeghosting("2"),
+    // BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
+    // InSliceDeghosting("2",2),
+    // BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
+    // InSliceDeghosting("3",3),
+    // GlobalGeomClustering(""),
     ClusterFileSink(oname),
 ]);
 
 
-local dead(iname, oname, views) = pg.pipeline([
-    UbooneBlobSource(iname, "dead", views), BlobClustering("dead"), ClusterFileSink(oname),
+local dead(iname, oname) = pg.pipeline([
+    multi_source(iname, "dead", ["uv","vw","wu"]),
+    BlobClustering("dead"), ClusterFileSink(oname),
 ]);
 
 local extra_plugins = ["WireCellRoot"];
 
-function(iname, oname, kind /*live or dead*/, views="" /* uvw, uv, vw, wu */)
+function(iname, oname, kind /*live or dead*/)
     if kind == "live"
-    then high.main(live(iname, oname, views), "Pgrapher", extra_plugins)
-    else high.main(dead(iname, oname, views), "Pgrapher", extra_plugins)
+    then high.main(live(iname, oname), "Pgrapher", extra_plugins)
+    else high.main(dead(iname, oname), "Pgrapher", extra_plugins)
 

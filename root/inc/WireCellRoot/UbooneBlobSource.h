@@ -1,6 +1,19 @@
 /**
    A source of IBlobSet from a MicroBooNE Wire-Cell Prototype files in ROOT
-   format providing Trun, TC (aka "live") or TDC (aka "dead") TTrees.
+   format providing Trun, TC (aka "live"), TDC (aka "dead") and T_bad_ch TTrees.
+
+   The blob set and its slices are constructed to mimic exactly one of seven cases:
+
+   - 3-view live :: All three planes are categorized as *active*, none or *dummy* nor *masked*.
+   - 2-view live :: Two planes are categorized as *active* and the third as *masked*, none are dummy.
+   - 2-view dead :: No planes are *active*, two planes are *masked* and the third is *dummy*.
+
+   See the imaging-overview.org section "Live vs dead" document for details of these categories.
+
+   The "view" is set by the "views" config paramter and the live vs dead by "kind".
+
+   This result is mimicry as the information in the trees is not exactly coherent with what WCT produces.
+   
  */
 
 #ifndef WIRECELLROOT_UBOONEBLOBSETSOURCE
@@ -67,8 +80,11 @@ namespace WireCell::Root {
             Default is "uvw" if kind is "live" else default is "uv".
 
         */
-        // Encode a view as OR'ed bits {u=1,v=2,w=4}
+        // Encode a view as OR'ed bits {u=1,v=2,w=4}, can be in {3,5,6,7}.
         char m_views{7};
+        // for dead, the third plane to get filled as dummy
+        IWirePlane::pointer m_dummy{nullptr};
+        std::vector<int> m_bodged; // for live/dead, plane indices that get bodged.
 
         /** Configuration: anode
 
@@ -95,18 +111,22 @@ namespace WireCell::Root {
         // Return true if blob index is consistent with one of our configured "views".
         bool in_views(int bind);
 
-        using SimpleSlicePtr = std::shared_ptr<Aux::SimpleSlice>;
-        void bodge_channels(SimpleSlicePtr slice, const RayGrid::Blob& blob, int bind);
+        void bodge_activity(ISlice::map_t& activity, const RayGrid::Blob& blob);
+        void dummy_activity(ISlice::map_t& activity);
 
         IFrame::pointer gen_frame();
         IChannel::pointer get_channel(int chanid);
 
         // Map WCP timesliceId value to a slice
+        using SimpleSlicePtr = std::shared_ptr<Aux::SimpleSlice>;
         using SliceMap = std::map<int, SimpleSlicePtr>;
         SliceMap load_slices();
         IBlobSet::pointer load_live();
         IBlobSet::pointer load_dead();
         std::pair<int,int> make_strip(const std::vector<int>& wire_in_plane_indices);
+
+        const double m_tick{0.5 * units::us};
+        const ISlice::value_t m_bodge{0, 1e12};
     };
 }
 

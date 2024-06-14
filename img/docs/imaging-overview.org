@@ -268,29 +268,25 @@ background which is unreadable.  [[https://community.slickedit.com/index.php/top
 :CUSTOM_ID: live-dead
 :END:
 
+WCT's ~MaskSlices~ slices a frame in time to produce a series of ~ISlice~ data objects.  During the process of slicing, it also applies certain transforms to the sampled signal.  The primary ingredient of each slice is its /activity map/ that associates an "activity" (a value and its uncertainty) to a channel.  Nominally, the activity is the integral over the time slice as provided by a configured set of tagged traces in the frame. In certain cases a special "dummy" or a "bad" activity will be set in the map, as described next.
 
-Channels are considered "live" if they are functioning properly or they are "dead".  A live channel may produce zero signal for some period of time.  That is interpreted as measuring an absence of activity.  A dead channel may produce non-zero signal for some period of time.  That is interpreted as inconclusive and ignored.  A channel may change between live and dead state throughout a given frame.
+A categorization of the wire planes is considered when producing the /activity map/.  Each plane may be in one or more of these three categories:
 
-There are many ways to determine "live" or "dead".  Statically configured "bad channel lists" or dynamically determined regions of "badness" are two general ways.  These judgments on the space of channel and tick are represented by a "bad" channel mask map provided in an ~IFrame~ /eg/ as constructed by ~ChargeErrorFrameEstimator~.
+- active :: channels of the plane will have their activity *added* in the nominal manner.
+- dummy :: all channels of the plane have a special "dummy activity" *assigned*, overriding any prior value.
+- masked :: "bad" channels of the plane have a special "bad activity" *assigned*, overriding any prior value.
+Both "dummy" and "bad" activities are chosen to be $0 \pm 10^{12}$ by convention and both will override any prior value that may exist for the channel in the /activity map/.
 
-Given the tomographic nature of wire-readout it is not feasible to deal with "dead" channels with some kind of ficducial cut.  Instead, the distinction of "live" vs "dead" channels are propagated through the WC imaging stage.  This leads to seven, mutually-exclusive types of blobs:
+A "dummy" plane represents the case where all its channels are intentionally ignored.  As the /activity map/ is used to determine tiling, this "ignoring" is represented by having *all* channels of the plane present so that the plane will not constrain forming blobs.  After ~BlobTiling~ usually comes ~BlobGrouping~ which forms "measures" by combining contiguous active channels in a slice.  Each measure has an activity which is the sum of activity of its channels.  A measure in a "dummy" plane will thus have zero value.  Next usually comes ~BlobSolving~ which will propagate a zero value for a "dummy" measure and connect it to blobs with a matrix element that is very small, inverse of the uncertainty.  Thus, the special "dummy" activity value and uncertainty propagate through the chain.
 
-- *3-view live blobs* formed from three views each providing live channels.
-- *2-view live blobs* as above but one view consists of dead channels.  There are three sub-types of 2-view live blobs, one for each plane supplying the dead channels.
-- *2-view dead blobs* or simply *dead blobs*.  The measures of two views consist of dead channels.  Again, there are three sub-types where depending on which view provides the live view.
+The input frame's /channel mask map/ (CMM) with the name of "bad" is used, if it exists, to identify a subset of frame samples that hold "bad activity".  This "badness" may be due to the channel being considered non-operational or to otherwise exhibit some pathology, perhaps transient.  Any sample in that CMM that resides in a slice leads to a "bad activity" assignment for its channel.
 
-Both live and dead blobs are interpreted as "likely contains ionization signal" while any volume not contained by a blob is considered "likely does not contain ionization signal".  
-2-view live blobs are largely considered as somewhat more ambiguous but otherwise generally similar to 3-view live blobs.   Dead blobs are used differently than live blobs.  For example, later clustering may allow two otherwise disconnected live blobs to become connected if the path between them goes through a dead blob but not form a connection between those two live blobs if no dead blob intercedes.
+Specific choices of categorization are defined to identify two broad classes of slices called "live" and "dead".  Within each of these classes are sub-classes that identify which subset of planes are considered for later forming of blobs by ~GridTiling~.  These classes are as described:
 
-The ~GridTiling~ component that performs tiling is ignorant of any of this live vs dead interpretation.  It merely consumes the /activity map/ of an ~ISlice~.  This maps a channel to a charge value and a charge uncertainty.  The amount of charge is ignored in tiling and only the existence of the channel in this map and knowledge of the locations of the wires feeding each channel is considered in tiling.  
+- 3-view live :: All three planes are categorized as *active*, none or *dummy* nor *masked*.
+- 2-view live :: Two planes are categorized as *active* and the third as *masked*, none are dummy.
+- 2-view dead :: No planes are *active*, two planes are *masked* and the third is *dummy*.
 
-An instance of the component ~MaskSlices~ is added as a predecessor to ~GridTiling~ in the DFP graph.  ~MaskSlices~ applies a live/dead interpretation in the process of consuming an input ~IFrame~ and of preparing an output stream of ~ISlice~ instances and in particular generating their activity maps.  A signal sample from a live channel that is within the span of slice being created is added to that channels entry in the activithy map.  A signal value is taken from one named set of tagged traces and the signal uncertainty from another.  Any channel that is determined to be "dead" in a slice has its entry in the activity map set to a special activity of $0 \pm 10^{12}$, by convention.  This determination of "dead" may override an otherwise previously counted "live" channel.
-
-A ~MaskSlices~ is further configured with three lists of plane indices:
-
-- ~active_planes~ :: the planes considered to generally be alive
-- ~masked_planes~ :: planes to ignore when checking for entries in the "bad" channel mask map.
-- ~dummy_planes~ :: planes for which all channels are set to the special activity value
 
 * Meta :noexport:
 
