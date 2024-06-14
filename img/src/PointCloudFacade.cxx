@@ -1294,7 +1294,7 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
     return sv.kd();
 }
 
-void Grouping::fill_proj_centers_pitch_mags()
+void Grouping::fill_proj_centers_pitch_mags() const
 {
     const int ndummy_layers = 2;
     if (!m_anode) {
@@ -1313,14 +1313,14 @@ void Grouping::fill_proj_centers_pitch_mags()
     }
 }
 
-const Facade::mapfp_t<double>& Grouping::proj_centers()
+const Facade::mapfp_t<double>& Grouping::proj_centers() const
 {
     if (!m_proj_centers.empty()) return m_proj_centers;
     fill_proj_centers_pitch_mags();
     return m_proj_centers;
 }
 
-const Facade::mapfp_t<double>& Grouping::pitch_mags()
+const Facade::mapfp_t<double>& Grouping::pitch_mags() const
 {
     if (!m_pitch_mags.empty()) return m_pitch_mags;
     fill_proj_centers_pitch_mags();
@@ -1338,6 +1338,28 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
     return skd.radius<std::vector<double>>(radius * radius, {x, y});
 }
 
+std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const {
+    if (m_anode == nullptr) {
+        raise<ValueError>("Anode is null");
+    }
+    const auto& iface = m_anode->face(face);
+    if (iface == nullptr) {
+        raise<ValueError>("Face is null");
+    }
+
+    const auto [angle_u,angle_v,angle_w] = wire_angles();
+    std::vector<double> angles = {angle_u, angle_v, angle_w};
+    const double angle = angles[pind];
+    const double pitch = pitch_mags().at(face).at(pind);
+    const double center = proj_centers().at(face).at(pind);
+    const int wind = point2wind(point, angle, pitch, center);
+
+    const auto params = get_params();
+    const double time = drift2time(iface, params.time_offset, params.drift_speed, point[0]);
+    const int tind = std::round(time / params.tick);
+
+    return {tind, wind};
+}
 
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
 double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
@@ -1356,14 +1378,14 @@ double Facade::drift2time(const IAnodeFace::pointer anodeface, const double time
     double xorig = anodeface->planes()[2]->wires().front()->center().x();
     return (drift - xorig) / (xsign * drift_speed) - time_offset;
 }
-std::tuple<double, int> Facade::convert_3Dpoint_time_wind(const IAnodeFace::pointer anodeface, const double time_offset,
-                                                          const double drift_speed, const int pind, geo_point_t& point)
+
+int Facade::point2wind(const geo_point_t& point, const double angle, const double pitch, const double center)
 {
-    if (!anodeface) {
-        raise<ValueError>("anodeface is null");
-    }
-    double time = Facade::drift2time(anodeface, time_offset, drift_speed, point[0]);
-    return {time, 0};
+    // double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
+    // y = mag * wind + center
+    double y = cos(angle) * point[2] - sin(angle) * point[1];
+    double wind = (y - center) / pitch;
+    return std::round(wind);
 }
 
 bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)

@@ -117,11 +117,12 @@ namespace WireCell::PointCloud::Facade {
         float_t pitch_u{3 * units::mm};
         float_t pitch_v{3 * units::mm};
         float_t pitch_w{3 * units::mm};
-        float_t angle_u{1.0472};                      // 60 degrees    uboone geometry ...
-        float_t angle_v{-1.0472};                     //-60 degrees   uboone geometry ...
-        float_t angle_w{0};                           // 0 degrees    uboone geometry ...
-        float_t tick_drift{0.5 * 1.101 * units::mm};  // tick * speed
+        float_t angle_u{1.0472};   // 60 degrees    uboone geometry ...
+        float_t angle_v{-1.0472};  //-60 degrees   uboone geometry ...
+        float_t angle_w{0};        // 0 degrees    uboone geometry ...
         float_t drift_speed{1.101 * units::mm / units::us};
+        float_t tick{0.5 * units::us};           // 0.5 mm per tick
+        float_t tick_drift{drift_speed * tick};  // tick * speed
         float_t time_offset{-1600 * units::us};
     };
 
@@ -355,32 +356,33 @@ namespace WireCell::PointCloud::Facade {
 
         const kd2d_t& kd2d(const int face, const int pind) const;
 
-        const mapfp_t<double>& proj_centers(); // lazy, do not access directly.
-        const mapfp_t<double>& pitch_mags();  // lazy, do not access directly.
+        const mapfp_t<double>& proj_centers() const; // lazy, do not access directly.
+        const mapfp_t<double>& pitch_mags() const;   // lazy, do not access directly.
 
-        /// @brief 
+        /// @brief
         /// @param point
         /// @param radius
         /// @param face
         /// @param pind plane index
-        /// @return 
+        /// @return
         kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int face, int pind) const;
 
+        /// @brief convert_3Dpoint_time_ch
+        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;
+
        private:
-        void fill_proj_centers_pitch_mags();
-        mapfp_t<double> m_proj_centers;
-        mapfp_t<double> m_pitch_mags;
-        mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
+        void fill_proj_centers_pitch_mags() const;
+        mutable mapfp_t<double> m_proj_centers;
+        mutable mapfp_t<double> m_pitch_mags;
+        mutable mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 
-    double time2drift(const IAnodeFace::pointer anodeface, const double time_offset,
-                      const double drift_speed, const double time);
-    double drift2time(const IAnodeFace::pointer anodeface, const double time_offset,
-                      const double drift_speed, const double drift);
-
-    std::tuple<double, int> convert_3Dpoint_time_wind(const IAnodeFace::pointer anodeface, const double time_offset,
-                                                      const double drift_speed, const int pind, geo_point_t& point);
+    double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
+                      const double time);
+    double drift2time(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
+                      const double drift);
+    int point2wind(const geo_point_t& point, const double angle, const double pitch, const double center);
 
     // Return true if a is less than b.  May be used as 3rd arg in std::sort to
     // get ascending order.  For descending, pass to sort() rbegin()/rend()

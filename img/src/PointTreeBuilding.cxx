@@ -469,26 +469,34 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         }
         /// test ctpc_f0p0 exists
         grouping->kd2d(0,0);
+
         /// find test point on ctpc
         const auto ctest = grouping->children().front();
         const auto p3ds = ctest->points();
         log->debug("p3ds.size() {}", p3ds[0].size());
-        const auto winds = ctest->wire_indices();
-        log->debug("winds.size() {}", winds[0].size());
-        log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
-        log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
-        const double radius = 3 * units::mm;
-        auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
-        auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
-        auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
-        log->debug("closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
-        const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
-        const auto& x = ctpc.get("x")->elements<Facade::float_t>();
-        const auto& y = ctpc.get("y")->elements<Facade::float_t>();
-        const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
-        const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
-        for (const auto& [ind, dist] : ret0) {
-            log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
+        {
+            const auto winds = ctest->wire_indices();
+            log->debug("winds.size() {}", winds[0].size());
+            log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
+            log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
+            const double radius = 3 * units::mm;
+            auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
+            auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
+            auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
+            log->debug("closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
+            const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
+            const auto& x = ctpc.get("x")->elements<Facade::float_t>();
+            const auto& y = ctpc.get("y")->elements<Facade::float_t>();
+            const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
+            const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
+            for (const auto& [ind, dist] : ret0) {
+                log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
+            }
+        }
+
+        {
+            const auto [tind, wind] = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 0);
+            log->debug("tind {} wind {}", tind, wind);
         }
         exit(0);
     }
