@@ -487,7 +487,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
             log->debug("winds.size() {}", winds[0].size());
             log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
             log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
-            const double radius = 3 * units::mm;
+            const double radius = 0.6 * units::cm;
             auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
             auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
             auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
@@ -515,6 +515,9 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
             bool d1 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 1);
             bool d2 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 2);
             log->debug("dead chs {} {} {}", d0, d1, d2);
+
+            bool is_good = grouping->is_good_point({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0);
+            log->debug("is_good_point {}", is_good);
         }
         exit(0);
     }

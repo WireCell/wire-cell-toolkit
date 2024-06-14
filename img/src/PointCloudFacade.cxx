@@ -1327,6 +1327,24 @@ const Facade::mapfp_t<double>& Grouping::pitch_mags() const
     return m_pitch_mags;
 }
 
+
+bool Grouping::is_good_point(const geo_point_t& point, const int face, double radius, int ch_range, int allowed_bad) const {
+    const int nplanes = 3;
+    int matched_planes = 0;
+    for (int pind = 0; pind < nplanes; ++pind) {
+        if (get_closest_points(point, radius, face, pind).size() > 0) {
+            matched_planes++;
+        } else if (get_closest_dead_chs(point, ch_range, face, pind)) {
+            matched_planes++;
+        }
+    }
+    std::cout << "matched_planes: " << matched_planes << std::endl;
+    if (matched_planes >= nplanes - allowed_bad) {
+        return true;
+    }
+    return false;
+}
+
 Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int face,
                                                     int pind) const
 {

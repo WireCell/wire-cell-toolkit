@@ -359,6 +359,9 @@ namespace WireCell::PointCloud::Facade {
         const mapfp_t<double>& proj_centers() const; // lazy, do not access directly.
         const mapfp_t<double>& pitch_mags() const;   // lazy, do not access directly.
 
+        bool is_good_point(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
+                           const int allowed_bad = 1) const;
+
         /// @brief
         /// @param point
         /// @param radius
