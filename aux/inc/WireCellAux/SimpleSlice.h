@@ -14,6 +14,10 @@ namespace WireCell::Aux {
         SimpleSlice(IFrame::pointer frame, int ident, double start, double span, const ISlice::map_t& activity)
             : m_frame(frame), m_ident(ident), m_start(start), m_span(span), m_activity(activity) { }
 
+        // Construct with no activity, user must fill in after construction.
+        SimpleSlice(IFrame::pointer frame, int ident, double start, double span)
+            : m_frame(frame), m_ident(ident), m_start(start), m_span(span) { }
+
         virtual ~SimpleSlice() {}
 
         // ISlice interface
@@ -22,6 +26,7 @@ namespace WireCell::Aux {
         double start() const { return m_start; }
         double span() const { return m_span; }
         map_t activity() const { return m_activity; }
+        map_t& activity() { return m_activity; }
     };
 }
 

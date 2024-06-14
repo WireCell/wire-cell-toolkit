@@ -13,13 +13,14 @@ local anodes = mid.anodes();
 local anode = anodes[0];
 
 // live/dead symmetries
-local UbooneBlobSource(fname, kind /*TC or TDC*/) = pg.pnode({
+local UbooneBlobSource(fname, kind /*live or dead*/, views="" /* uvw, uv, vw, wu */) = pg.pnode({
     type: 'UbooneBlobSource',
     name: fname,
     data: {
         input: fname,
-        anode: anode,
-        kind: kind
+        anode: wc.tn(anode),
+        kind: kind,
+        views: views,
     }
 }, nin=0, nout=1, uses=[anode]);
 local BlobClustering(name) = pg.pnode({
@@ -75,11 +76,11 @@ local GlobalGeomClustering(name) = pg.pnode({
     data:  { },
 }, nin=1, nout=1);
 
-local live(iname, oname) = pg.pipeline([
-    UbooneBlobSource(iname, "TC"), BlobClustering("live"),
+local live(iname, oname, views="") = pg.pipeline([
+    UbooneBlobSource(iname, "live", views), BlobClustering("live"),
     ProjectionDeghosting("1"),
     BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
-    InSliceDeghosting("1","1"),
+    InSliceDeghosting("1",1),
     ProjectionDeghosting("2"),
     BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
     InSliceDeghosting("2",2),
@@ -90,12 +91,14 @@ local live(iname, oname) = pg.pipeline([
 ]);
 
 
-local dead(iname, oname) = pg.pipeline([
-    UbooneBlobSource(iname, "TDC"), BlobClustering("dead"), ClusterFileSink(oname),
+local dead(iname, oname, views) = pg.pipeline([
+    UbooneBlobSource(iname, "dead", views), BlobClustering("dead"), ClusterFileSink(oname),
 ]);
 
-function(iname, oname, kind /*TC or TDC*/)
-    if kind == "TC"
-    then high.main(live(iname, oname), "Pgrapher")
-    else high.main(dead(iname, oname), "Pgrapher")
+local extra_plugins = ["WireCellRoot"];
+
+function(iname, oname, kind /*live or dead*/, views="" /* uvw, uv, vw, wu */)
+    if kind == "live"
+    then high.main(live(iname, oname, views), "Pgrapher", extra_plugins)
+    else high.main(dead(iname, oname, views), "Pgrapher", extra_plugins)
 

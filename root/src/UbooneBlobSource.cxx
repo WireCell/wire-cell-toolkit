@@ -1,9 +1,10 @@
 #include "WireCellRoot/UbooneBlobSource.h"
 #include "WireCellAux/SimpleFrame.h"
-#include "WireCellAux/SimpleSlice.h"
 #include "WireCellAux/SimpleBlob.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
+
+#include "TInterpreter.h"
 
 #include <algorithm> // minmax
 
@@ -62,6 +63,28 @@ void Root::UbooneBlobSource::configure(const WireCell::Configuration& cfg)
     }
     // so we can pop_back.
     std::reverse(m_input.begin(), m_input.end());
+
+    // See in_views().
+    m_views = 0;
+    auto jviews = cfg["views"];
+    if (jviews.isString() && jviews.size()) {
+        std::string views = jviews.asString();
+        for (char letter : views) {
+            if (letter > 'Z') letter -= 32; // upper case
+            if (letter == 'U') m_views |= 1;
+            if (letter == 'V') m_views |= 2;
+            if (letter == 'W') m_views |= 4;
+        }
+    }
+    else {
+        if (m_kind == "live") {
+            m_views = 7;
+        }
+        else {
+            m_views = 3;
+        }
+    }
+    log->debug("loading {} blobs of views bits {}", m_kind, m_views);
 }
 
 WireCell::Configuration Root::UbooneBlobSource::default_configuration() const
@@ -69,157 +92,241 @@ WireCell::Configuration Root::UbooneBlobSource::default_configuration() const
     Configuration cfg;
     cfg["input"] = Json::arrayValue;
     cfg["kind"] = m_kind;
+    cfg["views"] = Json::arrayValue;
     return cfg;
 }
 
 
-/**
-   Bags to hold the branch addresses relevant to building an IBlobSet.
-*/
 
 namespace WireCell::Root {
-    struct UbooneBlobSourceTrees {
 
+    /**
+       Sole interface to data in ROOT TTrees.
 
-        // "header"
-        // double eventTime{0};    // 1.45767e9. Unix time?
-        double triggerTime{0};  // 1.48822e10. Units?
-        // int runNo{0}; // 5384
-        // int subrunNo{0}; // 130
-        int eventNo{0}; // 6501
-        int nrebin{0};          // 4
-        // int frame_length{0};    // 3200 ?
-        // float unit_dis{0};      // 1.10306???
+       FIXME: consider T_bad_ch.
+    */
+    class UbooneBlobSourceTrees {
 
-        // "activity"
-        std::vector<int> *timesliceId{nullptr}; // [0,2399]
-        std::vector<std::vector<int>> *timesliceChannel{nullptr}; // [0,8255]
-        // Units are number of signal electrons.
-        std::vector<std::vector<int>> *raw_charge{nullptr};
-        std::vector<std::vector<int>> *raw_charge_err{nullptr};
+        std::unique_ptr<TFile> m_tfile;
+        TTree* m_activity{nullptr}; // always load
+        TTree* m_live{nullptr};     // always load
+        TTree* m_dead{nullptr};     // load only for kind=="dead"
 
-        void set_trun(TTree& trun) {
-            // "header"
-            trun.SetBranchAddress("triggerTime",&triggerTime); 
-            trun.SetBranchAddress("eventNo",&eventNo);
-            // trun.SetBranchAddress("runNo",&runNo);
-            // trun.SetBranchAddress("subRunNo",&subrunNo);
-            // trun.SetBranchAddress("eventTime",&eventTime);
-            // trun.SetBranchAddress("unit_dis",&unit_dis);
-            trun.SetBranchAddress("nrebin",&nrebin);
-            // trun.SetBranchAddress("frame_length",&frame_length);
+        Long64_t m_nentries{0}; // number of entries in the trees.
+        Long64_t m_entry{-1};   // not yet loaded.  Only use next() to advance
+
+    public:
+
+        // The data is available after construction and refreshed on each call
+        // to next().  The data is invalid when/if next() throws IndexError and
+        // "this" instance should be dropped shortly after.
+
+        struct Header {
+            // double eventTime{0};    // 1.45767e9. Unix time?
+            double triggerTime{0};  // 1.48822e10. Units?
+            int eventNo{0};
+            int nrebin{0};
+        };
+        Header header;
+
+        struct Activity {
 
             // "activity"
-            trun.SetBranchAddress("timesliceId",&timesliceId);
-            trun.SetBranchAddress("timesliceChannel",&timesliceChannel);
-            trun.SetBranchAddress("raw_charge",&raw_charge);
-            trun.SetBranchAddress("raw_charge_err",&raw_charge_err);
+            std::vector<int> *timesliceId{nullptr}; // [0,2399]
+            std::vector<std::vector<int>> *timesliceChannel{nullptr}; // [0,8255]
+            // Units are number of signal electrons.
+            std::vector<std::vector<int>> *raw_charge{nullptr};
+            std::vector<std::vector<int>> *raw_charge_err{nullptr};
+        };
+        Activity activity;
+
+        // TC and TDC are nearly the same.
+        struct Blob {
+            std::vector<int> *cluster_id_vec{nullptr};
+
+            // 0 value indicates the view for a blob is "dead"
+            std::vector<int> *flag_u_vec{nullptr};
+            std::vector<int> *flag_v_vec{nullptr};
+            std::vector<int> *flag_w_vec{nullptr};
+
+            std::vector<std::vector<int>> *wire_index_u_vec{nullptr};
+            std::vector<std::vector<int>> *wire_index_v_vec{nullptr};
+            std::vector<std::vector<int>> *wire_index_w_vec{nullptr};
+
+            // Lord, forgive us our sins.
+            std::vector<std::vector<int>*> flag_uvw;
+        };
+        struct TC : Blob { 
+            std::vector<int> *time_slice_vec{nullptr};               // TC: singular
+            std::vector<double> *q_vec{nullptr};
+        };
+        TC live;
+
+        struct TDC : Blob {
+            std::vector<std::vector<int>> *time_slices_vec{nullptr}; // TDC: plural
+        };
+        TDC dead;
+
+    public:
+
+        // Construct the interface to the trees.
+        //
+        // This does NOT load any entry.  Must call next() to load first entry, etc.
+        UbooneBlobSourceTrees(const std::string& tfile_name, bool include_dead=false) {
+            
+            m_tfile.reset(TFile::Open(tfile_name.c_str(), "READ"));
+            if (!m_tfile) {
+                raise<IOError>("failed to open %s", tfile_name);
+            }
+
+            set_activty_address();
+
+            m_live = open_ttree("TC");
+            set_blob_address(m_live, live);
+            m_live->SetBranchAddress("q", &live.q_vec);
+            m_live->SetBranchAddress("time_slice", &live.time_slice_vec);
+
+            if (include_dead) {
+                m_dead = open_ttree("TDC");
+                set_blob_address(m_dead, dead);
+                m_dead->SetBranchAddress("time_slice", &dead.time_slices_vec);
+            }
         }
 
-        // "blob"
-        // std::vector<int> *cluster_id_vec = new std::vector<int>;
-        std::vector<int> *time_slice_vec = new std::vector<int>;
-        // std::vector<int> *nwire_u_vec{nullptr};
-        // std::vector<int> *nwire_v_vec{nullptr};
-        // std::vector<int> *nwire_w_vec{nullptr};
-        // std::vector<int> *flag_u_vec{nullptr};
-        // std::vector<int> *flag_v_vec{nullptr};
-        // std::vector<int> *flag_w_vec{nullptr};
-        std::vector<std::vector<int>> *wire_index_u_vec{nullptr};
-        std::vector<std::vector<int>> *wire_index_v_vec{nullptr};
-        std::vector<std::vector<int>> *wire_index_w_vec{nullptr};
-
-        // Only gets defined if "q" exists.  ie, for TC not TDC.
-        std::vector<double> *q_vec{nullptr};
-
-        // Can be called with TC or TDC tree
-        void set_tc(TTree& tc) {
-            // tc.SetBranchAddress("cluster_id",&cluster_id_vec);
-            tc.SetBranchAddress("time_slice",&time_slice_vec);
-            // tc.SetBranchAddress("nwire_u",&nwire_u_vec);
-            // tc.SetBranchAddress("nwire_v",&nwire_v_vec);
-            // tc.SetBranchAddress("nwire_w",&nwire_w_vec);
-            // tc.SetBranchAddress("flag_u",&flag_u_vec);
-            // tc.SetBranchAddress("flag_v",&flag_v_vec);
-            // tc.SetBranchAddress("flag_w",&flag_w_vec);
-            tc.SetBranchAddress("wire_index_u",&wire_index_u_vec);
-            tc.SetBranchAddress("wire_index_v",&wire_index_v_vec);
-            tc.SetBranchAddress("wire_index_w",&wire_index_w_vec);
-
-            if (tc.GetBranch("q")) { 
-                tc.SetBranchAddress("q",&q_vec);
+        void next() {
+            ++m_entry;
+            if (m_entry < m_nentries) { 
+                m_activity->GetEntry(m_entry);
+                m_live->GetEntry(m_entry);
+                if (m_dead) {
+                    m_dead->GetEntry(m_entry);
+                }
+                return;
             }
+            raise<IndexError>("attempt to get entry %d past end of TTree with %d",
+                              m_entry, m_nentries);
+        }
+
+        // Get live or dead blob data
+        const Blob& blob(const std::string& which) {
+            if (which == "live") return live;
+            return dead;
+        }
+
+        int nentries() const { return m_nentries; }
+        int entry() const { return m_entry; }
+        int nslices() const { return activity.timesliceId->size(); }
+
+    private:
+
+
+        void set_activty_address() {
+            m_activity = open_ttree("Trun");
+            if (!m_activity) {
+                raise<IOError>("failed get activity tree");
+            }
+            m_nentries = m_activity->GetEntries();
+
+            // "header"
+            m_activity->SetBranchAddress("triggerTime", &header.triggerTime); 
+            m_activity->SetBranchAddress("eventNo", &header.eventNo);
+            m_activity->SetBranchAddress("nrebin", &header.nrebin);
+
+            // "activity"
+            m_activity->SetBranchAddress("timesliceId", &activity.timesliceId);
+            m_activity->SetBranchAddress("timesliceChannel", &activity.timesliceChannel);
+            m_activity->SetBranchAddress("raw_charge", &activity.raw_charge);
+            m_activity->SetBranchAddress("raw_charge_err", &activity.raw_charge_err);
+        }
+        void set_blob_address(TTree* tree, Blob& blob) {
+            if (!tree) {
+                raise<IOError>("failed to open required blob tree (TC or TDC)");
+            }
+            tree->SetBranchAddress("cluster_id", &blob.cluster_id_vec); 
+            tree->SetBranchAddress("flag_u", &blob.flag_u_vec);
+            tree->SetBranchAddress("flag_v", &blob.flag_v_vec);
+            tree->SetBranchAddress("flag_w", &blob.flag_w_vec);
+            blob.flag_uvw = {blob.flag_u_vec, blob.flag_v_vec, blob.flag_w_vec};
+            tree->SetBranchAddress("wire_index_u", &blob.wire_index_u_vec);
+            tree->SetBranchAddress("wire_index_v", &blob.wire_index_v_vec);
+            tree->SetBranchAddress("wire_index_w", &blob.wire_index_w_vec);
+        }
+
+        TTree* open_ttree(const std::string& tree_name) {
+            auto ttree = reinterpret_cast<TTree*>(m_tfile->Get(tree_name.c_str()));
+            if (!ttree) {
+                raise<IOError>("failed to get TTree %s from %s", tree_name, m_tfile->GetName());
+            }
+            return ttree;
         }
     };
 };
 
 
-
-
 bool Root::UbooneBlobSource::next()
 {
-    if (m_tfile) {
-        // We have an open file, try next entry.
-        ++m_entry;
-    }
-    else {
+    if (!m_data) {
         // We are starting a new file.
-        m_entry=0;
-        m_tc = nullptr;
-        m_trun = nullptr;
-        m_data = nullptr;
 
         if (m_input.empty()) {
-            // We have exhausted the list of files.
+            // We have exhausted our input files.
             return false;
         }
 
         auto fname = m_input.back();
         m_input.pop_back();
 
-        m_tfile.reset(TFile::Open(fname.c_str(), "READ"));
-        if (!m_tfile) {
-            log->error("failed to open {}, skipping", fname);
+        try {
+            m_data = std::make_unique<UbooneBlobSourceTrees>(fname, m_kind == "dead");
+        }
+        catch (IOError& err) {
+            log->warn("failed to open {}, skipping", fname);
+            m_data = nullptr;
             return next();
         }
-        m_trun = reinterpret_cast<TTree*>(m_tfile->Get("Trun"));
-        if (!m_trun) {
-            log->error("failed to get TTree Trun from {}, skipping", fname);
-            m_tfile = nullptr;
-            return next();
-        }
-        m_tc = reinterpret_cast<TTree*>(m_tfile->Get(m_kind.c_str()));
-        if (!m_tc) {
-            log->error("failed to get TTree {} from {}, skipping", m_kind, fname);
-            m_tfile = nullptr;
+        catch (IndexError& err) {
+            m_data = nullptr;
             return next();
         }
 
-        m_data = std::make_unique<UbooneBlobSourceTrees>();
-        m_data->set_trun(*m_trun);
-        m_data->set_tc(*m_tc);
+        // sanity check file
+        const int nentries = m_data->nentries();
+        if (! nentries) {
+            log->warn("no entries {}, skipping", fname);
+            m_data = nullptr;
+            return next();
+        }
+        log->debug("starting {} with {} entries", fname, nentries);
     }
 
-    // We have an open file with m_entry set to the one to try.
-    
-    if (m_entry < m_trun->GetEntries() && m_entry < m_tc->GetEntries()) {
-        // We are still inside the current file.
-        m_trun->GetEntry(m_entry);
-        m_tc->GetEntry(m_entry);
-        return true;
+    // We have an open file with at least some entries, try to advance
+    try {
+        m_data->next();
     }
-        
-    // We ran off the end of the file.
-    m_tfile = nullptr;
-    return next();
+    catch (IndexError& err) {
+        m_data = nullptr;
+        return next();
+    }
+
+    // sanity check entry
+    int nslices = m_data->nslices();
+    if (!nslices) {
+        log->warn("no slices in entry {}, skipping", m_data->entry());
+        return next();
+    }
+
+    log->debug("read {} slices in entry {}", nslices, m_data->entry());
+    return true;
 }
 
 
 IFrame::pointer Root::UbooneBlobSource::gen_frame()
 {
-    // No way to make traces.
-    return std::make_shared<SimpleFrame>(m_data->eventNo,
-                                         m_data->triggerTime, 
+    // We have no good way to make traces.  Best we might do is spread activity
+    // over nrebin ticks.  Assuming the traces are not important for downstream
+    // we make a frame that only holds metadata.
+    return std::make_shared<SimpleFrame>(m_data->header.eventNo,
+                                         m_data->header.triggerTime, 
                                          0.5*units::us);
 }
 
@@ -229,33 +336,97 @@ IChannel::pointer Root::UbooneBlobSource::get_channel(int chanid)
     return m_anode->channel(chanid);
 }
 
-static std::pair<int,int> make_strip(const std::vector<int>& winds)
+
+bool Root::UbooneBlobSource::in_views(int bind)
+{
+    // Inclusion test depends if we are loading live or dead blobs.
+    const int want = m_kind == "live" ? 1 : 0;
+    const auto& flag_uvw = m_data->blob(m_kind).flag_uvw;
+
+    int cone = 0;
+    for (int pln=0; pln<3; ++pln) {
+        if (want == flag_uvw[pln]->at(bind)) {
+            cone |= 1<<pln;
+        }
+    }
+
+    return cone == m_views;
+}
+
+
+// If any view of the blob is "flagged" 0 then set its channels activity to special "bad" value. 
+// FIXME: consider T_bad_ch
+void Root::UbooneBlobSource::bodge_channels(SimpleSlicePtr slice, const RayGrid::Blob& blob, int bind)
+{
+    const auto& flag_uvw = m_data->blob(m_kind).flag_uvw;
+
+    const std::vector<int> choff = {0,2400,4800};
+    const auto& strips = blob.strips();
+    for (int pln = 0; pln < 3; ++pln) {
+        if (flag_uvw[pln]->at(bind) == 1) {
+            continue;           // view is "good", keep whatever activity exists.
+        }
+        const auto& [beg,end] = strips[2+pln].bounds;
+        for (int wire = beg; wire<end; ++wire) {
+            const int ch = wire + choff[pln];
+            auto ich = get_channel(ch);
+            slice->activity()[ich] = {0, 1e12};
+        }        
+    }
+}
+
+
+/*
+
+  WCP's wire-in plane (the "wire" column) follows WCT standard.
+
+  Excerpt from ChannelWireGeometry_v2.txt.
+  Edited to round and put into mm units.
+
+  # ch   plane    wire    sx      sy    sz   ex      ey    ez
+  0       0       0        0    1171     0    0    1175     5
+  2399    0       2399     0   -1155 10365    0   -1152 10370
+  2400    1       0       -3   -1152     0   -3   -1155     5
+  4799    1       2399    -3    1174 10365   -3    1172 10370
+  4800    2       0       -6   -1155     3   -6    1175     3
+  8255    2       3455    -6   -1155 10368   -6    1175 10368
+
+  Can also check with:
+
+    wcwires -e 5e-2 -v microboone-celltree-wires-v2.1.json.bz2
+
+  With a lower imprecision value, it will show pitch/direction precision errors,
+  but no ordering errors.
+
+  So, we may take the wire_index_{u,v,w}_vec values at face value!
+*/
+std::pair<int,int> Root::UbooneBlobSource::make_strip(const std::vector<int>& winds)
 {
     const auto& [imin, imax] = std::minmax_element(winds.begin(), winds.end());
     return std::make_pair(*imin, *imax + 1);
 }
 
-IBlobSet::pointer Root::UbooneBlobSource::load()
+
+// Map prototype's slice index to toolkit ISlice.
+// Note, WCP's sole concept of "slice" is what we would call here just "live" slice.
+// It is "nrebin*tick" long.  WCT also has "dead" slice that spans some number live slices.
+// This method is used by both load_live() and load_dead().
+Root::UbooneBlobSource::SliceMap Root::UbooneBlobSource::load_slices()
 {
-    if (!m_data->timesliceId || !m_data->timesliceChannel) {
-        log->error("no time slice information");
-        return nullptr;
-    }
+    SliceMap slices;
 
     auto iframe = gen_frame();
 
-    // Slices and their activity
-    ISlice::vector islices;
-    IChannel::vector ichannels;
-    
-    const auto& tids = m_data->timesliceId;
+    const auto& act = m_data->activity; // abbrev
+
+    const auto& tids = act.timesliceId;
     const size_t nslices = tids->size();
-    const double span = m_data->nrebin * 0.5 * units::us;
+    const double span = m_data->header.nrebin * 0.5 * units::us;
     for (size_t sind=0; sind<nslices; ++sind) {
 
-        const auto& q = m_data->raw_charge->at(sind);
-        const auto& dq = m_data->raw_charge_err->at(sind);
-        const auto& chans = m_data->timesliceChannel->at(sind);;
+        const auto& q = act.raw_charge->at(sind);
+        const auto& dq = act.raw_charge_err->at(sind);
+        const auto& chans = act.timesliceChannel->at(sind);
         const size_t nchans = chans.size();
         
         ISlice::map_t activity;
@@ -265,45 +436,154 @@ IBlobSet::pointer Root::UbooneBlobSource::load()
         }
         int tsind = tids->at(sind);
         auto sslice = std::make_shared<SimpleSlice>(iframe, tsind, tsind*span, span, activity);
-        islices.push_back(sslice);
+        slices[tsind] = sslice;
     }            
+    return slices;
+}
 
+
+IBlobSet::pointer Root::UbooneBlobSource::load_live()
+{
+    auto iframe = gen_frame();
+
+    SliceMap live_slices = load_slices();
+
+    const auto& live_data = m_data->live;
     const RayGrid::Coordinates& coords = m_iface->raygrid();
 
     // Blobs
-    const size_t nblobs = m_data->time_slice_vec->size();
+    const size_t nblobs = live_data.cluster_id_vec->size();
     IBlob::vector iblobs;
     for (size_t bind=0; bind<nblobs; ++bind) {
+
+        if (! in_views(bind)) continue;
 
         RayGrid::Blob blob;
         blob.add(coords, RayGrid::Strip{0, {0,1}});
         blob.add(coords, RayGrid::Strip{1, {0,1}});
-        blob.add(coords, RayGrid::Strip{2, make_strip(m_data->wire_index_u_vec->at(bind))});
-        blob.add(coords, RayGrid::Strip{2, make_strip(m_data->wire_index_v_vec->at(bind))});
-        blob.add(coords, RayGrid::Strip{2, make_strip(m_data->wire_index_w_vec->at(bind))});
+        blob.add(coords, RayGrid::Strip{2, make_strip(live_data.wire_index_u_vec->at(bind))});
+        blob.add(coords, RayGrid::Strip{3, make_strip(live_data.wire_index_v_vec->at(bind))});
+        blob.add(coords, RayGrid::Strip{4, make_strip(live_data.wire_index_w_vec->at(bind))});
             
-        int sind = m_data->time_slice_vec->at(bind);
-        float blob_charge = 0;
-        if (m_kind == "TC" && m_data->q_vec) {
-            blob_charge = m_data->q_vec->at(bind);
-        }
+        const int sid = live_data.time_slice_vec->at(bind);
+        const float blob_charge = live_data.q_vec->at(bind);
 
-        auto iblob = std::make_shared<SimpleBlob>(bind, blob_charge, 0, blob, islices[sind], m_iface);
+        auto slice = live_slices[sid];
+        bodge_channels(slice, blob, bind);
+
+        auto iblob = std::make_shared<SimpleBlob>(bind, blob_charge, 0, blob, slice, m_iface);
         iblobs.push_back(iblob);
     }
-    return std::make_shared<SimpleBlobSet>(iframe->ident(), iblobs);
+    auto main_slice = live_slices.begin()->second;
+    return std::make_shared<SimpleBlobSet>(iframe->ident(), main_slice, iblobs);
 }
+
+
+IBlobSet::pointer Root::UbooneBlobSource::load_dead()
+{
+    // There are some WCP/WCT concept mismatches that are critical here.  It is
+    // assumed that all WCP dead blobs line up in time to form cleavage points
+    // which we call "dead slices" in WCT.  That is, we assume any two WCP
+    // "dead" blobs either totally overlap in time or do not overlap at all.
+
+    SliceMap live_slices = load_slices();
+    auto iframe = live_slices.begin()->second->frame();
+
+    const RayGrid::Coordinates& coords = m_iface->raygrid();
+    const auto& dead_data = m_data->dead;
+
+    IBlob::vector iblobs;
+    const size_t nblobs = dead_data.cluster_id_vec->size();
+    if (!nblobs) {
+        log->warn("no dead (TDC) blobs");
+        return std::make_shared<SimpleBlobSet>(iframe->ident(), nullptr, iblobs);
+    }
+
+    SliceMap dead_slices;
+
+    // pick up first slice to give to the blob set.
+    ISlice::pointer main_slice;
+
+    for (size_t bind=0; bind<nblobs; ++bind) {
+
+        if (! in_views(bind)) continue;
+
+        const auto& dead_tsvec = dead_data.time_slices_vec->at(bind);
+        const int dead_tsind = dead_tsvec.front(); // assumes ordered....
+        auto dead_sit = dead_slices.find(dead_tsind);
+
+        // Either created or looked up
+        SimpleSlicePtr dead_slice = nullptr;
+        if (dead_sit == dead_slices.end()) {
+
+            // First blob in this dead slice, create the ISlice
+            const double dead_span = m_data->header.nrebin * 0.5 * units::us * dead_tsvec.size();
+            const double dead_start = dead_tsind * dead_span;
+
+            // Add in activity for all live slices spanned by this first dead blob.
+            ISlice::map_t activity;
+            for (int tsind : dead_tsvec) {
+                const auto live_slice = live_slices[tsind];
+                if (!live_slice) {
+                    /// Don't warn.  The set of live slices may be sparse.
+                    // log->warn("dead slice {}+{} spans a non-existent live slice {}",
+                    //           dead_tsind, dead_tsvec.size(), tsind);
+                    continue;
+                }
+                for (const auto& [ich, act] : live_slice->activity()) {
+                    activity[ich] += act;
+                }
+            }
+            dead_slice = std::make_shared<SimpleSlice>(iframe, dead_tsind, dead_start, dead_span, activity);
+        }
+        else {
+            dead_slice = dead_sit->second;
+        }
+        if (! main_slice) {
+            main_slice = dead_slice;
+        }
+
+        RayGrid::Blob blob;
+        blob.add(coords, RayGrid::Strip{0, {0,1}});
+        blob.add(coords, RayGrid::Strip{1, {0,1}});
+        blob.add(coords, RayGrid::Strip{2, make_strip(dead_data.wire_index_u_vec->at(bind))});
+        blob.add(coords, RayGrid::Strip{3, make_strip(dead_data.wire_index_v_vec->at(bind))});
+        blob.add(coords, RayGrid::Strip{4, make_strip(dead_data.wire_index_w_vec->at(bind))});
+
+        const float bval = 0;
+        const float bunc = 0;
+
+        bodge_channels(dead_slice, blob, bind);
+
+        auto iblob = std::make_shared<SimpleBlob>(bind, bval, bunc, blob, dead_slice, m_iface);
+        iblobs.push_back(iblob);
+    }
+    return std::make_shared<SimpleBlobSet>(iframe->ident(), main_slice, iblobs);
+}
+
 
 bool Root::UbooneBlobSource::operator()(IBlobSet::pointer& blobset)
 {
     blobset = nullptr;
 
+    if (m_done) {
+        // log->debug("past EOS at call {}, stop calling me", ++m_calls);
+        return false;
+    }
+
     if (! next()) {
         log->debug("EOS at call {}", ++m_calls);
+        m_done = true;
         return true;
     }
 
-    blobset = load();
+    if (m_kind == "live") {
+        blobset = load_live();
+    }
+    else {
+        blobset = load_dead();
+    }
+
     return true;
 }
 
