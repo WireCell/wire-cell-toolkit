@@ -338,10 +338,10 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     /// FIXME: is this the way to get face?
                     const auto& x = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start());
                     const double y = pitch_mags.at(face).at(plane)*wind + proj_centers.at(face).at(plane);
-                    if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
-                        log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
-                                   wind, plane, face, x, y);
-                    }
+                    // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
+                    //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                    //                wind, plane, face, x, y);
+                    // }
                     ds_x[face][plane].push_back(x);
                     ds_y[face][plane].push_back(y);
                     ds_charge[face][plane].push_back(charge.value());
@@ -395,6 +395,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
         const auto& activity = slice->activity();
         for (const auto& [ichan, charge] : activity) {
             if(charge.uncertainty() < m_dead_threshold) continue;
+            // log->debug("m_dead_threshold {} charge.uncertainty() {}", m_dead_threshold, charge.uncertainty());
             const auto& cident = ichan->ident();
             const auto& wires = ichan->wires();
             for (const auto& wire : wires) {
@@ -404,10 +405,10 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 /// FIXME: is this the way to get face?
                 const auto& xbeg = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start());
                 const auto& xend = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start() + slice->span());
-                if (cident == 903) {
-                    log->debug("chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
-                               slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
-                }
+                // if (true) {
+                //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
+                //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
+                // }
                 auto & dead_winds = grouping->get_dead_winds(face, plane);
                 if (dead_winds.find(wind) == dead_winds.end()) {
                     dead_winds[wind] = {xbeg, xend};
@@ -415,12 +416,20 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                     const auto& [xbeg_now, xend_now] = dead_winds[wind];
                     dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
                 }
-                if (cident == 903) {
-                    log->debug("wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
-                }
+                // if (cident == 903) {
+                //     log->debug("wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
+                // }
             }
         }
     }
+    for (int pind = 0; pind < 2; ++pind) {
+        const auto& dead_winds = grouping->get_dead_winds(0, pind);
+        for (const auto& [wind, xbeg_xend] : dead_winds) {
+            log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
+        }
+    }
+    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
+               grouping->get_dead_winds(0, 2).size());
 }
 
 bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& tensorset)
@@ -460,10 +469,9 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     auto grouping = root_live->value.facade<Facade::Grouping>();
     grouping->set_anode(m_anode);
     add_ctpc(root_live, iclus_live);
+    add_dead_winds(root_live, iclus_live);
     /// TODO: remove after debugging
     {
-        const auto& iclus_dead = invec[1];
-        add_dead_winds(root_live, iclus_dead);
         for (const auto& [name, pc] : root_live->value.local_pcs()) {
             log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
         }
@@ -495,8 +503,18 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         }
 
         {
-            const auto [tind, wind] = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 0);
-            log->debug("tind {} wind {}", tind, wind);
+            const auto tw0 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 0);
+            const auto tw1 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 1);
+            const auto tw2 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 2);
+            log->debug("tind {} wind {}", std::get<0>(tw0), std::get<1>(tw0));
+            log->debug("tind {} wind {}", std::get<0>(tw1), std::get<1>(tw1));
+            log->debug("tind {} wind {}", std::get<0>(tw2), std::get<1>(tw2));
+        }
+        {
+            bool d0 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 0);
+            bool d1 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 1);
+            bool d2 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 2);
+            log->debug("dead chs {} {} {}", d0, d1, d2);
         }
         exit(0);
     }
@@ -519,7 +537,6 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
 
     if (m_multiplicity == 2) {
         const auto& iclus_dead = invec[1];
-        add_dead_winds(root_live, iclus_dead);
         /// FIXME: what do we expect?
         if(ident != iclus_dead->ident()) {
             raise<ValueError>("ident mismatch between live and dead clusters");

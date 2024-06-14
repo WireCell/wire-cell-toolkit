@@ -345,10 +345,10 @@ namespace WireCell::PointCloud::Facade {
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
-        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int plane)
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind) const
         {
             // make one if not exist
-            return m_dead_winds[face][plane];
+            return m_dead_winds[face][pind];
         }
         using sv2d_t = Tree::ScopedView<float_t>;
         using kd2d_t = sv2d_t::nfkd_t;
@@ -366,6 +366,9 @@ namespace WireCell::PointCloud::Facade {
         /// @param pind plane index
         /// @return
         kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int face, int pind) const;
+
+        /// @brief true if the point is within the dead region, [wind+ch_range, wind-ch_range] and [xmin, xmax]
+        bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int face, int pind) const;
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;

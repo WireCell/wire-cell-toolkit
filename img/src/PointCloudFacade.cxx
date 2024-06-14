@@ -1338,6 +1338,20 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
     return skd.radius<std::vector<double>>(radius * radius, {x, y});
 }
 
+bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int face, int pind) const {
+    const auto [tind, wind] = convert_3Dpoint_time_ch(point, face, pind);
+    const auto& ch2xrange = get_dead_winds(face, pind);
+    for (int ch = wind - ch_range; ch <= wind + ch_range; ++ch) {
+        if (ch2xrange.find(ch) ==  ch2xrange.end()) continue;
+        const auto [xmin, xmax] = ch2xrange.at(ch);
+        if (point[0] >= xmin && point[0] <= xmax) {
+            std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
+            return true;
+        }
+    }
+    return false;
+}
+
 std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const {
     if (m_anode == nullptr) {
         raise<ValueError>("Anode is null");
