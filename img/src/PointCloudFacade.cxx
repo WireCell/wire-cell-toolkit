@@ -1297,6 +1297,9 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
 void Grouping::fill_proj_centers_pitch_mags()
 {
     const int ndummy_layers = 2;
+    if (!m_anode) {
+        raise<ValueError>("anode is null");
+    }
     for (const auto& face : m_anode->faces()) {
         const auto& coords = face->raygrid();
         // skip dummy layers so the vector matches 0, 1, 2 plane order

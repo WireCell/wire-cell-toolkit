@@ -299,19 +299,10 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     const auto& cg = icluster->graph();
     log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
 
-    Facade::mapfp_t<double> proj_centers;
-    Facade::mapfp_t<double> pitch_mags;
-    for (const auto& face : m_anode->faces()) {
-        const auto& coords = face->raygrid();
-        // skip dummy layers so the vector matches 0, 1, 2 plane order
-        for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
-            const auto& pitch_dir = coords.pitch_dirs()[layer];
-            const auto& center = coords.centers()[layer];
-            double proj_center = center.dot(pitch_dir);
-            proj_centers[face->which()][layer-ndummy_layers] = proj_center;
-            pitch_mags[face->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
-        }
-    }
+    auto grouping = root->value.facade<Facade::Grouping>();
+    const auto& proj_centers = grouping->proj_centers();
+    const auto& pitch_mags = grouping->pitch_mags();
+    /// TODO: remove these prints after debugging
     for(const auto& [face, mags] : pitch_mags) {
         for(const auto& [pind, mag] : mags) {
             log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
@@ -346,7 +337,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     const auto& face = wire->planeid().face();
                     /// FIXME: is this the way to get face?
                     const auto& x = Facade::time2drift(m_anode->face(face), m_time_offset, m_drift_speed, slice->start());
-                    const double y = pitch_mags[face][plane]*wind + proj_centers[face][plane];
+                    const double y = pitch_mags.at(face).at(plane)*wind + proj_centers.at(face).at(plane);
                     if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
                         log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
                                    wind, plane, face, x, y);
@@ -466,15 +457,16 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
 
     Points::node_ptr root_live = sample_live(iclus_live);
+    auto grouping = root_live->value.facade<Facade::Grouping>();
+    grouping->set_anode(m_anode);
     add_ctpc(root_live, iclus_live);
-    /// FIXME: remove after debugging
+    /// TODO: remove after debugging
     {
         const auto& iclus_dead = invec[1];
         add_dead_winds(root_live, iclus_dead);
         for (const auto& [name, pc] : root_live->value.local_pcs()) {
             log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
         }
-        auto grouping = root_live->value.facade<Facade::Grouping>();
         /// test ctpc_f0p0 exists
         grouping->kd2d(0,0);
         /// find test point on ctpc
