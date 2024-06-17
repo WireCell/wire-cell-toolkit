@@ -837,12 +837,14 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob)
     return m_map_mcell_indices[blob];
 }
 
-void Cluster::Create_graph()
+void Cluster::Create_graph(const bool use_ctpc)
 {
     LogDebug("Create Graph! " << graph)
     if (graph != (MCUGraph*) 0) return;
     graph = new MCUGraph(nbpoints());
     Establish_close_connected_graph();
+    if (use_ctpc) Connect_graph(true);
+    Connect_graph(false);
 }
 
 void Cluster::Establish_close_connected_graph()
@@ -1265,6 +1267,13 @@ void Cluster::Establish_close_connected_graph()
     // end of copying ...
 
     LogDebug("between-blob: " << num_edges)
+}
+
+void Cluster::Connect_graph(const bool use_ctpc) {
+    // now form the connected components
+    std::vector<int> component(num_vertices(*graph));
+    const int num = connected_components(*graph, &component[0]);
+    if (num <= 1) return;
 }
 
 size_t Grouping::hash() const

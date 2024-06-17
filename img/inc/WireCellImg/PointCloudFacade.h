@@ -291,8 +291,11 @@ namespace WireCell::PointCloud::Facade {
         // FIXME: move to private after debugging
         // graph
         MCUGraph* graph;
-        void Create_graph();
+        void Create_graph(const bool use_ctpc = false);
+
+        /// @brief edges inside blobs and between overlapping blobs
         void Establish_close_connected_graph();
+        void Connect_graph(const bool use_ctpc = false);
         
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;
