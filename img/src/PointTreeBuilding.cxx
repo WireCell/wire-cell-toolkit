@@ -294,7 +294,6 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     using slice_t = WireCell::cluster_node_t::slice_t;
     using float_t = Facade::float_t;
     using int_t = Facade::int_t;
-    const int ndummy_layers = 2;
 
     const auto& cg = icluster->graph();
     log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
@@ -384,19 +383,18 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     using slice_t = WireCell::cluster_node_t::slice_t;
     // using float_t = Facade::float_t;
     // using int_t = Facade::int_t;
-    // const int ndummy_layers = 2;
     const auto& cg = icluster->graph();
     auto grouping = root->value.facade<Facade::Grouping>();
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
         const auto& cgnode = cg[vdesc];
         if (cgnode.code() != 's') continue;
         auto& slice = std::get<slice_t>(cgnode.ptr);
-        const auto& slice_index = slice->start()/m_tick;
+        // const auto& slice_index = slice->start()/m_tick;
         const auto& activity = slice->activity();
         for (const auto& [ichan, charge] : activity) {
             if(charge.uncertainty() < m_dead_threshold) continue;
             // log->debug("m_dead_threshold {} charge.uncertainty() {}", m_dead_threshold, charge.uncertainty());
-            const auto& cident = ichan->ident();
+            // const auto& cident = ichan->ident();
             const auto& wires = ichan->wires();
             for (const auto& wire : wires) {
                 const auto& wind = wire->index();
