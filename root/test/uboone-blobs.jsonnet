@@ -90,16 +90,18 @@ local multi_source = function(iname, kind, views)
     
 
 local live(iname, oname) = pg.pipeline([
-    multi_source(iname, "live", ["uvw","uv","vw","wu"]), BlobClustering("live"),
-    // ProjectionDeghosting("1"),
-    // BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
-    // InSliceDeghosting("1",1),
-    // ProjectionDeghosting("2"),
-    // BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
-    // InSliceDeghosting("2",2),
-    // BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
-    // InSliceDeghosting("3",3),
-    // GlobalGeomClustering(""),
+    multi_source(iname, "live", ["uvw","uv","vw","wu"]),
+    BlobClustering("live"),
+    // BlobGrouping("0"),
+    ProjectionDeghosting("1"),
+    BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
+    InSliceDeghosting("1",1),
+    ProjectionDeghosting("2"),
+    BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
+    InSliceDeghosting("2",2),
+    BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
+    InSliceDeghosting("3",3),
+    GlobalGeomClustering(""),
     ClusterFileSink(oname),
 ]);
 

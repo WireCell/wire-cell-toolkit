@@ -1,4 +1,6 @@
-/** A blob set holds a collection of blobs.
+/** A blob set holds a collection of blobs spanning a SINGLE time slice.
+ *
+ * Undefined behavior will occur if the blob set spans multiple time slices.
  *
  * See also ICluster which allows more rich associations.
  */
