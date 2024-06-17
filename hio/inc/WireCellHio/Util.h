@@ -38,7 +38,7 @@ namespace WireCell {
 
         extern std::mutex g_h5cpp_mutex;
 
-    };  // namespace Hio
+    }  // namespace Hio
 }  // namespace WireCell
 
 #endif  // WIRECELLHIO_UTIL

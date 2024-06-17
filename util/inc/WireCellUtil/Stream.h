@@ -18,7 +18,10 @@
 #include "WireCellUtil/MultiArray.h"
 
 #define CUSTARD_BOOST_USE_MINIZ
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include "WireCellUtil/custard/custard_boost.hpp"
+#pragma GCC diagnostic pop
 
 #include <boost/iostreams/filtering_stream.hpp>
 

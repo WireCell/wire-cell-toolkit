@@ -1,0 +1,100 @@
+#include "services_dune.fcl"
+
+process_name: wclssim
+physics :{
+   producers: {
+      plopper : {
+        module_type : BlipMaker
+      }
+      tpcrawdecoder : {
+         module_type : WireCellToolkit
+         wcls_main: {
+            tool_type: WCLS
+            apps: ["TbbFlow"] # Pgrapher, TbbFlow
+
+            # logsinks: ["stdout:info", "wcls-sim-drift-simchannel-nf-sp-img.log:debug"]
+            logsinks: ["stdout:debug"]
+            loglevels: ["debug"]
+
+            plugins: ["WireCellPgraph", "WireCellGen","WireCellSio","WireCellRoot","WireCellLarsoft"
+            ,"WireCellTbb"
+            # , "WireCellPytorch"
+            ]
+
+            // needs to be found via your WIRECELL_PATH
+            configs: ["pgrapher/experiment/dune-vd/wcls-sim-drift-simchannel-nf-sp-img.jsonnet"]
+
+
+            // Contract note: these exact "type:name" must be used to identify
+            // the configuration data structures for these components in the Jsonnet.
+
+            inputers: ["wclsSimDepoSource:"]
+            outputers: [
+                "wclsSimChannelSink:postdrift"
+            ]
+
+            // Make available parameters via Jsonnet's std.extVar()
+            params: {
+                # file: wires
+                # dunevd10kt_3view_30deg_v6_refactored.json.bz2
+                # dunevd10kt_3view_30deg_v5_refactored_1x8x6ref.json.bz2
+                files_wires: "dunevd10kt_3view_30deg_v5_refactored_1x8x6ref.json.bz2"
+                # file: fields
+                # dunevd-resp-isoc3views-18d92.json.bz2 30,-30,90
+                # pcbro-response-avg-12d50.json.bz2 2view prototype
+                files_fields: "dunevd-resp-isoc3views-18d92.json.bz2"
+                # file: noise
+                # dunevd10kt-1x6x6-3view-noise-spectra-v1.json.bz2
+                # dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2
+                # dunevd10kt-1x6x6-2view-noise-spectra-v1.json.bz2
+                files_noise: "dunevd10kt-1x6x6-3view-noise-spectra-v1.json.bz2"
+                # set mapping between internal wct plane ids and larsoft
+                # default is to assume WireCell::kU->geo::kU, kV->kV, kW->kW
+                # 3view-30deg: default, 3view: dunevd_3view
+                geo_planeid_labels: "default"
+                # process pratial or all CRMs: all or test2
+                process_crm: "all"
+            }
+            structs: {
+                # number of time samples
+                nticks: @local::dunefdvd_detproperties.NumberTimeSamples
+                # Longitudinal diffusion constant [cm2/ns] 4.0e-9
+                DL: @local::dunefd_largeantparameters.LongitudinalDiffusion
+                # Transverse diffusion constant [cm2/ns] 8.8e-9
+                DT: @local::dunefd_largeantparameters.TransverseDiffusion
+                # Electron lifetime [us] #10.4e3
+                lifetime: 10.4e3 #@local::dunefdvd_detproperties.Electronlifetime
+                # Electron drift speed, assumes a certain applied E-field [mm/us]
+                driftSpeed: 1.60563 # 1.60563, 1.565
+                # G4RefTime [us]
+                G4RefTime: @local::dunefd_detectorclocks.G4RefTime
+                # response plane [cm]
+                response_plane: 18.92
+                # number of CRMs, 24 for 1x8x6, 320 for 2x8x40
+                ncrm: 24
+                # use dnn_roi or not
+                use_dnnroi: false
+            }
+
+         }
+      }
+   }
+   p1 : [ plopper, tpcrawdecoder ]
+   outputFiles : [ out ]
+   
+   trigger_paths : [ p1 ]
+   end_paths: [ outputFiles ]
+}
+outputs: {
+   out: {
+      module_type: RootOutput
+      // fileName: "%ifb_wcsim.root"
+      fileName: "wcsim.root"
+
+      outputCommands :   [
+         # "keep *_*_*_*", "drop *", "keep recob::Wires_*_*_*"
+         "keep *_*_*_*"
+      ]
+
+   }
+}

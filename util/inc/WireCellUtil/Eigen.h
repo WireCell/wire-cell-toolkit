@@ -6,10 +6,10 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#pragma GCC diagnostic ignored "-Wignored-attributes"
 #include <Eigen/Core>
-#pragma GCC diagnostic pop
-
 #include <Eigen/Sparse>
+#pragma GCC diagnostic pop
 
 #include <Eigen/Eigenvalues> 
 

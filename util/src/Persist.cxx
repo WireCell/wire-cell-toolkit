@@ -5,11 +5,14 @@
 
 #include <cstdlib>  // for getenv, see get_path()
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
 #include <boost/iostreams/device/file.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/filesystem.hpp>
+#pragma GCC diagnostic pop
 
 #include <string>
 #include <sstream>

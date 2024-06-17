@@ -165,7 +165,7 @@ namespace WireCell::Img {
         void add_strategy(Configuration cfg);
     };
 
-};
+}
 
 #endif
 

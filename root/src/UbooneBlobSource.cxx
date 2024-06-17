@@ -323,7 +323,7 @@ namespace WireCell::Root {
             return ttree;
         }
     };
-};
+}
 
 
 bool Root::UbooneBlobSource::next()

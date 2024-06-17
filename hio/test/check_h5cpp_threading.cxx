@@ -8,7 +8,11 @@
 #include "WireCellUtil/Eigen.h"
 
 // h5cpp NEED to be placed after Eigen to use h5::read<Eigen::Matrix>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#pragma GCC diagnostic ignored "-Wsign-compare"
 #include <h5cpp/all>
+#pragma GCC diagnostic pop
 
 std::mutex g_h5cpp_mutex;
 

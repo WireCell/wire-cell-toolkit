@@ -2,7 +2,10 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Testing.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include "WireCellUtil/svg.hpp"
+#pragma GCC diagnostic pop
 
 #include <iostream>
 
