@@ -22,7 +22,8 @@
 
 namespace WireCell::Aux {
 
-    std::string dumps(const cluster_graph_t& cgraph);
+    // Dump a summary of a cluster graph.  If fingerprint, include more verbosity of channel-level info.
+    std::string dumps(const cluster_graph_t& cgraph, bool fingerprint=false);
 
     /// Return JSON representation of the cluster.
     Json::Value jsonify(const cluster_graph_t& cgraph);

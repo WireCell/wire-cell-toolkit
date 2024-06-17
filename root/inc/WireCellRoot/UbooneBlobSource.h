@@ -2,18 +2,18 @@
    A source of IBlobSet from a MicroBooNE Wire-Cell Prototype files in ROOT
    format providing Trun, TC (aka "live"), TDC (aka "dead") and T_bad_ch TTrees.
 
-   The blob set and its slices are constructed to mimic exactly one of seven cases:
+   Each output blob set spans one slice (as it must).  Thus this source must be
+   called multiple times to iterate through each ROOT TTree entry.
+
+   Each blob set is constructed in exactly one seven supported cases:
 
    - 3-view live :: All three planes are categorized as *active*, none or *dummy* nor *masked*.
    - 2-view live :: Two planes are categorized as *active* and the third as *masked*, none are dummy.
    - 2-view dead :: No planes are *active*, two planes are *masked* and the third is *dummy*.
 
-   See the imaging-overview.org section "Live vs dead" document for details of these categories.
+   See "views" and "kind" config parameters and the imaging-overview.org
+   document section "Live vs dead" document for details of these categories.
 
-   The "view" is set by the "views" config paramter and the live vs dead by "kind".
-
-   This result is mimicry as the information in the trees is not exactly coherent with what WCT produces.
-   
  */
 
 #ifndef WIRECELLROOT_UBOONEBLOBSETSOURCE
@@ -81,7 +81,7 @@ namespace WireCell::Root {
 
         */
         // Encode a view as OR'ed bits {u=1,v=2,w=4}, can be in {3,5,6,7}.
-        char m_views{7};
+        int m_views{0};
         // for dead, the third plane to get filled as dummy
         IWirePlane::pointer m_dummy{nullptr};
         std::vector<int> m_bodged; // for live/dead, plane indices that get bodged.
@@ -95,6 +95,21 @@ namespace WireCell::Root {
         */
         IAnodePlane::pointer m_anode;
         IAnodeFace::pointer m_iface;
+
+        /** Configuration: frame_eos
+
+            If true, emit an EOS after all blob sets for one ROOT TTree entry are output.
+
+            This will require downstream to handle the stream restarting.
+
+            Default is false.  Downstream may still identify an end of frame by
+            the ident of the frame of the blobset stream changing.
+        */
+        bool m_frame_eos{false};
+
+        // We don't even try to be just in time but for each TTree entry, fill a
+        // queue of data to return over many calls.
+        std::deque<IBlobSet::pointer> m_queue;
 
         // for logging
         size_t m_calls{0};
@@ -113,16 +128,13 @@ namespace WireCell::Root {
 
         void bodge_activity(ISlice::map_t& activity, const RayGrid::Blob& blob);
         void dummy_activity(ISlice::map_t& activity);
+        void fill_queue();
 
         IFrame::pointer gen_frame();
         IChannel::pointer get_channel(int chanid);
 
-        // Map WCP timesliceId value to a slice
-        using SimpleSlicePtr = std::shared_ptr<Aux::SimpleSlice>;
-        using SliceMap = std::map<int, SimpleSlicePtr>;
-        SliceMap load_slices();
-        IBlobSet::pointer load_live();
-        IBlobSet::pointer load_dead();
+        void load_live();
+        void load_dead();
         std::pair<int,int> make_strip(const std::vector<int>& wire_in_plane_indices);
 
         const double m_tick{0.5 * units::us};

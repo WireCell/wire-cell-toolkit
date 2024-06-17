@@ -71,6 +71,8 @@ namespace WireCell::Aux {
 
         virtual IBlob::vector blobs() const { return m_blobs; }
 
+        void insert(const IBlob::pointer& blob) { m_blobs.push_back(blob); }
+
         int m_ident;
         ISlice::pointer m_slice;
         IBlob::vector m_blobs;
