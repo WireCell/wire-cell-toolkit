@@ -3,8 +3,8 @@
     See blob-sampling.org document for details.
  */
 
-#ifndef WIRECELL_IMG_BLOBSAMPLER
-#define WIRECELL_IMG_BLOBSAMPLER
+#ifndef WIRECELL_CLUS_BLOBSAMPLER
+#define WIRECELL_CLUS_BLOBSAMPLER
 
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IConfigurable.h"
@@ -13,7 +13,7 @@
 
 #include <regex>
 
-namespace WireCell::Img {
+namespace WireCell::Clus {
 
     class BlobSampler : public Aux::Logger, public IBlobSampler, public IConfigurable
     {

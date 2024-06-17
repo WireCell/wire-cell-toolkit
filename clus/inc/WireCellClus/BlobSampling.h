@@ -2,8 +2,8 @@
 
     The heaving lifting is done via IBlobSamper instances.
 */
-#ifndef WIRECELL_IMG_BLOBSAMPLING
-#define WIRECELL_IMG_BLOBSAMPLING
+#ifndef WIRECELL_CLUS_BLOBSAMPLING
+#define WIRECELL_CLUS_BLOBSAMPLING
 
 #include "WireCellIface/IBlobSampling.h"
 #include "WireCellIface/IBlobSampler.h"
@@ -11,7 +11,7 @@
 #include "WireCellAux/Logger.h"
 
 
-namespace WireCell::Img {
+namespace WireCell::Clus {
 
     class BlobSampling : public Aux::Logger, public IBlobSampling, public IConfigurable
     {

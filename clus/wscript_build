@@ -1,0 +1,2 @@
+bld.smplpkg('WireCellClus', use='WireCellAux WireCellImg')
+

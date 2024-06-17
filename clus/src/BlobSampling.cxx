@@ -1,4 +1,4 @@
-#include "WireCellImg/BlobSampling.h"
+#include "WireCellClus/BlobSampling.h"
 #include "WireCellUtil/PointTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
@@ -6,19 +6,19 @@
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
 
-WIRECELL_FACTORY(BlobSampling, WireCell::Img::BlobSampling,
+WIRECELL_FACTORY(BlobSampling, WireCell::Clus::BlobSampling,
                  WireCell::INamed,
                  WireCell::IBlobSampling,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
-using namespace WireCell::Img;
+using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Tree;
 
 BlobSampling::BlobSampling()
-    : Aux::Logger("BlobSampling", "img")
+    : Aux::Logger("BlobSampling", "clus")
 {
 }
 

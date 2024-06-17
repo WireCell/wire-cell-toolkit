@@ -1,4 +1,4 @@
-#include "WireCellImg/PointCloudFacade.h"
+#include "WireCellClus/PointCloudFacade.h"
 #include <boost/container_hash/hash.hpp>
 
 using namespace WireCell;

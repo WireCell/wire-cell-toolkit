@@ -1,11 +1,11 @@
-#ifndef WIRECELLIMG_MULTIALGBLOBCLUSTERING
-#define WIRECELLIMG_MULTIALGBLOBCLUSTERING
+#ifndef WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
+#define WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellAux/Logger.h"
 
-namespace WireCell::Img {
+namespace WireCell::Clus {
 
     class MultiAlgBlobClustering : public Aux::Logger, public ITensorSetFilter, public IConfigurable {
        public:
@@ -52,6 +52,6 @@ namespace WireCell::Img {
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
     };
-}  // namespace WireCell::Img
+}  // namespace WireCell::Clus
 
 #endif

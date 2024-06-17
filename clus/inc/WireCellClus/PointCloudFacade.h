@@ -2,8 +2,8 @@
  *
  */
 
-#ifndef WIRECELLIMG_POINTCLOUDFACADE
-#define WIRECELLIMG_POINTCLOUDFACADE
+#ifndef WIRECELL_CLUS_POINTCLOUDFACADE
+#define WIRECELL_CLUS_POINTCLOUDFACADE
 
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellUtil/PointTree.h"

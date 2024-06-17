@@ -1,4 +1,4 @@
-#include <WireCellImg/ClusteringFuncs.h>
+#include <WireCellClus/ClusteringFuncs.h>
 
 #include <iostream>              // temp debug
 
