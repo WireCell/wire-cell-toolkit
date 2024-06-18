@@ -1,4 +1,4 @@
 # -*- python -*-
-bld.make_package('WCPQuickhull', use='')
+bld.smplpkg('WCPQuickhull', use='')
 
 

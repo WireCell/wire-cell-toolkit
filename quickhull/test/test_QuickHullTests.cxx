@@ -26,7 +26,7 @@ namespace quickhull {
 		
 		FloatType rnd(FloatType from, FloatType to) {
 			return from + (FloatType)dist(rng)*(to-from);
-		};
+		}
 		
 		void assertSameValue(FloatType a, FloatType b) {
 			assert(std::abs(a-b)<0.0001f);
@@ -50,7 +50,7 @@ namespace quickhull {
 		std::vector<Vector3<T>> createSphere(T radius, size_t M, Vector3<T> offset = Vector3<T>(0,0,0)) {
 			std::vector<Vector3<T>> pc;
 			const T pi = 3.14159f;
-			for (int i=0;i<=M;i++) {
+			for (size_t i=0;i<=M;i++) {
 				FloatType y = std::sin(pi/2 + (FloatType)i/(M)*pi);
 				FloatType r = std::cos(pi/2 + (FloatType)i/(M)*pi);
 				FloatType K = FloatType(1)-std::abs((FloatType)((FloatType)i-M/2.0f))/(FloatType)(M/2.0f);
@@ -268,7 +268,7 @@ namespace quickhull {
 				const vec3 v2(rnd(-1,1),rnd(-1,1),rnd(-1,1));
 				pc.push_back(v1);
 				pc.push_back(v2);
-				for (int i=0;i<N;i++) {
+				for (size_t i=0;i<N;i++) {
 					auto t1 = rnd(0,1);
 					auto t2 = rnd(0,1);
 					pc.push_back(t1*v1 + t2*v2);
