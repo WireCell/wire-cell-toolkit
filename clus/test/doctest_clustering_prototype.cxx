@@ -3,7 +3,7 @@
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
 
-#include "WireCellClus/PointCloudFacade.h"
+#include "WireCellClus/Facade.h"
 
 #include <unordered_map>
 

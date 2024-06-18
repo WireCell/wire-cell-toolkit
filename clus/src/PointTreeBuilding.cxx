@@ -1,6 +1,6 @@
 #include "WireCellClus/PointTreeBuilding.h"
 #include "WireCellImg/Projection2D.h"
-#include "WireCellClus/PointCloudFacade.h"
+#include "WireCellClus/Facade.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
 #include "WireCellUtil/GraphTools.h"

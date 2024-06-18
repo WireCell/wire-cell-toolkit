@@ -1,5 +1,5 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
-#include "WireCellClus/PointCloudFacade.h"
+#include "WireCellClus/Facade.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
