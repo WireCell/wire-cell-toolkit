@@ -16,6 +16,9 @@
 #include "WireCellUtil/Graph.h"
 
 
+#include "WCPQuickhull/QuickHull.h"
+
+
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
 namespace WireCell::PointCloud::Facade {
