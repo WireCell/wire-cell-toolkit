@@ -12,6 +12,20 @@
 #ifndef WIRECELLUTIL_SPDLOG
 #define WIRECELLUTIL_SPDLOG
 
+// Prefer SPDLOG_LOGGER_DEBUG() or SPDLOG_DEBUG() over bare calls to
+// log->debug() or spdlog::debug().
+//
+// Always use SPDLOG_LOGGER_TRACE() or SPDLOG_TRACE() for trace level logs.
+//
+//
+// To set default minmum level for these macros use, eg:
+//
+//   ./wcb configure --with-spdlog-active-level=trace [...]
+//
+// See util/docs/logging.org for more info.
+
+// #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_DEBUG
+#include "WireCellUtil/BuildConfig.h"
 #include <spdlog/spdlog.h>
 
 // We need FMT version but it is found in core.h in different locations

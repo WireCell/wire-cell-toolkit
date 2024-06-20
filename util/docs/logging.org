@@ -61,8 +61,38 @@ The ~wire-cell~ command line program allows changing the SPDLOG level on a per l
                         critical,error,warn,info,debug,trace)
   ...
 #+end_example
+With no logsink, WCT logging-compliant code is totally "silent".  A minimal setting is:
 
-The emission of log messages from SPDLOG macros is still subject to the build time configuration. 
+#+begin_example
+  wire-cell -l stderr -L debug [...]
+#+end_example
+This sets the default log level to be DEBUG with log output sent to stderr.  Many WCT data-flow processing nodes implement ~Aux::Logger~ which supports setting a per-node instance log level.  To set this, one must use the triplet of the log group and the component type and instance names.  These can be deduced from existing log lines.  For example,
+
+#+begin_example
+[15:59:11.745] D [  root  ] <UbooneBlobSource:live-uvw> loading live blobs of views bits: 7
+#+end_example
+This logger has a full name:
+
+#+begin_example
+root/UbooneBlobSource/live-uvw
+#+end_example
+To set the level for the logger of this one instance one may give, for example:
+
+#+begin_example
+wire-cell -L root/UbooneBlobSource/live-uvw:debug -l stderr [...]
+#+end_example
+This will only show that one instance at DEBUG and all logging will be at INFO.
+
+However, there is a pattern matching mechanism to set logger levels.  This job happens to have four instances of the component with type name ~UbooneBlobSource~.  All four can have their log levels set by giving a common prefix:
+#+begin_example
+wire-cell -L root/UbooneBlobSource:debug -l stderr [...]
+#+end_example
+Likewise, all loggers using the logger group ~root~ (as in the WCT sub-package using ROOT, not the root of some tree), one can give:
+#+begin_example
+wire-cell -L root:debug -l stderr [...]
+#+end_example
+
+
 
 ** Executing
 
@@ -74,8 +104,64 @@ When WCT is executed as a toolkit the calling code may use SPDLOG directly to co
 
 The emission of log messages from SPDLOG macros is still subject to the build time configuration. 
 
+** Checking
+
+As the logging control is rather flexible, it can be tricky to understand.  A simple check program is provided that excerpts the logging functionality of the WCT main.  With it, one can quickly try different command line options.  Here is an example of its use:
+
+#+begin_example
+   This allows checking WCT logging as it would be used via wire-cell.
+
+   Print help
+
+   $ check-logging -h
+
+   Default log stream, level and sink:
+
+   $ check-logging
+
+   Limit the default stream
+
+   $ check-logging -L warn
+
+   Setting any log sink (-l/--logsink) will cause the default log stream to be named "wct".
+
+   Set a default log sink
+
+   $ check-logging -l stderr
+
+   Set a sinks with levels
+
+   $ check-logging -l stderr:trace -l info.log:info
+
+   Set message level
+
+   $ check-logging -l stderr:trace -l info.log:info -l trace
+
+   Set message level on per stream basis
+
+   $ check-logging -l stderr:trace -l info.log:info -l trace -L wct:critical -L test:warn
+
+#+end_example
 
 ** Developing
 
 Developers may create a specific SPDLOG logger object or may use the "main" object.  Log object construction may be  simplified when constructing a WCT component that inherits from ~WireCell::Aux::Logger~.  See ~util/test/doctest_logging.cxx~ and existing use in WCT source for some examples.
 
+The emission of log messages from SPDLOG macros is still subject to the build time configuration. 
+
+
+* Meta :noexport:
+
+
+#+begin_src sh :results output drawer
+scp logging.html logging.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src
+
+#+RESULTS:
+:results:
+:end:
+
+
+# Local Variables:
+# eval: (setq org-html-self-link-headlines t)
+# End:
