@@ -283,3 +283,27 @@ TEST_CASE("create cluster graph")
     pcc.Create_graph();
     print_MCUGraph(*pcc.graph);
 }
+
+TEST_CASE("Simple3DPointCloud")
+{
+    Simple3DPointCloud s3dpc;
+    for (size_t ind=0; ind<5; ++ind) {
+        s3dpc.add({0.1*ind, 0, 0});
+    }
+    geo_point_t p_test1(-1, 0, 0);
+    geo_point_t dir1(1, 0, 0);
+    double test_dis = 5;
+    double dis_step = 0.1;
+    double angle_cut = 10;
+    double dis_cut = 0.2;
+    auto [ind1, dis1] = s3dpc.get_closest_point_along_vec(p_test1, dir1, test_dis, dis_step, angle_cut, dis_cut);
+    CHECK(ind1 == 0);
+    CHECK(dis1 == 1);
+    debug("ind1={} dis1={}", ind1, dis1);
+    geo_point_t p_test2(2, 0, 0);
+    geo_point_t dir2(-1, 0, 0);
+    auto [ind2, dis2] = s3dpc.get_closest_point_along_vec(p_test2, dir2, test_dis, dis_step, angle_cut, dis_cut);
+    CHECK(ind2 == 4);
+    CHECK(dis2 == 1.6);
+    debug("ind2={} dis2={}", ind2, dis2);
+}

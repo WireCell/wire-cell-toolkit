@@ -52,6 +52,39 @@ namespace WireCell::PointCloud::Facade {
         float_t time_offset{-1600 * units::us};
     };
 
+    class Simple3DPointCloud {
+       public:
+        using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexStatic>;
+        // these derived types do not depend on static/dynamic
+        using points_type = nfkd_t::points_type;
+        using results_type = nfkd_t::results_type;
+        using point_type = std::vector<double>;
+        inline const points_type& points() const { return m_points; }
+        inline points_type& points() { return m_points; }
+        void add(const point_type& new_pt);
+        const nfkd_t& kd(bool rebuild=false) const;
+        results_type get_closest_index(const geo_point_t& p, const size_t N) const;
+
+        /// @param p_test1 is the point to start from
+        /// @param dir is the direction to search along
+        /// @param test_dis is the distance to search
+        /// @param dis_step is the step size to sample along dir
+        /// @param angle_cut in degrees
+        /// @param dis_cut is the maximum distance to search
+        std::pair<int, double> get_closest_point_along_vec(
+            const geo_point_t& p_test1,
+            const geo_point_t& dir,
+            double test_dis,
+            double dis_step,
+            double angle_cut,
+            double dis_cut) const;
+
+       private:
+       
+        points_type m_points{3};
+        mutable std::unique_ptr<nfkd_t> m_kd{nullptr}; // lazy
+    };
+
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double time);
     double drift2time(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
