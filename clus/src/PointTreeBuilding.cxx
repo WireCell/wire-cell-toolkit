@@ -518,7 +518,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
             bool is_good = grouping->is_good_point({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0);
             log->debug("is_good_point {}", is_good);
         }
-        exit(0);
+        // exit(0);
     }
     // {
     //     auto grouping = root_live->value.facade<Facade::Grouping>();

@@ -1115,8 +1115,17 @@ void Cluster::Establish_close_connected_graph()
 void Cluster::Connect_graph(const bool use_ctpc) {
     // now form the connected components
     std::vector<int> component(num_vertices(*graph));
-    const int num = connected_components(*graph, &component[0]);
+    const size_t num = connected_components(*graph, &component[0]);
+    debug("num of connected components: {}", num);
     if (num <= 1) return;
+
+    std::vector<std::unique_ptr<Simple3DPointCloud>> pt_clouds;
+    for (size_t i = 0; i != num; i++) {
+        pt_clouds.push_back(std::make_unique<Simple3DPointCloud>());
+    }
+    for (size_t i = 0; i != component.size(); ++i) {
+        pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});
+    }
 }
 
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)

@@ -92,6 +92,7 @@ namespace WireCell::PointCloud::Facade {
         points_type m_points{3};
         mutable std::unique_ptr<nfkd_t> m_kd{nullptr}; // lazy
     };
+    std::ostream& operator<<(std::ostream& os, const Simple3DPointCloud& s3dpc);
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double time);

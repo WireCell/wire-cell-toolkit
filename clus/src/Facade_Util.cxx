@@ -196,6 +196,16 @@ std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(cons
     return std::make_tuple(p1_save, p2_save, min_dis);
 }
 
+std::ostream& Facade::operator<<(std::ostream& os, const Simple3DPointCloud& s3dpc)
+{
+    const size_t npts = s3dpc.points()[0].size();
+    os << "Simple3DPointCloud " << " npts=" << npts;
+    for (size_t ind=0; ind<npts; ++ind) {
+        os << " " << s3dpc.point(ind);
+    }
+    return os;
+}
+
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
 double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
     const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();

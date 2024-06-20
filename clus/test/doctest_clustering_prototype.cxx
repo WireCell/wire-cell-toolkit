@@ -291,6 +291,7 @@ TEST_CASE("Simple3DPointCloud")
         s3dpc.add({0.1*ind, 0, 0});
     }
     {
+        std::cout << s3dpc << std::endl;
         geo_point_t p_test1(-1, 0, 0);
         geo_point_t dir1(1, 0, 0);
         double test_dis = 5;
