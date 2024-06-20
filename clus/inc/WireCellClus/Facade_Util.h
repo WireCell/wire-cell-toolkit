@@ -61,9 +61,17 @@ namespace WireCell::PointCloud::Facade {
         using point_type = std::vector<double>;
         inline const points_type& points() const { return m_points; }
         inline points_type& points() { return m_points; }
+        inline geo_point_t point(const size_t ind) const {
+            if (ind >= m_points[0].size()) {
+                raise<IndexError>("point index %d out of range %d", ind, m_points[0].size());
+            }
+            return {m_points[0][ind], m_points[1][ind], m_points[2][ind]};
+        }
         void add(const point_type& new_pt);
         const nfkd_t& kd(bool rebuild=false) const;
         results_type get_closest_index(const geo_point_t& p, const size_t N) const;
+        /// @return index, geo_point_t
+        std::pair<size_t, geo_point_t> get_closest_wcpoint(const geo_point_t& p) const;
 
         /// @param p_test1 is the point to start from
         /// @param dir is the direction to search along
@@ -78,7 +86,7 @@ namespace WireCell::PointCloud::Facade {
             double dis_step,
             double angle_cut,
             double dis_cut) const;
-
+        std::tuple<int, int, double> get_closest_points(const Simple3DPointCloud& other) const;
        private:
        
         points_type m_points{3};

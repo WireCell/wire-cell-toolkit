@@ -60,7 +60,16 @@ const Facade::Simple3DPointCloud::nfkd_t& Facade::Simple3DPointCloud::kd(bool re
     return *m_kd;
 }
 Facade::Simple3DPointCloud::results_type Facade::Simple3DPointCloud::get_closest_index(const geo_point_t& p, const size_t N) const {
-        return kd().knn(N, p);
+    return kd().knn(N, p);
+}
+std::pair<size_t, geo_point_t> Facade::Simple3DPointCloud::get_closest_wcpoint(const geo_point_t& p) const {
+    const auto knn_res = kd().knn(1, p);
+    if (knn_res.size() != 1) {
+        raise<ValueError>("no points found");
+    }
+    const auto ind = knn_res[0].first;
+    geo_point_t pt = {points()[0][ind], points()[1][ind], points()[2][ind]};
+    return std::make_pair(ind, pt);
 }
 std::pair<int, double> Facade::Simple3DPointCloud::get_closest_point_along_vec(const geo_point_t& p_test1,
                                                                           const geo_point_t& dir, double test_dis,
@@ -101,6 +110,90 @@ std::pair<int, double> Facade::Simple3DPointCloud::get_closest_point_along_vec(c
     }
 
     return std::make_pair(min_index, min_dis1);
+}
+std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(const Simple3DPointCloud& other) const {
+
+    int p1_index = 0;
+    int p2_index = 0;
+    geo_point_t p1 = point(p1_index);
+    geo_point_t p2 = other.point(p2_index);
+    int p1_save;
+    int p2_save;
+    double min_dis = 1e9;
+
+    int prev_index1 = -1;
+    int prev_index2 = -1;
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+    }
+    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    prev_index1 = -1;
+    prev_index2 = -1;
+    p1_index = points()[0].size() - 1;
+    p2_index = 0;
+    p1 = point(p1_index);
+    p2 = other.point(p2_index);
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+    }
+    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    prev_index1 = -1;
+    prev_index2 = -1;
+    p1_index = 0;
+    p2_index = other.points()[0].size() - 1;
+    p1 = point(p1_index);
+    p2 = other.point(p2_index);
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+    }
+    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    prev_index1 = -1;
+    prev_index2 = -1;
+    p1_index = points()[0].size() - 1;
+    p2_index = other.points()[0].size() - 1;
+    p1 = point(p1_index);
+    p2 = other.point(p2_index);
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+    }
+    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    return std::make_tuple(p1_save, p2_save, min_dis);
 }
 
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
