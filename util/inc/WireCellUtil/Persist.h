@@ -80,8 +80,9 @@ namespace WireCell {
         void dump(const std::string& filename, const Json::Value& top, bool pretty = false);
 
         /// As above but dump to a JSON text string.
-        // fixme: no "pretty" for dumps() is implemented.
-        std::string dumps(const Json::Value& top, bool pretty = false);
+        /// Set indent to a number of spaces for indenting or negative for number of tabs.
+        /// Set nsig to be nonzero to limit the number of significant digits.
+        std::string dumps(const Json::Value& top, int indent = 0, int nsig=0);
 
         /// This can hold either Jsonnet external variable/value pairs
         /// The value is a string representation of a simple scalar
