@@ -78,7 +78,8 @@ Points::node_ptr make_simple_pctree()
     const Dataset& pc1 = n1->value.local_pcs().at("3d");
     debug("pc1: {}", pc1.size_major());
     
-
+    fa_int_t wmin = 100;
+    fa_int_t wmax = 101;
     // Ibid from a different track
     auto* n2 = root->insert(Points({
         {"scalar", Dataset({
@@ -89,12 +90,12 @@ Points::node_ptr make_simple_pctree()
             {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
-            {"u_wire_index_min", Array({(fa_int_t)1})},
-            {"u_wire_index_max", Array({(fa_int_t)2})},
-            {"v_wire_index_min", Array({(fa_int_t)1})},
-            {"v_wire_index_max", Array({(fa_int_t)2})},
-            {"w_wire_index_min", Array({(fa_int_t)1})},
-            {"w_wire_index_max", Array({(fa_int_t)2})},
+            {"u_wire_index_min", Array({(fa_int_t)wmin})},
+            {"u_wire_index_max", Array({(fa_int_t)wmax})},
+            {"v_wire_index_min", Array({(fa_int_t)wmin})},
+            {"v_wire_index_max", Array({(fa_int_t)wmax})},
+            {"w_wire_index_min", Array({(fa_int_t)wmin})},
+            {"w_wire_index_max", Array({(fa_int_t)wmax})},
         })},
         {"3d", make_janky_track(Ray(Point(1, 0, 0), Point(2, 0, 0)))}
         }));
@@ -145,10 +146,10 @@ TEST_CASE("clustering point tree")
 
     auto const& pc3d = s3d.pcs();
     CHECK(pc3d.size() == 2);
-    print_dds(pc3d);
+    // print_dds(pc3d);
 
-    auto const& pccenter = rval.scoped_view({ "center", {"x","y","z"}}).pcs();
-    print_dds(pccenter);
+    // auto const& pccenter = rval.scoped_view({ "center", {"x","y","z"}}).pcs();
+    // print_dds(pccenter);
 
     const auto& kd = s3d.kd();
     const auto& points = kd.points();
