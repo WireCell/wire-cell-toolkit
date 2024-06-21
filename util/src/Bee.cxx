@@ -164,10 +164,13 @@ size_t Bee::Sink::write(const Object& obj)
     // body.  But, we turn that off after Bee was improved in order that this
     // hack does not lead to duplicate directories being created when this Bee
     // interface is used to produce files with multiple events and/or
-    // algorithms.  { const std::string d1 = fmt::format("name data/\n",
-    // m_index); const std::string b1 = fmt::format("body 0\n"); const
-    // std::string d2 = fmt::format("name data/{0}/\n", m_index); const
-    // std::string b2 = fmt::format("body 0\n"); m_out << d1 << b1 << d2 << b2;
+    // algorithms.
+    // {
+    //     const std::string d1 = fmt::format("name data/\n", m_index);
+    //     const std::string b1 = fmt::format("body 0\n");
+    //     const std::string d2 = fmt::format("name data/{0}/\n", m_index);
+    //     const std::string b2 = fmt::format("body 0\n");
+    //     m_out << d1 << b1 << d2 << b2;
     // }
 
     // WCT stream protocol for actual file.

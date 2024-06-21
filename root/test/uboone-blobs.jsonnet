@@ -93,6 +93,8 @@ local live_sampler = {
     type: "BlobSampler",
     name: "live",
     data: {
+        time_offset: -1600 * wc.us,
+        drift_speed: 1.101 * wc.mm / wc.us,
         strategy: [
             "center",
             "stepped",
