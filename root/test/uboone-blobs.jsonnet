@@ -155,7 +155,7 @@ local dead(iname, oname) = pg.pipeline([
     BlobClustering("dead"), ClusterFileSink(oname),
 ]);
 
-local extra_plugins = ["WireCellRoot"];
+local extra_plugins = ["WireCellRoot","WireCellClus"];
 
 function(iname, oname, kind /*live or dead*/)
     if kind == "live"

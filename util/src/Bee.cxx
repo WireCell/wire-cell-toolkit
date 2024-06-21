@@ -157,13 +157,24 @@ size_t Bee::Sink::write(const Object& obj)
 {
     index(obj);
 
-    // WCT stream protocol.
-    const std::string fname = fmt::format("name data/{0}/{0}-{1}.json\n", m_index, obj.algorithm());
-    const std::string json = obj.json();
-    const std::string body = fmt::format("body {}\n", json.size());
+    // hold Bee's hand
+    {
+        const std::string d1 = fmt::format("name data/\n", m_index);
+        const std::string b1 = fmt::format("body 0\n");
+        const std::string d2 = fmt::format("name data/{0}/\n", m_index);
+        const std::string b2 = fmt::format("body 0\n");
+        m_out << d1 << b1 << d2 << b2;
+    }
 
-    m_out << fname << body << json.data();
-    m_out.flush();
+    // WCT stream protocol for actual file.
+    {
+        const std::string fname = fmt::format("name data/{0}/{0}-{1}.json\n", m_index, obj.algorithm());
+        const std::string json = obj.json();
+        const std::string body = fmt::format("body {}\n", json.size());
+
+        m_out << fname << body << json.data();
+        m_out.flush();
+    }
     return m_index;
 }
 
