@@ -1,11 +1,11 @@
-#include <WireCellImg/ClusteringFuncs.h>
+#include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellUtil/ExecMon.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
 using namespace WireCell;
-using namespace WireCell::Img;
+using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;

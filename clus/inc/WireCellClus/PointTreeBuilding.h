@@ -1,8 +1,8 @@
 /** Sample blobs to make point cloud tree and output as tensors.
  * Same as PointTreeBuilding but use ICluster as input.
 */
-#ifndef WIRECELL_IMG_POINTTREEBUILDING
-#define WIRECELL_IMG_POINTTREEBUILDING
+#ifndef WIRECELL__CLUS_POINTTREEBUILDING
+#define WIRECELL__CLUS_POINTTREEBUILDING
 
 #include "WireCellIface/IClusterFaninTensorSet.h"
 #include "WireCellIface/IBlobSampler.h"
@@ -13,7 +13,7 @@
 #include "WireCellUtil/Units.h"
 
 
-namespace WireCell::Img {
+namespace WireCell::Clus {
 
     class PointTreeBuilding : public Aux::Logger, public IClusterFaninTensorSet, public IConfigurable
     {

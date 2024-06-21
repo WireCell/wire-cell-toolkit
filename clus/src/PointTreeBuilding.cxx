@@ -1,6 +1,6 @@
-#include "WireCellImg/PointTreeBuilding.h"
+#include "WireCellClus/PointTreeBuilding.h"
 #include "WireCellImg/Projection2D.h"
-#include "WireCellImg/PointCloudFacade.h"
+#include "WireCellClus/Facade.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
 #include "WireCellUtil/GraphTools.h"
@@ -10,14 +10,15 @@
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
 
-WIRECELL_FACTORY(PointTreeBuilding, WireCell::Img::PointTreeBuilding,
+WIRECELL_FACTORY(PointTreeBuilding, WireCell::Clus::PointTreeBuilding,
                  WireCell::INamed,
                  WireCell::IClusterFaninTensorSet,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
 using namespace WireCell::GraphTools;
-using namespace WireCell::Img;
+using namespace WireCell::Clus;
+/// FIXME : move this to aux some day
 using WireCell::Img::Projection2D::get_geom_clusters;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
@@ -27,7 +28,7 @@ using WireCell::PointCloud::Dataset;
 using WireCell::PointCloud::Array;
 
 PointTreeBuilding::PointTreeBuilding()
-    : Aux::Logger("PointTreeBuilding", "img")
+    : Aux::Logger("PointTreeBuilding", "clus")
 {
 }
 
@@ -36,7 +37,7 @@ PointTreeBuilding::~PointTreeBuilding()
 {
 }
 
-std::vector<std::string> Img::PointTreeBuilding::input_types()
+std::vector<std::string> Clus::PointTreeBuilding::input_types()
 {
     const std::string tname = std::string(typeid(input_type).name());
     std::vector<std::string> ret(m_multiplicity, tname);
@@ -517,7 +518,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
             bool is_good = grouping->is_good_point({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0);
             log->debug("is_good_point {}", is_good);
         }
-        exit(0);
+        // exit(0);
     }
     // {
     //     auto grouping = root_live->value.facade<Facade::Grouping>();

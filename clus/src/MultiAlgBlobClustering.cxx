@@ -1,6 +1,6 @@
-#include "WireCellImg/MultiAlgBlobClustering.h"
-#include "WireCellImg/PointCloudFacade.h"
-#include <WireCellImg/ClusteringFuncs.h>
+#include "WireCellClus/MultiAlgBlobClustering.h"
+#include "WireCellClus/Facade.h"
+#include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
@@ -14,18 +14,18 @@
 
 #include <fstream>
 
-WIRECELL_FACTORY(MultiAlgBlobClustering, WireCell::Img::MultiAlgBlobClustering, WireCell::INamed,
+WIRECELL_FACTORY(MultiAlgBlobClustering, WireCell::Clus::MultiAlgBlobClustering, WireCell::INamed,
                  WireCell::ITensorSetFilter, WireCell::IConfigurable)
 
 using namespace WireCell;
-using namespace WireCell::Img;
+using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 MultiAlgBlobClustering::MultiAlgBlobClustering()
-  : Aux::Logger("MultiAlgBlobClustering", "img")
+  : Aux::Logger("MultiAlgBlobClustering", "clus")
 {
 }
 

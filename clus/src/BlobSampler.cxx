@@ -1,4 +1,4 @@
-#include "WireCellImg/BlobSampler.h"
+#include "WireCellClus/BlobSampler.h"
 
 #include "WireCellUtil/Range.h"
 #include "WireCellUtil/String.h"
@@ -7,21 +7,21 @@
 
 #include <iostream>             // debug
 
-WIRECELL_FACTORY(BlobSampler, WireCell::Img::BlobSampler,
+WIRECELL_FACTORY(BlobSampler, WireCell::Clus::BlobSampler,
                  WireCell::INamed,
                  WireCell::IBlobSampler,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
 using namespace WireCell::Aux;
-using namespace WireCell::Img;
+using namespace WireCell::Clus;
 using namespace WireCell::Range;
 using namespace WireCell::String;
 using namespace WireCell::RayGrid;
 using namespace WireCell::PointCloud;
 
 BlobSampler::BlobSampler()
-    : Aux::Logger("BlobSampler", "img")
+    : Aux::Logger("BlobSampler", "clus")
 {
 
 }
@@ -126,7 +126,7 @@ struct BlobSampler::Sampler : public Aux::Logger
     // size_t points_added{0};
 
     explicit Sampler(const Configuration& cfg, size_t ident)
-        : Aux::Logger("BlobSampler", "img")
+        : Aux::Logger("BlobSampler", "clus")
         , cc(cfg2cpp(cfg)), my_ident(ident)
     {
         // this->configure(cfg); can not call virtual methods from ctro!  Outer
