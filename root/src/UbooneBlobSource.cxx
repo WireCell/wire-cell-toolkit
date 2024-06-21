@@ -715,10 +715,9 @@ bool Root::UbooneBlobSource::operator()(IBlobSet::pointer& blobset)
     if (! blobset) {
         log->debug("EOS due to frame end at call={}", m_calls++);
     }
-    // too verbose for normal use
-    // else {
-    //     log->debug("blob set call={}: {}", m_calls++, dumps(blobset));
-    // }
+    else {
+        log->trace("blob set call={}: {}", m_calls++, dumps(blobset));
+    }
 
 
     return true;
