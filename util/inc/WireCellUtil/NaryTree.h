@@ -304,6 +304,14 @@ namespace WireCell::NaryTree {
             return sib->get();
         }
 
+        // Return the number of descendants (children, grand children, etc)
+        // reached from this node.  The count does not include this node.  Eg, a
+        // node that lacks children will also have zero descendants.
+        size_t ndescendants() const {
+            auto d = depth();
+            return std::distance(d.begin(), d.end()) - 1;
+        }
+
         // Access collection of child nodes as bare pointers.
         size_t nchildren() const { return nursery_.size(); }
         children_const_vector children() const {
@@ -318,11 +326,6 @@ namespace WireCell::NaryTree {
                            [](const auto& up) { return up.get(); });
             return ret;
         }
-
-        // FIXME TEMPORARY ACCESS WHILE FIXING CLUSTERING 
-        // Access the owning nursery of children directly.
-        // const nursery_type& nursery() const { return nursery_; }
-        // nursery_type& nursery() { return nursery_; }
 
         using child_value_range = iter_range<child_value_iter<Value>>;
         auto child_values() {

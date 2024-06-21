@@ -49,26 +49,30 @@ size_t nodes_in_uniform_tree(const std::list<size_t>& layer_sizes)
 
 
 
-TEST_CASE("nary tree node construction") {
-
-    {
-        Introspective d("moved");
-        Introspective::node_type n(std::move(d));
-        CHECK(n.value.nctor == 1);
-        CHECK(n.value.nmove == 1);
-        CHECK(n.value.ncopy == 0);
-        CHECK(n.value.ndef == 0);
-    }
-
-    {
-        Introspective d("copied");
-        Introspective::node_type n(d);
-        CHECK(n.value.nctor == 1);
-        CHECK(n.value.nmove == 0);
-        CHECK(n.value.ncopy == 1);
-        CHECK(n.value.ndef == 0);
-    }
+TEST_CASE("nary tree node construction move") 
+{
+    Introspective d("moved");
+    Introspective::node_type n(std::move(d));
+    CHECK(n.value.nctor == 1);
+    CHECK(n.value.nmove == 1);
+    CHECK(n.value.ncopy == 0);
+    CHECK(n.value.ndef == 0);
+    size_t nkids = n.ndescendants();
+    CHECK(nkids == 0);
 }
+TEST_CASE("nary tree node construction copy") {
+
+
+    Introspective d("copied");
+    Introspective::node_type n(d);
+    CHECK(n.value.nctor == 1);
+    CHECK(n.value.nmove == 0);
+    CHECK(n.value.ncopy == 1);
+    CHECK(n.value.ndef == 0);
+    size_t nkids = n.ndescendants();
+    CHECK(nkids == 0);
+}
+
 
 TEST_CASE("nary tree simple tree tests") {
 
@@ -312,6 +316,9 @@ TEST_CASE("nary tree flatten")
         }
         debug("\t\tpath: {}  \t (\"{}\")", path, value.name);
     }
+    size_t nkids = root.ndescendants();
+    CHECK(nkids == 8);
+
 }
 
 static size_t count_delim(const std::string& s, const std::string& d = ".")
