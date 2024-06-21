@@ -89,20 +89,66 @@ local multi_source = function(iname, kind, views)
                         for ind in std.range(0, nviews-1) ]);
     
 
+local live_sampler = {
+    type: "BlobSampler",
+    name: "live",
+    data: {
+        time_offset: -1600 * wc.us,
+        drift_speed: 1.101 * wc.mm / wc.us,
+        strategy: [
+            "center",
+            "stepped",
+        ],
+    }};
+local dead_sampler = {
+    type: "BlobSampler",
+    name: "dead",
+    data: {
+        strategy: [
+            "center",
+        ],
+    }};
+local BeeBlobSink(fname, sampler) = pg.pnode({
+    type: "BeeBlobSink",
+    name: fname,
+    data: {
+        geom: "uboone",
+        type: "wcp",
+        outname: fname,
+        samplers: wc.tn(sampler)
+    },
+}, nin=1, nout=0, uses=[sampler]);
+local BeeBlobTap = function(fname)
+    local sink = BeeBlobSink(fname);
+    local fan = pg.pnode({
+        type:'BlobSetFanout',
+        name:fname,
+        data: { multiplicity: 2 },
+    }, nin=1, nout=2);
+    pg.intern(innodes=[fan], centernodes=[sink],
+              edges=[ pg.edge(fan, sink, 1, 0) ]);
+
+
 local live(iname, oname) = pg.pipeline([
     multi_source(iname, "live", ["uvw","uv","vw","wu"]),
-    BlobClustering("live"),
+    BeeBlobSink(oname, live_sampler),
+
+    // BeeBlobTap("live.zip"),
+
+    // BlobClustering("live"),
     // BlobGrouping("0"),
-    ProjectionDeghosting("1"),
-    BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
-    InSliceDeghosting("1",1),
-    ProjectionDeghosting("2"),
-    BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
-    InSliceDeghosting("2",2),
-    BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
-    InSliceDeghosting("3",3),
-    GlobalGeomClustering(""),
-    ClusterFileSink(oname),
+
+    // "standard":
+    // ProjectionDeghosting("1"),
+    // BlobGrouping("1"), ChargeSolving("1a","uniform"), LocalGeomClustering("1"), ChargeSolving("1b","uboone"),
+    // InSliceDeghosting("1",1),
+    // ProjectionDeghosting("2"),
+    // BlobGrouping("2"), ChargeSolving("2a","uniform"), LocalGeomClustering("2"), ChargeSolving("2b","uboone"),
+    // InSliceDeghosting("2",2),
+    // BlobGrouping("3"), ChargeSolving("3a","uniform"), LocalGeomClustering("3"), ChargeSolving("3b","uboone"),
+    // InSliceDeghosting("3",3),
+    // GlobalGeomClustering(""),
+    // ClusterFileSink(oname),
 ]);
 
 
@@ -111,7 +157,7 @@ local dead(iname, oname) = pg.pipeline([
     BlobClustering("dead"), ClusterFileSink(oname),
 ]);
 
-local extra_plugins = ["WireCellRoot"];
+local extra_plugins = ["WireCellRoot","WireCellClus"];
 
 function(iname, oname, kind /*live or dead*/)
     if kind == "live"

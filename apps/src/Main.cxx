@@ -226,8 +226,14 @@ void Main::add_logsink(const std::string& log, const std::string& level)
 }
 void Main::set_loglevel(const std::string& log, const std::string& level)
 {
-    // std::cerr << "Set log \""<<log<<"\" to level \"" << level << "\"\n";
-    Log::set_level(level, log);
+    m_log_levels[log] = level;
+    // Log::set_level(level, log);
+}
+void Main::apply_log_config()
+{
+    for (const auto& [log,level] : m_log_levels) {
+        Log::set_level(level, log);
+    }
 }
 void Main::add_config(const std::string& filename) { m_cfgfiles.push_back(filename); }
 
@@ -251,8 +257,7 @@ void Main::initialize()
     Log::set_pattern("[%H:%M:%S.%03e] %L [%^%=8n%$] %v");
     log = Log::logger("main");
     log->set_pattern("[%H:%M:%S.%03e] %L [  main  ] %v");
-    set_loglevel("", "debug");
-    // log->debug("logging to \"main\"");
+    log->debug("logging to \"main\"");
 
     // Load configuration files
     for (auto filename : m_cfgfiles) {
@@ -327,6 +332,10 @@ void Main::initialize()
         }
         namobj->set_name(name);
     }
+
+    // We do this after setting names as INamed may have created a logger.
+    apply_log_config();
+    Log::fill_levels();
 
     // Finally, ask any configurables for their default, merge with
     // user config and give back.
