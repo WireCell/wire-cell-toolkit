@@ -117,8 +117,8 @@ std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(cons
     int p2_index = 0;
     geo_point_t p1 = point(p1_index);
     geo_point_t p2 = other.point(p2_index);
-    int p1_save;
-    int p2_save;
+    int p1_save = 0;
+    int p2_save = 0;
     double min_dis = 1e9;
 
     int prev_index1 = -1;
