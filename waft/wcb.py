@@ -14,8 +14,8 @@ ValidationContext.script_templates[".jsonnet"] = "${WCSONNET} ${SCRIPT}"
 
 mydir = osp.dirname(__file__)
 
-## These are packages descriptions which fit the generic functions.
-## They will be checked in order so put any dependencies first.
+# These are packages descriptions which fit the generic functions.
+# They will be checked in order so put any dependencies first.
 package_descriptions = [
 
     # spdlog is "header only" but use library version for faster recompilation
@@ -37,7 +37,6 @@ package_descriptions = [
     ('Jsonnet',  dict(incs=["libjsonnet.h"], libs=['jsonnet'])),
     ('TBB',      dict(incs=["tbb/parallel_for.h"], libs=['tbb'], pcname='tbb', mandatory=False)),
     ('HDF5',     dict(incs=["hdf5.h"], libs=['hdf5'], pcname='hdf5', mandatory=False)),
-    ('H5CPP',    dict(incs=["h5cpp/all"], mandatory=False, extuses=('HDF5',), pcname='h5cpp')),
 
     ('ZMQ',      dict(incs=["zmq.h"], libs=['zmq'], pcname='libzmq', mandatory=False)),
     ('CZMQ',     dict(incs=["czmq.h"], libs=['czmq'], pcname='libczmq', mandatory=False)),
@@ -141,7 +140,7 @@ def configure(cfg):
             ("tbb","HAVE_TBB LIB_FFTWTHREADS"),
             ("patrec", "HAVE_GLPK"),
             ("cuda","HAVE_CUDA"),
-            ("hio", "INCLUDES_H5CPP"),
+            ("hio", "INCLUDES_HDF5"),
             ("pytorch", "LIB_LIBTORCH"),
             ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ")
     ]:

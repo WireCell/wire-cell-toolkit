@@ -1,12 +1,4 @@
-/** Sink data to a file format used by the "Magnify" GUI .
- *
- * This is technically a "filter" as it passes on its input.  This
- * allows an instance of the sink to sit in the middle of some longer
- * chain.
- *
- * FIXME: currently this class TOTALLY violates the encapsulation of
- * DFP by requiring the input file in order to transfer input data out
- * of band of the flow.
+/** A pass-through for IFrame that saves IFrame to HDF
  */
 
 #ifndef WIRECELLHDF5_HDF5FRAMETAP
@@ -16,38 +8,35 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IFrameSink.h"
 #include "WireCellIface/IFrameFilter.h"
+#include "WireCellIface/ITerminal.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellAux/Logger.h"
 
-namespace WireCell {
-    namespace Hio {
+#include <hdf5.h>
 
-        class HDF5FrameTap : public IFrameFilter, public IConfigurable {
-           public:
-            HDF5FrameTap();
-            virtual ~HDF5FrameTap();
+namespace WireCell::Hio {
 
-            /// working operation - interface from IFrameFilter
-            /// executed when called by pgrapher
-            virtual bool operator()(const IFrame::pointer &inframe, IFrame::pointer &outframe);
+    class HDF5FrameTap : public Aux::Logger, public IFrameFilter, public IConfigurable, public ITerminal {
+    public:
+        HDF5FrameTap();
+        virtual ~HDF5FrameTap();
 
-            /// interfaces from IConfigurable
+        virtual bool operator()(const IFrame::pointer &inframe, IFrame::pointer &outframe);
+        virtual WireCell::Configuration default_configuration() const;
+        virtual void configure(const WireCell::Configuration &config);
+        virtual void finalize();
 
-            /// exeexecuted once at node creation
-            virtual WireCell::Configuration default_configuration() const;
 
-            /// executed once after node creation
-            virtual void configure(const WireCell::Configuration &config);
+    private:
+        Configuration m_cfg;           /// copy of configuration
+        IAnodePlane::pointer m_anode;  /// pointer to some APA, needed to associate chnnel ID to planes
 
-           private:
-            Configuration m_cfg;           /// copy of configuration
-            IAnodePlane::pointer m_anode;  /// pointer to some APA, needed to associate chnnel ID to planes
+        size_t m_calls{0};
 
-            int m_save_count;  // count frames saved
+        hid_t m_hfile;
 
-            /// SPD logger
-            Log::logptr_t l;
-        };
-    }  // namespace Hio
-}  // namespace WireCell
+    };
+
+}  // namespace WireCell::Hio
 
 #endif
