@@ -368,19 +368,30 @@ static double phi_angle(const Vector& dir)
 
 std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, const double dis,
                                                    HoughParamSpace param_space,
-                                                   std::unique_ptr<Simple3DPointCloud> s3dpc,
-                                                   std::vector<size_t> global_indices) const
+                                                   std::shared_ptr<const Simple3DPointCloud> s3dpc,
+                                                   const std::vector<size_t>& global_indices) const
 {
     std::vector<geo_point_t> pts;
     std::vector<const Blob*> blobs;
 
-    // auto results = skd.radius(dis*dis, origin);
-    auto results = kd_radius(dis, origin);
-    if (results.size() == 0) {
-        return {0, 0};
+    if (s3dpc == nullptr) {
+        auto results = kd_radius(dis, origin);
+        if (results.size() == 0) {
+            return {0, 0};
+        }
+        blobs = blobs_with_points(results);
+        pts = kd_points(results);
+    } else {
+        if (s3dpc->get_num_points() != global_indices.size()) {
+            raise<ValueError>("global indices size mismatch");
+        }
+        auto results = s3dpc->kd().radius(dis * dis, origin);
+        for (const auto& [point_index, _] : results) {
+            pts.push_back(s3dpc->point(point_index));
+            size_t global_index = global_indices[point_index];
+            blobs.push_back(blob_with_point(global_index));
+        }
     }
-    blobs = blobs_with_points(results);
-    pts = kd_points(results);
 
     constexpr double pi = 3.141592653589793;
 
@@ -429,15 +440,15 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
 }
 
 geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, HoughParamSpace param_space,
-                                      std::unique_ptr<Simple3DPointCloud> s3dpc,
-                                      std::vector<size_t> global_indices) const
+                                      std::shared_ptr<const Simple3DPointCloud> s3dpc,
+                                      const std::vector<size_t>& global_indices) const
 {
     if (param_space == HoughParamSpace::theta_phi) {
-        const auto [th, phi] = hough_transform(origin, dis, param_space);
+        const auto [th, phi] = hough_transform(origin, dis, param_space, s3dpc, global_indices);
         return {sin(th) * cos(phi), sin(th) * sin(phi), cos(th)};
     }
     // costh_phi
-    const auto [cth, phi] = hough_transform(origin, dis, param_space);
+    const auto [cth, phi] = hough_transform(origin, dis, param_space, s3dpc, global_indices);
     const double sth = sqrt(1 - cth * cth);
     return {sth * cos(phi), sth * sin(phi), cth};
 }
@@ -1125,11 +1136,11 @@ void Cluster::Connect_graph(const bool use_ctpc) {
     debug("num of connected components: {}", num);
     if (num <= 1) return;
 
-    std::vector<std::unique_ptr<Simple3DPointCloud>> pt_clouds;
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
     // use this to link the global index to the local index
     std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
     for (size_t i = 0; i != num; i++) {
-        pt_clouds.push_back(std::make_unique<Simple3DPointCloud>());
+        pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
     }
     for (size_t i = 0; i != component.size(); ++i) {
         pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});

@@ -160,16 +160,16 @@ namespace WireCell::PointCloud::Facade {
         // Note: radius must provide a LINEAR distance measure.
         std::pair<double, double> hough_transform(const geo_point_t& point, const double radius,
                                                   HoughParamSpace param_space = HoughParamSpace::theta_phi,
-                                                  std::unique_ptr<Simple3DPointCloud> s3dpc = nullptr,
-                                                  std::vector<size_t> global_indices = {}) const;
+                                                  std::shared_ptr<const Simple3DPointCloud> s3dpc = nullptr,
+                                                  const std::vector<size_t>& global_indices = {}) const;
 
         // Call hough_transform() and transform result as to a directional vector representation.
         //
         // Note: radius must provide a LINEAR distance measure.
         geo_vector_t vhough_transform(const geo_point_t& point, const double radius,
                                       HoughParamSpace param_space = HoughParamSpace::theta_phi,
-                                      std::unique_ptr<Simple3DPointCloud> = nullptr,
-                                      std::vector<size_t> global_indices = {}) const;
+                                      std::shared_ptr<const Simple3DPointCloud> = nullptr,
+                                      const std::vector<size_t>& global_indices = {}) const;
 
         // Return a quasi geometric size of the cluster based on its transverse
         // extents in each view and in time.
