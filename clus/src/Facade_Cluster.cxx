@@ -1120,12 +1120,161 @@ void Cluster::Connect_graph(const bool use_ctpc) {
     if (num <= 1) return;
 
     std::vector<std::unique_ptr<Simple3DPointCloud>> pt_clouds;
+    // use this to link the global index to the local index
+    std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
     for (size_t i = 0; i != num; i++) {
         pt_clouds.push_back(std::make_unique<Simple3DPointCloud>());
     }
     for (size_t i = 0; i != component.size(); ++i) {
         pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});
+        pt_clouds_global_indices.at(component[i]).push_back(i);
     }
+    /// DEBUGONLY:
+    for (size_t i = 0; i != num; i++) {
+        std::cout << *pt_clouds.at(i) << std::endl;
+        std::cout << "global indices: ";
+        for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
+            std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    // Initiate dist. metrics
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
+        num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(
+        num, std::vector<std::tuple<int, int, double>>(num));
+
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(
+        num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(
+        num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(
+        num, std::vector<std::tuple<int, int, double>>(num));
+
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = 0; k != num; k++) {
+            index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+
+            index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+        }
+    }
+
+    // Calc. dis, dis_dir1, dis_dir2
+    // check against the closest distance ...
+    // no need to have MST ...
+    // for (int j = 0; j != num; j++) {
+    //     for (int k = j + 1; k != num; k++) {
+    //         index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(pt_clouds.at(k));
+
+    //         if (num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
+    //                 (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400 ||
+    //             pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500) {
+    //             geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+    //             geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+
+    //             TVector3 dir1 = VHoughTrans(p1, 30 * units::cm, pt_clouds.at(j));
+    //             geo_point_t dir1 = vhough_transform(p1, 30 * units::cm, )
+    //             TVector3 dir2 = VHoughTrans(p2, 30 * units::cm, pt_clouds.at(k));
+    //             dir1 *= -1;
+    //             dir2 *= -1;
+
+    //             std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(
+    //                 p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+
+    //             if (result1.first >= 0) {
+    //                 index_index_dis_dir1[j][k] =
+    //                     std::make_tuple(std::get<0>(index_index_dis[j][k]), result1.first, result1.second);
+    //             }
+
+    //             std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(
+    //                 p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+
+    //             if (result2.first >= 0) {
+    //                 index_index_dis_dir2[j][k] =
+    //                     std::make_tuple(result2.first, std::get<1>(index_index_dis[j][k]), result2.second);
+    //             }
+    //         }
+
+    //         // Now check the path ...
+    //         {
+    //             WCPointCloud<double>::WCPoint wp1 = cloud.pts.at(std::get<0>(index_index_dis[j][k]));
+    //             WCPointCloud<double>::WCPoint wp2 = cloud.pts.at(std::get<1>(index_index_dis[j][k]));
+    //             Point p1(wp1.x, wp1.y, wp1.z);
+    //             Point p2(wp2.x, wp2.y, wp2.z);
+
+    //             double dis = sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2) + pow(p1.z - p2.z, 2));
+    //             double step_dis = 1.0 * units::cm;
+    //             int num_steps = dis / step_dis + 1;
+    //             int num_bad = 0;
+    //             for (int ii = 0; ii != num_steps; ii++) {
+    //                 Point test_p;
+    //                 test_p.x = p1.x + (p2.x - p1.x) / num_steps * (ii + 1);
+    //                 test_p.y = p1.y + (p2.y - p1.y) / num_steps * (ii + 1);
+    //                 test_p.z = p1.z + (p2.z - p1.z) / num_steps * (ii + 1);
+    //                 if (!ct_point_cloud.is_good_point(test_p)) {
+    //                     num_bad++;
+    //                 }
+    //             }
+
+    //             if (num_bad > 7 || num_bad > 2 && num_bad >= 0.75 * num_steps) {
+    //                 index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
+    //             }
+    //         }
+
+    //         // Now check the path ...
+    //         if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+    //             WCPointCloud<double>::WCPoint wp1 = cloud.pts.at(std::get<0>(index_index_dis_dir1[j][k]));
+    //             WCPointCloud<double>::WCPoint wp2 = cloud.pts.at(std::get<1>(index_index_dis_dir1[j][k]));
+    //             Point p1(wp1.x, wp1.y, wp1.z);
+    //             Point p2(wp2.x, wp2.y, wp2.z);
+
+    //             double dis = sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2) + pow(p1.z - p2.z, 2));
+    //             double step_dis = 1.0 * units::cm;
+    //             int num_steps = dis / step_dis + 1;
+    //             int num_bad = 0;
+    //             for (int ii = 0; ii != num_steps; ii++) {
+    //                 Point test_p;
+    //                 test_p.x = p1.x + (p2.x - p1.x) / num_steps * (ii + 1);
+    //                 test_p.y = p1.y + (p2.y - p1.y) / num_steps * (ii + 1);
+    //                 test_p.z = p1.z + (p2.z - p1.z) / num_steps * (ii + 1);
+    //                 if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
+    //             }
+
+    //             if (num_bad > 7 || num_bad > 2 && num_bad >= 0.75 * num_steps) {
+    //                 index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+    //             }
+    //         }
+
+    //         // Now check the path ...
+    //         if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+    //             WCPointCloud<double>::WCPoint wp1 = cloud.pts.at(std::get<0>(index_index_dis_dir2[j][k]));
+    //             WCPointCloud<double>::WCPoint wp2 = cloud.pts.at(std::get<1>(index_index_dis_dir2[j][k]));
+    //             Point p1(wp1.x, wp1.y, wp1.z);
+    //             Point p2(wp2.x, wp2.y, wp2.z);
+
+    //             double dis = sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2) + pow(p1.z - p2.z, 2));
+    //             double step_dis = 1.0 * units::cm;
+    //             int num_steps = dis / step_dis + 1;
+    //             int num_bad = 0;
+    //             for (int ii = 0; ii != num_steps; ii++) {
+    //                 Point test_p;
+    //                 test_p.x = p1.x + (p2.x - p1.x) / num_steps * (ii + 1);
+    //                 test_p.y = p1.y + (p2.y - p1.y) / num_steps * (ii + 1);
+    //                 test_p.z = p1.z + (p2.z - p1.z) / num_steps * (ii + 1);
+    //                 if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
+    //             }
+
+    //             if (num_bad > 7 || num_bad > 2 && num_bad >= 0.75 * num_steps) {
+    //                 index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+    //             }
+    //         }
+    //     }
+    // }
+
 }
 
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)
