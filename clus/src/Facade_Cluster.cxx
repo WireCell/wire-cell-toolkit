@@ -367,14 +367,21 @@ static double phi_angle(const Vector& dir)
 }
 
 std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, const double dis,
-                                                   HoughParamSpace param_space) const
+                                                   HoughParamSpace param_space,
+                                                   std::unique_ptr<Simple3DPointCloud> s3dpc,
+                                                   std::vector<size_t> global_indices) const
 {
+    std::vector<geo_point_t> pts;
+    std::vector<const Blob*> blobs;
+
     // auto results = skd.radius(dis*dis, origin);
     auto results = kd_radius(dis, origin);
-
     if (results.size() == 0) {
         return {0, 0};
     }
+    blobs = blobs_with_points(results);
+    pts = kd_points(results);
+
     constexpr double pi = 3.141592653589793;
 
     using direction_parameter_function_f = std::function<double(const Vector& dir)>;
@@ -397,9 +404,6 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     direction_parameter_function_f phi_param = phi_angle;
 
     auto hist = bh::make_histogram(bh::axis::regular<>(nbins1, min1, max1), bh::axis::regular<>(nbins2, min2, max2));
-
-    const auto& blobs = blobs_with_points(results);
-    const auto pts = kd_points(results);
 
     for (size_t ind = 0; ind < blobs.size(); ++ind) {
         const auto* blob = blobs[ind];
@@ -424,7 +428,9 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     return {cell.bin(0).center(), cell.bin(1).center()};
 }
 
-geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, HoughParamSpace param_space) const
+geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, HoughParamSpace param_space,
+                                      std::unique_ptr<Simple3DPointCloud> s3dpc,
+                                      std::vector<size_t> global_indices) const
 {
     if (param_space == HoughParamSpace::theta_phi) {
         const auto [th, phi] = hough_transform(origin, dis, param_space);
