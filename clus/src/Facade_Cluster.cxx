@@ -17,7 +17,7 @@ using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;
 
-#define __DEBUG__
+// #define __DEBUG__
 #ifdef __DEBUG__
 #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 #else
@@ -1137,7 +1137,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
     // now form the connected components
     std::vector<int> component(num_vertices(*graph));
     const size_t num = connected_components(*graph, &component[0]);
-    debug("num of connected components: {}", num);
+    LogDebug("num of connected components: " << num);
     if (num <= 1) return;
 
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
@@ -1150,14 +1150,17 @@ void Cluster::Connect_graph(const bool use_ctpc) {
         pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});
         pt_clouds_global_indices.at(component[i]).push_back(i);
     }
+
     /// DEBUGONLY:
-    for (size_t i = 0; i != num; i++) {
-        std::cout << *pt_clouds.at(i) << std::endl;
-        std::cout << "global indices: ";
-        for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
-            std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
+    if (0) {
+        for (size_t i = 0; i != num; i++) {
+            std::cout << *pt_clouds.at(i) << std::endl;
+            std::cout << "global indices: ";
+            for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
+                std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
     }
 
     // Initiate dist. metrics
