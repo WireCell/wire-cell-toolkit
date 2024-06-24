@@ -1,7 +1,11 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+
 #include <boost/container_hash/hash.hpp>
+#include <boost/graph/adjacency_list.hpp>
+#include <boost/graph/connected_components.hpp>
+#include <boost/graph/prim_minimum_spanning_tree.hpp>
 
 using namespace WireCell;
 using namespace WireCell::PointCloud;
@@ -13,7 +17,7 @@ using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;
 
-// #define __DEBUG__
+#define __DEBUG__
 #ifdef __DEBUG__
 #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 #else
@@ -699,7 +703,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob)
 
 void Cluster::Create_graph(const bool use_ctpc)
 {
-    LogDebug("Create Graph! " << graph)
+    LogDebug("Create Graph! " << graph);
     if (graph != (MCUGraph*) 0) return;
     graph = new MCUGraph(nbpoints());
     Establish_close_connected_graph();
@@ -858,7 +862,7 @@ void Cluster::Establish_close_connected_graph()
         }
     }
 
-    LogDebug("in-blob: " << num_edges)
+    LogDebug("in-blob: " << num_edges);
 
     std::vector<int> time_slices;
     for (auto [time, _] : this->time_blob_map()) {
@@ -1126,7 +1130,7 @@ void Cluster::Establish_close_connected_graph()
     }
     // end of copying ...
 
-    LogDebug("between-blob: " << num_edges)
+    LogDebug("between-blob: " << num_edges);
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) {
@@ -1298,6 +1302,167 @@ void Cluster::Connect_graph(const bool use_ctpc) {
         }
     }
 
+    // deal with MST of first type
+    {
+        boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
+                              boost::property<boost::edge_weight_t, double>>
+            temp_graph(num);
+
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                int index1 = j;
+                int index2 = k;
+                if (std::get<0>(index_index_dis[j][k]) >= 0) {
+                    add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+                    LogDebug(index1 << " " << index2 << " " << std::get<2>(index_index_dis[j][k]));
+                }
+            }
+        }
+
+        {
+            std::vector<int> possible_root_vertex;
+            std::vector<int> component(num_vertices(temp_graph));
+            const int num1 = connected_components(temp_graph, &component[0]);
+            possible_root_vertex.resize(num1);
+            std::vector<int>::size_type i;
+            for (i = 0; i != component.size(); ++i) {
+                possible_root_vertex.at(component[i]) = i;
+            }
+
+            for (size_t i = 0; i != possible_root_vertex.size(); i++) {
+                std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
+
+                prim_minimum_spanning_tree(temp_graph, &predecessors[0],
+                                           boost::root_vertex(possible_root_vertex.at(i)));
+
+                for (size_t j = 0; j != predecessors.size(); ++j) {
+                    if (predecessors[j] != j) {
+                        if (j < predecessors[j]) {
+                            index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
+                        }
+                        else {
+                            index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
+                        }
+                        // std::cout << j << " " << predecessors[j] << " " << std::endl;
+                    }
+                    else {
+                        // std::cout << j << " " << std::endl;
+                    }
+                }
+            }
+        }
+    }
+
+    // MST of the direction ...
+    {
+        boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
+                              boost::property<boost::edge_weight_t, double>>
+            temp_graph(num);
+
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                int index1 = j;
+                int index2 = k;
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    add_edge(
+                        index1, index2,
+                        std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])),
+                        temp_graph);
+                    LogDebug(index1 << " " << index2 << " "
+                                    << std::min(std::get<2>(index_index_dis_dir1[j][k]),
+                                                std::get<2>(index_index_dis_dir2[j][k])));
+                }
+            }
+        }
+
+        {
+            std::vector<int> possible_root_vertex;
+            std::vector<int> component(num_vertices(temp_graph));
+            const int num1 = connected_components(temp_graph, &component[0]);
+            possible_root_vertex.resize(num1);
+            std::vector<int>::size_type i;
+            for (i = 0; i != component.size(); ++i) {
+                possible_root_vertex.at(component[i]) = i;
+            }
+
+            for (size_t i = 0; i != possible_root_vertex.size(); i++) {
+                std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
+                prim_minimum_spanning_tree(temp_graph, &predecessors[0],
+                                           boost::root_vertex(possible_root_vertex.at(i)));
+                for (size_t j = 0; j != predecessors.size(); ++j) {
+                    if (predecessors[j] != j) {
+                        if (j < predecessors[j]) {
+                            index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
+                        }
+                        else {
+                            index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
+                        }
+                        // std::cout << j << " " << predecessors[j] << " " << std::endl;
+                    }
+                    else {
+                        // std::cout << j << " " << std::endl;
+                    }
+                }
+            }
+        }
+    }
+
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm) {
+                index_index_dis_mst[j][k] = index_index_dis[j][k];
+            }
+
+            // establish the path ...
+            if (std::get<0>(index_index_dis_mst[j][k]) >= 0) {
+                const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
+                const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
+                auto edge =
+                    add_edge(gind1, gind2, *graph);
+                    LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_mst[j][k]));
+                if (edge.second) {
+                    if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
+                        (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
+                    }
+                    else {
+                        (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
+                    }
+                }
+            }
+
+            if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
+                    auto edge = add_edge(gind1, gind2, *graph);
+                    LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir1[j][k]));
+                    if (edge.second) {
+                        if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
+                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]) * 1.1;
+                        }
+                        else {
+                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]);
+                        }
+                    }
+                }
+                if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
+                    auto edge = add_edge(gind1, gind2, *graph);
+                    LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir2[j][k]));
+                    if (edge.second) {
+                        if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
+                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]) * 1.1;
+                        }
+                        else {
+                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]);
+                        }
+                    }
+                }
+            }
+
+        }  // k
+    }  // j
 }
 
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)
