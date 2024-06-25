@@ -200,6 +200,8 @@ namespace WireCell::PointCloud::Facade {
         using wire_indices_t = std::vector<std::vector<int_t>>;
         const wire_indices_t& wire_indices();
 
+        std::vector<geo_point_t> get_hull() const;
+
        private:
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:

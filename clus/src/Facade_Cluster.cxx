@@ -1468,6 +1468,28 @@ void Cluster::Connect_graph(const bool use_ctpc) {
     }  // j
 }
 
+std::vector<geo_point_t> Cluster::get_hull() const 
+{
+    quickhull::QuickHull<float> qh;
+    std::vector<quickhull::Vector3<float>> pc;
+    const auto& points = this->points();
+    for (int i = 0; i != npoints(); i++) {
+        pc.emplace_back(points[0][i], points[1][i], points[2][i]);
+    }
+    quickhull::ConvexHull<float> hull = qh.getConvexHull(pc, false, true);
+    std::set<int> indices;
+
+    for (size_t i = 0; i != hull.getIndexBuffer().size(); i++) {
+        indices.insert(hull.getIndexBuffer().at(i));
+    }
+
+    std::vector<geo_point_t> results;
+    for (auto i : indices) {
+        results.push_back({points[0][i], points[1][i], points[2][i]});
+    }
+    return results;
+}
+
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)
 {
     if (a == b) return false;
