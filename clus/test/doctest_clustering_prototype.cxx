@@ -267,6 +267,26 @@ static void print_MCUGraph(const MCUGraph& g) {
     }
 }
 
+TEST_CASE("pca")
+{
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    REQUIRE(pccptr != nullptr);
+    REQUIRE(pccptr->grouping() == grouping);
+    Cluster& pcc = *pccptr;
+
+    geo_point_t center = pcc.get_center();
+    debug("center: {} {} {}", center.x(), center.y(), center.z());
+    for (size_t ind=0; ind<3; ++ind) {
+        auto axis = pcc.get_pca_axis(ind);
+        auto val = pcc.get_pca_value(ind);
+        debug("pca{}: {} {} {} {}", ind, axis.x(), axis.y(), axis.z(), val);
+    }
+}
+
 
 TEST_CASE("create cluster graph")
 {

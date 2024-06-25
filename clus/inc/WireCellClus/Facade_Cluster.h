@@ -202,6 +202,10 @@ namespace WireCell::PointCloud::Facade {
 
         std::vector<geo_point_t> get_hull() const;
 
+        geo_point_t get_center() const;
+        geo_vector_t get_pca_axis(int axis) const;
+        double get_pca_value(int axis) const;
+
        private:
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
@@ -221,6 +225,13 @@ namespace WireCell::PointCloud::Facade {
         mutable double m_length{0};
         // Cached and lazily calculated in npoints()
         mutable int m_npoints{0};
+
+        void Calc_PCA() const;
+        mutable bool m_pca_calculated{false};
+        // lazy, do not access directly.
+        mutable geo_point_t m_center;
+        mutable geo_vector_t m_pca_axis[3];
+        mutable double m_pca_values[3];
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.

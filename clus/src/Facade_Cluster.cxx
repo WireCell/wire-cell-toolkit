@@ -2,6 +2,8 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
 
+#include "WireCellUtil/Array.h"
+
 #include <boost/container_hash/hash.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/connected_components.hpp>
@@ -1488,6 +1490,84 @@ std::vector<geo_point_t> Cluster::get_hull() const
         results.push_back({points[0][i], points[1][i], points[2][i]});
     }
     return results;
+}
+
+void Cluster::Calc_PCA() const
+{
+    if (m_pca_calculated) return;
+
+    m_center.set(0, 0, 0);
+    int nsum = 0;
+    for (const Blob* blob : children()) {
+        for (const geo_point_t& p : blob->points()) {
+            m_center += p;
+            nsum++;
+        }
+    }
+
+    for (int i = 0; i != 3; i++) {
+        m_pca_axis[i].set(0, 0, 0);
+    }
+
+    if (nsum >= 3) {
+        m_center = m_center / nsum;
+    }
+    else {
+        return;
+    }
+    Eigen::MatrixXd cov_matrix(3, 3);
+
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (const Blob* blob : children()) {
+                for (const geo_point_t& p : blob->points()) {
+                    cov_matrix(i, j) += (p[i] - m_center[i]) * (p[j] - m_center[j]);
+                }
+            }
+        }
+    }
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+
+    const auto eigen = WireCell::Array::pca(cov_matrix);
+    auto eigen_values = eigen.eigenvalues();
+    auto eigen_vectors = eigen.eigenvectors();
+
+    for (int i = 0; i != 3; i++) {
+        m_pca_values[i] = eigen_values(i);
+        double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + eigen_vectors(1, i) * eigen_vectors(1, i) +
+                             eigen_vectors(2, i) * eigen_vectors(2, i));
+        m_pca_axis[i].set(eigen_vectors(0, i) / norm, eigen_vectors(1, i) / norm, eigen_vectors(2, i) / norm);
+        std::cout << "PCA: " << i << " " << m_pca_values[i] << " " << m_pca_axis[i] << std::endl;
+    }
+
+    m_pca_calculated = true;
+}
+
+
+
+geo_point_t Cluster::get_center() const {
+    if (!m_pca_calculated) {
+        Calc_PCA();
+    }
+    return m_center;
+}
+geo_vector_t Cluster::get_pca_axis(int axis) const {
+    if (!m_pca_calculated) {
+        Calc_PCA();
+    }
+    if (axis < 0 || axis >= 3) raise<IndexError>("axis %d < 0 || axis >= 3", axis);
+    return m_pca_axis[axis];
+}
+double Cluster::get_pca_value(int axis) const {
+    if (!m_pca_calculated) {
+        Calc_PCA();
+    }
+    if (axis < 0 || axis >= 3) raise<IndexError>("axis %d < 0 || axis >= 3", axis);
+    return m_pca_values[axis];
+
 }
 
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)
