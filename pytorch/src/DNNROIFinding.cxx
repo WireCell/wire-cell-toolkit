@@ -28,7 +28,10 @@
 // become a dynamic option.
 
 #ifdef DNNROI_HDF5_DEBUG
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <h5cpp/all>
+#pragma GCC diagnostic pop
 #endif
 
 /// macro to register name - concrete pair in the NamedFactory

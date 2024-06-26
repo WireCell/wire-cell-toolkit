@@ -20,6 +20,7 @@ using namespace std;
 using namespace WireCell;
 
 namespace WireCell {
+    /// fixme: why invent TracelessFrame instead of using SimpleFrame with no traces?
     class TracelessFrame : public IFrame {
        public:
         TracelessFrame(int ident, double time = 0, double tick = 0.5 * units::microsecond)
@@ -224,6 +225,7 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
         return;
     }
 
+    /// fixme: this should be created once in the calling function and given to each slice.
     // needed by ISlice
     auto tlframe = new TracelessFrame(in->ident(), in->time(), in->tick());
     auto tlframe_ptr = IFrame::pointer(tlframe);

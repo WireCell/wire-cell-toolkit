@@ -33,9 +33,11 @@ void DepoSetFilter::configure(const WireCell::Configuration& cfg)
     if (anode == nullptr) {
         THROW(ValueError() << errmsg{"Input anode is a nullptr"});
     }
-    IAnodeFace::vector abode_faces = anode->faces();
-    for (auto face : abode_faces) {
-        m_boxes.push_back(face->sensitive());
+    IAnodeFace::vector anode_faces = anode->faces();
+    for (auto face : anode_faces) {
+        auto bb = face->sensitive();
+        m_boxes.push_back(bb);
+        log->debug("face={} bounds={}", face->ident(), bb.bounds());
     }
 }
 
@@ -43,25 +45,25 @@ bool DepoSetFilter::operator()(const input_pointer& in, output_pointer& out)
 {
     out = nullptr;
     if (!in) {
-        log->debug("DepoSetFilter fail with no input on call = {}", m_count);
+        log->debug("EOS at call={}", m_count);
         return true;
     }
     IDepo::vector output_depos;
-    for (auto idepo : *(in->depos())) {
-        bool pass = false;
+    auto indepos = in->depos();
+    for (auto idepo : *indepos) {
         for (auto box : m_boxes) {
             WireCell::Ray r = box.bounds();
-
-            if (box.inside(idepo->pos())) {
-                pass = true;
-                break;
+            if (! box.inside(idepo->pos())) {
+                continue;
             }
-        }
-        if (pass) {
             output_depos.push_back(idepo);
+            break;
         }
     }
-    log->debug("call={} Number of Depos for a give APA={}", m_count, output_depos.size());
+    const int nin = indepos->size();
+    const int nout = output_depos.size();
+    log->debug("call={} depos: input={} output={} dropped={}",
+               m_count, nin, nout, nout-nin);
     out = std::make_shared<WireCell::Aux::SimpleDepoSet>(m_count, output_depos);
     ++m_count;
     return true;

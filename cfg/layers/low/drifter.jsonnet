@@ -27,15 +27,17 @@ function(random, xregions, lar, offset=0, fluctuate=true, name="")
     pg.pnode({
         type: 'DepoSetDrifter',
         name: name,
-        data: { drifter: "Drifter" }
-    }, nin=1, nout=1, uses=[pg.pnode({
-        type: 'Drifter',
-        name: name,
-        data: lar {
-            rng: wc.tn(random),
-            xregions: xregions, // for help, see: low.util.driftsToXregions(drifts)
-            time_offset: offset,
-            fluctuate: fluctuate,
-        },
-    }, nin=1, nout=1, uses=[random])])
+        data: { drifter: "Drifter:"+name }
+    }, nin=1, nout=1, uses = [
+        pg.pnode({
+            type: 'Drifter',
+            name: name,
+            data: lar {
+                rng: wc.tn(random),
+                xregions: xregions, // for help, see: low.util.driftsToXregions(drifts)
+                time_offset: offset,
+                fluctuate: fluctuate,
+            },
+        }, nin=1, nout=1, uses=[random])
+    ])
         

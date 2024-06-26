@@ -93,8 +93,8 @@ WireCell::Configuration Gen::EmpiricalNoiseModel::default_configuration() const
 
 void Gen::EmpiricalNoiseModel::resample(NoiseSpectrum& spectrum) const
 {
-    log->debug("m_nsamples={} fft_length={} m_period={} spec: nsamples={} period={}",
-               m_nsamples, m_fft_length, m_period, spectrum.nsamples, spectrum.period);
+    // log->debug("m_nsamples={} fft_length={} m_period={} spec: nsamples={} period={}",
+    //            m_nsamples, m_fft_length, m_period, spectrum.nsamples, spectrum.period);
 
     if (spectrum.nsamples == m_fft_length && spectrum.period == m_period) {
         return;              // natural sampling is what is requested.
@@ -221,8 +221,8 @@ void Gen::EmpiricalNoiseModel::configure(const WireCell::Configuration& cfg)
 
         resample(*nsptr);
         m_spectral_data[nsptr->plane].push_back(nsptr);  // assumes ordered by wire length!
-        log->debug("nwanted={} plane={} ntold={} ngot={} ninput={}",
-                   m_nsamples, nsptr->plane, nsptr->nsamples, nsptr->amps.size(), nfreqs);
+        // log->debug("nwanted={} plane={} ntold={} ngot={} ninput={}",
+        //            m_nsamples, nsptr->plane, nsptr->nsamples, nsptr->amps.size(), nfreqs);
     }
 
     if (errors) {

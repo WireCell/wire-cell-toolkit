@@ -33,7 +33,7 @@ Node* Factory::operator()(WireCell::INode::pointer wcnode)
     }
     auto mit = m_factory.find(wcnode->category());
     if (mit == m_factory.end()) {
-        l->critical("factory failed to find maker for category: {}", wcnode->category());
+        l->critical("factory failed to find maker for category: {}", (int)wcnode->category());
         THROW(ValueError() << errmsg{"failed to find maker"});
     }
     auto maker = mit->second;

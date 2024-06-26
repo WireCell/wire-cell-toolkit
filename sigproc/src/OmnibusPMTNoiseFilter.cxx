@@ -224,13 +224,15 @@ bool OmnibusPMTNoiseFilter::operator()(const input_pointer& in, output_pointer& 
         itraces.push_back(ITrace::pointer(trace));
     }
 
-    IFrame::trace_list_t indices(itraces.size());
-    for (size_t ind = 0; ind < itraces.size(); ++ind) {
-        indices[ind] = ind;
+    auto sframe = new Aux::SimpleFrame(in->ident(), in->time(), itraces, in->tick(), in->masks());
+    if (! m_outtag.empty()) {
+        IFrame::trace_list_t indices(itraces.size());
+        for (size_t ind = 0; ind < itraces.size(); ++ind) {
+            indices[ind] = ind;
+        }
+        sframe->tag_traces(m_outtag, indices);
     }
 
-    auto sframe = new Aux::SimpleFrame(in->ident(), in->time(), itraces, in->tick(), in->masks());
-    sframe->tag_traces(m_outtag, indices);
     out = IFrame::pointer(sframe);
 
     return true;

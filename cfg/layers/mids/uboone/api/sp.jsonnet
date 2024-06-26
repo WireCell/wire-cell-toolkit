@@ -12,16 +12,18 @@ local pg = low.pg;
 local frs = import "frs.jsonnet";
 
 
-function(services, params, options={}) function(anode)
+function(services, params, options={}) function(anode, name)
     local fr = frs(params).nf;
 
     local cer = params.ductor.binning {
         type: "ColdElecResponse",
+        name: name,
         data: params.elec,
     };
 
     local perchanresp = {
         type: "PerChannelResponse",
+        name: name,
         data: {
             filename: params.nf.chresp_file,
         }
@@ -29,6 +31,7 @@ function(services, params, options={}) function(anode)
 
     local sigproc_perchan = pg.pnode({
         type: "OmnibusSigProc",
+        name: name,
         data: {
             // This class has a HUGE set of parameters.  See
             // OmnibusSigProc.h for the list.  For here, for now, we
@@ -49,6 +52,7 @@ function(services, params, options={}) function(anode)
 
     local sigproc_uniform = pg.pnode({
         type: "OmnibusSigProc",
+        name: name,
         data: {
             anode: wc.tn(anode),
             dft: wc.tn(services.dft),
@@ -76,16 +80,17 @@ function(services, params, options={}) function(anode)
 
     local rawsplit = pg.pnode({
         type: "FrameSplitter",
-        name: "rawsplitter"
+        name: "rawsplitter"+name,
     }, nin=1, nout=2);
 
     local sigsplit = pg.pnode({
         type: "FrameSplitter",
-        name: "sigsplitter"
+        name: "sigsplitter"+name
     }, nin=1, nout=2);
 
     local chsel = pg.pnode({
         type: "ChannelSelector",
+        name: name,
         data: {
             // channels that will get L1SP applied
             channels: std.range(3566,4305),
@@ -135,14 +140,14 @@ function(services, params, options={}) function(anode)
     // from normal SP for input to L1SP
     local rawsigmerge = pg.pnode({
         type: "FrameMerger",
-        name: "rawsigmerge",
+        name: "rawsigmerge"+name,
         data: {
             rule: "replace",
 
             // note: the first two need to match the order of what data is
             // fed to ports 0 and 1 of this component in the pgraph below!
             mergemap: [
-                ["raw","raw","raw"],
+                ["","","raw"],
                 ["gauss","gauss","gauss"],
             ],
         }
@@ -153,14 +158,14 @@ function(services, params, options={}) function(anode)
     // to be found.
     local l1merge = pg.pnode({
         type: "FrameMerger",
-        name: "l1merge",
+        name: "l1merge"+name,
         data: {
             rule: "replace",
 
             // note: the first two need to match the order of what data is
             // fed to ports 0 and 1 of this component in the pgraph below!
             mergemap: [
-                ["raw","raw","raw"],
+                // ["raw","raw","raw"],
                 ["l1sp","gauss","gauss"],
                 ["l1sp","wiener","wiener"],
             ],
@@ -179,4 +184,4 @@ function(services, params, options={}) function(anode)
                  pg.edge(chsel, l1spfilter),
                  pg.edge(l1spfilter, l1merge),
              ],
-             name="L1SP")
+             name="L1SP"+name)

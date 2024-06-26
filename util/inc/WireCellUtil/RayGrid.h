@@ -12,6 +12,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/ObjectArray2d.h"
 #include "WireCellUtil/MultiArray.h"
+#include "WireCellUtil/Spdlog.h"
+
 #include <vector>
 #include <map>
 
@@ -167,5 +169,7 @@ namespace WireCell {
 
     }  // namespace RayGrid
 }  // namespace WireCell
+
+template <> struct fmt::formatter<WireCell::RayGrid::coordinate_t> : fmt::ostream_formatter {};
 
 #endif

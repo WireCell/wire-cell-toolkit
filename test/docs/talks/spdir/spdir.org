@@ -1,0 +1,523 @@
+#+title: Wire-Cell Signal Processing Directional Metrics (spdir)
+#+setupfile: ~/sync/talks/setup.org
+#+LATEX_HEADER: \usepackage{siunitx}
+
+
+
+* Stuff needed to rebuild this document                            :noexport:
+
+** arXiv hates ~wget~ so manually download https://arxiv.org/pdf/1802.08709.pdf
+
+** Run ~spdir~ so its plots can be included here
+
+#+begin_src shell
+if [ ! -d spdir-plots ] ; then
+../../../scripts/spdir --directory spdir-plots all
+fi
+#+end_src
+
+#+RESULTS:
+
+This takes a while and some warnings can be expected:
+
+#+begin_example
+OptimizeWarning: Covariance of the parameters could not be estimated
+#+end_example
+
+Attempt to fit a metric failed.
+
+#+begin_example
+error: (Weights sum to zero, can't be normalized) failed to calculate metrics for pln=0 ch=slice(0, 800, None) splat_filename='pdsp-splats-p0-txz82deg-ty90deg.npz' signal_filename='pdsp-signals-simhi-sphi-p0-txz82deg-ty90deg.npz'
+#+end_example
+
+Attempt to bracket the distribution failed.
+
+Failures results in 100% bias/res/ineff.
+
+** Make the DAG visualizations 
+
+#+begin_src shell
+../../../scripts/spdir --configfile spdir-dag-one-angle.cfg --dag all > spdir-dag-one-angle.dot
+dot -Tpdf -o spdir-dag-one-angle.pdf spdir-dag-one-angle.dot
+dot -Tpdf -o spdir-dag.pdf spdir-dag.dot
+#+end_src
+
+#+RESULTS:
+
+
+** Get 2D/q1D FR plots
+
+#+begin_src shell
+wget -q -c https://raw.githubusercontent.com/LS4GAN/toyzero/master/plots/fake-resps-diagnostic.png
+wget -q -c https://raw.githubusercontent.com/LS4GAN/toyzero/master/plots/real-resps-diagnostic.png
+#+end_src
+
+#+RESULTS:
+
+** UVCGAN comes back.
+
+The UVCGAN data comes back not in WCT frame file format so needs an "import" step done by ~wirecell-ls4gan npz-to-wct~.  Besides array reformatting, UVCGAN format drops any ~tickinfo~.
+
+Checking ~tickinfo~ I sent digits to UVCGAN with $t_0 = -63897.76357827$ and $tbin=0$.  Even though I kept working on this while UCVGAN was processing, rerunning still makes digits with this ~tickinfo~.  Fix this by adding ~wirecell-util framels~ to spit out a JSON summary of the frame and update ~spdir~ so that it uses this to form a ~tickinfo~ to give to ~wirecell-ls4gan npz-to-wct~.
+
+** NF is bad
+
+It seems PDSP NF kills collection channels hit by the tracks.  Probably bad-channel list.  Remove it and rerun SP on both ~digits~ and ~uvcgan~.  To avoid rerunning sim, use
+
+#+begin_example
+$ ../test/scripts/spdir --configfile ../spdir-few.json  --config detector=pdsp -p --touch all
+$ rm pdsp-mplots* pdsp-signals* pdsp-plots* pdsp-metrics*
+$ ../test/scripts/spdir --configfile ../spdir-few.json  --config detector=pdsp --config uvcgan_output=uvcgan-output -p all
+#+end_example
+
+Once that looks okay, remove the ~--configfile~ to do all angles ("few" still does 251 jobs, then 1007 more with it removed).
+
+
+
+
+* ~spdir~ - SP metrics as a function of track direction
+
+#+begin_quote
+~spdir~ provides a *standard calculator* of *efficiency, bias and resolution* of Wire-Cell *signal processing* as a function of *track direction*.
+#+end_quote
+
+- Motivation
+
+- Calculation overview
+
+- Results on PDSP
+
+- Running the process
+
+- Future work
+
+
+* Motivation for an ~spdir~ process
+
+A few needs from different areas happened to coincide:
+
+- \small People started to reimplement MicroBooNE SP-1 paper's "money plot" figure 30 to new detectors.
+
+- Production of this plot in a "standard" way for multiple detectors and across different WCT software versions was seen as a very strong regression test.
+
+- The  final LS4GAN LDRD paper using LArTPC needs some "physics level" comparisons between nominal simulation and UVCGAN-translated and the ~spdir~ metrics are a very good match for that.
+
+Though each of these adds its own complexity, they are largely overlapping and so a unified, general approach has been pursued.
+
+
+* ~spdir~ process overview
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.15
+:END:
+
+\includegraphics[width=\textwidth]{spdir-dag.pdf}
+
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.8
+:END:
+
+- Generate *depos* from *ideal line tracks* at *different angles*.
+- Apply *drift* and *splat* with proper smearing to get "SP truth denominator".
+- Apply *FR* + *sim* (signal+noise) to *drift* to get *digits*.
+- Translate *nominal* digits with LS4GAN to get *uvcgan* digits.
+- Apply *FR* + *sigproc* both types of digits get *signals*.
+- Compare *splat* to *signals* to form *metrics* for given *plane and track angle*.
+- Collect *metrics* across a configuration and make the "money plot".
+
+$\leftarrow$ conceptual DAG, actual DAG for one track angle $\downarrow$
+
+\includegraphics[width=0.7\textwidth]{spdir-dag-one-angle.pdf}
+
+
+* Three field responses
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.8
+:END:
+
+\small
+
+|              FR usage: | detector | sigproc |
+|                    <r> |      <r> | <l>     |
+|------------------------+----------+---------|
+|            real nature |       3D | 2D      |
+|            mock nature |       2D | q1D     |
+|------------------------+----------+---------|
+|      unnaturally ideal |       2D | 2D      |
+| very unnaturally ideal |      q1D | q1D     |
+|------------------------+----------+---------|
+
+
+*q1D* is *intentionally degraded* from 2D: zero all but central wire region. 
+
+- \scriptsize FR variation still exists across the central wire region, thus "q" for "quasi".
+
+- Consider ~spdir~ metrics using *mock nature* as a *proxy* for *real nature*.
+
+- Historically we consider *unnaturally ideal* FR pairings. 
+
+- Cover all combos of q1D/2D, $2 \times 2$ multiplier to number of jobs.
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.18
+:END:
+
+
+\includegraphics[width=\textwidth]{real-resps-diagnostic.png}
+
+\includegraphics[width=\textwidth]{fake-resps-diagnostic.png}
+
+
+* Extra requirements for LS4GAN 
+
+LS4GAN translates sim-q1D $\to$ sim-2D$'$ as a *proxy* for translating sim-2D $\to$ det-3D$'$.
+
+- Manually export ADC frames from ~spdir~ to UVCGAN environment.
+- UVCGAN does *cross translation* (q1D $\leftrightarrow$ 2D).
+- Import translated ADC frames back to ~spdir~.
+- For each translated FR, SP with either FR applied.
+
+Results in another $2 \times 2$ multiplier of ~spdir~ variants.
+
+
+* Single track, no LS4GAN ~spdir~ sub-DAG
+
+\includegraphics[width=\textwidth]{spdir-dag-one-angle.pdf}
+
+#+begin_center
+\tiny just for reference
+#+end_center
+
+
+* Extend MicroBooNE SP-1 paper's track direction angle convention
+
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.6
+:END:
+
+- \small MB defines angles in the "global" coordinate system.
+  - Coincident with the W-plane coordinate system.
+- MB uses same track for metrics from all 3 planes.
+  - U/V's wire-track angle different than W's.
+- ~spdir~ also defines track angles in each wire plane coordinate system.
+  - Calculates metrics using both conventions.
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.4
+:END:
+
+\includegraphics[width=\textwidth,page=17,clip,trim=4.5cm 10.5cm 5cm 11.5cm]{1802.08709.pdf}
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 1.0
+:END:
+
+
+Can configure any angles, but default to MB's choice:
+- $\theta_y = 90^\circ$ always (though it is possible to vary this).
+- $\theta_{xz} \in \{0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89\}^\circ$.
+
+
+* Result plots
+
+Two basic types of sets of plots:
+
+- Metrics vs track angle in global or wire-plane coordinates.
+
+- Several detailed metrics plots for a given track angle and wire-plane coordinate system.
+
+Both have subtypes depending on sim/SP FRs
+- "mock reality" (sim-2D/sp-q1D) vs "unnaturally ideal" (sim-2D/sp-2D)
+
+Current set of plots are all for ProtoDUNE-SP.
+- "unnaturally ideal" and "global coordinates" is equivalent to MB "money plot"
+
+Some examples $\longrightarrow$
+
+
+* Unnaturally ideal: sim-2D, sp-2D
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-sphi-wirecoords.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-sphi-globalcoords.pdf}
+
+
+
+
+* Mock reality: sim-2D, sp-q1D
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-splo-wirecoords.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-splo-globalcoords.pdf}
+
+
+* Unnaturally ideal: sim-2D, sp-2D, $3^\circ$ global angles - details
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+#+begin_export latex
+\only<1>{\includegraphics[page=1,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz3deg-ty90deg.pdf}}
+\only<2>{\includegraphics[page=2,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz3deg-ty90deg.pdf}}
+\only<3>{\includegraphics[page=3,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz3deg-ty90deg.pdf}}
+\only<4>{\includegraphics[page=4,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz3deg-ty90deg.pdf}}
+\only<5>{\includegraphics[page=5,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz3deg-ty90deg.pdf}}
+#+end_export
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-sphi-globalcoords.pdf}
+
+
+
+
+
+* Unnaturally ideal: sim-2D, sp-2D, $30^\circ$ global angles - details
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+#+begin_export latex
+\only<1>{\includegraphics[page=1,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz30deg-ty90deg.pdf}}
+\only<2>{\includegraphics[page=2,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz30deg-ty90deg.pdf}}
+\only<3>{\includegraphics[page=3,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz30deg-ty90deg.pdf}}
+\only<4>{\includegraphics[page=4,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz30deg-ty90deg.pdf}}
+\only<5>{\includegraphics[page=5,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz30deg-ty90deg.pdf}}
+#+end_export
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-sphi-globalcoords.pdf}
+
+
+
+
+
+* Unnaturally ideal: sim-2D, sp-2D, $89^\circ$ global angles - details
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+#+begin_export latex
+\only<1>{\includegraphics[page=1,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz89deg-ty90deg.pdf}}
+\only<2>{\includegraphics[page=2,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz89deg-ty90deg.pdf}}
+\only<3>{\includegraphics[page=3,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz89deg-ty90deg.pdf}}
+\only<4>{\includegraphics[page=4,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz89deg-ty90deg.pdf}}
+\only<5>{\includegraphics[page=5,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-sphi-p2-txz89deg-ty90deg.pdf}}
+#+end_export
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-sphi-globalcoords.pdf}
+
+
+
+
+
+* Mock reality: sim-2D, sp-q1D (repeated)
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-splo-wirecoords.pdf}
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-splo-globalcoords.pdf}
+
+
+* Mock reality: sim-2D, sp-q1D, $10^\circ$ global angles - details
+
+**                                                                :B_columns:
+:PROPERTIES:
+:BEAMER_env: columns
+:END:
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+#+begin_export latex
+\only<1>{\includegraphics[page=1,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-splo-p2-txz10deg-ty90deg.pdf}}
+\only<2>{\includegraphics[page=2,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-splo-p2-txz10deg-ty90deg.pdf}}
+\only<3>{\includegraphics[page=3,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-splo-p2-txz10deg-ty90deg.pdf}}
+\only<4>{\includegraphics[page=4,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-splo-p2-txz10deg-ty90deg.pdf}}
+\only<5>{\includegraphics[page=5,width=\textwidth]{spdir-plots/pdsp-mplots-simhi-splo-p2-txz10deg-ty90deg.pdf}}
+#+end_export
+
+***                                                                   :BMCOL:
+:PROPERTIES:
+:BEAMER_col: 0.5
+:END:
+
+\includegraphics[width=\textwidth]{spdir-plots/pdsp-plots-simhi-splo-globalcoords.pdf}
+
+
+
+
+
+* Running ~spdir~
+
+\small
+#+begin_example
+cd /path/to/wire-cell-python
+pip install -e .
+pip install snakemake
+
+# for convenience to find "spdir"
+PATH=/path/to/wire-cell-toolkit/test/scripts:$PATH
+
+spdir --directory spdir all
+ls spdir/ | wc -l
+1060
+#+end_example
+
+* LS4GAN translation
+
+LS4GAN UVCGAN-translations are optional and require external processing.
+
+#+begin_example
+tar -cvf spdir-pdsp-digits.tar spdir/pdsp-digits-sim*.npz
+#+end_example
+
+Send ~spdir-pdsp-digits.tar~ to Dmitrii for UVCGAN-translation and receive results, unpack and complete the ~spdir~ DAG execution.
+
+#+begin_example
+tar -C spdir -xf translations-from-dmitrii.tar 
+spdir --directory spdir ls4gan
+#+end_example
+
+
+* Programs used by ~spdir~
+
+~spdir~ is a [[https://snakemake.readthedocs.io/][Snakemake]] file using:
+
+- ~wirecell-gen detlinegen~ generate tracks vs angle (Dmitrii).
+- ~wirecell-sigproc frzero~ construct degraded q1d FR.
+- ~wirecell-test ssss-metrics~ write JSON metric file for each track/variant.
+- ~wirecell-test plot-metrics~ plot set of JSON metric files.
+- ~wirecell-test plot-ssss~ metric detailed plots
+- ~wire-cell -c omnijob.jsonnet~ a generic, do-all job driven by CLI args
+  - requires detector support in ~cfg/layers/~ scheme (pdsp and uboone so far).
+
+
+* Future work
+
+** With PDSP
+
+- Check sign convention with MB SP-1 metrics.
+- Switch from Gaussian fit $\mu/\sigma$ to avg/RMS stats to avoid fit failures.
+- Splat extra smearing is from a "Morse analysis" assuming only 2D sim/SP FR.
+  - Should repeat with mixed $2\times 2$ sim/SP FRs.
+
+** With MicroBooNE
+
+- Apply to ~uboone~, which has existing ~omnijob.jsonnet~ config support.
+- Make quantitative comparison with MB SP-1 plot.
+
+** Other detectors
+
+- Develop WCT configuration and run on SBND, PDHD/PDVD, DUNEFD, etc.
+  - Likely I need help from detector/WCT experts.

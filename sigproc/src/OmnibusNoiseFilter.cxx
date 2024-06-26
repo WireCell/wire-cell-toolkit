@@ -242,8 +242,10 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
     for (size_t ind = 0; ind < itraces.size(); ++ind) {
         indices[ind] = ind;
     }
-    sframe->tag_traces(m_outtag, indices);
-    sframe->tag_frame("noisefilter");
+    if (! m_outtag.empty()) {
+        sframe->tag_traces(m_outtag, indices);
+    }
+    sframe->tag_frame("noisefilter"); // fixme: this is unnecessary and should be removed 
     outframe = IFrame::pointer(sframe);
 
     log->debug("call={} output frame: {}", m_count, Aux::taginfo(outframe));

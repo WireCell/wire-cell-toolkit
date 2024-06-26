@@ -1,0 +1,477 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+#
+# This workflow ultimately produces "standard" plots showing per-plane SP
+# metrics as a function of track directions for a given detector.
+#
+# CAVEAT: only canonical detector names (pdsp, uboone) supported by cfg/layers/ can be targeted.
+#
+# Intermidate file names follow a pattern that allows expressing a variety of combinations of processing stages.
+# 
+#  {detector}-{tier}-{modifiers}-p{plane}-txz{txz}deg-ty{ty}deg.{ext}'
+#
+# - detector :: canonical detector name.
+# - variant :: see below
+# - plane :: the number of the wire plane (0,1,2) that is targeted.
+# - txz :: the theta_xz in targeted wire plane coordinates.
+# - ty :: the theta_y in targeted wire plane coordinates.
+#
+# The "variant" expresses the path-dependent content.  It conists of a "tier" and zero or more "tier modifiers".
+#
+# - depos :: original energy deposits of a the track at the given angles
+# - drifts :: depos drifted to the response plane
+# - splats :: the drifts "smeared and splatted" to the channels - FIXME: smearing assumes 2D
+# - digits :: ADC waveforms, requires "-sim{lo,hi}" modifier indicating if lo (q1d) or hi (2d) FR was used.
+# - uvcgan :: ADC waveforms translated by UVCGAN, requires "-tgt{lo,hi}" modifier indicating the target domain.
+# - signal :: Signal waveforms from SP requires either a digit or uvcgan modifier and a "-sp{lo,hi}" modifier
+# - metrics :: the metrics file for a given variant and angle. requires digits/uvcgan and signal modifiers
+# - mplots :: the plot file for a given variant and angle pair. requires digits/uvcgan and signal modifiers
+# - plots :: the plot file for a given variant across all angles.  requires digits/uvcgan and signal modifiers
+#
+# Note a *-plot.pdf file holds plots over all angles for a given variant while
+# *-plot-*.pdf holds plots for a given variant and angle pair.
+#
+# Suggested running:
+#
+#     $ spdir --config detector=pdsp --directory=pdsp-spdir
+#     $ spdir --config detector=uboone --directory=uboone-spdir
+#
+# This script requires snakemake.  Suggest to install inside a venv:
+#
+#     pip install snakemake
+#
+# Note: as of 2024-02-14 an older version of pulp is required.  If you get
+# errors mentioning this package try:
+#
+#     pip install 'pulp<2.8'
+#
+# TODO:
+#
+# - [ ] the smearing used by splat is tied to the FR used in the "morse"
+#       running.  For now we use smearing determined from 2D regardless what we
+#       compare to.
+# 
+# - [ ] extend support for uboone.
+
+# Provide hard-wired configuration defaults.  User may over ride them with a
+# config file or CLI config parameters.
+for k,v in dict(
+        # The canonical detector name.  Future may accept a list.
+        detector="pdsp",
+        # Matched arrays for track angles.  
+        # Angle from Y axis to track direction
+        theta_y_deg=( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
+        # Angle from X axis to projection of track into X-Z plane
+        theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 ),
+        # The plane numbers.  Probably universal.
+        planes = [0,1,2],
+        # location of uvcgan returns.  Set on CLI: --config uvcgan_output=....
+        # uvcgan_output = "uvcgan-output".  If this is left "None" then UVCGAN
+        # related subgraphs are not built.
+        uvcgan_output = None,
+
+).items():
+    config.setdefault(k,v)
+
+import json
+
+# Break out some config into simple vars
+thetas = list(zip(config['theta_xz_deg'], config['theta_y_deg']))
+txz = config['theta_xz_deg']
+ty =  config['theta_y_deg']
+nang = len(ty)
+planes = config['planes']
+gens = ['sim']
+if config.get('uvcgan_output', None):
+    gens=['sim','tgt']
+
+def debug(*args, **kwds):
+    return # MAKE QUIET
+    import sys
+    sys.stderr.write(*args, **kwds)
+    sys.stderr.write('\n')
+
+class FailsafeDict(dict):
+    def __getitem__(self, item):
+        try:
+            return super().__getitem__(item)
+        except KeyError:
+            return "{" + str(item) + "}"
+def fname(tier=None, ext='npz', **kwds):
+    '''
+    Generate standard file name.   Tier required
+    '''
+    if tier is None:
+        raise ValueError("tier must be given")
+
+    pre='{detector}-{tier}'
+    post='p{plane}-txz{txz}deg-ty{ty}deg.{ext}'
+    simfr='sim{simfr}'            # nominal simulation
+    tgtfr='tgt{simfr}'            # uvcgan translation, tgt means "target domain"
+    genfr='{gen}{simfr}'          # wildcard match on "sim" or "tgt"
+    sp='sp{spfr}'
+    plotpost='{coords}coords.{ext}'
+    if tier in ('depos', 'drifts', 'splats'):
+        parts = [pre, post]
+    elif tier in ('digits', ):
+        parts = [pre, simfr, post]
+    elif tier in ('uvcgan', ):
+        parts = [pre, tgtfr, post]
+    elif tier in ('signals','metrics','mplots'):
+        parts = [pre, genfr, sp, post]
+    elif tier in ('plots',):
+        parts = [pre, genfr, sp, plotpost]
+    else:
+        raise ValueError(f'unknown tier: {tier}')
+
+    pattern = '-'.join(parts)
+
+    dat = FailsafeDict(kwds, tier=tier, ext=ext)
+    ret = pattern.format_map(dat)
+    debug(f'fname({tier=},{ext=},{kwds=})\n\t{ret}')
+
+    return ret
+
+def expand_thetas(**kwds):
+    return [fname(txz=txz,ty=ty,**kwds) for txz,ty in thetas]
+
+def expand_detector(**kwds):
+    debug(f'expand_detector({kwds=})')
+    got = expand(expand_thetas(**kwds), plane=planes, detector=[config['detector']], allow_missing=True)
+    return got
+
+def expand_nodetector(**kwds):
+    return expand(expand_thetas(**kwds), plane=planes, detector=['{detector}'])
+
+
+def tracking_params(w):
+    '''
+    Make detector-specific args for detlinegen.
+    '''
+    # MB wires are near X=0 and volume extends to +2548mm.
+    if w.detector == "uboone":
+        return "--offset '1*m,0*m,0*m'"
+    if w.detector == "pdsp":
+        return "--offset '-1*m,0*m,0*m'"
+    return ""
+
+rule tracking:
+    output:
+        depos=fname(tier='depos'),
+        meta=fname(tier='depos', ext='json'),
+    params:
+        offset=tracking_params
+    shell: '''
+    wirecell-gen detlinegen \
+    {params.offset} \
+    --detector={wildcards.detector} \
+    --plane={wildcards.plane} \
+    --angle-coords=wire-plane \
+    --theta_xz="{wildcards.txz}*deg" \
+    --theta_y="{wildcards.ty}*deg" \
+    --output_depos {output.depos} \
+    --output_meta {output.meta}
+    '''
+
+rule all_depos:
+    input:
+        expand_detector(tier='depos')
+
+
+# PDSP period is broken.  We want to import the FR file anyways, so fix the
+# period along the way.  For non-PDSP we effectively copy it in as-is.
+def import_fr_params(w):
+    if w.detector == 'pdsp':
+        return '-P "100*ns"'
+    return ''
+
+rule import_fr:
+    output:
+        "{detector}-fields-hi.json.bz2"
+    params:
+        import_fr_params
+    shell: '''
+    wirecell-resp condition {params} -o {output} {wildcards.detector}
+    '''
+
+rule make_q1dfr:
+    input:
+        "{detector}-fields-hi.json.bz2"
+    output:
+        "{detector}-fields-lo.json.bz2"
+    shell: '''
+    wirecell-sigproc frzero -n 0 -o {output} {input}
+    '''
+
+rule all_frs:
+    input:
+        expand("{detector}-fields-{fr}.json.bz2", detector=[config['detector']], fr=['lo','hi'])
+        
+
+# Also makes splat.
+# fixme: The extra smearing in splat is tied to the FR which we currently ignore.
+rule drift:
+    input:
+        cfg=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+        depos=fname(tier='depos'),
+        fr='{detector}-fields-hi.json.bz2'
+    output:
+        drifts=fname(tier='drifts'),
+        splats=fname(tier='splats'),
+        log=fname(tier='drifts',ext='log')
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A tasks=drift,splat \
+    -A input={input.depos} \
+    -A detector={wildcards.detector} \
+    -A variant=spdir_hifr \
+    --tla-code output='{{drift:"{output.drifts}",splat:"{output.splats}"}}'
+    '''
+
+# A prototypical DAG for the drift job.  Bogus file names are used as
+# documentation placeholders.
+rule drift_dag:
+    input:
+        workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+    output:
+        '{detector}-drift-dag.pdf'
+    shell: '''
+    wirecell-pgraph dotify \
+    -A tasks=drift,splat \
+    -A input=depos.npz \
+    -A detector={wildcards.detector} \
+    -A variant=spdir_hifr \
+    -A output='{{drift:"drifts.npz",splat:"splats.npz"}}' \
+    {input} {output}
+    '''
+    
+
+rule all_drifts:
+    input:
+        expand_detector(tier='drifts')
+
+
+rule simulate:
+    input:
+        cfg=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+        drifts=rules.drift.output.drifts,
+        fr='{detector}-fields-{simfr}.json.bz2'
+    output:
+        digits=fname(tier='digits'),
+        log=fname(tier='digits',ext='log')
+    wildcard_constraints:
+        simfr='lo|hi',
+        gen='sim'
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A tasks=sim \
+    -A input={input.drifts} \
+    -A detector={wildcards.detector} \
+    -A variant=spdir_{wildcards.simfr}fr \
+    --tla-code output='{{sim:"{output.digits}"}}'
+    '''
+
+rule simulate_dag:
+    input:
+        workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+    output:
+        '{detector}-simulate-dag.pdf'
+    shell: '''
+    wirecell-pgraph dotify \
+    -A tasks=sim \
+    -A input=drifts.npz \
+    -A detector={wildcards.detector} \
+    -A variant=spdir_hifr \
+    -A output='digits.npz' \
+    {input} {output}
+    '''
+
+rule all_digits:
+    input:
+        expand(expand_detector(tier='digits'), simfr=['lo','hi'])
+
+
+rule sigproc:
+    input:
+        cfg=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+        digits=rules.simulate.output.digits,
+        fr='{detector}-fields-{spfr}.json.bz2'
+    output:
+        signals=fname(tier='signals'),
+        log=fname(tier='signals', ext='log')
+    wildcard_constraints:
+        simfr='lo|hi',
+        gen="sim"
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A tasks=sp \
+    -A input={input.digits} \
+    -A detector={wildcards.detector} \
+    -A variant=spdir_{wildcards.spfr}fr \
+    --tla-code output='{{sp:"{output.signals}"}}'
+    '''
+
+# We get files back from UVCGAN as:
+# 
+#   {uvcgan_output}/tgthi/pdsp-uvcgan-tgthi-p0-txz30deg-ty90deg.npz
+#
+# and etc for tgtlo and need to convert them to WCT format.  Part of this
+# conversion involves digging out the t0 of the "digits" file that was exported
+# for UVCGAN translation.
+#
+# CRITICAL: to be hermetic, one must freeze the output directory and all code
+# while data is out for translation!
+if config.get('uvcgan_output', None):
+    uvcgan_output=config['uvcgan_output']
+    rule import_uvcgan:
+        input:
+            digits = fname(tier='digits', gen='tgt'),
+            uvcgan = uvcgan_output + '/tgt{simfr}/' + fname(tier='uvcgan', gen='tgt')
+        output:
+            fname(tier='uvcgan', gen='tgt')
+        wildcard_constraints:
+            simfr='lo|hi',
+            gen="tgt"
+        run:
+            # No way to get raw text from shell()?
+            jtext = '\n'.join(shell('wirecell-util framels {input.digits}', iterable=True))
+            print(f'{jtext=}')
+            jdat = json.loads(jtext)
+            ti = '{t0},{tick},{tbin}'.format(**jdat)
+            shell(f"wirecell-ls4gan npz-to-wct --tinfo '{ti}' -n '*' -o {output} {input.uvcgan}")
+
+    rule sigproc_uvcgan:
+        input:
+            cfg=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+            digits=fname(tier='uvcgan', gen='tgt'),
+            fr='{detector}-fields-{spfr}.json.bz2'
+        output:
+            signals=fname(tier='signals', gen='tgt'),
+            log=fname(tier='signals', gen='tgt', ext='log')
+        wildcard_constraints:
+            simfr='lo|hi',
+            gen="tgt"
+        shell: '''
+        wire-cell -c {input.cfg} -l {output.log} -L debug \
+        -A tasks=sp \
+        -A input={input.digits} \
+        -A detector={wildcards.detector} \
+        -A variant=spdir_{wildcards.spfr}fr \
+        --tla-code output='{{sp:"{output.signals}"}}'
+        '''
+
+
+rule sigproc_dag:
+    input:
+        workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+    output:
+        '{detector}-sigproc-dag.pdf'
+    shell: '''
+    wirecell-pgraph dotify \
+    -A tasks=nf,sp \
+    -A input=digits.npz \
+    -A detector={wildcards.detector} \
+    -A variant=spdir_hifr \
+    -A output='{{sp:"sigproc.npz"}}' \
+    {input} {output}
+    '''
+    
+
+rule all_signals:
+    input:
+        expand(expand_detector(tier='signals'), gen=gens, simfr=['lo','hi'], spfr=['lo','hi'])
+
+
+rule metrics:
+    input:
+        splats =fname(tier='splats'),
+        signals=fname(tier='signals'),
+        depos  =fname(tier='depos', ext='json')
+    output:
+        metrics=fname(tier='metrics', ext='json')
+    shell: '''
+    wirecell-test ssss-metrics \
+      --output {output.metrics} \
+      --params {input.depos} \
+      {input.splats} {input.signals}
+    '''
+
+rule all_metrics:
+    input:
+        expand(expand_detector(tier='metrics', ext='json'), gen=gens, simfr=['lo','hi'], spfr=['lo','hi'])
+    
+
+def plots_args(w):
+    'Generate additional args for plots command'
+    fr = dict(lo='q1D', hi='2D')
+    simfr = fr[w.simfr]
+    spfr = fr[w.spfr]
+    gen = 'sim'
+    if w.gen == 'tgt':
+        gen = 'gan'
+    args = f"--title '{w.detector.upper()} {gen}:{simfr} SP:{spfr}'"
+    if w.coords == "global":
+        args += ' --coordinate-plane=2'
+    return args
+        
+rule plots:
+    input:
+        metrics=expand_detector(tier='metrics', ext='json')
+    output:
+        metrics=fname(tier='plots', ext='pdf')
+    params:
+        args=plots_args
+    wildcard_constraints:
+        simfr='lo|hi',
+        gen='sim|tgt'
+    shell: '''
+    wirecell-test plot-metrics {params.args} -o {output} {input}
+    '''
+
+
+rule all_plots:
+    input:
+        expand(fname(detector=config['detector'], tier='plots', ext='pdf'),
+               gen=gens, simfr=['lo','hi'], spfr=['lo','hi'], coords=['wire','global'])
+rule all_plots_gan:
+    input:
+        expand(fname(detector=config['detector'], tier='plots', ext='pdf'),
+               gen=['tgt'], simfr=['lo','hi'], spfr=['lo','hi'], coords=['wire','global'])
+        
+
+rule metric_plots:
+    input:
+        splats =fname(tier='splats'),
+        signals=fname(tier='signals')
+    output:
+        plots=fname(tier='mplots', ext='pdf')
+    shell: '''
+    wirecell-test plot-ssss --output {output.plots} {input.splats} {input.signals}
+    '''
+
+
+rule all_mplots:
+    input:
+        expand(expand_detector(tier='mplots', ext='pdf'), gen=gens, simfr=['lo','hi'], spfr=['lo','hi'])
+
+rule all_mplots_gan:
+    input:
+        expand(expand_detector(tier='mplots', ext='pdf'), gen=['tgt'], simfr=['lo','hi'], spfr=['lo','hi'])
+
+rule all:
+    input:
+        rules.all_mplots.input, rules.all_plots.input
+
+
+rule all_gan:
+    input:
+        rules.all_mplots_gan.input, rules.all_plots_gan.input
+
+rule all_dags:
+    input:
+        expand(rules.drift_dag.output, detector=[config['detector']]),
+        expand(rules.simulate_dag.output, detector=[config['detector']]),
+        expand(rules.sigproc_dag.output, detector=[config['detector']])
+        
+

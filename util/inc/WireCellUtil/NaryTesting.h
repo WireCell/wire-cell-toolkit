@@ -4,6 +4,7 @@
 #define WIRECELLUTIL_NARYTESTING
 
 #include "WireCellUtil/NaryTreeNotified.h"
+#include "WireCellUtil/Spdlog.h"
 
 namespace WireCell::NaryTesting {
 
@@ -53,5 +54,6 @@ namespace WireCell::NaryTesting {
 
 }
 
+template <> struct fmt::formatter<WireCell::NaryTesting::Introspective> : fmt::ostream_formatter {};
 
 #endif

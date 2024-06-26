@@ -7,7 +7,9 @@
 
 #include <string>
 
-WIRECELL_FACTORY(FrameMerger, WireCell::SigProc::FrameMerger, WireCell::IFrameJoiner, WireCell::IConfigurable)
+WIRECELL_FACTORY(FrameMerger,
+                 WireCell::SigProc::FrameMerger,
+                 WireCell::INamed, WireCell::IFrameJoiner, WireCell::IConfigurable)
 
 using namespace WireCell;
 
@@ -15,16 +17,16 @@ Configuration SigProc::FrameMerger::default_configuration() const
 {
     Configuration cfg;
 
-    // The merge map specifies a list of triples of tags.  The first
-    // tag in the pair corresponds to a trace tag on the first frame,
-    // and likewise the second.  The third is a tag that will be
-    // placed on the merged set of traces in the output frame.  The
-    // merge is performed considering only traces in the two input
-    // frames that respectively match their tags.  As tags may have
-    // overlapping sets of traces, it is important to recognize that
-    // the merge is progressive and in order of the merge map.  If the
-    // merge map is empty then all traces in frame 1 are merged with
-    // all traces in frame 2 irrespective of any tags.
+    // The merge map specifies a list of triples of tags.  The first (second)
+    // tag is compared to trace tags in the frame from port 0 (1).  Either or
+    // both of the first two tags may be empty strings which match untagged
+    // traces.  The third tag placed on the merged set of traces from these two
+    // input in the output frame.  The merge is performed considering only
+    // traces in the two input frames that respectively match their tags.  As
+    // tags may have overlapping sets of traces, it is important to recognize
+    // that the merge is progressive and in order of the merge map.  If the
+    // merge map is empty then all traces in frame 1 are merged with all traces
+    // in frame 2 irrespective of any tags.
     cfg["mergemap"] = Json::arrayValue;
 
     // The rule determins the algorithm employed in the merge.
@@ -49,12 +51,15 @@ bool SigProc::FrameMerger::operator()(const input_tuple_type& intup, output_poin
     auto one = std::get<0>(intup);
     auto two = std::get<1>(intup);
     if (!one or !two) {
-        std::cerr << "FrameMerger: EOS\n";
+        log->debug("EOS at call={}", m_count++);
         return true;
     }
 
     auto jmergemap = m_cfg["mergemap"];
     const int nsets = jmergemap.size();
+
+    log->debug("call={} frame1: {}", m_count, WireCell::Aux::taginfo(one));
+    log->debug("call={} frame2: {}", m_count, WireCell::Aux::taginfo(two));
 
     // collect traces into a vector of vector whether we are dealling
     // with all traces or honoring tags.
@@ -62,10 +67,8 @@ bool SigProc::FrameMerger::operator()(const input_tuple_type& intup, output_poin
     if (!nsets) {
         tracesv1.push_back(Aux::untagged_traces(one));
         tracesv2.push_back(Aux::untagged_traces(two));
-        std::cerr << "FrameMerger: see frame: " << one->ident() << " no tags, whole frame\n";
     }
     else {
-        std::cerr << "FrameMerger: see frame: " << one->ident() << " with tags:\n";
         for (int ind = 0; ind < nsets; ++ind) {
             auto jtags = jmergemap[ind];
             std::string tag1 = jtags[0].asString();
@@ -73,9 +76,10 @@ bool SigProc::FrameMerger::operator()(const input_tuple_type& intup, output_poin
             std::string tag3 = jtags[2].asString();
             tracesv1.push_back(Aux::tagged_traces(one, tag1));
             tracesv2.push_back(Aux::tagged_traces(two, tag2));
-            std::cerr << "\ttags: " << tag1 << "[" << tracesv1.back().size() << "]"
-                      << " + " << tag2 << "[" << tracesv2.back().size() << "]"
-                      << " -> " << tag3 << "\n";
+            log->debug("call={} tags: {}[{}] + {}[{}] -> {}",
+                       m_count,
+                       tag1, tracesv1.back().size(),
+                       tag2, tracesv2.back().size(), tag3);
         }
     }
 
@@ -136,6 +140,8 @@ bool SigProc::FrameMerger::operator()(const input_tuple_type& intup, output_poin
     return true;
 }
 
-SigProc::FrameMerger::FrameMerger() {}
+SigProc::FrameMerger::FrameMerger()
+    : Aux::Logger("FrameMerger", "sigproc")
+{}
 
 SigProc::FrameMerger::~FrameMerger() {}

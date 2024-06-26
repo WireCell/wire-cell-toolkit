@@ -29,6 +29,7 @@ const double height = 100;
 
 #include "raygrid_dump.h"
 
+
 static std::vector<Point> make_points(std::default_random_engine& generator, double x)
 {
     std::vector<Point> points;
@@ -151,7 +152,7 @@ struct Chirp {
             for (layer_index_t layer = 0; layer < nlayers; ++layer) {
                 const auto& astrip = astrips[layer];
                 if (layer == c.first.layer) {
-                    info("L{} A: {} {}", layer, astrip, c);
+                    info("L{} A: {} {},{}", layer, astrip, c.first, c.second);
                     if (astrip.on(c.first.grid)) {
                         info("\ton with found={} nlayers={}", found, nlayers);
                         ++found;
@@ -161,7 +162,7 @@ struct Chirp {
                     break;
                 }
                 if (layer == c.second.layer) {
-                    info("L{} A: {} {}", layer, astrip, c);
+                    info("L{} A: {} {},{}", layer, astrip, c.first, c.second);
                     if (astrip.on(c.second.grid)) {
                         info("\ton with found={} nlayers={}", found, nlayers);
                         ++found;
@@ -173,7 +174,7 @@ struct Chirp {
                 const double ploc = coords.pitch_location(c.first, c.second, layer);
                 const int pind = coords.pitch_index(ploc, layer);
 
-                info("L{} A: {} pind={} ploc={} {}", layer, astrip, pind, ploc, c);
+                info("L{} A: {} pind={} ploc={} {},{}", layer, astrip, pind, ploc, c.first, c.second);
 
                 if (astrip.in(pind)) {
                     info("\tin with found={} nlayers={}", found, nlayers);

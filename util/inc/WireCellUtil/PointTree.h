@@ -319,4 +319,6 @@ namespace WireCell::PointCloud::Tree {
 
 }
 
+template <> struct fmt::formatter<WireCell::PointCloud::Tree::Scope> : fmt::ostream_formatter {};
+
 #endif

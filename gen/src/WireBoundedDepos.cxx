@@ -9,20 +9,28 @@
 
 #include <boost/range.hpp>
 
-#include <sstream>
-#include <iostream>
 
-WIRECELL_FACTORY(WireBoundedDepos, WireCell::Gen::WireBoundedDepos, WireCell::IDrifter, WireCell::IConfigurable)
+WIRECELL_FACTORY(WireBoundedDepos,
+                 WireCell::Gen::WireBoundedDepos,
+                 WireCell::INamed, WireCell::IDrifter, WireCell::IConfigurable)
 
 using namespace std;
 using namespace WireCell;
+
+Gen::WireBoundedDepos::WireBoundedDepos()
+  : Aux::Logger("WireBoundedDepos", "gen")
+{
+}
+Gen::WireBoundedDepos::~WireBoundedDepos()
+{
+}
 
 WireCell::Configuration Gen::WireBoundedDepos::default_configuration() const
 {
     Configuration cfg;
     cfg["anode"] = "";
 
-    // A the list of wire regions
+    // List of wire regions
     // [{
     //   plane: <plane-number>,
     //   min: <min-wire-number>,
@@ -43,7 +51,6 @@ void Gen::WireBoundedDepos::configure(const WireCell::Configuration& cfg)
 
     for (auto face : m_anode->faces()) {
         if (face->planes().empty()) {
-            std::cerr << "Gen::WireBoundedDepos: not given multi-plane AnodeFace for face " << face->ident() << "\n";
             continue;
         }
         for (auto plane : face->planes()) {
@@ -55,7 +62,7 @@ void Gen::WireBoundedDepos::configure(const WireCell::Configuration& cfg)
         }
         break;  // fixme:
     }
-    m_accept = cfg["mode"].asString() == "accept";
+    m_accept = get<std::string>(cfg, "mode", "accept") == "accept";
 
     auto jregions = cfg["regions"];
     for (auto jregion : jregions) {
@@ -66,8 +73,7 @@ void Gen::WireBoundedDepos::configure(const WireCell::Configuration& cfg)
         m_regions.push_back(wr);
     }
 
-    std::cerr << "WireBoundedDepos: " << cfg["mode"] << " with " << m_regions.size() << " wires in " << m_pimpos.size()
-              << " planes\n";
+    log->debug("accept={} nregions={} nplanes={}", m_accept, m_regions.size(), m_pimpos.size());
 }
 
 bool Gen::WireBoundedDepos::operator()(const input_pointer& depo, output_queue& outq)
@@ -117,8 +123,3 @@ bool Gen::WireBoundedDepos::operator()(const input_pointer& depo, output_queue& 
     return true;
 }
 
-Gen::WireBoundedDepos::WireBoundedDepos()
-  : m_accept(true)
-{
-}
-Gen::WireBoundedDepos::~WireBoundedDepos() {}

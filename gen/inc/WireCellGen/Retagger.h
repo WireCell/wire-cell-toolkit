@@ -1,6 +1,6 @@
 /* The retagger support frame and trace tag rule sets like FrameFanin
  * and FrameFanout but also support a "merge" ruleset which can
- * combine trace sets.  For exaple an element of the tag_rules in
+ * combine trace sets.  For example an element of the tag_rules in
  * configuration may look like:
   {
     type: "Retagger",

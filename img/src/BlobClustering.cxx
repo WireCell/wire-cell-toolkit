@@ -2,6 +2,7 @@
 #include "WireCellImg/GeomClusteringUtil.h"
 
 #include "WireCellAux/SimpleCluster.h"
+#include "WireCellAux/ClusterHelpers.h"
 
 #include "WireCellUtil/RayClustering.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -119,8 +120,11 @@ void Img::BlobClustering::flush(output_queue& clusters)
         ++bsit;
     }
 
+    auto cluster = std::make_shared<Aux::SimpleCluster>(grind.graph(), cur_ident());
+    log->debug("flushing at call={}: ident={} graph: {}", m_count, cluster->ident(), Aux::dumps(cluster->graph()));
+
     // 3) pack and clear
-    clusters.push_back(std::make_shared<Aux::SimpleCluster>(grind.graph(), cur_ident()));
+    clusters.push_back(cluster);
     m_cache.clear();
 }
 
@@ -169,6 +173,25 @@ bool Img::BlobClustering::operator()(const input_pointer& blobset,
         clusters.push_back(nullptr);  // forward eos
         ++m_count;
         return true;
+    }
+    
+    {                           // sanity check
+        size_t nmissing = 0;
+        for (const auto& iblob : blobset->blobs()) {
+            if (! iblob->slice()) {
+                ++nmissing;
+                log->debug("blob {} missing slice {} out of {}",
+                           iblob->ident(), nmissing, blobset->blobs().size());
+                continue;
+            }
+            // log->debug("blob {} slice {} at time={}",
+            //            iblob->ident(), iblob->slice()->ident(),
+            //            iblob->slice()->start());
+        }
+        if (nmissing) {
+            log->critical("{} blobs missing their slice, this job is not valid", nmissing);
+            raise<ValueError>("blobs missing their slice");
+        }
     }
 
     if (new_frame(blobset)) {

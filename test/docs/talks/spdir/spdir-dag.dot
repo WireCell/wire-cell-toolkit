@@ -1,0 +1,18 @@
+digraph spdir {
+    node[shape=box]
+    detlinegen drift splat sim sigproc LS4GAN calculator plotter
+    node[shape=ellipse]
+
+    angles -> detlinegen -> track -> drift -> drifts -> splat -> splats
+    drifts -> sim -> digits
+    simFR -> sim
+    digits -> LS4GAN -> uvcgan
+    digits -> sigproc
+    spFR -> sigproc
+    uvcgan -> sigproc
+    sigproc->signals
+    signals -> calculator
+    splat -> calculator
+    calculator -> metrics
+    metrics -> plotter -> plots
+}

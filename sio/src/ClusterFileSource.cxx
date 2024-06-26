@@ -184,7 +184,7 @@ ICluster::pointer ClusterFileSource::load_numpy(int ident)
             THROW(ValueError() << errmsg{"illegal shape"});
         }
         log->debug("file {} with type={} code={} ident={} shape=({},{})",
-                   m_cur.fname, pf.type, pf.code, ident, shape[0], shape[1]);
+                   m_cur.fname, (int)pf.type, pf.code, ident, shape[0], shape[1]);
         
         if (pf.type == ParsedFilename::node) {
             const node_element_t* data = pig.as_type<node_element_t>();
@@ -292,7 +292,7 @@ ICluster::pointer ClusterFileSource::dispatch()
         return load_numpy(pf.ident);
     }
     log->warn("do not know how to dispatch file {} with type={} code={} ident={}",
-              m_cur.fname, pf.type, pf.code, pf.ident);
+              m_cur.fname, (int)pf.type, pf.code, pf.ident);
     return nullptr;
 }
 

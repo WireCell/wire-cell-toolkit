@@ -5,11 +5,14 @@
 
 #include <cstdlib>  // for getenv, see get_path()
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
 #include <boost/iostreams/device/file.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/filesystem.hpp>
+#pragma GCC diagnostic pop
 
 #include <string>
 #include <sstream>
@@ -78,11 +81,29 @@ void WireCell::Persist::dump(const std::string& filename, const Json::Value& jro
         outfilt << jwriter.write(jroot);
     }
 }
-// fixme: support pretty option for indentation
-std::string WireCell::Persist::dumps(const Json::Value& cfg, bool)
+
+std::string WireCell::Persist::dumps(const Json::Value& obj, int indent, int nsig)
 {
+    Json::StreamWriterBuilder swb;
+
+    if (indent < 0) {
+        swb["indentation"] = std::string(std::abs(indent), '\t');
+    }
+    else {
+        swb["indentation"] = std::string(indent, ' ');
+    }
+
+    const bool default_sig = nsig == 0 || nsig == 17;
+    if (! default_sig) {
+        swb["precision"] = nsig;
+        // Note: there is also a "precisionType" option.  It defaults to
+        // "significant" using "%.*g" or it can be "decimal" which uses "%.*f"
+        // sprintf codes.
+    }
+
+    std::unique_ptr<Json::StreamWriter> w(swb.newStreamWriter());
     stringstream ss;
-    ss << cfg;
+    w->write(obj, &ss);
     return ss.str();
 }
 

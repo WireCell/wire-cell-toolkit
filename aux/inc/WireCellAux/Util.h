@@ -158,7 +158,7 @@ namespace WireCell {
             return ITensor::pointer(st);
         }
 
-    };  // namespace Aux
+    }  // namespace Aux
 }  // namespace WireCell
 
 #endif  // WIRECELLSIG_UTIL

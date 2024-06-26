@@ -447,8 +447,8 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
         if 'ROOTSYS' in use:
             linkdef = dictdir.find_resource('LinkDef.h')
             bld.gen_rootcling_dict(name, linkdef,
-                                   headers = headers,
-                                   includes = includes, 
+                                   # headers = headers,
+                                   # includes = includes, 
                                    use = use)
             source.append(bld.path.find_or_declare(name+'Dict.cxx'))
         else:

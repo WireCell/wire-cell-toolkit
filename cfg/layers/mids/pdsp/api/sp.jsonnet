@@ -7,23 +7,20 @@ local spfilt = import "sp-filters.jsonnet";
 local low = import "../../../low.jsonnet";
 local wc = low.wc;
 
-local resps = import "resps.jsonnet";
-
 // Allow an optional argument "sparse" as this is really an end-user
 // decision.  Higher layers may expose this option to the TLA.
-function(services, params, options={}) function(anode)
+function(services, params, options={}) function(anode, name)
     local pars = std.mergePatch(params, std.get(options, "params", {}));
     local opts = {sparse:true} + options;
-    local ident = low.util.idents(anode);
     local resolution = pars.digi.resolution;
     local fullscale = pars.digi.fullscale[1] - pars.digi.fullscale[0];
     local ADC_mV_ratio = ((1 << resolution) - 1 ) / fullscale;
 
-    local res = resps(params).sp;
+    local res = low.resps(params).sp;
 
     low.pg.pnode({
         type: 'OmnibusSigProc',
-        name: ident,
+        name: name,
         data: {
 
             /**  
@@ -56,23 +53,25 @@ function(services, params, options={}) function(anode)
             r_sep_peak: 6.0, // default 6.0
             r_low_peak_sep_threshold_pre: 1200, // default 1200
 
-            // frame tags
-            wiener_tag: 'wiener' + ident,
-            decon_charge_tag: 'decon_charge' + ident,
-            gauss_tag: 'gauss' + ident,
+            /// These defaults are okay, even with out anode ident qualifier
+            // wiener_tag: 'wiener',
+            // gauss_tag: 'gauss',
 
+            // FIXME: we should not need to "unset" these.  They should empty by
+            // default and use_roi_debug_mode should be removed.
             use_roi_debug_mode: false,
-            tight_lf_tag: 'tight_lf' + ident,
-            loose_lf_tag: 'loose_lf' + ident,
-            cleanup_roi_tag: 'cleanup_roi' + ident,
-            break_roi_loop1_tag: 'break_roi_1st' + ident,
-            break_roi_loop2_tag: 'break_roi_2nd' + ident,
-            shrink_roi_tag: 'shrink_roi' + ident,
-            extend_roi_tag: 'extend_roi' + ident,
+            decon_charge_tag: '',
+            tight_lf_tag: '',
+            loose_lf_tag: '',
+            cleanup_roi_tag: '',
+            break_roi_loop1_tag: '',
+            break_roi_loop2_tag: '',
+            shrink_roi_tag: '',
+            extend_roi_tag: '',
 
             use_multi_plane_protection: false,
-            mp3_roi_tag: 'mp3_roi' + ident,
-            mp2_roi_tag: 'mp2_roi' + ident,
+            mp3_roi_tag: '',
+            mp2_roi_tag: '',
             
             isWrapped: false,
             sparse : opts.sparse,

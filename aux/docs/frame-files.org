@@ -53,6 +53,12 @@ summary_<tagA>_<ident1>.npy
 frame_<tagB>_<ident1>.npy
 channels_<tagB>_<ident1>.npy
 tickinfo_<tagB>_<ident1>.npy
+frame__<ident1>.npy
+channels__<ident1>.npy
+tickinfo__<ident1>.npy
+frame_*_<ident1>.npy
+channels_*_<ident1>.npy
+tickinfo_*_<ident1>.npy
 chanmask_<cmtagC>_<ident1>.npy
 chanmask_<cmtagD>_<ident1>.npy
 ...
@@ -60,19 +66,23 @@ chanmask_<cmtagD>_<ident1>.npy
 
 We will call "framelet" the trio of arrays of type ~frame~, ~channels~ and
 ~tickinfo~ and an optional fourth ~summary~ array that carry the same
-~<tag>~ and frame ~<ident>~.  To be valid, the size of the 1D ~channels~
-array, and the summary array if present, must be the same as the
-number of (channel) rows in the ~frame~ array.  The first two entries
-(~time~ and ~tick~) of all ~tickinfo~ are expected to be identical but their
-third (~tbin0~) may differ for each framelet.  See [[file:tickinfo.org]].
+~<tag>~ and frame ~<ident>~.
 
-The rows of the ~frame~ and ~channel~ arrays are added to the ~IFrame~
-traces collection in the order they are encountered in the file.
-Otherwise, order does not matter except that all arrays for a given
-frame ~<ident>~ must be contiguous.  The ~<tag>~ portion of the framelet
-array file names is used to add to the ~IFrame~ trace map map.  In the
-current version of the file, there is no support for representing
-tagged trace indices.
+To be valid, the size of the 1D ~channels~ array, and the summary array if
+present, must be the same as the number of (channel) rows in the ~frame~ array.
+The first two entries (~time~ and ~tick~) of all ~tickinfo~ must be be identical but
+their third entry (~tbin0~) may differ for each framelet.  See [[file:tickinfo.org]].
+
+The rows of the ~frame~ array and the corresponding elements of the ~channel~ array
+are added to the ~IFrame~ traces collection in the order they are encountered in
+the file.  Otherwise, order does not matter except that all arrays for a given
+frame ~<ident>~ must be contiguous.
+
+The ~<tag>~ portion of the framelet provides a *trace tag* (and *not* a frame tag).
+When the ~<tag>~ is unspecified (ie, there are a pair of subsequent underscores,
+eg ~frame__0~~) or when the ~<tag>~ takes a special value of ~*~ (eg ~frame_*_0~) then
+the arrays are interpreted to represent an portion of the frame consisting of
+untagged traces.  In such a case, any associated ~summary_~ is ignored.
 
 The ~chanmask~ arrays are optional and each provides one entry in the
 ~IFrame~ channel mask map.  The key is take as the ~<cmtag>~ part of the

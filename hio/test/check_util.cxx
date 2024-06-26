@@ -8,7 +8,7 @@ namespace test {
     h5::ds_t write(const h5::fd_t &fd, const std::string &dataset_path, const T *ptr, args_t &&... args)
     {
         return h5::write(fd, dataset_path, ptr, args...);
-    };
+    }
 }  // namespace test
 
 int main()

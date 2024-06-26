@@ -181,10 +181,13 @@ IDepoSet::pointer Sio::DepoFileSource::next()
         return nullptr;
     }
         
-    std::vector<Aux::SimpleDepo*> sdepos;
+    // build list of depos in order given
+    std::vector<std::shared_ptr<Aux::SimpleDepo>> all_sdepos;
+
+    // First pass make all depos
     for (size_t ind=0; ind < ndepos; ++ind) {
 
-        auto sdepo = new Aux::SimpleDepo(
+        auto sdepo = std::make_shared<Aux::SimpleDepo>(
             darr(ind, 0),        // t
             Point(darr(ind, 2),  // x
                   darr(ind, 3),  // y
@@ -196,37 +199,48 @@ IDepoSet::pointer Sio::DepoFileSource::next()
             iarr(ind, 0),        // id
             iarr(ind, 1));       // pdg
 
+        all_sdepos.push_back(sdepo);
+    }
+
+    // second pass, save out the active and resolve the prior depos
+    std::vector<std::shared_ptr<Aux::SimpleDepo>> sdepos;
+    size_t npriors = 0;
+    size_t npriors_missing = 0;
+    for (size_t ind=0; ind < ndepos; ++ind) {
+
         const auto gen = iarr(ind, 2);
-        if (gen > 0) {
-            // this depo is a prior
-            const size_t other = iarr(ind, 3);
-            if (other >= sdepos.size()) {
-                log->warn("call={}, prior depo {} not provided in {}",
-                          m_count, other, sdepos.size());
-            }
-            else {
-                auto idepo = IDepo::pointer(sdepo);
-                sdepo = nullptr;
-                sdepos[other]->set_prior(idepo);
-            }
+        if (!gen) {  // active
+            sdepos.push_back(all_sdepos[ind]);
+            continue;
         }
-        // We save both gen=0 and gen>0 as nullptrs to preserve indexing
-        sdepos.push_back(sdepo);
-    }
 
-    WireCell::IDepo::vector depos;
+        // Prior
+        const size_t other = iarr(ind, 3);
+        if (other >= all_sdepos.size()) {
+            ++npriors_missing;
+        }
+        else {
+            ++npriors;
+            all_sdepos[other]->set_prior(all_sdepos[ind]);
+        }
+    }
+    if (npriors_missing) {
+        log->warn("call={}, missing {} prior depos, active={} total={}",
+                  m_count, npriors_missing, sdepos.size(), all_sdepos.size());
+    }
+    all_sdepos.clear();
+
+    // convert to IDepos
+    WireCell::IDepo::vector idepos;
     for (auto sdepo: sdepos) {
-        if (sdepo) {
-            auto idepo = IDepo::pointer(sdepo);
-            sdepo = nullptr;
-            depos.push_back(idepo);
-        }
+        idepos.push_back(sdepo);
     }
+    sdepos.clear();
 
-    log->debug("call={} loaded {} depos from ident {} stream {}",
-               m_count, depos.size(), ident, m_inname);
+    log->debug("call={} loaded {} active, {} total depos from ident {} stream {} with {} priors",
+               m_count, idepos.size(), ndepos, ident, m_inname, npriors);
 
-    return std::make_shared<Aux::SimpleDepoSet>(ident, depos);
+    return std::make_shared<Aux::SimpleDepoSet>(ident, idepos);
 }
 
 bool Sio::DepoFileSource::operator()(IDepoSet::pointer& ds)

@@ -10,7 +10,10 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellAux/Logger.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <boost/iostreams/filtering_stream.hpp>
+#pragma GCC diagnostic pop
 
 #include <string>
 #include <vector>

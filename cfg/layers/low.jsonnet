@@ -6,9 +6,15 @@
 
     util : import "low/util.jsonnet",
     gen : import "low/gen.jsonnet",
-    drifter : import "low/drifter.jsonnet",
+
     anodes : import "low/anodes.jsonnet",
+
+    drifter : import "low/drifter.jsonnet",
+    reframer : import "low/reframer.jsonnet",
     dnnroi : import "low/dnnroi.jsonnet",
 
     img : import "low/img.jsonnet",
+
+    resps : import "low/resps.jsonnet",
+    ssss : import "low/ssss.jsonnet",
 }

@@ -4,13 +4,12 @@ local low = import "../../../low.jsonnet";
 local pg = low.pg;
 local wc = low.wc;
 
-function(services, params) function(anode)
-    local ident = low.util.idents(anode);
-    local img = low.img(anode);
+function(services, params) function(anode, name) 
+    local img = low.img(anode, name);
 
     local wfm = {
         type: 'WaveformMap',
-        name: ident,
+        name: name,
         data: {
             filename: params.img.charge_error_file,
         },
@@ -20,11 +19,11 @@ function(services, params) function(anode)
                   active_planes=[0,1,2], masked_planes=[], dummy_planes=[]) =
         pg.pnode({
             type: "MaskSlices",
-            name: ident+ext,
+            name: name+ext,
             data: {
-                wiener_tag: "wiener"+ident,
-                charge_tag: "gauss"+ident,
-                error_tag: "gauss_error"+ident,
+                wiener_tag: "wiener",
+                charge_tag: "gauss",
+                error_tag: "gauss_error",
                 tick_span: span,
                 anode: wc.tn(anode),
                 min_tbin: min_tbin,
@@ -40,10 +39,10 @@ function(services, params) function(anode)
     local sigunc = 
         pg.pnode({
             type: 'ChargeErrorFrameEstimator',
-            name: ident,
+            name: name,
             data: {
-                intag: "gauss"+ident,
-                outtag: 'gauss_error'+ident,
+                intag: "gauss",
+                outtag: 'gauss_error',
                 anode: wc.tn(anode),
 	        rebin: 4,  // this number should be consistent with the waveform_map choice
 	        fudge_factors: [2.31, 2.31, 1.1],  // fudge factors for each plane [0,1,2]
@@ -59,6 +58,6 @@ function(services, params) function(anode)
         img.tiling(),
         img.clustering(),
         img.grouping(),
-        img.charge_solving(),   // fixme: a few optins we may want to allow to specify in variant params
-    ], ident)
+        img.charge_solving(),
+    ], name=name)
 

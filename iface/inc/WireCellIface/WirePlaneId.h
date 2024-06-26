@@ -3,6 +3,7 @@
 
 // fixme: should move into WirePlaneIdCfg.h or similar. (more below)
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/Spdlog.h"
 #include <ostream>
 #include <functional>
 
@@ -70,5 +71,7 @@ namespace std {
         std::size_t operator()(const WireCell::WirePlaneId& wpid) const { return std::hash<int>()(wpid.ident()); }
     };
 }  // namespace std
+
+template <> struct fmt::formatter<WireCell::WirePlaneId> : fmt::ostream_formatter {};
 
 #endif

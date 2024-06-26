@@ -81,6 +81,8 @@ namespace WireCell {
         /// Add a log sink, reserved names 'stdout' and 'stderr' or a filename.
         void add_logsink(const std::string& log, const std::string& level = "");
 
+        void apply_log_config();
+
         /// Set a minimum level to emit a message for a given
         /// log. (levels: critical, error, warn, info, debug, trace).
         void set_loglevel(const std::string& log, const std::string& level = "");
@@ -107,6 +109,9 @@ namespace WireCell {
         // Limit number of threads.  0 means set no limit.  This is
         // only relevant if we are built with TBB support
         int m_threads{0};
+
+        std::unordered_map<std::string, std::string> m_log_levels;
+
     };
 
 }  // namespace WireCell

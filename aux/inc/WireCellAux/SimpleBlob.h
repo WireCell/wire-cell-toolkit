@@ -56,6 +56,13 @@ namespace WireCell::Aux {
           , m_blobs(blobs)
         {
         }
+        // Leaky abstraction: a blob set may span multiple slices
+        SimpleBlobSet(int ident, const IBlob::vector& blobs)
+          : m_ident(ident)
+          , m_slice(nullptr)
+          , m_blobs(blobs)
+        {
+        }
         virtual ~SimpleBlobSet();
 
         virtual int ident() const { return m_ident; }
@@ -63,6 +70,8 @@ namespace WireCell::Aux {
         virtual ISlice::pointer slice() const { return m_slice; }
 
         virtual IBlob::vector blobs() const { return m_blobs; }
+
+        void insert(const IBlob::pointer& blob) { m_blobs.push_back(blob); }
 
         int m_ident;
         ISlice::pointer m_slice;

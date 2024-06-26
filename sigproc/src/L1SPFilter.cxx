@@ -14,7 +14,9 @@
 #include <numeric>
 #include <iostream>
 
-WIRECELL_FACTORY(L1SPFilter, WireCell::SigProc::L1SPFilter, WireCell::IFrameFilter, WireCell::IConfigurable)
+WIRECELL_FACTORY(L1SPFilter,
+                 WireCell::SigProc::L1SPFilter,
+                 WireCell::INamed, WireCell::IFrameFilter, WireCell::IConfigurable)
 
 using namespace Eigen;
 using namespace WireCell;
@@ -26,7 +28,8 @@ using WireCell::Aux::DftTools::inv_c2r;
 
 L1SPFilter::L1SPFilter(double gain, double shaping, double postgain, double ADC_mV, double fine_time_offset,
                        double coarse_time_offset)
-  : m_gain(gain)
+  : Aux::Logger("L1SPFilter", "sigproc")
+  , m_gain(gain)
   , m_shaping(shaping)
   , m_postgain(postgain)
   , m_ADC_mV(ADC_mV)
@@ -82,8 +85,6 @@ void L1SPFilter::init_resp()
 
         // convolute with V and Y average responses ...
         double intrinsic_time_offset = fravg.origin / fravg.speed;
-        // std::cout << intrinsic_time_offset << " " << m_fine_time_offset << " " << m_coarse_time_offset << " " <<
-        // m_gain << " " << 14.0 * units::mV/units::fC << " " << m_shaping << " " << fravg.period << std::endl;
 
         double x0 = (-intrinsic_time_offset - m_coarse_time_offset + m_fine_time_offset);
         double xstep = fravg.period;
@@ -183,14 +184,13 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
 {
     out = nullptr;
     if (!in) {
+        log->debug("EOS at call={}", m_count++);
         return true;  // eos
     }
 
     std::string adctag = get<std::string>(m_cfg, "adctag");
     std::string sigtag = get<std::string>(m_cfg, "sigtag");
     std::string outtag = get<std::string>(m_cfg, "outtag");
-
-    //    std::cout << smearing_vec.size() << std::endl;
 
     int roi_pad = 0;
     roi_pad = get(m_cfg, "roi_pad", roi_pad);
@@ -200,25 +200,18 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
     double raw_ROI_th_nsigma = get(m_cfg, "raw_ROI_th_nsigma", 4);
     double raw_ROI_th_adclimit = get(m_cfg, "raw_ROI_th_adclimit", 10);
 
-    // std::cout << "Xin: " << raw_ROI_th_nsigma << " " << raw_ROI_th_adclimit << " " << overall_time_offset << " " <<
-    // collect_time_offset << " " << roi_pad << " " << adc_l1_threshold << " " << adc_sum_threshold << " " <<
-    // adc_sum_rescaling << " " << adc_sum_rescaling_limit << " " << l1_seg_length << " " << l1_scaling_factor << " " <<
-    // l1_lambda << " " << l1_epsilon << " " << l1_niteration << " " << l1_decon_limit << " " << l1_resp_scale << " " <<
-    // l1_col_scale << " " << l1_ind_scale << std::endl;
     init_resp();
 
     auto adctraces = Aux::tagged_traces(in, adctag);
     auto sigtraces = Aux::tagged_traces(in, sigtag);
 
     if (adctraces.empty() or sigtraces.empty() or adctraces.size() != sigtraces.size()) {
-        std::cerr << "L1SPFilter got unexpected input: " << adctraces.size() << " ADC traces and " << sigtraces.size()
-                  << " signal traces\n";
-        THROW(RuntimeError() << errmsg{"L1SPFilter: unexpected input"});
+        log->error("unexpected input: {} ADC traces, {} signal traces at call={}",
+                   adctraces.size(), sigtraces.size(), m_count++);
+        raise<RuntimeError>("L1SPFilter: unexpected input");
     }
 
     m_period = in->tick();
-
-    // std::cout << m_period/units::us << std::endl;
 
     /// here, use the ADC and signal traces to do L1SP
     ///  put result in out_traces
@@ -240,9 +233,6 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
         }
 
         init_map[ch] = time_ticks;
-        // if (time_ticks.size()>0){
-        // 	std::cout << ch << " " << time_ticks.size() << std::endl;
-        // }
     }
 
     // do ROI from the raw signal
@@ -269,9 +259,6 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
         double cut = raw_ROI_th_nsigma * sqrt((pow(mean_p1sig - mean, 2) + pow(mean_n1sig - mean, 2)) / 2.);
         if (cut < raw_ROI_th_adclimit) cut = raw_ROI_th_adclimit;
 
-        // if (ch==4090)
-        // 	std::cout << cut << " " << raw_pad << std::endl;
-
         for (int qi = 0; qi < ntbins; qi++) {
             if (fabs(charges[qi]) > cut) {
                 for (int qii = -raw_pad; qii != raw_pad + 1; qii++) {
@@ -279,9 +266,6 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
                 }
             }
         }
-        // if (time_ticks.size()>0){
-        // 	std::cout << ch << " " << time_ticks.size() << std::endl;
-        // }
     }
 
     // create ROIs ...
@@ -332,9 +316,6 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
         }
 
         if (rois_save.size() > 0) map_ch_rois[wire_index] = rois_save;
-        // for (auto it = rois_save.begin(); it!=rois_save.end(); it++){
-        // std::cout << wire_index << " " << it->first << " " << it->second +1 << std::endl;
-        // }
     }
 
     std::map<int, std::vector<int>> map_ch_flag_rois;
@@ -407,7 +388,6 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
             }
         }
 
-        // std::cout << trace->channel() << std::endl;
         out_traces.push_back(newtrace);
     }
 
@@ -457,17 +437,20 @@ bool L1SPFilter::operator()(const input_pointer& in, output_pointer& out)
         out_traces.at(i2) = new_trace;
     }
 
-    std::cerr << "L1SPFilter: frame: " << in->ident() << " " << adctag << "[" << adctraces.size() << "] + " << sigtag
-              << "[" << sigtraces.size() << "] --> " << outtag << "[" << out_traces.size() << "]\n";
-
-    // Finally, we save the traces to an output frame with tags.
-
-    IFrame::trace_list_t tl(out_traces.size());
-    std::iota(tl.begin(), tl.end(), 0);
+    // Finally, we save the traces to an output frame.
 
     auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick());
-    sf->tag_traces(outtag, tl);
+    if (! outtag.empty()) {
+        IFrame::trace_list_t tl(out_traces.size());
+        std::iota(tl.begin(), tl.end(), 0);
+        sf->tag_traces(outtag, tl);
+    }
     out = IFrame::pointer(sf);
+
+    log->debug("call={} adctag={} sigtag={} outtag={}", m_count, adctag, sigtag, outtag);
+    log->debug("call={} in frame: {}", m_count, Aux::taginfo(in));
+    log->debug("call={} out frame: {}", m_count, Aux::taginfo(out));
+    ++m_count;
 
     return true;
 }
@@ -542,14 +525,6 @@ int L1SPFilter::L1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
         flag_l1 = 2;
     }
 
-    // if (adctrace->channel() == 4079){
-    // std::cout << adctrace->channel() << " " << nbin_fit << " " << start_tick << " " << end_tick << " " << temp_sum <<
-    // " " << temp1_sum << " " << temp2_sum << " " << max_val << " " << min_val << " " << flag_l1 << std::endl;
-    // }
-
-    // std::cout << temp_sum << " " << temp1_sum << " " << temp_sum/(temp1_sum*adc_sum_rescaling*1.0/nbin_fit) << " " <<
-    // adc_ratio_threshold << " " << temp1_sum*adc_sum_rescaling*1.0/nbin_fit << " " << flag_l1 << std::endl;
-
     if (flag_l1 == 1) {
         // do L1 fit ...
         int n_section = std::round(nbin_fit / l1_seg_length * 1.0);
@@ -612,7 +587,7 @@ int L1SPFilter::L1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                 l1_signal.at(j) = final_beta(j) * l1_col_scale + final_beta(nbin_fit + j) * l1_ind_scale;
             }
             int mid_bin = (smearing_vec.size() - 1) / 2;
-            // std::cout << smearing_vec.size() << " " << mid_bin << std::endl;
+
             for (int j = 0; j != nbin_fit; j++) {
                 double content = l1_signal.at(j);
                 if (content > 0) {
@@ -676,14 +651,7 @@ int L1SPFilter::L1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                             l1_signal.at(k) = 0;
                         }
                     }
-                    // std::cout << max_val << " " << mean_val1 << std::endl;
                 }
-
-                // std::cout << nonzero_bins.front() << " X " << nonzero_bins.back() << std::endl;
-                // std::cout << ROIs.size() << std::endl;
-                // for (size_t i=0;i!=ROIs.size();i++){
-                //   std::cout << ROIs.at(i).first << " " << ROIs.at(i).second << std::endl;
-                // }
 
                 // finish cleaning ...
             }
