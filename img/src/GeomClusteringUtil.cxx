@@ -38,7 +38,7 @@ void WireCell::Img::geom_clustering(cluster_indexed_graph_t& grind, IBlobSet::ve
         return;
     }
 
-    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local"};
+    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local", "dead_clus"};
     if (known_policies.find(policy) == known_policies.end()) {
         THROW(ValueError() << errmsg{String::format("policy \"%s\" not implemented!", policy)});
     }
@@ -195,7 +195,7 @@ void WireCell::Img::geom_clustering(cluster_indexed_graph_t& grind, IBlobSet::ve
 void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string policy,
                                             const std::unordered_map<cluster_vertex_t, int> groups)
 {
-    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local"};
+    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local", "dead_clus"};
     if (known_policies.find(policy) == known_policies.end()) {
         THROW(ValueError() << errmsg{String::format("policy \"%s\" not implemented!", policy)});
     }
@@ -212,6 +212,11 @@ void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string pol
     if (policy == "simple") {
         // max_rel_diff = 1;
         map_gap_tol = {{1, 0}};
+    }
+
+    if (policy == "dead_clus") {
+        // max_rel_diff = 1;
+        map_gap_tol = {{0, 1}, {1, 1}};
     }
 
     // overlap + tolerance

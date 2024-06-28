@@ -1532,6 +1532,7 @@ void Cluster::Calc_PCA() const
     cov_matrix(1, 0) = cov_matrix(0, 1);
     cov_matrix(2, 0) = cov_matrix(0, 2);
     cov_matrix(2, 1) = cov_matrix(1, 2);
+    // std::cout << cov_matrix << std::endl;
 
     const auto eigen = WireCell::Array::pca(cov_matrix);
     auto eigen_values = eigen.eigenvalues();
@@ -1542,7 +1543,7 @@ void Cluster::Calc_PCA() const
         double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + eigen_vectors(1, i) * eigen_vectors(1, i) +
                              eigen_vectors(2, i) * eigen_vectors(2, i));
         m_pca_axis[i].set(eigen_vectors(0, i) / norm, eigen_vectors(1, i) / norm, eigen_vectors(2, i) / norm);
-        std::cout << "PCA: " << i << " " << m_pca_values[i] << " " << m_pca_axis[i] << std::endl;
+        // std::cout << "PCA: " << i << " " << m_pca_values[i] << " " << m_pca_axis[i] << std::endl;
     }
 
     m_pca_calculated = true;
