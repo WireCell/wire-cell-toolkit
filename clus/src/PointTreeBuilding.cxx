@@ -319,22 +319,22 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     using int_t = Facade::int_t;
 
     const auto& cg = icluster->graph();
-    log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
+    // log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
 
     auto grouping = root->value.facade<Facade::Grouping>();
     const auto& proj_centers = grouping->proj_centers();
     const auto& pitch_mags = grouping->pitch_mags();
-    /// TODO: remove these prints after debugging
-    for(const auto& [face, mags] : pitch_mags) {
-        for(const auto& [pind, mag] : mags) {
-            log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
-        }
-    }
-    for (const auto& [face, centers] : proj_centers) {
-        for(const auto& [pind, center] : centers) {
-            log->debug("face {} pind {} center {}", face, pind, center);
-        }
-    }
+    /// DEBUGONLY: remove these prints after debugging
+    // for(const auto& [face, mags] : pitch_mags) {
+    //     for(const auto& [pind, mag] : mags) {
+    //         log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
+    //     }
+    // }
+    // for (const auto& [face, centers] : proj_centers) {
+    //     for(const auto& [pind, center] : centers) {
+    //         log->debug("face {} pind {} center {}", face, pind, center);
+    //     }
+    // }
 
     Facade::mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
     Facade::mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
@@ -376,7 +376,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             // log->debug("ds_x.size() {}", ds_x.size());
         }
     }
-    log->debug("got {} slices", nslices);
+    // log->debug("got {} slices", nslices);
 
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {
@@ -394,12 +394,12 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             const std::string ds_name = String::format("ctpc_f%dp%d", face, plane);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root->value.local_pcs().emplace(ds_name, ds);
-            log->debug("added point cloud {} with {} points", ds_name, x.size());
+            // log->debug("added point cloud {} with {} points", ds_name, x.size());
         }
     }
-    for (const auto& [name, pc] : root->value.local_pcs()) {
-        log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
-    }
+    // for (const auto& [name, pc] : root->value.local_pcs()) {
+    //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    // }
 }
 
 void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
@@ -443,14 +443,15 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
             }
         }
     }
-    for (int pind = 0; pind < 2; ++pind) {
-        const auto& dead_winds = grouping->get_dead_winds(0, pind);
-        for (const auto& [wind, xbeg_xend] : dead_winds) {
-            log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
-        }
-    }
-    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
-               grouping->get_dead_winds(0, 2).size());
+    /// DEBUGONLY:
+    // for (int pind = 0; pind < 2; ++pind) {
+    //     const auto& dead_winds = grouping->get_dead_winds(0, pind);
+    //     for (const auto& [wind, xbeg_xend] : dead_winds) {
+    //         log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
+    //     }
+    // }
+    // log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
+    //            grouping->get_dead_winds(0, 2).size());
 }
 
 bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& tensorset)
@@ -492,56 +493,56 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
     /// TODO: remove after debugging
-    {
-        for (const auto& [name, pc] : root_live->value.local_pcs()) {
-            log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
-        }
-        /// test ctpc_f0p0 exists
-        grouping->kd2d(0,0);
+    // {
+    //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
+    //         log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    //     }
+    //     /// test ctpc_f0p0 exists
+    //     grouping->kd2d(0,0);
 
-        /// find test point on ctpc
-        const auto ctest = grouping->children().front();
-        const auto p3ds = ctest->points();
-        log->debug("p3ds.size() {}", p3ds[0].size());
-        {
-            const auto winds = ctest->wire_indices();
-            log->debug("winds.size() {}", winds[0].size());
-            log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
-            log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
-            const double radius = 0.6 * units::cm;
-            auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
-            auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
-            auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
-            log->debug("closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
-            const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
-            const auto& x = ctpc.get("x")->elements<Facade::float_t>();
-            const auto& y = ctpc.get("y")->elements<Facade::float_t>();
-            const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
-            const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
-            for (const auto& [ind, dist] : ret0) {
-                log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
-            }
-        }
+    //     /// find test point on ctpc
+    //     const auto ctest = grouping->children().front();
+    //     const auto p3ds = ctest->points();
+    //     log->debug("p3ds.size() {}", p3ds[0].size());
+    //     {
+    //         const auto winds = ctest->wire_indices();
+    //         log->debug("winds.size() {}", winds[0].size());
+    //         log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
+    //         log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
+    //         const double radius = 0.6 * units::cm;
+    //         auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
+    //         auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
+    //         auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
+    //         log->debug("closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
+    //         const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
+    //         const auto& x = ctpc.get("x")->elements<Facade::float_t>();
+    //         const auto& y = ctpc.get("y")->elements<Facade::float_t>();
+    //         const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
+    //         const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
+    //         for (const auto& [ind, dist] : ret0) {
+    //             log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
+    //         }
+    //     }
 
-        {
-            const auto tw0 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 0);
-            const auto tw1 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 1);
-            const auto tw2 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 2);
-            log->debug("tind {} wind {}", std::get<0>(tw0), std::get<1>(tw0));
-            log->debug("tind {} wind {}", std::get<0>(tw1), std::get<1>(tw1));
-            log->debug("tind {} wind {}", std::get<0>(tw2), std::get<1>(tw2));
-        }
-        {
-            bool d0 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 0);
-            bool d1 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 1);
-            bool d2 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 2);
-            log->debug("dead chs {} {} {}", d0, d1, d2);
+    //     {
+    //         const auto tw0 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 0);
+    //         const auto tw1 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 1);
+    //         const auto tw2 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 2);
+    //         log->debug("tind {} wind {}", std::get<0>(tw0), std::get<1>(tw0));
+    //         log->debug("tind {} wind {}", std::get<0>(tw1), std::get<1>(tw1));
+    //         log->debug("tind {} wind {}", std::get<0>(tw2), std::get<1>(tw2));
+    //     }
+    //     {
+    //         bool d0 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 0);
+    //         bool d1 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 1);
+    //         bool d2 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 2);
+    //         log->debug("dead chs {} {} {}", d0, d1, d2);
 
-            bool is_good = grouping->is_good_point({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0);
-            log->debug("is_good_point {}", is_good);
-        }
-        // exit(0);
-    }
+    //         bool is_good = grouping->is_good_point({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0);
+    //         log->debug("is_good_point {}", is_good);
+    //     }
+    //     // exit(0);
+    // }
     // {
     //     auto grouping = root_live->value.facade<Facade::Grouping>();
     //     auto children = grouping->children(); // copy
