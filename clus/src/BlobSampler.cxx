@@ -691,6 +691,8 @@ struct Stepped : public BlobSampler::Sampler
     // point instead of the ray crossing point.
     double offset{0.5};
 
+    double tolerance{0.03};
+
     virtual void configure(const Configuration& cfg)
     {
         min_step_size = get(cfg, "min_step_size", min_step_size);
@@ -706,13 +708,38 @@ struct Stepped : public BlobSampler::Sampler
         auto swidth = [](const Strip& s) -> int {
             return s.bounds.second - s.bounds.first;
         };
-        std::sort(strips.begin()+2, strips.end(),
-                  [&](const Strip& a, const Strip& b) -> bool {
-                      return swidth(a) < swidth(b);
-                  });
-        const Strip& smin = strips[2];
-        const Strip& smid = strips[3];
-        const Strip& smax = strips[4];
+        // std::sort(strips.begin()+2, strips.end(),
+        //           [&](const Strip& a, const Strip& b) -> bool {
+        //               return swidth(a) < swidth(b);
+        //           });
+        // const Strip& smin = strips[2];
+        // const Strip& smid = strips[3];
+        // const Strip& smax = strips[4];
+
+        // XQ update this part of code to match WCP
+        Strip smax = strips[2]; int max_id = 2;
+        Strip smin = strips[3]; int min_id = 3;
+        Strip smid = strips[4]; int mid_id = 4;
+
+        if (swidth(strips[3]) > swidth(smax)){
+            smax = strips[3]; max_id = 3;
+        }
+        if(swidth(strips[4]) > swidth(smax)){
+            smax = strips[4]; max_id = 4;
+        }
+        if (swidth(strips[2]) < swidth(smin)){
+            smin = strips[2]; min_id = 2;
+        }
+        if(swidth(strips[4]) < swidth(smin)){
+            smin = strips[4]; min_id = 4;
+        }
+
+        for (int i = 2;i!=5;i++){
+            if (i != max_id && i != min_id){
+                smid = strips[i];        
+                mid_id = i;
+            }
+        }
         
         int nmin = std::max(min_step_size, max_step_fraction*swidth(smin));
         int nmax = std::max(min_step_size, max_step_fraction*swidth(smax));
@@ -750,8 +777,13 @@ struct Stepped : public BlobSampler::Sampler
                 // adjust wire center ...                 
                 const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust;
                 // XQ: how was the closest wire is found, if the pitch is exactly at the middle between two wires?
-                auto gmid = coords.pitch_index(pitch, smid.layer);
-                if (smid.in(gmid)) {
+                const double pitch_relative = coords.pitch_relative(pitch, smid.layer); 
+//                auto gmid = coords.pitch_index(pitch, smid.layer);
+ //               if (smid.in(gmid)) {
+                // if (smax.bounds.first==1006 && smax.bounds.second==1011)
+                //     std::cout << smax.bounds.first << " " << smax.bounds.second << " " << smin.bounds.first << " " << smin.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second 
+                //         << " " << *it_gmax << " " << *it_gmin << " " << pitch << " " << pitch_relative << " " << pitch_adjust << " " << max_id << " " << min_id << " " << mid_id << std::endl;
+                if (pitch_relative > smid.bounds.first - tolerance && pitch_relative < smid.bounds.second + tolerance){
                     const auto pt = coords.ray_crossing(cmin, cmax);
                     points.push_back(pt + adjust);
                 }
