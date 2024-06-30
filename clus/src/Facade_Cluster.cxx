@@ -37,6 +37,18 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
 Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
 
+void Cluster::print_blobs_info() const{
+    for (const Blob* blob : children()) {
+        std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() -1
+        << " V: " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() -1
+        << " W: " << blob->w_wire_index_min() << " " << blob->w_wire_index_max() -1
+        << " T: " << blob->slice_index_min() << " " << blob->slice_index_max() -1
+        << std::endl;
+
+
+    }
+}
+
 const Cluster::time_blob_map_t& Cluster::time_blob_map() const
 {
     if (m_time_blob_map.empty()) {

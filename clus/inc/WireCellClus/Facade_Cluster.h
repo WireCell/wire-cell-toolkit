@@ -69,6 +69,9 @@ namespace WireCell::PointCloud::Facade {
         std::vector<geo_point_t> kd_points(const kd_results_t& res);
         std::vector<geo_point_t> kd_points(const kd_results_t& res) const;
 
+        // print all blob information
+        void print_blobs_info() const;
+
         // Get all blobs in k-d tree order.  This is different than children()
         // order and different that sort_blobs() order.
         std::vector<Blob*> kd_blobs();

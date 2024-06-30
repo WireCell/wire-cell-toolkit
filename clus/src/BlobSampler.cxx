@@ -719,18 +719,37 @@ struct Stepped : public BlobSampler::Sampler
 
         std::vector<Point> points;
 
+        //XQ: is the order of 0 vs. 1 correct for the wire center???
         const Vector adjust = offset * (
-            coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}) -
-            coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}));
+            coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}) -
+            coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}));
 
+        const double pitch_adjust = offset * (coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) - coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer) ); 
         // log->debug("offset={} adjust={},{},{}", offset, adjust.x(), adjust.y(), adjust.z());
 
-        for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) {
-            coordinate_t cmin{smin.layer, gmin};
-            for (auto gmax=smax.bounds.first; gmax < smax.bounds.second; gmax += nmax) {
-                coordinate_t cmax{smax.layer, gmax};
-                
-                const double pitch = coords.pitch_location(cmin, cmax, smid.layer);
+        std::set<decltype(smin.bounds.first)> min_wires_set;
+        std::set<decltype(smin.bounds.first)> max_wires_set;
+
+        //XQ: is this the right way of adding the last wire?        
+        for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) { 
+            min_wires_set.insert(gmin);
+        }
+        min_wires_set.insert(smin.bounds.second-1);
+        for (auto gmax=smax.bounds.first; gmax < smax.bounds.second; gmax += nmax) {
+            max_wires_set.insert(gmax);
+        }
+        max_wires_set.insert(smax.bounds.second-1);
+
+        for (auto it_gmin = min_wires_set.begin(); it_gmin != min_wires_set.end(); it_gmin++){
+//        for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) {
+            coordinate_t cmin{smin.layer, *it_gmin};
+           for (auto it_gmax = max_wires_set.begin(); it_gmax != max_wires_set.end(); it_gmax++){
+           // for (auto gmax=smax.bounds.first; gmax < smax.bounds.second; gmax += nmax) {
+                coordinate_t cmax{smax.layer, *it_gmax};
+
+                // adjust wire center ...                 
+                const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust;
+                // XQ: how was the closest wire is found, if the pitch is exactly at the middle between two wires?
                 auto gmid = coords.pitch_index(pitch, smid.layer);
                 if (smid.in(gmid)) {
                     const auto pt = coords.ray_crossing(cmin, cmax);

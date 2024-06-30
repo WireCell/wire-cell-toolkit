@@ -50,19 +50,47 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
       for (size_t idead = 0; idead < dead_clusters.size(); ++idead) {
         const auto& dead = dead_clusters.at(idead);
 	
-	auto blobs = live->is_connected(*dead, dead_live_overlap_offset);
+	    auto blobs = live->is_connected(*dead, dead_live_overlap_offset);
 	//
-	if (blobs.size() > 0) {
+	    if (blobs.size() > 0) {
 	  //	  if (dead_live_cluster_mapping.find(dead) == dead_live_cluster_mapping.end()){
             if (dead_live_cluster_mapping.find(dead) == dead_live_cluster_mapping.end()) {
                 dead_cluster_order.push_back(dead);
             }
-	  dead_live_cluster_mapping[dead].push_back(live);
-	  dead_live_mcells_mapping[dead].push_back(blobs);
+	        dead_live_cluster_mapping[dead].push_back(live);
+	        dead_live_mcells_mapping[dead].push_back(blobs);
 	  //}
-	}
+	    }
       }
     }
+
+    // debug code fine-grain debugging 
+    for (auto it = dead_live_cluster_mapping.begin(); it!= dead_live_cluster_mapping.end(); it++){
+        if (it->second.size()>1){    
+            int nlength = 0;
+            const Cluster *temp_cluster = 0;
+            std::cerr << "Xin: " << it->second.size() << " ";
+            for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++){
+                std::cout << (*it1)->get_length()/units::cm << " ";
+                if ((*it1)->get_length() > 100*units::cm){
+                     nlength ++;
+                    //temp_cluster = *it1;
+                }
+                else temp_cluster = *it1; 
+            }
+            std::cout << std::endl;
+            // test a special case ... 
+            if (nlength==2 && it->second.size()==3){
+                //std::cout << (*it->first) << " " << temp_cluster << " " << temp_cluster->get_length()/units::cm << std::endl;
+                it->first->print_blobs_info();
+                //temp_cluster->print_blobs_info();
+            }
+        }
+    }   
+    //debug end ...
+
+
+
 
     if (dead_live_cluster_mapping.empty()) {
         std::cerr
