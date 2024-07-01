@@ -39,10 +39,10 @@ const Grouping* Cluster::grouping() const { return this->m_node->parent->value.t
 
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {
-        std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() -1
-        << " V: " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() -1
-        << " W: " << blob->w_wire_index_min() << " " << blob->w_wire_index_max() -1
-        << " T: " << blob->slice_index_min() << " " << blob->slice_index_max() -1
+        std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() 
+        << " V: " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() 
+        << " W: " << blob->w_wire_index_min() << " " << blob->w_wire_index_max() 
+        << " T: " << blob->slice_index_min() << " " << blob->slice_index_max()
         << std::endl;
 
 
@@ -68,7 +68,7 @@ std::vector<const Blob*> Cluster::is_connected(const Cluster& c, const int offse
             for (const auto& [good_start, goodblobs] : time_blob_map()) {
                 for (const auto* goodblob : goodblobs) {
                     auto good_end = goodblob->slice_index_max();  // not inclusive
-                    if (good_end < bad_start || good_start >= bad_end) {
+                    if (good_end <= bad_start || good_start >= bad_end) {  
                         continue;
                     }
                     if (goodblob->overlap_fast(*badblob, offset)) {

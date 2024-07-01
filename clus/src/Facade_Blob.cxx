@@ -83,12 +83,12 @@ void Blob::on_construct(node_type* node)
 
 bool Blob::overlap_fast(const Blob& b, const int offset) const
 {
-    if (u_wire_index_min() > b.u_wire_index_max() + offset) return false;
-    if (b.u_wire_index_min() > u_wire_index_max() + offset) return false;
-    if (v_wire_index_min() > b.v_wire_index_max() + offset) return false;
-    if (b.v_wire_index_min() > v_wire_index_max() + offset) return false;
-    if (w_wire_index_min() > b.w_wire_index_max() + offset) return false;
-    if (b.w_wire_index_min() > w_wire_index_max() + offset) return false;
+    if (u_wire_index_min() > b.u_wire_index_max()-1 + offset) return false;
+    if (b.u_wire_index_min() > u_wire_index_max()-1 + offset) return false;
+    if (v_wire_index_min() > b.v_wire_index_max()-1 + offset) return false;
+    if (b.v_wire_index_min() > v_wire_index_max()-1 + offset) return false;
+    if (w_wire_index_min() > b.w_wire_index_max()-1 + offset) return false;
+    if (b.w_wire_index_min() > w_wire_index_max()-1 + offset) return false;
     return true;
 }
 

@@ -373,7 +373,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     perf.dump("pre clustering", live_grouping);
 
     // dead_live
-    //clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
+    clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
     perf.dump("clustering live-dead", live_grouping);
 
     // second function ...

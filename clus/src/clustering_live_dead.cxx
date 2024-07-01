@@ -77,25 +77,29 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
                     //temp_cluster = *it1;
                     if ((*it1)->get_length() > 200*units::cm) temp_cluster = *it1;
                 }
-//                else temp_cluster = *it1; 
+                else temp_cluster = *it1; 
             }
             std::cout << std::endl;
             // test a special case ... 
             if (nlength==2 && it->second.size()==3){
                 std::cout << (*it->first) << " " << temp_cluster << " " << temp_cluster->get_length()/units::cm << std::endl;
-                //it->first->print_blobs_info();
-                //temp_cluster->print_blobs_info();
-                auto blob = temp_cluster->get_last_blob();
-                std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() -1
-                        << " V: " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() -1
-                        << " W: " << blob->w_wire_index_min() << " " << blob->w_wire_index_max() -1
-                        << " T: " << blob->slice_index_min() << " " << blob->slice_index_max() -1
-                        << std::endl;
-                auto points = blob->points();
+                std::cout << "Dead: " << std::endl;
+                it->first->print_blobs_info();
+                std::cout << "Live: " << std::endl;
+                temp_cluster->print_blobs_info();
+                std::cout << dead_live_overlap_offset << std::endl;
+                //auto blob = temp_cluster->get_first_blob();
+                //std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max()
+                //         << " V: " << blob->v_wire_index_min() << " " << blob->v_wire_index_max()
+                //         << " W: " << blob->w_wire_index_min() << " " << blob->w_wire_index_max()
+                //         << " T: " << blob->slice_index_min() << " " << blob->slice_index_max()
+                //         << std::endl;
+                // auto points = blob->points();
                 
-                for (auto it1 = points.begin();it1!=points.end();it1++){
-                    std::cout << (*it1).x() << " " << (*it1).y() << " " << (*it1).z() << std::endl;
-                }
+                // for (auto it1 = points.begin();it1!=points.end();it1++){
+                //     std::cout << (*it1).x() << " " << (*it1).y() << " " << (*it1).z() << std::endl;
+                // }
+                //live->is_connected(*dead, dead_live_overlap_offset, true);
             }
         }
     }   
