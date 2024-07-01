@@ -496,7 +496,8 @@ double WireCell::PointCloud::Facade::Find_Closest_Points(
     double length_2,
     double length_cut,
     geo_point_t& p1_save,
-    geo_point_t& p2_save
+    geo_point_t& p2_save,
+    bool flag_print
     )
 {
   double dis_save = 1e9;
@@ -530,6 +531,8 @@ double WireCell::PointCloud::Facade::Find_Closest_Points(
   mcell1 = cluster1->get_first_blob();
   p1 = mcell1->center_pos();
 
+  if (flag_print) std::cout << "a: " << p1 << std::endl;
+
   while (mcell1 != prev_mcell1 || mcell2 != prev_mcell2){
     prev_mcell1 = mcell1;
     prev_mcell2 = mcell2;
@@ -541,6 +544,8 @@ double WireCell::PointCloud::Facade::Find_Closest_Points(
     temp_results = cluster1->get_closest_point_blob(p2);
     p1 = temp_results.first;
     mcell1 = temp_results.second;
+
+    if (flag_print) std::cout << "a: " << p1 << " " << p2 << std::endl;
   }
   geo_point_t diff = p1 - p2;
   dis = diff.magnitude();
@@ -557,6 +562,8 @@ double WireCell::PointCloud::Facade::Find_Closest_Points(
   mcell1 = cluster1->get_last_blob();
   p1 = mcell1->center_pos();
 
+  if (flag_print) std::cout << "b: " << p1 << std::endl;
+
   while(mcell1!=prev_mcell1 || mcell2!=prev_mcell2){
     prev_mcell1 = mcell1;
     prev_mcell2 = mcell2;
@@ -565,10 +572,13 @@ double WireCell::PointCloud::Facade::Find_Closest_Points(
     auto temp_results = cluster2->get_closest_point_blob(p1);
     p2 = temp_results.first;
     mcell2 = temp_results.second;
+    
     // find the closest point and merged cell in cluster1
     temp_results = cluster1->get_closest_point_blob(p2);
     p1 = temp_results.first;
     mcell1 = temp_results.second;
+  
+    if (flag_print) std::cout << "b: " << p1 << " " << p2 << std::endl;
   }
   diff = p1 - p2;
   dis = diff.magnitude();

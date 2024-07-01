@@ -35,8 +35,12 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
       if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), length_cut)){
-	//to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+
+		// // debug ...
+        // std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
+
+		//to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+		boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
 			ilive2desc[map_cluster_index[cluster_2]], g);
 
 
@@ -63,9 +67,24 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
   geo_point_t p1;
   geo_point_t p2;
 
+// 	// debug ...
+//   bool flag_print = false;
+//   if (fabs(length_1 + length_2 - 1.42425*units::cm - 144.15 * units::cm) < 0.01*units::cm 
+//   && fabs(fabs(length_1-length_2) - fabs(1.42425 - 144.15)*units::cm) < 0.01*units::cm) flag_print =true;
+
   double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1, p2);
+
+//    if (flag_print) {
+//     std::cout << length_1/units::cm << " " << length_2/units::cm << " " << cluster1.npoints() << 
+//     " " << cluster2.npoints() << " " << p1 << " " << p2 << " " << dis/units::cm << std::endl;
+//     std::cout << (*cluster1.get_first_blob()) << " " << cluster1.get_first_blob()->center_pos() << " " << (*cluster1.get_last_blob()) << " " << cluster1.get_last_blob()->center_pos() << std::endl;
+//     auto points = cluster1.get_first_blob()->points();
+//     for (auto it1 = points.begin();it1!=points.end();it1++){
+//       std::cout << (*it1).x() << " " << (*it1).y() << " " << (*it1).z() << std::endl;
+//     }
+//   }
 
   if ((dis < length_cut || (dis < 80*units::cm && length_1 +length_2 > 50*units::cm && length_1>15*units::cm && length_2 > 15*units::cm))){
     geo_point_t cluster1_ave_pos = cluster1.calc_ave_pos(p1,10*units::cm);

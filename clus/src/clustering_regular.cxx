@@ -44,11 +44,13 @@ void WireCell::PointCloud::Facade::clustering_regular(
       if (cluster_2->get_length() < internal_length_cut) continue;
 
       if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), length_cut, flag_enable_extend)){
-	//	to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			ilive2desc[map_cluster_index[cluster_2]], g);
 
+        // debug ...
+        //std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
 
+	      //	to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+			  ilive2desc[map_cluster_index[cluster_2]], g);
       }
     }
   }
@@ -70,9 +72,25 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
   geo_point_t p1;
   geo_point_t p2;
 
+  // debug
+    // bool flag_print = false;
+    // if (fabs(length_1 + length_2 - 12.9601*units::cm - 83.8829*units::cm) < 0.3*units::cm 
+    // && fabs(fabs(length_1-length_2) - fabs(12.9601*units::cm - 83.8829*units::cm)) < 0.3*units::cm) flag_print =true;
+
   double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
+
+  // if (flag_print) {
+  //   std::cout << length_1/units::cm << " " << length_2/units::cm << " " << cluster1.npoints() << 
+  //   " " << cluster2.npoints() << " " << p1 << " " << p2 << " " << dis/units::cm << std::endl;
+  //   std::cout << (*cluster1.get_first_blob()) << " " << cluster1.get_first_blob()->center_pos() << " " << (*cluster1.get_last_blob()) << " " << cluster1.get_last_blob()->center_pos() << std::endl;
+  //   auto points = cluster1.get_first_blob()->points();
+  //   for (auto it1 = points.begin();it1!=points.end();it1++){
+  //     std::cout << (*it1).x() << " " << (*it1).y() << " " << (*it1).z() << std::endl;
+  //   }
+  // }
+
 
   if (dis < length_cut){
     bool flag_para = false;

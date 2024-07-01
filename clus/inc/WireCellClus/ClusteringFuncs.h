@@ -46,7 +46,8 @@ namespace WireCell::PointCloud::Facade {
 			       double length_2,
 			       double length_cut,
 			       geo_point_t& p1_save, // output
-			       geo_point_t& p2_save  // output
+			       geo_point_t& p2_save,  // output
+                   bool flag_print = false
 			       );
 			       
     
