@@ -143,7 +143,7 @@ namespace WireCell::PointCloud::Facade {
         // Return the points at the extremes of the given Cartesian axis.  Default is Y-axis.
         //
         // Note: the two points are in DESCENDING order!
-        std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const;
+        std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const; 
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 
