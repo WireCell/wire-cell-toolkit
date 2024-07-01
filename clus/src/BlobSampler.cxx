@@ -719,7 +719,7 @@ struct Stepped : public BlobSampler::Sampler
         // XQ update this part of code to match WCP
         Strip smax = strips[2]; int max_id = 2;
         Strip smin = strips[3]; int min_id = 3;
-        Strip smid = strips[4]; int mid_id = 4;
+        Strip smid = strips[4]; /*int mid_id = 4;*/
 
         if (swidth(strips[3]) > swidth(smax)){
             smax = strips[3]; max_id = 3;
@@ -737,7 +737,7 @@ struct Stepped : public BlobSampler::Sampler
         for (int i = 2;i!=5;i++){
             if (i != max_id && i != min_id){
                 smid = strips[i];        
-                mid_id = i;
+                // mid_id = i;
             }
         }
         
