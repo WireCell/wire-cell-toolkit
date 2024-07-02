@@ -365,7 +365,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     // initialize clusters ...
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
-    // Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
+    Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
 
     //perf.dump("original live clusters", live_grouping, false, false);
     //perf.dump("original dead clusters", dead_grouping, false, false);
