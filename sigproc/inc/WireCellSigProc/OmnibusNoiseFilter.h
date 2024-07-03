@@ -58,6 +58,8 @@ namespace WireCell {
            private:
             // number of time ticks in the waveforms processed.  Set to 0 and first input trace sets it.
             size_t m_nticks;
+            // allow user to refresh the nticks for each event
+            bool m_reload_nticks{false};
             std::string m_intag, m_outtag;
             std::vector<WireCell::IChannelFilter::pointer> m_perchan, m_grouped, m_perchan_status;
             WireCell::IChannelNoiseDatabase::pointer m_noisedb;

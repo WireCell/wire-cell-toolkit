@@ -41,6 +41,11 @@ void OmnibusNoiseFilter::configure(const WireCell::Configuration& cfg)
         log->warn("\"nsamples\" is an obsolete parameter, use \"nticks\"");
         // we don't throw here on assumption that nticks is still provided
     }
+    
+    m_reload_nticks = get<bool>(cfg, "reload_nticks", m_reload_nticks);
+    if (m_reload_nticks) {
+        log->debug("will refresh nticks per event");
+    }
 
     auto jmm = cfg["maskmap"];
     for (auto name : jmm.getMemberNames()) {
@@ -77,6 +82,7 @@ WireCell::Configuration OmnibusNoiseFilter::default_configuration() const
 {
     Configuration cfg;
     cfg["nticks"] = (int) m_nticks;
+    cfg["reload_nticks"] = m_reload_nticks;
     cfg["maskmap"]["chirp"] = "bad";
     cfg["maskmap"]["noisy"] = "bad";
 
@@ -115,7 +121,7 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         return true;
     }
 
-    if (! m_nticks) {
+    if (! m_nticks or m_reload_nticks) {
         // Warning: this implicitly assumes a dense frame (ie, all tbin=0 and all waveforms same size).
         // It also won't stop triggering a warning inside OneChannelNoise if there is a mismatch.
         m_nticks = traces.at(0)->charge().size();
