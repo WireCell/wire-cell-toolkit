@@ -24,8 +24,7 @@ namespace WireCell {
         template <class U>
         friend std::ostream& operator<<(std::ostream&, const D3Vector<U>&);
 
-        typedef std::vector<T> D3VectorStore;
-        D3VectorStore m_v{3};
+        T m_v[3];
 
       public:
 
@@ -34,14 +33,12 @@ namespace WireCell {
 
         /// Construct from elements.
         D3Vector(const T& a = 0, const T& b = 0, const T& c = 0)
-            : m_v(3,0)
         {
             this->set(a, b, c);
         }
 
         // Copy constructor.
         D3Vector(const D3Vector& o)
-            : m_v(3,0)
         {
             if (o.size() == 3) {
                 this->set(o.x(), o.y(), o.z());
@@ -51,13 +48,13 @@ namespace WireCell {
             }
         }
 
+        // arrays do not have move constructors or move assignment operators.
         // Move constructor.
-        D3Vector(D3Vector&& o)
-            : m_v(std::move(o.m_v))
-        { }
+        // D3Vector(D3Vector&& o)
+        //     : m_v{std::move(o.m_v)}
+        // { }
 
         D3Vector(const T d[3])
-            : m_v(3,0)
         {
             this->set(d[0], d[1], d[2]);
         }
@@ -77,7 +74,6 @@ namespace WireCell {
         /// Set vector from elements;
         void set(const T& a = 0, const T& b = 0, const T& c = 0)
         {
-            m_v.resize(3, 0);
             m_v[0] = a;
             m_v[1] = b;
             m_v[2] = c;
@@ -88,13 +84,13 @@ namespace WireCell {
 
         // make this look like std::vector
         const T& at(size_t index) const {
-            return m_v.at(index);
+            return m_v[index];
         }
         T& at(size_t index) {
-            return m_v.at(index);
+            return m_v[index];
         }
-        const T* data() const { return m_v.data(); }
-        T* data() { return m_v.data(); }
+        const T* data() const { return m_v; }
+        T* data() { return m_v; }
         const size_t size() const { return 3; }
         void clear() { m_v[0] = m_v[1] = m_v[2] = 0; }
         void resize(size_t /*s*/) { /* no-op */ }
@@ -102,7 +98,6 @@ namespace WireCell {
         /// Convert from other typed vector.
         template <class TT>
         D3Vector(const D3Vector<TT>& o)
-            : m_v(3,0)
         {
             this->set(o.x(), o.y(), o.z());
         }
@@ -113,12 +108,12 @@ namespace WireCell {
         T z() const { return m_v[2]; }
 
         /// Access elements by copy.
-        T operator[](std::size_t index) const { return m_v.at(index); }
+        T operator[](std::size_t index) const { return m_v[index]; }
 
         /// Access elements by reference.
         T& operator[](std::size_t index)
         {
-            return m_v.at(index);  // throw if out of bounds
+            return m_v[index];  // throw if out of bounds
         }
 
         /// Return the dot product of this vector and the other.
@@ -196,8 +191,7 @@ namespace WireCell {
         // can call set(x,y,z) to revalidate.
         void invalidate()
         {
-            m_v.clear();
-            m_v.shrink_to_fit();
+            /// TODO: no op?
         }
     };
 
