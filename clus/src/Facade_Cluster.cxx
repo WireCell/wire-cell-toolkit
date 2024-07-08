@@ -727,7 +727,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob)
     return m_map_mcell_indices[blob];
 }
 
-#define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
+// #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(const bool use_ctpc)
 {
     LogDebug("Create Graph! " << graph);
@@ -1510,7 +1510,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
         }  // k
     }  // j
 }
-#define LogDebug(x)
+// #define LogDebug(x)
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {
