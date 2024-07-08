@@ -18,6 +18,8 @@
 
 #include "WCPQuickhull/QuickHull.h"
 
+// extern int global_counter_get_closest_wcpoint;
+
 
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
@@ -50,6 +52,7 @@ namespace WireCell::PointCloud::Facade {
         float_t tick{0.5 * units::us};           // 0.5 mm per tick
         float_t tick_drift{drift_speed * tick};  // tick * speed
         float_t time_offset{-1600 * units::us};
+        int nticks_live_slice{4};
     };
 
     class Simple3DPointCloud {
@@ -91,7 +94,6 @@ namespace WireCell::PointCloud::Facade {
         /// @brief  return local indices instead of global
         std::tuple<int, int, double> get_closest_points(const Simple3DPointCloud& other) const;
        private:
-       
         points_type m_points{3};
         mutable std::unique_ptr<nfkd_t> m_kd{nullptr}; // lazy
     };

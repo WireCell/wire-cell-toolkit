@@ -11,6 +11,8 @@ using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;
 
+// int global_counter_get_closest_wcpoint = 0;
+
 // #define __DEBUG__
 #ifdef __DEBUG__
 #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
@@ -63,12 +65,14 @@ Facade::Simple3DPointCloud::results_type Facade::Simple3DPointCloud::get_closest
     return kd().knn(N, p);
 }
 std::pair<size_t, geo_point_t> Facade::Simple3DPointCloud::get_closest_wcpoint(const geo_point_t& p) const {
+    // global_counter_get_closest_wcpoint++;
     const auto knn_res = kd().knn(1, p);
     if (knn_res.size() != 1) {
         raise<ValueError>("no points found");
     }
     const auto ind = knn_res[0].first;
     geo_point_t pt = {points()[0][ind], points()[1][ind], points()[2][ind]};
+    // std::cout << "get_closest_wcpoint: " << p << " " << ind << " " << pt << " " << knn_res[0].second << std::endl;
     return std::make_pair(ind, pt);
 }
 std::pair<int, double> Facade::Simple3DPointCloud::get_closest_point_along_vec(const geo_point_t& p_test1,
@@ -129,6 +133,7 @@ std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(cons
         std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
         std::tie(p1_index, p1) = get_closest_wcpoint(p2);
     }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
     double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
     if (dis < min_dis) {
         min_dis = dis;
@@ -148,6 +153,7 @@ std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(cons
         std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
         std::tie(p1_index, p1) = get_closest_wcpoint(p2);
     }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
     dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
     if (dis < min_dis) {
         min_dis = dis;
@@ -167,6 +173,7 @@ std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(cons
         std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
         std::tie(p1_index, p1) = get_closest_wcpoint(p2);
     }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
     dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
     if (dis < min_dis) {
         min_dis = dis;
@@ -186,6 +193,7 @@ std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(cons
         std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
         std::tie(p1_index, p1) = get_closest_wcpoint(p2);
     }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
     dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
     if (dis < min_dis) {
         min_dis = dis;

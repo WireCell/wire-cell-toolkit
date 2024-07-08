@@ -241,6 +241,8 @@ namespace {
 }
 
 Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster) const {
+
+    using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
@@ -259,9 +261,18 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             const IBlob::pointer iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
             named_pointclouds_t pcs;
             /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
-            pcs.emplace("3d", sampler->sample_blob(iblob, nblobs));
+            auto [pc, aux] = sampler->sample_blob(iblob, nblobs);
+            pcs.emplace("3d", pc);
             const Point center = calc_blob_center(pcs["3d"]);
-            const auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), m_tick);
+            auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), m_tick);
+            int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
+            int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
+            int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
+            int_t min_wire_type = aux.get("min_wire_type")->elements<int_t>()[0];
+            scaler_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
+            scaler_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
+            scaler_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
+            scaler_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
             pcs.emplace("scalar", std::move(scaler_ds));
             cnode->insert(Points(std::move(pcs)));
 
@@ -274,6 +285,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
 }
 
 Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointer icluster) const {
+    using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
@@ -294,8 +306,12 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             }
             auto iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
             named_pointclouds_t pcs;
-            // pcs.emplace("dead", sampler->sample_blob(iblob, nblobs));
-            pcs.emplace("scalar", make_scaler_dataset(iblob, {0,0,0}, 0, m_tick));
+            auto scaler_ds = make_scaler_dataset(iblob, {0,0,0}, 0, m_tick);
+            scaler_ds.add("max_wire_interval", Array({(int_t)-1}));
+            scaler_ds.add("min_wire_interval", Array({(int_t)-1}));
+            scaler_ds.add("max_wire_type", Array({(int_t)-1}));
+            scaler_ds.add("min_wire_type", Array({(int_t)-1}));
+            pcs.emplace("scalar", scaler_ds);
             pcs.emplace("corner", make_corner_dataset(iblob));
             // for (const auto& [name, pc] : pcs) {
             //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());
@@ -567,6 +583,14 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
             raise<ValueError>("ident mismatch between live and dead clusters");
         }
         Points::node_ptr root_dead = sample_dead(iclus_dead);
+        /// DEBUGONLY:
+        // {
+        //     Facade::Grouping& dead_grouping = *root_dead->value.facade<Facade::Grouping>();
+        //     // std::cout<< "dumping\n";
+        //     // for (const auto cluster : dead_grouping.children()) {
+        //     //     std::cout << cluster->dump() << std::endl;
+        //     // }
+        // }
         auto tens_dead = as_tensors(*root_dead.get(), datapath+"/dead");
         log->debug("Made {} dead tensors", tens_dead.size());
         for(const auto& ten : tens_dead) {

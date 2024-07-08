@@ -24,7 +24,7 @@ namespace WireCell::Clus {
 
         // IBlobSampler
         // virtual PointCloud::Dataset sample_blobs(const IBlob::vector& blobs);
-        virtual PointCloud::Dataset sample_blob(const IBlob::pointer& blob,
+        virtual std::tuple<PointCloud::Dataset, PointCloud::Dataset> sample_blob(const IBlob::pointer& blob,
                                                 int bob_index = 0);
         
         // IConfigurable

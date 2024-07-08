@@ -20,12 +20,23 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                                        std::map<int, std::pair<double, double>>& dead_w_index)
 {
     std::vector<Cluster*> live_clusters = live_grouping.children();  // copy
+    // for (size_t ilive = 0; ilive < 3; ++ilive) {
     for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
         const auto& live = live_clusters.at(ilive);
-        live->Create_graph();
-        std::vector<geo_point_t> boundary_points, independent_points;
-        bool sep_Dec2 = JudgeSeparateDec_2(live, {1, 0, 0}, boundary_points, independent_points, live->get_length());
-        std::cout << "sep_Dec2: " << sep_Dec2 << std::endl;
+        const size_t nblobs = live->children().size();
+        // std::cout << "ilive: " << ilive
+        // << " nblobs " << nblobs
+        // << " npoints " << live->npoints()
+        // << " counter: " << global_counter_get_closest_wcpoint << std::endl;
+        /// TODO: below is just for debugging, need to wait for real impl.
+        {
+            std::unordered_set<size_t> nblobs_to_check = {612, 725, 2414};
+            if (nblobs_to_check.find(nblobs) == nblobs_to_check.end()) continue;
+            live->Create_graph();
+            // std::vector<geo_point_t> boundary_points, independent_points;
+            // bool sep_Dec2 = JudgeSeparateDec_2(live, {1, 0, 0}, boundary_points, independent_points, live->get_length());
+            // std::cout << "sep_Dec2: " << sep_Dec2 << std::endl;
+        }
     }
 }
 

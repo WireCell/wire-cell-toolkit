@@ -49,6 +49,16 @@ void Cluster::print_blobs_info() const{
     }
 }
 
+std::string Cluster::dump() const{
+    const auto [u_min, v_min, w_min, t_min] = get_uvwt_min();
+    const auto [u_max, v_max, w_max, t_max] = get_uvwt_max();
+    std::stringstream ss;
+    ss << " blobs " << children().size() << " points " << npoints()
+    << " [" << t_min << " " << t_max << "] " << children().size()
+    << " " << u_min << " " << u_max << " " << v_min << " " << v_max << " " << w_min << " " << w_max;
+    return ss.str();
+}
+
 const Cluster::time_blob_map_t& Cluster::time_blob_map() const
 {
     if (m_time_blob_map.empty()) {
@@ -717,6 +727,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob)
     return m_map_mcell_indices[blob];
 }
 
+#define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(const bool use_ctpc)
 {
     LogDebug("Create Graph! " << graph);
@@ -787,6 +798,10 @@ void Cluster::Establish_close_connected_graph()
         std::vector<int> pinds = this->get_blob_indices(mcell);
         int max_wire_interval = mcell->get_max_wire_interval();
         int min_wire_interval = mcell->get_min_wire_interval();
+        // std::cout << "mcell: " << pinds.size()
+        // << " type " << mcell->get_max_wire_type() << " " << mcell->get_min_wire_type()
+        // << " interval " << max_wire_interval << " " << min_wire_interval
+        //           << std::endl;
         std::map<int, std::set<int>>* map_max_index_wcps;
         std::map<int, std::set<int>>* map_min_index_wcps;
         if (mcell->get_max_wire_type() == 0) {
@@ -878,12 +893,14 @@ void Cluster::Establish_close_connected_graph()
         }
     }
 
-    LogDebug("in-blob: " << num_edges);
+    LogDebug("in-blob edges: " << num_edges);
 
     std::vector<int> time_slices;
     for (auto [time, _] : this->time_blob_map()) {
         time_slices.push_back(time);
     }
+    const int nticks_per_slice = grouping()->get_params().nticks_live_slice;
+    // std::cout << "time_slices size: " << time_slices.size() << std::endl;
 
     std::vector<std::pair<const Blob*, const Blob*>> connected_mcells;
 
@@ -908,13 +925,13 @@ void Cluster::Establish_close_connected_graph()
         // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
         std::vector<BlobSet> vec_mcells_set;
         if (i + 1 < time_slices.size()) {
-            if (time_slices.at(i + 1) - time_slices.at(i) == 1) {
+            if (time_slices.at(i + 1) - time_slices.at(i) == 1*nticks_per_slice) {
                 vec_mcells_set.push_back(this->time_blob_map().at(time_slices.at(i + 1)));
                 if (i + 2 < time_slices.size())
-                    if (time_slices.at(i + 2) - time_slices.at(i) == 2)
+                    if (time_slices.at(i + 2) - time_slices.at(i) == 2*nticks_per_slice)
                         vec_mcells_set.push_back(this->time_blob_map().at(time_slices.at(i + 2)));
             }
-            else if (time_slices.at(i + 1) - time_slices.at(i) == 2) {
+            else if (time_slices.at(i + 1) - time_slices.at(i) == 2*nticks_per_slice) {
                 vec_mcells_set.push_back(this->time_blob_map().at(time_slices.at(i + 1)));
             }
         }
@@ -933,7 +950,12 @@ void Cluster::Establish_close_connected_graph()
                 }
             }
         }
+        // std::cout << "yuhw: itime_slices " << i
+        // << " time_slices.at(i) " << time_slices.at(i)
+        // << " vec_mcells_set  " << vec_mcells_set.size()
+        // << " connected_mcells " << connected_mcells.size() << std::endl;
     }
+    // std::cout << "connected_mcells size: " << connected_mcells.size() << std::endl;
 
     // establish edge ...
     std::map<std::pair<int, int>, std::pair<int, double>> closest_index;
@@ -1146,14 +1168,14 @@ void Cluster::Establish_close_connected_graph()
     }
     // end of copying ...
 
-    LogDebug("between-blob: " << num_edges);
+    LogDebug("all edges: " << num_edges);
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) {
     // now form the connected components
     std::vector<int> component(num_vertices(*graph));
     const size_t num = connected_components(*graph, &component[0]);
-    LogDebug("num of connected components: " << num);
+    LogDebug(" npoints " << npoints() << " nconnected " << num);
     if (num <= 1) return;
 
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
@@ -1209,6 +1231,8 @@ void Cluster::Connect_graph(const bool use_ctpc) {
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
+            // std::cout << j << " " << k << " " << std::get<0>(index_index_dis[j][k]) << " "
+            //           << std::get<1>(index_index_dis[j][k]) << " " << std::get<2>(index_index_dis[j][k]) << " counter: " << global_counter_get_closest_wcpoint << std::endl;
 
             if ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
                     (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
@@ -1247,10 +1271,11 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
+                geo_point_t test_p;
                 for (int ii = 0; ii != num_steps; ii++) {
-                    geo_point_t test_p(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
-                                       p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
-                                       p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
+                    test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
+                               p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
+                               p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         /// FIXME: how to add face information?
@@ -1274,10 +1299,11 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
+                geo_point_t test_p;
                 for (int ii = 0; ii != num_steps; ii++) {
-                    geo_point_t test_p(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
-                                       p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
-                                       p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
+                    test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
+                               p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
+                               p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         /// FIXME: how to add face information?
@@ -1301,10 +1327,11 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
+                geo_point_t test_p;
                 for (int ii = 0; ii != num_steps; ii++) {
-                    geo_point_t test_p(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
-                                       p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
-                                       p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
+                    test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
+                               p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
+                               p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         /// FIXME: how to add face information?
@@ -1333,7 +1360,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                 int index2 = k;
                 if (std::get<0>(index_index_dis[j][k]) >= 0) {
                     add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
-                    LogDebug(index1 << " " << index2 << " " << std::get<2>(index_index_dis[j][k]));
+                    // LogDebug(index1 << " " << index2 << " " << std::get<2>(index_index_dis[j][k]));
                 }
             }
         }
@@ -1387,9 +1414,9 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                         index1, index2,
                         std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])),
                         temp_graph);
-                    LogDebug(index1 << " " << index2 << " "
-                                    << std::min(std::get<2>(index_index_dis_dir1[j][k]),
-                                                std::get<2>(index_index_dis_dir2[j][k])));
+                    // LogDebug(index1 << " " << index2 << " "
+                    //                 << std::min(std::get<2>(index_index_dis_dir1[j][k]),
+                    //                             std::get<2>(index_index_dis_dir2[j][k])));
                 }
             }
         }
@@ -1438,7 +1465,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                 const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
                 auto edge =
                     add_edge(gind1, gind2, *graph);
-                    LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_mst[j][k]));
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_mst[j][k]));
                 if (edge.second) {
                     if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
                         (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
@@ -1454,7 +1481,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
                     const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
                     auto edge = add_edge(gind1, gind2, *graph);
-                    LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir1[j][k]));
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir1[j][k]));
                     if (edge.second) {
                         if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
                             (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]) * 1.1;
@@ -1468,7 +1495,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
                     const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
                     auto edge = add_edge(gind1, gind2, *graph);
-                    LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir2[j][k]));
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir2[j][k]));
                     if (edge.second) {
                         if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
                             (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]) * 1.1;
@@ -1483,6 +1510,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
         }  // k
     }  // j
 }
+#define LogDebug(x)
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {

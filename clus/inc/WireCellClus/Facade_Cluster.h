@@ -72,6 +72,8 @@ namespace WireCell::PointCloud::Facade {
         // print all blob information
         void print_blobs_info() const;
 
+        std::string dump() const;
+
         // Get all blobs in k-d tree order.  This is different than children()
         // order and different that sort_blobs() order.
         std::vector<Blob*> kd_blobs();
@@ -193,7 +195,7 @@ namespace WireCell::PointCloud::Facade {
         // FIXME: move to private after debugging
         // graph
         MCUGraph* graph;
-        void Create_graph(const bool use_ctpc = false);
+        void Create_graph(const bool use_ctpc = true);
 
         /// @brief edges inside blobs and between overlapping blobs
         void Establish_close_connected_graph();

@@ -153,7 +153,7 @@ struct BlobSampler::Sampler : public Aux::Logger
     }
 
     // Entry point to subclasses
-    virtual void sample(Dataset& ds) = 0;
+    virtual void sample(Dataset& ds, Dataset& aux) = 0;
 
     // subclass may want to config self.
     virtual void configure(const Configuration& cfg) { }
@@ -378,25 +378,26 @@ struct BlobSampler::Sampler : public Aux::Logger
     }
 };
 
-PointCloud::Dataset BlobSampler::sample_blob(const IBlob::pointer& iblob,
+std::tuple<PointCloud::Dataset, PointCloud::Dataset> BlobSampler::sample_blob(const IBlob::pointer& iblob,
                                              int blob_index)
 {
     if (!iblob) {
         THROW(ValueError() << errmsg{"can not sample null blob"});
     }
 
-    PointCloud::Dataset ret;
+    PointCloud::Dataset ret_main;
+    PointCloud::Dataset ret_aux;
     // size_t points_added = 0;
 
     for (auto& sampler : m_samplers) {
         sampler->begin_sample(blob_index, iblob);
-        sampler->sample(ret);
+        sampler->sample(ret_main, ret_aux);
         // points_added += sampler->points_added;
         sampler->end_sample();
     }
     // log->debug("got {} blobs, sampled {} points with {} samplers, returning {}",
-    //            nblobs, points_added, m_samplers.size(), ret.size_major());
-    return ret;
+    //            nblobs, points_added, m_samplers.size(), ret_main.size_major());
+    return {ret_main, ret_aux};
 }
 
 // PointCloud::Dataset BlobSampler::sample_blobs(const IBlob::vector& iblobs)
@@ -428,7 +429,7 @@ struct Center : public BlobSampler::Sampler
     Center(const Center&) = default;
     Center& operator=(const Center&) = default;
 
-    void sample(Dataset& ds)
+    void sample(Dataset& ds, Dataset& aux)
     {
         auto corners = iblob->shape().corners();
         std::vector<Point> points(1);
@@ -448,7 +449,7 @@ struct Corner : public BlobSampler::Sampler
     {
         span = get(cfg, "span", span);
     }
-    void sample(Dataset& ds)
+    void sample(Dataset& ds, Dataset& aux)
     {
         const auto& corners = iblob->shape().corners();
         const size_t npts = corners.size();
@@ -469,7 +470,7 @@ struct Edge : public BlobSampler::Sampler
     Edge(const Edge&) = default;
     Edge& operator=(const Edge&) = default;
 
-    void sample(Dataset& ds)
+    void sample(Dataset& ds, Dataset& aux)
     {
         const auto& coords = anodeface->raygrid();
         auto pts = coords.ring_points(iblob->shape().corners());
@@ -512,7 +513,7 @@ struct Grid : public BlobSampler::Sampler
         planes.push_back(other[tot]);
     }
 
-    void sample(Dataset& ds)
+    void sample(Dataset& ds, Dataset& aux)
     {
         if (step == 1.0) {
             aligned(ds, iblob);
@@ -637,7 +638,7 @@ struct Bounds : public BlobSampler::Sampler
         step = get(cfg, "step", step);
     }
 
-    void sample(Dataset& ds)
+    void sample(Dataset& ds, Dataset& aux)
     {
         const auto& coords = anodeface->raygrid();
         auto pts = coords.ring_points(iblob->shape().corners());
@@ -701,7 +702,7 @@ struct Stepped : public BlobSampler::Sampler
     }
 
 
-    void sample(Dataset& ds) {
+    void sample(Dataset& ds, Dataset& aux) {
         const auto& coords = anodeface->raygrid();
         auto strips = iblob->shape().strips();
 
@@ -790,6 +791,13 @@ struct Stepped : public BlobSampler::Sampler
             }
         }
         intern(ds, points);
+
+        // make aux dataset
+        /// TODO: hard coded for 5 planes, i.e., wire_type is id - "2"
+        aux.add("max_wire_interval", Array({(int)nmax}));
+        aux.add("min_wire_interval", Array({(int)nmin}));
+        aux.add("max_wire_type", Array({(int)(max_id-2)}));
+        aux.add("min_wire_type", Array({(int)(min_id-2)}));
     }
 };
 

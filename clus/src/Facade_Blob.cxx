@@ -76,6 +76,10 @@ void Blob::on_construct(node_type* node)
     v_wire_index_max_ = pc_scalar.get("v_wire_index_max")->elements<int_t>()[0];
     w_wire_index_min_ = pc_scalar.get("w_wire_index_min")->elements<int_t>()[0];
     w_wire_index_max_ = pc_scalar.get("w_wire_index_max")->elements<int_t>()[0];
+    max_wire_interval_ = pc_scalar.get("max_wire_interval")->elements<int_t>()[0];
+    min_wire_interval_ = pc_scalar.get("min_wire_interval")->elements<int_t>()[0];
+    max_wire_type_ = pc_scalar.get("max_wire_type")->elements<int_t>()[0];
+    min_wire_type_ = pc_scalar.get("min_wire_type")->elements<int_t>()[0];
     ///
     ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change the above.
     ///

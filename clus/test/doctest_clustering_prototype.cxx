@@ -71,6 +71,10 @@ Points::node_ptr make_simple_pctree()
             {"v_wire_index_max", Array({(fa_int_t)1})},
             {"w_wire_index_min", Array({(fa_int_t)0})},
             {"w_wire_index_max", Array({(fa_int_t)1})},
+            {"max_wire_interval", Array({(fa_int_t)1})},
+            {"min_wire_interval", Array({(fa_int_t)1})},
+            {"max_wire_type", Array({(fa_int_t)0})},
+            {"min_wire_type", Array({(fa_int_t)0})},
         })},
         {"3d", make_janky_track(Ray(Point(0, 0, 0), Point(1, 0, 0)))}
         }));
@@ -96,6 +100,10 @@ Points::node_ptr make_simple_pctree()
             {"v_wire_index_max", Array({(fa_int_t)wmax})},
             {"w_wire_index_min", Array({(fa_int_t)wmin})},
             {"w_wire_index_max", Array({(fa_int_t)wmax})},
+            {"max_wire_interval", Array({(fa_int_t)1})},
+            {"min_wire_interval", Array({(fa_int_t)1})},
+            {"max_wire_type", Array({(fa_int_t)0})},
+            {"min_wire_type", Array({(fa_int_t)0})},
         })},
         {"3d", make_janky_track(Ray(Point(1, 0, 0), Point(2, 0, 0)))}
         }));

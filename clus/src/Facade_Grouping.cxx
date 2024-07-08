@@ -72,7 +72,7 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
     const auto sname = String::format("ctpc_f%dp%d", face, pind);
     Tree::Scope scope = {sname, {"x", "y"}, 1};
     const auto& sv = m_node->value.scoped_view(scope);
-    std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
+    // std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
     return sv.kd();
 }
 
@@ -120,7 +120,7 @@ bool Grouping::is_good_point(const geo_point_t& point, const int face, double ra
             matched_planes++;
         }
     }
-    std::cout << "matched_planes: " << matched_planes << std::endl;
+    // std::cout << "matched_planes: " << matched_planes << std::endl;
     if (matched_planes >= nplanes - allowed_bad) {
         return true;
     }

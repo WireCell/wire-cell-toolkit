@@ -3,6 +3,7 @@
 
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IAnodePlane.h"
 #include "WireCellAux/Logger.h"
 
 namespace WireCell::Clus {
@@ -51,6 +52,9 @@ namespace WireCell::Clus {
 
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
+
+        // 
+        IAnodePlane::pointer m_anode;
     };
 }  // namespace WireCell::Clus
 

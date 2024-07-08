@@ -78,7 +78,8 @@ bool BlobSampling::operator()(const input_pointer& blobset, output_pointer& tens
         }
         named_pointclouds_t pcs;
         for (auto& [name, sampler] : m_samplers) {
-            pcs.emplace(name, sampler->sample_blob(iblob, bind));
+            auto [pc, aux] = sampler->sample_blob(iblob, bind);
+            pcs.emplace(name, pc);
         }
         root->insert(Points(pcs));
     }

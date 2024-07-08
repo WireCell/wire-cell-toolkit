@@ -13,7 +13,7 @@ Aux::Bee::Object Aux::Bee::dump(const IBlob::vector& blobs, IBlobSampler::pointe
     Aux::Bee::Object bee;    
 
     for (const auto& iblob : blobs) {
-        auto pc = sampler->sample_blob(iblob, iblob->ident());
+        auto [pc, aux] = sampler->sample_blob(iblob, iblob->ident());
         auto x = pc.get("x")->elements<double>();
         auto y = pc.get("y")->elements<double>();
         auto z = pc.get("z")->elements<double>();

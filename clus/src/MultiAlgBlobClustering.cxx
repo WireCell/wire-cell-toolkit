@@ -38,6 +38,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
     m_perf = get(cfg, "perf", m_perf);
+
+    m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -339,6 +341,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         log->error("Failed to get dead point cloud tree from \"{}\"", inpath);
         raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inpath);
     }
+    auto grouping = root_live->value.facade<Grouping>();
+    grouping->set_anode(m_anode);
     perf("loaded live clusters");
 
     // log->debug("Got live pctree with {} children", root_live->nchildren());
@@ -424,11 +428,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
     /// PLACEHOLDER: just to test the function
-    // std::map<int, std::pair<double, double>> dead_u_index;
-    // std::map<int, std::pair<double, double>> dead_v_index;
-    // std::map<int, std::pair<double, double>> dead_w_index;
-    // clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index);
-    // perf.dump("clustering_separate", live_grouping);
+    std::map<int, std::pair<double, double>> dead_u_index;
+    std::map<int, std::pair<double, double>> dead_v_index;
+    std::map<int, std::pair<double, double>> dead_w_index;
+    clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index);
+    perf.dump("clustering_separate", live_grouping);
 
     // BEE debug dead-live
     if (!m_bee_dir.empty()) {
