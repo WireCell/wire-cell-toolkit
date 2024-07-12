@@ -65,7 +65,7 @@ namespace WireCell::Sio {
         int m_ident_offset{0};
         int m_last_ident{-1};
 
-        Bee::Object m_obj;
+        Bee::Points m_bpts;
         Bee::Sink m_sink;
 
         void flush(int ident = -1);

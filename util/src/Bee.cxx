@@ -7,9 +7,35 @@
 #include "WireCellUtil/Units.h"
 #include <boost/container_hash/hash.hpp>
 
+#include <numeric>
+
 using namespace WireCell;
         
-Bee::Object::Object(const std::string& geom,
+std::string Bee::Object::json() const
+{
+    return Persist::dumps(m_data, 0, 6);
+}
+
+size_t Bee::Object::hash() const
+{
+    std::hash<Configuration> chash;
+    return chash(m_data);
+}
+
+Bee::Points::Points()
+{
+    detector("");
+    algorithm("");
+    rse(0,0,0);
+    m_data["x"] = Json::arrayValue;
+    m_data["y"] = Json::arrayValue;
+    m_data["z"] = Json::arrayValue;
+    m_data["q"] = Json::arrayValue;
+    m_data["cluster_id"] = Json::arrayValue;
+}
+
+
+Bee::Points::Points(const std::string& geom,
                const std::string& type,
                int run, int sub, int evt)
 {
@@ -23,22 +49,23 @@ Bee::Object::Object(const std::string& geom,
     m_data["cluster_id"] = Json::arrayValue;
 }
 
-void Bee::Object::detector(const std::string& geom)
+void Bee::Points::detector(const std::string& geom)
 {
     m_data["geom"] = geom;
 }
 
-void Bee::Object::algorithm(const std::string& type)
+void Bee::Points::algorithm(const std::string& type)
 {
+    m_name = type;
     m_data["type"] = type;
 }
 
-std::string Bee::Object::algorithm() const
+std::string Bee::Points::algorithm() const
 {
     return m_data["type"].asString();
 }
 
-void Bee::Object::rse(int run, int sub, int evt)
+void Bee::Points::rse(int run, int sub, int evt)
 {
     if (run >= 0) 
         m_data["runNo"] = run;
@@ -48,7 +75,7 @@ void Bee::Object::rse(int run, int sub, int evt)
         m_data["eventNo"] = evt;
 }
 
-void Bee::Object::reset(int evt, int sub, int run)
+void Bee::Points::reset(int evt, int sub, int run)
 {
     rse(run,sub,evt);
     m_data["x"] = Json::arrayValue;
@@ -58,7 +85,7 @@ void Bee::Object::reset(int evt, int sub, int run)
     m_data["cluster_id"] = Json::arrayValue;
 }
 
-std::vector<int> Bee::Object::rse() const
+std::vector<int> Bee::Points::rse() const
 {
     return {
         m_data["runNo"].asInt(),
@@ -67,12 +94,7 @@ std::vector<int> Bee::Object::rse() const
     };
 }
 
-std::string Bee::Object::json() const
-{
-    return Persist::dumps(m_data, 0, 6);
-}
-
-void Bee::Object::append(const Point& p, double q, int clid)
+void Bee::Points::append(const Point& p, double q, int clid)
 {
     // Here we take the unusual pattern to store a value in explicit units.
     // Normally, WCT code should NOT do this.  But, we consider m_data to belong
@@ -84,7 +106,7 @@ void Bee::Object::append(const Point& p, double q, int clid)
     m_data["cluster_id"].append(clid);
 }
 
-void Bee::Object::append(const Bee::Object& obj)
+void Bee::Points::append(const Bee::Points& obj)
 {
     const int num = obj.size();
     const std::vector<std::string> xyzq = {"x","y","z","q","cluser_id"};
@@ -96,22 +118,108 @@ void Bee::Object::append(const Bee::Object& obj)
     }
 }
 
-size_t Bee::Object::size() const
+size_t Bee::Points::size() const
 {
     return m_data["q"].size();
 }
-bool Bee::Object::empty() const
+bool Bee::Points::empty() const
 {
     return m_data["q"].empty();
 }
 
-int Bee::Object::back_cluster_id() const
+int Bee::Points::back_cluster_id() const
 {
     int siz = size();
     if (!siz) { return -1; }
     return m_data["cluser_id"][siz-1].asInt();
 }
 
+
+////// Patches
+
+// Underlying m_data is a triple-nested array.
+// array of patches
+// each patch is array of pairs
+// each pair gives (x,y).
+Bee::Patches::Patches(const std::string& name, double tolerance, size_t minpts)
+    : Object(name, Json::arrayValue)
+    , m_tolerance(tolerance)
+    , m_minpts(minpts)
+{
+
+}
+        
+void Bee::Patches::append(double y, double z)
+{
+    m_y.push_back(y);
+    m_z.push_back(z);
+}
+
+void Bee::Patches::clear()
+{
+    m_y.clear();
+    m_z.clear();
+    m_data = Json::arrayValue;
+}
+
+void Bee::Patches::flush()
+{
+    if (m_z.empty()) {
+        return;
+    }
+
+    const size_t npts = m_z.size();
+
+    const double cy = std::accumulate(m_y.begin(), m_y.end(), 0) / npts;
+    const double cz = std::accumulate(m_z.begin(), m_z.end(), 0) / npts;
+
+    std::vector<double> angs(npts);
+    std::vector<size_t> inds(npts);
+    std::iota(inds.begin(), inds.end(), 0);
+    for (auto ind : inds) {
+        const double dy = m_y[ind] - cy;
+        const double dz = m_z[ind] - cz;
+        angs[ind] = atan2(dz, dy);
+    }
+
+    if (m_tolerance > 0) {
+        auto far_less = [&](size_t a, size_t b) {
+            if (std::abs(m_y[a] - m_y[b]) > m_tolerance) return m_y[a] < m_y[b];
+            if (std::abs(m_z[a] - m_z[b]) > m_tolerance) return m_z[a] < m_z[b];
+            return false;
+        };
+        std::set<size_t, decltype(far_less)> uindset(inds.begin(), inds.end(), far_less);
+        inds.clear();
+        inds.insert(inds.end(), uindset.begin(), uindset.end());
+    }
+
+    if (inds.size() < m_minpts) {
+        m_y.clear();
+        m_z.clear();
+        return;
+    }
+
+    std::sort(inds.begin(), inds.end(),
+              [&](size_t a, size_t b) -> bool {
+                  return angs[a] < angs[b];
+              });
+
+    // export to Bee json
+    Json::Value jpatch = Json::arrayValue;
+    for (auto ind : inds) {
+        Json::Value jpt = Json::arrayValue;
+        jpt.append(m_y[ind] / units::cm);
+        jpt.append(m_z[ind] / units::cm);
+        jpatch.append(jpt);
+    }
+    m_data.append(jpatch);
+
+    m_y.clear();
+    m_z.clear();
+}
+
+size_t Bee::Patches::size() const { return m_data.size(); }
+bool Bee::Patches::empty() const { return m_data.empty(); }
 
 ///// Sink
 
@@ -144,26 +252,22 @@ void Bee::Sink::index(const Object& obj)
         raise<IOError>("Bee::Sink has no output stream");
     }
 
-    // Get current object "fingerprints"
-    size_t rse = 0;
-    for (int num : obj.rse()) {
-        boost::hash_combine(rse, num);
+    const auto name = obj.name();
+    if (m_seen.find(name) != m_seen.end()) {
+        flush();
     }
-    const auto alg = obj.algorithm();
+    m_seen.insert(name);
+}
 
-    bool need_change = rse != m_rse || m_seen.find(alg) != m_seen.end();
+void Bee::Sink::flush()
+{
+    ++m_index;
+    m_seen.clear();
+}
 
-    if (need_change) {
-        if (m_rse) {
-            // when m_rse is zero, it means first time in so use initial m_index==0.
-            // when non-zero then it is time to advance.
-            ++m_index;
-        }
-        m_rse = rse;
-        m_seen.clear();
-    }
-    // Insert if we need change or not.
-    m_seen.insert(alg);
+std::string Bee::Sink::store_path(const Object& obj) const
+{
+    return fmt::format("data/{0}/{0}-{1}.json\n", m_index, obj.name());
 }
 
 size_t Bee::Sink::write(const Object& obj)
@@ -188,10 +292,9 @@ size_t Bee::Sink::write(const Object& obj)
 
     // WCT stream protocol for actual file.
     {
-        const std::string fname = fmt::format("name data/{0}/{0}-{1}.json\n", m_index, obj.algorithm());
+        const std::string fname = "name " + store_path(obj);
         const std::string json = obj.json();
         const std::string body = fmt::format("body {}\n", json.size());
-
         m_out << fname << body << json.data();
         m_out.flush();
     }
@@ -201,6 +304,8 @@ size_t Bee::Sink::write(const Object& obj)
 void Bee::Sink::close()
 {
     if (m_out.empty()) { return; }
+    m_index=0;
+    m_seen.clear();
     m_out.flush();
     m_out.pop();
     m_out.clear();

@@ -3,14 +3,14 @@
 
 using namespace WireCell;
 
-Aux::Bee::Object Aux::Bee::dump(IBlobSet::pointer bs, IBlobSampler::pointer sampler)
+Aux::Bee::Points Aux::Bee::dump(IBlobSet::pointer bs, IBlobSampler::pointer sampler)
 {
     return dump(bs->blobs(), sampler);
 }
 
-Aux::Bee::Object Aux::Bee::dump(const IBlob::vector& blobs, IBlobSampler::pointer sampler)
+Aux::Bee::Points Aux::Bee::dump(const IBlob::vector& blobs, IBlobSampler::pointer sampler)
 {
-    Aux::Bee::Object bee;    
+    Aux::Bee::Points bee;    
 
     for (const auto& iblob : blobs) {
         auto [pc, aux] = sampler->sample_blob(iblob, iblob->ident());

@@ -26,6 +26,9 @@ using namespace WireCell::PointCloud::Tree;
 
 MultiAlgBlobClustering::MultiAlgBlobClustering()
   : Aux::Logger("MultiAlgBlobClustering", "clus")
+  , m_bee_img("uboone", "img")
+  , m_bee_ld("uboone", "live-dead")
+  , m_bee_dead("channel-deadarea", 0.0, 3)
 {
 }
 
@@ -37,10 +40,6 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     if (cfg.isMember("bee_dir")) {
         log->warn("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
     }
-    m_bee_img.detector("uboone");
-    m_bee_img.algorithm("img");
-    m_bee_ld.detector("uboone");
-    m_bee_ld.algorithm("live-dead");
 
     m_sink.reset(get<std::string>(cfg, "bee_zip", "mabc.zip"));
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
@@ -70,28 +69,33 @@ void MultiAlgBlobClustering::finalize()
     m_sink.close();
 }
 
-static void reset_bee(int ident, WireCell::Bee::Object& bobj)
+static void reset_bee(int ident, WireCell::Bee::Points& bpts)
 {
     int run=0, evt=0;
     if (ident > 0) {
         run = (ident >> 16) & 0x7fff;
         evt = (ident) & 0xffff;
     }
-    bobj.reset(evt, 0, run);
+    bpts.reset(evt, 0, run);
 }
 
-void MultiAlgBlobClustering::flush(WireCell::Bee::Object& bobj, int ident)
+void MultiAlgBlobClustering::flush(WireCell::Bee::Points& bpts, int ident)
 {
-    if (bobj.empty()) return;
+    if (bpts.empty()) return;
 
-    m_sink.write(bobj);
-    reset_bee(ident, bobj);
+    m_sink.write(bpts);
+    reset_bee(ident, bpts);
 }
 
 void MultiAlgBlobClustering::flush(int ident)
 {
     flush(m_bee_img, ident);
     flush(m_bee_ld,  ident);
+    if (m_save_deadarea && m_bee_dead.size()) {
+        m_bee_dead.flush();
+        m_sink.write(m_bee_dead);
+        m_bee_dead.clear();
+    }
     m_last_ident = ident;
 }
 
@@ -99,9 +103,9 @@ void MultiAlgBlobClustering::flush(int ident)
 // many schema and there is no "standard".  So we keep this dumper here, since
 // it is here we know the pc tree schema.
 static
-void fill_bee(WireCell::Bee::Object& bobj, const Points::node_t& root)
+void fill_bee_points(WireCell::Bee::Points& bpts, const Points::node_t& root)
 {
-    int clid = bobj.back_cluster_id();
+    int clid = bpts.back_cluster_id();
     const double charge = 0;
     for (const auto cnode : root.children()) {  // this is a loop through all clusters ...
         ++clid;
@@ -116,10 +120,33 @@ void fill_bee(WireCell::Bee::Object& bobj, const Points::node_t& root)
             auto y = spc.get().get("y")->elements<double>();
             auto z = spc.get().get("z")->elements<double>();
             const size_t size = x.size();
-            // fixme: add to Bee::Object a method to append vector-like things...
+            // fixme: add to Bee::Points a method to append vector-like things...
             for (size_t ind = 0 ; ind<size; ++ind) {
-                bobj.append(Point(x[ind], y[ind], z[ind]), charge, clid);
+                bpts.append(Point(x[ind], y[ind], z[ind]), charge, clid);
             }
+        }
+    }
+}
+
+static
+void fill_bee_patches(WireCell::Bee::Patches& bee, const Points::node_t& root)
+{
+    int first_slice = -1;
+    for (const auto cnode : root.children()) {
+        for (const auto bnode : cnode->children()) {
+            const auto& lpcs = bnode->value.local_pcs();
+
+            const auto& pc_scalar = lpcs.at("scalar");
+            int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
+            if (first_slice < 0) {
+                first_slice = slice_index_min;
+            }
+            if (slice_index_min != first_slice) continue;
+
+            const auto& pc_corner = lpcs.at("corner");
+            const auto& y = pc_corner.get("y")->elements<double>();
+            const auto& z = pc_corner.get("z")->elements<double>();
+            bee.append(y.begin(), y.end(), z.begin(), z.end());
         }
     }
 }
@@ -197,6 +224,7 @@ namespace {
         return true;
     }
 #endif
+
     void dumpe_deadarea(const Points::node_t& root, const std::string& fn)
     {
         using WireCell::PointCloud::Facade::float_t;
@@ -349,8 +377,13 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     //     }
     //     perf("loaded dump live clusters to bee");
     // }
-    fill_bee(m_bee_img, *root_live.get());
+    fill_bee_points(m_bee_img, *root_live.get());
     perf("loaded dump live clusters to bee");
+    if (m_save_deadarea) {
+        fill_bee_patches(m_bee_dead, *root_dead.get());
+        perf("loaded dump dead regions to bee");
+    }
+    log->debug("will {} {} dead patches", m_save_deadarea ? "save" : "not save", m_bee_dead.size());
 
     cluster_set_t cluster_connected_dead;
 
@@ -427,7 +460,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     //     dump_bee(*root_live.get(), String::format("%s/%d-dead-live.json", sub_dir, ident));
     //     perf("dump live clusters to bee");
     // }
-    fill_bee(m_bee_ld, *root_live.get());
+    fill_bee_points(m_bee_ld, *root_live.get());
     perf("dump live clusters to bee");
 
     std::string outpath = m_outpath;

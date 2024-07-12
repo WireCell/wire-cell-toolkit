@@ -32,9 +32,10 @@ namespace WireCell::Clus {
          */
         Bee::Sink m_sink;
         int m_last_ident{-1};
-        Bee::Object m_bee_img, m_bee_ld;
+        Bee::Points m_bee_img, m_bee_ld;
+        Bee::Patches m_bee_dead;
         void flush(int ident = -1);
-        void flush(WireCell::Bee::Object& bobj, int ident);
+        void flush(WireCell::Bee::Points& bpts, int ident);
 
         bool m_save_deadarea{false};
 

@@ -9,13 +9,13 @@
 
 namespace WireCell::Aux::Bee {
 
-    using WireCell::Bee::Object;
+    using WireCell::Bee::Points;
 
-    // Convert a blob set to a Bee object by applying the sampler.  The sampler
-    // is expected to produce point cloud arrays named: "x", "y", "z" for point
-    // positions and may produce "charge_val" for a charge measure. 
-    Object dump(IBlobSet::pointer bs, IBlobSampler::pointer sampler);
-    Object dump(const IBlob::vector& blobs, IBlobSampler::pointer sampler);
+    // Convert a blob set to a Bee Points object by applying the sampler.  The
+    // sampler is expected to produce point cloud arrays named: "x", "y", "z"
+    // for point positions and may produce "charge_val" for a charge measure.
+    Points dump(IBlobSet::pointer bs, IBlobSampler::pointer sampler);
+    Points dump(const IBlob::vector& blobs, IBlobSampler::pointer sampler);
 
 }
 

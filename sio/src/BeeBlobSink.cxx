@@ -41,12 +41,12 @@ void Sio::BeeBlobSink::configure(const WireCell::Configuration& cfg)
     if (cfg["geom"].isNull()) {
         raise<ValueError>("BeeBlobSink requires a 'geom' to give canonical Bee detector name");
     }
-    m_obj.detector(cfg["geom"].asString());
+    m_bpts.detector(cfg["geom"].asString());
     // optional
-    m_obj.algorithm(get<std::string>(cfg, "type", "unknown"));
+    m_bpts.algorithm(get<std::string>(cfg, "type", "unknown"));
 
     m_ident_offset = get(cfg,"evt",0);
-    m_obj.rse(get(cfg,"run",0), get(cfg,"sub",0), m_ident_offset);
+    m_bpts.rse(get(cfg,"run",0), get(cfg,"sub",0), m_ident_offset);
 
     // String or array of string, can not be empty
     m_samplers.clear();
@@ -79,12 +79,12 @@ WireCell::Configuration Sio::BeeBlobSink::default_configuration() const
 
 void Sio::BeeBlobSink::flush(int ident)
 {
-    if (m_obj.empty()) {
+    if (m_bpts.empty()) {
         return;
     }
     log->debug("writing to {} at call={}", m_outname, m_calls);
-    m_sink.write(m_obj);
-    m_obj.reset(ident);
+    m_sink.write(m_bpts);
+    m_bpts.reset(ident);
     m_last_ident = ident;
 }
 
@@ -120,7 +120,7 @@ bool Sio::BeeBlobSink::operator()(const IBlobSet::pointer& bs)
     }
 
     if (m_last_ident < 0) {     // first time.
-        m_obj.reset(ident);
+        m_bpts.reset(ident);
         m_last_ident = ident;
     }
     else if (m_last_ident != ident) {
@@ -131,10 +131,10 @@ bool Sio::BeeBlobSink::operator()(const IBlobSet::pointer& bs)
         auto obj = Aux::Bee::dump(bs, sampler);
         log->trace("sampled {} blobs getting {} points at call={}",
                    blobs.size(), obj.size(), m_calls);
-        m_obj.append(obj);
+        m_bpts.append(obj);
     }
 
-    log->trace("have {} points at call={}", m_obj.size(), m_calls);
+    log->trace("have {} points at call={}", m_bpts.size(), m_calls);
     ++m_calls;
     return true;
 }
