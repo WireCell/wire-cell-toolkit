@@ -1,14 +1,18 @@
 #ifndef WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 #define WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 
+#include "WireCellAux/Logger.h"
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
-#include "WireCellAux/Logger.h"
+#include "WireCellIface/ITerminal.h"
+#include "WireCellUtil/Bee.h"
 
 namespace WireCell::Clus {
 
-    class MultiAlgBlobClustering : public Aux::Logger, public ITensorSetFilter, public IConfigurable {
+    class MultiAlgBlobClustering
+        : public Aux::Logger, public ITensorSetFilter, public IConfigurable, public ITerminal
+    {
        public:
         MultiAlgBlobClustering();
         virtual ~MultiAlgBlobClustering() = default;
@@ -18,10 +22,22 @@ namespace WireCell::Clus {
 
         virtual bool operator()(const input_pointer& in, output_pointer& out);
 
+        virtual void finalize();
+
        private:
-        // directory to save the bee debug file
-        std::string m_bee_dir{""};
+
+        /** Config: bee_zip
+         *
+         * The path to a zip file to fill with Bee JSON
+         */
+        Bee::Sink m_sink;
+        int m_last_ident{-1};
+        Bee::Object m_bee_img, m_bee_ld;
+        void flush(int ident = -1);
+        void flush(WireCell::Bee::Object& bobj, int ident);
+
         bool m_save_deadarea{false};
+
 
         // Count how many times we are called
         size_t m_count{0};

@@ -152,12 +152,14 @@ namespace WireCell::Root {
         struct Header {
             // double eventTime{0};    // 1.45767e9. Unix time?
             double triggerTime{0};  // 1.48822e10. Units?
+            int runNo{0};
             int eventNo{0};
             int nrebin{0};
             // float unit_dis{0};
 
             void set_addresses(TTree& tree) {
                 tree.SetBranchAddress("triggerTime", &triggerTime);
+                tree.SetBranchAddress("runNo", &runNo);
                 tree.SetBranchAddress("eventNo", &eventNo);
                 tree.SetBranchAddress("nrebin", &nrebin);
                 // tree.SetBranchAddress("unit_dis",&unit_dis);
@@ -401,7 +403,8 @@ IFrame::pointer Root::UbooneBlobSource::gen_frame()
     // We have no good way to make traces.  Best we might do is spread activity
     // over nrebin ticks.  Assuming the traces are not important for downstream
     // we make a frame that only holds metadata.
-    return std::make_shared<SimpleFrame>(m_data->header.eventNo,
+    int ident = ((m_data->header.runNo & 0x7fff) << 16) | (m_data->header.eventNo & 0xffff);
+    return std::make_shared<SimpleFrame>(ident,
                                          m_data->header.triggerTime, 
                                          0.5*units::us);
 }

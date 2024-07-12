@@ -48,28 +48,36 @@ namespace WireCell::Bee {
                int run=0, int sub=0, int evt=0);
 
 
-        /// Drop arrays and reset the event number
-        void reset(int evt);
+        /// Drop arrays and reset the e/s/r numbers.
+        /// CAUTION: opposite order than may be expected.
+        /// If sub or run are negative, any previous value is kept.
+        void reset(int evt, int sub=-1, int run=-1);
 
         void detector(const std::string& geom);
         void algorithm(const std::string& type);
         std::string algorithm() const;
 
-        /// Set the run/subrun/event numbers
+        /// Set the run/subrun/event numbers.  Pass negative to leave current
+        /// value unchanged.
         void rse(int run, int sub, int evt);
 
+        /// Return run/sub/evt as vector of int.
         std::vector<int> rse() const;
 
-        // Add a WCT point.  Note, p is expected to be in usual WCT system-of-units.
-        void append(const Point& p, double q=0);
+        /// Add a WCT point.  Note, p is expected to be in usual WCT system-of-units.
+        void append(const Point& p, double q=0, int clid=0);
 
-        // Return self as a JSON string
+        /// Return self as a JSON string
         std::string json() const;
 
+        /// Simply append obj's x,y,z,q,cluster_id arrays to this.
         void append(const Object& obj);
 
         size_t size() const;
         bool empty() const;
+
+        // return the cluster id of the last appended point
+        int back_cluster_id() const;
 
     public:
 

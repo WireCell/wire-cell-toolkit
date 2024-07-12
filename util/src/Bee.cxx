@@ -20,6 +20,7 @@ Bee::Object::Object(const std::string& geom,
     m_data["y"] = Json::arrayValue;
     m_data["z"] = Json::arrayValue;
     m_data["q"] = Json::arrayValue;
+    m_data["cluster_id"] = Json::arrayValue;
 }
 
 void Bee::Object::detector(const std::string& geom)
@@ -39,18 +40,22 @@ std::string Bee::Object::algorithm() const
 
 void Bee::Object::rse(int run, int sub, int evt)
 {
-    m_data["runNo"] = run;
-    m_data["subRunNo"] = sub;
-    m_data["eventNo"] = evt;
+    if (run >= 0) 
+        m_data["runNo"] = run;
+    if (sub >= 0)
+        m_data["subRunNo"] = sub;
+    if (evt >= 0)
+        m_data["eventNo"] = evt;
 }
 
-void Bee::Object::reset(int evt)
+void Bee::Object::reset(int evt, int sub, int run)
 {
-    m_data["eventNo"] = evt;
+    rse(run,sub,evt);
     m_data["x"] = Json::arrayValue;
     m_data["y"] = Json::arrayValue;
     m_data["z"] = Json::arrayValue;
     m_data["q"] = Json::arrayValue;
+    m_data["cluster_id"] = Json::arrayValue;
 }
 
 std::vector<int> Bee::Object::rse() const
@@ -67,7 +72,7 @@ std::string Bee::Object::json() const
     return Persist::dumps(m_data, 0, 6);
 }
 
-void Bee::Object::append(const Point& p, double q)
+void Bee::Object::append(const Point& p, double q, int clid)
 {
     // Here we take the unusual pattern to store a value in explicit units.
     // Normally, WCT code should NOT do this.  But, we consider m_data to belong
@@ -76,15 +81,17 @@ void Bee::Object::append(const Point& p, double q)
     m_data["y"].append(p.y()/units::cm);
     m_data["z"].append(p.z()/units::cm);
     m_data["q"].append(q);
+    m_data["cluster_id"].append(clid);
 }
 
 void Bee::Object::append(const Bee::Object& obj)
 {
     const int num = obj.size();
-    const std::vector<std::string> xyzq = {"x","y","z","q"};
+    const std::vector<std::string> xyzq = {"x","y","z","q","cluser_id"};
     for (const auto& key : xyzq) {
+        const auto& arr = obj.m_data[key];
         for (int ind=0; ind<num; ++ind) {
-            m_data[key].append(obj.m_data[key][ind]);
+            m_data[key].append(arr[ind]);
         }
     }
 }
@@ -98,6 +105,12 @@ bool Bee::Object::empty() const
     return m_data["q"].empty();
 }
 
+int Bee::Object::back_cluster_id() const
+{
+    int siz = size();
+    if (!siz) { return -1; }
+    return m_data["cluser_id"][siz-1].asInt();
+}
 
 
 ///// Sink
