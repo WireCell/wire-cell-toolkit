@@ -1,16 +1,9 @@
-#include "WireCellUtil/Configuration.h"
-#include "WireCellUtil/Persist.h"
-#include "WireCellUtil/Testing.h"
-#include "WireCellUtil/Point.h"
+#include "WireCellUtil/ConfigurationTesting.h"
 
-#include <iostream>
 
-using namespace WireCell;
-using namespace std;
-
-int main()
+const std::string& WireCell::ConfigurationTesting::tracks_json()
 {
-    string json = R"(
+    static std::string ret = R"(
 [
    {
       "data": {
@@ -71,18 +64,5 @@ int main()
 ]
 )";
 
-    Configuration cfg = Persist::loads(json);
-
-    for (auto comp : cfg) {
-        Assert(get<string>(comp, "type") == "TrackDepos");
-        Configuration data = comp["data"];
-        Assert(get<double>(data, "step_size") == 1.0);
-        Configuration tracks = data["tracks"];
-        for (auto track : tracks) {
-            Assert(get<double>(track, "charge") < 0);
-            Ray ray = get<Ray>(track, "ray");
-            cerr << ray << endl;
-        }
-    }
-    return 0;
+    return ret;
 }

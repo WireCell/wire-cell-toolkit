@@ -211,8 +211,20 @@ namespace WireCell {
         assign(*ptr, val);
     }
 
+    /// Return a hash of the content of the config.
+    size_t hash(const Configuration& cfg);
+
 }  // namespace WireCell
 
 template <> struct fmt::formatter<WireCell::Configuration> : fmt::ostream_formatter {};
+
+namespace std {
+    template<>
+    struct hash< WireCell::Configuration > {
+        size_t operator()(const WireCell::Configuration& cfg) const {
+            return WireCell::hash(cfg);
+        }
+    };
+}
 
 #endif
