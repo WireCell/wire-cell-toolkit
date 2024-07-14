@@ -108,6 +108,11 @@ const Blob* Cluster::get_last_blob() const
     return *(time_blob_map().rbegin()->second.rbegin());
 }
 
+size_t Cluster::get_num_time_slices() const
+{
+    return time_blob_map().size();
+}
+
 std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t& p_test1, geo_point_t dir,
                                                                     double test_dis, double dis_step, double angle_cut,
                                                                     double dis_cut) const
@@ -1574,9 +1579,10 @@ void Cluster::Calc_PCA() const
     cov_matrix(2, 1) = cov_matrix(1, 2);
     // std::cout << cov_matrix << std::endl;
 
-    const auto eigen = WireCell::Array::pca(cov_matrix);
-    auto eigen_values = eigen.eigenvalues();
-    auto eigen_vectors = eigen.eigenvectors();
+    // const auto eigenSolver = WireCell::Array::pca(cov_matrix);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_values = eigenSolver.eigenvalues();
+    auto eigen_vectors = eigenSolver.eigenvectors();
 
     for (int i = 0; i != 3; i++) {
         m_pca_values[i] = eigen_values(i);

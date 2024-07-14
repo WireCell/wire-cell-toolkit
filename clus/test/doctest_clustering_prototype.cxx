@@ -295,6 +295,20 @@ TEST_CASE("pca")
     }
 }
 
+TEST_CASE("quickhull")
+{
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    auto bpoints = pccptr->get_hull();
+    for (const auto &bpoint : bpoints)
+    {
+        std::cout << "boundary_point: " << bpoint << std::endl;
+    }
+}
+
 
 TEST_CASE("create cluster graph")
 {

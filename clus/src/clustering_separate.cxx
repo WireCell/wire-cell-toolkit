@@ -10,6 +10,9 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+// time_slice_length is length span for a slice
+static bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length);
+
 static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length);
@@ -33,11 +36,36 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             std::unordered_set<size_t> nblobs_to_check = {612, 725, 2414};
             if (nblobs_to_check.find(nblobs) == nblobs_to_check.end()) continue;
             live->Create_graph();
-            // std::vector<geo_point_t> boundary_points, independent_points;
-            // bool sep_Dec2 = JudgeSeparateDec_2(live, {1, 0, 0}, boundary_points, independent_points, live->get_length());
-            // std::cout << "sep_Dec2: " << sep_Dec2 << std::endl;
+            std::vector<geo_point_t> boundary_points, independent_points;
+            bool sep_Dec2 = JudgeSeparateDec_2(live, {1, 0, 0}, boundary_points, independent_points, live->get_length());
+            std::cout << "sep_Dec2: " << sep_Dec2 << std::endl;
         }
     }
+}
+
+static bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length)
+{
+    // get the main axis
+    geo_point_t dir1(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
+    geo_point_t dir2(cluster->get_pca_axis(1).x(), cluster->get_pca_axis(1).y(), cluster->get_pca_axis(1).z());
+    geo_point_t dir3(cluster->get_pca_axis(2).x(), cluster->get_pca_axis(2).y(), cluster->get_pca_axis(2).z());
+
+    double angle1 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+
+    /// CHECKME: is "time_slice_length" drift_speed * tick?
+    double temp_angle1 = asin(cluster->get_num_time_slices() * time_slice_length / length) / 3.1415926 * 180.;
+
+    double angle2 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+    double ratio1 = cluster->get_pca_value(1) / cluster->get_pca_value(0);
+    double ratio2 = cluster->get_pca_value(2) / cluster->get_pca_value(0);
+
+    // std::cout << " K : " << ratio1 << " " << ratio2 << " " << angle1 << " " << angle2 << " " << pow(10,exp(1.38115-1.19312*pow(angle1,1./3.))-2.2) << " " << pow(10,exp(1.38115-1.19312*pow(angle2,1./3.))-2.2) << " " << cluster->get_num_time_slices() << std::endl;
+
+    if (ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2) ||
+        ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(temp_angle1, 1. / 3.)) - 2.2) ||
+        ratio2 > pow(10, exp(1.38115 - 1.19312 * pow(angle2, 1. / 3.)) - 2.2) || ratio1 > 0.75)
+        return true;
+    return false;
 }
 
 static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,

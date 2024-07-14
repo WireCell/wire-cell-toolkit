@@ -186,6 +186,9 @@ namespace WireCell::PointCloud::Facade {
         // Return blob at the back of the time blob map.  Raises ValueError if cluster is empty.
         const Blob* get_last_blob() const;
 
+        // number of unique slice times, i.e. time_blob_map().size()
+        size_t get_num_time_slices() const;
+
         // Return a value representing the content of this cluster.
         size_t hash() const;
 
