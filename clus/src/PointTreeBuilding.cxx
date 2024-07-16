@@ -216,6 +216,9 @@ namespace {
             const auto& [one, two] = crossing;
             auto pt = coords.ray_crossing(one, two);
             auto is_higher = [&](const RayGrid::coordinate_t& c) {
+                if (c.layer < 2) {
+                    return false;
+                }
                 const double diff = (pt - center).dot(coords.pitch_dirs()[c.layer]);
                 return diff > 0;
             };
