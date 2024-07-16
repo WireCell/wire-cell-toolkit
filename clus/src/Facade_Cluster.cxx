@@ -1584,11 +1584,12 @@ void Cluster::Calc_PCA() const
     auto eigen_values = eigenSolver.eigenvalues();
     auto eigen_vectors = eigenSolver.eigenvectors();
 
+    // ascending order from Eigen, we want descending
     for (int i = 0; i != 3; i++) {
-        m_pca_values[i] = eigen_values(i);
+        m_pca_values[2-i] = eigen_values(i);
         double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + eigen_vectors(1, i) * eigen_vectors(1, i) +
                              eigen_vectors(2, i) * eigen_vectors(2, i));
-        m_pca_axis[i].set(eigen_vectors(0, i) / norm, eigen_vectors(1, i) / norm, eigen_vectors(2, i) / norm);
+        m_pca_axis[2-i].set(eigen_vectors(0, i) / norm, eigen_vectors(1, i) / norm, eigen_vectors(2, i) / norm);
         // std::cout << "PCA: " << i << " " << m_pca_values[i] << " " << m_pca_axis[i] << std::endl;
     }
 
