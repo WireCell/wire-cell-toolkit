@@ -4,6 +4,7 @@
 #include "WireCellAux/BlobTools.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Persist.h"
 #include "WireCellUtil/Units.h"
 
 #include "TInterpreter.h"
@@ -49,18 +50,27 @@ void Root::UbooneBlobSource::configure(const WireCell::Configuration& cfg)
     }        
 
     m_kind = get(cfg, "kind", m_kind);
+
+    auto check_file = [](const auto& jstr) -> std::string {
+        auto got = Persist::resolve(jstr.asString());
+        if (got.empty()) {
+            raise<ValueError>("file not found: %s", jstr.asString());
+        }
+        return got;
+    };
+
     auto input = cfg["input"];
     if (input.isNull()) {
         log->critical("input is required");
         raise<ValueError>("UbooneBlobSource: input is required");
     }
     if (input.isString()) {
-        m_input.push_back(input.asString());
+        m_input.push_back(check_file(input));
     }
     else {
         m_input.clear();
         for (const auto& one: input) {
-            m_input.push_back(one.asString());
+            m_input.push_back(check_file(one));
         }
     }
     // so we can pop_back.
