@@ -1,0 +1,94 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+# Run like:
+#
+# ./root/test/uboone-blobs.smake -p --directory out <rule>
+#
+# Rules:
+#
+# dotify_all: make PDFs for WCT flow graphs
+# cluster: run full job
+# bee_upload: run cluster + upload bee zip file and maybe open your browser
+
+import os
+from pathlib import Path
+
+wctcfg = workflow.basedir + "/uboone-blobs.jsonnet"
+wcpdat = "result_5384_130_6501.root"
+wcpdat_url = f"https://github.com/HaiwangYu/wcp-porting-img/raw/main/fgval/{wcpdat}"
+if not Path(wcpdat).exists():
+    import urllib.request
+    urllib.request.urlretrieve(wcpdat_url, wcpdat)
+
+
+rule load:
+    input:
+        cfg = wctcfg,
+        dat = wcpdat
+    output:
+        log='load-{kind}.log',
+        err='load-{kind}.err',
+        dat='clus-{kind}.npz'
+    shell: '''
+    wire-cell -l {output.log} -L debug \
+      -A iname={input.dat} -A oname={output.dat} -A kind={wildcards.kind} \
+      {input.cfg} 2> {output.err}
+    '''
+
+rule all_loads:
+    input: expand(rules.load.output.dat, kind=['live','dead'])
+
+rule cluster:
+    input:
+        live='clus-live.npz',
+        dead='clus-dead.npz',
+        cfg=wctcfg,
+    output:
+        log="live-dead.log",
+        err="live-dead.err",
+        bee="live-dead.zip",
+        dat="live-dead.tar.gz"
+    shell: '''
+    wire-cell -l {output.log} -L debug \
+      -A iname={input.live},{input.dead} \
+      -A oname={output.bee},{output.dat} \
+      -A kind=clus \
+      {input.cfg} 2> {output.err}
+    '''
+
+rule bee_upload:
+    input:
+        dat=rules.cluster.output.bee,
+        uploader=workflow.basedir + "/../../test/scripts/bee-upload"
+    output:
+        log="bee-upload.log"
+    shell: '''
+    {input.uploader} {input.dat} > {output.log}
+    '''
+    
+    
+
+def dotify_iname(w):
+    if w.kind in ("live", "dead"):
+        return "result.root"
+    return "live.npz,dead.npz"
+def dotify_oname(w):
+    if w.kind == "clus":
+        return "bee.zip,tens.npz"
+    return f'{w.kind}.npz'
+rule dotify:
+    input: wctcfg
+    output:
+        pdf="uboone-blobs-{kind}.pdf",
+        json="uboone-blobs-{kind}.json",
+    params:
+        iname=dotify_iname,
+        oname=dotify_oname
+    shell: '''
+    wcsonnet -A iname={params.iname} -A oname={params.oname} -A kind={wildcards.kind} {input} > {output.json}
+    wirecell-pgraph dotify {output.json} {output.pdf}
+    '''
+rule dotify_all:
+    input:
+        expand(rules.dotify.output, kind=["live","dead","clus"])
