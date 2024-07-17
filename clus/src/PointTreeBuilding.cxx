@@ -214,18 +214,20 @@ namespace {
         
         for (const auto& crossing : crossings) {
             const auto& [one, two] = crossing;
-            auto pt = coords.ray_crossing(one, two);
-            auto is_higher = [&](const RayGrid::coordinate_t& c) {
-                if (c.layer < 2) {
-                    return false;
-                }
-                const double diff = (pt - center).dot(coords.pitch_dirs()[c.layer]);
-                return diff > 0;
-            };
             RayGrid::coordinate_t o1 = one;
             RayGrid::coordinate_t o2 = two;
-            if (is_higher(one)) o1.grid += 1;
-            if (is_higher(two)) o2.grid += 1;
+            // {
+            //     auto pt = coords.ray_crossing(one, two);
+            //     auto is_higher = [&](const RayGrid::coordinate_t& c) {
+            //         if (c.layer < 2) {
+            //             return false;
+            //         }
+            //         const double diff = (pt - center).dot(coords.pitch_dirs()[c.layer]);
+            //         return diff > 0;
+            //     };
+            //     if (is_higher(one)) o1.grid += 1;
+            //     if (is_higher(two)) o2.grid += 1;
+            // }
             auto opt = coords.ray_crossing(o1, o2);
             corner_x.push_back(opt.x());
             corner_y.push_back(opt.y());
