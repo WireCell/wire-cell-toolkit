@@ -170,17 +170,8 @@ void Bee::Patches::flush()
 
     const size_t npts = m_z.size();
 
-    const double cy = std::accumulate(m_y.begin(), m_y.end(), 0) / npts;
-    const double cz = std::accumulate(m_z.begin(), m_z.end(), 0) / npts;
-
-    std::vector<double> angs(npts);
     std::vector<size_t> inds(npts);
     std::iota(inds.begin(), inds.end(), 0);
-    for (auto ind : inds) {
-        const double dy = m_y[ind] - cy;
-        const double dz = m_z[ind] - cz;
-        angs[ind] = atan2(dz, dy);
-    }
 
     if (m_tolerance > 0) {
         auto far_less = [&](size_t a, size_t b) {
@@ -197,6 +188,21 @@ void Bee::Patches::flush()
         m_y.clear();
         m_z.clear();
         return;
+    }
+
+    const double cy = std::accumulate(inds.begin(), inds.end(), 0.0,
+                                      [&](double val, size_t ind) {
+                                          return val + m_y[ind]; }) / inds.size();
+    const double cz = std::accumulate(inds.begin(), inds.end(), 0.0,
+                                      [&](double val, size_t ind) {
+                                          return val + m_z[ind]; }) / inds.size();
+
+    std::vector<double> angs(npts);
+    for (auto ind : inds) {
+        const double dy = m_y[ind] - cy;
+        const double dz = m_z[ind] - cz;
+        constexpr double pi = 3.14159265358979323846; // fixme: use std::numbers::pi in C++20
+        angs[ind] = std::atan2(dz, dy) + pi; // from [-pi,pi] to [0,2pi]
     }
 
     std::sort(inds.begin(), inds.end(),
