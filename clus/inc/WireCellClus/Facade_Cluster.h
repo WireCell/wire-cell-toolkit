@@ -23,20 +23,6 @@ namespace WireCell::PointCloud::Facade {
     class Blob;
     class Grouping;
 
-    struct VertexProp {
-        int index;
-        // WCPointCloud<double>::WCPoint wcpoint;
-        //  add pointer to merged cell
-    };
-    struct EdgeProp {
-        float dist;  // edge distance
-    };
-
-    using namespace boost;
-    typedef adjacency_list<vecS, vecS, undirectedS, VertexProp, EdgeProp> MCUGraph;
-    typedef graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
-    typedef graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
-
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
     class Cluster : public NaryTree::FacadeParent<Blob, points_t> {
         // The expected scope.
@@ -100,6 +86,8 @@ namespace WireCell::PointCloud::Facade {
 
         // Return blob containing the returned point that is closest to the given point.
         using point_blob_map_t = std::map<geo_point_t, const Blob*>;
+
+        // WCP: get_closest_wcpoint
         std::pair<geo_point_t, const Blob*> get_closest_point_blob(const geo_point_t& point) const;
 
         // Return set of blobs each with a corresponding point.  The set
@@ -123,6 +111,7 @@ namespace WireCell::PointCloud::Facade {
 
         // Return the number of points within radius of the point.  Note, radius
         // is a LINEAR distance through the L2 metric is used internally.
+        // get_num_points in WCP
         int nnearby(const geo_point_t& point, double radius) const;
 
         // Return the number of points in the k-d tree partitioned into pair
@@ -146,6 +135,18 @@ namespace WireCell::PointCloud::Facade {
         //
         // Note: the two points are in DESCENDING order!
         std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const; 
+
+        /// TODO: dir keep changing inside the func?
+        geo_point_t get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_t dir, const double step, const int allowed_nstep) const;
+
+        /// @brief adjusts the positions of two points (start and end points)
+        /// to be more in line with the overall point cloud.
+        void adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const;
+
+        /// section for 2D PC
+
+        /// FIXME: implement
+        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, cont int plane) const;
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 
@@ -171,6 +172,7 @@ namespace WireCell::PointCloud::Facade {
         // Call hough_transform() and transform result as to a directional vector representation.
         //
         // Note: radius must provide a LINEAR distance measure.
+        // VHoughTrans in WCP
         geo_vector_t vhough_transform(const geo_point_t& point, const double radius,
                                       HoughParamSpace param_space = HoughParamSpace::theta_phi,
                                       std::shared_ptr<const Simple3DPointCloud> = nullptr,
@@ -203,6 +205,16 @@ namespace WireCell::PointCloud::Facade {
         /// @brief edges inside blobs and between overlapping blobs
         void Establish_close_connected_graph();
         void Connect_graph(const bool use_ctpc = false);
+
+        /// FIXME: what does this do?
+        void dijkstra_shortest_paths(const geo_point_t& wcp, const bool use_ctpc = true);
+
+        /// FIXME: what does this do?
+        void cal_shortest_path(const geo_point_t& wcp_target);
+
+
+        /// FIXME: what does this do?
+        std::list<geo_point_t>& get_path_wcps();
         
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;

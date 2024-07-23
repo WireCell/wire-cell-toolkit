@@ -40,6 +40,20 @@ namespace WireCell::PointCloud::Facade {
     using float_t = double;
     using int_t = int;
 
+    struct VertexProp {
+        int index;
+        // WCPointCloud<double>::WCPoint wcpoint;
+        //  add pointer to merged cell
+    };
+    struct EdgeProp {
+        float dist;  // edge distance
+    };
+
+    using namespace boost;
+    typedef adjacency_list<vecS, vecS, undirectedS, VertexProp, EdgeProp> MCUGraph;
+    typedef graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
+    typedef graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
+
     // FIXME: refactor to vector<pitch>, etc?  or vector<TPCPlane> with ::pitch/::angle?
     struct TPCParams {
         float_t pitch_u{3 * units::mm};
