@@ -126,3 +126,10 @@ The ~DepoFluxSplat~ allows two arbitrary Gaussian widths (transverse and longitu
 #+attr_latex: :width 0.4\textwidth :center
 [[file:depofluxsplat/plots-smear0006.png]]
 #+end_center
+
+* Meta :noexport:
+
+
+#+begin_src sh :results none
+scp -r depofluxsplat/ depofluxsplat.html depofluxsplat.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

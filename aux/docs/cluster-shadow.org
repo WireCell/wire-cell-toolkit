@@ -63,3 +63,10 @@ each edge endpoint and then perform pair-wise set-theoretic operations
 on the ~Rectangles~ object from each.
 
 Examples and/or pointers to tests t.b.d.
+
+* Meta :noexport:
+
+
+#+begin_src sh :results none :output none
+scp -r cluster-shadow.html cluster-shadow.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

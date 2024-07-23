@@ -368,3 +368,8 @@ ITensor::vector as_tensors(<concrete types>);
 <concrete types> as_<concrete name>(<ITensor types>);
 #+end_example
 
+* Meta :noexport:
+
+#+begin_src sh :results none :output none
+scp -r tensor-data-model.html tensor-data-model.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

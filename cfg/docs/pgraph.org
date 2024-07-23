@@ -1,4 +1,6 @@
 #+title: WCT ~pgraph~ configuration support
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+options: ':t
 
 * Introduction
 
@@ -179,3 +181,9 @@ described above simple.
 
 ** Aggregate closed component graphs
 
+* Meta :noexport:
+
+
+#+begin_src sh :results none
+scp -r pgraph.html pgraph.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

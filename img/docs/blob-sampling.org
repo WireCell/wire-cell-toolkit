@@ -1,6 +1,5 @@
 #+title: Blob Depo Fill
 #+include: ../../docs/include-topic.org
-#+LATEX_HEADER: \usepackage[margin=1in]{geometry}
 #+options: ':t
 
 * Overview
@@ -183,3 +182,9 @@ The ~extra~ configuration parameter gives strings interpreted as regular express
 
 
 Any attributes produced with the same name as used by ~BlobSampler~ have identical meaning.  
+
+* Meta :noexport:
+
+#+begin_src sh :results none :output none
+scp -r blob-sampling.pdf blob-sampling.html hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

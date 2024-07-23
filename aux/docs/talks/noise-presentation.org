@@ -803,6 +803,11 @@ Interpolate so $n' \to n'' = \frac{N_2}{2} \triangleq \frac{N''_1}{2R_{21}},\ N_
 If $N''_1 > N_2$ we may alias by pretending same periods.
 
 
+* Meta :noexport:
+
+#+begin_src sh :results none :output none
+scp -r noise-presentation.pdf  hierocles.bnl:public_html/wire-cell/docs/
+#+end_src
 
 
 
