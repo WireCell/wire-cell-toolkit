@@ -584,7 +584,7 @@ static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_
     return false;
 }
 
-#define _INDEV_
+// #define _INDEV_
 #ifdef _INDEV_
 std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_point_cloud, WCP::PR3DCluster *cluster,
                                                      std::vector<geo_point_t> &boundary_points,

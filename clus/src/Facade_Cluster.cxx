@@ -69,7 +69,7 @@ const Cluster::time_blob_map_t& Cluster::time_blob_map() const
     return m_time_blob_map;
 }
 
-geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_t dir, const double step,
+geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step,
                                           const int allowed_nstep) const
 {
     dir = dir.norm();
@@ -87,11 +87,9 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
         counter++;
 
         // first step
-        test_point.x() = old_wcp.x() + dir.x() * step;
-        test_point.y() = old_wcp.y() + dir.y() * step;
-        test_point.z() = old_wcp.z() + dir.z() * step;
+        test_point.set(old_wcp.x() + dir.x() * step, old_wcp.y() + dir.y() * step, old_wcp.z() + dir.z() * step);
         // geo_point_t new_wcp = point_cloud->get_closest_wcpoint(test_point);
-        const auto [new_wcp, new_wcp_blob] = get_closest_point_blob(test_point);
+        auto [new_wcp, new_wcp_blob] = get_closest_point_blob(test_point);
 
         geo_point_t dir1(new_wcp.x() - old_wcp.x(), new_wcp.y() - old_wcp.y(), new_wcp.z() - old_wcp.z());
         double dis = dir1.magnitude();                      // distance change
@@ -136,17 +134,8 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
             }
         }
 
-        //  std::cout <<  " A " << old_wcp.x()/units::cm << " " << old_wcp.y()/units::cm << " " << old_wcp.z()/units::cm << "
-        //  " << dis1/units::cm << " " << angle << " " << dis/units::cm << " " << angle1 << " " <<
-        //  fabs(dir1.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " <<
-        //  fabs(dir.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << std::endl;
-
         if (flag_forward) {
             old_wcp = new_wcp;
-
-            // std::cout << "A: " << " " << new_wcp.x()/units::cm << " " << new_wcp.y()/units::cm << " " <<
-            // new_wcp.z()/units::cm << " " << angle << " " << dis * sin(angle/180.*3.1415926)/units::cm << angle1 << " "
-            // << dis1 * sin(angle1/180.*3.1415926)/units::cm << " " << dis/units::cm << std::endl;
 
             if (dis > 3 * units::cm) {
                 if (flag_para) {
@@ -156,7 +145,7 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
                 else {
                     dir = dir * old_dis + dir1;
                 }
-                dir.SetMag(1);
+                dir = dir.norm();
                 old_dis = dis;  //(old_dis*old_dis+dis*dis)/(old_dis + dis);
             }
         }
@@ -164,49 +153,40 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
             //  failure & update direction
             flag_continue = false;
 
-            test_point.x() = old_wcp.x();
-            test_point.y() = old_wcp.y();
-            test_point.z() = old_wcp.z();
+            test_point.set(old_wcp.x(), old_wcp.y(), old_wcp.z());
 
             geo_point_t dir4;
             double eff_dis;
             if (flag_para) {
-                dir4 = VHoughTrans(test_point, 100 * units::cm);
+                dir4 = vhough_transform(test_point, 100 * units::cm);
                 eff_dis = 5 * units::cm;
             }
             else {
-                dir4 = VHoughTrans(test_point, 30 * units::cm);
+                dir4 = vhough_transform(test_point, 30 * units::cm);
                 eff_dis = 15 * units::cm;
             }
-            dir4.SetMag(1);
-            if (dir4.angle(dir) > 3.1415926 / 2.) dir4 *= -1;
-
-            // std::cout << dir.x() << " " << dir.y() << " " << dir.z() << " " << dir4.x() << " " << dir4.y() << " " <<
-            // dir4.z() << " " << old_dis/units::cm << " " << dir4.angle(dir)/3.1415926*180. << std::endl;
+            dir4 = dir4.norm();
+            if (dir4.angle(dir) > 3.1415926 / 2.) dir4 = dir4 * -1;
 
             if (flag_para) {
                 dir = dir * old_dis + dir4 * eff_dis + orig_dir * 15 * units::cm;
-                dir.SetMag(1);
+                dir = dir.norm();
                 old_dis = eff_dis;
             }
             else {
                 //	non-parallel case
                 if (dir4.angle(dir) < 25 / 180. * 3.1415926) {
                     dir = dir * old_dis + dir4 * eff_dis;
-                    dir.SetMag(1);
+                    dir = dir.norm();
                     old_dis = eff_dis;
                 }
             }
 
-            //  std::cout << dir.x() << " " << dir.y() << " " << dir.z() << " " << dir4.x() << " " << dir4.y() << " " <<
-            //  dir4.z() << std::endl;
-
             // start jump gaps
             for (int i = 0; i != allowed_nstep * 5; i++) {
-                test_point.x() = old_wcp.x() + dir.x() * step * (1 + 1. / 5. * i);
-                test_point.y() = old_wcp.y() + dir.y() * step * (1 + 1. / 5. * i);
-                test_point.z() = old_wcp.z() + dir.z() * step * (1 + 1. / 5. * i);
-                new_wcp = point_cloud->get_closest_wcpoint(test_point);
+                test_point.set(old_wcp.x() + dir.x() * step * (1 + 1. / 5. * i), old_wcp.y() + dir.y() * step * (1 + 1. / 5. * i),
+                               old_wcp.z() + dir.z() * step * (1 + 1. / 5. * i));
+                new_wcp = get_closest_point_blob(test_point).first;
                 double dis2 = sqrt(pow(new_wcp.x() - test_point.x(), 2) + pow(new_wcp.y() - test_point.y(), 2) +
                                    pow(new_wcp.z() - test_point.z(), 2));
                 dir1.set(new_wcp.x() - old_wcp.x(), new_wcp.y() - old_wcp.y(), new_wcp.z() - old_wcp.z());
@@ -224,8 +204,6 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
                 double angle_2 = fabs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
                 double angle_3 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
                 double angle_4 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-
-                //	std::cout << angle_1 << " " << angle_2 << std::endl;
 
                 if (angle_1 < 7.5 && angle_2 < 7.5 || angle_3 < 5 && angle_4 < 5 && (angle_1 < 12.5 && angle_2 < 12.5))
                     flag_para = true;
@@ -251,22 +229,10 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
                     }
                 }
 
-                //	std::cout << i << " " << old_wcp.x()/units::cm << " " << old_wcp.y()/units::cm << " " <<
-                //old_wcp.z()/units::cm << " " << test_point.x()/units::cm << " " << test_point.y()/units::cm << " " <<
-                //test_point.z()/units::cm << " " << dis1/units::cm << " " << angle << " " << dis/units::cm << " " <<
-                //angle1 << " " << fabs(dir1.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " <<
-                //fabs(dir.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " << flag_para  << " " << angle_1 << " "
-                //<< angle_2 << " " << angle_3 << " " << angle_4 << " " << new_wcp.x()/units::cm << " " <<
-                //new_wcp.y()/units::cm << " " << new_wcp.z()/units::cm << std::endl;
-
                 if (flag_forward) {
                     old_wcp = new_wcp;
 
                     if (dis > 3 * units::cm) {
-                        //  std::cout << "B: " << dir.x() << " " << dir.y() << " " << dir.z() << " " << dir1.x() << " "
-                        //  << dir1.y() << dir1.z() << " " << new_wcp.x()/units::cm << " " << new_wcp.y()/units::cm << " "
-                        //  << new_wcp.z()/units::cm << " " << dir1.angle(dir)/3.1415926*180. << std::endl;
-
                         if (flag_para) {
                             dir = dir * old_dis + dir1 + orig_dir * 15 * units::cm;
                         }
@@ -288,12 +254,12 @@ geo_point_t Cluster::get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_
     return old_wcp;
 }
 
-void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx)
+void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
 {
     const auto& winds = wire_indices();
 
-    const geo_point_t start_p = point3d(start_idx);
-    const geo_point_t end_p = point3d(end_idx);
+    geo_point_t start_p = point3d(start_idx);
+    geo_point_t end_p = point3d(end_idx);
 
     double low_x = start_p.x() - 1 * units::cm;
     if (end_p.x() - 1 * units::cm < low_x) low_x = end_p.x() - 1 * units::cm;
@@ -406,7 +372,7 @@ const Cluster::kd2d_t& Cluster::kd2d(const size_t plane) const
     return sv.kd();
 }
 
-std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, cont int plane) const {
+std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane) const {
 
     const auto& tp = grouping()->get_params();
     double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
@@ -529,7 +495,7 @@ size_t Cluster::nbpoints() const
     return ret;
 }
 
-const Cluster::wire_indices_t& Cluster::wire_indices()
+const Cluster::wire_indices_t& Cluster::wire_indices() const
 {
     const auto& sv = m_node->value.scoped_view<int_t>(scope_wire_index);
     const auto& skd = sv.kd();

@@ -141,8 +141,8 @@ namespace WireCell::PointCloud::Facade {
         // Note: the two points are in DESCENDING order!
         std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const; 
 
-        /// TODO: dir keep changing inside the func?
-        geo_point_t get_furthest_wcpoint(const geo_point_t& old_wcp, geo_point_t dir, const double step, const int allowed_nstep) const;
+        /// TODO: old_wcp and dir are used as local vars inside the function, make the IO more clear?
+        geo_point_t get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step, const int allowed_nstep) const;
 
         /// @brief adjusts the positions of two points (start and end points)
         /// to be more in line with the overall point cloud.
@@ -156,8 +156,8 @@ namespace WireCell::PointCloud::Facade {
         using kd2d_t = sv2d_t::nfkd_t;
         const kd2d_t& kd2d(const size_t plane) const;
 
-        /// FIXME: implement
-        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, cont int plane) const;
+        /// 
+        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane) const;
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 
@@ -229,7 +229,7 @@ namespace WireCell::PointCloud::Facade {
         
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;
-        const wire_indices_t& wire_indices();
+        const wire_indices_t& wire_indices() const;
 
         std::vector<geo_point_t> get_hull() const;
 
