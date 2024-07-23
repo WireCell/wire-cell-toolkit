@@ -395,6 +395,36 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx)
     }
 }
 
+
+const Cluster::sv2d_t& Cluster::sv2d(const size_t plane) const {
+    return m_node->value.scoped_view(scope2ds[plane]);
+    }
+
+const Cluster::kd2d_t& Cluster::kd2d(const size_t plane) const
+{
+    const auto& sv = sv2d(plane);
+    return sv.kd();
+}
+
+std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, cont int plane) const {
+
+    const auto& tp = grouping()->get_params();
+    double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
+    double x = p.x();
+    double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
+    std::vector<float_t> query_pt = {x, y};
+    const auto& skd = kd2d(plane);
+    auto ret_matches = skd.radius(search_radius * search_radius, query_pt);
+
+    std::vector<size_t> ret_index(ret_matches.size());
+    for (size_t i = 0; i != ret_matches.size(); i++)
+    {
+        ret_index.at(i) = ret_matches.at(i).first;
+    }
+
+    return ret_index;
+}
+
 std::vector<const Blob*> Cluster::is_connected(const Cluster& c, const int offset) const
 {
     std::vector<const Blob*> ret;

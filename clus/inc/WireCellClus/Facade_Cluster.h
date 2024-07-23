@@ -28,6 +28,11 @@ namespace WireCell::PointCloud::Facade {
         // The expected scope.
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
+        Tree::Scope scope2ds[3] = {
+            {"2dp0", {"x", "y"}},
+            {"2dp1", {"x", "y"}},
+            {"2dp2", {"x", "y"}}
+        };
 
        public:
         Cluster() = default;
@@ -144,6 +149,12 @@ namespace WireCell::PointCloud::Facade {
         void adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const;
 
         /// section for 2D PC
+
+        // Get the scoped view for the "3d" point cloud (x,y,z)
+        using sv2d_t = Tree::ScopedView<double>;
+        const sv2d_t& sv2d(const size_t plane) const;
+        using kd2d_t = sv2d_t::nfkd_t;
+        const kd2d_t& kd2d(const size_t plane) const;
 
         /// FIXME: implement
         std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, cont int plane) const;
