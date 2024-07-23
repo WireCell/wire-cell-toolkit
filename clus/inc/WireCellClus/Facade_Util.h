@@ -10,10 +10,10 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Spdlog.h"
+#include "WireCellUtil/Graph.h"
+// #include "WireCellUtil/D2Vector.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
-
-#include "WireCellUtil/Graph.h"
 
 
 #include "WCPQuickhull/QuickHull.h"
@@ -29,6 +29,8 @@ namespace WireCell::PointCloud::Facade {
     using node_ptr = std::unique_ptr<node_t>;
     using geo_point_t = WireCell::Point;
     using geo_vector_t = WireCell::Vector;
+    using geo_point2d_t = D3Vector<double>;
+    using geo_vector2d_t = D3Vector<double>;
 
     // map for face, plane to something
     /// TODO: face (ident? which?) -> plane (index) -> Dataset
@@ -112,6 +114,34 @@ namespace WireCell::PointCloud::Facade {
         mutable std::unique_ptr<nfkd_t> m_kd{nullptr}; // lazy
     };
     std::ostream& operator<<(std::ostream& os, const Simple3DPointCloud& s3dpc);
+
+
+    class Multi2DPointCloud {
+       public:
+        Multi2DPointCloud(double angle_u, double angle_v, double angle_w);
+        using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexStatic>;
+        // these derived types do not depend on static/dynamic
+        using points_type = nfkd_t::points_type;
+        using results_type = nfkd_t::results_type;
+        using point_type = std::vector<double>;
+        inline const points_type& points(const size_t plane) const { return m_points[plane]; }
+        inline points_type& points(const size_t plane) { return m_points[plane]; }
+        inline point_type point(const size_t plane, const size_t ind) const {
+            if (ind >= m_points[plane][0].size()) {
+                raise<IndexError>("point index %d out of range %d", ind, m_points[0].size());
+            }
+            return {m_points[plane][0][ind], m_points[plane][1][ind]};
+        }
+        void add(const geo_point_t& new_pt);
+        size_t get_num_points() const { return m_points[0][0].size(); }
+        const nfkd_t& kd(const size_t plane, const bool rebuild=false) const;
+        std::pair<int, double> get_closest_2d_dis(const geo_point_t &p, size_t plane) const;
+       private:
+        points_type m_points[3];
+        mutable std::unique_ptr<nfkd_t> m_kd[3]; // lazy
+        double angle_uvw[3];
+    };
+    std::ostream& operator<<(std::ostream& os, const Multi2DPointCloud& s3dpc);
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double time);

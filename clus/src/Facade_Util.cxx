@@ -214,6 +214,42 @@ std::ostream& Facade::operator<<(std::ostream& os, const Simple3DPointCloud& s3d
     return os;
 }
 
+Facade::Multi2DPointCloud::Multi2DPointCloud(const double angle_u, const double angle_v, const double angle_w) : angle_uvw{angle_u, angle_v, angle_w} {}
+
+void Facade::Multi2DPointCloud::add(const geo_point_t& new_pt) {
+    for (size_t plane = 0; plane < 3; ++plane) {
+        double x = new_pt[0];
+        double y = cos(angle_uvw[plane]) * new_pt[2] - sin(angle_uvw[plane]) * new_pt[1];
+        points(plane).push_back({x, y});
+    }
+}
+
+const Facade::Multi2DPointCloud::nfkd_t& Facade::Multi2DPointCloud::kd(const size_t plane, const bool rebuild) const
+{
+    if (rebuild) m_kd[plane] = nullptr;
+    if (m_kd[plane]) return *m_kd[plane];
+    m_kd[plane] = std::make_unique<nfkd_t>(points(plane));
+    return *m_kd[plane];
+}
+std::pair<int, double> Facade::Multi2DPointCloud::get_closest_2d_dis(const geo_point_t& p, size_t plane) const
+{
+    double x = p[0];
+    double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
+    std::vector<double> query = {x, y};
+    const auto& res = kd(plane).knn(1, query);
+
+    if (res.size() == 1)
+        return std::make_pair(res[0].first, res[0].second); /// FIXME: dist or dist^2?
+    else
+        return std::make_pair(-1, 1e9);
+}
+
+std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dpc)
+{
+    os << "Multi2DPointCloud " << " get_num_points " << m2dpc.get_num_points();
+    return os;
+}
+
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
 double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
     const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();

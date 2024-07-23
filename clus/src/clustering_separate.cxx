@@ -597,6 +597,7 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
     // std::cout << independent_points.size() << " " << boundary_points.size() << std::endl;
     std::cout << "Separate_1 with ct_point_cloud: start " << cluster->get_cluster_id() << std::endl;
 
+    const auto& tp = cluster->grouping()->get_params();
     // TPCParams &mp = Singleton<TPCParams>::Instance();
     // double pitch_u = mp.get_pitch_u();
     // double pitch_v = mp.get_pitch_v();
@@ -611,7 +612,7 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
     geo_point_t dir_beam(0, 0, 1);
 
     // ToyPointCloud *temp_cloud = new ToyPointCloud(angle_u, angle_v, angle_w);
-    auto temp_cloud = std::make_shared<Simple3DPointCloud>();
+    auto temp_cloud = std::make_shared<Multi2DPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
 
     // ToyPointCloud *cloud = cluster->get_point_cloud();
 
@@ -689,14 +690,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
         start_wcpoint = independent_points.at(min_index);
 
         // change direction if certain thing happened ...
-        /* if (min_pca_dis > max_pca_dis && max_pca_dis < 5*units::cm){ */
-        /*   if (1){ */
-        /* 	std::cout << min_pca_dis/units::cm << " " << max_pca_dis/units::cm << std::endl; */
-        /* 	start_wcpoint = independent_points.at(max_index); */
-        /* 	main_dir *= -1; */
-        /* 	max_index = min_index; */
-        /*   } */
-        /* }else */
 
         {
             geo_point_t p1(independent_points.at(max_index).x(), independent_points.at(max_index).y(),
@@ -705,16 +698,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                            independent_points.at(min_index).z());
             geo_point_t temp_dir1 = cluster->vhough_transform(p1, 15 * units::cm);
             geo_point_t temp_dir2 = cluster->vhough_transform(p2, 15 * units::cm);
-            // int num_p1 = cluster->get_num_points(p1,15*units::cm);
-            // int num_p2 = cluster->get_num_points(p2,15*units::cm);
-
-            //   std::cout << p1.x()/units::cm << " " << p1.y()/units::cm << " " << p1.z()/units::cm << " " <<
-            //   cluster->get_num_points(p1,15*units::cm) << " " << cluster->get_num_points(p2,15*units::cm) << " " <<
-            //   fabs(temp_dir1.angle(main_dir)-3.1415926/2.)/3.1415926*180. << " " <<
-            //   fabs(temp_dir2.angle(main_dir)-3.1415926/2.)/3.1415926*180. << " " << length/units::cm << " " <<
-            //   fabs(temp_dir1.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " <<
-            //   fabs(temp_dir2.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " << main_dir.X() << " " <<
-            //   main_dir.Y() << " " << main_dir.Z() << std::endl;
 
             bool flag_change = false;
 
@@ -766,32 +749,16 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
         }
         dir = dir.norm();
 
-        // std::cout  << " " << start_wcpoint.x()/units::cm << " " << start_wcpoint.y()/units::cm << " " <<
-        // start_wcpoint.z()/units::cm << " " <<  " " << dir.X() << " " << dir.Y() << " " << dir.Z() << std::endl;
-
         geo_point_t inv_dir = dir * (-1);
         start_wcpoint = cluster->get_furthest_wcpoint(start_wcpoint, inv_dir, 1 * units::cm, 0);
         end_wcpoint = cluster->get_furthest_wcpoint(start_wcpoint, dir);
 
         geo_point_t test_dir(end_wcpoint.x() - start_wcpoint.x(), end_wcpoint.y() - start_wcpoint.y(),
                              end_wcpoint.z() - start_wcpoint.z());
-
-        //  std::cout  << " XQ1 " << start_wcpoint.x()/units::cm << " " << start_wcpoint.y()/units::cm << " " <<
-        //  start_wcpoint.z()/units::cm << " " << end_wcpoint.x()/units::cm << " " << end_wcpoint.y()/units::cm << " "
-        //  << end_wcpoint.z()/units::cm << " " << dir.X() << " " << dir.Y() << " " << dir.Z() << " " <<
-        //  fabs(test_dir.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << std::endl;
-
         if (fabs(test_dir.angle(drift_dir) - 3.1415926 / 2.) < 2.5 * 3.1415926 / 180.) {
             cluster->adjust_wcpoints_parallel(start_wcpoint, end_wcpoint);
-            // std::cout << "Parallel Case! " << " " << fabs(test_dir.angle(drift_dir)-3.1415926/2.)/3.1415926*180. <<
-            // std::endl;
         }
     }
-
-    // std::cout <<
-    // sqrt(pow(start_wcpoint.x()-end_wcpoint.x(),2)+pow(start_wcpoint.y()-end_wcpoint.y(),2)+pow(start_wcpoint.z()-end_wcpoint.z(),2))
-    // << " " << length << " " << std::endl;
-
     if (sqrt(pow(start_wcpoint.x() - end_wcpoint.x(), 2) + pow(start_wcpoint.y() - end_wcpoint.y(), 2) +
              pow(start_wcpoint.z() - end_wcpoint.z(), 2)) < length / 3.) {
         // reverse the case ...
@@ -841,29 +808,10 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
 
         geo_point_t test_dir(end_wcpoint.x() - start_wcpoint.x(), end_wcpoint.y() - start_wcpoint.y(),
                              end_wcpoint.z() - start_wcpoint.z());
-
-        // std::cout  << " XQ2 " << start_wcpoint.x()/units::cm << " " << start_wcpoint.y()/units::cm << " " <<
-        // start_wcpoint.z()/units::cm << " " << end_wcpoint.x()/units::cm << " " << end_wcpoint.y()/units::cm << " " <<
-        // end_wcpoint.z()/units::cm << " " << dir.X() << " " << dir.Y() << " " << dir.Z() << " " <<
-        // fabs(test_dir.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << std::endl;
-
         if (fabs(test_dir.angle(drift_dir) - 3.1415926 / 2.) < 2.5 * 3.1415926 / 180.) {
             cluster->adjust_wcpoints_parallel(start_wcpoint, end_wcpoint);
-            // std::cout << "Parallel Case! " << " " << fabs(test_dir.angle(drift_dir)-3.1415926/2.)/3.1415926*180. <<
-            // std::endl;
         }
     }
-
-    /* if
-     * (sqrt(pow(start_wcpoint.x()-end_wcpoint.x(),2)+pow(start_wcpoint.y()-end_wcpoint.y(),2)+pow(start_wcpoint.z()-end_wcpoint.z(),2))/units::cm
-     * ) */
-
-    // std::cout  << " XQ " << start_wcpoint.x()/units::cm << " " << start_wcpoint.y()/units::cm << " " <<
-    // start_wcpoint.z()/units::cm << " " << end_wcpoint.x()/units::cm << " " << end_wcpoint.y()/units::cm << " " <<
-    // end_wcpoint.z()/units::cm << " " << dir.X() << " " << dir.Y() << " " << dir.Z() << " " <<
-    // sqrt(pow(start_wcpoint.x()-end_wcpoint.x(),2)+pow(start_wcpoint.y()-end_wcpoint.y(),2)+pow(start_wcpoint.z()-end_wcpoint.z(),2))/units::cm
-    // << " " << length/units::cm << std::endl;
-
     cluster->dijkstra_shortest_paths(start_wcpoint, ct_point_cloud);
     cluster->cal_shortest_path(end_wcpoint);
 
@@ -887,9 +835,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
 
     geo_point_t prev_wcp = path_wcps.front();
     for (auto it = path_wcps.begin(); it != path_wcps.end(); it++) {
-        // std::cout << "a: " << (*it).x()/units::cm << " " << (*it).y()/units::cm << " " << (*it).z()/units::cm <<
-        // std::endl;
-
         double dis = sqrt(pow((*it).x() - prev_wcp.x(), 2) + pow((*it).y() - prev_wcp.y(), 2) +
                           pow((*it).z() - prev_wcp.z(), 2));
         if (dis <= 1.0 * units::cm) {
@@ -904,8 +849,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                                        prev_wcp.y() + (k + 1.) / num_points * ((*it).y() - prev_wcp.y()),
                                        prev_wcp.z() + (k + 1.) / num_points * ((*it).z() - prev_wcp.z()));
                 pts.push_back(current_pt);
-                //	std::cout << "b: " << current_pt.x()/units::cm << " " << current_pt.y()/units::cm << " " <<
-                //current_pt.z()/units::cm << std::endl;
             }
         }
         prev_wcp = (*it);
@@ -970,36 +913,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                 }
             }
         }
-        /* if (fabs(test_p.y()-76.7*units::cm)<2*units::cm && fabs(test_p.z()-328.9*units::cm)<2*units::cm &&
-         * fabs(test_p.x() - 132.8*units::cm) < 2*units::cm){ */
-        /*   std::pair<int,double> temp0 = temp_cloud->get_closest_2d_dis(test_p,0); */
-        /*   std::pair<int,double> temp1 = temp_cloud->get_closest_2d_dis(test_p,1); */
-        /*   std::pair<int,double> temp2 = temp_cloud->get_closest_2d_dis(test_p,2); */
-        /*   std::cout << test_p.x()/units::cm << " " << test_p.y()/units::cm << " " << test_p.z()/units::cm << " " <<
-         * flag_u_pts.at(cloud->get_cloud().pts[j].index) << " " << flag_v_pts.at(cloud->get_cloud().pts[j].index) << "
-         * " << flag_w_pts.at(cloud->get_cloud().pts[j].index) << " " << flag1_u_pts.at(cloud->get_cloud().pts[j].index)
-         * << " " << flag1_v_pts.at(cloud->get_cloud().pts[j].index) << " " <<
-         * flag1_w_pts.at(cloud->get_cloud().pts[j].index) << " " << temp0.second/units::cm << " " <<
-         * pts[temp0.first].x()/units::cm << " " << pts[temp0.first].y()/units::cm << " " <<
-         * pts[temp0.first].z()/units::cm << " " << cloud->get_cloud().pts[j].mcell->GetTimeSlice() << std::endl; */
-        /* } */
-        // std::cout << j << " " << << std::endl;
-        /* if (fabs(cloud->get_cloud().pts[j].z()-194.1*units::cm) < 1*units::cm && */
-        /* 	fabs(cloud->get_cloud().pts[j].x()-297.3*units::cm) < 1*units::cm && */
-        /* 	fabs(cloud->get_cloud().pts[j].y()-93.9*units::cm) < 1*units::cm */
-        /* 	){ */
-        /*   temp_results = temp_cloud->get_closest_2d_dis(test_p,0); */
-        /*   dis = temp_results.second; */
-        /*   bool test_flag = dead_u_index.find(cloud->get_cloud().pts[j].index_u)==dead_u_index.end() ; */
-        /*   std::cout << cloud->get_cloud().pts[j].x()/units::cm << " " << cloud->get_cloud().pts[j].y()/units::cm << "
-         * " << cloud->get_cloud().pts[j].z()/units::cm << " " << flag_u_pts.at(cloud->get_cloud().pts[j].index) << " "
-         * << flag_v_pts.at(cloud->get_cloud().pts[j].index) << " " << flag_w_pts.at(cloud->get_cloud().pts[j].index) <<
-         * " " << flag1_u_pts.at(cloud->get_cloud().pts[j].index) << " " <<
-         * flag1_v_pts.at(cloud->get_cloud().pts[j].index) << " " << flag1_w_pts.at(cloud->get_cloud().pts[j].index) <<
-         * " " << dis/units::cm << " A " <<  test_flag << " " << flag2_u_pts.at(cloud->get_cloud().pts[j].index) << " "
-         * << flag2_v_pts.at(cloud->get_cloud().pts[j].index) << " " << flag_w_pts.at(cloud->get_cloud().pts[j].index)
-         * << std::endl; */
-        /* } */
     }
 
     // special treatment of first and last point
@@ -1047,7 +960,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
         if (flag_u_pts.at(j) && flag_v_pts.at(j) && (flag2_w_pts.at(j) || flag1_w_pts.at(j)) ||
             flag_u_pts.at(j) && flag_w_pts.at(j) && (flag2_v_pts.at(j) || flag1_v_pts.at(j)) ||
             flag_w_pts.at(j) && flag_v_pts.at(j) && (flag2_u_pts.at(j) || flag1_u_pts.at(j))) {
-            // mcell_np_map1[cloud->get_cloud().pts.at(j).mcell]++;
             mcell_np_map1[cluster->blob_with_point(j)]++;
         }
     }
@@ -1057,10 +969,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
 
     for (auto it = mcells.begin(); it != mcells.end(); it++) {
         SlimMergeGeomCell *mcell = *it;
-        /* if (fabs(mcell->get_sampling_points().front().x()-300*units::cm)<6*units::mm)  */
-        /*   std::cout << mcell_np_map[mcell] << " a " << mcell->get_sampling_points().size() << */
-        /* 	" " << mcell->get_uwires().size() << " " <<  mcell->get_vwires().size() << " " <<
-         * mcell->get_wwires().size() << std::endl; */
 
         if (mcell_np_map[mcell] > 0.5 * mcell->get_sampling_points().size() ||
             mcell_np_map[mcell] > 0.25 * mcell->get_sampling_points().size() &&
@@ -1071,11 +979,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
             delete mcell;  // ghost cell ...
         }
         else {
-            /* if (mcell_np_map1[mcell] > 0.01* mcell->get_sampling_points().size()) */
-            /* 	std::cout << mcell_np_map1[mcell] / (mcell->get_sampling_points().size()+1e-9) << " " << */
-            /* 	  mcell_np_map[mcell] / (mcell->get_sampling_points().size()+1e-9) << " " <<
-             * mcell->get_sampling_points().size() << std::endl; */
-
             cluster2->AddCell(mcell, mcell->GetTimeSlice());
         }
     }
@@ -1094,11 +997,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                 other_clusters.at(i)->Create_point_cloud();
                 ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
                 std::tuple<int, int, double> temp_dis = temp_cloud1->get_closest_points(cluster1_cloud);
-
-                //      std::cout << temp_cloud1->get_closest_dis(p1)/units::cm << " " << p1.x()/units::cm << " " <<
-                //      p1.y()/units::cm << " " << p1.z()/units::cm << " " << std::get<2>(temp_dis) /units::cm <<
-                //      std::endl;
-
                 if (std::get<2>(temp_dis) < 0.5 * units::cm) {
                     std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
                     double length_1 = sqrt(2. / 3. *
@@ -1115,11 +1013,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                                 close_dis < 3 * units::cm ||
                             fabs(temp_dir1.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3 &&
                                 fabs(temp_dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3) {
-                            //	  std::cout << temp_dir1.angle(temp_dir2)/3.1415926*180. << " " <<
-                            //fabs(temp_dir1.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " <<
-                            //fabs(temp_dir2.angle(drift_dir)-3.1415926/2.)/3.1415926*180. << " " << length_1/units::cm
-                            //<< std::endl;
-
                             temp_merge_clusters.push_back(other_clusters.at(i));
                         }
                     }
@@ -1161,9 +1054,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
             other_clusters.at(i)->Calc_PCA();
             ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
             std::tuple<int, int, double> temp_dis = temp_cloud1->get_closest_points(cluster1_cloud);
-
-            // std::cout << length_1 / units::cm << std::endl;
-
             if (length_1 < 30 * units::cm && std::get<2>(temp_dis) < 5 * units::cm) {
                 int temp_total_points = other_clusters.at(i)->get_num_points();
                 int temp_close_points = 0;
@@ -1175,15 +1065,10 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                         temp_close_points++;
                     }
                 }
-
-                // std::cout << temp_close_points << " A " << temp_total_points << " " << length_1/units::cm <<
-                // std::endl;
-
                 if (temp_close_points > 0.7 * temp_total_points) {
                     saved_clusters.push_back(other_clusters.at(i));
                     flag_save = true;
                 }
-                // std::vector<size_t> indices = cloud->get_closest_2d_index(pts.front(),2.4*units::cm,0);
             }
             else if (std::get<2>(temp_dis) < 2.5 * units::cm && length_1 >= 30 * units::cm) {
                 int temp_total_points = other_clusters.at(i)->get_num_points();
@@ -1196,10 +1081,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                         temp_close_points++;
                     }
                 }
-
-                //      std::cout << temp_close_points << " B " << temp_total_points << " " << length_1/units::cm <<
-                //      std::endl;
-
                 if (temp_close_points > 0.85 * temp_total_points) {
                     saved_clusters.push_back(other_clusters.at(i));
                     flag_save = true;
@@ -1252,9 +1133,6 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
                 }
             }
         }
-
-        // std::cout << temp_save_clusters.size() << std::endl;
-
         for (size_t i = 0; i != temp_save_clusters.size(); i++) {
             PR3DCluster *cluster1 = temp_save_clusters.at(i);
             to_be_merged_clusters.push_back(cluster1);
@@ -1283,18 +1161,11 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
     }
 
     delete temp_cloud;
-
-    /* int num_mcells = 0; */
-    /* for (size_t i=0;i!=final_clusters.size();i++){ */
-    /*   num_mcells += final_clusters.at(i)->get_num_mcells(); */
-    /* } */
-    /* std::cout << cluster->get_num_mcells() << " " << num_mcells << std::endl; */
-
     std::cout << "Separate_1 with ct_point_cloud: finished\n";
     return final_clusters;
 }
 
-std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_2(WCP::PR3DCluster *cluster, double dis_cut)
+// std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_2(WCP::PR3DCluster *cluster, double dis_cut)
 {
     std::map<int, SMGCSet> &time_cells_set_map = cluster->get_time_cells_set_map();
     SMGCSelection mcells = cluster->get_mcells();
