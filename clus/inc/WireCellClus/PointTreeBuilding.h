@@ -49,6 +49,10 @@ namespace WireCell::Clus {
         double m_drift_speed {1.101*units::millimeter/units::us};
         double m_time_offset {-1600 * units::us};
         double m_dead_threshold {1e10};
+        /// TODO: pass these to TPCParams?
+        double m_angle_u {1.0472}; // 60 degrees
+        double m_angle_v {-1.0472}; // -60 degrees
+        double m_angle_w {0}; // 0 degrees
         IAnodePlane::pointer m_anode;
         
         /** Configuration: "samplers"

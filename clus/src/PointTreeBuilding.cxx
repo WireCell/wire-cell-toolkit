@@ -245,6 +245,25 @@ namespace {
     }
 }
 
+static Dataset make2dds (const Dataset& ds3d, const double angle) {
+    Dataset ds;
+    const auto& x = ds3d.get("x")->elements<Facade::float_t>();
+    const auto& y = ds3d.get("y")->elements<Facade::float_t>();
+    const auto& z = ds3d.get("z")->elements<Facade::float_t>();
+    std::vector<Facade::float_t> x2d(x.size());
+    std::vector<Facade::float_t> y2d(y.size());
+    for (size_t ind=0; ind<x.size(); ++ind) {
+        const auto& xx = x[ind];
+        const auto& yy = y[ind];
+        const auto& zz = z[ind];
+        x2d[ind] = xx;
+        y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+    }
+    ds.add("x", Array(x2d));
+    ds.add("y", Array(y2d));
+    return ds;
+}
+
 Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster) const {
 
     using int_t = Facade::int_t;
@@ -266,8 +285,11 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             const IBlob::pointer iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
             named_pointclouds_t pcs;
             /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
-            auto [pc, aux] = sampler->sample_blob(iblob, nblobs);
-            pcs.emplace("3d", pc);
+            auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
+            pcs.emplace("3d", pc3d);
+            pcs.emplace("2dp0", make2dds(pc3d, m_angle_u));
+            pcs.emplace("2dp1", make2dds(pc3d, m_angle_v));
+            pcs.emplace("2dp2", make2dds(pc3d, m_angle_w));
             const Point center = calc_blob_center(pcs["3d"]);
             auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), m_tick);
             int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
