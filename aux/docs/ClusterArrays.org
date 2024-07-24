@@ -207,3 +207,9 @@ The implementation landscape for persisting ~ICluster~ is illustrated:
 
 Solid thick black edges represent exchange of data between WCT data flow graph nodes.  Solid thin lines represent code dependency.  Thick dashed edges represent file I/O.  Note ~ClusterFile{Source,Sink}~ directly convert ~ICluster~ while ~TensorFile{Source,Sink}~ are general and the conversion to ~ITensor~ is performed by ~TensorCluster~ and ~ClusterTensor~.
 
+* Meta :noexport:
+
+
+#+begin_src sh :results none :output none
+scp -r ClusterArrays.html ClusterArrays.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

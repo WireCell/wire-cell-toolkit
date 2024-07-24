@@ -120,3 +120,8 @@ Open the ~.vtp~ and ~.vtu~ and check alignment along the X-axis.
 Note the ~--t0~ *adds* the offset to the depo time.  Likewise, the a
 ~time_offset~ value given to ~BlobDepoFill~ will be *added* to the depo
 times prior to locating them within blobs.
+* Meta :noexport:
+
+#+begin_src sh :results none :output none
+scp -r BlobDepoFill.pdf BlobDepoFill.html hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

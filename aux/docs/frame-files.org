@@ -242,3 +242,9 @@ additional metadata:
 - ~tag="tag"~ :: the associated index trace tag.
 Note, it is undefined behavior if no matching index tensor exists.
 
+* Meta :noexport:
+
+
+#+begin_src sh :results none :output none
+scp -r frame-files.html frame-files.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

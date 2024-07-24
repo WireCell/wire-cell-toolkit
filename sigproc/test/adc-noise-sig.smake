@@ -1,24 +1,27 @@
-#!/usr/bin/env snakemake
+#!/usr/bin/env -S snakemake --cores all --snakefile
 
 # Render the full DAG:
-# snakemake -p -jall -s sigproc/test/adc-noise-sig.smake all --dag > adc-noise-sig.dot
+# ./sigproc/test/adc-noise-sig.smake all --dag > adc-noise-sig.dot
 #
 # Or, for one generator:
-# snakemake -p -jall -s sigproc/test/adc-noise-sig.smake all_UVCGAN --dag > adc-noise-sig-UVCGAN.dot
+# ./sigproc/test/adc-noise-sig.smake all_UVCGAN --dag > adc-noise-sig-UVCGAN.dot
 #
 # Drop "--dag" to run.  Replace "all" with a target file name for focused run.
 
 import os
 from pathlib import Path
 from adc_noise_sig import *
-from snakemake.remote.HTTP import RemoteProvider as HTTPRemoteProvider
-HTTP = HTTPRemoteProvider()
+
+# from snakemake.remote.HTTP import RemoteProvider as HTTPRemoteProvider
+# HTTP = HTTPRemoteProvider()
 
 # The input files.
 # Note, we reuse UVCGAN's "real" samples by doing this in all non-UVCGAN dirs:
 # cd ../selected_translations_UGATIT/
 # ln -s ../selected_translations_UVCGAN/real_{a,b} .
-sample_urlbase = 'https://www.phy.bnl.gov/~bviren/tmp/ls4gan/data/samples_sigproc'
+# sample_urlbase = 'https://www.phy.bnl.gov/~bviren/tmp/ls4gan/data/samples_sigproc'
+## only works inside BNL but www.phy.bnl.gov cert, while correct, breaks Python.
+sample_urlbase = 'http://hierocles.phy.bnl.gov/~bviren/tmp/ls4gan/data/samples_sigproc'
 sample_file = sample_urlbase+'/selected_translations_{generator}/{source}_{domain}/sample_{event}.npz'
 
 # set this to where {fake,real}_{a,b}/sample_*.npz live
@@ -103,7 +106,7 @@ rule all_UVCGAN:
                
 rule get_resp_b:
     input:
-        HTTP.remote(f'{wcdata_url}/{resp_file_remote}', keep_local=True)
+        storage.http(f'{wcdata_url}/{resp_file_remote}', keep_local=True)
     output:
         f'{outdir}/resp-b.json.bz2'
     run:
@@ -122,7 +125,7 @@ rule gen_resp_a:
 # input: f'{datadir}/{{source}}_{{domain}}/sample_{{event}}.npz'
 rule import_raw:
     input:
-        HTTP.remote(sample_file, keep_local=True)
+        storage.http(sample_file, keep_local=True)
     output:
         eventdir + '/raw.npz'
     wildcard_constraints:
