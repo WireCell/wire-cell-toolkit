@@ -324,7 +324,9 @@ TEST_CASE("create cluster graph")
     CHECK(pcc.sanity());
 
     pcc.Create_graph();
-    print_MCUGraph(*pcc.graph);
+    print_MCUGraph(*pcc.get_graph());
+
+    pcc.dijkstra_shortest_paths(0, true);
 }
 
 TEST_CASE("Simple3DPointCloud")
@@ -364,4 +366,18 @@ TEST_CASE("Simple3DPointCloud")
         CHECK(dis == 0.6);
         debug("ind1={} ind2={} dis={}", ind1, ind2, dis);
     }
+}
+
+
+TEST_CASE("dijkstra_shortest_paths")
+{
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    REQUIRE(pccptr != nullptr);
+    REQUIRE(pccptr->grouping() == grouping);
+    Cluster& pcc = *pccptr;
+    pcc.dijkstra_shortest_paths(0, true);
 }

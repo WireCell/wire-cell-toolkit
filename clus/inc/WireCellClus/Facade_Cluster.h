@@ -207,24 +207,22 @@ namespace WireCell::PointCloud::Facade {
 
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
-        
-        // FIXME: move to private after debugging
-        // graph
-        MCUGraph* graph;
+
+        inline const MCUGraph* get_graph() const { return graph; }
         void Create_graph(const bool use_ctpc = true);
 
         /// @brief edges inside blobs and between overlapping blobs
         void Establish_close_connected_graph();
         void Connect_graph(const bool use_ctpc = false);
 
-        /// FIXME: what does this do?
-        void dijkstra_shortest_paths(const geo_point_t& wcp, const bool use_ctpc = true);
+        /// FIXME: impl.
+        void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true);
 
-        /// FIXME: what does this do?
+        /// FIXME: impl.
         void cal_shortest_path(const geo_point_t& wcp_target);
 
 
-        /// FIXME: what does this do?
+        /// FIXME: impl.
         std::list<geo_point_t>& get_path_wcps();
         
         // TODO: relying on scoped_view to do the caching?
@@ -263,6 +261,13 @@ namespace WireCell::PointCloud::Facade {
         mutable geo_point_t m_center;
         mutable geo_vector_t m_pca_axis[3];
         mutable double m_pca_values[3];
+
+        // graph
+        MCUGraph* graph;
+        // create things for Dijkstra
+        std::vector<vertex_descriptor> m_parents;
+        std::vector<int> m_distances;
+        int m_source_pt_index{-1};
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.

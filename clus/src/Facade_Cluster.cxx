@@ -8,6 +8,7 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
+#include <boost/graph/dijkstra_shortest_paths.hpp>
 
 using namespace WireCell;
 using namespace WireCell::PointCloud;
@@ -1838,6 +1839,25 @@ void Cluster::Connect_graph(const bool use_ctpc) {
     }  // j
 }
 // #define LogDebug(x)
+
+void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc)
+{
+    // if (graph == (MCUGraph*) 0) Create_graph(use_ctpc);
+    // if (pt_idx == m_source_pt_index) return;
+    graph = new MCUGraph(10);
+    m_source_pt_index = pt_idx;
+    m_parents.resize(num_vertices(*graph));
+    m_distances.resize(num_vertices(*graph));
+
+    vertex_descriptor v0 = vertex(pt_idx, *graph);
+    const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
+    std::cout << "param's C++ type: " << typeid(param).name() << std::endl;
+    boost::dijkstra_shortest_paths(*graph, v0, param);
+    // boost::dijkstra_shortest_paths(*graph, v0,
+    //                                boost::weight_map(boost::get(&EdgeProp::dist, *graph))
+    //                                    .predecessor_map(&m_parents[0])
+    //                                    .distance_map(&m_distances[0]));
+}
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {

@@ -42,6 +42,8 @@ namespace WireCell::PointCloud::Facade {
     using float_t = double;
     using int_t = int;
 
+
+    using namespace boost;
     struct VertexProp {
         int index;
         // WCPointCloud<double>::WCPoint wcpoint;
@@ -50,8 +52,6 @@ namespace WireCell::PointCloud::Facade {
     struct EdgeProp {
         float dist;  // edge distance
     };
-
-    using namespace boost;
     typedef adjacency_list<vecS, vecS, undirectedS, VertexProp, EdgeProp> MCUGraph;
     typedef graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
     typedef graph_traits<MCUGraph>::edge_descriptor edge_descriptor;

@@ -857,59 +857,62 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
         temp_cloud->add(pt);
     }
 
+    const auto& winds = cluster->wire_indices();
+
     for (size_t j = 0; j != flag_u_pts.size(); j++) {
-        geo_point_t test_p;
-        test_p.x() = cloud->get_cloud().pts[j].x();
-        test_p.y() = cloud->get_cloud().pts[j].y();
-        test_p.z() = cloud->get_cloud().pts[j].z();
+        geo_point_t test_p = cluster->point3d(j);
+        // test_p.x() = cluster->point3d(j).x();
+        // test_p.y() = cluster->point3d(j).y();
+        // test_p.z() = cluster->point3d(j).z();
         std::pair<int, double> temp_results = temp_cloud->get_closest_2d_dis(test_p, 0);
         double dis = temp_results.second;
         if (dis <= 1.5 * units::cm) {
-            flag_u_pts.at(cloud->get_cloud().pts[j].index) = true;
+            // flag_u_pts.at(j) = true;
+            flag_u_pts.at(j) = true;
         }
         if (dis <= 2.4 * units::cm) {
-            flag1_u_pts.at(cloud->get_cloud().pts[j].index) = true;
+            flag1_u_pts.at(j) = true;
         }
         else {
-            if (dead_u_index.find(cloud->get_cloud().pts[j].index_u) != dead_u_index.end()) {
-                if (cloud->get_cloud().pts[j].x() >= dead_u_index[cloud->get_cloud().pts[j].index_u].first &&
-                    cloud->get_cloud().pts[j].x() <= dead_u_index[cloud->get_cloud().pts[j].index_u].second) {
-                    if (dis < 10 * units::cm) flag1_u_pts.at(cloud->get_cloud().pts[j].index) = true;
-                    flag2_u_pts.at(cloud->get_cloud().pts[j].index) = true;
+            if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
+                if (cluster->point3d(j).x() >= dead_u_index[winds[0][j]].first &&
+                    cluster->point3d(j).x() <= dead_u_index[winds[0][j]].second) {
+                    if (dis < 10 * units::cm) flag1_u_pts.at(j) = true;
+                    flag2_u_pts.at(j) = true;
                 }
             }
         }
         temp_results = temp_cloud->get_closest_2d_dis(test_p, 1);
         dis = temp_results.second;
         if (dis <= 1.5 * units::cm) {
-            flag_v_pts.at(cloud->get_cloud().pts[j].index) = true;
+            flag_v_pts.at(j) = true;
         }
         if (dis <= 2.4 * units::cm) {
-            flag1_v_pts.at(cloud->get_cloud().pts[j].index) = true;
+            flag1_v_pts.at(j) = true;
         }
         else {
-            if (dead_v_index.find(cloud->get_cloud().pts[j].index_v) != dead_v_index.end()) {
-                if (cloud->get_cloud().pts[j].x() >= dead_v_index[cloud->get_cloud().pts[j].index_v].first &&
-                    cloud->get_cloud().pts[j].x() <= dead_v_index[cloud->get_cloud().pts[j].index_v].second) {
-                    if (dis < 10.0 * units::cm) flag1_v_pts.at(cloud->get_cloud().pts[j].index) = true;
-                    flag2_v_pts.at(cloud->get_cloud().pts[j].index) = true;
+            if (dead_v_index.find(winds[1][j]) != dead_v_index.end()) {
+                if (cluster->point3d(j).x() >= dead_v_index[winds[1][j]].first &&
+                    cluster->point3d(j).x() <= dead_v_index[winds[1][j]].second) {
+                    if (dis < 10.0 * units::cm) flag1_v_pts.at(j) = true;
+                    flag2_v_pts.at(j) = true;
                 }
             }
         }
         temp_results = temp_cloud->get_closest_2d_dis(test_p, 2);
         dis = temp_results.second;
         if (dis <= 1.5 * units::cm) {
-            flag_w_pts.at(cloud->get_cloud().pts[j].index) = true;
+            flag_w_pts.at(j) = true;
         }
         if (dis <= 2.4 * units::cm) {
-            flag1_w_pts.at(cloud->get_cloud().pts[j].index) = true;
+            flag1_w_pts.at(j) = true;
         }
         else {
-            if (dead_w_index.find(cloud->get_cloud().pts[j].index_w) != dead_w_index.end()) {
-                if (cloud->get_cloud().pts[j].x() >= dead_w_index[cloud->get_cloud().pts[j].index_w].first &&
-                    cloud->get_cloud().pts[j].x() <= dead_w_index[cloud->get_cloud().pts[j].index_w].second) {
-                    if (dis < 10 * units::cm) flag1_w_pts.at(cloud->get_cloud().pts[j].index) = true;
-                    flag2_w_pts.at(cloud->get_cloud().pts[j].index) = true;
+            if (dead_w_index.find(winds[2][j]) != dead_w_index.end()) {
+                if (cluster->point3d(j).x() >= dead_w_index[winds[2][j]].first &&
+                    cluster->point3d(j).x() <= dead_w_index[winds[2][j]].second) {
+                    if (dis < 10 * units::cm) flag1_w_pts.at(j) = true;
+                    flag2_w_pts.at(j) = true;
                 }
             }
         }
@@ -917,27 +920,27 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
 
     // special treatment of first and last point
     {
-        std::vector<size_t> indices = cloud->get_closest_2d_index(pts.front(), 2.1 * units::cm, 0);
+        std::vector<size_t> indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, 0);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_u_pts.at(indices.at(k)) = true;
         }
-        indices = cloud->get_closest_2d_index(pts.front(), 2.1 * units::cm, 1);
+        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, 1);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_v_pts.at(indices.at(k)) = true;
         }
-        indices = cloud->get_closest_2d_index(pts.front(), 2.1 * units::cm, 2);
+        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, 2);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_w_pts.at(indices.at(k)) = true;
         }
-        indices = cloud->get_closest_2d_index(pts.back(), 2.1 * units::cm, 0);
+        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, 0);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_u_pts.at(indices.at(k)) = true;
         }
-        indices = cloud->get_closest_2d_index(pts.back(), 2.1 * units::cm, 1);
+        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, 1);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_v_pts.at(indices.at(k)) = true;
         }
-        indices = cloud->get_closest_2d_index(pts.back(), 2.1 * units::cm, 2);
+        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, 2);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_w_pts.at(indices.at(k)) = true;
         }
@@ -954,7 +957,7 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
         if (flag_u_pts.at(j) && flag_v_pts.at(j) && flag1_w_pts.at(j) ||
             flag_u_pts.at(j) && flag_w_pts.at(j) && flag1_v_pts.at(j) ||
             flag_w_pts.at(j) && flag_v_pts.at(j) && flag1_u_pts.at(j)) {
-            mcell_np_map[cloud->get_cloud().pts.at(j).mcell]++;
+            mcell_np_map[cluster->blob_with_point(j)]++;
         }
 
         if (flag_u_pts.at(j) && flag_v_pts.at(j) && (flag2_w_pts.at(j) || flag1_w_pts.at(j)) ||
@@ -983,182 +986,182 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
         }
     }
 
-    std::vector<WCP::PR3DCluster *> final_clusters;
-    std::vector<WCP::PR3DCluster *> other_clusters = Separate_2(cluster2, 5 * units::cm);
-    delete cluster2;
+    // std::vector<WCP::PR3DCluster *> final_clusters;
+    // std::vector<WCP::PR3DCluster *> other_clusters = Separate_2(cluster2, 5 * units::cm);
+    // delete cluster2;
 
-    if (cluster1->get_num_mcells() > 0) {
-        {
-            cluster1->Create_point_cloud();
-            ToyPointCloud *cluster1_cloud = cluster1->get_point_cloud();
-            std::vector<WCP::PR3DCluster *> temp_merge_clusters;
-            // check against other clusters
-            for (size_t i = 0; i != other_clusters.size(); i++) {
-                other_clusters.at(i)->Create_point_cloud();
-                ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
-                std::tuple<int, int, double> temp_dis = temp_cloud1->get_closest_points(cluster1_cloud);
-                if (std::get<2>(temp_dis) < 0.5 * units::cm) {
-                    std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
-                    double length_1 = sqrt(2. / 3. *
-                                               (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-                                                pow(pitch_w * range_v1.at(2), 2)) +
-                                           pow(time_slice_width * range_v1.at(3), 2));
-                    geo_point_t p1(end_wcpoint.x(), end_wcpoint.y(), end_wcpoint.z());
-                    double close_dis = temp_cloud1->get_closest_dis(p1);
+    // if (cluster1->get_num_mcells() > 0) {
+    //     {
+    //         cluster1->Create_point_cloud();
+    //         ToyPointCloud *cluster1_cloud = cluster1->get_point_cloud();
+    //         std::vector<WCP::PR3DCluster *> temp_merge_clusters;
+    //         // check against other clusters
+    //         for (size_t i = 0; i != other_clusters.size(); i++) {
+    //             other_clusters.at(i)->Create_point_cloud();
+    //             ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
+    //             std::tuple<int, int, double> temp_dis = temp_cloud1->get_closest_points(cluster1_cloud);
+    //             if (std::get<2>(temp_dis) < 0.5 * units::cm) {
+    //                 std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
+    //                 double length_1 = sqrt(2. / 3. *
+    //                                            (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
+    //                                             pow(pitch_w * range_v1.at(2), 2)) +
+    //                                        pow(time_slice_width * range_v1.at(3), 2));
+    //                 geo_point_t p1(end_wcpoint.x(), end_wcpoint.y(), end_wcpoint.z());
+    //                 double close_dis = temp_cloud1->get_closest_dis(p1);
 
-                    if (close_dis < 10 * units::cm && length_1 < 50 * units::cm) {
-                        geo_point_t temp_dir1 = cluster1->vhough_transform(p1, 15 * units::cm);
-                        geo_point_t temp_dir2 = other_clusters.at(i)->vhough_transform(p1, 15 * units::cm);
-                        if (temp_dir1.angle(temp_dir2) / 3.1415926 * 180. > 145 && length_1 < 30 * units::cm &&
-                                close_dis < 3 * units::cm ||
-                            fabs(temp_dir1.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3 &&
-                                fabs(temp_dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3) {
-                            temp_merge_clusters.push_back(other_clusters.at(i));
-                        }
-                    }
-                }
-            }
+    //                 if (close_dis < 10 * units::cm && length_1 < 50 * units::cm) {
+    //                     geo_point_t temp_dir1 = cluster1->vhough_transform(p1, 15 * units::cm);
+    //                     geo_point_t temp_dir2 = other_clusters.at(i)->vhough_transform(p1, 15 * units::cm);
+    //                     if (temp_dir1.angle(temp_dir2) / 3.1415926 * 180. > 145 && length_1 < 30 * units::cm &&
+    //                             close_dis < 3 * units::cm ||
+    //                         fabs(temp_dir1.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3 &&
+    //                             fabs(temp_dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3) {
+    //                         temp_merge_clusters.push_back(other_clusters.at(i));
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-            if (temp_merge_clusters.size() > 0) {
-                temp_merge_clusters.push_back(cluster1);
-                PR3DCluster *cluster3 = new PR3DCluster(3);
-                // merge and delete actions ...
-                for (auto it1 = temp_merge_clusters.begin(); it1 != temp_merge_clusters.end(); it1++) {
-                    SMGCSelection &temp_mcells = (*it1)->get_mcells();
-                    for (auto it = temp_mcells.begin(); it != temp_mcells.end(); it++) {
-                        SlimMergeGeomCell *mcell = *it;
-                        cluster3->AddCell(mcell, mcell->GetTimeSlice());
-                    }
-                    if ((*it1) != cluster1)
-                        other_clusters.erase(find(other_clusters.begin(), other_clusters.end(), (*it1)));
-                    delete (*it1);
-                }
-                cluster1 = cluster3;
-                cluster1->Create_point_cloud();
-            }
-            final_clusters.push_back(cluster1);
-        }
-        ToyPointCloud *cluster1_cloud = cluster1->get_point_cloud();
+    //         if (temp_merge_clusters.size() > 0) {
+    //             temp_merge_clusters.push_back(cluster1);
+    //             PR3DCluster *cluster3 = new PR3DCluster(3);
+    //             // merge and delete actions ...
+    //             for (auto it1 = temp_merge_clusters.begin(); it1 != temp_merge_clusters.end(); it1++) {
+    //                 SMGCSelection &temp_mcells = (*it1)->get_mcells();
+    //                 for (auto it = temp_mcells.begin(); it != temp_mcells.end(); it++) {
+    //                     SlimMergeGeomCell *mcell = *it;
+    //                     cluster3->AddCell(mcell, mcell->GetTimeSlice());
+    //                 }
+    //                 if ((*it1) != cluster1)
+    //                     other_clusters.erase(find(other_clusters.begin(), other_clusters.end(), (*it1)));
+    //                 delete (*it1);
+    //             }
+    //             cluster1 = cluster3;
+    //             cluster1->Create_point_cloud();
+    //         }
+    //         final_clusters.push_back(cluster1);
+    //     }
+    //     ToyPointCloud *cluster1_cloud = cluster1->get_point_cloud();
 
-        std::vector<WCP::PR3DCluster *> saved_clusters;
-        std::vector<WCP::PR3DCluster *> to_be_merged_clusters;
-        for (size_t i = 0; i != other_clusters.size(); i++) {
-            // How to write???
-            bool flag_save = false;
-            std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
-            double length_1 = sqrt(2. / 3. *
-                                       (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-                                        pow(pitch_w * range_v1.at(2), 2)) +
-                                   pow(time_slice_width * range_v1.at(3), 2));
-            other_clusters.at(i)->Create_point_cloud();
-            other_clusters.at(i)->Calc_PCA();
-            ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
-            std::tuple<int, int, double> temp_dis = temp_cloud1->get_closest_points(cluster1_cloud);
-            if (length_1 < 30 * units::cm && std::get<2>(temp_dis) < 5 * units::cm) {
-                int temp_total_points = other_clusters.at(i)->get_num_points();
-                int temp_close_points = 0;
-                for (size_t j = 0; j != temp_cloud1->get_num_points(); j++) {
-                    geo_point_t test_point(temp_cloud1->get_cloud().pts.at(j).x(),
-                                           temp_cloud1->get_cloud().pts.at(j).y(),
-                                           temp_cloud1->get_cloud().pts.at(j).z());
-                    if (cluster1_cloud->get_closest_dis(test_point) < 10 * units::cm) {
-                        temp_close_points++;
-                    }
-                }
-                if (temp_close_points > 0.7 * temp_total_points) {
-                    saved_clusters.push_back(other_clusters.at(i));
-                    flag_save = true;
-                }
-            }
-            else if (std::get<2>(temp_dis) < 2.5 * units::cm && length_1 >= 30 * units::cm) {
-                int temp_total_points = other_clusters.at(i)->get_num_points();
-                int temp_close_points = 0;
-                for (size_t j = 0; j != temp_cloud1->get_num_points(); j++) {
-                    geo_point_t test_point(temp_cloud1->get_cloud().pts.at(j).x(),
-                                           temp_cloud1->get_cloud().pts.at(j).y(),
-                                           temp_cloud1->get_cloud().pts.at(j).z());
-                    if (cluster1_cloud->get_closest_dis(test_point) < 10 * units::cm) {
-                        temp_close_points++;
-                    }
-                }
-                if (temp_close_points > 0.85 * temp_total_points) {
-                    saved_clusters.push_back(other_clusters.at(i));
-                    flag_save = true;
-                }
-            }
+    //     std::vector<WCP::PR3DCluster *> saved_clusters;
+    //     std::vector<WCP::PR3DCluster *> to_be_merged_clusters;
+    //     for (size_t i = 0; i != other_clusters.size(); i++) {
+    //         // How to write???
+    //         bool flag_save = false;
+    //         std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
+    //         double length_1 = sqrt(2. / 3. *
+    //                                    (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
+    //                                     pow(pitch_w * range_v1.at(2), 2)) +
+    //                                pow(time_slice_width * range_v1.at(3), 2));
+    //         other_clusters.at(i)->Create_point_cloud();
+    //         other_clusters.at(i)->Calc_PCA();
+    //         ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
+    //         std::tuple<int, int, double> temp_dis = temp_cloud1->get_closest_points(cluster1_cloud);
+    //         if (length_1 < 30 * units::cm && std::get<2>(temp_dis) < 5 * units::cm) {
+    //             int temp_total_points = other_clusters.at(i)->get_num_points();
+    //             int temp_close_points = 0;
+    //             for (size_t j = 0; j != temp_cloud1->get_num_points(); j++) {
+    //                 geo_point_t test_point(temp_cloud1->get_cloud().pts.at(j).x(),
+    //                                        temp_cloud1->get_cloud().pts.at(j).y(),
+    //                                        temp_cloud1->get_cloud().pts.at(j).z());
+    //                 if (cluster1_cloud->get_closest_dis(test_point) < 10 * units::cm) {
+    //                     temp_close_points++;
+    //                 }
+    //             }
+    //             if (temp_close_points > 0.7 * temp_total_points) {
+    //                 saved_clusters.push_back(other_clusters.at(i));
+    //                 flag_save = true;
+    //             }
+    //         }
+    //         else if (std::get<2>(temp_dis) < 2.5 * units::cm && length_1 >= 30 * units::cm) {
+    //             int temp_total_points = other_clusters.at(i)->get_num_points();
+    //             int temp_close_points = 0;
+    //             for (size_t j = 0; j != temp_cloud1->get_num_points(); j++) {
+    //                 geo_point_t test_point(temp_cloud1->get_cloud().pts.at(j).x(),
+    //                                        temp_cloud1->get_cloud().pts.at(j).y(),
+    //                                        temp_cloud1->get_cloud().pts.at(j).z());
+    //                 if (cluster1_cloud->get_closest_dis(test_point) < 10 * units::cm) {
+    //                     temp_close_points++;
+    //                 }
+    //             }
+    //             if (temp_close_points > 0.85 * temp_total_points) {
+    //                 saved_clusters.push_back(other_clusters.at(i));
+    //                 flag_save = true;
+    //             }
+    //         }
 
-            if (!flag_save) to_be_merged_clusters.push_back(other_clusters.at(i));
-        }
+    //         if (!flag_save) to_be_merged_clusters.push_back(other_clusters.at(i));
+    //     }
 
-        // add a protection
-        std::vector<WCP::PR3DCluster *> temp_save_clusters;
-        std::map<WCP::PR3DCluster *, double> temp_cluster_length_map;
-        for (size_t i = 0; i != saved_clusters.size(); i++) {
-            PR3DCluster *cluster1 = saved_clusters.at(i);
-            std::vector<int> range_v1 = cluster1->get_uvwt_range();
-            double length_1 = sqrt(2. / 3. *
-                                       (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-                                        pow(pitch_w * range_v1.at(2), 2)) +
-                                   pow(time_slice_width * range_v1.at(3), 2));
-            temp_cluster_length_map[cluster1] = length_1;
-        }
-        for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
-            PR3DCluster *cluster1 = to_be_merged_clusters.at(i);
-            std::vector<int> range_v1 = cluster1->get_uvwt_range();
-            double length_1 = sqrt(2. / 3. *
-                                       (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-                                        pow(pitch_w * range_v1.at(2), 2)) +
-                                   pow(time_slice_width * range_v1.at(3), 2));
-            temp_cluster_length_map[cluster1] = length_1;
-        }
+    //     // add a protection
+    //     std::vector<WCP::PR3DCluster *> temp_save_clusters;
+    //     std::map<WCP::PR3DCluster *, double> temp_cluster_length_map;
+    //     for (size_t i = 0; i != saved_clusters.size(); i++) {
+    //         PR3DCluster *cluster1 = saved_clusters.at(i);
+    //         std::vector<int> range_v1 = cluster1->get_uvwt_range();
+    //         double length_1 = sqrt(2. / 3. *
+    //                                    (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
+    //                                     pow(pitch_w * range_v1.at(2), 2)) +
+    //                                pow(time_slice_width * range_v1.at(3), 2));
+    //         temp_cluster_length_map[cluster1] = length_1;
+    //     }
+    //     for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
+    //         PR3DCluster *cluster1 = to_be_merged_clusters.at(i);
+    //         std::vector<int> range_v1 = cluster1->get_uvwt_range();
+    //         double length_1 = sqrt(2. / 3. *
+    //                                    (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
+    //                                     pow(pitch_w * range_v1.at(2), 2)) +
+    //                                pow(time_slice_width * range_v1.at(3), 2));
+    //         temp_cluster_length_map[cluster1] = length_1;
+    //     }
 
-        for (size_t i = 0; i != saved_clusters.size(); i++) {
-            PR3DCluster *cluster1 = saved_clusters.at(i);
-            if (temp_cluster_length_map[cluster1] < 5 * units::cm) continue;
-            ToyPointCloud *cloud1 = cluster1->get_point_cloud();
-            geo_point_t dir1(cluster1->get_PCA_axis(0).x(), cluster1->get_PCA_axis(0).y(),
-                             cluster1->get_PCA_axis(0).z());
-            for (size_t j = 0; j != to_be_merged_clusters.size(); j++) {
-                PR3DCluster *cluster2 = to_be_merged_clusters.at(j);
-                if (temp_cluster_length_map[cluster2] < 10 * units::cm) continue;
-                ToyPointCloud *cloud2 = cluster2->get_point_cloud();
-                geo_point_t dir2(cluster2->get_PCA_axis(0).x(), cluster2->get_PCA_axis(0).y(),
-                                 cluster2->get_PCA_axis(0).z());
-                std::tuple<int, int, double> temp_dis = cloud1->get_closest_points(cloud2);
-                if (std::get<2>(temp_dis) < 15 * units::cm &&
-                    fabs(dir1.angle(dir2) - 3.1415926 / 2.) / 3.1415926 * 180 > 75) {
-                    //	std::cout << std::get<2>(temp_dis)/units::cm << " " <<  << std::endl;
-                    temp_save_clusters.push_back(cluster1);
-                    break;
-                }
-            }
-        }
-        for (size_t i = 0; i != temp_save_clusters.size(); i++) {
-            PR3DCluster *cluster1 = temp_save_clusters.at(i);
-            to_be_merged_clusters.push_back(cluster1);
-            saved_clusters.erase(find(saved_clusters.begin(), saved_clusters.end(), cluster1));
-        }
+    //     for (size_t i = 0; i != saved_clusters.size(); i++) {
+    //         PR3DCluster *cluster1 = saved_clusters.at(i);
+    //         if (temp_cluster_length_map[cluster1] < 5 * units::cm) continue;
+    //         ToyPointCloud *cloud1 = cluster1->get_point_cloud();
+    //         geo_point_t dir1(cluster1->get_PCA_axis(0).x(), cluster1->get_PCA_axis(0).y(),
+    //                          cluster1->get_PCA_axis(0).z());
+    //         for (size_t j = 0; j != to_be_merged_clusters.size(); j++) {
+    //             PR3DCluster *cluster2 = to_be_merged_clusters.at(j);
+    //             if (temp_cluster_length_map[cluster2] < 10 * units::cm) continue;
+    //             ToyPointCloud *cloud2 = cluster2->get_point_cloud();
+    //             geo_point_t dir2(cluster2->get_PCA_axis(0).x(), cluster2->get_PCA_axis(0).y(),
+    //                              cluster2->get_PCA_axis(0).z());
+    //             std::tuple<int, int, double> temp_dis = cloud1->get_closest_points(cloud2);
+    //             if (std::get<2>(temp_dis) < 15 * units::cm &&
+    //                 fabs(dir1.angle(dir2) - 3.1415926 / 2.) / 3.1415926 * 180 > 75) {
+    //                 //	std::cout << std::get<2>(temp_dis)/units::cm << " " <<  << std::endl;
+    //                 temp_save_clusters.push_back(cluster1);
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //     for (size_t i = 0; i != temp_save_clusters.size(); i++) {
+    //         PR3DCluster *cluster1 = temp_save_clusters.at(i);
+    //         to_be_merged_clusters.push_back(cluster1);
+    //         saved_clusters.erase(find(saved_clusters.begin(), saved_clusters.end(), cluster1));
+    //     }
 
-        cluster2 = new PR3DCluster(2);
-        for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
-            SMGCSelection &temp_mcells = to_be_merged_clusters.at(i)->get_mcells();
-            for (auto it = temp_mcells.begin(); it != temp_mcells.end(); it++) {
-                SlimMergeGeomCell *mcell = *it;
-                cluster2->AddCell(mcell, mcell->GetTimeSlice());
-            }
-            delete to_be_merged_clusters.at(i);
-        }
+    //     cluster2 = new PR3DCluster(2);
+    //     for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
+    //         SMGCSelection &temp_mcells = to_be_merged_clusters.at(i)->get_mcells();
+    //         for (auto it = temp_mcells.begin(); it != temp_mcells.end(); it++) {
+    //             SlimMergeGeomCell *mcell = *it;
+    //             cluster2->AddCell(mcell, mcell->GetTimeSlice());
+    //         }
+    //         delete to_be_merged_clusters.at(i);
+    //     }
 
-        final_clusters.push_back(cluster2);
-        for (size_t i = 0; i != saved_clusters.size(); i++) {
-            final_clusters.push_back(saved_clusters.at(i));
-        }
-    }
-    else {
-        for (size_t i = 0; i != other_clusters.size(); i++) {
-            final_clusters.push_back(other_clusters.at(i));
-        }
-    }
+    //     final_clusters.push_back(cluster2);
+    //     for (size_t i = 0; i != saved_clusters.size(); i++) {
+    //         final_clusters.push_back(saved_clusters.at(i));
+    //     }
+    // }
+    // else {
+    //     for (size_t i = 0; i != other_clusters.size(); i++) {
+    //         final_clusters.push_back(other_clusters.at(i));
+    //     }
+    // }
 
     delete temp_cloud;
     std::cout << "Separate_1 with ct_point_cloud: finished\n";
