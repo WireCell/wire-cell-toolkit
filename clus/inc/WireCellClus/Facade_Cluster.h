@@ -145,7 +145,7 @@ namespace WireCell::PointCloud::Facade {
         std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const; 
 
         /// TODO: old_wcp and dir are used as local vars inside the function, make the IO more clear?
-        geo_point_t get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step, const int allowed_nstep) const;
+        geo_point_t get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step = 5*units::cm, const int allowed_nstep = 12) const;
 
         /// @brief adjusts the positions of two points (start and end points)
         /// to be more in line with the overall point cloud.
@@ -213,21 +213,21 @@ namespace WireCell::PointCloud::Facade {
 
         inline MCUGraph* get_graph() { return graph; }
         inline const MCUGraph* get_graph() const { return graph; }
-        void Create_graph(const bool use_ctpc = true);
+        void Create_graph(const bool use_ctpc = true) const;
 
         /// @brief edges inside blobs and between overlapping blobs
-        void Establish_close_connected_graph();
-        void Connect_graph(const bool use_ctpc = false);
+        void Establish_close_connected_graph() const;
+        void Connect_graph(const bool use_ctpc = false) const;
 
-        /// FIXME: impl.
-        void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true);
+        ///
+        void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true) const;
 
-        /// FIXME: impl.
-        void cal_shortest_path(const size_t dest_wcp_index);
+        ///
+        void cal_shortest_path(const size_t dest_wcp_index) const;
 
 
-        /// FIXME: impl.
-        std::list<geo_point_t>& get_path_wcps();
+        ///
+        inline const std::list<size_t>& get_path_wcps() const { return m_path_wcps; }
         
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;
@@ -249,8 +249,8 @@ namespace WireCell::PointCloud::Facade {
         const time_blob_map_t& time_blob_map() const;
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
 
-        std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
-        std::vector<int> get_blob_indices(const Blob*);
+        mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
+        std::vector<int> get_blob_indices(const Blob*) const;
 
 
         // Cached and lazily calculated in get_length().
@@ -267,13 +267,13 @@ namespace WireCell::PointCloud::Facade {
         mutable double m_pca_values[3];
 
         // graph
-        MCUGraph* graph;
+        mutable MCUGraph* graph;
         // create things for Dijkstra
-        std::vector<vertex_descriptor> m_parents;
-        std::vector<int> m_distances;
-        int m_source_pt_index{-1};
-        std::list<size_t> m_path_wcps;
-        std::list<Blob*> m_path_mcells;
+        mutable std::vector<vertex_descriptor> m_parents;
+        mutable std::vector<int> m_distances;
+        mutable int m_source_pt_index{-1};
+        mutable std::list<size_t> m_path_wcps;
+        mutable std::list<const Blob*> m_path_mcells;
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.

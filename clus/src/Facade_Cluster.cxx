@@ -1054,7 +1054,7 @@ size_t Cluster::hash() const
     return h;
 }
 
-std::vector<int> Cluster::get_blob_indices(const Blob* blob)
+std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 {
     if (m_map_mcell_indices.empty()) {
         const auto& skd = kd3d();
@@ -1067,7 +1067,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob)
 }
 
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
-void Cluster::Create_graph(const bool use_ctpc)
+void Cluster::Create_graph(const bool use_ctpc) const
 {
     LogDebug("Create Graph! " << graph);
     if (graph != (MCUGraph*) 0) return;
@@ -1077,7 +1077,7 @@ void Cluster::Create_graph(const bool use_ctpc)
     Connect_graph(false);
 }
 
-void Cluster::Establish_close_connected_graph()
+void Cluster::Establish_close_connected_graph() const
 {
     std::map<const Blob*, std::map<int, std::set<int>>> map_mcell_uindex_wcps;
     std::map<const Blob*, std::map<int, std::set<int>>> map_mcell_vindex_wcps;
@@ -1510,7 +1510,7 @@ void Cluster::Establish_close_connected_graph()
     LogDebug("all edges: " << num_edges);
 }
 
-void Cluster::Connect_graph(const bool use_ctpc) {
+void Cluster::Connect_graph(const bool use_ctpc) const {
     // now form the connected components
     std::vector<int> component(num_vertices(*graph));
     const size_t num = connected_components(*graph, &component[0]);
@@ -1851,7 +1851,7 @@ void Cluster::Connect_graph(const bool use_ctpc) {
 }
 // #define LogDebug(x)
 
-void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc)
+void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
 {
     if (graph == (MCUGraph*) 0) Create_graph(use_ctpc);
     if (pt_idx == m_source_pt_index) return;
@@ -1878,7 +1878,7 @@ void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc)
 
 
 
-void Cluster::cal_shortest_path(const size_t dest_wcp_index)
+void Cluster::cal_shortest_path(const size_t dest_wcp_index) const
 {
     m_path_wcps.clear();
     m_path_mcells.clear();
@@ -1886,7 +1886,7 @@ void Cluster::cal_shortest_path(const size_t dest_wcp_index)
     int prev_i = -1;
     for (int i = dest_wcp_index; i != m_source_pt_index; i = m_parents[i])
     {
-        auto* mcell = blob_with_point(i);
+        const auto* mcell = blob_with_point(i);
         if (m_path_wcps.size() == 0)
         {
             m_path_wcps.push_front(i);
