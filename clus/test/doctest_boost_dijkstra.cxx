@@ -17,17 +17,36 @@ typedef boost::graph_traits<Graph>::edge_descriptor Edge;
 
 TEST_CASE("standalone dijkstra") {
     Graph graph;
-    // Add vertices and edges here
-    // ...
+
+    // Add vertices
+    Vertex v0 = boost::add_vertex(graph);
+    Vertex v1 = boost::add_vertex(graph);
+    Vertex v2 = boost::add_vertex(graph);
+    Vertex v3 = boost::add_vertex(graph);
+    Vertex v4 = boost::add_vertex(graph);
+
+    // Add edges
+    Edge e0 = boost::add_edge(v0, v1, TestEdgeProp{1}, graph).first;
+    Edge e1 = boost::add_edge(v1, v4, TestEdgeProp{1}, graph).first;
+    Edge e2 = boost::add_edge(v0, v2, TestEdgeProp{1}, graph).first;
+    Edge e3 = boost::add_edge(v2, v4, TestEdgeProp{2}, graph).first;
+
     std::vector<Vertex> parents(boost::num_vertices(graph));
     std::vector<int> distances(boost::num_vertices(graph));
-    Vertex v0 = 0;  // Starting vertex
     boost::dijkstra_shortest_paths(
         graph, v0,
         boost::weight_map(boost::get(&TestEdgeProp::dist, graph))
             .predecessor_map(&parents[0])
             .distance_map(&distances[0])
     );
-    // Process results here
-    // ...
+    std::cout << "parents: ";
+    for (int i = 0; i < parents.size(); i++) {
+        std::cout << i << "->" << parents[i] << " ";
+    }
+    std::cout << std::endl;
+    std::cout << "distances: ";
+    for (int i = 0; i < distances.size(); i++) {
+        std::cout << i << "->" << distances[i] << " ";
+    }
+    std::cout << std::endl;
 }

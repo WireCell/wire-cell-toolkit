@@ -379,5 +379,7 @@ TEST_CASE("dijkstra_shortest_paths")
     REQUIRE(pccptr != nullptr);
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
-    pcc.dijkstra_shortest_paths(0, true);
+    pcc.Create_graph(false);
+    print_MCUGraph(*pcc.get_graph());
+    pcc.dijkstra_shortest_paths(5, false);
 }

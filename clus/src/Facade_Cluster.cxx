@@ -1842,21 +1842,23 @@ void Cluster::Connect_graph(const bool use_ctpc) {
 
 void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc)
 {
-    // if (graph == (MCUGraph*) 0) Create_graph(use_ctpc);
-    // if (pt_idx == m_source_pt_index) return;
-    graph = new MCUGraph(10);
+    if (graph == (MCUGraph*) 0) Create_graph(use_ctpc);
+    if (pt_idx == m_source_pt_index) return;
     m_source_pt_index = pt_idx;
     m_parents.resize(num_vertices(*graph));
     m_distances.resize(num_vertices(*graph));
 
     vertex_descriptor v0 = vertex(pt_idx, *graph);
+    // making a param object
     const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
-    std::cout << "param's C++ type: " << typeid(param).name() << std::endl;
     boost::dijkstra_shortest_paths(*graph, v0, param);
-    // boost::dijkstra_shortest_paths(*graph, v0,
-    //                                boost::weight_map(boost::get(&EdgeProp::dist, *graph))
-    //                                    .predecessor_map(&m_parents[0])
-    //                                    .distance_map(&m_distances[0]));
+    std::cout << "dijkstra_shortest_paths: " << pt_idx << " " << use_ctpc << std::endl;
+    for (size_t i = 0; i != m_distances.size(); i++) {
+        std::cout << i << " " << m_distances[i] << std::endl;
+    }
+    for (size_t i = 0; i != m_parents.size(); i++) {
+        std::cout << i << " " << m_parents[i] << std::endl;
+    }
 }
 
 std::vector<geo_point_t> Cluster::get_hull() const 

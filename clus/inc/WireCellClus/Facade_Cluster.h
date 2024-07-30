@@ -208,6 +208,7 @@ namespace WireCell::PointCloud::Facade {
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
 
+        inline MCUGraph* get_graph() { return graph; }
         inline const MCUGraph* get_graph() const { return graph; }
         void Create_graph(const bool use_ctpc = true);
 
