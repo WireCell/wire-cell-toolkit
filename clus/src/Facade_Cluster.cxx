@@ -1853,12 +1853,16 @@ void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc)
     const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
     boost::dijkstra_shortest_paths(*graph, v0, param);
     std::cout << "dijkstra_shortest_paths: " << pt_idx << " " << use_ctpc << std::endl;
+    std::cout << "distances: ";
     for (size_t i = 0; i != m_distances.size(); i++) {
-        std::cout << i << " " << m_distances[i] << std::endl;
+        std::cout << i << "->" << m_distances[i] << " ";
     }
+    std::cout << std::endl;
+    std::cout << "parents: ";
     for (size_t i = 0; i != m_parents.size(); i++) {
-        std::cout << i << " " << m_parents[i] << std::endl;
+        std::cout << i << "->" << m_parents[i] << " ";
     }
+    std::cout << std::endl;
 }
 
 std::vector<geo_point_t> Cluster::get_hull() const 
