@@ -252,6 +252,12 @@ TEST_CASE("clustering facade")
     debug("num_points: {} {} | expecting 15, 5", num1, num2);
     CHECK(num1 == 15);
     CHECK(num2 == 5);
+
+    size_t idx11 = pcc.get_closest_point_index({1.1,0,0});
+    size_t idx5 = pcc.get_closest_point_index({0.5,0,0});
+    CHECK(idx5 == 5);
+    CHECK(idx11 == 11);
+    debug("idx5 {} idx11 {} | expecting 5, 11", idx5, idx11);
 }
 
 

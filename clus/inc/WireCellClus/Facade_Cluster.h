@@ -95,6 +95,9 @@ namespace WireCell::PointCloud::Facade {
         // WCP: get_closest_wcpoint
         std::pair<geo_point_t, const Blob*> get_closest_point_blob(const geo_point_t& point) const;
 
+        // 
+        size_t get_closest_point_index(const geo_point_t& point) const;
+
         // Return set of blobs each with a corresponding point.  The set
         // includes blobs with at least one point within the given radius of the
         // given point.  The point is one in the blob and that is closest to the

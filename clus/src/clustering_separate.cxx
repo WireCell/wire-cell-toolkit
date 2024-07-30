@@ -586,16 +586,26 @@ static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_
 
 // #define _INDEV_
 #ifdef _INDEV_
-std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_point_cloud, WCP::PR3DCluster *cluster,
+std::vector<Cluster *> WCP2dToy::Separate_1(const bool use_ctpc, const Cluster *cluster,
                                                      std::vector<geo_point_t> &boundary_points,
-                                                     std::vector<geo_point_t> &independent_points,
+                                                     std::vector<geo_point_t> &independent_point,
                                                      std::map<int, std::pair<double, double>> &dead_u_index,
                                                      std::map<int, std::pair<double, double>> &dead_v_index,
                                                      std::map<int, std::pair<double, double>> &dead_w_index,
                                                      double length)
 {
-    // std::cout << independent_points.size() << " " << boundary_points.size() << std::endl;
-    std::cout << "Separate_1 with ct_point_cloud: start " << cluster->get_cluster_id() << std::endl;
+    std::cout << "Separate_1 with use_ctpc: start " << cluster->get_cluster_id() << std::endl;
+
+    // translate all the points at the beginning
+    // TODO: is this the best way to do this?
+    // std::vector<geo_point_t> independent_points(boundary_points_idxs.size());
+    // for(auto idx : independent_point_idxs) {
+    //     independent_points[idx] = point3d(independent_point_idxs.at(idx));
+    // }
+    // std::vector<geo_point_t> boundary_points(boundary_points_idxs.size());
+    // for(auto idx : boundary_points_idxs) {
+    //     boundary_points[idx] = point3d(boundary_points_idxs.at(idx));
+    // }
 
     const auto& tp = cluster->grouping()->get_params();
     // TPCParams &mp = Singleton<TPCParams>::Instance();
@@ -812,7 +822,7 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
             cluster->adjust_wcpoints_parallel(start_wcpoint, end_wcpoint);
         }
     }
-    cluster->dijkstra_shortest_paths(start_wcpoint, ct_point_cloud);
+    cluster->dijkstra_shortest_paths(start_wcpoint, use_ctpc);
     cluster->cal_shortest_path(end_wcpoint);
 
     std::list<geo_point_t> &path_wcps = cluster->get_path_wcps();
@@ -1164,7 +1174,7 @@ std::vector<WCP::PR3DCluster *> WCP2dToy::Separate_1(WCP::ToyCTPointCloud &ct_po
     // }
 
     delete temp_cloud;
-    std::cout << "Separate_1 with ct_point_cloud: finished\n";
+    std::cout << "Separate_1 with use_ctpc: finished\n";
     return final_clusters;
 }
 

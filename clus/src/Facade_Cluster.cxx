@@ -679,6 +679,17 @@ std::pair<geo_point_t, const Blob*> Cluster::get_closest_point_blob(const geo_po
     return std::make_pair(point3d(point_index), blob_with_point(point_index));
 }
 
+size_t Cluster::get_closest_point_index(const geo_point_t& point) const
+{
+    auto results = kd_knn(1, point);
+    if (results.size() == 0) {
+        raise<ValueError>("no points in cluster");
+    }
+
+    const auto& [point_index, _] = results[0];
+    return point_index;
+}
+
 geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis) const
 {
     // average position
