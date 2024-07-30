@@ -1865,6 +1865,38 @@ void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc)
     // std::cout << std::endl;
 }
 
+
+
+void Cluster::cal_shortest_path(const size_t dest_wcp_index)
+{
+    m_path_wcps.clear();
+    m_path_mcells.clear();
+
+    int prev_i = -1;
+    for (int i = dest_wcp_index; i != m_source_pt_index; i = m_parents[i])
+    {
+        auto* mcell = blob_with_point(i);
+        if (m_path_wcps.size() == 0)
+        {
+            m_path_wcps.push_front(i);
+            m_path_mcells.push_front(mcell);
+        }
+        else
+        {
+            m_path_wcps.push_front(i);
+            if (mcell != m_path_mcells.front())
+                m_path_mcells.push_front(mcell);
+        }
+        if (i == prev_i)
+            break;
+        prev_i = i;
+    }
+    auto* src_mcell = blob_with_point(m_source_pt_index);
+    m_path_wcps.push_front(m_source_pt_index);
+    if (src_mcell != m_path_mcells.front())
+        m_path_mcells.push_front(src_mcell);
+}
+
 std::vector<geo_point_t> Cluster::get_hull() const 
 {
     quickhull::QuickHull<float> qh;

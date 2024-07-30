@@ -220,7 +220,7 @@ namespace WireCell::PointCloud::Facade {
         void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true);
 
         /// FIXME: impl.
-        void cal_shortest_path(const geo_point_t& wcp_target);
+        void cal_shortest_path(const size_t dest_wcp_index);
 
 
         /// FIXME: impl.
@@ -269,6 +269,8 @@ namespace WireCell::PointCloud::Facade {
         std::vector<vertex_descriptor> m_parents;
         std::vector<int> m_distances;
         int m_source_pt_index{-1};
+        std::list<size_t> m_path_wcps;
+        std::list<Blob*> m_path_mcells;
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.
