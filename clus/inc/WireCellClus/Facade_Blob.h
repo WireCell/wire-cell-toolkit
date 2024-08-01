@@ -44,6 +44,7 @@ namespace WireCell::PointCloud::Facade {
         int_t npoints() const { return npoints_; }
 
         // units are number of ticks
+        /// FIXME: change min, max to begin end
         int_t slice_index_min() const { return slice_index_min_; }
         int_t slice_index_max() const { return slice_index_max_; }
 

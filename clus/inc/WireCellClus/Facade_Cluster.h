@@ -239,14 +239,15 @@ namespace WireCell::PointCloud::Facade {
         geo_vector_t get_pca_axis(int axis) const;
         double get_pca_value(int axis) const;
 
-       private:
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
         // https://github.com/HaiwangYu/learn-cpp/blob/main/test-multimap.cxx
-
+        // WCP: get_time_cells_set_map
         using BlobSet = std::set<const Blob*>;
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
+
+       private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
 
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
