@@ -1070,8 +1070,8 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 void Cluster::Create_graph(const bool use_ctpc) const
 {
     LogDebug("Create Graph! " << graph);
-    if (graph != (MCUGraph*) 0) return;
-    graph = new MCUGraph(nbpoints());
+    if (m_graph != nullptr) return;
+    m_graph = std::make_unique<MCUGraph>(nbpoints());
     Establish_close_connected_graph();
     if (use_ctpc) Connect_graph(true);
     Connect_graph(false);
@@ -1096,8 +1096,8 @@ void Cluster::Establish_close_connected_graph() const
 
         std::vector<int> pinds = this->get_blob_indices(mcell);
         for (const int pind : pinds) {
-            auto v = vertex(pind, *graph);  // retrieve vertex descriptor
-            (*graph)[v].index = pind;
+            auto v = vertex(pind, *m_graph);  // retrieve vertex descriptor
+            (*m_graph)[v].index = pind;
             if (map_uindex_wcps.find(winds[0][pind]) == map_uindex_wcps.end()) {
                 std::set<int> wcps;
                 wcps.insert(pind);
@@ -1219,9 +1219,9 @@ void Cluster::Establish_close_connected_graph() const
                     int pind2 = *it4;
                     if (pind1 != pind2) {
                         // add edge ...
-                        auto edge = add_edge(pind1, pind2, *graph);
+                        auto edge = add_edge(pind1, pind2, *m_graph);
                         if (edge.second) {
-                            (*graph)[edge.first].dist = sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                            (*m_graph)[edge.first].dist = sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
                                                              pow(points[1][pind1] - points[1][pind2], 2) +
                                                              pow(points[2][pind1] - points[2][pind2], 2));
                             num_edges++;
@@ -1499,9 +1499,9 @@ void Cluster::Establish_close_connected_graph() const
         int index1 = it4->first.first;
         int index2 = it4->second.first;
         double dis = it4->second.second;
-        auto edge = add_edge(index1, index2, *graph);
+        auto edge = add_edge(index1, index2, *m_graph);
         if (edge.second) {
-            (*graph)[edge.first].dist = dis;
+            (*m_graph)[edge.first].dist = dis;
             num_edges++;
         }
     }
@@ -1512,8 +1512,8 @@ void Cluster::Establish_close_connected_graph() const
 
 void Cluster::Connect_graph(const bool use_ctpc) const {
     // now form the connected components
-    std::vector<int> component(num_vertices(*graph));
-    const size_t num = connected_components(*graph, &component[0]);
+    std::vector<int> component(num_vertices(*m_graph));
+    const size_t num = connected_components(*m_graph, &component[0]);
     LogDebug(" npoints " << npoints() << " nconnected " << num);
     if (num <= 1) return;
 
@@ -1803,14 +1803,14 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                 const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
                 const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
                 auto edge =
-                    add_edge(gind1, gind2, *graph);
+                    add_edge(gind1, gind2, *m_graph);
                     // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_mst[j][k]));
                 if (edge.second) {
                     if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
-                        (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
+                        (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
                     }
                     else {
-                        (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
+                        (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
                     }
                 }
             }
@@ -1819,28 +1819,28 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                 if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
                     const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
-                    auto edge = add_edge(gind1, gind2, *graph);
+                    auto edge = add_edge(gind1, gind2, *m_graph);
                     // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir1[j][k]));
                     if (edge.second) {
                         if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
-                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]) * 1.1;
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]) * 1.1;
                         }
                         else {
-                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]);
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]);
                         }
                     }
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
                     const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
-                    auto edge = add_edge(gind1, gind2, *graph);
+                    auto edge = add_edge(gind1, gind2, *m_graph);
                     // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir2[j][k]));
                     if (edge.second) {
                         if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
-                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]) * 1.1;
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]) * 1.1;
                         }
                         else {
-                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]);
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]);
                         }
                     }
                 }
@@ -1853,16 +1853,16 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
 
 void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
 {
-    if (graph == (MCUGraph*) 0) Create_graph(use_ctpc);
+    if (m_graph == nullptr) Create_graph(use_ctpc);
     if (pt_idx == m_source_pt_index) return;
     m_source_pt_index = pt_idx;
-    m_parents.resize(num_vertices(*graph));
-    m_distances.resize(num_vertices(*graph));
+    m_parents.resize(num_vertices(*m_graph));
+    m_distances.resize(num_vertices(*m_graph));
 
-    vertex_descriptor v0 = vertex(pt_idx, *graph);
+    vertex_descriptor v0 = vertex(pt_idx, *m_graph);
     // making a param object
-    const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
-    boost::dijkstra_shortest_paths(*graph, v0, param);
+    const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *m_graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
+    boost::dijkstra_shortest_paths(*m_graph, v0, param);
     // std::cout << "dijkstra_shortest_paths: " << pt_idx << " " << use_ctpc << std::endl;
     // std::cout << "distances: ";
     // for (size_t i = 0; i != m_distances.size(); i++) {

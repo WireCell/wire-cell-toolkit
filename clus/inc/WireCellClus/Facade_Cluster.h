@@ -211,8 +211,8 @@ namespace WireCell::PointCloud::Facade {
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
 
-        inline MCUGraph* get_graph() { return graph; }
-        inline const MCUGraph* get_graph() const { return graph; }
+        inline MCUGraph* get_graph() { return m_graph.get(); }
+        inline const MCUGraph* get_graph() const { return m_graph.get(); }
         void Create_graph(const bool use_ctpc = true) const;
 
         /// @brief edges inside blobs and between overlapping blobs
@@ -267,8 +267,8 @@ namespace WireCell::PointCloud::Facade {
         mutable geo_vector_t m_pca_axis[3];
         mutable double m_pca_values[3];
 
-        // graph
-        mutable MCUGraph* graph;
+        // m_graph
+        mutable std::unique_ptr<MCUGraph> m_graph;
         // create things for Dijkstra
         mutable std::vector<vertex_descriptor> m_parents;
         mutable std::vector<int> m_distances;
