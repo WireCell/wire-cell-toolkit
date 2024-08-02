@@ -1205,20 +1205,20 @@ std::vector<int> Separate_2(const Cluster *cluster, const double dis_cut)
     }
 
     using BlobSet = std::set<const Blob*>;
-    std::vector<std::pair<Blob *, Blob *>> connected_mcells;
+    std::vector<std::pair<const Blob *, const Blob *>> connected_mcells;
     for (size_t i = 0; i != time_slices.size(); i++) {
-        const BlobSet &mcells_set = time_cells_set_map[time_slices.at(i)];
+        const BlobSet &mcells_set = time_cells_set_map.at(time_slices.at(i));
 
         // create graph for points in mcell inside the same time slice
         if (mcells_set.size() >= 2) {
             for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); it2++) {
-                Blob *mcell1 = *it2;
+                const Blob *mcell1 = *it2;
                 auto it2p = it2;
                 if (it2p != mcells_set.end()) {
                     it2p++;
                     for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
-                        Blob *mcell2 = *(it3);
-                        if (mcell1->Overlap_fast(mcell2, 5)) connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                        const Blob *mcell2 = *(it3);
+                        if (mcell1->overlap_fast(*mcell2, 5)) connected_mcells.push_back(std::make_pair(mcell1, mcell2));
                     }
                 }
             }
@@ -1227,13 +1227,13 @@ std::vector<int> Separate_2(const Cluster *cluster, const double dis_cut)
         std::vector<BlobSet> vec_mcells_set;
         if (i + 1 < time_slices.size()) {
             if (time_slices.at(i + 1) - time_slices.at(i) == 1) {
-                vec_mcells_set.push_back(time_cells_set_map[time_slices.at(i + 1)]);
+                vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
                 if (i + 2 < time_slices.size())
                     if (time_slices.at(i + 2) - time_slices.at(i) == 2)
-                        vec_mcells_set.push_back(time_cells_set_map[time_slices.at(i + 2)]);
+                        vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 2)));
             }
             else if (time_slices.at(i + 1) - time_slices.at(i) == 2) {
-                vec_mcells_set.push_back(time_cells_set_map[time_slices.at(i + 1)]);
+                vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
             }
         }
         bool flag = false;
@@ -1241,10 +1241,10 @@ std::vector<int> Separate_2(const Cluster *cluster, const double dis_cut)
             if (flag) break;
             BlobSet &next_mcells_set = vec_mcells_set.at(j);
             for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
-                Blob *mcell1 = (*it1);
+                const Blob *mcell1 = (*it1);
                 for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
-                    Blob *mcell2 = (*it2);
-                    if (mcell1->Overlap_fast(mcell2, 2)) {
+                    const Blob *mcell2 = (*it2);
+                    if (mcell1->overlap_fast(*mcell2, 2)) {
                         flag = true;
                         connected_mcells.push_back(std::make_pair(mcell1, mcell2));
                     }
@@ -1258,7 +1258,7 @@ std::vector<int> Separate_2(const Cluster *cluster, const double dis_cut)
     const int N = mcells.size();
     MCUGraph graph(N);
 
-    std::map<Blob *, int> mcell_index_map;
+    std::map<const Blob *, int> mcell_index_map;
     for (size_t i = 0; i != mcells.size(); i++) {
         Blob *curr_mcell = mcells.at(i);
         mcell_index_map[curr_mcell] = i;
@@ -1297,7 +1297,7 @@ std::vector<int> Separate_2(const Cluster *cluster, const double dis_cut)
 
             for (int j = 0; j != num; j++) {
                 for (int k = j + 1; k != num; k++) {
-                    std::tuple<int, int, double> temp_results = pt_clouds.at(j)->get_closest_points(pt_clouds.at(k));
+                    std::tuple<int, int, double> temp_results = pt_clouds.at(j)->get_closest_points(*(pt_clouds.at(k)));
                     if (std::get<2>(temp_results) < dis_cut) {
                         int index1 = vec_vec[j].front();
                         int index2 = vec_vec[k].front();
