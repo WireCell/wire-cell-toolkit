@@ -98,7 +98,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             for (size_t k = 0; k != temp_sep_clusters.size(); k++) {
                                 double length_1 = temp_sep_clusters.at(k)->get_length();
                                 if (length_1 > 60 * units::cm) num_clusters++;
-                                delete temp_sep_clusters.at(k);
+                                // delete temp_sep_clusters.at(k);
                             }
                             if (num_clusters > 1) flag_proceed = true;
                         }
@@ -274,7 +274,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         }
 
                         for (auto it = temp_del_clusters.begin(); it != temp_del_clusters.end(); it++) {
-                            delete *it;
+                            // delete *it;
                         }
                     }
                     //	  std::cerr << em("sep del sep1") << std::endl;
@@ -313,7 +313,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         //	  delete final_sep_cluster;
 
                         for (auto it = temp_del_clusters.begin(); it != temp_del_clusters.end(); it++) {
-                            delete *it;
+                            // delete *it;
                         }
                     }
                 }
@@ -328,7 +328,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
     for (auto it = del_clusters.begin(); it != del_clusters.end(); it++) {
         Cluster *ocluster = (*it);
         live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
-        delete ocluster;
+        // delete ocluster;
     }
 }
 
@@ -1279,7 +1279,8 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
     // Cluster& cluster2 = grouping.make_child();
 
     // blob (index) -> cluster_id (0 or 1)
-    std::vector<size_t> blob_groups(cluster->nchildren(), 0);
+    std::vector<int> b2groupid(cluster->nchildren(), 0);
+    std::set<int> groupids;
 
     for (size_t idx=0; idx < mcells.size(); idx++) {  
         Blob *mcell = mcells.at(idx);
@@ -1291,26 +1292,34 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
         if (mcell_np_map[mcell] > 0.5 * mcell->nbpoints() ||
             (mcell_np_map[mcell] > 0.25 * mcell->nbpoints() && total_wires < 25)) {
             // cluster1->AddCell(mcell, mcell->GetTimeSlice());
-            blob_groups[idx] = 0;
+            b2groupid[idx] = 0;
+            groupids.insert(0);
         }
         else if (mcell_np_map1[mcell] >= 0.95 * mcell->nbpoints()) {
             // delete mcell;  // ghost cell ...
-            blob_groups[idx] = 2; // to be deleted
+            b2groupid[idx] = -1; // to be deleted
+            groupids.insert(-1);
         }
         else {
             // cluster2->AddCell(mcell, mcell->GetTimeSlice());
-            blob_groups[idx] = 1;
+            b2groupid[idx] = 1;
+            groupids.insert(1);
         }
     }
-    std::vector<Cluster*> clusters_step0 = cluster->separate<Cluster>(blob_groups);
-    if (clusters_step0.size() == 3) {
-        grouping->remove_child(*clusters_step0[2]);
+    std::cout << "before separate, cluster has " << cluster->nchildren() << " children " << " with " << groupids.size() << " groups" << std::endl;
+    auto clusters_step0 = cluster->separate<Cluster>(b2groupid);
+    std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
+    for (int id : groupids) {
+        std::cout << "separated cluster " << id << " has " << clusters_step0[id]->nchildren() << " children" << std::endl;
     }
 
-    std::vector<Cluster*> other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
+    std::vector<Cluster*> other_clusters;
+    if (clusters_step0.find(1) != clusters_step0.end()) {
+        other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
+    }
     // delete cluster2;
 
-    if (clusters_step0[0]->nchildren() > 0) {
+    if (clusters_step0.find(0) != clusters_step0.end()) {
         // merge some clusters from other_clusters to clusters_step0[0]
         {
             // cluster1->Create_point_cloud();
@@ -1460,7 +1469,8 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
 std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut)
 {
     const auto& time_cells_set_map = cluster->time_blob_map();
-    std::vector<Blob*> mcells = cluster->children();
+    std::cout << "Separate_2 nchildren: " << cluster->nchildren() << std::endl;
+    std::vector<Blob*>& mcells = cluster->children();
 
     std::vector<int> time_slices;
     for (auto it1 = time_cells_set_map.begin(); it1 != time_cells_set_map.end(); it1++) {
@@ -1593,8 +1603,13 @@ std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut)
     // }
     // delete graph;
     // return final_clusters;
-    std::vector<size_t> component(num_vertices(graph));
+    std::vector<int> component(num_vertices(graph));
     const int num = connected_components(graph, &component[0]);
     // return component;
-    return cluster->separate<Cluster>(component);
+    auto id2cluster = cluster->separate<Cluster>(component);
+    std::vector<Cluster*> ret;
+    for (auto [id, cluster] : id2cluster) {
+        ret.push_back(cluster);
+    }
+    return ret;
 }

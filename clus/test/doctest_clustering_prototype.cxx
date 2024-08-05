@@ -401,22 +401,19 @@ TEST_CASE("Facade separate")
     REQUIRE(pccptr != nullptr);
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
-    std::vector<size_t> groups = {0, 1};
-    auto clusters = pcc.separate<Cluster>(groups);
-    debug("separate into {} clusters", clusters.size());
-    CHECK(clusters.size() == 2);
-    for (size_t ind=0; ind<clusters.size(); ++ind) {
-        // auto* cluster = clusters[ind]->node()->value.facade<Cluster>();
-        // auto* cluster = dynamic_cast<Cluster*>(clusters[ind]);
-        Cluster* cluster = clusters[ind];
+    std::vector<int> groups = {42, 128};
+    auto id2cluster = pcc.separate<Cluster>(groups);
+    debug("separate into {} clusters", id2cluster.size());
+    CHECK(id2cluster.size() == 2);
+    for (auto [id, cluster] : id2cluster) {
         REQUIRE(cluster != nullptr);
-        debug("cluster {} has {} children {} points", ind, cluster->nchildren(), cluster->npoints());
+        debug("cluster {} has {} children {} points", id, cluster->nchildren(), cluster->npoints());
         CHECK(cluster->nchildren() == 1);
         CHECK(cluster->npoints() == 10);
     }
     debug("before removal, grouping has {} children", grouping->nchildren());
     // clusters[1]->node()->parent->remove(clusters[1]->node());
-    grouping->remove_child(*clusters[1]);
+    grouping->remove_child(*id2cluster[128]);
     debug("after removal, grouping has {} children", grouping->nchildren());
     CHECK(grouping->nchildren() == 1);
 }

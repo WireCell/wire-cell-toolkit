@@ -200,21 +200,22 @@ namespace WireCell::NaryTree {
         }
 
 
-        // assumes it has a parent and children, make a vector of self_type* and each one has
+        // assumes it has a parent and children, make a vector of concrete_self_type* and each one has
         // a subset of children. the length of gorups must match the number of children.
-        // the children with the same group id will go to same self_type*
-        // ASSUMPTION: group ids are from 0 and continuous
+        // children with negative group number will be removed
         template<typename concrete_self_type>
-        std::vector<concrete_self_type*> separate(const std::vector<size_t>& groups, bool notify_value=true) {
+        std::unordered_map<int, concrete_self_type*> separate(const std::vector<int>& groups, bool notify_value=true) {
             std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
             if(groups.size() != nchildren()) {
                 raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
             }
             auto parent = this->m_node->parent;
-            std::unordered_map<size_t, concrete_self_type*> id2facade;
+            std::unordered_map<int, concrete_self_type*> id2facade;
             const auto orig_children = children(); // make a copy
             for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
                 std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+                // remove children with negative group number 
+                if (groups[ichild] < 0) continue;
                 auto* child = orig_children[ichild];
                 if (id2facade.find(groups[ichild]) == id2facade.end()) {
                     node_type* new_snode = parent->insert(notify_value);
@@ -227,14 +228,15 @@ namespace WireCell::NaryTree {
                 new_facade->m_node->insert(child->node(), notify_value);
                 std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
             }
-            std::vector<concrete_self_type*> ret;
-            for (auto it = id2facade.begin(); it != id2facade.end(); it++) {
-                ret.push_back(it->second);
-            }
-            // remove self from parent
             parent->remove(this->m_node, notify_value);
-            std::cout << "ret size: " << ret.size() << std::endl;
-            return ret;
+            // std::vector<concrete_self_type*> ret;
+            // for (auto it = id2facade.begin(); it != id2facade.end(); it++) {
+            //     ret.push_back(it->second);
+            // }
+            // std::cout << "ret size: " << ret.size() << std::endl;
+            // remove self from parent
+            // return ret;
+            return id2facade;
         }
 
     private:
