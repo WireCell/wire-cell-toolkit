@@ -389,3 +389,28 @@ TEST_CASE("dijkstra_shortest_paths")
     print_MCUGraph(*pcc.get_graph());
     pcc.dijkstra_shortest_paths(5, false);
 }
+
+
+TEST_CASE("Facade seperate")
+{
+    Points::node_t root_node;
+    Grouping* grouping = root_node.value.facade<Grouping>();
+    REQUIRE(grouping != nullptr);
+    root_node.insert(make_simple_pctree());
+    Cluster* pccptr = grouping->children()[0];
+    REQUIRE(pccptr != nullptr);
+    REQUIRE(pccptr->grouping() == grouping);
+    Cluster& pcc = *pccptr;
+    std::vector<size_t> groups = {0, 1};
+    auto clusters = pcc.seperate(groups);
+    debug("seperate into {} clusters", clusters.size());
+    CHECK(clusters.size() == 2);
+    for (size_t ind=0; ind<clusters.size(); ++ind) {
+        // auto* cluster = clusters[ind]->node()->value.facade<Cluster>();
+        auto* cluster = dynamic_cast<Cluster*>(clusters[ind]);
+        REQUIRE(cluster != nullptr);
+        debug("cluster {} has {} children {} points", ind, cluster->nchildren(), cluster->npoints());
+        CHECK(cluster->nchildren() == 1);
+        CHECK(cluster->npoints() == 10);
+    }
+}

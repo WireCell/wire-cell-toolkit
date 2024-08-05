@@ -199,6 +199,41 @@ namespace WireCell::NaryTree {
             return *cnode->value.template facade<child_type>();
         }
 
+
+        // assumes it has a parent and children, make a vector of self_type* and each one has
+        // a subset of children. the length of gorups must match the number of children.
+        // the children with the same group id will go to same self_type*
+        // ASSUMPTION: group ids are from 0 and continuous
+        std::vector<self_type*> seperate(const std::vector<size_t>& groups, bool notify_value=true) {
+            std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
+            if(groups.size() != nchildren()) {
+                raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
+            }
+            auto parent = this->m_node->parent;
+            std::unordered_map<size_t, self_type*> id2facade;
+            const auto orig_children = children(); // make a copy
+            for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
+                std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+                auto* child = orig_children[ichild];
+                if (id2facade.find(groups[ichild]) == id2facade.end()) {
+                    node_type* new_snode = parent->insert(notify_value);
+                    new_snode->value.set_facade(std::make_unique<self_type>());
+                    auto new_facade = new_snode->value.template facade<self_type>();
+                    id2facade[groups[ichild]] = new_facade;
+                }
+                std::cout << "id2facade size: " << id2facade.size() << std::endl;
+                auto new_facade = id2facade[groups[ichild]];
+                new_facade->m_node->insert(child->node(), notify_value);
+                std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+            }
+            std::vector<self_type*> ret;
+            for (auto it = id2facade.begin(); it != id2facade.end(); it++) {
+                ret.push_back(it->second);
+            }
+            std::cout << "ret size: " << ret.size() << std::endl;
+            return ret;
+        }
+
     private:
         // Lazy cache of children facades.
         children_type m_children;
