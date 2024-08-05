@@ -205,7 +205,7 @@ namespace WireCell::NaryTree {
         // the children with the same group id will go to same self_type*
         // ASSUMPTION: group ids are from 0 and continuous
         template<typename concrete_self_type>
-        std::vector<concrete_self_type*> seperate(const std::vector<size_t>& groups, bool notify_value=true) {
+        std::vector<concrete_self_type*> separate(const std::vector<size_t>& groups, bool notify_value=true) {
             std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
             if(groups.size() != nchildren()) {
                 raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());

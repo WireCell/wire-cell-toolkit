@@ -17,6 +17,16 @@ static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length);
 
+std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
+                                                     std::vector<geo_point_t> &boundary_points,
+                                                     std::vector<geo_point_t> &independent_points,
+                                                     std::map<int, std::pair<double, double>> &dead_u_index,
+                                                     std::map<int, std::pair<double, double>> &dead_v_index,
+                                                     std::map<int, std::pair<double, double>> &dead_w_index,
+                                                     double length);
+
+std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut);
+
 void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                                        std::map<int, std::pair<double, double>>& dead_u_index,
                                                        std::map<int, std::pair<double, double>>& dead_v_index,
@@ -583,7 +593,7 @@ static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_
 #define _INDEV_
 #ifdef _INDEV_
 
-std::vector<Cluster *> Separate_1(const bool use_ctpc, const Cluster *cluster,
+std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
                                                      std::vector<geo_point_t> &boundary_points,
                                                      std::vector<geo_point_t> &independent_points,
                                                      std::map<int, std::pair<double, double>> &dead_u_index,
@@ -1014,7 +1024,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, const Cluster *cluster,
     }
     std::vector<Cluster*> clusters_step0 = cluster->separate<Cluster>(blob_groups);
     if (clusters_step0.size() == 3) {
-        grouping->remove_child(clusters_step0[2]);
+        grouping->remove_child(*clusters_step0[2]);
     }
 
     std::vector<Cluster*> other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
@@ -1042,7 +1052,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, const Cluster *cluster,
                     double close_dis = other_clusters.at(i)->get_closest_dis(p1);
 
                     if (close_dis < 10 * units::cm && length_1 < 50 * units::cm) {
-                        geo_point_t temp_dir1 = cluster1->vhough_transform(p1, 15 * units::cm);
+                        geo_point_t temp_dir1 = clusters_step0[0]->vhough_transform(p1, 15 * units::cm);
                         geo_point_t temp_dir2 = other_clusters.at(i)->vhough_transform(p1, 15 * units::cm);
                         if (temp_dir1.angle(temp_dir2) / 3.1415926 * 180. > 145 && length_1 < 30 * units::cm &&
                                 close_dis < 3 * units::cm ||
@@ -1056,7 +1066,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, const Cluster *cluster,
 
             for (auto temp_cluster : temp_merge_clusters) {
                 clusters_step0[0]->take_children(*temp_cluster, true);
-                grouping.remove_child(*temp_cluster);
+                grouping->remove_child(*temp_cluster);
             }
 
             final_clusters.push_back(clusters_step0[0]);
@@ -1127,7 +1137,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, const Cluster *cluster,
                 // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
                 geo_point_t dir2(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
                                  cluster2->get_pca_axis(0).z());
-                std::tuple<int, int, double> temp_dis = cluster1->get_closest_points(cluster2);
+                std::tuple<int, int, double> temp_dis = cluster1->get_closest_points(*cluster2);
                 if (std::get<2>(temp_dis) < 15 * units::cm &&
                     fabs(dir1.angle(dir2) - 3.1415926 / 2.) / 3.1415926 * 180 > 75) {
                     //	std::cout << std::get<2>(temp_dis)/units::cm << " " <<  << std::endl;
@@ -1142,10 +1152,10 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, const Cluster *cluster,
             saved_clusters.erase(find(saved_clusters.begin(), saved_clusters.end(), cluster1));
         }
 
-        Cluster& cluster2 = grouping.make_child();
+        Cluster& cluster2 = grouping->make_child();
         for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
             cluster2.take_children(*to_be_merged_clusters[i], true);
-            grouping.remove_child(*to_be_merged_clusters[i]);
+            grouping->remove_child(*to_be_merged_clusters[i]);
         }
 
         final_clusters.push_back(&cluster2);
@@ -1306,5 +1316,5 @@ std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut)
     std::vector<size_t> component(num_vertices(graph));
     const int num = connected_components(graph, &component[0]);
     // return component;
-    return cluster->seperate<Cluster>(component);
+    return cluster->separate<Cluster>(component);
 }

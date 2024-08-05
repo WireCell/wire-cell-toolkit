@@ -391,7 +391,7 @@ TEST_CASE("dijkstra_shortest_paths")
 }
 
 
-TEST_CASE("Facade seperate")
+TEST_CASE("Facade separate")
 {
     Points::node_t root_node;
     Grouping* grouping = root_node.value.facade<Grouping>();
@@ -402,8 +402,8 @@ TEST_CASE("Facade seperate")
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
     std::vector<size_t> groups = {0, 1};
-    auto clusters = pcc.seperate<Cluster>(groups);
-    debug("seperate into {} clusters", clusters.size());
+    auto clusters = pcc.separate<Cluster>(groups);
+    debug("separate into {} clusters", clusters.size());
     CHECK(clusters.size() == 2);
     for (size_t ind=0; ind<clusters.size(); ++ind) {
         // auto* cluster = clusters[ind]->node()->value.facade<Cluster>();
