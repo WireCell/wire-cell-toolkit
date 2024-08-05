@@ -25,33 +25,313 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
                                                      std::map<int, std::pair<double, double>> &dead_w_index,
                                                      double length);
 
-std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut);
+std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm);
+
 
 void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
-                                                       std::map<int, std::pair<double, double>>& dead_u_index,
-                                                       std::map<int, std::pair<double, double>>& dead_v_index,
-                                                       std::map<int, std::pair<double, double>>& dead_w_index)
+                                   std::map<int, std::pair<double, double>> &dead_u_index,
+                                   std::map<int, std::pair<double, double>> &dead_v_index,
+                                   std::map<int, std::pair<double, double>> &dead_w_index)
 {
-    std::vector<Cluster*> live_clusters = live_grouping.children();  // copy
-    // for (size_t ilive = 0; ilive < 3; ++ilive) {
-    for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-        const auto& live = live_clusters.at(ilive);
-        const size_t nblobs = live->children().size();
-        // std::cout << "ilive: " << ilive
-        // << " nblobs " << nblobs
-        // << " npoints " << live->npoints()
-        // << " counter: " << global_counter_get_closest_wcpoint << std::endl;
-        /// TODO: below is just for debugging, need to wait for real impl.
-        {
-            std::unordered_set<size_t> nblobs_to_check = {612, 725, 2414};
-            if (nblobs_to_check.find(nblobs) == nblobs_to_check.end()) continue;
-            live->Create_graph();
-            std::vector<geo_point_t> boundary_points, independent_points;
-            bool sep_Dec2 = JudgeSeparateDec_2(live, {1, 0, 0}, boundary_points, independent_points, live->get_length());
-            std::cout << "sep_Dec2: " << sep_Dec2 << std::endl;
+    std::vector<Cluster*> live_clusters = live_grouping.children(); // copy
+    // sort the clusters by length using a lambda function
+    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster* cluster1, const Cluster* cluster2) {
+        return cluster1->get_length() < cluster2->get_length();
+    });
+    
+
+    geo_point_t drift_dir(1, 0, 0);
+    geo_point_t beam_dir(0, 0, 1);
+    geo_point_t vertical_dir(0, 1, 0);
+
+    //  ExecMon em("sep starting");
+
+    const auto& mp = live_grouping.get_params();
+    // this is for 4 time slices
+    double live_time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+
+    std::vector<Cluster *> new_clusters;
+    std::vector<Cluster *> del_clusters;
+
+    for (size_t i = 0; i != live_clusters.size(); i++) {
+        Cluster *cluster = live_clusters.at(i);
+
+        if (cluster->get_length() > 100 * units::cm) {
+            std::vector<geo_point_t> boundary_points;
+            std::vector<geo_point_t> independent_points;
+
+            bool flag_proceed = JudgeSeparateDec_2(cluster, drift_dir, boundary_points, independent_points,
+                                                             cluster->get_length());
+
+            if (!flag_proceed && cluster->get_length() > 100 * units::cm &&
+                JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width) &&
+                independent_points.size() > 0) {
+                bool flag_top = false;
+                for (size_t j = 0; j != independent_points.size(); j++) {
+                    if (independent_points.at(j).y() > 101.5 * units::cm) {
+                        flag_top = true;
+                        break;
+                    }
+                }
+
+                geo_point_t main_dir(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
+
+                if (flag_top) {
+                    if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 16 ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 33 &&
+                            cluster->get_length() > 160 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
+                            cluster->get_length() > 260 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 65 &&
+                            cluster->get_length() > 360 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 45 &&
+                            cluster->get_pca_value(1) > 0.75 * cluster->get_pca_value(0) ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
+                            cluster->get_pca_value(1) > 0.55 * cluster->get_pca_value(0)) {
+                        flag_proceed = true;
+                    }
+                    else {
+                        if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
+                            cluster->get_pca_value(1) > 0.2 * cluster->get_pca_value(0)) {
+                            std::vector<Cluster *> temp_sep_clusters = Separate_2(cluster, 10 * units::cm);
+                            int num_clusters = 0;
+                            for (size_t k = 0; k != temp_sep_clusters.size(); k++) {
+                                double length_1 = temp_sep_clusters.at(k)->get_length();
+                                if (length_1 > 60 * units::cm) num_clusters++;
+                                delete temp_sep_clusters.at(k);
+                            }
+                            if (num_clusters > 1) flag_proceed = true;
+                        }
+                    }
+                }
+                else {
+                    if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 4 &&
+                            cluster->get_length() > 170 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 25 &&
+                            cluster->get_length() > 210 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 28 &&
+                            cluster->get_length() > 270 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 35 &&
+                            cluster->get_length() > 330 * units::cm ||
+                        fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 30 &&
+                            cluster->get_pca_value(1) > 0.55 * cluster->get_pca_value(0)) {
+                        flag_proceed = true;
+                    }
+                }
+
+                //	std::cout << flag_top << " " << flag_proceed << std::endl;
+            }
+
+            if (flag_proceed) {
+                //   if (JudgeSeparateDec_2(cluster,drift_dir,boundary_points,independent_points)){
+                if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width)) {
+                    //	  std::cerr << em("sep prepare sep") << std::endl;
+
+                    std::cout << "calling Separate_1 at " << __LINE__ << std::endl;
+                    std::vector<Cluster *> sep_clusters =
+                        Separate_1(false, cluster, boundary_points, independent_points, dead_u_index, dead_v_index,
+                                             dead_w_index, cluster->get_length());
+                    Cluster *cluster1 = sep_clusters.at(0);
+                    new_clusters.push_back(cluster1);
+
+                    del_clusters.push_back(cluster);
+
+                    if (sep_clusters.size() >= 2) {  // 1
+                        for (size_t k = 2; k < sep_clusters.size(); k++) {
+                            new_clusters.push_back(sep_clusters.at(k));
+                        }
+                        //	  std::cerr << em("sep sep1") << std::endl;
+
+                        std::vector<Cluster *> temp_del_clusters;
+                        Cluster *cluster2 = sep_clusters.at(1);
+                        double length_1 = cluster2->get_length();
+
+                        Cluster *final_sep_cluster = cluster2;
+
+                        if (length_1 > 100 * units::cm) {
+                            boundary_points.clear();
+                            independent_points.clear();
+
+                            // if (flag_proceed && JudgeSeparateDec_1(cluster2,drift_dir)){
+                            if (JudgeSeparateDec_1(cluster2, drift_dir, length_1, live_time_slice_width) &&
+                                JudgeSeparateDec_2(cluster2, drift_dir, boundary_points, independent_points,
+                                                             length_1)) {
+                                // std::cout << "Separate 2nd level" << std::endl;
+
+                                std::cout << "calling Separate_1 at " << __LINE__ << std::endl;
+                                std::vector<Cluster *> sep_clusters =
+                                    Separate_1(false, cluster2, boundary_points, independent_points, dead_u_index,
+                                                         dead_v_index, dead_w_index, length_1);
+                                Cluster *cluster3 = sep_clusters.at(0);
+                                new_clusters.push_back(cluster3);
+
+                                temp_del_clusters.push_back(cluster2);
+                                // cluster2->Del_graph();
+                                // delete cluster2;
+                                if (sep_clusters.size() >= 2) {  // 2
+                                    for (size_t k = 2; k < sep_clusters.size(); k++) {
+                                        new_clusters.push_back(sep_clusters.at(k));
+                                    }
+                                    //	      std::cerr << em("sep sep2") << std::endl;
+
+                                    Cluster *cluster4 = sep_clusters.at(1);
+                                    final_sep_cluster = cluster4;
+                                    length_1 = cluster4->get_length();
+
+
+                                    if (length_1 > 100 * units::cm) {
+                                        boundary_points.clear();
+                                        independent_points.clear();
+                                        if (JudgeSeparateDec_1(cluster4, drift_dir, length_1,
+                                                                         live_time_slice_width) &&
+                                            JudgeSeparateDec_2(cluster4, drift_dir, boundary_points,
+                                                                         independent_points, length_1)) {
+                                            //	std::cout << "Separate 3rd level" << std::endl;
+
+                                            std::cout << "calling Separate_1 at " << __LINE__ << std::endl;
+                                            std::vector<Cluster *> sep_clusters = Separate_1(
+                                                false, cluster4, boundary_points, independent_points, dead_u_index,
+                                                dead_v_index, dead_w_index, length_1);
+
+                                            //		  std::cerr << em("sep sep3") << std::endl;
+
+                                            Cluster *cluster5 = sep_clusters.at(0);
+                                            new_clusters.push_back(cluster5);
+
+                                            temp_del_clusters.push_back(cluster4);
+                                            // cluster4->Del_graph();
+                                            //		  delete cluster4;
+                                            if (sep_clusters.size() >= 2) {  // 3
+                                                for (size_t k = 2; k < sep_clusters.size(); k++) {
+                                                    new_clusters.push_back(sep_clusters.at(k));
+                                                }
+                                                Cluster *cluster6 = sep_clusters.at(1);
+                                                final_sep_cluster = cluster6;
+                                            }
+                                            else {
+                                                final_sep_cluster = 0;
+                                            }
+                                        }
+                                    }
+                                }
+                                else {
+                                    final_sep_cluster = 0;
+                                }
+                            }
+                        }
+
+                        // temporary
+                        if (final_sep_cluster != 0) {
+                            length_1 = final_sep_cluster->get_length();
+
+                            //	std::cout << length_1/units::cm << std::endl;
+
+                            if (length_1 > 60 * units::cm) {
+                                boundary_points.clear();
+                                independent_points.clear();
+                                JudgeSeparateDec_1(final_sep_cluster, drift_dir, length_1, live_time_slice_width);
+                                JudgeSeparateDec_2(final_sep_cluster, drift_dir, boundary_points,
+                                                             independent_points, length_1);
+                                if (independent_points.size() > 0) {
+                                    // std::cout << "Separate final one" << std::endl;
+
+                                    std::cout << "calling Separate_1 at " << __LINE__ << std::endl;
+                                    std::vector<Cluster *> sep_clusters =
+                                        Separate_1(false, final_sep_cluster, boundary_points, independent_points,
+                                                             dead_u_index, dead_v_index, dead_w_index, length_1);
+
+                                    //	      std::cerr << em("sep sep4") << std::endl;
+
+                                    Cluster *cluster5 = sep_clusters.at(0);
+                                    new_clusters.push_back(cluster5);
+
+                                    temp_del_clusters.push_back(final_sep_cluster);
+                                    // final_sep_cluster->Del_graph();
+                                    // delete final_sep_cluster;
+                                    if (sep_clusters.size() >= 2) {
+                                        for (size_t k = 2; k < sep_clusters.size(); k++) {
+                                            new_clusters.push_back(sep_clusters.at(k));
+                                        }
+
+                                        Cluster *cluster6 = sep_clusters.at(1);
+                                        final_sep_cluster = cluster6;
+                                    }
+                                    else {
+                                        final_sep_cluster = 0;
+                                    }
+                                }
+                            }
+
+                            if (final_sep_cluster != 0) {
+                                std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
+                                for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
+                                    new_clusters.push_back(*it);
+                                }
+
+                                temp_del_clusters.push_back(final_sep_cluster);
+                                // final_sep_cluster->Del_graph();
+                            }
+                        }
+
+                        for (auto it = temp_del_clusters.begin(); it != temp_del_clusters.end(); it++) {
+                            delete *it;
+                        }
+                    }
+                    //	  std::cerr << em("sep del sep1") << std::endl;
+                }
+                else if (cluster->get_length() < 6 * units::m) {
+                    std::cout << "Stripping Cluster " << std::endl;
+                    // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
+                    std::cout << "calling Separate_1 at " << __LINE__ << std::endl;
+                    std::vector<Cluster *> sep_clusters =
+                        Separate_1(false, cluster, boundary_points, independent_points, dead_u_index, dead_v_index,
+                                             dead_w_index, cluster->get_length());
+
+                    Cluster *cluster1 = sep_clusters.at(0);
+                    new_clusters.push_back(cluster1);
+
+                    del_clusters.push_back(cluster);
+                    // cluster->Del_graph();
+                    // delete cluster;
+
+                    if (sep_clusters.size() >= 2) {
+                        for (size_t k = 2; k < sep_clusters.size(); k++) {
+                            new_clusters.push_back(sep_clusters.at(k));
+                        }
+
+                        std::vector<Cluster *> temp_del_clusters;
+                        Cluster *cluster2 = sep_clusters.at(1);
+                        double length_1 = cluster2->get_length();
+                        Cluster *final_sep_cluster = cluster2;
+
+                        std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
+                        for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
+                            new_clusters.push_back(*it);
+                        }
+                        temp_del_clusters.push_back(final_sep_cluster);
+                        // final_sep_cluster->Del_graph();
+                        //	  delete final_sep_cluster;
+
+                        for (auto it = temp_del_clusters.begin(); it != temp_del_clusters.end(); it++) {
+                            delete *it;
+                        }
+                    }
+                }
+            }  // else ...
         }
     }
+
+    for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
+        Cluster *ncluster = (*it);
+        live_clusters.push_back(ncluster);
+    }
+    for (auto it = del_clusters.begin(); it != del_clusters.end(); it++) {
+        Cluster *ocluster = (*it);
+        live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
+        delete ocluster;
+    }
 }
+
 
 static bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length)
 {
