@@ -690,6 +690,114 @@ size_t Cluster::get_closest_point_index(const geo_point_t& point) const
     return point_index;
 }
 
+double Cluster::get_closest_dis(const geo_point_t& point) const
+{
+    auto results = kd_knn(1, point);
+    if (results.size() == 0) {
+        raise<ValueError>("no points in cluster");
+    }
+
+    const auto& [_, dis] = results[0];
+    return dis;
+}
+
+std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) const{
+
+    int p1_index = 0;
+    int p2_index = 0;
+    geo_point_t p1 = point3d(p1_index);
+    geo_point_t p2 = other.point3d(p2_index);
+    int p1_save = 0;
+    int p2_save = 0;
+    double min_dis = 1e9;
+
+    int prev_index1 = -1;
+    int prev_index2 = -1;
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        p2_index = other.get_closest_point_index(p1);
+        p2 = other.point3d(p2_index);
+        p1_index = get_closest_point_index(p2);
+        p1 = point3d(p1_index);
+    }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    prev_index1 = -1;
+    prev_index2 = -1;
+    p1_index = points()[0].size() - 1;
+    p2_index = 0;
+    p1 = point(p1_index);
+    p2 = other.point(p2_index);
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        p2_index = other.get_closest_point_index(p1);
+        p2 = other.point3d(p2_index);
+        p1_index = get_closest_point_index(p2);
+        p1 = point3d(p1_index);
+    }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    prev_index1 = -1;
+    prev_index2 = -1;
+    p1_index = 0;
+    p2_index = other.points()[0].size() - 1;
+    p1 = point(p1_index);
+    p2 = other.point(p2_index);
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        p2_index = other.get_closest_point_index(p1);
+        p2 = other.point3d(p2_index);
+        p1_index = get_closest_point_index(p2);
+        p1 = point3d(p1_index);
+    }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    prev_index1 = -1;
+    prev_index2 = -1;
+    p1_index = points()[0].size() - 1;
+    p2_index = other.points()[0].size() - 1;
+    p1 = point(p1_index);
+    p2 = other.point(p2_index);
+    while (p1_index != prev_index1 || p2_index != prev_index2) {
+        prev_index1 = p1_index;
+        prev_index2 = p2_index;
+        p2_index = other.get_closest_point_index(p1);
+        p2 = other.point3d(p2_index);
+        p1_index = get_closest_point_index(p2);
+        p1 = point3d(p1_index);
+    }
+    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    if (dis < min_dis) {
+        min_dis = dis;
+        p1_save = p1_index;
+        p2_save = p2_index;
+    }
+
+    return std::make_tuple(p1_save, p2_save, min_dis);
+}
+
 geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis) const
 {
     // average position

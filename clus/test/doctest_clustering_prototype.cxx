@@ -414,4 +414,9 @@ TEST_CASE("Facade seperate")
         CHECK(cluster->nchildren() == 1);
         CHECK(cluster->npoints() == 10);
     }
+    debug("before removal, grouping has {} children", grouping->nchildren());
+    // clusters[1]->node()->parent->remove(clusters[1]->node());
+    grouping->remove_child(*clusters[1]);
+    debug("after removal, grouping has {} children", grouping->nchildren());
+    CHECK(grouping->nchildren() == 1);
 }

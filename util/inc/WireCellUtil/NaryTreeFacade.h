@@ -231,6 +231,8 @@ namespace WireCell::NaryTree {
             for (auto it = id2facade.begin(); it != id2facade.end(); it++) {
                 ret.push_back(it->second);
             }
+            // remove self from parent
+            parent->remove(this->m_node, notify_value);
             std::cout << "ret size: " << ret.size() << std::endl;
             return ret;
         }
