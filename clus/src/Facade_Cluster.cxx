@@ -754,7 +754,7 @@ std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) c
     prev_index1 = -1;
     prev_index2 = -1;
     p1_index = 0;
-    p2_index = npoints() - 1;
+    p2_index = other.npoints() - 1;
     p1 = point3d(p1_index);
     p2 = other.point3d(p2_index);
     while (p1_index != prev_index1 || p2_index != prev_index2) {
@@ -776,7 +776,7 @@ std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) c
     prev_index1 = -1;
     prev_index2 = -1;
     p1_index = npoints() - 1;
-    p2_index = npoints() - 1;
+    p2_index = other.npoints() - 1;
     p1 = point3d(p1_index);
     p2 = other.point3d(p2_index);
     while (p1_index != prev_index1 || p2_index != prev_index2) {
