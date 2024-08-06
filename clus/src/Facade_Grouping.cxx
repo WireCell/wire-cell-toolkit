@@ -49,6 +49,29 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
     return ss.str();
 }
 
+
+void Grouping::on_construct(node_type* node)
+{
+    this->NaryTree::Facade<points_t>::on_construct(node);
+    const auto& lpcs = m_node->value.local_pcs();
+    /// FIXME: use fixed numbers?
+    std::set<int> faces = {0, 1};
+    std::set<int> planes = {0, 1, 2};
+    for (const int face : faces) {
+        for (const int plane : planes) {
+            const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
+            if (lpcs.find(ds_name) == lpcs.end()) continue;
+            const auto& pc_dead_winds = lpcs.at(ds_name);
+            const auto& xbeg = pc_dead_winds.get("xbeg")->elements<float_t>();
+            const auto& xend = pc_dead_winds.get("xend")->elements<float_t>();
+            const auto& wind = pc_dead_winds.get("wind")->elements<int_t>();
+            for (size_t i = 0; i < xbeg.size(); ++i) {
+                m_dead_winds[face][plane][wind[i]] = {xbeg[i], xend[i]};
+            }
+        }
+    }
+}
+
 size_t Grouping::hash() const
 {
     std::size_t h = 0;

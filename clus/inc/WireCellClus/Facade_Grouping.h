@@ -77,6 +77,10 @@ namespace WireCell::PointCloud::Facade {
         mutable mapfp_t<double> m_proj_centers;
         mutable mapfp_t<double> m_pitch_mags;
         mutable mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
+
+       protected:
+        // Receive notification when this facade is created on a node.
+        virtual void on_construct(node_type* node);
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 
