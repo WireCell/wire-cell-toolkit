@@ -214,13 +214,18 @@ std::ostream& Facade::operator<<(std::ostream& os, const Simple3DPointCloud& s3d
     return os;
 }
 
-Facade::Multi2DPointCloud::Multi2DPointCloud(const double angle_u, const double angle_v, const double angle_w) : angle_uvw{angle_u, angle_v, angle_w} {}
+Facade::Multi2DPointCloud::Multi2DPointCloud(const double angle_u, const double angle_v, const double angle_w) : angle_uvw{angle_u, angle_v, angle_w} {
+    for (size_t plane = 0; plane < 3; ++plane) {
+        points(plane).resize(2);
+    }
+}
 
 void Facade::Multi2DPointCloud::add(const geo_point_t& new_pt) {
     for (size_t plane = 0; plane < 3; ++plane) {
         double x = new_pt[0];
         double y = cos(angle_uvw[plane]) * new_pt[2] - sin(angle_uvw[plane]) * new_pt[1];
-        points(plane).push_back({x, y});
+        points(plane)[0].push_back(x);
+        points(plane)[1].push_back(y);
     }
 }
 
