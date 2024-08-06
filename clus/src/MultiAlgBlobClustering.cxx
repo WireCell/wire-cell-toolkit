@@ -319,9 +319,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
     /// PLACEHOLDER: just to test the function
-    std::map<int, std::pair<double, double>> dead_u_index;
-    std::map<int, std::pair<double, double>> dead_v_index;
-    std::map<int, std::pair<double, double>> dead_w_index;
+    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
+    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
+    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
     clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index);
     perf.dump("clustering_separate", live_grouping);
 
