@@ -45,6 +45,9 @@ namespace WireCell {
                                    float upper_decon_limit1 = 0.08,
                                    float roi_min_max_ratio = 0.8, float rms_threshold = 0.);
 
+            float get_rms_and_rois(const WireCell::Waveform::realseq_t& signal, std::vector<std::vector<int> >& rois);
+            bool Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig, int& beg, int& end, float minwidth);
+
             class OneChannelNoise : public WireCell::IChannelFilter, public WireCell::IConfigurable {
                public:
                 OneChannelNoise(const std::string& anode_tn = "AnodePlane",
@@ -98,6 +101,33 @@ namespace WireCell {
                 IDFT::pointer m_dft;
 
                 float m_rms_threshold;
+            };
+
+            /**
+             * To tag regions for the FEMB negative pulse issue
+             * Could be upgraded to subtract the baseline ditortion in the future
+             */
+            class FEMBNoiseSub : public WireCell::IChannelFilter, public WireCell::IConfigurable {
+               public:
+                FEMBNoiseSub(const std::string& anode = "AnodePlane", float width=50.0);
+                virtual ~FEMBNoiseSub();
+
+                virtual void configure(const WireCell::Configuration& config);
+                virtual WireCell::Configuration default_configuration() const;
+
+                //// IChannelFilter interface
+
+                /** Filter in place the signal `sig` from given `channel`. */
+                virtual WireCell::Waveform::ChannelMaskMap apply(int channel, signal_t& sig) const;
+
+                /** Filter in place a group of signals together. */
+                virtual WireCell::Waveform::ChannelMaskMap apply(channel_signals_t& chansig) const;
+
+               private:
+                std::string m_anode_tn;
+                IAnodePlane::pointer m_anode;
+
+                float m_width;
             };
 
         }  // namespace PDHD
