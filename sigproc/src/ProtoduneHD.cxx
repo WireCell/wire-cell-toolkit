@@ -748,7 +748,7 @@ float PDHD::get_rms_and_rois(const WireCell::Waveform::realseq_t& signal, std::v
 bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig, int& beg, int& end, float min_width)
 {
     // project all channels to 1D signal
-    auto nsignals = chansig.begin()->second.size();
+    int nsignals = chansig.begin()->second.size();
     WireCell::Waveform::realseq_t signal(nsignals);
     for (const auto& cs: chansig) {
         std::transform(signal.begin(), signal.end(), cs.second.begin(), signal.begin(), std::plus<float>() );
@@ -759,8 +759,8 @@ bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chan
     for(auto roi_tmp : rois){
         double width = roi_tmp.size();
         if( width > min_width ){ // found the noise
-            beg = roi_tmp[0]-20; // FIXME: need to check validity outside of this function
-            end = roi_tmp.back()+20;
+            beg = std::max(roi_tmp[0]-20, 0);
+            end = std::min(roi_tmp.back()+20, nsignals-1);
             return true;
         }
     }
@@ -1006,9 +1006,6 @@ WireCell::Waveform::ChannelMaskMap PDHD::FEMBNoiseSub::apply(channel_signals_t& 
     WireCell::Waveform::BinRange fembnoise_bins;
     bool is_femb_noise = Is_FEMB_noise(chansig, fembnoise_bins.first, fembnoise_bins.second, m_width);
     if (is_femb_noise) {
-        fembnoise_bins.first = std::max(fembnoise_bins.first, 0);
-        int nsignals = chansig.begin()->second.size();
-        fembnoise_bins.second = std::min(fembnoise_bins.second, nsignals);
         for (auto const& cs : chansig) {
             ret["femb_noise"][cs.first].push_back(fembnoise_bins);
             std::cout << "[wgu] FEMB Noise channel= " << cs.first << " , time bins: "
