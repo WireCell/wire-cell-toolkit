@@ -343,9 +343,9 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                    std::map<int, std::pair<double, double>> &dead_w_index,
                                    const bool use_ctpc)
 {
-    std::cout << "dead_u_index size: " << dead_u_index.size() << std::endl;
-    std::cout << "dead_v_index size: " << dead_v_index.size() << std::endl;
-    std::cout << "dead_w_index size: " << dead_w_index.size() << std::endl;
+    // std::cout << "dead_u_index size: " << dead_u_index.size() << std::endl;
+    // std::cout << "dead_v_index size: " << dead_v_index.size() << std::endl;
+    // std::cout << "dead_w_index size: " << dead_w_index.size() << std::endl;
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
@@ -615,12 +615,12 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                 }
                 else if (cluster->get_length() < 6 * units::m) {
                     const size_t orig_nchildren = cluster->nchildren();
-                    std::cout << "Stripping Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
+                    // std::cout << "Stripping Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
                                    dead_v_index, dead_w_index, cluster->get_length());
-                    std::cout << "Stripping Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                    // std::cout << "Stripping Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                     Cluster *cluster1 = sep_clusters.at(0);
                     new_clusters.push_back(cluster1);
@@ -1227,7 +1227,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
     // if (cluster->nchildren() == 612) {
     //     flag_debug_porting = true;
     // }
-    std::cout << "Separate_1 with use_ctpc: start " << std::endl;
+    // std::cout << "Separate_1 with use_ctpc: start " << std::endl;
 
     // translate all the points at the beginning
     // TODO: is this the best way to do this?
@@ -1728,12 +1728,12 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
             groupids.insert(1);
         }
     }
-    std::cout << "before separate, cluster has " << cluster->nchildren() << " children " << " with " << groupids.size() << " groups" << std::endl;
+    // std::cout << "before separate, cluster has " << cluster->nchildren() << " children " << " with " << groupids.size() << " groups" << std::endl;
     auto clusters_step0 = cluster->separate<Cluster>(b2groupid);
-    std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
-    for (int id : groupids) {
-        std::cout << "separated cluster " << id << " has " << clusters_step0[id]->nchildren() << " children" << std::endl;
-    }
+    // std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
+    // for (int id : groupids) {
+    //     std::cout << "separated cluster " << id << " has " << clusters_step0[id]->nchildren() << " children" << std::endl;
+    // }
 
     std::vector<Cluster*> other_clusters;
     if (clusters_step0.find(1) != clusters_step0.end()) {
@@ -1893,7 +1893,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
     // }
 
     // delete temp_cloud;
-    std::cout << "Separate_1 with use_ctpc: finished\n";
+    // std::cout << "Separate_1 with use_ctpc: finished\n";
     return final_clusters;
 }
 
@@ -1903,7 +1903,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
 std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut, const size_t ticks_per_slice)
 {
     const auto& time_cells_set_map = cluster->time_blob_map();
-    std::cout << "Separate_2 nchildren: " << cluster->nchildren() << std::endl;
+    // std::cout << "Separate_2 nchildren: " << cluster->nchildren() << std::endl;
     std::vector<Blob*>& mcells = cluster->children();
 
     std::vector<int> time_slices;
