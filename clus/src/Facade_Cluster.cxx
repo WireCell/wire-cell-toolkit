@@ -29,9 +29,16 @@ using spdlog::debug;
 
 std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluster)
 {
-    
+    const auto uvwt_min = cluster.get_uvwt_min();
+    const auto uvwt_max = cluster.get_uvwt_max();
+    std::cout << "uvwt_min " << std::get<0>(uvwt_min) << " " << std::get<1>(uvwt_min) << " " << std::get<2>(uvwt_min) << " " << std::get<3>(uvwt_min) << std::endl;
+    std::cout << "uvwt_max " << std::get<0>(uvwt_max) << " " << std::get<1>(uvwt_max) << " " << std::get<2>(uvwt_max) << " " << std::get<3>(uvwt_max) << std::endl;
     os << "<Cluster [" << (void*) cluster.hash() << "]:" << " npts=" << cluster.npoints()
-       << " nblobs=" << cluster.nchildren() << ">";
+       << " nblobs=" << cluster.nchildren() << ">"
+       << " u " << std::get<0>(uvwt_min) << " " << std::get<0>(uvwt_max)
+       << " v " << std::get<1>(uvwt_min) << " " << std::get<1>(uvwt_max)
+       << " w " << std::get<2>(uvwt_min) << " " << std::get<2>(uvwt_max)
+       << " t " << std::get<3>(uvwt_min) << " " << std::get<3>(uvwt_max);
     return os;
 }
 
@@ -56,7 +63,36 @@ std::string Cluster::dump() const{
     std::stringstream ss;
     ss << " blobs " << children().size() << " points " << npoints()
     << " [" << t_min << " " << t_max << "] " << children().size()
-    << " " << u_min << " " << u_max << " " << v_min << " " << v_max << " " << w_min << " " << w_max;
+    << " uvw " << u_min << " " << u_max << " " << v_min << " " << v_max << " " << w_min << " " << w_max;
+    return ss.str();
+}
+
+std::string Cluster::dump_graph() const{
+    if (m_graph==nullptr){
+        return "empty graph";
+    }
+    auto g = *m_graph;
+    std::stringstream ss;
+
+    ss << "MCUGraph:" << std::endl;
+    ss << "Vertices: " << num_vertices(g) << std::endl;
+    ss << "Edges: " << num_edges(g) << std::endl;
+
+    ss << "Vertex Properties:" << std::endl;
+    auto vrange = boost::vertices(g);
+    for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+        auto v = *vit;
+        ss << "Vertex " << v << ": Index = " << g[v].index << point3d(g[v].index) << std::endl;
+    }
+
+    ss << "Edge Properties:" << std::endl;
+    auto erange = boost::edges(g);
+    for (auto eit = erange.first; eit != erange.second; ++eit) {
+        auto e = *eit;
+        auto src = source(e, g);
+        auto tgt = target(e, g);
+        ss << "Edge " << e << " [ " << point3d(g[src].index) << ", " << point3d(g[tgt].index) << " ]" << ": Distance = " << g[e].dist << std::endl;
+    }
     return ss.str();
 }
 
@@ -943,6 +979,7 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_min() const
 
         if (first) {
             ret = {u, v, w, t};
+            first = false;
             continue;
         }
         get<0>(ret) = std::min(get<0>(ret), u);
@@ -965,6 +1002,7 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_max() const
 
         if (first) {
             ret = {u, v, w, t};
+            first = false;
             continue;
         }
         get<0>(ret) = std::max(get<0>(ret), u);
