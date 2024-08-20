@@ -318,11 +318,15 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         perf.dump("clustering extend 4", live_grouping);
     }
 
-    /// PLACEHOLDER: just to test the function
     std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
     std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
     std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
-    clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index);
+    log->debug("dead_u_index size {}", dead_u_index.size());
+    log->debug("dead_v_index size {}", dead_v_index.size());
+    log->debug("dead_w_index size {}", dead_w_index.size());
+    log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
+    clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
+    log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
     perf.dump("clustering_separate", live_grouping);
 
     // BEE debug dead-live
