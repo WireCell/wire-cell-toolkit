@@ -244,7 +244,7 @@ std::pair<int, double> Facade::Multi2DPointCloud::get_closest_2d_dis(const geo_p
     const auto& res = kd(plane).knn(1, query);
 
     if (res.size() == 1)
-        return std::make_pair(res[0].first, res[0].second); /// FIXME: dist or dist^2?
+        return std::make_pair(res[0].first, sqrt(res[0].second)); /// Note, res.second is the square of the distance!
     else
         return std::make_pair(-1, 1e9);
 }
