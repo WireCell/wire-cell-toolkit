@@ -447,10 +447,12 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
 
 void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
     using slice_t = WireCell::cluster_node_t::slice_t;
-    // using float_t = Facade::float_t;
-    // using int_t = Facade::int_t;
+    using float_t = Facade::float_t;
+    using int_t = Facade::int_t;
     const auto& cg = icluster->graph();
     auto grouping = root->value.facade<Facade::Grouping>();
+    std::set<int> faces;
+    std::set<int> planes;
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
         const auto& cgnode = cg[vdesc];
         if (cgnode.code() != 's') continue;
@@ -473,6 +475,8 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                 //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
                 // }
+                faces.insert(face);
+                planes.insert(plane);
                 auto & dead_winds = grouping->get_dead_winds(face, plane);
                 if (dead_winds.find(wind) == dead_winds.end()) {
                     dead_winds[wind] = {xbeg, xend};
@@ -493,8 +497,38 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     //         log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
     //     }
     // }
-    // log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
-    //            grouping->get_dead_winds(0, 2).size());
+    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
+               grouping->get_dead_winds(0, 2).size());
+
+    Facade::mapfp_t<std::vector<float_t>> xbegs, xends;
+    Facade::mapfp_t<std::vector<int_t>> winds;
+    for (const auto& face : faces) {
+        for (const auto& plane : planes) {
+            for (const auto& [wind, xbeg_xend] : grouping->get_dead_winds(face, plane)) {
+                xbegs[face][plane].push_back(xbeg_xend.first);
+                xends[face][plane].push_back(xbeg_xend.second);
+                winds[face][plane].push_back(wind);
+            }
+        }
+    }
+    for (const auto& face : faces) {
+        for (const auto& plane : planes) {
+            Dataset ds;
+            ds.add("xbeg", Array(xbegs[face][plane]));
+            ds.add("xend", Array(xends[face][plane]));
+            ds.add("wind", Array(winds[face][plane]));
+            const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
+            // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
+            root->value.local_pcs().emplace(ds_name, ds);
+            // log->debug("added point cloud {} with {} points", ds_name, xbeg.size());
+        }
+    }
+    for (const auto& [name, pc] : root->value.local_pcs()) {
+        if (name.find("dead_winds") != std::string::npos) {
+            log->debug("contains point cloud {} with {} points", name, pc.get("xbeg")->size_major());
+        }
+    }
+
 }
 
 bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& tensorset)
