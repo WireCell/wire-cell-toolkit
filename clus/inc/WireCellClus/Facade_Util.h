@@ -32,6 +32,8 @@ namespace WireCell::PointCloud::Facade {
     using geo_point2d_t = D3Vector<double>;
     using geo_vector2d_t = D3Vector<double>;
 
+    class Cluster;
+
     // map for face, plane to something
     /// TODO: face (ident? which?) -> plane (index) -> Dataset
     template<typename T> using mapfp_t = std::unordered_map<int, std::unordered_map<int, T>>;
@@ -119,7 +121,7 @@ namespace WireCell::PointCloud::Facade {
     class Multi2DPointCloud {
        public:
         Multi2DPointCloud(double angle_u, double angle_v, double angle_w);
-        using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexStatic>;
+        using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
         // these derived types do not depend on static/dynamic
         using points_type = nfkd_t::points_type;
         using results_type = nfkd_t::results_type;
@@ -142,6 +144,34 @@ namespace WireCell::PointCloud::Facade {
         double angle_uvw[3];
     };
     std::ostream& operator<<(std::ostream& os, const Multi2DPointCloud& s3dpc);
+
+
+    class DynamicPointCloud {
+       public:
+        DynamicPointCloud(double angle_u, double angle_v, double angle_w);
+        using points3d_type = Simple3DPointCloud::points_type;
+        using points2d_type = Multi2DPointCloud::points_type;
+        using point_type = std::vector<double>;
+        inline size_t get_num_points() const { return m_pc3d.get_num_points(); }
+        inline point_type point2d(const size_t plane, const size_t ind) const {
+            return m_pc2d.point(plane, ind);
+        }
+        inline geo_point_t point3d(const size_t ind) const { return m_pc3d.point(ind); }
+
+        /// @brief add points from p_test along dir with range and step
+        void add_points(const Cluster* cluster, const geo_point_t& p_test, const geo_point_t& dir_unmorm, const double range,
+                        const double step, const double angle);
+
+        /// @return: dist, Cluster, point_index
+        std::vector<std::tuple<double, Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
+                                                                             const int plane);
+
+       private:
+        Multi2DPointCloud m_pc2d;
+        Simple3DPointCloud m_pc3d;
+        std::vector<int> m_winds[3]; // u, v, w
+        std::vector<const Cluster*> m_index_cluster;
+    };
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double time);

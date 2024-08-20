@@ -1,4 +1,5 @@
 #include "WireCellClus/Facade.h"
+#include "WireCellClus/Facade_Cluster.h"
 #include <boost/container_hash/hash.hpp>
 
 using namespace WireCell;
@@ -253,6 +254,37 @@ std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dp
 {
     os << "Multi2DPointCloud " << " get_num_points " << m2dpc.get_num_points();
     return os;
+}
+
+Facade::DynamicPointCloud::DynamicPointCloud(const double angle_u, const double angle_v, const double angle_w)
+  : m_pc2d(angle_u, angle_v, angle_w)
+{
+}
+
+void Facade::DynamicPointCloud::DynamicPointCloud::add_points(const Cluster* cluster, const geo_point_t& p_test,
+                                                              const geo_point_t& dir_unmorm, const double range,
+                                                              const double step, const double angle)
+{
+    size_t current_size = get_num_points();
+    geo_point_t dir = dir_unmorm.norm();
+
+    int num_points = int(range / (step)) + 1;
+    double dis_seg = range / num_points;
+
+    /// TODO: resize is faster, but needs more interface implementation
+    for (int k = 0; k != num_points; k++) {
+        // 13 cm  = 75 * sin(10/180.*3.1415926)
+        double dis_cut =
+            std::min(std::max(2.4 * units::cm, k * dis_seg * sin(angle / 180. * 3.1415926)), 13 * units::cm);
+        m_index_cluster.push_back(cluster);
+        m_pc3d.add({p_test.x() + k * dir.x() * dis_seg, p_test.y() + k * dir.y() * dis_seg,
+                    p_test.z() + k * dir.z() * dis_seg});
+        m_winds[0].push_back(int(dis_cut));
+        m_winds[1].push_back(int(dis_cut));
+        m_winds[2].push_back(int(dis_cut));
+        m_pc2d.add({p_test.x() + k * dir.x() * dis_seg, p_test.y() + k * dir.y() * dis_seg,
+                    p_test.z() + k * dir.z() * dis_seg});
+    }
 }
 
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
