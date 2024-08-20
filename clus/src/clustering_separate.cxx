@@ -654,18 +654,18 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
         }
     }
 
-    std::cout << "Separate clusters: " << new_clusters.size() << std::endl;
-    /// FIXME: remove these? since the live_clusters is just a copy of raw pointers
-    for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
-        Cluster *ncluster = (*it);
-        live_clusters.push_back(ncluster);
-    }
-    std::cout << "Delete clusters: " << del_clusters.size() << std::endl;
-    for (auto it = del_clusters.begin(); it != del_clusters.end(); it++) {
-        Cluster *ocluster = (*it);
-        live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
-        // delete ocluster;
-    }
+    // std::cout << "Separate clusters: " << new_clusters.size() << std::endl;
+    // /// FIXME: remove these? since the live_clusters is just a copy of raw pointers
+    // for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
+    //     Cluster *ncluster = (*it);
+    //     live_clusters.push_back(ncluster);
+    // }
+    // std::cout << "Delete clusters: " << del_clusters.size() << std::endl;
+    // for (auto it = del_clusters.begin(); it != del_clusters.end(); it++) {
+    //     Cluster *ocluster = (*it);
+    //     live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
+    //     // delete ocluster;
+    // }
 }
 
 /// @brief PCA based
