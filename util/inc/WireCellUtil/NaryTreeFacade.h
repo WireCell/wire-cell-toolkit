@@ -205,7 +205,7 @@ namespace WireCell::NaryTree {
         // children with negative group number will be removed
         template<typename concrete_self_type>
         std::unordered_map<int, concrete_self_type*> separate(const std::vector<int>& groups, bool notify_value=true) {
-            std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
+            // std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
             if(groups.size() != nchildren()) {
                 raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
             }
@@ -213,7 +213,7 @@ namespace WireCell::NaryTree {
             std::unordered_map<int, concrete_self_type*> id2facade;
             const auto orig_children = children(); // make a copy
             for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
-                std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+                // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
                 // remove children with negative group number 
                 if (groups[ichild] < 0) continue;
                 auto* child = orig_children[ichild];
@@ -223,10 +223,10 @@ namespace WireCell::NaryTree {
                     auto new_facade = new_snode->value.template facade<concrete_self_type>();
                     id2facade[groups[ichild]] = new_facade;
                 }
-                std::cout << "id2facade size: " << id2facade.size() << std::endl;
+                // std::cout << "id2facade size: " << id2facade.size() << std::endl;
                 auto new_facade = id2facade[groups[ichild]];
                 new_facade->m_node->insert(child->node(), notify_value);
-                std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+                // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
             }
             parent->remove(this->m_node, notify_value);
             // std::vector<concrete_self_type*> ret;
