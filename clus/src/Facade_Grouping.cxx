@@ -168,7 +168,7 @@ bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range
         if (ch2xrange.find(ch) ==  ch2xrange.end()) continue;
         const auto [xmin, xmax] = ch2xrange.at(ch);
         if (point[0] >= xmin && point[0] <= xmax) {
-            std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
+            // std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
             return true;
         }
     }
