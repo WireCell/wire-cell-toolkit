@@ -1084,6 +1084,45 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_earliest_latest_points() const
     return std::make_pair(backwards.second, backwards.first);
 }
 
+std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
+{
+    geo_point_t extreme_wcp[6];
+    for (int i = 0; i != 6; i++) {
+        extreme_wcp[i] = point3d(0);
+    }
+    for (size_t i = 1; i < npoints(); i++) {
+        if (point3d(i).y() > extreme_wcp[0].y()) extreme_wcp[0] = point3d(i);
+        if (point3d(i).y() < extreme_wcp[1].y()) extreme_wcp[1] = point3d(i);
+
+        if (point3d(i).x() > extreme_wcp[2].x()) extreme_wcp[2] = point3d(i);
+        if (point3d(i).x() < extreme_wcp[3].x()) extreme_wcp[3] = point3d(i);
+
+        if (point3d(i).z() > extreme_wcp[4].z()) extreme_wcp[4] = point3d(i);
+        if (point3d(i).z() < extreme_wcp[5].z()) extreme_wcp[5] = point3d(i);
+    }
+
+    double max_dis = -1;
+    geo_point_t wcp1, wcp2;
+    for (int i = 0; i != 6; i++) {
+        for (int j = i + 1; j != 6; j++) {
+            double dis =
+                sqrt(pow(extreme_wcp[i].x() - extreme_wcp[j].x(), 2) + pow(extreme_wcp[i].y() - extreme_wcp[j].y(), 2) +
+                     pow(extreme_wcp[i].z() - extreme_wcp[j].z(), 2));
+            if (dis > max_dis) {
+                max_dis = dis;
+                wcp1 = extreme_wcp[i];
+                wcp2 = extreme_wcp[j];
+            }
+        }
+    }
+    geo_point_t p1(wcp1.x(), wcp1.y(), wcp1.z());
+    geo_point_t p2(wcp2.x(), wcp2.y(), wcp2.z());
+    p1 = calc_ave_pos(p1, 5 * units::cm);
+    p2 = calc_ave_pos(p2, 5 * units::cm);
+
+    return std::make_pair(p1, p2);
+}
+
 bool Cluster::sanity(Log::logptr_t log) const
 {
     {

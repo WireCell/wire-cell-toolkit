@@ -146,9 +146,17 @@ namespace WireCell::PointCloud::Facade {
         // Note: the two points are in ASCENDING order!
         std::pair<geo_point_t, geo_point_t> get_earliest_latest_points() const;
 
+        // WCP: get_two_extreme_points
+        // TODO: configurable dist cut?
+        // 1, determines the most extreme points along the y, x, z axes
+        // 2, calculates which pair of these points has the greatest distance between them
+        // 3, adjusted using local averaging, calc_ave_pos
+        std::pair<geo_point_t,geo_point_t> get_two_extreme_points() const;
+
         // Return the points at the extremes of the given Cartesian axis.  Default is Y-axis.
         //
         // Note: the two points are in DESCENDING order!
+        // WCP: get_highest_lowest_wcps
         std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const; 
 
         /// TODO: old_wcp and dir are used as local vars inside the function, make the IO more clear?
