@@ -249,6 +249,19 @@ std::pair<int, double> Facade::Multi2DPointCloud::get_closest_2d_dis(const geo_p
     else
         return std::make_pair(-1, 1e9);
 }
+std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d_index(const geo_point_t &p, const double radius, size_t plane) const
+{
+    double x = p[0];
+    double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
+    std::vector<double> query = {x, y};
+    // const auto& res = kd(plane).knn(1, query);
+    const auto& res = kd(plane).radius(radius * radius, query);
+    std::vector<std::pair<size_t, double>> ret;
+    for (const auto& r : res) {
+        ret.push_back(std::make_pair(r.first, sqrt(r.second)));
+    }
+    return ret;
+}
 
 std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dpc)
 {
@@ -285,6 +298,20 @@ void Facade::DynamicPointCloud::DynamicPointCloud::add_points(const Cluster* clu
         m_pc2d.add({p_test.x() + k * dir.x() * dis_seg, p_test.y() + k * dir.y() * dis_seg,
                     p_test.z() + k * dir.z() * dis_seg});
     }
+}
+
+std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointCloud::DynamicPointCloud::get_2d_points_info(
+    const geo_point_t& p, const double radius, const int plane)
+{
+    std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index(p, radius, plane);
+    std::vector<std::tuple<double, const Cluster*, size_t>> return_results;
+
+    for (size_t i = 0; i != results.size(); i++) {
+        return_results.push_back(std::make_tuple(sqrt(results.at(i).second), m_index_cluster.at(results.at(i).first),
+                                                 (size_t)results.at(i).first));
+    }
+
+    return return_results;
 }
 
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed

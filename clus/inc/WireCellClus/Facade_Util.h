@@ -138,6 +138,7 @@ namespace WireCell::PointCloud::Facade {
         size_t get_num_points() const { return m_points[0][0].size(); }
         const nfkd_t& kd(const size_t plane, const bool rebuild=false) const;
         std::pair<int, double> get_closest_2d_dis(const geo_point_t &p, size_t plane) const;
+        std::vector<std::pair<size_t, double>> get_closest_2d_index(const geo_point_t &p, const double radius, size_t plane) const;
        private:
         points_type m_points[3];
         mutable std::unique_ptr<nfkd_t> m_kd[3]; // lazy
@@ -163,7 +164,7 @@ namespace WireCell::PointCloud::Facade {
                         const double step, const double angle);
 
         /// @return: dist, Cluster, point_index
-        std::vector<std::tuple<double, Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
+        std::vector<std::tuple<double, const Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
                                                                              const int plane);
 
        private:
