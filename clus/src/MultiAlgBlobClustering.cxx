@@ -329,6 +329,15 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
     perf.dump("clustering_separate", live_grouping);
 
+
+    const auto &tp = live_grouping.get_params();
+    auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
+    for (const Cluster *cluster : live_grouping.children()) {
+        global_point_cloud->add_points(cluster, 0);
+    }
+    clustering_connect1(live_grouping, global_point_cloud, dead_u_index, dead_v_index, dead_w_index);
+    perf.dump("clustering_connect1", live_grouping);
+
     // BEE debug dead-live
     // if (!m_bee_dir.empty()) {
     //     std::string sub_dir = String::format("%s/%d", m_bee_dir, ident);
