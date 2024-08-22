@@ -33,6 +33,7 @@ namespace WireCell::PointCloud::Facade {
     using geo_vector2d_t = D3Vector<double>;
 
     class Cluster;
+    class Blob;
 
     // map for face, plane to something
     /// TODO: face (ident? which?) -> plane (index) -> Dataset
@@ -159,6 +160,9 @@ namespace WireCell::PointCloud::Facade {
         }
         inline geo_point_t point3d(const size_t ind) const { return m_pc3d.point(ind); }
 
+        // useful when hacking the winds with dist_cut
+        inline int dist_cut(const size_t plane, const size_t ind) const { return m_winds[plane].at(ind); }
+
         /// @brief add points from p_test along dir with range and step
         void add_points(const Cluster* cluster, const geo_point_t& p_test, const geo_point_t& dir_unmorm, const double range,
                         const double step, const double angle);
@@ -167,11 +171,14 @@ namespace WireCell::PointCloud::Facade {
         std::vector<std::tuple<double, const Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
                                                                              const int plane);
 
+        std::pair<double, double> hough_transform(const geo_point_t& origin, const double dis) const;
+        geo_point_t vhough_transform(const geo_point_t& origin, const double dis) const;
        private:
         Multi2DPointCloud m_pc2d;
         Simple3DPointCloud m_pc3d;
         std::vector<int> m_winds[3]; // u, v, w
-        std::vector<const Cluster*> m_index_cluster;
+        std::vector<const Cluster*> m_clusters;
+        std::vector<const Blob*> m_blobs;
     };
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,

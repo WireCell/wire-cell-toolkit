@@ -274,7 +274,7 @@ Facade::DynamicPointCloud::DynamicPointCloud(const double angle_u, const double 
 {
 }
 
-void Facade::DynamicPointCloud::DynamicPointCloud::add_points(const Cluster* cluster, const geo_point_t& p_test,
+void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const geo_point_t& p_test,
                                                               const geo_point_t& dir_unmorm, const double range,
                                                               const double step, const double angle)
 {
@@ -289,7 +289,8 @@ void Facade::DynamicPointCloud::DynamicPointCloud::add_points(const Cluster* clu
         // 13 cm  = 75 * sin(10/180.*3.1415926)
         double dis_cut =
             std::min(std::max(2.4 * units::cm, k * dis_seg * sin(angle / 180. * 3.1415926)), 13 * units::cm);
-        m_index_cluster.push_back(cluster);
+        m_clusters.push_back(cluster);
+        m_blobs.push_back(nullptr);
         m_pc3d.add({p_test.x() + k * dir.x() * dis_seg, p_test.y() + k * dir.y() * dis_seg,
                     p_test.z() + k * dir.z() * dis_seg});
         m_winds[0].push_back(int(dis_cut));
@@ -300,18 +301,103 @@ void Facade::DynamicPointCloud::DynamicPointCloud::add_points(const Cluster* clu
     }
 }
 
-std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointCloud::DynamicPointCloud::get_2d_points_info(
+std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointCloud::get_2d_points_info(
     const geo_point_t& p, const double radius, const int plane)
 {
     std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index(p, radius, plane);
     std::vector<std::tuple<double, const Cluster*, size_t>> return_results;
 
     for (size_t i = 0; i != results.size(); i++) {
-        return_results.push_back(std::make_tuple(sqrt(results.at(i).second), m_index_cluster.at(results.at(i).first),
+        return_results.push_back(std::make_tuple(results.at(i).second, m_clusters.at(results.at(i).first),
                                                  (size_t)results.at(i).first));
     }
 
     return return_results;
+}
+
+
+
+#include <boost/histogram.hpp>
+#include <boost/histogram/algorithm/sum.hpp>
+namespace bh = boost::histogram;
+namespace bha = boost::histogram::algorithm;
+
+// Example parameter calculating functions used by directional hough
+// transforms.
+static double theta_angle(const Vector& dir)
+{
+    const Vector Z(0, 0, 1);
+    return acos(Z.dot(dir));
+}
+static double theta_cosine(const Vector& dir)
+{
+    const Vector Z(0, 0, 1);
+    return Z.dot(dir);
+}
+static double phi_angle(const Vector& dir)
+{
+    const Vector X(1, 0, 0);
+    const Vector Y(0, 1, 0);
+    return atan2(Y.dot(dir), X.dot(dir));
+}
+
+std::pair<double, double> Facade::DynamicPointCloud::hough_transform(const geo_point_t& origin, const double dis) const
+{
+    std::vector<geo_point_t> pts;
+    std::vector<const Blob*> blobs;
+    auto results = m_pc3d.kd().radius(dis * dis, origin);
+    for (const auto& [point_index, _] : results) {
+        pts.push_back(m_pc3d.point(point_index));
+        blobs.push_back(m_blobs.at(point_index));
+    }
+
+    constexpr double pi = 3.141592653589793;
+
+    using direction_parameter_function_f = std::function<double(const Vector& dir)>;
+
+    // Parameter axis 1 is some measure of theta angle (angle or cosine)
+    const int nbins1 = 180;
+    // param_space == costh_phi
+    direction_parameter_function_f theta_param = theta_angle;
+    double min1 = 0, max1 = pi;
+
+    // Parameter axis 2 is only supported by phi angle
+    const int nbins2 = 360;
+    const double min2 = -pi;
+    const double max2 = +pi;
+    direction_parameter_function_f phi_param = phi_angle;
+
+    auto hist = bh::make_histogram(bh::axis::regular<>(nbins1, min1, max1), bh::axis::regular<>(nbins2, min2, max2));
+
+    for (size_t ind = 0; ind < blobs.size(); ++ind) {
+        const auto* blob = blobs[ind];
+        auto charge = blob->charge();
+        // protection against the charge=0 case ...
+        if (charge == 0) charge = 1;
+        if (charge <= 0) continue;
+
+        const auto npoints = blob->npoints();
+        const auto& pt = pts[ind];
+
+        const Vector dir = (pt - origin).norm();
+
+        const double p1 = theta_param(dir);
+        const double p2 = phi_param(dir);
+        hist(p1, p2, bh::weight(charge / npoints));
+    }
+
+    auto indexed = bh::indexed(hist);
+    auto it = std::max_element(indexed.begin(), indexed.end());
+    const auto& cell = *it;
+    return {cell.bin(0).center(), cell.bin(1).center()};
+}
+
+
+geo_point_t Facade::DynamicPointCloud::vhough_transform(const geo_point_t& origin, const double dis) const
+{
+    // TODO: only support theta_phi
+    const auto [th, phi] = hough_transform(origin, dis);
+    return {sin(th) * cos(phi), sin(th) * sin(phi), cos(th)};
 }
 
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
