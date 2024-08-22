@@ -183,6 +183,20 @@ namespace WireCell {
             return *this;
         }
 
+        template <typename N>
+        D3Vector& operator*=(const N& a)
+        {
+            this->set(x()*a, y()*a, z()*a);
+            return *this;
+        }
+
+        template <typename N>
+        D3Vector& operator/=(const N& a)
+        {
+            this->set(x()/a, y()/a, z()/a);
+            return *this;
+        }
+
         /// defining these opens a fairly nightmarish door.
         /// https://www.artima.com/articles/the-safe-bool-idiom
         // bool operator!() const { return m_v.size() != 3; }
