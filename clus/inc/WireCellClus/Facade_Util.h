@@ -163,7 +163,11 @@ namespace WireCell::PointCloud::Facade {
         // useful when hacking the winds with dist_cut
         inline int dist_cut(const size_t plane, const size_t ind) const { return m_winds[plane].at(ind); }
 
+
+        void add_points(const Cluster* cluster, const int flag=0, const double step = 0.6*units::cm); // flag 1 points, flag 2 scheleton
+
         /// @brief add points from p_test along dir with range and step
+        /// @attention: the index_uvw is hacked to store the distance cut
         void add_points(const Cluster* cluster, const geo_point_t& p_test, const geo_point_t& dir_unmorm, const double range,
                         const double step, const double angle);
 
