@@ -136,4 +136,10 @@ namespace WireCell::PointCloud::Facade {
                              std::map<int, std::pair<double, double>>& dead_w_index,
                              const bool use_ctpc);
 
+    void clustering_connect1(Grouping& live_grouping,
+                             std::shared_ptr<const DynamicPointCloud> global_point_cloud,
+                             std::map<int, std::pair<double, double>> &dead_u_index,
+                             std::map<int, std::pair<double, double>> &dead_v_index,
+                             std::map<int, std::pair<double, double>> &dead_w_index);
+
 }  // namespace WireCell::PointCloud::Facade
