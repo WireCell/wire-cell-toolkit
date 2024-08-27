@@ -65,7 +65,8 @@ namespace WireCell {
             // save Multi-Plane ROI into the out frame (set use_roi_debug_mode=true)
             // mp_rois: osp-chid, start -> start, end
             void save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& indices, int plane,
-                            std::multimap<std::pair<int, int>, std::pair<int, int> > mp_rois);
+                            // std::multimap<std::pair<int, int>, std::pair<int, int> > mp_rois);
+                            const std::multimap<std::pair<int, int>, std::pair<int, int> > &mp_rois);
 
             void save_ext_roi(ITrace::vector& itraces, IFrame::trace_list_t& indices, int plane,
                               std::vector<std::list<SignalROI*> >& roi_channel_list);

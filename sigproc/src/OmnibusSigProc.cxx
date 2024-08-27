@@ -538,6 +538,9 @@ void OmnibusSigProc::save_roi(ITrace::vector& itraces, IFrame::trace_list_t& ind
         for (auto signal_roi : roi_channel_list.at(och.wire)) {
             int start = signal_roi->get_start_bin();
             int end = signal_roi->get_end_bin();
+            // if (och.ident==2160) {
+            //   std::cout << "[wgu] roi ch: " << och.channel << " wire: " << och.wire << " " << start << " " << end << std::endl;
+            // }
             // if (och.wire==732)
             //   std::cout << "[wgu] OmnibusSigProc::save_roi() wire: " << och.wire << " channel: " << och.channel << "
             //   ROI: " << start << " " << end << " channel: " << signal_roi->get_chid() << " plane: " <<
@@ -683,8 +686,13 @@ void OmnibusSigProc::save_ext_roi(ITrace::vector& itraces, IFrame::trace_list_t&
 // save Multi-Plane ROI into the out frame (set use_roi_debug_mode=true)
 // mp_rois: osp-chid, start -> start, end
 void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& indices, int plane,
-                                std::multimap<std::pair<int, int>, std::pair<int, int>> mp_rois)
+                                // std::multimap<std::pair<int, int>, std::pair<int, int>> mp_rois)
+                                const std::multimap<std::pair<int, int>, std::pair<int, int>> &mp_rois)
 {
+// Process the mp_roi map. Turn it into a map of channel -> List of (start, end). Allows much more efficient access
+    std::map<int, std::vector<std::pair<int, int>>> channel_to_mproi;
+    for (auto signal_roi : mp_rois) channel_to_mproi[signal_roi.first.first].push_back(signal_roi.second);
+
     // reuse this temporary vector to hold charge for a channel.
     ITrace::ChargeSequence charge(m_nticks, 0.0);
 
@@ -692,10 +700,13 @@ void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& i
 
         std::fill(charge.begin(), charge.end(), 0);
 
-        for (auto signal_roi : mp_rois) {
-            if (och.channel != signal_roi.first.first) continue;
-            int start = signal_roi.second.first;
-            int end = signal_roi.second.second;
+//        for (auto signal_roi : mp_rois) {
+//            if (och.channel != signal_roi.first.first) continue;
+//            int start = signal_roi.second.first;
+//            int end = signal_roi.second.second;
+        for (auto signal_roi : channel_to_mproi[och.channel]) {
+            int start = signal_roi.first;
+            int end = signal_roi.second;
             // end is should be included but not larger than m_nticks
             for (int i = start; i <= end && i < m_nticks; i++) {
                 charge.at(i) = 4000.;  // arbitary constant number for ROI display
@@ -1590,9 +1601,9 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 for (const auto& f : m_anode->faces()) {
                     // mp3: 3 plane protection based on cleaup ROI
                     // f->which(): per-Anode face index
-                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution);
+                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
                     // mp2: 2 plane protection based on cleaup ROI
-                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution);
+                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
                 }
                 save_mproi(*itraces, mp3_roi_traces, iplane, roi_refine.get_mp3_rois());
                 save_mproi(*itraces, mp2_roi_traces, iplane, roi_refine.get_mp2_rois());
