@@ -498,17 +498,24 @@ std::pair<double, double> Facade::DynamicPointCloud::hough_transform(const geo_p
         const auto* blob = blobs[ind];
         auto charge = blob->charge();
         // protection against the charge=0 case ...
-        if (charge == 0) charge = 1;
+        // if (charge == 0) charge = 1;
         if (charge <= 0) continue;
 
         const auto npoints = blob->npoints();
         const auto& pt = pts[ind];
 
         const Vector dir = (pt - origin).norm();
+        const double r = (pt - origin).magnitude();
 
         const double p1 = theta_param(dir);
         const double p2 = phi_param(dir);
-        hist(p1, p2, bh::weight(charge / npoints));
+        if (r < 10 * units::cm) {
+            hist(p1, p2, bh::weight(charge / npoints));
+        }
+        else {
+            // hough->Fill(vec.Theta(), vec.Phi(), q * pow(10 * units::cm / r, 2));
+            hist(p1, p2, bh::weight(charge / npoints * pow(10 * units::cm / r, 2)));
+        }
     }
 
     auto indexed = bh::indexed(hist);
