@@ -7,12 +7,22 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+
+#define __DEBUG__
+#ifdef __DEBUG__
+#define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
+#else
+#define LogDebug(x)
+#endif
+
 void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
                                                        std::shared_ptr<const DynamicPointCloud> global_point_cloud,
                                                        std::map<int, std::pair<double, double>> &dead_u_index,
                                                        std::map<int, std::pair<double, double>> &dead_v_index,
                                                        std::map<int, std::pair<double, double>> &dead_w_index)
 {
+    LogDebug("global_point_cloud.get_num_points() " << global_point_cloud->get_num_points());
+    LogDebug("dead_u_index.size() " << dead_u_index.size() << " dead_v_index.size() " << dead_v_index.size() << " dead_w_index.size() " << dead_w_index.size());
     // sort the clusters length ...
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
@@ -28,7 +38,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
     double angle = 7.5;
     double loose_dis_cut = 7.5 * units::cm;
 
-    std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
+    // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
     cluster_connectivity_graph_t  g;
     std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
     std::map<const Cluster*, int> map_cluster_index;
@@ -53,9 +63,15 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        LogDebug("#b " << cluster->nchildren() << " length " << cluster->get_length());
+
+        #ifdef __DEBUG__
+        if (cluster->nchildren() == 84) break;
+        #endif
         // cluster->Create_point_cloud();
 
         std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
+        LogDebug("#b " << cluster->nchildren() << " extreme_points " << extreme_points.first << " " << extreme_points.second);
         geo_point_t main_dir(extreme_points.second.x() - extreme_points.first.x(),
                           extreme_points.second.y() - extreme_points.first.y(),
                           extreme_points.second.z() - extreme_points.first.z());
@@ -94,6 +110,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
             if (dir1.dot(main_dir) > 0) dir1 *= -1;
             if (dir2.dot(dir1) > 0) dir2 *= -1;
         }
+        LogDebug("#b " << cluster->nchildren() << " dir1 " << dir1 << " dir2 " << dir2);
 
         bool flag_add_dir1 = true;
         bool flag_add_dir2 = true;
@@ -195,8 +212,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
         else {
             flag_para_2 = false;
         }
-
-        //}
+        
+        LogDebug("#b " << cluster->nchildren() << " flag_para_1 " << flag_para_1 << " flag_prol_1 " << flag_prol_1 << " flag_para_2 " << flag_para_2 << " flag_prol_2 " << flag_prol_2);
 
         if (i == 0) {
             if (flag_para_1 || flag_prol_1) {
@@ -235,6 +252,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
                     fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
                     cluster->get_length() < 200 * units::cm) {
                 // WCP::WCPointCloud<double> &cloud = cluster->get_point_cloud()->get_cloud();
+                LogDebug("#b " << cluster->nchildren() << " gsc " << global_skeleton_cloud->get_num_points());
                 int num_total_points = cluster->npoints();
                 const auto& winds = cluster->wire_indices();
                 int num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
@@ -253,11 +271,12 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
                     if (!flag_dead) {
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
                             global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
+                        LogDebug("#b " << cluster->nchildren() << " test_point " << test_point << " loose_dis_cut " << loose_dis_cut << " results.size() " << results.size());
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
                             for (size_t k = 0; k != results.size(); k++) {
-
+                                // LogDebug("#b " << cluster->nchildren() << " results.at(k) " << std::get<0>(results.at(k)) << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))));
                                 if (std::get<0>(results.at(k)) <
                                     global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k)))) {
                                     flag_unique = false;
@@ -410,8 +429,14 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
                         }
                         if (flag_unique) num_unique[2]++;
                     }
+                } // loop over points
+                LogDebug("num_unique " << num_unique[0] << " " << num_unique[1] << " " << num_unique[2]);
+                LogDebug("map_cluster_num " << map_cluster_num[0].size() << " " << map_cluster_num[1].size() << " " << map_cluster_num[2].size());
+                if (cluster->nchildren() == 84) {
+                    for (auto it = map_cluster_num[0].begin(); it != map_cluster_num[0].end(); it++) {
+                        LogDebug("map_cluster_num[0] " << it->first->nchildren() << " " << it->second);
+                    }
                 }
-                //      Cluster *curr_cluster = cluster;
 
                 bool flag_merge = false;
 
@@ -534,6 +559,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
                             // curr_cluster = max_cluster;
                         }
 
+                        LogDebug("max_cluster_u #b " << max_cluster_u->nchildren() << " max_cluster_v #b " << max_cluster_v->nchildren() << " max_cluster_w #b " << max_cluster_w->nchildren());
+                        LogDebug("max_cluster #b " << max_cluster->nchildren() << " map_cluster_dir1 " << map_cluster_dir1[max_cluster] << " map_cluster_dir2 " << map_cluster_dir2[max_cluster]);
                         if (fabs(dir1.angle(map_cluster_dir1[max_cluster]) - 3.1415926 / 2.) < 75 * 3.1415926 / 180. &&
                             fabs(dir1.angle(map_cluster_dir2[max_cluster]) - 3.1415926 / 2.) < 75 * 3.1415926 / 180.) {
                             flag_add_dir1 = false;
@@ -609,6 +636,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
                 }
             }  // length cut ...
 
+            LogDebug("#b " << cluster->nchildren() << " flag_add_dir1 " << flag_add_dir1 << " flag_add_dir2 " << flag_add_dir2);
             if (flag_add_dir1) {
                 // add extension points in ...
                 if (flag_para_1 || flag_prol_1) {
@@ -646,6 +674,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
         }  // not the first cluster ...
     }  // loop over clusters ...
 
+    LogDebug("#edges " << boost::num_edges(g) << " #vertices " << boost::num_vertices(g));
+
     // merge clusters
 
     /**
@@ -656,8 +686,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
     // for (auto it = to_be_merged_pairs.begin(); it != to_be_merged_pairs.end(); it++) {
     //     Cluster *cluster1 = (*it).first;
     //     Cluster *cluster2 = (*it).second;
-    //     //  std::cout << cluster1 << " " << cluster2 << " " << cluster1->get_cluster_id() << " " <<
-    //     //  cluster2->get_cluster_id() << std::endl;
+    //     //  LogDebug(cluster1 << " " << cluster2 << " " << cluster1->get_cluster_id() << " " <<
+    //     //  cluster2->get_cluster_id());
 
     //     bool flag_new = true;
     //     std::vector<std::set<Cluster *>> temp_set;
@@ -703,11 +733,11 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
 
     //     for (auto it1 = clusters.begin(); it1 != clusters.end(); it1++) {
     //         Cluster *ocluster = *(it1);
-    //         // std::cout << ocluster->get_cluster_id() << " ";
+    //         // LogDebug(ocluster->get_cluster_id() << " ";
     //         SMGCSelection &mcells = ocluster->get_mcells();
     //         for (auto it2 = mcells.begin(); it2 != mcells.end(); it2++) {
     //             SlimMergeGeomCell *mcell = (*it2);
-    //             // std::cout << ocluster->get_cluster_id() << " " << mcell << std::endl;
+    //             // LogDebug(ocluster->get_cluster_id() << " " << mcell);
     //             int time_slice = mcell->GetTimeSlice();
     //             ncluster->AddCell(mcell, time_slice);
     //         }
@@ -721,7 +751,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
     //                                 pow(pitch_w * range_v1.at(2), 2)) +
     //                            pow(time_slice_width * range_v1.at(3), 2));
     //     cluster_length_map[ncluster] = length_1;
-    //     // std::cout << std::endl;
+    //     // LogDebug(std::endl;
     // }
     /**
      * end of round1
@@ -743,7 +773,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
         ilive2desc[ilive] = boost::add_vertex(ilive, g2);
     }
 
-    to_be_merged_pairs.clear(); // clear it for other usage ...
+    // to_be_merged_pairs.clear(); // clear it for other usage ...
     for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
         const Cluster *cluster_1 = (*it);
         // cluster_1->Calc_PCA();
@@ -812,8 +842,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
     // for (auto it = to_be_merged_pairs.begin(); it != to_be_merged_pairs.end(); it++) {
     //     Cluster *cluster1 = (*it).first;
     //     Cluster *cluster2 = (*it).second;
-    //     //  std::cout << cluster1 << " " << cluster2 << " " << cluster1->get_cluster_id() << " " <<
-    //     //  cluster2->get_cluster_id() << std::endl;
+    //     //  LogDebug(cluster1 << " " << cluster2 << " " << cluster1->get_cluster_id() << " " <<
+    //     //  cluster2->get_cluster_id());
 
     //     bool flag_new = true;
     //     std::vector<std::set<Cluster *>> temp_set;
@@ -852,11 +882,11 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
     //     live_clusters.push_back(ncluster);
     //     for (auto it1 = clusters.begin(); it1 != clusters.end(); it1++) {
     //         Cluster *ocluster = *(it1);
-    //         // std::cout << ocluster->get_cluster_id() << " ";
+    //         // LogDebug(ocluster->get_cluster_id() << " ";
     //         SMGCSelection &mcells = ocluster->get_mcells();
     //         for (auto it2 = mcells.begin(); it2 != mcells.end(); it2++) {
     //             SlimMergeGeomCell *mcell = (*it2);
-    //             // std::cout << ocluster->get_cluster_id() << " " << mcell << std::endl;
+    //             // LogDebug(ocluster->get_cluster_id() << " " << mcell);
     //             int time_slice = mcell->GetTimeSlice();
     //             ncluster->AddCell(mcell, time_slice);
     //         }
@@ -870,7 +900,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
     //                                 pow(pitch_w * range_v1.at(2), 2)) +
     //                            pow(time_slice_width * range_v1.at(3), 2));
     //     cluster_length_map[ncluster] = length_1;
-    //     // std::cout << std::endl;
+    //     // LogDebug(std::endl;
     // }
     /**
      * end of round2
