@@ -266,7 +266,7 @@ namespace WireCell::Root {
                 const int nentries = tree.GetEntries();
                 for (int entry = 0; entry<nentries; ++entry) {
                     tree.GetEntry(entry);
-                    auto& brl = _masks[entry];
+                    auto& brl = _masks[chid];
                     brl.emplace_back(tick_beg, tick_end);
                 }
             }
@@ -534,6 +534,7 @@ void Root::UbooneBlobSource::load_live()
     }
 
     // activity
+    std::map<int, std::set<IChannel::pointer> > dead_channels;
     for (int sind=0; sind<n_slices_data; ++sind) {
 
         int tsid = tids->at(sind); // time slice ID
@@ -560,6 +561,8 @@ void Root::UbooneBlobSource::load_live()
                 if (ichan->planeid().index() != m_bodged[0]) {
                     continue;                    
                 }
+                std::cout << "bad channel " << ch << " in plane " << ichan->planeid().index() << std::endl;
+                dead_channels[ichan->planeid().index()].insert(ichan);
                 // If slice overlaps with any of the bin ranges.
                 for (const auto& tt : brl) {
                     if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
@@ -567,7 +570,10 @@ void Root::UbooneBlobSource::load_live()
                 }
             }
         }
-    }            
+    }
+    for (const auto& [pind, chans] : dead_channels) {
+        std::cout << "plane " << pind << " has " << chans.size() << " dead channels\n";
+    }
 
     // blobs
     const auto& live_data = m_data->live;
