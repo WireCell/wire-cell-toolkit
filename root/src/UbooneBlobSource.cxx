@@ -561,7 +561,6 @@ void Root::UbooneBlobSource::load_live()
                 if (ichan->planeid().index() != m_bodged[0]) {
                     continue;                    
                 }
-                std::cout << "bad channel " << ch << " in plane " << ichan->planeid().index() << std::endl;
                 dead_channels[ichan->planeid().index()].insert(ichan);
                 // If slice overlaps with any of the bin ranges.
                 for (const auto& tt : brl) {
@@ -572,7 +571,7 @@ void Root::UbooneBlobSource::load_live()
         }
     }
     for (const auto& [pind, chans] : dead_channels) {
-        std::cout << "plane " << pind << " has " << chans.size() << " dead channels\n";
+        log->debug("plane {} has {} dead channels", pind, chans.size());
     }
 
     // blobs
