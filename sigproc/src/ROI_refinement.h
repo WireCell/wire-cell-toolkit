@@ -35,12 +35,12 @@ namespace WireCell {
             void MP3ROI(const int plane, const IAnodePlane::pointer anode, const IAnodeFace::pointer face,
                         const std::map<int, int>& map_ch, ROI_formation& roi_form, const double mp_th1 = 0.,
                         const double mp_th2 = 0., const int tick_resolution = 10, const int wire_resolution = 2,
-                        const int nbounds_layers = 2);
+                        const int nbounds_layers = 2, const std::vector<int> iplane2layer={0,1,2});
 
             void MP2ROI(const int plane, const IAnodePlane::pointer anode, const IAnodeFace::pointer face,
                         const std::map<int, int>& map_ch, ROI_formation& roi_form, const double mp_th1 = 0.,
                         const double mp_th2 = 0., const int tick_resolution = 10, const int wire_resolution = 2,
-                        const int nbounds_layers = 2);
+                        const int nbounds_layers = 2, const std::vector<int> iplane2layer={0,1,2});
 
             typedef std::multimap<std::pair<int, int>, std::pair<int, int>> MapMPROI;
             MapMPROI get_mp2_rois() const { return mp_rois; }

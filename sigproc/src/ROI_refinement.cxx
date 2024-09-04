@@ -1533,7 +1533,9 @@ void ROI_refinement::CleanUpInductionROIs(int plane)
         for (int i = 0; i != nwire_v; i++) {
             for (auto it = rois_v_loose.at(i).begin(); it != rois_v_loose.at(i).end(); it++) {
                 SignalROI *roi = *it;
-                if (roi->get_above_threshold(threshold).size() != 0) Good_ROIs.insert(roi);
+                // Historically, "mean_threshold" was not included in this condition.
+                // It has now been added to ensure consistency between iplane == 0 and iplane == 1.
+                if (roi->get_above_threshold(threshold).size() != 0 || roi->get_average_heights() > mean_threshold) Good_ROIs.insert(roi);
             }
         }
         Bad_ROIs.clear();
@@ -2575,11 +2577,13 @@ namespace {
         if (end < 0) end = 0;
         if (start >= (int) vec.size()) start = vec.size() - 1;
         if (end >= (int) vec.size()) end = vec.size() - 1;
-        size_t mid = (start + end) / 2;
-        if (vec[start] > ret) ret = vec[start];
-        if (vec[mid] > ret) ret = vec[mid];
-        if (vec[end] > ret) ret = vec[end];
-        LogDebug("feature_val: " << vec[start] << " " << vec[mid] << " " << vec[end] << " " << ret);
+        // size_t mid = (start + end) / 2;
+        // if (vec[start] > ret) ret = vec[start];
+        // if (vec[mid] > ret) ret = vec[mid];
+        // if (vec[end] > ret) ret = vec[end];
+        // LogDebug("feature_val: " << vec[start] << " " << vec[mid] << " " << vec[end] << " " << ret);
+        ret = *(std::max_element(vec.begin(), vec.end()));
+        LogDebug("feature_val: " << ret);
         return ret;
     }
 }  // namespace
@@ -2589,7 +2593,7 @@ void ROI_refinement::MP3ROI(const int plane, const IAnodePlane::pointer anode, c
                             const std::map<int, int>& map_ch, ROI_formation& roi_form,
                             const double mp_th1, const double mp_th2,
                             const int tick_resolution, const int wire_resolution,
-                            const int nbounds_layers)
+                            const int nbounds_layers, const std::vector<int> iplane2layer)
 {
     //log->info("ROI_refinement::MP3ROI:");
     LogDebug("mp_th1: " << mp_th1 << ", mp_th2: " << mp_th2);
@@ -2614,7 +2618,8 @@ void ROI_refinement::MP3ROI(const int plane, const IAnodePlane::pointer anode, c
                     if (face->which() != wire->planeid().face()) continue;
                     auto pit_id = wire->index();
                     coord.grid = pit_id;
-                    coord.layer = iplane + nbounds_layers;
+                    coord.layer = iplane2layer[iplane] + nbounds_layers;
+                    // coord.layer = iplane + nbounds_layers;
                     // integer division choose floor, including end bin seems better
                     for (int tick = roi->get_start_bin() / tick_resolution; tick <= roi->get_end_bin() / tick_resolution;
                          ++tick) {
@@ -2663,7 +2668,8 @@ void ROI_refinement::MP3ROI(const int plane, const IAnodePlane::pointer anode, c
                 << " map_tick_pitch_roi: " << map_tick_pitch_roi[iplane].size());
     }
 
-    WireCell::RayGrid::layer_index_t layer = plane + nbounds_layers;
+    WireCell::RayGrid::layer_index_t layer = iplane2layer[plane] + nbounds_layers;
+    // WireCell::RayGrid::layer_index_t layer = plane + nbounds_layers;
     for (auto tc1 : map_tick_coord[ref_planes[0]]) {
         for (auto tc2 : map_tick_coord[ref_planes[1]]) {
             if (tc2.first != tc1.first) continue;
@@ -2744,7 +2750,7 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
                             const std::map<int, int>& map_roichid_anodechid, ROI_formation& roi_form,
                             const double mp_th1, const double mp_th2,
                             const int tick_resolution, const int wire_resolution,
-                            const int nbounds_layers)
+                            const int nbounds_layers, const std::vector<int> iplane2layer)
 {
     //log->info("ROI_refinement::MP2ROI:");
     LogDebug("mp_th1: " << mp_th1 << ", mp_th2: " << mp_th2);
@@ -2757,8 +2763,12 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
     }
 
     std::map<int, int> map_wireid_roichid[3];
+    // Reusing the conversion vector (default: {0,1,2}) from OmnibusSigProc for simplicity.
+    // For a more flexible design, consider making this configurable.
+    std::vector<int> ilayer2plane = iplane2layer;
     for (auto chident : anode->channels()) {  // Anode chiid
-        auto iplane = anode->resolve(chident).index();
+        auto ilayer = anode->resolve(chident).index();
+        auto iplane = ilayer2plane[ilayer];
         auto roichid = map_anodechid_roichid[chident];
         auto ch = anode->channel(chident);
         auto wires = ch->wires();
@@ -2788,7 +2798,8 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
                     if (face->which() != wire->planeid().face()) continue;
                     auto pit_id = wire->index();
                     coord.grid = pit_id;
-                    coord.layer = iplane + nbounds_layers;
+                    coord.layer = iplane2layer[iplane] + nbounds_layers;
+                    // coord.layer = iplane + nbounds_layers;
                     for (int tick = roi->get_start_bin() / tick_resolution; tick <= roi->get_end_bin() / tick_resolution;
                          ++tick) {
                         int content_id = tick * tick_resolution - roi->get_start_bin();
@@ -2831,7 +2842,8 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
                 << " map_tick_pitch_roi: " << map_tick_pitch_roi[iplane].size());
     }
 
-    WireCell::RayGrid::layer_index_t layer = target_plane + nbounds_layers;
+    WireCell::RayGrid::layer_index_t layer = iplane2layer[target_plane] + nbounds_layers;
+    // WireCell::RayGrid::layer_index_t layer = target_plane + nbounds_layers;
     for (auto tc1 : map_tick_coord[ref_planes[0]]) {
         for (auto tc2 : map_tick_coord[ref_planes[1]]) {
             if (tc2.first != tc1.first) continue;
