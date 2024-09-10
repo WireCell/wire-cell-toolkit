@@ -26,6 +26,7 @@
 #define WIRECELL_ARRAY
 
 #include "WireCellUtil/Waveform.h"
+#include "WireCellUtil/Spdlog.h"
 
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues> 
@@ -100,5 +101,8 @@ namespace WireCell {
 
     }  // namespace Array
 }  // namespace WireCell
+
+template <> struct fmt::formatter<Eigen::Matrix<double,-1,-1>> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<Eigen::Matrix<double,-1, 1>> : fmt::ostream_formatter {};
 
 #endif

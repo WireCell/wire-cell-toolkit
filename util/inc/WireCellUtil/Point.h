@@ -3,6 +3,7 @@
 
 #include "WireCellUtil/D3Vector.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/Spdlog.h"
 
 #include <set>
 #include <memory>  // auto_ptr
@@ -124,5 +125,8 @@ namespace WireCell {
 // WireCell::Ray operator*(double scale, const WireCell::Ray& ray) {
 //     return WireCell::Ray(ray.first*scale, ray.second*scale);
 // }
+
+template <> struct fmt::formatter<WireCell::Point> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::Ray> : fmt::ostream_formatter {};
 
 #endif

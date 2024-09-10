@@ -1,18 +1,22 @@
 #ifndef WIRECELL_LOGGING
 #define WIRECELL_LOGGING
 
-// SPDLOG_LOGGER_DEBUG() and SPDLOG_LOGGER_TRACE can be used to wrap
-// very verbose messages and they can be deactivated at compile time
-// so as to not suffer performance slowdowns.  Of course, do not put
-// code with side effects inside these macros.
+// Prefer SPDLOG_LOGGER_DEBUG() or SPDLOG_DEBUG() over bare calls to
+// log->debug() or spdlog::debug().
+//
+// Always use SPDLOG_LOGGER_TRACE() or SPDLOG_TRACE() for trace level logs.
+//
+//
+// To set default minmum level for these macros use, eg:
+//
+//   ./wcb configure --with-spdlog-active-level=trace [...]
+//
+// See util/docs/logging.org for more info.
 
-// Eventually set this via build configuration to DEBUG or maybe INFO.
-// For development, we keep to trace although default set in wire-cell
-// CLI are higher.
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+// #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_DEBUG
+#include "WireCellUtil/BuildConfig.h"
 
-#include "spdlog/spdlog.h"
-#include "spdlog/fmt/ostr.h"
+#include "WireCellUtil/Spdlog.h"
 
 #include <memory>
 #include <string>
@@ -56,6 +60,12 @@ namespace WireCell {
 
         // Set logging pattern the default or given logger's sinks.
         void set_pattern(std::string pattern, std::string which = "");
+
+        // Set up logging.  This is intended for a oneliner in main().  Output
+        // can be "stderr", "stdout" or a file name.
+        void default_logging(const std::string& output = "stderr",
+                             std::string level = "", bool with_env = true);
+
     }  // namespace Log
 
 }  // namespace WireCell

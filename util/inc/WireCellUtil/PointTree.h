@@ -14,6 +14,7 @@
 #include "WireCellUtil/KDTree.h"
 
 #include "WireCellUtil/Logging.h" // debug
+#include "WireCellUtil/Spdlog.h"
 
 #include <boost/range/adaptors.hpp>
 #include <boost/iterator/transform_iterator.hpp>
@@ -281,5 +282,7 @@ namespace WireCell::PointCloud::Tree {
 
 
 }
+
+template <> struct fmt::formatter<WireCell::PointCloud::Tree::Scope> : fmt::ostream_formatter {};
 
 #endif
