@@ -142,4 +142,11 @@ namespace WireCell::PointCloud::Facade {
                              std::map<int, std::pair<double, double>> &dead_v_index,
                              std::map<int, std::pair<double, double>> &dead_w_index);
 
+    void clustering_deghost(Grouping& live_grouping,
+                            std::map<int, std::pair<double, double>>& dead_u_index,
+                            std::map<int, std::pair<double, double>>& dead_v_index,
+                            std::map<int, std::pair<double, double>>& dead_w_index,
+                            double length_cut,
+                            const bool use_ctpc);
+
 }  // namespace WireCell::PointCloud::Facade

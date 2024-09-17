@@ -398,6 +398,62 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     }
 }
 
+bool Cluster::construct_skeleton(const bool use_ctpc)
+{
+    if (m_path_wcps.size() > 0) return false;
+    // Calc_PCA();
+
+    // WCP::WCPointCloud<double>& cloud = point_cloud->get_cloud();
+    // WCPointCloud<double>::WCPoint highest_wcp = cloud.pts[0];
+    // WCPointCloud<double>::WCPoint lowest_wcp = cloud.pts[0];
+    geo_point_t highest_wcp = point3d(0);
+    geo_point_t lowest_wcp = point3d(0);
+    int highest_index = 0;
+    int lowest_index = 0;
+
+    // geo_point_t main_dir(PCA_axis[0].x, PCA_axis[0].y, PCA_axis[0].z);
+    // main_dir.SetMag(1);
+    // TVector3 temp_pt(highest_wcp.x - center.x, highest_wcp.y - center.y, highest_wcp.z - center.z);
+    // double highest_value = temp_pt.Dot(main_dir);
+    // double lowest_value = highest_value;
+    geo_point_t main_dir = get_pca_axis(0);
+    main_dir = main_dir.norm();
+    geo_point_t center = get_center();
+    geo_point_t temp_pt(highest_wcp.x() - center.x(), highest_wcp.y() - center.y(), highest_wcp.z() - center.z());
+    double highest_value = temp_pt.dot(main_dir);
+    double lowest_value = highest_value;
+
+    // for (size_t i = 1; i < cloud.pts.size(); i++) {
+    //     temp_pt.SetXYZ(cloud.pts[i].x - center.x, cloud.pts[i].y - center.y, cloud.pts[i].z - center.z);
+    //     double value = temp_pt.Dot(main_dir);
+    //     if (value > highest_value) {
+    //         highest_value = value;
+    //         highest_wcp = cloud.pts[i];
+    //     }
+    //     else if (value < lowest_value) {
+    //         lowest_value = value;
+    //         lowest_wcp = cloud.pts[i];
+    //     }
+    // }
+    for (size_t i = 1; i < npoints(); i++) {
+        temp_pt.set(point3d(i).x() - center.x(), point3d(i).y() - center.y(), point3d(i).z() - center.z());
+        double value = temp_pt.dot(main_dir);
+        if (value > highest_value) {
+            highest_value = value;
+            highest_wcp = point3d(i);
+            highest_index = i;
+        }
+        else if (value < lowest_value) {
+            lowest_value = value;
+            lowest_wcp = point3d(i);
+            lowest_index = i;
+        }
+    }
+
+    dijkstra_shortest_paths(highest_index, use_ctpc);
+    cal_shortest_path(lowest_index);
+    return true;
+}
 
 const Cluster::sv2d_t& Cluster::sv2d(const size_t plane) const {
     return m_node->value.scoped_view(scope2ds[plane]);

@@ -140,6 +140,7 @@ namespace WireCell::PointCloud::Facade {
         const nfkd_t& kd(const size_t plane, const bool rebuild=false) const;
         std::pair<int, double> get_closest_2d_dis(const geo_point_t &p, size_t plane) const;
         std::vector<std::pair<size_t, double>> get_closest_2d_index(const geo_point_t &p, const double radius, size_t plane) const;
+        std::vector<std::pair<size_t, double>> get_closest_2d_index(const geo_point_t &p, const int N, size_t plane) const;
        private:
         points_type m_points[3];
         mutable std::unique_ptr<nfkd_t> m_kd[3]; // lazy
@@ -163,7 +164,7 @@ namespace WireCell::PointCloud::Facade {
         // useful when hacking the winds with dist_cut
         inline int dist_cut(const size_t plane, const size_t ind) const { return m_winds[plane].at(ind); }
 
-
+        /// @brief flag 0 points, flag 1 skeleton
         void add_points(const Cluster* cluster, const int flag=0, const double step = 0.6*units::cm); // flag 1 points, flag 2 scheleton
 
         /// @brief add points from p_test along dir with range and step
@@ -174,6 +175,8 @@ namespace WireCell::PointCloud::Facade {
         /// @return: dist, Cluster, point_index
         std::vector<std::tuple<double, const Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
                                                                              const int plane);
+        /// @brief 
+        std::tuple<double, const Cluster*, size_t> get_closest_2d_point_info(const geo_point_t& p, const int plane);
 
         std::pair<double, double> hough_transform(const geo_point_t& origin, const double dis) const;
         geo_point_t vhough_transform(const geo_point_t& origin, const double dis) const;

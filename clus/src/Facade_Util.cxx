@@ -262,6 +262,19 @@ std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d
     }
     return ret;
 }
+std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d_index(const geo_point_t &p, const int N, size_t plane) const
+{
+    double x = p[0];
+    double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
+    std::vector<double> query = {x, y};
+    const auto& res = kd(plane).knn(N, query);
+    // const auto& res = kd(plane).radius(radius * radius, query);
+    std::vector<std::pair<size_t, double>> ret;
+    for (const auto& r : res) {
+        ret.push_back(std::make_pair(r.first, sqrt(r.second)));
+    }
+    return ret;
+}
 
 std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dpc)
 {
@@ -440,6 +453,17 @@ std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointClou
     return return_results;
 }
 
+
+std::tuple<double, const Cluster*, size_t> Facade::DynamicPointCloud::get_closest_2d_point_info(
+    const geo_point_t& p, const int plane)
+{
+    std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index(p, 1, plane);
+    std::vector<std::tuple<double, const Cluster*, size_t>> return_results;
+    if (results.size() != 1) {
+        return std::make_tuple(1e9, nullptr, -1);
+    }
+    return std::make_tuple(results.at(0).second, m_clusters.at(results.at(0).first), (size_t)results.at(0).first);
+}
 
 
 #include <boost/histogram.hpp>

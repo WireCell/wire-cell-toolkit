@@ -165,6 +165,9 @@ namespace WireCell::PointCloud::Facade {
         /// @brief adjusts the positions of two points (start and end points)
         /// to be more in line with the overall point cloud.
         void adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const;
+        
+        /// WCP: Construct_skeleton
+        bool construct_skeleton(const bool use_ctpc);
 
         /// section for 2D PC
 
