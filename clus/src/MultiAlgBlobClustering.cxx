@@ -45,6 +45,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
+    m_x_boundary_low_limit = get(cfg, "x_boundary_low_limit", m_x_boundary_low_limit);
+    m_x_boundary_high_limit = get(cfg, "x_boundary_high_limit", m_x_boundary_high_limit);
     m_perf = get(cfg, "perf", m_perf);
 
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
@@ -267,6 +269,15 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     perf.dump("pre clustering", live_grouping);
 
+    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
+    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
+    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
+    log->debug("dead_u_index size {}", dead_u_index.size());
+    log->debug("dead_v_index size {}", dead_v_index.size());
+    log->debug("dead_w_index size {}", dead_w_index.size());
+
+#define __HIDE__
+#ifndef __HIDE__
     // dead_live
     clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
     perf.dump("clustering live-dead", live_grouping);
@@ -317,13 +328,6 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         }
         perf.dump("clustering extend 4", live_grouping);
     }
-
-    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
-    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
-    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
-    // log->debug("dead_u_index size {}", dead_u_index.size());
-    // log->debug("dead_v_index size {}", dead_v_index.size());
-    // log->debug("dead_w_index size {}", dead_w_index.size());
     // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
     clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
     // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
@@ -335,8 +339,26 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     for (const Cluster *cluster : live_grouping.children()) {
         global_point_cloud->add_points(cluster, 0);
     }
+    std::vector<double> cluster_lengths;
+    for (const Cluster *cluster : live_grouping.children()) {
+        cluster_lengths.push_back(cluster->get_length());
+    }
+    std::cout << "large clusters 10mm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 10*units::mm; }) << std::endl;
+    std::cout << "large clusters 5cm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 5*units::cm; }) << std::endl;
     clustering_connect1(live_grouping, global_point_cloud, dead_u_index, dead_v_index, dead_w_index);
+    cluster_lengths.clear();
+    for (const Cluster *cluster : live_grouping.children()) {
+        cluster_lengths.push_back(cluster->get_length());
+    }
+    std::cout << "large clusters 10mm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 10*units::mm; }) << std::endl;
+    std::cout << "large clusters 5cm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 5*units::cm; }) << std::endl;
     perf.dump("clustering_connect1", live_grouping);
+
+    clustering_deghost(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
+    perf.dump("clustering_deghost", live_grouping);
+#endif
+    clustering_examine_x_boundary(live_grouping, m_x_boundary_low_limit, m_x_boundary_high_limit);
+    perf.dump("clustering_examine_x_boundary", live_grouping);
 
     // BEE debug dead-live
     // if (!m_bee_dir.empty()) {

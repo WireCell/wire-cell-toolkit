@@ -2252,6 +2252,89 @@ double Cluster::get_pca_value(int axis) const {
 
 }
 
+std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_limit, const double high_limit)
+{
+    double num_points[3] = {0, 0, 0};
+    double x_max = -1e9;
+    double x_min = 1e9;
+    auto& mcells = children();
+    for (Blob* mcell : mcells) {
+        /// TODO: no caching, could be slow
+        std::vector<geo_point_t> pts = mcell->points();
+        for (size_t i = 0; i != pts.size(); i++) {
+            if (pts.at(i).x() < low_limit) {
+                num_points[0]++;
+                if (pts.at(i).x() > x_max) x_max = pts.at(i).x();
+            }
+            else if (pts.at(i).x() > high_limit) {
+                num_points[2]++;
+                if (pts.at(i).x() < x_min) x_min = pts.at(i).x();
+            }
+            else {
+                num_points[1]++;
+            }
+        }
+    }
+
+    // std::cout << num_points[0] << " " << num_points[1] << " " << num_points[2] << std::endl;
+
+    std::vector<Cluster*> clusters;
+    std::vector<int> b2groupid(mcells.size(), 0);
+    std::set<int> groupids;
+
+    if (num_points[0] + num_points[2] < num_points[1] * 0.075) {
+        // PR3DCluster* cluster_1 = 0;
+        // PR3DCluster* cluster_2 = 0;
+        // PR3DCluster* cluster_3 = 0;
+        /// FIXME: does tolerance need to be configurable?
+        if (x_max < low_limit - 1.0 * units::cm && x_max > -1e8) {
+            // fill the small one ...
+            // cluster_1 = new PR3DCluster(1);
+            groupids.insert(1);
+        }
+        if (x_min > high_limit + 1.0 * units::cm && x_min < 1e8) {
+            // fill the large one ...
+            // cluster_3 = new PR3DCluster(3);
+            groupids.insert(3);
+        }
+        if (!groupids.empty()) {
+            // cluster_2 = new PR3DCluster(2);
+            groupids.insert(2);
+            for (size_t idx=0; idx < mcells.size(); idx++) {
+                Blob *mcell = mcells.at(idx);
+                if (mcell->points()[0].x() < low_limit) {
+                    if (groupids.find(1) != groupids.end()) {
+                        // cluster_1->AddCell(mcell, mcell->GetTimeSlice());
+                        b2groupid[idx] = 1;
+                    }
+                    else {
+                        // cluster_2->AddCell(mcell, mcell->GetTimeSlice());
+                        b2groupid[idx] = 2;
+                    }
+                }
+                else if (mcell->points()[0].x() > high_limit) {
+                    if (groupids.find(3) != groupids.end()) {
+                        // cluster_3->AddCell(mcell, mcell->GetTimeSlice());
+                        b2groupid[idx] = 3;
+                    }
+                    else {
+                        // cluster_2->AddCell(mcell, mcell->GetTimeSlice());
+                        b2groupid[idx] = 2;
+                    }
+                }
+                else {
+                    // cluster_2->AddCell(mcell, mcell->GetTimeSlice());
+                    b2groupid[idx] = 2;
+                }
+            }
+            // if (cluster_1 != 0) clusters.push_back(cluster_1);
+            // clusters.push_back(cluster_2);
+            // if (cluster_3 != 0) clusters.push_back(cluster_3);
+        }
+    }
+    return this->separate<Cluster>(b2groupid);
+}
+
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)
 {
     if (a == b) return false;

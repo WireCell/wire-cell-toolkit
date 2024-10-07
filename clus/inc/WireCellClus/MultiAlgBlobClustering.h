@@ -70,6 +70,10 @@ namespace WireCell::Clus {
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
 
+        // clustering_examine_x_boundary
+        double m_x_boundary_low_limit{-1*units::cm};
+        double m_x_boundary_high_limit{257*units::cm};
+
         // 
         IAnodePlane::pointer m_anode;
     };

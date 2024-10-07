@@ -267,6 +267,10 @@ namespace WireCell::PointCloud::Facade {
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
 
+        /// @brief break a cluster if it crosses the boundary
+        /// @return if breaking, return broken clusters, if not, return empty map
+        std::unordered_map<int, Cluster*> examine_x_boundary(const double low_limit = -1*units::cm, const double high_limit = 257*units::cm);
+
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
 

@@ -54,7 +54,18 @@ void Facade::Simple3DPointCloud::add(const point_type& new_pt) {
     for (size_t ind=0; ind<3; ++ind) {
         points()[ind].push_back(new_pt[ind]);
     }
+    // points_type new_pts = {{new_pt[0]}, {new_pt[1]}, {new_pt[2]}};
+    kd().append({{new_pt[0]}, {new_pt[1]}, {new_pt[2]}});
 }
+
+Facade::Simple3DPointCloud::nfkd_t& Facade::Simple3DPointCloud::kd(bool rebuild)
+{
+    if (rebuild) m_kd = nullptr;
+    if (m_kd) return *m_kd;
+    m_kd = std::make_unique<nfkd_t>(points());
+    return *m_kd;
+}
+
 const Facade::Simple3DPointCloud::nfkd_t& Facade::Simple3DPointCloud::kd(bool rebuild) const
 {
     if (rebuild) m_kd = nullptr;
@@ -62,6 +73,7 @@ const Facade::Simple3DPointCloud::nfkd_t& Facade::Simple3DPointCloud::kd(bool re
     m_kd = std::make_unique<nfkd_t>(points());
     return *m_kd;
 }
+
 Facade::Simple3DPointCloud::results_type Facade::Simple3DPointCloud::get_closest_index(const geo_point_t& p, const size_t N) const {
     return kd().knn(N, p);
 }
@@ -218,6 +230,11 @@ std::ostream& Facade::operator<<(std::ostream& os, const Simple3DPointCloud& s3d
 Facade::Multi2DPointCloud::Multi2DPointCloud(const double angle_u, const double angle_v, const double angle_w) : angle_uvw{angle_u, angle_v, angle_w} {
     for (size_t plane = 0; plane < 3; ++plane) {
         points(plane).resize(2);
+        // points(plane) = {coordinates_type(), coordinates_type()};
+        kd(plane);
+        // std::cout << kd(plane).npoints();
+        // LogDebug("kd: " << plane << " points(plane).size() " <<  points(plane).size() << " " << points(plane)[0].size() << " " << kd(plane).npoints());
+        // std::cout << "kd: " << plane << " points(plane).size() " <<  points(plane).size() << " " << points(plane)[0].size() << " " << kd(plane).npoints() << std::endl;
     }
 }
 
@@ -227,6 +244,7 @@ void Facade::Multi2DPointCloud::add(const geo_point_t& new_pt) {
         double y = cos(angle_uvw[plane]) * new_pt[2] - sin(angle_uvw[plane]) * new_pt[1];
         points(plane)[0].push_back(x);
         points(plane)[1].push_back(y);
+        kd(plane).append({{x}, {y}});
     }
 }
 
@@ -235,6 +253,16 @@ const Facade::Multi2DPointCloud::nfkd_t& Facade::Multi2DPointCloud::kd(const siz
     if (rebuild) m_kd[plane] = nullptr;
     if (m_kd[plane]) return *m_kd[plane];
     m_kd[plane] = std::make_unique<nfkd_t>(points(plane));
+    LogDebug("const kd: " << plane << " points(plane)[0].size() " << points(plane)[0].size() << " " << m_kd[plane]->npoints());
+    return *m_kd[plane];
+}
+
+Facade::Multi2DPointCloud::nfkd_t& Facade::Multi2DPointCloud::kd(const size_t plane, const bool rebuild)
+{
+    if (rebuild) m_kd[plane] = nullptr;
+    if (m_kd[plane]) return *m_kd[plane];
+    m_kd[plane] = std::make_unique<nfkd_t>(points(plane));
+    LogDebug("kd: " << plane << " " << m_kd[plane]->npoints());
     return *m_kd[plane];
 }
 std::pair<int, double> Facade::Multi2DPointCloud::get_closest_2d_dis(const geo_point_t& p, size_t plane) const
@@ -249,7 +277,7 @@ std::pair<int, double> Facade::Multi2DPointCloud::get_closest_2d_dis(const geo_p
     else
         return std::make_pair(-1, 1e9);
 }
-std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d_index(const geo_point_t &p, const double radius, size_t plane) const
+std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d_index_radius(const geo_point_t &p, const double radius, size_t plane) const
 {
     double x = p[0];
     double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
@@ -262,16 +290,21 @@ std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d
     }
     return ret;
 }
-std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d_index(const geo_point_t &p, const int N, size_t plane) const
+std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d_index_knn(const geo_point_t &p, const int N, size_t plane) const
 {
     double x = p[0];
     double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
+    LogDebug("knn: " << x << " " << y << " N " << N << " plane " << plane << " kd(plane).npoints() " << kd(plane).npoints());
     std::vector<double> query = {x, y};
     const auto& res = kd(plane).knn(N, query);
     // const auto& res = kd(plane).radius(radius * radius, query);
     std::vector<std::pair<size_t, double>> ret;
     for (const auto& r : res) {
-        ret.push_back(std::make_pair(r.first, sqrt(r.second)));
+        LogDebug("get_num_points " << get_num_points() << " kd.npoints() " << kd(plane).npoints());
+        LogDebug(" res " << r.first << " " << r.second);
+        const auto p2d = point(plane, r.first);
+        LogDebug(" 2dp" << plane << " " << p2d[0] << " " << p2d[1] << " dist2 " << (x-p2d[0])*(x-p2d[0]) + (y-p2d[1])*(y-p2d[1]));
+        ret.push_back(std::make_pair(r.first, r.second));
     }
     return ret;
 }
@@ -410,6 +443,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const int fla
         //     index_w->addPoints(current_size, current_size + pts.size() - 1);
         // }
     }
+    LogDebug("add_points: " << m_pc3d.get_num_points() << " " << m_pc2d.get_num_points() << " " << m_clusters.size() << " " << m_blobs.size() << " " << m_winds[0].size());
 }
 
 void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const geo_point_t& p_test,
@@ -442,7 +476,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const geo_poi
 std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointCloud::get_2d_points_info(
     const geo_point_t& p, const double radius, const int plane)
 {
-    std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index(p, radius, plane);
+    std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index_radius(p, radius, plane);
     std::vector<std::tuple<double, const Cluster*, size_t>> return_results;
 
     for (size_t i = 0; i != results.size(); i++) {
@@ -457,11 +491,15 @@ std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointClou
 std::tuple<double, const Cluster*, size_t> Facade::DynamicPointCloud::get_closest_2d_point_info(
     const geo_point_t& p, const int plane)
 {
-    std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index(p, 1, plane);
+    std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index_knn(p, 1, plane);
     std::vector<std::tuple<double, const Cluster*, size_t>> return_results;
     if (results.size() != 1) {
         return std::make_tuple(1e9, nullptr, -1);
     }
+    const auto p3d = m_pc3d.point(results.at(0).first);
+    const auto cluster = m_clusters.at(results.at(0).first);
+    LogDebug(" 3d " << p3d << " " << results.at(0).second);
+    LogDebug(" cluster.npoints() " << cluster->npoints());
     return std::make_tuple(results.at(0).second, m_clusters.at(results.at(0).first), (size_t)results.at(0).first);
 }
 

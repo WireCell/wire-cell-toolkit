@@ -146,7 +146,9 @@ namespace WireCell::PointCloud::Facade {
                             std::map<int, std::pair<double, double>>& dead_u_index,
                             std::map<int, std::pair<double, double>>& dead_v_index,
                             std::map<int, std::pair<double, double>>& dead_w_index,
-                            double length_cut,
-                            const bool use_ctpc);
+                            const bool use_ctpc,
+                            double length_cut = 0);
+
+    void clustering_examine_x_boundary(Grouping& live_grouping, const double low_limit, const double high_limit);
 
 }  // namespace WireCell::PointCloud::Facade

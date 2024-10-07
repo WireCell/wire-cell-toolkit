@@ -76,7 +76,7 @@ namespace WireCell::PointCloud::Facade {
 
     class Simple3DPointCloud {
        public:
-        using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexStatic>;
+        using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
         // these derived types do not depend on static/dynamic
         using points_type = nfkd_t::points_type;
         using results_type = nfkd_t::results_type;
@@ -92,6 +92,7 @@ namespace WireCell::PointCloud::Facade {
         void add(const point_type& new_pt);
         size_t get_num_points() const { return m_points[0].size(); }
         const nfkd_t& kd(bool rebuild=false) const;
+        nfkd_t& kd(bool rebuild=false);
         results_type get_closest_index(const geo_point_t& p, const size_t N) const;
         /// @return index, geo_point_t
         std::pair<size_t, geo_point_t> get_closest_wcpoint(const geo_point_t& p) const;
@@ -124,6 +125,7 @@ namespace WireCell::PointCloud::Facade {
         Multi2DPointCloud(double angle_u, double angle_v, double angle_w);
         using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
         // these derived types do not depend on static/dynamic
+        using coordinates_type = nfkd_t::coordinates_type;
         using points_type = nfkd_t::points_type;
         using results_type = nfkd_t::results_type;
         using point_type = std::vector<double>;
@@ -138,9 +140,10 @@ namespace WireCell::PointCloud::Facade {
         void add(const geo_point_t& new_pt);
         size_t get_num_points() const { return m_points[0][0].size(); }
         const nfkd_t& kd(const size_t plane, const bool rebuild=false) const;
+        nfkd_t& kd(const size_t plane, const bool rebuild=false);
         std::pair<int, double> get_closest_2d_dis(const geo_point_t &p, size_t plane) const;
-        std::vector<std::pair<size_t, double>> get_closest_2d_index(const geo_point_t &p, const double radius, size_t plane) const;
-        std::vector<std::pair<size_t, double>> get_closest_2d_index(const geo_point_t &p, const int N, size_t plane) const;
+        std::vector<std::pair<size_t, double>> get_closest_2d_index_radius(const geo_point_t &p, const double radius, size_t plane) const;
+        std::vector<std::pair<size_t, double>> get_closest_2d_index_knn(const geo_point_t &p, const int N, size_t plane) const;
        private:
         points_type m_points[3];
         mutable std::unique_ptr<nfkd_t> m_kd[3]; // lazy
