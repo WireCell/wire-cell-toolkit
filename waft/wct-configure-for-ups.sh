@@ -52,11 +52,14 @@ fi
 wct_cc=${CC:-gcc}
 wct_cxx=${CXX:-g++}
 wct_fort=${FORT:-gfortran}
+export CXXFLAGS='-Wno-misleading-indentation -Wno-int-in-bool-context -Wvla'
 env CC=$wct_cc CXX=$wct_cxx FC=wct_fort \
     ./wcb configure \
     --with-tbb=no \
     --with-jsoncpp="$JSONCPP_FQ_DIR" \
-    --with-jsonnet="$JSONNET_FQ_DIR" \
+    --with-jsonnet="$GOJSONNET_FQ_DIR" \
+    --with-spdlog="$SPDLOG_FQ_DIR" \
+    --with-spdlog-lib="$SPDLOG_LIB" \
     --with-eigen-include="$EIGEN_DIR/include/eigen3" \
     --with-root="$ROOT_FQ_DIR" \
     --with-fftw="$FFTW_FQ_DIR" \
@@ -65,5 +68,6 @@ env CC=$wct_cc CXX=$wct_cxx FC=wct_fort \
     --boost-includes="$BOOST_INC" \
     --boost-libs="$BOOST_LIB" \
     --boost-mt \
-    --prefix="$install_dir"
+    --prefix="$install_dir" \
+    --build-debug="-O2 -ggdb3 -w" 
 
