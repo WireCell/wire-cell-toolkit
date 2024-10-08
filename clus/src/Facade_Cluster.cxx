@@ -2276,7 +2276,9 @@ std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_l
         }
     }
 
-    // std::cout << num_points[0] << " " << num_points[1] << " " << num_points[2] << std::endl;
+    std::cout
+    << "npoits() " << npoints() << " xmax " << x_max << " xmin " << x_min << " low_limit " << low_limit << " high_limit " << high_limit
+    << num_points[0] << " " << num_points[1] << " " << num_points[2] << std::endl;
 
     std::vector<Cluster*> clusters;
     std::vector<int> b2groupid(mcells.size(), 0);
@@ -2296,6 +2298,10 @@ std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_l
             // fill the large one ...
             // cluster_3 = new PR3DCluster(3);
             groupids.insert(3);
+        }
+        for (const auto& id : groupids) 
+        {
+            std::cout << "group: " << id << std::endl;
         }
         if (!groupids.empty()) {
             // cluster_2 = new PR3DCluster(2);

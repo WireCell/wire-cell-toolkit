@@ -271,11 +271,14 @@ namespace WireCell::PointCloud::Facade {
         /// @return if breaking, return broken clusters, if not, return empty map
         std::unordered_map<int, Cluster*> examine_x_boundary(const double low_limit = -1*units::cm, const double high_limit = 257*units::cm);
 
+        /// @brief get_mcell_indices in WCP
+        /// TODO: currently return copy, return a const reference?
+        std::vector<int> get_blob_indices(const Blob*) const;
+
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
 
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
-        std::vector<int> get_blob_indices(const Blob*) const;
 
 
         // Cached and lazily calculated in get_length().

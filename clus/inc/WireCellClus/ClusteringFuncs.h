@@ -151,4 +151,6 @@ namespace WireCell::PointCloud::Facade {
 
     void clustering_examine_x_boundary(Grouping& live_grouping, const double low_limit, const double high_limit);
 
+    void clustering_protect_overclustering(Grouping& live_grouping);
+
 }  // namespace WireCell::PointCloud::Facade
