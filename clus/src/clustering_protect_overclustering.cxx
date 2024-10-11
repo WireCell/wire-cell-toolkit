@@ -919,38 +919,9 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
 void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& live_grouping)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // can follow ToyClustering_separate to add clusters ...
-    const auto &tp = live_grouping.get_params();
-    // this is for 4 time slices
-    double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
-
-    // std::vector<Cluster *> new_clusters;
-    // std::vector<Cluster *> del_clusters;
-
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
         Examine_overclustering(cluster);
-        // if (clusters.size() > 0) {
-        //     del_clusters.push_back(cluster);
-        //     std::copy(clusters.begin(), clusters.end(), std::back_inserter(new_clusters));
-        // }
     }
-
-    // // at the end of it ...
-    // for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
-    //     Cluster *ncluster = (*it);
-    //     std::vector<int> range_v1 = ncluster->get_uvwt_range();
-    //     double length_1 = sqrt(2. / 3. *
-    //                                (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-    //                                 pow(pitch_w * range_v1.at(2), 2)) +
-    //                            pow(time_slice_width * range_v1.at(3), 2));
-    //     cluster_length_map[ncluster] = length_1;
-    //     live_clusters.push_back(ncluster);
-    // }
-    // for (auto it = del_clusters.begin(); it != del_clusters.end(); it++) {
-    //     Cluster *ocluster = (*it);
-    //     cluster_length_map.erase(ocluster);
-    //     live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
-    //     delete ocluster;
-    // }
 }

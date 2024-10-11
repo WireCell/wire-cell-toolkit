@@ -356,9 +356,13 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     clustering_deghost(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
     perf.dump("clustering_deghost", live_grouping);
-#endif
+
     clustering_examine_x_boundary(live_grouping, m_x_boundary_low_limit, m_x_boundary_high_limit);
     perf.dump("clustering_examine_x_boundary", live_grouping);
+#endif
+
+    clustering_protect_overclustering(live_grouping);
+    perf.dump("clustering_protect_overclustering", live_grouping);
 
     // BEE debug dead-live
     // if (!m_bee_dir.empty()) {
