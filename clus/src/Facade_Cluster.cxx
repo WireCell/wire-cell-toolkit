@@ -603,7 +603,7 @@ int Cluster::nnearby(const geo_point_t& point, double radius) const
     return res.size();
 }
 
-std::pair<int, int> Cluster::ndipole(const geo_point_t& point, const geo_point_t& dir) const
+std::pair<int, int> Cluster::ndipole(const geo_point_t& point, const geo_point_t& dir, const double dis) const
 {
     const auto& points = this->points();
     const size_t npoints = points[0].size();
@@ -613,6 +613,7 @@ std::pair<int, int> Cluster::ndipole(const geo_point_t& point, const geo_point_t
 
     for (size_t ind = 0; ind < npoints; ++ind) {
         geo_point_t dir1(points[0][ind] - point.x(), points[1][ind] - point.y(), points[2][ind] - point.z());
+        if (dis > 0 && dir1.magnitude() > dis) continue;
         if (dir1.dot(dir) >= 0) {
             ++num_p1;
         }
@@ -769,6 +770,17 @@ std::pair<geo_point_t, const Blob*> Cluster::get_closest_point_blob(const geo_po
 
     const auto& [point_index, _] = results[0];
     return std::make_pair(point3d(point_index), blob_with_point(point_index));
+}
+
+std::pair<size_t, geo_point_t> Cluster::get_closest_wcpoint(const geo_point_t& point) const
+{
+    auto results = kd_knn(1, point);
+    if (results.size() == 0) {
+        return std::make_pair(-1, nullptr);
+    }
+
+    const auto& [point_index, _] = results[0];
+    return std::make_pair(point_index, point3d(point_index));
 }
 
 size_t Cluster::get_closest_point_index(const geo_point_t& point) const
@@ -1138,6 +1150,11 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_earliest_latest_points() const
 {
     auto backwards = get_highest_lowest_points(0);
     return std::make_pair(backwards.second, backwards.first);
+}
+
+std::pair<geo_point_t, geo_point_t> Cluster::get_front_back_points() const
+{
+    return get_highest_lowest_points(2);
 }
 
 std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
@@ -2339,6 +2356,94 @@ std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_l
         }
     }
     return this->separate<Cluster>(b2groupid);
+}
+
+bool Cluster::judge_vertex(geo_point_t& p_test, const double asy_cut, const double occupied_cut)
+{
+    p_test = calc_ave_pos(p_test, 3 * units::cm);
+
+    geo_point_t dir = vhough_transform(p_test, 15 * units::cm);
+
+    // judge if this is end points
+    std::pair<int, int> num_pts = ndipole(p_test, dir, 25 * units::cm);
+
+    if ((num_pts.first + num_pts.second) == 0) return false;
+
+    double asy = fabs(num_pts.first - num_pts.second) / (num_pts.first + num_pts.second);
+
+    if (asy > asy_cut) {
+        return true;
+    }
+    else {
+        // TPCParams& mp = Singleton<TPCParams>::Instance();
+        // double angle_u = mp.get_angle_u();
+        // double angle_v = mp.get_angle_v();
+        // double angle_w = mp.get_angle_w();
+        const auto& mp = grouping()->get_params();
+        // ToyPointCloud temp_point_cloud(angle_u, angle_v, angle_w);
+        auto temp_point_cloud = std::make_shared<Multi2DPointCloud>(mp.angle_u, mp.angle_v, mp.angle_w);
+        dir = dir.norm();
+        // PointVector pts;
+        std::vector<geo_point_t> pts;
+        for (size_t i = 0; i != 40; i++) {
+            geo_point_t pt(p_test.x() + i * 0.5 * units::cm * dir.x(), p_test.y() + i * 0.5 * units::cm * dir.y(),
+                     p_test.z() + i * 0.5 * units::cm * dir.z());
+            // WCP::WCPointCloud<double>::WCPoint& wcp = point_cloud->get_closest_wcpoint(pt);
+            auto [_, wcp] = get_closest_wcpoint(pt);
+
+            if (sqrt(pow(wcp.x() - pt.x(), 2) + pow(wcp.y() - pt.y(), 2) + pow(wcp.z() - pt.z(), 2)) <
+                std::max(1.8 * units::cm, i * 0.5 * units::cm * sin(18. / 180. * 3.1415926))) {
+                pt = wcp;
+            }
+            pts.push_back(pt);
+            if (i != 0) {
+                geo_point_t pt1(p_test.x() - i * 0.5 * units::cm * dir.x(), p_test.y() - i * 0.5 * units::cm * dir.y(),
+                          p_test.z() - i * 0.5 * units::cm * dir.z());
+                // WCP::WCPointCloud<double>::WCPoint& wcp1 = point_cloud->get_closest_wcpoint(pt1);
+                auto [_, wcp1] = get_closest_wcpoint(pt1);
+                if (sqrt(pow(wcp1.x() - pt1.x(), 2) + pow(wcp1.y() - pt1.y(), 2) + pow(wcp1.z() - pt1.z(), 2)) <
+                    std::max(1.8 * units::cm, i * 0.5 * units::cm * sin(18. / 180. * 3.1415926))) {
+                    pt1 = wcp1;
+                }
+                pts.push_back(pt1);
+            }
+        }
+        // temp_point_cloud.AddPoints(pts);
+        for (auto& pt : pts) {
+            temp_point_cloud->add(pt);
+        }
+        // temp_point_cloud.build_kdtree_index();
+
+        int temp_num_total_points = 0;
+        int temp_num_occupied_points = 0;
+
+        // const int N = point_cloud->get_num_points();
+        const int N = npoints();
+        // WCP::WCPointCloud<double>& cloud = point_cloud->get_cloud();
+        for (int i = 0; i != N; i++) {
+            // geo_point_t dir1(cloud.pts[i].x() - p_test.x(), cloud.pts[i].y() - p_test.y(), cloud.pts[i].z() - p_test.z());
+            geo_point_t dir1 = point3d(i) - p_test;
+
+            if (dir1.magnitude() < 15 * units::cm) {
+                geo_point_t test_p1 = point3d(i);
+                temp_num_total_points++;
+                double dis[3];
+                dis[0] = temp_point_cloud->get_closest_2d_dis(test_p1, 0).second;
+                dis[1] = temp_point_cloud->get_closest_2d_dis(test_p1, 1).second;
+                dis[2] = temp_point_cloud->get_closest_2d_dis(test_p1, 2).second;
+                if (dis[0] <= 1.5 * units::cm && dis[1] <= 1.5 * units::cm && dis[2] <= 2.4 * units::cm ||
+                    dis[0] <= 1.5 * units::cm && dis[2] <= 1.5 * units::cm && dis[1] <= 2.4 * units::cm ||
+                    dis[2] <= 1.5 * units::cm && dis[1] <= 1.5 * units::cm && dis[0] <= 2.4 * units::cm)
+                    temp_num_occupied_points++;
+            }
+        }
+
+        if (temp_num_occupied_points < temp_num_total_points * occupied_cut) return true;
+    }
+
+    // judge if there
+
+    return false;
 }
 
 bool Facade::cluster_less(const Cluster* a, const Cluster* b)

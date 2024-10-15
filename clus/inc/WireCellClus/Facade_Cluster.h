@@ -95,6 +95,8 @@ namespace WireCell::PointCloud::Facade {
 
         // WCP: get_closest_wcpoint
         std::pair<geo_point_t, const Blob*> get_closest_point_blob(const geo_point_t& point) const;
+        /// WCP: get_closest_wcpoint: index, geo_point_t
+        std::pair<size_t, geo_point_t> get_closest_wcpoint(const geo_point_t& p) const;
 
         // 
         size_t get_closest_point_index(const geo_point_t& point) const;
@@ -122,17 +124,20 @@ namespace WireCell::PointCloud::Facade {
         int npoints() const;
 
         // Number of points according to sum of Blob::nbpoints()
+        // WCP: int get_num_points()
         size_t nbpoints() const;
 
         // Return the number of points within radius of the point.  Note, radius
         // is a LINEAR distance through the L2 metric is used internally.
-        // get_num_points in WCP
+        // WCP: int get_num_points(Point& p_test, double dis);
         int nnearby(const geo_point_t& point, double radius) const;
 
         // Return the number of points in the k-d tree partitioned into pair
         // (#forward,#backward) based on given direction of view from the given
         // point.
-        std::pair<int, int> ndipole(const geo_point_t& point, const geo_point_t& dir) const;
+        // WCP: std::pair<int,int> get_num_points(Point& p, TVector3& dir, double dis);
+        // if dis < 0, then no cut on distance
+        std::pair<int, int> ndipole(const geo_point_t& point, const geo_point_t& dir, const double dis=-1) const;
 
         // Return the number of points with in the radius of the given point in
         // the k-d tree partitioned into pair (#forward,#backward) based on
@@ -140,11 +145,6 @@ namespace WireCell::PointCloud::Facade {
         //
         // Note: the radius is a LINEAR distance measure.
         // std::pair<int, int> nprojection(const geo_point_t& point, const geo_point_t& dir, double radius) const;
-
-        // Return the points at the extremes of the X-axis.
-        //
-        // Note: the two points are in ASCENDING order!
-        std::pair<geo_point_t, geo_point_t> get_earliest_latest_points() const;
 
         // WCP: get_two_extreme_points
         // TODO: configurable dist cut?
@@ -156,8 +156,16 @@ namespace WireCell::PointCloud::Facade {
         // Return the points at the extremes of the given Cartesian axis.  Default is Y-axis.
         //
         // Note: the two points are in DESCENDING order!
-        // WCP: get_highest_lowest_wcps
+        // WCP: axis=1: get_highest_lowest_wcps, 2: get_front_back_wcps, 0: get_earliest_latest_wcps (reverse order)
         std::pair<geo_point_t, geo_point_t> get_highest_lowest_points(size_t axis = 1) const; 
+
+        // Return the points at the extremes of the X-axis.
+        // WCP: get_earliest_latest_wcps
+        // Note: the two points are in ASCENDING order!
+        std::pair<geo_point_t, geo_point_t> get_earliest_latest_points() const;
+
+        // WCP: get_front_back_wcps
+        std::pair<geo_point_t, geo_point_t> get_front_back_points() const;
 
         /// TODO: old_wcp and dir are used as local vars inside the function, make the IO more clear?
         geo_point_t get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step = 5*units::cm, const int allowed_nstep = 12) const;
@@ -274,6 +282,10 @@ namespace WireCell::PointCloud::Facade {
         /// @brief get_mcell_indices in WCP
         /// TODO: currently return copy, return a const reference?
         std::vector<int> get_blob_indices(const Blob*) const;
+
+        /// @brief to assess whether a given point (p_test) in a cluster is a vertex, or endpoint, based on asymmetry and occupancy criteria.
+        /// @note p_test will be updated
+        bool judge_vertex(geo_point_t& p_test, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
