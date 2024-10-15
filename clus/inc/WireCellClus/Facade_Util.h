@@ -112,7 +112,96 @@ namespace WireCell::PointCloud::Facade {
             double dis_cut) const;
 
         /// @brief  return local indices instead of global
-        std::tuple<int, int, double> get_closest_points(const Simple3DPointCloud& other) const;
+        template <typename PCType>
+        std::tuple<int, int, double> get_closest_points(const PCType& other) const
+        {
+            int p1_index = 0;
+            int p2_index = 0;
+            geo_point_t p1 = point(p1_index);
+            geo_point_t p2 = other.point(p2_index);
+            int p1_save = 0;
+            int p2_save = 0;
+            double min_dis = 1e9;
+
+            int prev_index1 = -1;
+            int prev_index2 = -1;
+            while (p1_index != prev_index1 || p2_index != prev_index2) {
+                prev_index1 = p1_index;
+                prev_index2 = p2_index;
+                std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+                std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+            }
+            // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+            double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis < min_dis) {
+                min_dis = dis;
+                p1_save = p1_index;
+                p2_save = p2_index;
+            }
+
+            prev_index1 = -1;
+            prev_index2 = -1;
+            p1_index = points()[0].size() - 1;
+            p2_index = 0;
+            p1 = point(p1_index);
+            p2 = other.point(p2_index);
+            while (p1_index != prev_index1 || p2_index != prev_index2) {
+                prev_index1 = p1_index;
+                prev_index2 = p2_index;
+                std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+                std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+            }
+            // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+            dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis < min_dis) {
+                min_dis = dis;
+                p1_save = p1_index;
+                p2_save = p2_index;
+            }
+
+            prev_index1 = -1;
+            prev_index2 = -1;
+            p1_index = 0;
+            p2_index = other.points()[0].size() - 1;
+            p1 = point(p1_index);
+            p2 = other.point(p2_index);
+            while (p1_index != prev_index1 || p2_index != prev_index2) {
+                prev_index1 = p1_index;
+                prev_index2 = p2_index;
+                std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+                std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+            }
+            // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+            dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis < min_dis) {
+                min_dis = dis;
+                p1_save = p1_index;
+                p2_save = p2_index;
+            }
+
+            prev_index1 = -1;
+            prev_index2 = -1;
+            p1_index = points()[0].size() - 1;
+            p2_index = other.points()[0].size() - 1;
+            p1 = point(p1_index);
+            p2 = other.point(p2_index);
+            while (p1_index != prev_index1 || p2_index != prev_index2) {
+                prev_index1 = p1_index;
+                prev_index2 = p2_index;
+                std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
+                std::tie(p1_index, p1) = get_closest_wcpoint(p2);
+            }
+            // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+            dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis < min_dis) {
+                min_dis = dis;
+                p1_save = p1_index;
+                p2_save = p2_index;
+            }
+
+            return std::make_tuple(p1_save, p2_save, min_dis);
+        }
+
        private:
         points_type m_points{3};
         mutable std::unique_ptr<nfkd_t> m_kd{nullptr}; // lazy

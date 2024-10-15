@@ -62,7 +62,7 @@ Facade::Simple3DPointCloud::nfkd_t& Facade::Simple3DPointCloud::kd(bool rebuild)
 {
     if (rebuild) m_kd = nullptr;
     if (m_kd) return *m_kd;
-    m_kd = std::make_unique<nfkd_t>(points());
+    m_kd = std::make_unique<nfkd_t>(3);
     return *m_kd;
 }
 
@@ -70,7 +70,7 @@ const Facade::Simple3DPointCloud::nfkd_t& Facade::Simple3DPointCloud::kd(bool re
 {
     if (rebuild) m_kd = nullptr;
     if (m_kd) return *m_kd;
-    m_kd = std::make_unique<nfkd_t>(points());
+    m_kd = std::make_unique<nfkd_t>(3);
     return *m_kd;
 }
 
@@ -128,94 +128,6 @@ std::pair<int, double> Facade::Simple3DPointCloud::get_closest_point_along_vec(c
 
     return std::make_pair(min_index, min_dis1);
 }
-std::tuple<int, int, double> Facade::Simple3DPointCloud::get_closest_points(const Simple3DPointCloud& other) const {
-
-    int p1_index = 0;
-    int p2_index = 0;
-    geo_point_t p1 = point(p1_index);
-    geo_point_t p2 = other.point(p2_index);
-    int p1_save = 0;
-    int p2_save = 0;
-    double min_dis = 1e9;
-
-    int prev_index1 = -1;
-    int prev_index2 = -1;
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
-        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
-
-    prev_index1 = -1;
-    prev_index2 = -1;
-    p1_index = points()[0].size() - 1;
-    p2_index = 0;
-    p1 = point(p1_index);
-    p2 = other.point(p2_index);
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
-        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
-
-    prev_index1 = -1;
-    prev_index2 = -1;
-    p1_index = 0;
-    p2_index = other.points()[0].size() - 1;
-    p1 = point(p1_index);
-    p2 = other.point(p2_index);
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
-        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
-
-    prev_index1 = -1;
-    prev_index2 = -1;
-    p1_index = points()[0].size() - 1;
-    p2_index = other.points()[0].size() - 1;
-    p1 = point(p1_index);
-    p2 = other.point(p2_index);
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        std::tie(p2_index, p2) = other.get_closest_wcpoint(p1);
-        std::tie(p1_index, p1) = get_closest_wcpoint(p2);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
-
-    return std::make_tuple(p1_save, p2_save, min_dis);
-}
 
 std::ostream& Facade::operator<<(std::ostream& os, const Simple3DPointCloud& s3dpc)
 {
@@ -224,17 +136,16 @@ std::ostream& Facade::operator<<(std::ostream& os, const Simple3DPointCloud& s3d
     for (size_t ind=0; ind<npts; ++ind) {
         os << " " << s3dpc.point(ind);
     }
+    os << " kd:" << s3dpc.kd().npoints();
+    for (size_t ind=0; ind<s3dpc.kd().npoints(); ++ind) {
+        os << " " << s3dpc.kd().point3d(ind);
+    }
     return os;
 }
 
 Facade::Multi2DPointCloud::Multi2DPointCloud(const double angle_u, const double angle_v, const double angle_w) : angle_uvw{angle_u, angle_v, angle_w} {
     for (size_t plane = 0; plane < 3; ++plane) {
         points(plane).resize(2);
-        // points(plane) = {coordinates_type(), coordinates_type()};
-        kd(plane);
-        // std::cout << kd(plane).npoints();
-        // LogDebug("kd: " << plane << " points(plane).size() " <<  points(plane).size() << " " << points(plane)[0].size() << " " << kd(plane).npoints());
-        // std::cout << "kd: " << plane << " points(plane).size() " <<  points(plane).size() << " " << points(plane)[0].size() << " " << kd(plane).npoints() << std::endl;
     }
 }
 
@@ -252,7 +163,7 @@ const Facade::Multi2DPointCloud::nfkd_t& Facade::Multi2DPointCloud::kd(const siz
 {
     if (rebuild) m_kd[plane] = nullptr;
     if (m_kd[plane]) return *m_kd[plane];
-    m_kd[plane] = std::make_unique<nfkd_t>(points(plane));
+    m_kd[plane] = std::make_unique<nfkd_t>(2);
     LogDebug("const kd: " << plane << " points(plane)[0].size() " << points(plane)[0].size() << " " << m_kd[plane]->npoints());
     return *m_kd[plane];
 }
@@ -261,7 +172,7 @@ Facade::Multi2DPointCloud::nfkd_t& Facade::Multi2DPointCloud::kd(const size_t pl
 {
     if (rebuild) m_kd[plane] = nullptr;
     if (m_kd[plane]) return *m_kd[plane];
-    m_kd[plane] = std::make_unique<nfkd_t>(points(plane));
+    m_kd[plane] = std::make_unique<nfkd_t>(2);
     LogDebug("kd: " << plane << " " << m_kd[plane]->npoints());
     return *m_kd[plane];
 }
