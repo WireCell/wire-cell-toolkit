@@ -570,6 +570,8 @@ const Cluster::kd3d_t& Cluster::kd3d() const
     return sv.kd();
 }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
+geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
+
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
 int Cluster::npoints() const
 {

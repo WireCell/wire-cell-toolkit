@@ -82,6 +82,8 @@ namespace WireCell::PointCloud::Facade {
         // Return the 3D point at the k-d tree point index.  Calling this in a
         // tight loop should probably be avoided.  Instead get the full points() array.
         geo_point_t point3d(size_t point_index) const;
+        // alias for point3d to match the Simple3DPointCloud interface
+        geo_point_t point(size_t point_index) const;
 
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.
         using points_type = kd3d_t::points_type;

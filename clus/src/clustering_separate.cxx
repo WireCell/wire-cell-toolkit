@@ -12,9 +12,6 @@ using namespace WireCell::PointCloud::Tree;
 
 // bool flag_debug_porting = false;
 
-// time_slice_length is length span for a slice
-static bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length);
-
 /// @attention contains hard-coded distance cuts
 /// @param boundary_points return the boundary points
 /// @param independent_points return the independent points
@@ -29,8 +26,6 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
                                                      std::map<int, std::pair<double, double>> &dead_v_index,
                                                      std::map<int, std::pair<double, double>> &dead_w_index,
                                                      double length);
-
-std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
 
 
 // void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
@@ -669,7 +664,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 }
 
 /// @brief PCA based
-static bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length)
+bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length)
 {
     // get the main axis
     geo_point_t dir1(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
@@ -1900,7 +1895,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
 #endif //_INDEV_
 
 /// input cluster will be destroyed
-std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut, const size_t ticks_per_slice)
+std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, const double dis_cut, const size_t ticks_per_slice)
 {
     const auto& time_cells_set_map = cluster->time_blob_map();
     // std::cout << "Separate_2 nchildren: " << cluster->nchildren() << std::endl;

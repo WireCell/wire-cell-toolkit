@@ -153,4 +153,13 @@ namespace WireCell::PointCloud::Facade {
 
     void clustering_protect_overclustering(Grouping& live_grouping);
 
+    void clustering_neutrino(Grouping &live_grouping, int num_try, const double low_limit, const double high_limit);
+
+
+
+    // time_slice_length is length span for a slice
+    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length);
+
+    std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
+
 }  // namespace WireCell::PointCloud::Facade
