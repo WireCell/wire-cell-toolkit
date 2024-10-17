@@ -155,6 +155,7 @@ namespace WireCell::PointCloud::Facade {
 
     void clustering_neutrino(Grouping &live_grouping, int num_try, const double low_limit, const double high_limit);
 
+    map_cluster_cluster_vec clustering_isolated(Grouping& live_grouping);
 
 
     // time_slice_length is length span for a slice

@@ -100,6 +100,13 @@ namespace WireCell::PointCloud::Facade {
         /// WCP: get_closest_wcpoint: index, geo_point_t
         std::pair<size_t, geo_point_t> get_closest_wcpoint(const geo_point_t& p) const;
 
+        /// PCType needs to have point() and get_closest_wcpoint() methods
+        template <typename PCType>
+        std::tuple<int, int, double> get_closest_points(const PCType& two) const
+        {
+            return PointCloud::Facade::get_closest_points(*this, two);
+        }
+
         // 
         size_t get_closest_point_index(const geo_point_t& point) const;
 
@@ -332,6 +339,11 @@ namespace WireCell::PointCloud::Facade {
     // Apply standard sort to put clusters in descending order.
     void sort_clusters(std::vector<const Cluster*>& clusters);
     void sort_clusters(std::vector<Cluster*>& clusters);
+
+    struct cluster_less_functor {
+        bool operator()(const Cluster* a, const Cluster* b) const { return cluster_less(a, b); }
+    };
+    typedef std::map<Cluster*, std::vector<std::pair<Cluster*,double>>, cluster_less_functor> map_cluster_cluster_vec;
 
 
 }  // namespace WireCell::PointCloud::Facade
