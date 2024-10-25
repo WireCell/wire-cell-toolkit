@@ -4,11 +4,28 @@
 The `Facade_Cluster` class is part of the WireCell Point Cloud namespace and provides a high-level interface for working with clusters of 3D points and blobs in particle detector data analysis. It acts as a facade over a PC (Point Cloud) tree, giving semantics to what would otherwise be simple nodes.
 
 ## Key Features
-- 2D and 3D point cloud management
-- Spatial operations and queries
-- Graph-based analysis
-- Time-based clustering
-- Geometric analysis
+
+### Point Cloud Management
+- Supports both 2D and 3D point clouds
+- Provides k-d tree functionality for efficient spatial queries
+- Manages collections of blobs (groups of points) within the cluster
+
+### Spatial Operations
+- Distance calculations between points and clusters
+- Finding nearest neighbors and points within a radius
+- Calculation of geometric properties (center, PCA axes)
+- Convex hull computation
+- Hough transformations for direction finding
+
+### Graph Operations
+- Supports creation and manipulation of cluster graphs
+- Implements Dijkstra's shortest path algorithm
+- Provides connectivity analysis between blobs
+
+### Time-Based Analysis
+- Manages time-slice based organization of blobs
+- Supports time-ordered operations and queries
+- Tracks temporal relationships between points and blobs
 
 ## Complete API Reference
 
@@ -554,6 +571,28 @@ static void sort_clusters(std::vector<Cluster*>& clusters);
 - Comparison and sorting functions for clusters
 - Based on multiple criteria (length, points, coordinates)
 - Both const and non-const versions available
+
+## Important Notes
+
+1. **Performance Considerations**
+   - Many operations use lazy evaluation and caching
+   - K-d trees are built on-demand
+   - Complex operations should be used judiciously in tight loops
+
+2. **Thread Safety**
+   - Most const methods are thread-safe
+   - Caching operations may not be thread-safe
+   - Graph operations should be synchronized if used in multi-threaded context
+
+3. **Memory Management**
+   - The class manages various internal caches and data structures
+   - Users should be aware of potential memory usage with large point clouds
+
+## Dependencies
+- Boost Graph Library
+- WireCell utilities and interfaces
+- Point Cloud data structures
+- K-d tree implementations
 
 
 ## Best Practices
