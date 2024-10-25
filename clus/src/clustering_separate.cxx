@@ -12,12 +12,7 @@ using namespace WireCell::PointCloud::Tree;
 
 // bool flag_debug_porting = false;
 
-/// @attention contains hard-coded distance cuts
-/// @param boundary_points return the boundary points
-/// @param independent_points return the independent points
-static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
-                               std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length);
+
 
 std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
                                                      std::vector<geo_point_t> &boundary_points,
@@ -693,7 +688,7 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, co
     return false;
 }
 
-static bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
+bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length)
 {

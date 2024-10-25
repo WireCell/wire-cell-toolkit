@@ -160,6 +160,13 @@ namespace WireCell::PointCloud::Facade {
 
     // time_slice_length is length span for a slice
     bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length);
+    /// @attention contains hard-coded distance cuts
+    /// @param boundary_points return the boundary points
+    /// @param independent_points return the independent points
+    bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
+                               std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
+                               const double cluster_length);
+    
 
     std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
 
