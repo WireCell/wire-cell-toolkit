@@ -157,6 +157,44 @@ std::vector<size_t> get_closest_2d_index(
 - Operates on specified wire plane (0=U, 1=V, 2=W)
 - Essential for wire-plane specific analysis
 
+```cpp
+template <typename PCType>
+std::tuple<int, int, double> get_closest_points(const PCType& two) const;
+```
+- Finds closest points between this cluster and another point cloud
+- Returns tuple containing:
+  - Index of closest point in this cluster
+  - Index of closest point in the other point cloud
+  - Distance between these points
+- Uses iterative search to find global minimum distance
+- Checks multiple starting positions to avoid local minima
+- Template allows comparison with any point cloud type implementing required interface
+
+```cpp
+std::pair<geo_point_t, double> get_closest_point_along_vec(
+    geo_point_t& p_test,  // Starting point
+    geo_point_t dir,      // Direction vector
+    double test_dis,      // Maximum search distance
+    double dis_step,      // Step size for search
+    double angle_cut,     // Maximum allowed angle deviation
+    double dis_cut        // Maximum allowed distance from line
+) const;
+```
+- Searches for closest point along a specified direction vector
+- Parameters:
+  - p_test: Starting point for the search
+  - dir: Direction to search along
+  - test_dis: Maximum distance to search
+  - dis_step: Distance between test points along direction
+  - angle_cut: Maximum allowed angular deviation (in degrees)
+  - dis_cut: Maximum allowed perpendicular distance from search line
+- Returns:
+  - Closest point found meeting criteria
+  - Distance from starting point
+- Used for tracking trajectory analysis
+- Important for finding continuation points in tracks
+- Includes angular constraints to ensure consistent direction
+
 #### Point Counting and Analysis
 ```cpp
 int nnearby(const geo_point_t& point, double radius) const;
@@ -316,6 +354,61 @@ std::tuple<int, int, int, int> get_uvwt_max() const;
 - Return wire indices and time ranges
 - Important for detector coordinate analysis
 - Provide min/max values for U, V, W coordinates and time
+
+```cpp
+geo_point_t get_center() const;
+```
+- Returns the geometric center (centroid) of the cluster
+- Calculated as average position of all points
+- Uses charge weighting if available
+- Cached for efficiency after first calculation
+- Important for PCA and other geometric calculations
+- Triggers PCA calculation if not already performed
+
+```cpp
+geo_vector_t get_pca_axis(int axis) const;
+```
+- Returns principal component axis vector for specified component
+- Parameters:
+  - axis: Index of principal component (0, 1, or 2)
+    - 0: Primary (longest) axis
+    - 1: Secondary axis
+    - 2: Tertiary (shortest) axis
+- Returns normalized direction vector
+- Triggers PCA calculation if not already performed
+- Important for determining cluster orientation
+- Throws IndexError if axis is invalid
+
+```cpp
+double get_pca_value(int axis) const;
+```
+- Returns eigenvalue for specified principal component
+- Parameters:
+  - axis: Index of principal component (0, 1, or 2)
+    - 0: Largest eigenvalue (most variance)
+    - 1: Middle eigenvalue
+    - 2: Smallest eigenvalue
+- Eigenvalues indicate spread of points along each axis
+- Useful for shape analysis:
+  - Large ratio between values indicates elongated structure
+  - Similar values indicate spherical structure
+- Triggers PCA calculation if not already performed
+- Throws IndexError if axis is invalid
+
+These functions are particularly important for:
+- Track finding and reconstruction
+- Cluster shape analysis
+- Trajectory determination
+- Pattern recognition
+- Quality assessment of clustering
+
+Note on PCA Implementation:
+- PCA calculation is performed lazily (only when needed)
+- Results are cached for efficiency
+- Uses Eigen library for eigenvalue decomposition
+- Considers charge weighting when available
+- Thread-safe for const access
+- Invalidated when cluster structure changes
 
 #### Direction Finding
 ```cpp
