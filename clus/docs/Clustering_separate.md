@@ -128,31 +128,216 @@ else {
 }
 ```
 
-### 6. Separation Execution
+
+# Separation Execution Analysis
+
+## Entry Point
 ```cpp
 if (flag_proceed) {
     if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width)) {
-        // Perform main separation
-        std::vector<Cluster*> sep_clusters = Separate_1(use_ctpc, cluster, 
-            boundary_points, independent_points,
-            dead_u_index, dead_v_index, dead_w_index,
-            cluster->get_length());
-            
-        // Process results
-        Cluster* cluster1 = sep_clusters.at(0);
-        new_clusters.push_back(cluster1);
-        del_clusters.push_back(cluster);
-        
-        // Handle additional separated clusters
-        if (sep_clusters.size() >= 2) {
-            // Process additional clusters
-        }
+        // Main separation path
     }
     else if (cluster->get_length() < 6*units::m) {
-        // Alternative separation for shorter clusters
+        // Alternative separation path for shorter clusters
     }
 }
 ```
+
+## 1. Main Separation Path
+
+### Initial Separation
+```cpp
+// Primary separation attempt
+std::vector<Cluster*> sep_clusters = Separate_1(use_ctpc, cluster, 
+    boundary_points, independent_points,
+    dead_u_index, dead_v_index, dead_w_index,
+    cluster->get_length());
+
+// Process first separated cluster
+Cluster* cluster1 = sep_clusters.at(0);
+new_clusters.push_back(cluster1);
+del_clusters.push_back(cluster);
+```
+
+### Multiple Cluster Handling
+```cpp
+if (sep_clusters.size() >= 2) {  // If more than one cluster produced
+    // Add additional clusters (beyond first two)
+    for (size_t k = 2; k < sep_clusters.size(); k++) {
+        new_clusters.push_back(sep_clusters.at(k));
+    }
+
+    // Process second cluster
+    std::vector<Cluster*> temp_del_clusters;
+    Cluster* cluster2 = sep_clusters.at(1);
+    double length_1 = cluster2->get_length();
+    Cluster* final_sep_cluster = cluster2;
+```
+
+### Recursive Separation Level 1
+```cpp
+if (length_1 > 100 * units::cm) {
+    boundary_points.clear();
+    independent_points.clear();
+
+    if (JudgeSeparateDec_1(cluster2, drift_dir, length_1, live_time_slice_width) &&
+        JudgeSeparateDec_2(cluster2, drift_dir, boundary_points, independent_points, length_1)) {
+        
+        // Second level separation
+        std::vector<Cluster*> sep_clusters = Separate_1(use_ctpc, cluster2, 
+            boundary_points, independent_points,
+            dead_u_index, dead_v_index, dead_w_index, length_1);
+        
+        Cluster* cluster3 = sep_clusters.at(0);
+        new_clusters.push_back(cluster3);
+        temp_del_clusters.push_back(cluster2);
+```
+
+### Recursive Separation Level 2
+```cpp
+        if (sep_clusters.size() >= 2) {
+            // Add additional clusters from second separation
+            for (size_t k = 2; k < sep_clusters.size(); k++) {
+                new_clusters.push_back(sep_clusters.at(k));
+            }
+
+            Cluster* cluster4 = sep_clusters.at(1);
+            final_sep_cluster = cluster4;
+            length_1 = cluster4->get_length();
+
+            // Third level check
+            if (length_1 > 100 * units::cm) {
+                boundary_points.clear();
+                independent_points.clear();
+```
+
+### Recursive Separation Level 3
+```cpp
+                if (JudgeSeparateDec_1(cluster4, drift_dir, length_1, live_time_slice_width) &&
+                    JudgeSeparateDec_2(cluster4, drift_dir, boundary_points, independent_points, length_1)) {
+                    
+                    std::vector<Cluster*> sep_clusters = Separate_1(use_ctpc, cluster4, 
+                        boundary_points, independent_points,
+                        dead_u_index, dead_v_index, dead_w_index, length_1);
+
+                    Cluster* cluster5 = sep_clusters.at(0);
+                    new_clusters.push_back(cluster5);
+                    temp_del_clusters.push_back(cluster4);
+
+                    if (sep_clusters.size() >= 2) {
+                        for (size_t k = 2; k < sep_clusters.size(); k++) {
+                            new_clusters.push_back(sep_clusters.at(k));
+                        }
+                        Cluster* cluster6 = sep_clusters.at(1);
+                        final_sep_cluster = cluster6;
+                    }
+                    else {
+                        final_sep_cluster = 0;
+                    }
+                }
+            }
+        }
+```
+
+### Final Cluster Processing
+```cpp
+if (final_sep_cluster != 0) {
+    length_1 = final_sep_cluster->get_length();
+
+    if (length_1 > 60 * units::cm) {
+        boundary_points.clear();
+        independent_points.clear();
+        
+        // Final separation attempt for long clusters
+        if (JudgeSeparateDec_1(final_sep_cluster, drift_dir, length_1, live_time_slice_width) &&
+            JudgeSeparateDec_2(final_sep_cluster, drift_dir, boundary_points, independent_points, length_1) &&
+            independent_points.size() > 0) {
+            
+            std::vector<Cluster*> sep_clusters = Separate_1(use_ctpc, final_sep_cluster,
+                boundary_points, independent_points,
+                dead_u_index, dead_v_index, dead_w_index, length_1);
+
+            Cluster* cluster5 = sep_clusters.at(0);
+            new_clusters.push_back(cluster5);
+            temp_del_clusters.push_back(final_sep_cluster);
+
+            if (sep_clusters.size() >= 2) {
+                // Process additional clusters
+                for (size_t k = 2; k < sep_clusters.size(); k++) {
+                    new_clusters.push_back(sep_clusters.at(k));
+                }
+                final_sep_cluster = sep_clusters.at(1);
+            }
+            else {
+                final_sep_cluster = 0;
+            }
+        }
+    }
+```
+
+### Final Separation Using Separate_2
+```cpp
+    if (final_sep_cluster != 0) {
+        // Use simpler separation algorithm for final pass
+        std::vector<Cluster*> final_sep_clusters = Separate_2(final_sep_cluster);
+        for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
+            new_clusters.push_back(*it);
+        }
+        temp_del_clusters.push_back(final_sep_cluster);
+    }
+}
+```
+
+## 2. Alternative Path for Shorter Clusters
+```cpp
+else if (cluster->get_length() < 6*units::m) {
+    std::vector<Cluster*> sep_clusters = Separate_1(use_ctpc, cluster,
+        boundary_points, independent_points,
+        dead_u_index, dead_v_index, dead_w_index,
+        cluster->get_length());
+
+    Cluster* cluster1 = sep_clusters.at(0);
+    new_clusters.push_back(cluster1);
+    del_clusters.push_back(cluster);
+
+    if (sep_clusters.size() >= 2) {
+        // Process additional clusters similar to main path
+        // but with simplified logic
+    }
+}
+```
+
+## Key Features of Separation Execution
+
+1. **Recursive Structure**
+   - Up to 3 levels of recursive separation
+   - Each level handles progressively smaller clusters
+   - Different criteria at each level
+
+2. **Length-Based Processing**
+   - Primary threshold: 100 cm
+   - Secondary threshold: 60 cm
+   - Maximum length: 6 meters
+
+3. **Memory Management**
+   - Tracks clusters to be deleted
+   - Manages temporary clusters
+   - Maintains cluster hierarchy
+
+4. **Protection Mechanisms**
+   - Multiple validation checks
+   - Size-based restrictions
+   - Geometric criteria at each level
+
+5. **Alternative Processing**
+   - Special handling for shorter clusters
+   - Simplified logic for certain cases
+   - Final cleanup using Separate_2
+
+This detailed separation execution shows how the function handles complex cluster configurations through multiple levels of recursive separation while maintaining cluster integrity and proper memory management.
+
+
+
 
 ### 7. Result Management
 ```cpp
