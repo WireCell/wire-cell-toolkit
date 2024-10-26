@@ -155,22 +155,217 @@ for (size_t j = 0; j != flag_u_pts.size(); j++) {
 }
 ```
 
-### 8. Cluster Formation
+# Cluster Formation Details in Separate_1
+
+## 1. Initial Classification of Blobs
 ```cpp
-// Create new clusters based on classification
-std::vector<Cluster*> final_clusters;
+const auto& mcells = cluster->children();
+std::map<const Blob*, int> mcell_np_map, mcell_np_map1;
 
-// Form initial clusters
+// Initialize maps
+for (auto it = mcells.begin(); it != mcells.end(); it++) {
+    mcell_np_map[*it] = 0;
+    mcell_np_map1[*it] = 0;
+}
+
+// Count points satisfying different criteria for each blob
+for (size_t j = 0; j != flag_u_pts.size(); j++) {
+    const Blob* mcell = cluster->blob_with_point(j);
+    
+    // Primary classification criterion
+    if (flag_u_pts.at(j) && flag_v_pts.at(j) && flag1_w_pts.at(j) ||
+        flag_u_pts.at(j) && flag_w_pts.at(j) && flag1_v_pts.at(j) ||
+        flag_w_pts.at(j) && flag_v_pts.at(j) && flag1_u_pts.at(j)) {
+        mcell_np_map[mcell]++;
+    }
+
+    // Secondary classification criterion
+    if (flag_u_pts.at(j) && flag_v_pts.at(j) && (flag2_w_pts.at(j) || flag1_w_pts.at(j)) ||
+        flag_u_pts.at(j) && flag_w_pts.at(j) && (flag2_v_pts.at(j) || flag1_v_pts.at(j)) ||
+        flag_w_pts.at(j) && flag_v_pts.at(j) && (flag2_u_pts.at(j) || flag1_u_pts.at(j))) {
+        mcell_np_map1[mcell]++;
+    }
+}
+```
+
+## 2. Initial Blob Assignment
+```cpp
+// blob (index) -> cluster_id mapping
+std::vector<int> b2groupid(cluster->nchildren(), 0);
+std::set<int> groupids;
+
+for (size_t idx=0; idx < mcells.size(); idx++) {  
+    Blob* mcell = mcells.at(idx);
+    
+    // Calculate total wire coverage
+    const size_t total_wires = mcell->u_wire_index_max() - mcell->u_wire_index_min() +
+                              mcell->v_wire_index_max() - mcell->v_wire_index_min() +
+                              mcell->w_wire_index_max() - mcell->w_wire_index_min();
+
+    // Assign blobs to groups based on point counts and wire coverage
+    if (mcell_np_map[mcell] > 0.5 * mcell->nbpoints() ||
+        (mcell_np_map[mcell] > 0.25 * mcell->nbpoints() && total_wires < 25)) {
+        b2groupid[idx] = 0;  // Main cluster
+        groupids.insert(0);
+    }
+    else if (mcell_np_map1[mcell] >= 0.95 * mcell->nbpoints()) {
+        b2groupid[idx] = -1;  // To be deleted (ghost cell)
+        groupids.insert(-1);
+    }
+    else {
+        b2groupid[idx] = 1;  // Secondary cluster
+        groupids.insert(1);
+    }
+}
+```
+
+## 3. Initial Cluster Separation
+```cpp
+// Perform initial separation based on group IDs
 auto clusters_step0 = cluster->separate<Cluster>(b2groupid);
+```
 
-// Handle secondary separation
+## 4. Secondary Separation and Processing
+```cpp
+std::vector<Cluster*> other_clusters;
 if (clusters_step0.find(1) != clusters_step0.end()) {
+    // Apply Separate_2 to secondary clusters
     other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
 }
 
-// Merge and refine clusters
-// Handle special cases and cleanup
+// Process main cluster if it exists
+if (clusters_step0.find(0) != clusters_step0.end()) {
 ```
+
+## 5. Cluster Merging Logic
+```cpp
+// Check for clusters that should be merged with main cluster
+std::vector<Cluster*> temp_merge_clusters;
+for (size_t i = 0; i != other_clusters.size(); i++) {
+    std::tuple<int, int, double> temp_dis = 
+        other_clusters.at(i)->get_closest_points(*clusters_step0[0]);
+        
+    if (std::get<2>(temp_dis) < 0.5 * units::cm) {
+        double length_1 = other_clusters.at(i)->get_length();
+        geo_point_t p1(end_wcpoint.x(), end_wcpoint.y(), end_wcpoint.z());
+        double close_dis = other_clusters.at(i)->get_closest_dis(p1);
+
+        // Check merging criteria
+        if (close_dis < 10 * units::cm && length_1 < 50 * units::cm) {
+            geo_point_t temp_dir1 = clusters_step0[0]->vhough_transform(p1, 15 * units::cm);
+            geo_point_t temp_dir2 = other_clusters.at(i)->vhough_transform(p1, 15 * units::cm);
+            
+            // Angle-based merging decisions
+            if (temp_dir1.angle(temp_dir2) / 3.1415926 * 180. > 145 && 
+                length_1 < 30 * units::cm && close_dis < 3 * units::cm ||
+                fabs(temp_dir1.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3 &&
+                fabs(temp_dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 3) {
+                temp_merge_clusters.push_back(other_clusters.at(i));
+            }
+        }
+    }
+}
+```
+
+## 6. Executing Mergers
+```cpp
+// Perform merging operations
+for (auto temp_cluster : temp_merge_clusters) {
+    clusters_step0[0]->take_children(*temp_cluster, true);
+    grouping->remove_child(*temp_cluster);
+}
+
+final_clusters.push_back(clusters_step0[0]);
+```
+
+## 7. Additional Cluster Analysis
+```cpp
+// Further analysis of remaining clusters
+std::vector<Cluster*> saved_clusters;
+std::vector<Cluster*> to_be_merged_clusters;
+
+for (size_t i = 0; i != other_clusters.size(); i++) {
+    bool flag_save = false;
+    double length_1 = other_clusters.at(i)->get_length();
+    
+    // Analysis for short clusters
+    if (length_1 < 30 * units::cm && std::get<2>(temp_dis) < 5 * units::cm) {
+        int temp_total_points = other_clusters.at(i)->npoints();
+        int temp_close_points = 0;
+        
+        // Count close points
+        for (size_t j = 0; j != other_clusters.at(i)->npoints(); j++) {
+            geo_point_t test_point = other_clusters.at(i)->point3d(j);
+            if (clusters_step0[0]->get_closest_dis(test_point) < 10 * units::cm) {
+                temp_close_points++;
+            }
+        }
+        
+        // Decision based on point proximity
+        if (temp_close_points > 0.7 * temp_total_points) {
+            saved_clusters.push_back(other_clusters.at(i));
+            flag_save = true;
+        }
+    }
+    
+    // Analysis for longer clusters
+    else if (std::get<2>(temp_dis) < 2.5 * units::cm && length_1 >= 30 * units::cm) {
+        // Similar point proximity analysis with different thresholds
+    }
+
+    if (!flag_save) 
+        to_be_merged_clusters.push_back(other_clusters.at(i));
+}
+```
+
+## 8. Final Protection and Cleanup
+```cpp
+// Additional protection checks
+std::vector<Cluster*> temp_save_clusters;
+for (size_t i = 0; i != saved_clusters.size(); i++) {
+    Cluster* cluster1 = saved_clusters.at(i);
+    if (cluster1->get_length() < 5 * units::cm) 
+        continue;
+        
+    // Check against to-be-merged clusters
+    for (size_t j = 0; j != to_be_merged_clusters.size(); j++) {
+        Cluster* cluster2 = to_be_merged_clusters.at(j);
+        if (cluster2->get_length() < 10 * units::cm) 
+            continue;
+            
+        // Additional geometric checks
+        std::tuple<int, int, double> temp_dis = 
+            cluster1->get_closest_points(*cluster2);
+        if (std::get<2>(temp_dis) < 15 * units::cm &&
+            fabs(dir1.angle(dir2) - 3.1415926/2.)/3.1415926*180 > 75) {
+            temp_save_clusters.push_back(cluster1);
+            break;
+        }
+    }
+}
+```
+
+## 9. Final Cluster Organization
+```cpp
+// Create final cluster for merged segments
+Cluster& cluster2 = grouping->make_child();
+for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
+    cluster2.take_children(*to_be_merged_clusters[i], true);
+    grouping->remove_child(*to_be_merged_clusters[i]);
+}
+
+// Add clusters to final result
+final_clusters.push_back(&cluster2);
+for (size_t i = 0; i != saved_clusters.size(); i++) {
+    final_clusters.push_back(saved_clusters.at(i));
+}
+```
+
+This detailed breakdown shows how the function handles the complex task of organizing and merging clusters based on various geometric and proximity criteria, with multiple levels of protection against incorrect merging decisions.
+
+
+
+
 
 ## Key Features
 
