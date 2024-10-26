@@ -165,19 +165,56 @@ This algorithm is complex and operates in several steps:
    - Special handling for parallel tracks
    - Different thresholds based on track lengths
 
-The algorithm handles several specific cases:
-- Parallel tracks that might be segments of the same particle
-- Extended tracks that should be joined
-- Tracks with small gaps that should be connected
-- Special cases for different wire orientations (U, V, W)
+Let me break down the `Clustering_2nd_round` function, which appears to be part of a particle physics detector clustering algorithm that determines whether two clusters should be merged based on their geometric properties.
 
-The code shows specific geometric calculations and checks used to make merging decisions. The SVG visualization helps understand the geometric relationships between tracks and wire directions, while the flow diagram shows the overall decision process.
+Key Logic:
+1. Initial Length Filter: 
+```cpp
+if (length_1 < 10*units::cm && length_2 < 10*units::cm) return false;
+```
+- Rejects pairs where both clusters are shorter than 10cm
 
-Key thresholds include:
-- Minimum track length: 10cm
-- Standard merge distance: 35cm (default length_cut)
-- Extended merge distance: 80cm (for long tracks)
-- Minimum combined length for long tracks: 50cm
-- Various angle thresholds (7.5°, 15°, etc.)
+2. Main Distance Check:
+```cpp
+double dis = Find_Closest_Points(cluster1, cluster2, length_1, length_2, length_cut, p1, p2);
+```
+- Finds closest points between clusters and their distance
 
-Would you like me to elaborate on any specific part of this algorithm or create additional visualizations for particular cases?
+3. First Merge Criteria:
+```cpp
+if ((dis < length_cut || (dis < 80*units::cm && length_1 + length_2 > 50*units::cm && length_1>15*units::cm && length_2 > 15*units::cm)))
+```
+- Merges if either:
+  - Distance is less than length_cut (default 35cm)
+  - OR if clusters are long (>15cm each, sum >50cm) and relatively close (<80cm)
+
+4. Parallel Track Analysis:
+The function then does detailed analysis for parallel tracks by:
+- Checking if tracks are perpendicular to drift direction (X-axis)
+- Analyzing angles relative to U and V wire directions
+- Using Hough transforms to get cluster directions
+
+5. Key Parallel Cases:
+- U-wire parallel case:
+```cpp
+if ((fabs(angle2-3.1415926/2.)<7.5/180.*3.1415926 || (fabs(angle2-3.1415926/2.)<15/180.*3.1415926)&&dis <6*units::cm))
+```
+- V-wire parallel case:
+```cpp
+if ((fabs(angle3-3.1415926/2.)<7.5/180.*3.1415926 || (fabs(angle3-3.1415926/2.)<15/180.*3.1415926)&&dis <6*units::cm))
+```
+
+6. Prolonged Track Analysis:
+- Checks for tracks that might be prolongations of each other
+- Analyzes angles with respect to U, V, and W wire directions
+- Special handling for very close tracks (<5cm)
+
+The algorithm appears designed to handle several specific cases in particle tracking:
+1. Parallel tracks that might be segments of the same particle
+2. Extended tracks that should be joined
+3. Tracks with small gaps that should be connected
+4. Special cases for different wire orientations (U, V, W)
+
+The function uses multiple geometric criteria and angle checks to make decisions, with different thresholds for different scenarios. It's particularly careful about long tracks (>60cm) and has special handling for shorter tracks with different distance thresholds.
+
+The overall goal seems to be to join track segments that are likely from the same particle while avoiding false merges of truly separate tracks. This is achieved through careful geometric analysis and multiple validation steps for different track configurations.
