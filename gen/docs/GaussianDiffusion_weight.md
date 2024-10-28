@@ -2,7 +2,8 @@
 
 ## 1. Basic Setup and Goal
 
-The fundamental problem is to determine how to distribute charge between two adjacent wires when we have a continuous Gaussian distribution of charge. Let's walk through the mathematical derivation.
+Induced current of drifted charge is computed by convolution of continuous charge distribution and discrete field responses. 
+The fundamental problem is to determine how to distribute charge between two adjacent impact wire positions (where the field response is simulated; usually every 1/10th of the wire pitch), in order to effectively apply a linear interpolation of the field responses between the two impact positions, thus maintaining the continuity and accuracy of the simulated waveforms across impact positions along wire pitch orientation for any given charge. 
 
 ### Initial Conditions:
 - Gaussian distribution centered at μ with standard deviation σ
@@ -40,7 +41,7 @@ x_avg = (1/Q) * ∫(x₁ to x₂) x*G(x) dx
 ### Step 3: Weight Formula Derivation
 The weight formula:
 ```
-w(x) = -σ/(x₂-x₁) * (G₂-G₁)/(√2π) / Q + (μ-x₂)/(x₁-x₂)
+w(x) = -σ²/(x₂-x₁) * (G₂-G₁) / Q + (μ-x₂)/(x₁-x₂)
 ```
 
 This comes from combining:
