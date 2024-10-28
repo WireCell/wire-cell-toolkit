@@ -3,11 +3,12 @@
 ## 1. Basic Setup and Goal
 
 Induced current of drifted charge is computed by convolution of continuous charge distribution and discrete field responses. 
-The fundamental problem is to determine how to distribute charge between two adjacent impact wire positions (where the field response is simulated; usually every 1/10th of the wire pitch), in order to effectively apply a linear interpolation of the field responses between the two impact positions, thus maintaining the continuity and accuracy of the simulated waveforms across impact positions along wire pitch orientation for any given charge. 
+The fundamental problem is to determine how to distribute charge between two adjacent impact wire positions (where the field response is simulated; usually every 1/10th of the actual wire pitch), in order to effectively apply a linear interpolation of the field responses between the two impact positions, thus maintaining the continuity and accuracy of the simulated waveforms across impact positions along wire pitch orientation for any given charge. 
+Check page 38 of arXiv:1802.08709 for more detail.
 
 ### Initial Conditions:
 - Gaussian distribution centered at μ with standard deviation σ
-- Two adjacent wires at positions x₁ and x₂
+- Two adjacent impact wire positions at x₁ and x₂
 - Total charge Q in the region between x₁ and x₂
 
 ## 2. Mathematical Framework
@@ -20,8 +21,8 @@ G(x) = (1/√(2πσ²)) * exp(-(x-μ)²/(2σ²))
 ### Linear Interpolation Position:
 For any point x between two wires:
 ```
-w_linear(x) = (x₂ - x)/(x₂ - x₁)  [for wire at x₁]
-w_linear(x) = (x - x₁)/(x₂ - x₁)  [for wire at x₂]
+u_linear(x) = (x₂ - x)/(x₂ - x₁)  [for x₁ impact position]
+u_linear(x) = (x - x₁)/(x₂ - x₁)  [for x₂ impact position]
 ```
 
 ## 3. Weight Derivation Steps
@@ -41,12 +42,13 @@ x_avg = (1/Q) * ∫(x₁ to x₂) x*G(x) dx
 ### Step 3: Weight Formula Derivation
 The weight formula:
 ```
-w(x) = -σ²/(x₂-x₁) * (G₂-G₁) / Q + (μ-x₂)/(x₁-x₂)
+w₁ = σ²/(x₁-x₂) * (G(x₁)-G(x₂)) / Q + (μ-x₂)/(x₁-x₂) [for x₁ impact position]
+w₂ = 1 - w₁ [for x₂ impact position]
 ```
 
 This comes from combining:
 1. The normalized derivative of the Gaussian (rate of change term)
-2. Linear interpolation based on the center position
+2. Constant term based on the distance from the central/peak position of the charge
 
 ## 4. Physical Interpretation
 
@@ -134,7 +136,7 @@ The weight calculation balances two physical aspects:
         
         <!-- Formula -->
         <text x="400" y="100" text-anchor="middle" font-size="12">
-            w(x) = -σ/(x₂-x₁) * (G₂-G₁)/(√2π) / Q + (μ-x₂)/(x₁-x₂)
+            w(x) = σ²/(x₁-x₂) * (G(x₁)-G(x₂)) / Q + (μ-x₂)/(x₁-x₂)
         </text>
     </g>
 </svg>
@@ -159,7 +161,7 @@ The mathematical interpretation of the weight calculation can be understood in t
 3. **Weight Calculation Components**
    The weight formula combines two essential physical aspects:
 
-   a) **Gaussian Derivative Term**: `-σ/(x₂-x₁) * (G₂-G₁)/(√2π) / Q`
+   a) **Gaussian Derivative Term**: `σ²/(x₁-x₂) * (G(x₁)-G(x₂)) / Q`
       - Represents how quickly the charge distribution changes
       - Accounts for the shape of the Gaussian
       - Normalized by total charge Q to maintain conservation
@@ -187,7 +189,7 @@ The key insights behind this formulation are:
    - Numerically stable
    - Handles edge cases appropriately
 
-The diagrams show:
+The diagrams [need to be fixed] show:
 1. The basic setup with the Gaussian distribution and wire positions
 2. The charge integration between wires
 3. The components of the weight calculation
