@@ -77,6 +77,7 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
     }
 
     std::vector<ITrace::vector> tracesvin;
+    std::vector<IFrame::trace_summary_t> summariesvin; //added Ewerton 2023-10-04    
 
     // size_t ntraces = 0;
     size_t ntags = m_tags.size();
@@ -86,32 +87,51 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
     }
     else {
         tracesvin.resize(ntags);
+        summariesvin.resize(ntags);
         for (size_t ind = 0; ind < ntags; ++ind) {
             std::string tag = m_tags[ind];
             tracesvin[ind] = Aux::tagged_traces(in, tag);
+            summariesvin[ind] = in->trace_summary(tag);//added Ewerton 2023-10-04
+            std::cerr << "\nChannelSelector: tag=" << tag << "\n";//added Ewerton 2023-10-04
             // ntraces += tracesvin[ind].size();
         }
     }
-    
+
+
     ITrace::vector out_traces;
     std::vector<IFrame::trace_list_t> tagged_trace_indices;
+    std::vector<IFrame::trace_summary_t> tagged_trace_summaries;//added Ewerton 2023-10-04
+
 
     for (size_t ind = 0; ind < tracesvin.size(); ++ind) {
+        //std::cerr << "\n tracesvin[ind].size()=" << tracesvin[ind].size() << "\n";//added Ewerton 2023-10-02
         auto& traces = tracesvin[ind];
-
+        auto& summary = summariesvin[ind];//added Ewerton 2023-10-04
         IFrame::trace_list_t tl;
+        IFrame::trace_summary_t thl; //added Ewerton 2023-10-04
         for (size_t trind = 0; trind < traces.size(); ++trind) {
             auto& trace = traces[trind];
+            // DEBUG Ewerton 2024-04-15
+            std::cerr << "\n [ChannelSelector] summary.size()=" << summary.size() << "\n";
+            // end DEBUG
+           auto threshold = summary.size() ? summary[trind] : -999; // added Ewerton 2023-10-04
             if (m_channels.find(trace->channel()) == m_channels.end()) {
                 continue;
             }
             tl.push_back(out_traces.size());
+            if(summary.size()) thl.push_back(threshold); //added Ewerton 2023-10-04
             out_traces.push_back(trace);
+            // summary[trind] => element
+            // trind => element index
+            // sl.push_back(out..) => index of trace in out_traces
         }
         tagged_trace_indices.push_back(tl);
+        tagged_trace_summaries.push_back(thl); //empty vector if there is no summary for given tag. added Ewerton 2023-10-04
     }
 
-    auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick());
+    auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick()); // original
+    //auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick(), in->masks()); // changed Ewerton 2023-10-??
+
     if (ntags) {
         for (size_t ind = 0; ind < ntags; ++ind) {
             std::string tag = m_tags[ind];
@@ -121,7 +141,11 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
                 }
             }
             else {
-                sf->tag_traces(tag, tagged_trace_indices[ind]);
+                //sf->tag_traces(tag, tagged_trace_indices[ind]); //original. commented Ewerton 2023-10-02
+                if(tagged_trace_summaries[ind].size())
+                  sf->tag_traces(tag, tagged_trace_indices[ind], tagged_trace_summaries[ind]); //added Ewerton 2023-10-04
+                else
+                  sf->tag_traces(tag, tagged_trace_indices[ind]); //added Ewerton 2023-10-04
             }
         }
     }
@@ -143,6 +167,25 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
     std::stringstream info;
     info << "input " << Aux::taginfo(in) << " output: " << Aux::taginfo(out);
     log->debug(info.str());
+
+       
+/*
+Waveform::ChannelMaskMap deb_masks = out->masks(); //default cmm from masks() function is empty cmm -> create local CMM?
+std::cerr << "\n ChannelSelector deb_masks.size()=" << deb_masks.size() << "\n\n";    std::string cmm_tag("bad"); // use single tag for cmm: "bad"
+Waveform::ChannelMasks chm = deb_masks[cmm_tag]; // use single tag for now: "bad"
+int deleteme2=0;
+for(auto cm : chm)
+{
+  deleteme2++;
+  if(deleteme2<10) {
+    auto ch = cm.first;
+    std::cerr << "\n ChannelSelector ChannelMaskMap: ch=" << ch << "\n\n";
+    Waveform::BinRangeList br = cm.second;
+    for(auto r : br) std::cerr << "\n ChannelSelector rlow=" << r.first << ", rup=" << r.second;
+  }
+}
+*/    
+// ------------end debug Ewerton 2023-08-22 ------------
 
     return true;
 }
