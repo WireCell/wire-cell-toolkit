@@ -8,9 +8,7 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
-    Grouping& live_grouping,
-    const double low_limit,
-    const double high_limit
+    Grouping& live_grouping
     )
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
@@ -26,7 +24,7 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
         // only examine big clusters ...
         if (cluster->get_length() > 5 * units::cm && cluster->get_length() < 150 * units::cm) {
             // cluster->Create_point_cloud();
-            std::unordered_map<int, Cluster*> id2clusters = cluster->examine_x_boundary(low_limit, high_limit);
+            std::unordered_map<int, Cluster*> id2clusters = cluster->examine_x_boundary(tp.FV_xmin, tp.FV_xmax);
             // if (clusters.size() != 0) {
             //     del_clusters.push_back(cluster);
             //     std::copy(clusters.begin(), clusters.end(), std::back_inserter(new_clusters));

@@ -328,11 +328,11 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
 
 
 void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
-                                   std::map<int, std::pair<double, double>> &dead_u_index,
-                                   std::map<int, std::pair<double, double>> &dead_v_index,
-                                   std::map<int, std::pair<double, double>> &dead_w_index,
                                    const bool use_ctpc)
 {
+    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
+    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
+    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
     // std::cout << "dead_u_index size: " << dead_u_index.size() << std::endl;
     // std::cout << "dead_v_index size: " << dead_v_index.size() << std::endl;
     // std::cout << "dead_w_index size: " << dead_w_index.size() << std::endl;

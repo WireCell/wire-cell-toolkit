@@ -72,6 +72,8 @@ namespace WireCell::PointCloud::Facade {
         float_t tick_drift{drift_speed * tick};  // tick * speed
         float_t time_offset{-1600 * units::us};
         int nticks_live_slice{4};
+        float_t FV_xmin{-1*units::cm};
+        float_t FV_xmax{257*units::cm};
     };
 
 

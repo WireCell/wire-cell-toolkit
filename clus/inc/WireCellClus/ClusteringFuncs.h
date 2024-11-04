@@ -260,31 +260,131 @@ namespace WireCell::PointCloud::Facade {
     //                          std::map<int, std::pair<double, double>>& dead_w_index);
 
     void clustering_separate(Grouping& live_grouping,
-                             std::map<int, std::pair<double, double>>& dead_u_index,
-                             std::map<int, std::pair<double, double>>& dead_v_index,
-                             std::map<int, std::pair<double, double>>& dead_w_index,
                              const bool use_ctpc);
+    class ClusteringSeparate {
+       public:
+        ClusteringSeparate(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            use_ctpc_ = get(config, "use_ctpc", true);
+        }
 
-    void clustering_connect1(Grouping& live_grouping,
-                             std::shared_ptr<const DynamicPointCloud> global_point_cloud,
-                             std::map<int, std::pair<double, double>> &dead_u_index,
-                             std::map<int, std::pair<double, double>> &dead_v_index,
-                             std::map<int, std::pair<double, double>> &dead_w_index);
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_separate(live_clusters, use_ctpc_);
+            return {};
+        }
+
+       private:
+        double use_ctpc_{true};
+    };
+
+    void clustering_connect1(Grouping& live_grouping);
+    class ClusteringConnect1 {
+       public:
+        ClusteringConnect1(const WireCell::Configuration& config)
+        {
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_connect1(live_clusters);
+            return {};
+        }
+
+       private:
+    };
 
     void clustering_deghost(Grouping& live_grouping,
-                            std::map<int, std::pair<double, double>>& dead_u_index,
-                            std::map<int, std::pair<double, double>>& dead_v_index,
-                            std::map<int, std::pair<double, double>>& dead_w_index,
                             const bool use_ctpc,
                             double length_cut = 0);
+    class ClusteringDeGhost {
+       public:
+        ClusteringDeGhost(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            use_ctpc_ = get(config, "use_ctpc", true);
+            length_cut_ = get(config, "length_cut", 0);
+        }
 
-    void clustering_examine_x_boundary(Grouping& live_grouping, const double low_limit, const double high_limit);
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_deghost(live_clusters, use_ctpc_, length_cut_);
+            return {};
+        }
+
+       private:
+        double use_ctpc_{true};
+        double length_cut_{0};
+    };
+
+    void clustering_examine_x_boundary(Grouping& live_grouping);
+    class ClusteringExamineXBoundary {
+       public:
+        ClusteringExamineXBoundary(const WireCell::Configuration& config)
+        {
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_examine_x_boundary(live_clusters);
+            return {};
+        }
+
+       private:
+    };
 
     void clustering_protect_overclustering(Grouping& live_grouping);
+    class ClusteringProtectOverClustering {
+       public:
+        ClusteringProtectOverClustering(const WireCell::Configuration& config)
+        {
+        }
 
-    void clustering_neutrino(Grouping &live_grouping, int num_try, const double low_limit, const double high_limit);
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_protect_overclustering(live_clusters);
+            return {};
+        }
+
+       private:
+    };
+
+    void clustering_neutrino(Grouping &live_grouping, int num_try);
+    class ClusteringNeutrino {
+       public:
+        ClusteringNeutrino(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            num_try_ = get(config, "num_try", 1);
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            for (int i = 0; i != num_try_; i++) {
+                clustering_neutrino(live_clusters, i);
+            }
+            return {};
+        }
+
+       private:
+        int num_try_{1};
+    };
 
     map_cluster_cluster_vec clustering_isolated(Grouping& live_grouping);
+    class ClusteringIsolated {
+       public:
+        ClusteringIsolated(const WireCell::Configuration& config)
+        {
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            return clustering_isolated(live_clusters);
+        }
+
+       private:
+    };
 
 
     // time_slice_length is length span for a slice
@@ -320,6 +420,27 @@ namespace WireCell::PointCloud::Facade {
         }
         else if (function_name == "clustering_extend_loop") {
             return ClusteringExtendLoop(config);
+        }
+        else if (function_name == "clustering_separate") {
+            return ClusteringSeparate(config);
+        }
+        else if (function_name == "clustering_connect1") {
+            return ClusteringConnect1(config);
+        }
+        else if (function_name == "clustering_deghost") {
+            return ClusteringDeGhost(config);
+        }
+        else if (function_name == "clustering_examine_x_boundary") {
+            return ClusteringExamineXBoundary(config);
+        }
+        else if (function_name == "clustering_protect_overclustering") {
+            return ClusteringProtectOverClustering(config);
+        }
+        else if (function_name == "clustering_neutrino") {
+            return ClusteringNeutrino(config);
+        }
+        else if (function_name == "clustering_isolated") {
+            return ClusteringIsolated(config);
         }
         else {
             throw std::invalid_argument("Unknown function name in configuration");

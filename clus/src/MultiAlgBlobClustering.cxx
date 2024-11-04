@@ -281,6 +281,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     log->debug("dead_w_index size {}", dead_w_index.size());
 
 #define __HIDE__
+
     for (const auto& func_cfg : m_func_cfgs) {
         std::cout << "func_cfg: " << func_cfg << std::endl;
         auto func = getClusteringFunction(func_cfg);
@@ -338,11 +339,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         }
         perf.dump("clustering extend 4", live_grouping);
     }
+
     // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
-    clustering_separate(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
+    clustering_separate(live_grouping, true);
     // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
     perf.dump("clustering_separate", live_grouping);
-
 
     const auto &tp = live_grouping.get_params();
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
@@ -367,13 +368,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     clustering_deghost(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
     perf.dump("clustering_deghost", live_grouping);
 
-    clustering_examine_x_boundary(live_grouping, m_x_boundary_low_limit, m_x_boundary_high_limit);
+    clustering_examine_x_boundary(live_grouping);
     perf.dump("clustering_examine_x_boundary", live_grouping);
 
     clustering_protect_overclustering(live_grouping);
     perf.dump("clustering_protect_overclustering", live_grouping);
-#endif
-#ifndef __HIDE__
 #endif
 
     // BEE debug dead-live

@@ -8,19 +8,24 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-#define __DEBUG__
+// #define __DEBUG__
 #ifdef __DEBUG__
 #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 #else
 #define LogDebug(x)
 #endif
 
-void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
-                                                       std::shared_ptr<const DynamicPointCloud> global_point_cloud,
-                                                       std::map<int, std::pair<double, double>> &dead_u_index,
-                                                       std::map<int, std::pair<double, double>> &dead_v_index,
-                                                       std::map<int, std::pair<double, double>> &dead_w_index)
+void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
 {
+    const auto &tp = live_grouping.get_params();
+    auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
+    for (const Cluster *cluster : live_grouping.children()) {
+        global_point_cloud->add_points(cluster, 0);
+    }
+    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
+    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
+    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
+
     LogDebug("global_point_cloud.get_num_points() " << global_point_cloud->get_num_points());
     LogDebug("dead_u_index.size() " << dead_u_index.size() << " dead_v_index.size() " << dead_v_index.size() << " dead_w_index.size() " << dead_w_index.size());
     // sort the clusters length ...
@@ -29,7 +34,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping,
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    const auto &tp = live_grouping.get_params();
     double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
 
     auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);

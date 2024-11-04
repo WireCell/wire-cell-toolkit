@@ -8,8 +8,7 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try, const double low_limit,
-                                                       const double high_limit)
+void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
@@ -40,7 +39,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         // el_wcps.first.x()/units::cm << " " << el_wcps.second.x()/units::cm << std::endl;
 
         // if (el_wcps.first.x() < -1 * units::cm || el_wcps.second.x() > 257 * units::cm ||
-        if (el_wcps.first.x() < low_limit || el_wcps.second.x() > high_limit || cluster->get_length() < 6.0 * units::cm)
+        if (el_wcps.first.x() < mp.FV_xmin || el_wcps.second.x() > mp.FV_xmax || cluster->get_length() < 6.0 * units::cm)
             continue;
 
         bool flag_fy = false;
