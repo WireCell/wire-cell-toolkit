@@ -1719,7 +1719,7 @@ std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
         }
     }
     // std::cout << "before separate, cluster has " << cluster->nchildren() << " children " << " with " << groupids.size() << " groups" << std::endl;
-    auto clusters_step0 = cluster->separate<Cluster>(b2groupid);
+    auto clusters_step0 = cluster->separate<Cluster, Grouping>(b2groupid);
     // std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
     // for (int id : groupids) {
     //     std::cout << "separated cluster " << id << " has " << clusters_step0[id]->nchildren() << " children" << std::endl;
@@ -2033,7 +2033,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster
     std::vector<int> component(num_vertices(graph));
     const int num = connected_components(graph, &component[0]);
     // return component;
-    auto id2cluster = cluster->separate<Cluster>(component);
+    auto id2cluster = cluster->separate<Cluster, Grouping>(component);
     std::vector<Cluster*> ret;
     for (auto [id, cluster] : id2cluster) {
         ret.push_back(cluster);

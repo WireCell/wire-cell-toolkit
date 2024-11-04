@@ -901,7 +901,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     const int bind = cluster->kd3d().major_index(i);
                     b2groupid.at(bind) = component1[i];
                 }
-                return cluster->separate<Cluster>(b2groupid);
+                return cluster->separate<Cluster, Grouping>(b2groupid);
             }
         }
 

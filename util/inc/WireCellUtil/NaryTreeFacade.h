@@ -200,17 +200,19 @@ namespace WireCell::NaryTree {
         }
 
 
-        // assumes it has a parent and children, make a vector of concrete_self_type* and each one has
+        // assumes it has a parent and children, make a vector of SelfType* and each one has
         // a subset of children. the length of gorups must match the number of children.
         // children with negative group number will be removed
-        template<typename concrete_self_type>
-        std::unordered_map<int, concrete_self_type*> separate(const std::vector<int>& groups, bool notify_value=true) {
+        template<typename SelfType, typename ParentType>
+        std::unordered_map<int, SelfType*> separate(const std::vector<int>& groups, bool notify_value=true) {
             // std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
             if(groups.size() != nchildren()) {
                 raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
             }
             auto parent = this->m_node->parent;
-            std::unordered_map<int, concrete_self_type*> id2facade;
+            auto parent_facade = parent->value.template facade<ParentType>();
+            parent_facade->invalidate_children(); // clear the facade cache
+            std::unordered_map<int, SelfType*> id2facade;
             const auto orig_children = children(); // make a copy
             for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
                 // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
@@ -219,8 +221,8 @@ namespace WireCell::NaryTree {
                 auto* child = orig_children[ichild];
                 if (id2facade.find(groups[ichild]) == id2facade.end()) {
                     node_type* new_snode = parent->insert(notify_value);
-                    new_snode->value.set_facade(std::make_unique<concrete_self_type>());
-                    auto new_facade = new_snode->value.template facade<concrete_self_type>();
+                    new_snode->value.set_facade(std::make_unique<SelfType>());
+                    auto new_facade = new_snode->value.template facade<SelfType>();
                     id2facade[groups[ichild]] = new_facade;
                 }
                 // std::cout << "id2facade size: " << id2facade.size() << std::endl;
@@ -228,24 +230,18 @@ namespace WireCell::NaryTree {
                 new_facade->m_node->insert(child->node(), notify_value);
                 // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
             }
-            parent->remove(this->m_node, notify_value);
-            // std::vector<concrete_self_type*> ret;
-            // for (auto it = id2facade.begin(); it != id2facade.end(); it++) {
-            //     ret.push_back(it->second);
-            // }
-            // std::cout << "ret size: " << ret.size() << std::endl;
             // remove self from parent
-            // return ret;
+            parent->remove(this->m_node, notify_value);
             return id2facade;
+        }
+
+        void invalidate_children() {
+            m_children.clear();
         }
 
     private:
         // Lazy cache of children facades.
         children_type m_children;
-
-        void invalidate_children() {
-            m_children.clear();
-        }
 
 
     };

@@ -24,7 +24,12 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
         // only examine big clusters ...
         if (cluster->get_length() > 5 * units::cm && cluster->get_length() < 150 * units::cm) {
             // cluster->Create_point_cloud();
+            // std::cout << "Cluster " << i << " old pointer " << cluster << " nchildren " << cluster->nchildren() << std::endl;
             std::unordered_map<int, Cluster*> id2clusters = cluster->examine_x_boundary(tp.FV_xmin, tp.FV_xmax);
+            // std::cout << "Cluster " << i << " is seperated into " << id2clusters.size() << " clusters" << std::endl;
+            // for (auto [id, ncluster] : id2clusters) {
+            //     std::cout << "id " << id << " new pointer " << ncluster << " nchildren " << ncluster->nchildren() << std::endl;
+            // }
             // if (clusters.size() != 0) {
             //     del_clusters.push_back(cluster);
             //     std::copy(clusters.begin(), clusters.end(), std::back_inserter(new_clusters));

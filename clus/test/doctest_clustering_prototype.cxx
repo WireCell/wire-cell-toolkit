@@ -407,7 +407,7 @@ TEST_CASE("Facade separate")
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
     std::vector<int> groups = {42, 128};
-    auto id2cluster = pcc.separate<Cluster>(groups);
+    auto id2cluster = pcc.separate<Cluster, Grouping>(groups);
     debug("separate into {} clusters", id2cluster.size());
     CHECK(id2cluster.size() == 2);
     for (auto [id, cluster] : id2cluster) {
