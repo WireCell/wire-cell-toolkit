@@ -33,10 +33,36 @@ namespace WireCell::PointCloud::Facade {
     // clustering_live_dead.cxx
     // first function ...
     void clustering_live_dead(Grouping& live_clusters,
-			      const Grouping& dead_clusters,
-                              cluster_set_t& cluster_connected_dead, // in/out
-                              const int dead_live_overlap_offset // specific params
+                              const Grouping& dead_clusters,
+                              cluster_set_t& cluster_connected_dead,  // in/out
+                              const int dead_live_overlap_offset      // specific params
     );
+    class ClusteringLiveDead {
+       public:
+        ClusteringLiveDead(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            const int dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_);
+        }
+
+       private:
+        int dead_live_overlap_offset_{2};
+    };
+
+    inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
+        std::string function_name = config["name"].asString();
+
+        if (function_name == "clustering_live_dead") {
+            return ClusteringLiveDead(config);
+        } else {
+            throw std::invalid_argument("Unknown function name in configuration");
+        }
+    }
 
     // clustering_extend.cxx
     //helper function ..

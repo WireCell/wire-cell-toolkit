@@ -7,7 +7,10 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
-
+/**
+ * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
+ * @return large cluster -> {small cluster, distance} 
+*/
 map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy

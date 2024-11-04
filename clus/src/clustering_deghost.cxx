@@ -8,7 +8,7 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-#define __DEBUG__
+// #define __DEBUG__
 #ifdef __DEBUG__
 #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 #else

@@ -47,6 +47,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
     m_x_boundary_low_limit = get(cfg, "x_boundary_low_limit", m_x_boundary_low_limit);
     m_x_boundary_high_limit = get(cfg, "x_boundary_high_limit", m_x_boundary_high_limit);
+
+    m_func_cfgs = cfg["func_cfgs"];
+
+
     m_perf = get(cfg, "perf", m_perf);
 
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
@@ -277,6 +281,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     log->debug("dead_w_index size {}", dead_w_index.size());
 
 #define __HIDE__
+    for (const auto& func_cfg : m_func_cfgs) {
+        std::cout << "func_cfg: " << func_cfg << std::endl;
+        auto func = getClusteringFunction(func_cfg);
+        func(live_grouping, dead_grouping, cluster_connected_dead);
+        perf.dump(func_cfg["name"].asString(), live_grouping);
+    }
 #ifndef __HIDE__
     // dead_live
     clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
@@ -359,10 +369,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     clustering_examine_x_boundary(live_grouping, m_x_boundary_low_limit, m_x_boundary_high_limit);
     perf.dump("clustering_examine_x_boundary", live_grouping);
-#endif
 
     clustering_protect_overclustering(live_grouping);
     perf.dump("clustering_protect_overclustering", live_grouping);
+#endif
+#ifndef __HIDE__
+#endif
 
     // BEE debug dead-live
     // if (!m_bee_dir.empty()) {

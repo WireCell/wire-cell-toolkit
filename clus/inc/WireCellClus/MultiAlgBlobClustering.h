@@ -74,6 +74,8 @@ namespace WireCell::Clus {
         double m_x_boundary_low_limit{-1*units::cm};
         double m_x_boundary_high_limit{257*units::cm};
 
+        Configuration m_func_cfgs;
+
         // 
         IAnodePlane::pointer m_anode;
     };
