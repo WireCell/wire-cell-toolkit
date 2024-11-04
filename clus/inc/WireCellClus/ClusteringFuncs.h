@@ -42,27 +42,18 @@ namespace WireCell::PointCloud::Facade {
         ClusteringLiveDead(const WireCell::Configuration& config)
         {
             // FIXME: throw if not found?
-            const int dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
+            dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_);
+            return {};
         }
 
        private:
         int dead_live_overlap_offset_{2};
     };
-
-    inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
-        std::string function_name = config["name"].asString();
-
-        if (function_name == "clustering_live_dead") {
-            return ClusteringLiveDead(config);
-        } else {
-            throw std::invalid_argument("Unknown function name in configuration");
-        }
-    }
 
     // clustering_extend.cxx
     //helper function ..
@@ -87,6 +78,65 @@ namespace WireCell::PointCloud::Facade {
                            const double length_2_cut = 3*units::cm,                       //
                            const int num_dead_try =3                                      //
 			   );
+    class ClusteringExtend {
+       public:
+        ClusteringExtend(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            flag_ = get(config, "flag", 0);
+            length_cut_ = get(config, "length_cut", 150*units::cm);
+            num_try_ = get(config, "num_try", 0);
+            length_2_cut_ = get(config, "length_2_cut", 3*units::cm);
+            num_dead_try_ = get(config, "num_dead_try", 3);
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_extend(live_clusters, cluster_connected_dead, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
+            return {};
+        }
+
+       private:
+        int flag_{0};
+        double length_cut_{150*units::cm};
+        int num_try_{0};
+        double length_2_cut_{3*units::cm};
+        int num_dead_try_{3};
+    };
+    class ClusteringExtendLoop {
+       public:
+        ClusteringExtendLoop(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            num_try_ = get(config, "num_try", 0);
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            // for very busy events do less ...
+            int num_try = num_try_;
+            if (live_clusters.nchildren() > 1100) num_try = 1;
+            for (int i = 0; i != num_try; i++) {
+                // deal with prolong case
+                clustering_extend(live_clusters, cluster_connected_dead, 1, 150*units::cm, 0);
+                // deal with parallel case
+                clustering_extend(live_clusters, cluster_connected_dead, 2, 30*units::cm, 0);
+                // extension regular case
+                clustering_extend(live_clusters, cluster_connected_dead, 3, 15*units::cm, 0);
+                // extension ones connected to dead region ...
+                if (i == 0) {
+                    clustering_extend(live_clusters, cluster_connected_dead, 4, 60 * units::cm, i);
+                }
+                else {
+                    clustering_extend(live_clusters, cluster_connected_dead, 4, 35 * units::cm, i);
+                }
+            }
+            return {};
+        }
+
+       private:
+        int num_try_{0};
+    };
 
     bool Clustering_4th_prol(const Cluster& cluster1,
 			     const Cluster& cluster2,
@@ -119,6 +169,25 @@ namespace WireCell::PointCloud::Facade {
                             const double length_cut = 45*units::cm,                                       //
                             bool flag_enable_extend = true                                       //
     );
+    class ClusteringRegular {
+       public:
+        ClusteringRegular(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            length_cut_ = get(config, "length_cut", 45*units::cm);
+            flag_enable_extend_ = get(config, "flag_enable_extend", true);
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_regular(live_clusters, cluster_connected_dead, length_cut_, flag_enable_extend_);
+            return {};
+        }
+
+       private:
+        double length_cut_{45*units::cm};
+        bool flag_enable_extend_{true};
+    };
 
     bool Clustering_1st_round(const Cluster& cluster1,
 			      const Cluster& cluster2,
@@ -132,6 +201,23 @@ namespace WireCell::PointCloud::Facade {
                                      cluster_set_t& cluster_connected_dead, // in/out
                                      const double length_cut = 35*units::cm
     );
+    class ClusteringParallelProlong {
+       public:
+        ClusteringParallelProlong(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            length_cut_ = get(config, "length_cut", 35*units::cm);
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_parallel_prolong(live_clusters, cluster_connected_dead, length_cut_);
+            return {};
+        }
+
+       private:
+        double length_cut_{35*units::cm};
+    };
 
     bool Clustering_2nd_round(const Cluster& cluster1,
 			      const Cluster& cluster2,
@@ -144,6 +230,23 @@ namespace WireCell::PointCloud::Facade {
                           cluster_set_t& cluster_connected_dead, // in/out
                           const double length_cut = 1*units::cm //
     );
+    class ClusteringClose {
+       public:
+        ClusteringClose(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+            length_cut_ = get(config, "length_cut", 1*units::cm);
+        }
+
+        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_close(live_clusters, cluster_connected_dead, length_cut_);
+            return {};
+        }
+
+       private:
+        double length_cut_{1*units::cm};
+    };
 
     bool Clustering_3rd_round( const Cluster& cluster1,
 			       const Cluster& cluster2,
@@ -196,4 +299,30 @@ namespace WireCell::PointCloud::Facade {
 
     std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
 
+
+    inline std::function<map_cluster_cluster_vec(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
+        std::string function_name = config["name"].asString();
+
+        if (function_name == "clustering_live_dead") {
+            return ClusteringLiveDead(config);
+        }
+        else if (function_name == "clustering_extend") {
+            return ClusteringExtend(config);
+        }
+        else if (function_name == "clustering_regular") {
+            return ClusteringRegular(config);
+        }
+        else if (function_name == "clustering_parallel_prolong") {
+            return ClusteringParallelProlong(config);
+        }
+        else if (function_name == "clustering_close") {
+            return ClusteringClose(config);
+        }
+        else if (function_name == "clustering_extend_loop") {
+            return ClusteringExtendLoop(config);
+        }
+        else {
+            throw std::invalid_argument("Unknown function name in configuration");
+        }
+    }
 }  // namespace WireCell::PointCloud::Facade
