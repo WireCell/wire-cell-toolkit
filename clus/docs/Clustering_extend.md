@@ -3,6 +3,57 @@
 ## Overview
 `clustering_extend` is a comprehensive clustering function that manages different clustering strategies based on a flag parameter. It builds a graph of cluster connections and merges clusters based on various geometric criteria.
 
+```mermaid
+flowchart TD
+    A[Start] --> B[Initialize Directions, Graph, and Clusters]
+    B --> C{Loop through Live Clusters}
+    C --> D1{Check cluster_1 Length > Length_1_Cut}
+    D1 -->|Yes| E{Flag Check}
+    D1 -->|No| C
+    
+    %% Prolong Case
+    E -->|Flag == 1| F1[Calculate Earliest and Latest Points]
+    F1 --> G1[Calculate Directions for Earliest and Latest Points]
+    G1 --> H1{Angle < Threshold?}
+    H1 -->|Yes| I1[Loop through Clusters for Merging]
+    I1 --> J1{If cluster_2 Valid}
+    J1 -->|Yes| K1[Call Clustering_4th_prol]
+    K1 --> L1[Add Edge in Graph g if Merged]
+    L1 --> C
+    
+    %% Parallel Case
+    E -->|Flag == 2| F2[Calculate Highest and Lowest Points]
+    F2 --> G2[Calculate Directions for Highest and Lowest Points]
+    G2 --> H2{Angle < Threshold?}
+    H2 -->|Yes| I2[Loop through Clusters for Merging]
+    I2 --> J2{If cluster_2 Valid}
+    J2 -->|Yes| K2[Call Clustering_4th_para]
+    K2 --> L2[Add Edge in Graph g if Merged]
+    L2 --> C
+    
+    %% Regular Case
+    E -->|Flag == 3| F3[Determine Points for Merging]
+    F3 --> G3[Loop through Clusters for Merging]
+    G3 --> H3{If cluster_2 Valid}
+    H3 -->|Yes| I3[Call Clustering_4th_reg]
+    I3 --> J3[Add Edge in Graph g if Merged]
+    J3 --> C
+
+    %% Dead Cluster Case
+    E -->|Flag == 4| F4{Is Cluster in cluster_connected_dead?}
+    F4 -->|Yes| G4[Loop through Clusters for Merging]
+    G4 --> H4{If cluster_2 Length > Length_2_Cut}
+    H4 -->|Yes| I4[Call Clustering_4th_dead]
+    I4 --> J4[Add Edge in Graph g if Merged]
+    J4 --> C
+    
+    %% End Process
+    C -->|All Clusters Processed| M[Merge Clusters]
+    M --> N[End]
+
+
+```
+
 ## Function Signature
 ```cpp
 void clustering_extend(
