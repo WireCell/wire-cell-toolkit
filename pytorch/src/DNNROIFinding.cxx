@@ -325,9 +325,16 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         traces,
         inframe->tick(), inframe->masks());
     sframe->tag_frame("DNNROIFinding");
+    log->debug("call={} getting summary for tag {}", m_save_count, m_cfg.summary_tag);
     auto summary = get_summary_e(inframe, m_cfg.summary_tag);
+    std::string ss;
+    for (const auto& rms : summary) {
+        ss += fmt::format("{:.2f} ", rms);
+    }
+    log->trace("call={} summary: {}", m_save_count, ss);
     sframe->tag_traces(m_cfg.outtag, m_trace_indices, summary);
     outframe = IFrame::pointer(sframe);
+    log->debug("call={} output frame: {}", m_save_count, Aux::taginfo(outframe));
 
     log->debug(tk(fmt::format("call={} finish", m_save_count)));
     ++m_save_count;
