@@ -92,7 +92,7 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
             std::string tag = m_tags[ind];
             tracesvin[ind] = Aux::tagged_traces(in, tag);
             summariesvin[ind] = in->trace_summary(tag);//added Ewerton 2023-10-04
-            std::cerr << "\nChannelSelector: tag=" << tag << "\n";//added Ewerton 2023-10-04
+            // std::cerr << "\nChannelSelector: tag=" << tag << "\n";//added Ewerton 2023-10-04
             // ntraces += tracesvin[ind].size();
         }
     }
@@ -112,7 +112,7 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
         for (size_t trind = 0; trind < traces.size(); ++trind) {
             auto& trace = traces[trind];
             // DEBUG Ewerton 2024-04-15
-            std::cerr << "\n [ChannelSelector] summary.size()=" << summary.size() << "\n";
+            // std::cerr << "\n [ChannelSelector] summary.size()=" << summary.size() << "\n";
             // end DEBUG
            auto threshold = summary.size() ? summary[trind] : -999; // added Ewerton 2023-10-04
             if (m_channels.find(trace->channel()) == m_channels.end()) {
@@ -129,8 +129,8 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
         tagged_trace_summaries.push_back(thl); //empty vector if there is no summary for given tag. added Ewerton 2023-10-04
     }
 
-    auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick()); // original
-    //auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick(), in->masks()); // changed Ewerton 2023-10-??
+    // auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick()); // original
+    auto sf = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick(), in->masks()); // changed Ewerton 2023-10-??
 
     if (ntags) {
         for (size_t ind = 0; ind < ntags; ++ind) {
