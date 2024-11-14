@@ -7,6 +7,13 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+#define __DEBUG__
+#ifdef __DEBUG__
+#define LogDebug(x) std::cout << "[isolated]: " << __LINE__ << " : " << x << std::endl
+#else
+#define LogDebug(x)
+#endif
+
 /**
  * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
  * @return large cluster -> {small cluster, distance} 
@@ -40,11 +47,12 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
                 if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir, live_clusters.at(i)->get_length(),
                                        time_slice_width)) {
                     std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
+                    LogDebug(" Cluster " << i << "  separated into " << sep_clusters.size());
                     int max = 0;
                     double max_length = 0;
                     for (auto it = sep_clusters.begin(); it != sep_clusters.end(); it++) {
                         // std::tuple<int, int, int, int> ranges = (*it)->get_uvwt_range();
-                        std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
+                        std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
                         std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
                         double length_1 = sqrt(2. / 3. *
                                                    (pow(mp.pitch_u * ranges.at(0), 2) + pow(mp.pitch_v * ranges.at(1), 2) +
@@ -79,6 +87,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             }
         }
     }
+    LogDebug("big_clusters.size() = " << big_clusters.size() << " small_clusters.size() = " << small_clusters.size());
 
     std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
 
@@ -109,6 +118,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             used_small_clusters.insert(curr_cluster);
         }
     }
+    LogDebug("to_be_merged_pairs.size() = " << to_be_merged_pairs.size());
 
     // small distance ...
     double small_small_dis_cut = 5 * units::cm;
@@ -157,6 +167,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             }
         }
     }
+    LogDebug("clustering small with small ones " << to_be_merged_pairs.size());
 
     // clustering big ones ...
     // cloud1 is the longer one
@@ -237,6 +248,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             }
         }
     }
+    LogDebug("clustering big ones " << to_be_merged_pairs.size());
 
     // merge clusters
     std::vector<std::set<Cluster *>> merge_clusters;
@@ -322,6 +334,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             results[max_cluster].push_back(std::make_pair(temp_cluster, dis));
         }
     }
+    LogDebug("results.size() = " << results.size());
 
     return results;
 }
