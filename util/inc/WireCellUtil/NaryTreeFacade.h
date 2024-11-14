@@ -68,7 +68,8 @@ namespace WireCell::NaryTree {
 
         Faced() = default;
         Faced(Faced&& other) = default;
-
+        Faced& operator=(Faced&& other) = default;
+      
         virtual ~Faced() {}
 
         /// Access the facade as type.  May return nullptr.  Ownership is

@@ -1,1 +1,1 @@
-bld.smplpkg('WireCellHio', use='WireCellAux H5CPP HDF5', test_use='HDF5')
+bld.smplpkg('WireCellHio', use='WireCellAux HDF5', test_use='HDF5')

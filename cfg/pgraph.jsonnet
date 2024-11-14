@@ -168,6 +168,45 @@ local wc = import "wirecell.jsonnet";
     insert_node(pnode, edge_to_break, newhead, newtail, iport=0, oport=0, name=null):: 
     self.insert_one(pnode, self.find_indices(pnode.edges, edge_to_break)[0], newhead, newtail, iport, oport, name),
 
+    // Splice a sink-like subgraph sg with a number of open ports into a graph gr
+    // by breaking the same number of edges.  Edges are selected by a function:
+    //
+    // edge_selector(e) -> true/false
+    //
+    // returning true if an edge should be broken and a fan-out inserted.
+    // Fanouts are provided with inode (no pnode) bodies returned by a function
+    // of a broken edge count and the broken edge:
+    //
+    // fanout_factory(n,e) -> { type:"XxxFanout", name:"blah", data: {} }
+    //
+    // The fanout is strictly 1->2.
+    //
+    splice(gr, sg, edge_selector, fanout_factory)::
+        local gr_edges = $.edges(gr);
+        local break_edges = std.filter(edge_selector, gr_edges);
+        local same_size = std.assertEqual(std.length(break_edges), std.length(sg.iports));
+        local keep_edges = std.filter(function(e) !edge_selector(e), gr_edges);
+        local orig_source_ports = [e.tail for e in break_edges];
+        local orig_sink_ports = [e.head for e in break_edges];
+        local patch_iota = std.range(0, std.length(break_edges) -1);
+        local patch_fanouts = [
+            $.pnode(fanout_factory(num, break_edges[num]), nin=1, nout=2)
+            for num in patch_iota
+        ];
+        local new_edges = [ {
+            tail: patch_fanouts[ind].oports[1],
+            head: sg.iports[ind],
+        } for ind in patch_iota ];
+        local old_edges = [ {
+            tail: patch_fanouts[ind].oports[0],
+            head: orig_sink_ports[ind]
+        } for ind in patch_iota ];
+        local to_fans = [ {
+            tail: orig_source_ports[ind],
+            head: patch_fanouts[ind].iports[0],
+        } for ind in patch_iota ];
+        $.intern(centernodes = [gr { edges: keep_edges}, sg] + patch_fanouts,
+                 edges = keep_edges + new_edges + old_edges + to_fans),
 
     // Joint N sources using joiner, return pnode that looks like a
     // single source.  The joiner must be capable of handling and

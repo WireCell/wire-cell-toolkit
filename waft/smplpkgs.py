@@ -161,7 +161,9 @@ class ValidationContext:
         self.uses = to_list(uses)
 
         # fixme: ugly layer-busting hack.
-        self.script_environ['.bats'] = dict(BATS_LIB_PATH=bld.path.parent.find_dir("test").abspath())
+        tdir = bld.path.parent.find_dir("test")
+        if tdir:
+            self.script_environ['.bats'] = dict(BATS_LIB_PATH=tdir.abspath())
 
         # fixme: want to still build but just not run tests if --tests is omitted....
         # if not self.bld.env.TESTS:
@@ -405,6 +407,9 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
     test_use = list(set(use + to_list(test_use)))
     test_use.sort()
 
+    if not hasattr(bld, 'smplpkg_names'):
+        bld.smplpkg_names = list()
+    bld.smplpkg_names.append(name)    
     if not hasattr(bld, 'smplpkg_graph'):
         bld.smplpkg_graph = SimpleGraph()
     bld.smplpkg_graph.register(
@@ -463,6 +468,7 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
         ei = ''
         if incdir:
             ei = 'inc' 
+        debug(f'smplpkgs: library: {name}')
         bld(features = 'cxx cxxshlib',
             name = name,
             source = source,
@@ -481,11 +487,8 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
-#include "spdlog/spdlog.h"
-#include "spdlog/cfg/env.h"
 int main(int argc, char** argv) {
-    WireCell::Log::add_stderr();
-    spdlog::cfg::load_env_levels();
+    WireCell::Log::default_logging("stderr","info",true);
     doctest::Context context;
     context.applyCommandLine(argc, argv);
     return context.run();

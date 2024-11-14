@@ -20,7 +20,7 @@ int fact(int n) {
 void spin_piggy()
 {
     int big = 100;    
-    double dummy=0;
+    double dummy [[maybe_unused]] =0;
     while (big) {
         --big;
         dummy += fact(big);
@@ -31,7 +31,7 @@ void spin_piggy_em()
 {
     ExecMon em("");
     int big = 100;    
-    double dummy=0;
+    double dummy [[maybe_unused]] =0;
     while (big) {
         --big;
         dummy += fact(big);

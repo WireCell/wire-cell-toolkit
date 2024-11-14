@@ -59,15 +59,43 @@ void OmnibusNoiseFilter::configure(const WireCell::Configuration& cfg)
                    jf.asString());
         m_perchan_status.push_back(filt);
     }
-    for (auto jf : cfg["grouped_filters"]) {
-        auto filt = Factory::find_tn<IChannelFilter>(jf.asString());
-        log->debug("adding grouped filter: {} \"{}\"", m_grouped.size(), jf.asString());
-        m_grouped.push_back(filt);
-    }
 
     auto jcndb = cfg["noisedb"];
     m_noisedb = Factory::find_tn<IChannelNoiseDatabase>(jcndb.asString());
     log->debug("using channel noise DB object: \"{}\"", jcndb.asString());
+    log->warn("Use of CHND is deprecated and will be removed in the future.");
+
+    // We should use multi-group channel filters, the interface below is maintained
+    // to ensure backwards compatibility. See:
+    // https://github.com/WireCell/wire-cell-toolkit/issues/327
+    if ( !cfg["grouped_filters"].empty() ) {
+        MGCF mgcf;
+        mgcf.channelgroups = m_noisedb->coherent_channels();
+        for (auto jf : cfg["grouped_filters"]) {
+            auto filt = Factory::find_tn<IChannelFilter>(jf.asString());
+            log->debug("adding grouped filter: {} \"{}\"", mgcf.filters.size(), jf.asString());
+            mgcf.filters.push_back(filt);
+        }
+        m_multigroup_chanfilters.push_back(mgcf);
+    }
+
+    for (auto jmgcf: cfg["multigroup_chanfilters"]) {
+        MGCF mgcf;
+        auto jgroups = jmgcf["channelgroups"];
+        for (auto jgroup : jgroups) {
+            std::vector<int> channel_group;
+            for (auto jch : jgroup) {
+                channel_group.push_back(jch.asInt());
+            }
+            mgcf.channelgroups.push_back(channel_group);
+        }
+        for (auto jf: jmgcf["filters"]){
+            auto filt = Factory::find_tn<IChannelFilter>(jf.asString());
+            log->debug("adding grouped filter: {} \"{}\"", mgcf.filters.size(), jf.asString());
+            mgcf.filters.push_back(filt);
+        }
+        m_multigroup_chanfilters.push_back(mgcf);
+    }
 
     m_intag = get(cfg, "intraces", m_intag);
     m_outtag = get(cfg, "outtraces", m_outtag);
@@ -182,38 +210,39 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         log->warn("warning, truncated or extended {} samples", nchanged_samples);
     }
 
-    int group_counter = 0;
+    // int group_counter = 0;
     int nunknownchans = 0;
-    for (auto group : m_noisedb->coherent_channels()) {
-        ++group_counter;
+    for (const auto& mgcf : m_multigroup_chanfilters) {
+        for (auto group : mgcf.channelgroups) {
 
-        int flag = 1;
+            int flag = 1;
 
-        IChannelFilter::channel_signals_t chgrp;
-        for (auto ch : group) {  // fix me: check if we don't actually have this channel
-                                 // std::cout << group_counter << " " << ch << " " << std::endl;
-            if (bychan.find(ch) == bychan.end()) {
-                ++nunknownchans;
-                flag = 0;
+            IChannelFilter::channel_signals_t chgrp;
+            for (auto ch : group) {  // fix me: check if we don't actually have this channel
+                                    // std::cout << group_counter << " " << ch << " " << std::endl;
+                if (bychan.find(ch) == bychan.end()) {
+                    ++nunknownchans;
+                    flag = 0;
+                }
+                else {
+                    chgrp[ch] = bychan[ch]->charge();  // copy...
+                }
             }
-            else {
-                chgrp[ch] = bychan[ch]->charge();  // copy...
+            if (flag == 0) continue;
+
+            for (auto filter : mgcf.filters) {
+                auto masks = filter->apply(chgrp);
+                Waveform::merge(cmm, masks, m_maskmap);
             }
-        }
 
-        if (flag == 0) continue;
+            for (auto cs : chgrp) {
+                // cs.second; // copy
+                bychan[cs.first]->charge().assign(cs.second.begin(), cs.second.end());
+            }
 
-        for (auto filter : m_grouped) {
-            auto masks = filter->apply(chgrp);
+        } // end of channel groups
 
-            Waveform::merge(cmm, masks, m_maskmap);
-        }
-
-        for (auto cs : chgrp) {
-            // cs.second; // copy
-            bychan[cs.first]->charge().assign(cs.second.begin(), cs.second.end());
-        }
-    }
+    } // end of MGCF
 
     if (nunknownchans) {
         log->debug("{} unknown channels (probably the channel selector is in use)", nunknownchans);

@@ -6,11 +6,23 @@
 #ifndef WIRECELL_MULTIARRAY
 #define WIRECELL_MULTIARRAY
 
+#ifdef __clang__
+#  if defined(__has_warning)
+#    define HAS_WARNING(warning) __has_warning(warning)
+#  else
+#    define HAS_WARNING(warning) 1
+#  endif
+#else
+#  define HAS_WARNING(warning) 1
+#endif
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wdeprecated-declarations"
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#if HAS_WARNING("-Wmaybe-uninitialized")
 #pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 #pragma GCC diagnostic warning "-Warray-bounds"
 #pragma GCC diagnostic ignored "-Warray-bounds"
 

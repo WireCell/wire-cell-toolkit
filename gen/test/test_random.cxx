@@ -148,8 +148,8 @@ double test_speed_direct(size_t ndraws)
 struct Xorsh { 
     unsigned long x{123456789}, y{362436069}, z{521288629};
     typedef size_t result_type;
-    static size_t min() { return 0; }
-    static size_t max() { return std::numeric_limits<long>::max(); }
+    static constexpr size_t min() { return 0; }
+    static constexpr size_t max() { return std::numeric_limits<long>::max(); }
 
     unsigned long operator()() {
         unsigned long t;

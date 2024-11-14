@@ -183,7 +183,7 @@ def options(opt):
                    help="Given name of emacs daemon to use via emacsclient for org export.  If none, use emacs directly (which is slower and may not pick up your config) [default=None], Note default daemon is called 'server'")
 
 def configure(cfg):
-    cfg.find_program("emacs", var="EMACS")
+    cfg.find_program("emacs", var="EMACS", mandatory=False)
     cfg.find_program("emacsclient", var="EMACSCLIENT", mandatory=False)
 
     cfg.env.EMACS_DAEMON = cfg.options.emacs_daemon

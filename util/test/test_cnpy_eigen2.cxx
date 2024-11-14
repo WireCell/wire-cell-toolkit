@@ -12,6 +12,8 @@
 #include "WireCellUtil/NumpyHelper.h"
 #include "WireCellUtil/Array.h"
 
+#include <cassert>
+
 using ntype = short;
 
 using ArrayType = Eigen::Array<ntype, Eigen::Dynamic, Eigen::Dynamic>;
@@ -50,7 +52,7 @@ int main(int argc, char* argv[])
 
     for (int irow = 0; irow < Nrows; ++irow) {
         for (int icol=0; icol < Ncols; ++icol) {
-            ntype val = icol + irow*Ncols;
+            ntype val [[maybe_unused]] = icol + irow*Ncols;
             assert(arr2(irow, icol) == val);
         }
     }

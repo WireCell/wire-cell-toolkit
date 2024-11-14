@@ -4,7 +4,7 @@ from waflib.Configure import conf
 
 def options(opt):
     opt = opt.add_option_group('Eigen Options')
-    opt.add_option('--with-eigen', type='string',
+    opt.add_option('--with-eigen', type=str,
                    help="give Eigen3 installation location")
 
 

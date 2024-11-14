@@ -1,7 +1,16 @@
+#if defined __clang__
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wunused-local-typedefs"
+#endif
+
 #include "boost/icl/interval_map.hpp"
 #include "boost/icl/split_interval_map.hpp"
 #include "boost/icl/separate_interval_set.hpp"
 #include "boost/icl/split_interval_set.hpp"
+
+#if defined __clang__
+ #pragma clang diagnostic pop
+#endif
 
 #include <iostream>
 #include <vector>

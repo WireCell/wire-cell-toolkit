@@ -322,7 +322,7 @@ def options(opt):
     """
     opt.add_option('--tests', default=None, action='store_true',
                    help="Activate tests [default: off]")
-    opt.add_option('--test-duration', type="float", action='store',
+    opt.add_option('--test-duration', type=float, action='store',
                    help="Skip tests that may take longer than this many seconds [default: ignored]")
     tgs=','.join(test_group_sequence)
     opt.add_option('--test-group', default=None,

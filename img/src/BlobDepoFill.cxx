@@ -92,14 +92,14 @@ slice_and_dice_depos(Log::logptr_t& log,
     // Add slice nodes 
     const size_t nsbins = sbins.nbins();
     for (size_t idx = 0; idx < nsbins; ++idx) {
-        const auto gidx = boost::add_vertex({idx, 's'}, gr);
+        const auto gidx [[maybe_unused]] = boost::add_vertex({idx, 's'}, gr);
         assert(gidx == idx);
     }
 
     // Add depo nodes
     const size_t ndepos = depos.size();
     for (size_t idx=0; idx<ndepos; ++idx) {
-        const auto gidx = boost::add_vertex({idx, 'd'}, gr);
+        const auto gidx [[maybe_unused]] = boost::add_vertex({idx, 'd'}, gr);
         assert(gidx == idx + nsbins);
     }
     
@@ -107,7 +107,7 @@ slice_and_dice_depos(Log::logptr_t& log,
     const auto pbins = pimpos.region_binning();
     const size_t nwires = pbins.nbins();
     for (size_t idx = 0; idx < nwires; ++idx) {
-        const auto gidx = boost::add_vertex({idx, 'w'}, gr);
+        const auto gidx [[maybe_unused]] = boost::add_vertex({idx, 'w'}, gr);
         assert(gidx == idx + nsbins + ndepos);
     }
 

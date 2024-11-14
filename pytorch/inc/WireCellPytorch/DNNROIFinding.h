@@ -83,6 +83,8 @@ namespace WireCell {
             // The output trace tag, likely should be set to "dnnspN"
             // with "N" marking the anode number.
             std::string outtag{""};
+
+            int nchunks{1};
         };
 
         class DNNROIFinding : public Aux::Logger,

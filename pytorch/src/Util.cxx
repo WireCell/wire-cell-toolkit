@@ -36,7 +36,7 @@ ITensorSet::pointer Pytorch::to_itensor(const std::vector<torch::IValue> &inputs
         size_t nbyte = 4;
         for (auto n : shape) nbyte *= n;
         auto data = (float *) st->data();
-        memcpy(data, (float *) ten[0][0].data<float>(), nbyte);
+        memcpy(data, (float *) ten[0][0].data_ptr<float>(), nbyte);
         itv->push_back(ITensor::pointer(st));
         ++ind;
     }

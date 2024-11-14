@@ -37,7 +37,7 @@ def kokkos_hook(self, node):
 
 def options(opt):
     generic._options(opt, "KOKKOS")
-    opt.add_option('--kokkos-options', type='string', help="cuda, ...")
+    opt.add_option('--kokkos-options', type=str, help="cuda, ...")
 
 def configure(cfg):
     generic._configure(cfg, "KOKKOS", mandatory=False,

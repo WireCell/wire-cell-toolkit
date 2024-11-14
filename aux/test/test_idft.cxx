@@ -144,7 +144,7 @@ void fwdrev(IDFT::pointer dft, int id, int ntimes, int size)
         dft->inv2d(freq.data(), inter.data(), nstrides, stride);
 
         --ntimes;        
-        auto tot = Waveform::sum(inter);
+        auto tot [[maybe_unused]] = Waveform::sum(inter);
         assert(std::real(tot) == 0);
     }
     //std::cerr << "finished " << id << std::endl;

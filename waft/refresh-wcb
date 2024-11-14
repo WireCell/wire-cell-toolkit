@@ -9,7 +9,7 @@ waftag="waf-2.0.25"
 wafdir="/tmp/wcb/$waftag"
 
 
-tooldir="$(dirname $BASH_SOURCE)"
+tooldir="$(dirname "$(realpath "$BASH_SOURCE")")"
 # these are copied from waf
 # tools="doxygen boost bjam"
 # add any in cwd, assuming we are sitting in waf-tools
@@ -75,28 +75,29 @@ if [ ! -f "$tooldir/boost.py" ] ; then
 fi
 
 #toolflags="compat15"
-toolflags=""
+toolflags=()
 for tool in $tools ;
 do
     maybe="$tooldir/${tool}.py"
-    if [ -f $maybe ] ; then
-	toolflags="$toolflags,$maybe"
+    if [ -f "$maybe" ] ; then
+	toolflags+=("$maybe")
 	continue
     fi
     maybe="$wafdir/waflib/Tools/${tool}.py"
-    if [ -f $maybe ] ; then
-	toolflags="$toolflags,$tool"
+    if [ -f "$maybe" ] ; then
+	toolflags+=("$tool")
 	continue
     fi
     maybe="$wafdir/waflib/extras/${tool}.py"
-    if [ -f $maybe ] ; then
-	toolflags="$toolflags,$tool"
+    if [ -f "$maybe" ] ; then
+	toolflags+=("$tool")
 	continue
     fi
     
     echo "Failed to find tool $tool"
     exit 1
 done
+toolflags=$(printf '%s\n' "${toolflags[@]}" | paste -sd,)
 
 pushd "$wafdir" > /dev/null
 #python waf-light --python=python2 --tools=$toolflags

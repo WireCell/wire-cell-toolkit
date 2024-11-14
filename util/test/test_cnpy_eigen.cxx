@@ -11,6 +11,8 @@
 
 #include "WireCellUtil/Eigen.h"
 
+#include <cassert>
+
 using ntype = short;
 
 // default Eigen ordering
@@ -68,7 +70,7 @@ int main(int argc, char* argv[])
     ArrayXXsColM eig2 = eig;
     for (int irow = 0; irow < Nrows; ++irow) {
         for (int icol=0; icol < Ncols; ++icol) {
-            ntype val = icol + irow*Ncols;
+            ntype val [[maybe_unused]] = icol + irow*Ncols;
             assert(eig(irow, icol) == val);
             assert(eig2(irow, icol) == val);
         }

@@ -35,13 +35,13 @@ int main()
         // d1 = f1;
     }
     {   // not-too-large ints should be held exact
-        float  x1 = float32(12345678);
-        double x2 = float64(12345678);
+        float  x1 [[maybe_unused]] = float32(12345678);
+        double x2 [[maybe_unused]] = float64(12345678);
         assert (x1 == x2);
     }
     {   // even larger for doubles
-        double y1 = float64(1234567890);
-        double y2 = float64(1234567890);
+        double y1 [[maybe_unused]] = float64(1234567890);
+        double y2 [[maybe_unused]] = float64(1234567890);
         assert (y1 == y2);
     }
 

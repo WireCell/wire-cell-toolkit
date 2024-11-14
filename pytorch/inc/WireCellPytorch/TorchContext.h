@@ -3,6 +3,7 @@
  */
 
 #include "WireCellIface/ISemaphore.h"
+
 #include <torch/script.h>
 
 namespace WireCell::Pytorch {

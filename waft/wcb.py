@@ -14,8 +14,8 @@ ValidationContext.script_templates[".jsonnet"] = "${WCSONNET} ${SCRIPT}"
 
 mydir = osp.dirname(__file__)
 
-## These are packages descriptions which fit the generic functions.
-## They will be checked in order so put any dependencies first.
+# These are packages descriptions which fit the generic functions.
+# They will be checked in order so put any dependencies first.
 package_descriptions = [
 
     # spdlog is "header only" but use library version for faster recompilation
@@ -34,10 +34,10 @@ package_descriptions = [
 
     # for faster parsing, consider:
     # ./wcb configure --with-jsonnet-libs=gojsonnet 
+    # see https://github.com/WireCell/wire-cell-toolkit/issues/342
     ('Jsonnet',  dict(incs=["libjsonnet.h"], libs=['jsonnet'])),
     ('TBB',      dict(incs=["tbb/parallel_for.h"], libs=['tbb'], pcname='tbb', mandatory=False)),
     ('HDF5',     dict(incs=["hdf5.h"], libs=['hdf5'], pcname='hdf5', mandatory=False)),
-    ('H5CPP',    dict(incs=["h5cpp/all"], mandatory=False, extuses=('HDF5',), pcname='h5cpp')),
 
     ('ZMQ',      dict(incs=["zmq.h"], libs=['zmq'], pcname='libzmq', mandatory=False)),
     ('CZMQ',     dict(incs=["czmq.h"], libs=['czmq'], pcname='libczmq', mandatory=False)),
@@ -61,10 +61,7 @@ def options(opt):
     opt.load('kokkos')
     #opt.load('protobuf')
 
-    for name,desc in package_descriptions:
-        generic._options(opt, name,
-                         desc.get("incs", None),
-                         desc.get("libs", None))
+    generic.do_options(opt, *package_descriptions)
 
     opt.add_option('--build-debug', default='-O2 -ggdb3',
                    help="Build with debug symbols")
@@ -83,27 +80,22 @@ def configure(cfg):
     cfg.load('boost')
     cfg.load('smplpkgs')
 
-    for name, args in package_descriptions:
-        generic._configure(cfg, name, **args)
+    generic.do_configure(cfg, *package_descriptions)
 
-    if getattr(cfg.options, "with_libtorch", False) is False:
-        info ("sans libtorch")
-    else:
+    def with_p(name):
+        return generic.with_p(cfg.options, name)
+
+    debug(f'wcb: {cfg.options=}')
+    if with_p('libtorch'):
         cfg.load('libtorch')
 
-    if getattr(cfg.options, "with_cuda", False) is False:
-        info ("sans CUDA")
-    else:
+    if with_p('cuda'):
         cfg.load('cuda')
 
-    if getattr(cfg.options, "with_kokkos", False) is False:
-        info ("sans KOKKOS")
-    else:
+    if with_p('kokkos'):
         cfg.load('kokkos')
 
-    if getattr(cfg.options, "with_root", False) is False:
-        info ("sans ROOT")
-    else:
+    if with_p('root'):
         cfg.load('rootsys')
 
 
@@ -134,6 +126,7 @@ def configure(cfg):
     cfg.env.LIB += ['z']
     
     submodules = find_submodules(cfg)
+    debug(f'wcb: {submodules=}')
 
     # Remove WCT packages if they an optional dependency wasn't found
     for pkg,ext in [
@@ -141,7 +134,7 @@ def configure(cfg):
             ("tbb","HAVE_TBB LIB_FFTWTHREADS"),
             ("patrec", "HAVE_GLPK"),
             ("cuda","HAVE_CUDA"),
-            ("hio", "INCLUDES_H5CPP"),
+            ("hio", "INCLUDES_HDF5"),
             ("pytorch", "LIB_LIBTORCH"),
             ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ")
     ]:
@@ -216,9 +209,13 @@ def build(bld):
                     bld.install_files(bld.env.DOCS_INSTALL_PATH, out,
                                       cwd=bld_dir, relative_trick=True)
 
+    debug(f'wcb: {bld.smplpkg_names=}')
+    link_libs = 'WireCellAux WireCellIface WireCellUtil'.split()
+    debug(f'wcb: {link_libs=}')
     # Produce a pkg-config .pc file
     bld(source='wire-cell-toolkit.pc.in',
         name="pkg-config-file",
+        LLIBS = ' '.join([f'-l{n}' for n in link_libs]),
         REQUIRES = ' '.join(bld.env.REQUIRES),
         install_path = '${LIBDIR}/pkgconfig/')
 

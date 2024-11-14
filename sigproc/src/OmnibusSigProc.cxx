@@ -113,10 +113,40 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_r_sigma = get(config, "r_sigma", m_r_sigma);
     m_r_th_percent = get(config, "r_th_percent", m_r_th_percent);
 
+    m_ROI_tight_lf_filter = get(config, "ROI_tight_lf_filter", m_ROI_tight_lf_filter);
+    m_ROI_tighter_lf_filter = get(config, "ROI_tighter_lf_filter", m_ROI_tighter_lf_filter);
+    m_ROI_loose_lf_filter = get(config, "ROI_loose_lf_filter", m_ROI_loose_lf_filter);
+    m_Gaus_wide_filter = get(config, "Gaus_wide_filter", m_Gaus_wide_filter);
+    if (config.isMember("Wiener_tight_filters")) {
+        m_Wiener_tight_filters.clear();
+        for (auto name: config["Wiener_tight_filters"]) {
+            m_Wiener_tight_filters.push_back(name.asString());
+        }
+    }
+    if (config.isMember("Wiener_wide_filters")) {
+        m_Wiener_wide_filters.clear();
+        for (auto name: config["Wiener_wide_filters"]) {
+            m_Wiener_wide_filters.push_back(name.asString());
+        }
+    }
+    if (config.isMember("Wire_filters")) {
+        m_Wire_filters.clear();
+        for (auto name: config["Wire_filters"]) {
+            m_Wire_filters.push_back(name.asString());
+        }
+    }
+
     if (config.isMember("process_planes")) {
         m_process_planes.clear();
         for (auto jplane : config["process_planes"]) {
             m_process_planes.push_back(jplane.asInt());
+        }
+    }
+
+    if (config.isMember("plane2layer")) {
+        m_plane2layer.clear();
+        for (auto jplane : config["plane2layer"]) {
+            m_plane2layer.push_back(jplane.asInt());
         }
     }
 
@@ -132,6 +162,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_frame_tag = get(config, "frame_tag", m_frame_tag);
 
     m_use_roi_debug_mode = get(config, "use_roi_debug_mode", m_use_roi_debug_mode);
+    m_save_negtive_charge = get(config, "save_negtive_charge", m_save_negtive_charge);
     m_use_roi_refinement = get(config, "use_roi_refinement", m_use_roi_refinement);
     m_tight_lf_tag = get(config, "tight_lf_tag", m_tight_lf_tag);
     m_loose_lf_tag = get(config, "loose_lf_tag", m_loose_lf_tag);
@@ -142,6 +173,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_extend_roi_tag = get(config, "extend_roi_tag", m_extend_roi_tag);
 
     m_use_multi_plane_protection = get<bool>(config, "use_multi_plane_protection", m_use_multi_plane_protection);
+    m_do_not_mp_protect_traditional = get<bool>(config, "do_not_mp_protect_traditional", m_do_not_mp_protect_traditional);
     m_mp3_roi_tag = get(config, "mp3_roi_tag", m_mp3_roi_tag);
     m_mp2_roi_tag = get(config, "mp2_roi_tag", m_mp2_roi_tag);
     m_mp_th1 = get(config, "mp_th1", m_mp_th1);
@@ -180,13 +212,19 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         }
         for (auto plane : face->planes()) {
             int plane_index = plane->planeid().index();
-            auto& pchans = plane_channels[plane_index];
+            // Remap plane layer if necessary (default: 0,1,2), see:
+            // https://github.com/WireCell/wire-cell-toolkit/issues/322
+            int layer_index = m_plane2layer[plane_index];
+            auto& pchans = plane_channels[layer_index];
+            // auto& pchans = plane_channels[plane_index];
+           
             // These IChannel vectors are ordered in same order as wire-in-plane.
             const auto& ichans = plane->channels();
             // Append
             pchans.reserve(pchans.size() + ichans.size());
             pchans.insert(pchans.end(), ichans.begin(), ichans.end());
             ss << "\tpind" << plane_index << " "
+               << "lind" << layer_index << " "
                << "aid" << m_anode->ident() << " "
                << "fid" << face->ident() << " "
                << "pid" << plane->ident() << " "
@@ -263,6 +301,11 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["r_max_npeaks"] = m_r_max_npeaks;
     cfg["r_sigma"] = m_r_sigma;
     cfg["r_th_precent"] = m_r_th_percent;
+
+    cfg["ROI_tight_lf_filter"] = m_ROI_tight_lf_filter;
+    cfg["ROI_tighter_lf_filter"] = m_ROI_tighter_lf_filter;
+    cfg["ROI_loose_lf_filter"] = m_ROI_loose_lf_filter;
+    cfg["Gaus_wide_filter"] = m_Gaus_wide_filter;
 
     // cfg["process_planes"] = Json::arrayValue;
 
@@ -391,7 +434,7 @@ void OmnibusSigProc::save_data(
             const float q = m_r_data[plane](och.wire, itick);
             // charge.at(itick) = q > 0.0 ? q : 0.0;
             // charge.at(itick) = q ;
-            if (m_use_roi_debug_mode) {
+            if (m_use_roi_debug_mode && m_save_negtive_charge) {
                 charge.at(itick) = q;  // debug mode: save all decons
             }
             else {              // nominal: threshold at zero.
@@ -642,8 +685,12 @@ void OmnibusSigProc::save_ext_roi(ITrace::vector& itraces, IFrame::trace_list_t&
 // save Multi-Plane ROI into the out frame (set use_roi_debug_mode=true)
 // mp_rois: osp-chid, start -> start, end
 void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& indices, int plane,
-                                std::multimap<std::pair<int, int>, std::pair<int, int>> mp_rois)
+                                const std::multimap<std::pair<int, int>, std::pair<int, int>> &mp_rois)
 {
+    // Process the mp_roi map. Turn it into a map of channel -> List of (start, end). Allows much more efficient access
+    std::map<int, std::vector<std::pair<int, int>>> channel_to_mproi;
+    for (auto signal_roi : mp_rois) channel_to_mproi[signal_roi.first.first].push_back(signal_roi.second);
+
     // reuse this temporary vector to hold charge for a channel.
     ITrace::ChargeSequence charge(m_nticks, 0.0);
 
@@ -651,10 +698,9 @@ void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& i
 
         std::fill(charge.begin(), charge.end(), 0);
 
-        for (auto signal_roi : mp_rois) {
-            if (och.channel != signal_roi.first.first) continue;
-            int start = signal_roi.second.first;
-            int end = signal_roi.second.second;
+        for (auto signal_roi : channel_to_mproi[och.channel]) {
+            int start = signal_roi.first;
+            int end = signal_roi.second;
             // end is should be included but not larger than m_nticks
             for (int i = start; i <= end && i < m_nticks; i++) {
                 charge.at(i) = 4000.;  // arbitary constant number for ROI display
@@ -790,8 +836,9 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
 
     // Convert each average FR to a 2D array
     for (int iplane = 0; iplane < 3; ++iplane) {
-        auto arr = Response::as_array(fravg.planes[iplane], fine_nwires, fine_nticks);
-
+        int ilayer = m_plane2layer[iplane]; // Remap plane layer if necessary (default: 0,1,2), see:
+                                            // https://github.com/WireCell/wire-cell-toolkit/issues/322
+        auto arr = Response::as_array(fravg.planes[ilayer], fine_nwires, fine_nticks);
 
         int nrows = 0;
         int ncols = 0;
@@ -1001,9 +1048,9 @@ void OmnibusSigProc::decon_2D_init(int plane)
     m_c_data[plane] = m_c_data[plane] / c_resp;
 
     // apply software filter on wire
-    const std::vector<std::string> filter_names{"Wire_ind", "Wire_ind", "Wire_col"};
+    // const std::vector<std::string> filter_names{"Wire_ind", "Wire_ind", "Wire_col"};
     Waveform::realseq_t wire_filter_wf;
-    auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", filter_names[plane]);
+    auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wire_filters[plane]);
     wire_filter_wf = ncr1->filter_waveform(m_c_data[plane].rows());
     for (int irow = 0; irow < m_c_data[plane].rows(); ++irow) {
         for (int icol = 0; icol < m_c_data[plane].cols(); ++icol) {
@@ -1054,10 +1101,10 @@ void OmnibusSigProc::decon_2D_ROI_refine(int plane)
 {
     // apply software filter on time
 
-    const std::vector<std::string> filter_names{"Wiener_tight_U", "Wiener_tight_V", "Wiener_tight_W"};
+    // const std::vector<std::string> filter_names{"Wiener_tight_U", "Wiener_tight_V", "Wiener_tight_W"};
     Waveform::realseq_t roi_hf_filter_wf;
 
-    auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", filter_names[plane]);
+    auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
     roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
 
     Array::array_xxc c_data_afterfilter(m_c_data[plane].rows(), m_c_data[plane].cols());
@@ -1080,25 +1127,28 @@ void OmnibusSigProc::decon_2D_tightROI(int plane)
 
     Waveform::realseq_t roi_hf_filter_wf;
     if (plane == 0) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
-        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_tight_lf");
+        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_tight_lf_filter);
         auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
         for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
             roi_hf_filter_wf.at(i) *= temp_filter.at(i);
         }
     }
     else if (plane == 1) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
-        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_tight_lf");
+        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_tight_lf_filter);
         auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
         for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
             roi_hf_filter_wf.at(i) *= temp_filter.at(i);
         }
     }
     else {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
 
@@ -1123,25 +1173,28 @@ void OmnibusSigProc::decon_2D_tighterROI(int plane)
 
     Waveform::realseq_t roi_hf_filter_wf;
     if (plane == 0) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
-        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_tighter_lf");
+        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_tighter_lf_filter);
         auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
         for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
             roi_hf_filter_wf.at(i) *= temp_filter.at(i);
         }
     }
     else if (plane == 1) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
-        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_tighter_lf");
+        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_tighter_lf_filter);
         auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
         for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
             roi_hf_filter_wf.at(i) *= temp_filter.at(i);
         }
     }
     else {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
 
@@ -1171,18 +1224,19 @@ void OmnibusSigProc::decon_2D_looseROI(int plane)
     Waveform::realseq_t roi_hf_filter_wf1;
     Waveform::realseq_t roi_hf_filter_wf2;
     if (plane == 0) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
         roi_hf_filter_wf1 = roi_hf_filter_wf;
         {
-            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_loose_lf");
+            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_loose_lf_filter);
             auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
             for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
                 roi_hf_filter_wf.at(i) *= temp_filter.at(i);
             }
         }
         {
-            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_tight_lf");
+            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_tight_lf_filter);
             auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
             for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
                 roi_hf_filter_wf1.at(i) *= temp_filter.at(i);
@@ -1190,18 +1244,19 @@ void OmnibusSigProc::decon_2D_looseROI(int plane)
         }
     }
     else if (plane == 1) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
         roi_hf_filter_wf1 = roi_hf_filter_wf;
         {
-            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_loose_lf");
+            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_loose_lf_filter);
             auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
             for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
                 roi_hf_filter_wf.at(i) *= temp_filter.at(i);
             }
         }
         {
-            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_tight_lf");
+            auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_tight_lf_filter);
             auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
             for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
                 roi_hf_filter_wf1.at(i) *= temp_filter.at(i);
@@ -1209,7 +1264,8 @@ void OmnibusSigProc::decon_2D_looseROI(int plane)
         }
     }
     else {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
 
@@ -1247,25 +1303,28 @@ void OmnibusSigProc::decon_2D_looseROI_debug_mode(int plane)
 
     Waveform::realseq_t roi_hf_filter_wf;
     if (plane == 0) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_U");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
-        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_loose_lf");
+        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_loose_lf_filter);
         auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
         for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
             roi_hf_filter_wf.at(i) *= temp_filter.at(i);
         }
     }
     else if (plane == 1) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_V");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
-        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", "ROI_loose_lf");
+        auto ncr2 = Factory::find<IFilterWaveform>("LfFilter", m_ROI_loose_lf_filter);
         auto temp_filter = ncr2->filter_waveform(m_c_data[plane].cols());
         for (size_t i = 0; i != roi_hf_filter_wf.size(); i++) {
             roi_hf_filter_wf.at(i) *= temp_filter.at(i);
         }
     }
     else {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_tight_W");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_tight_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
 
@@ -1319,15 +1378,18 @@ void OmnibusSigProc::decon_2D_hits(int plane)
 
     Waveform::realseq_t roi_hf_filter_wf;
     if (plane == 0) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_wide_U");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_wide_U");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_wide_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
     else if (plane == 1) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_wide_V");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_wide_V");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_wide_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
     else {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_wide_W");
+        // auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Wiener_wide_W");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wiener_wide_filters[plane]);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
 
@@ -1352,15 +1414,15 @@ void OmnibusSigProc::decon_2D_charge(int plane)
 
     Waveform::realseq_t roi_hf_filter_wf;
     if (plane == 0) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Gaus_wide");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Gaus_wide_filter);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
     else if (plane == 1) {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Gaus_wide");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Gaus_wide_filter);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
     else {
-        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", "Gaus_wide");
+        auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Gaus_wide_filter);
         roi_hf_filter_wf = ncr1->filter_waveform(m_c_data[plane].cols());
     }
 
@@ -1533,12 +1595,18 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 for (const auto& f : m_anode->faces()) {
                     // mp3: 3 plane protection based on cleaup ROI
                     // f->which(): per-Anode face index
-                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution);
+                    // Default values: wire_resolution = 2, nbounds_layers = 2
+                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
                     // mp2: 2 plane protection based on cleaup ROI
-                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution);
+                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
                 }
                 save_mproi(*itraces, mp3_roi_traces, iplane, roi_refine.get_mp3_rois());
                 save_mproi(*itraces, mp2_roi_traces, iplane, roi_refine.get_mp2_rois());
+                if (m_do_not_mp_protect_traditional) {
+                    // clear mp after saving to itraces
+                    roi_refine.get_mp3_rois().clear();
+                    roi_refine.get_mp2_rois().clear();
+                }
             }
         }
 

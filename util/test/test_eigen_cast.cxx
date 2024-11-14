@@ -1,5 +1,6 @@
 #include "WireCellUtil/Eigen.h"
 
+#include <cassert>
 #include <vector>
 #include <iostream>
 #include <complex>

@@ -29,7 +29,28 @@
 #define WIRECELL_UTIL_RECTANGLES
 
 #include "WireCellUtil/Binning.h"
+
+#if defined __GNUC__
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wunused-local-typedefs"
+#endif
+
+#if defined __clang__
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wunused-local-typedefs"
+#endif
+
 #include "boost/icl/interval_map.hpp"
+
+#if defined __GNUC__
+ #pragma GCC diagnostic pop
+#endif
+
+#if defined __clang__
+ #pragma clang diagnostic pop
+#endif
+
+#include <vector>
 #include <set>
 
 namespace WireCell {

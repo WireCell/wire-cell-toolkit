@@ -63,7 +63,7 @@ int test_file(const std::string& fname,
 {
     ExecMon em("pc tree from tensor DM file");
 
-    auto& pm = PluginManager::instance();
+    auto& pm [[maybe_unused]] = PluginManager::instance();
     assert(pm.add("WireCellSio"));
 
     auto cobj = Factory::lookup_tn<IConfigurable>("TensorFileSource");

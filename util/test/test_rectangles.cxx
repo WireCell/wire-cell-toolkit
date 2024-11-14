@@ -14,7 +14,16 @@ This test does this:
 
 With this:
 */
+#if defined __clang__
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wunused-local-typedefs"
+#endif
+
 #include "boost/icl/interval_map.hpp"
+
+#if defined __clang__
+ #pragma clang diagnostic pop
+#endif
 /*
 Except I got it transposed so it is Y-major instead of X-major.
 
@@ -26,6 +35,7 @@ Thank you herbstluftwm(1) for the drawing.
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using key_t = int;                  // coordinates
 typedef boost::icl::interval<key_t>::interval_type interval_t;

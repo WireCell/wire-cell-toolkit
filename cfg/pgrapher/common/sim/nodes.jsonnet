@@ -10,7 +10,9 @@ function(params, tools)
 {
     // Create a drifter Pnode.
     drifter: g.pnode({
-        local xregions = wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes])),
+        // local xregions = wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes])),
+        // Filter out any null values in xregions
+        local xregions = std.filter(function(x) x!= null, wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes]))),
 
         type: "Drifter",
         data: params.lar {

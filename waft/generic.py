@@ -39,20 +39,55 @@ import sys
 import os.path as osp
 from waflib.Logs import debug
 
+def boolish(b):
+    '''
+    Convert b to Bool if true'ish or false'ish string, else return b.
+    '''
+    if not isinstance(b, str):
+        return b
+    if b.lower() in 'yes on true'.split():
+        return True
+    if b.lower() in 'no off false'.split():
+        return False
+    return b
+
+
+def with_p(opt, name):
+    '''
+    Return whether opt is with named package.
+    '''
+    return boolish(getattr(opt, f'with_{name}', None) \
+                   or getattr(opt, f'with_{name}_lib', None) \
+                   or getattr(opt, f'with_{name}_libs', None) \
+                   or getattr(opt, f'with_{name}_include', None))
+
+
+def do_options(opt, *pkgdesc, **pkgmap):
+    for name, desc in list(pkgdesc) + list(pkgmap.items()):
+        _options(opt, name,
+                 desc.get("incs", None),
+                 desc.get("libs", None))
+        
+
 def _options(opt, name, incs=None, libs=None):
     lower = name.lower()
     opt = opt.add_option_group('%s Options' % name)
-    opt.add_option('--with-%s'%lower, type='string', default=None,
+    opt.add_option('--with-%s'%lower, type=str, default=None,
                    help="give %s installation location" % name)
     if incs is None or len(incs):
-        opt.add_option('--with-%s-include'%lower, type='string', 
+        opt.add_option('--with-%s-include'%lower, type=str, 
                        help="give %s include installation location"%name)
     if libs is None or len(libs):
-        opt.add_option('--with-%s-lib'%lower, type='string', 
-                       help="give %s lib installation location"%name)
-        opt.add_option('--with-%s-libs'%lower, type='string', 
+        opt.add_option('--with-%s-lib'%lower, type=str, 
+                       help="list %s lib installation locations"%name)
+        opt.add_option('--with-%s-libs'%lower, type=str, 
                        help="list %s link libraries"%name)
     return
+
+def do_configure(cfg, *pkgdesc, **pkgmap):
+    for name, desc in list(pkgdesc) + list(pkgmap.items()):
+        _configure(cfg, name, **desc)
+    
 
 def _configure(ctx, name, incs=(), libs=(), bins=(), pcname=None, mandatory=True, extuses=()):
     lower = name.lower()
@@ -68,7 +103,7 @@ def _configure(ctx, name, incs=(), libs=(), bins=(), pcname=None, mandatory=True
         if maybe:
             libs = [s.strip() for s in maybe.split(",") if s.strip()]
     
-    debug ("CONFIGURE", name, instdir, incdir, libdir, mandatory, extuses)
+    debug (f"configure: {name=} {instdir=} {incdir=} {libdir=} {mandatory=} {extuses=}")
 
     if mandatory:
         if instdir:
@@ -102,18 +137,18 @@ def _configure(ctx, name, incs=(), libs=(), bins=(), pcname=None, mandatory=True
             if not incdir and instdir:
                 incdir = osp.join(instdir, 'include')
             if incdir:
-                setattr(ctx.env, 'INCLUDES_'+UPPER, [incdir])
+                setattr(ctx.env, 'INCLUDES_'+UPPER, incdir.split(","))
 
         if libs:
             if not libdir and instdir:
                 libdir = osp.join(instdir, 'lib')
             if libdir:
-                setattr(ctx.env, 'LIBPATH_'+UPPER, [libdir])
+                setattr(ctx.env, 'LIBPATH_'+UPPER, libdir.split(","))
 
         if bins:
             if not bindir and instdir:
                 bindir = osp.join(instdir, 'bin')
-            if libdir:
+            if bindir:
                 setattr(ctx.env, 'PATH_'+UPPER, [bindir])
             
     

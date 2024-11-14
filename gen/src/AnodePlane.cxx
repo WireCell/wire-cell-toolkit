@@ -162,9 +162,24 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
             sensitive_face = false;
             log->debug("anode {} face {} is not sensitive", m_ident, iface);
         }
+        if (!jface["response"].isNumeric() or !jface["anode"].isNumeric()) {
+            log->critical("Non-scalar value for response_x or anode_x is not supported.");
+            THROW(ValueError() << errmsg{"AnodePlane: error in configuration, expect scalar values for response_x and anode_x."});
+        }
         const double response_x = jface["response"].asDouble();
         const double anode_x = get(jface, "anode", response_x);
-        const double cathode_x = jface["cathode"].asDouble();
+        // const double cathode_x = jface["cathode"].asDouble();
+        double cathode_xref;
+        if (jface["cathode"].isNumeric()) {
+            cathode_xref = jface["cathode"].asDouble();
+        }
+        if (jface["cathode"].isMember("x")) {
+            auto xvec = get<std::vector<double>>(jface["cathode"], "x");
+            const auto [vmin, vmax] = std::minmax_element(xvec.begin(), xvec.end());
+            cathode_xref = *vmin < response_x ? *vmin : *vmax;
+        }
+        const double cathode_x = cathode_xref;
+
         log->debug("X planes: \"cathode\"@ {}m, \"response\"@{}m, \"anode\"@{}m", cathode_x / units::m,
                  response_x / units::m, anode_x / units::m);
 

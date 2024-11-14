@@ -1,11 +1,12 @@
 #ifndef WIRECELL_GEN_DRIFTER
 #define WIRECELL_GEN_DRIFTER
 
+#include "WireCellAux/Logger.h"
 #include "WireCellIface/IDrifter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IRandom.h"
 #include "WireCellUtil/Units.h"
-#include "WireCellAux/Logger.h"
+#include "WireCellUtil/CoordRegion.h"
 
 #include <set>
 
@@ -151,15 +152,37 @@ namespace WireCell {
                 bool operator()(const IDepo::pointer& lhs, const IDepo::pointer& rhs) const;
             };
 
-            // A little helper to carry the region extent and depo buffers.
+            // Represent a region defined along the drift (X) direction that is
+            // partitioned into two sub regions ("bulk" and "near") by three
+            // bounds.  The "bulk" region is bound by "response" and "cathode"
+            // and the "near" region is between "anode" and "response" bounds.
+            // The two extreme bounds are named after physical parts of a LArTPC
+            // detector but the bounds need not necessarily coincide with those
+            // physical parts.  They are merely used for selecting depos and
+            // determining how they will be drifted.  Any depo that does not
+            // reside in one of the two regions is simply dropped.  A depo in
+            // the "bulk" is drifted forward in time to the response plane with
+            // full drift physics applied.  A depo in the "near" is drifted
+            // backwards in time to the response plane and has no "anti-drift
+            // physics" applied (it is just transported).
+            //
+            // The Drifter may have multiple Xregions (eg, to handle double
+            // sided anode or cathode planes).  Each Xregion is configured as
+            // per WireCellUtil/CoordBounds.h and allows for bounds that are
+            // perpendicular to the drift direction, a tilted plane or an
+            // arbitrarily sampled surface.
+            //
+            // The Xregion also buffers the depos that selected to reside in one
+            // of its two sub regions prior to them being flushed to output.
             struct Xregion {
                 Xregion(Configuration cfg);
-                double anode, response, cathode;
+
+                std::unique_ptr<CoordBounds> anode, response, cathode;
+                CoordRegion bulk, near;
+
                 typedef std::set<IDepo::pointer, DepoTimeCompare> ordered_depos_t;
                 ordered_depos_t depos;  // buffer depos
 
-                bool inside_bulk(double x) const;
-                bool inside_response(double x) const;
             };
             std::vector<Xregion> m_xregions;
 
@@ -169,7 +192,7 @@ namespace WireCell {
                   : depo(depo)
                 {
                 }
-                bool operator()(const Xregion& xr) const { return xr.inside_bulk(depo->pos().x()); }
+                bool operator()(const Xregion& xr) const { return xr.bulk.inside(depo->pos()); }
             };
             struct IsInsideResp {
                 const input_pointer& depo;
@@ -177,7 +200,7 @@ namespace WireCell {
                   : depo(depo)
                 {
                 }
-                bool operator()(const Xregion& xr) const { return xr.inside_response(depo->pos().x()); }
+                bool operator()(const Xregion& xr) const { return xr.near.inside(depo->pos()); }
             };
 
         };  // Drifter

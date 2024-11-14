@@ -65,6 +65,15 @@ namespace WireCell {
             std::map<std::string, std::string> m_maskmap;
 
             size_t m_count{0};
+
+            // This little struct, named MGCF (Multi-Group Channel Filters), is used to associate a set of
+            // channels with a set of filters. See: https://github.com/WireCell/wire-cell-toolkit/issues/327
+            struct MGCF {
+                std::vector<IChannelNoiseDatabase::channel_group_t> channelgroups;
+                std::vector<IChannelFilter::pointer> filters;
+            };
+
+            std::vector<MGCF>  m_multigroup_chanfilters;
         };
 
     }  // namespace SigProc

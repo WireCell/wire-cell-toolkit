@@ -39,7 +39,7 @@ def configure(cfg):
 
     if not 'HAVE_CUDA' in cfg.env:
         return
-    nvccflags = "-shared -Xcompiler -fPIC "
+    nvccflags = "-shared -Xcompiler -fPIC --gpu-architecture=all"
     nvccflags += os.environ.get("NVCCFLAGS","")
     cfg.env.NVCCFLAGS += nvccflags.strip().split()
     debug ("cuda: NVCCFLAGS = %s" % (' '.join(cfg.env.NVCCFLAGS)))

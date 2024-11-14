@@ -33,30 +33,12 @@ bool Gen::Drifter::DepoTimeCompare::operator()(const IDepo::pointer& lhs, const 
 // Xregion helper
 
 Gen::Drifter::Xregion::Xregion(Configuration cfg)
-  : anode(0.0)
-  , response(0.0)
-  , cathode(0.0)
+    : anode(make_coordbounds(cfg["anode"]))
+    , response(make_coordbounds(cfg["response"]))
+    , cathode(make_coordbounds(cfg["cathode"]))
+    , bulk(*response, *cathode)
+    , near(*anode, *response)
 {
-    auto ja = cfg["anode"];
-    auto jr = cfg["response"];
-    auto jc = cfg["cathode"];
-    if (ja.isNull()) {
-        ja = jr;
-    }
-    if (jr.isNull()) {
-        jr = ja;
-    }
-    anode = ja.asDouble();
-    response = jr.asDouble();
-    cathode = jc.asDouble();
-}
-bool Gen::Drifter::Xregion::inside_response(double x) const
-{
-    return (anode < x and x < response) or (response < x and x < anode);
-}
-bool Gen::Drifter::Xregion::inside_bulk(double x) const
-{
-    return (response < x and x < cathode) or (cathode < x and x < response);
 }
 
 Gen::Drifter::Drifter()
@@ -111,12 +93,9 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
         THROW(ValueError() << errmsg{"no xregions given"});
     }
     for (auto jone : jxregions) {
-        Xregion xr(jone);
-        m_xregions.push_back(xr);
-        log->debug("xregion: anode: {} mm, response: {} mm, cathode: {} mm",
-                   xr.anode / units::mm,
-                   xr.response / units::mm,
-                   xr.cathode / units::mm);
+        if (!jone.isNull()) {
+          m_xregions.emplace_back(Xregion(jone));
+        }
     }
     log->debug("time offset: {} ms, drift speed: {} mm/us", m_toffset / units::ms,
              m_speed / (units::mm / units::us));
@@ -146,13 +125,13 @@ bool Gen::Drifter::insert(const input_pointer& depo)
         // Back up in space and time.  This is a best effort fudge.  See:
         // https://github.com/WireCell/wire-cell-gen/issues/22
 
-        respx = xrit->response;
+        respx = xrit->response->location();
         direction = -1.0;
     }
     else {
         xrit = std::find_if(m_xregions.begin(), m_xregions.end(), Gen::Drifter::IsInsideBulk(depo));
         if (xrit != m_xregions.end()) {  // in bulk
-            respx = xrit->response;
+            respx = xrit->response->location();
             direction = 1.0;
         }
     }

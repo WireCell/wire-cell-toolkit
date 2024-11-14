@@ -11,7 +11,6 @@ import os
 # fixme: move into waft/
 from waflib.Build import BuildContext
 from waflib.Logs import debug, info, error, warn
-import waflib.Utils
 
 TOP = '.'
 APPNAME = 'WireCell'
@@ -43,10 +42,16 @@ def options(opt):
     opt.add_option('--cxxstd', default='c++17',
                    help="Set the value for the compiler's --std= option, default 'c++17'")
 
+
 def configure(cfg):
     # Save to BuildConfig.h and env
     cfg.define("WIRECELL_VERSION", VERSION)
     cfg.env.VERSION = VERSION
+
+    # See https://github.com/WireCell/wire-cell-toolkit/issues/337
+    if not cfg.options.libdir and cfg.env.LIBDIR.endswith("lib64"):
+        cfg.env.LIBDIR = cfg.env.LIBDIR[:-2]
+        debug(f'configure: forcing: {cfg.env.LIBDIR=} instead of lib64/, use explicit --libdir if you really want it')
     
     # Set to DEBUG to activate SPDLOG_DEBUG() macros or TRACE to activate both
     # those and SPDLOG_TRACE() levels.
@@ -97,19 +102,14 @@ int main(int argc,const char *argv[])
 def build(bld):
     ### we used to be set sloppiness globally.  Now we use #pragma to
     ### selectively quell warnings.  See util/docs/pragma.org for some info.
-
-    # This -Werror is a never ending source of frustration due to developers
-    # using a mix of old and new compilers.  Old compilers tend not catch as
-    # much so those developers tend to insert things that cause users of new
-    # compilers to see errors.  Until the playing field is level, remove
-    # -Werror.
-    # bld.env.CXXFLAGS += '-Wall -Wpedantic -Werror'.split()
-    bld.env.CXXFLAGS += '-Wall -Wpedantic'.split()    
+    bld.env.CXXFLAGS += '-Wall -Wpedantic'.split()
 
     bld.load('wcb')
 
+    
 def dumpenv(bld):
     bld.load('wcb')
+
 
 def packrepo(bld):
     bld.load('wcb')

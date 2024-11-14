@@ -122,7 +122,7 @@ TH2F* plot_frame(MultiPdf& pdf, IFrame::pointer frame, std::string name, double 
 int main(int argc, char* argv[])
 {
     PluginManager& pm = PluginManager::instance();
-    auto aux_pi = pm.add("WireCellAux");
+    auto aux_pi [[maybe_unused]] = pm.add("WireCellAux");
     assert(aux_pi);
     pm.add("WireCellGen");
     pm.add("WireCellRoot");

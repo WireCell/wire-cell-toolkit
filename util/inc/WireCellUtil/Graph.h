@@ -18,13 +18,29 @@
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
 
+#ifdef __clang__
+#  if defined(__has_warning)
+#    define HAS_WARNING(warning) __has_warning(warning)
+#  else
+#    define HAS_WARNING(warning) 1
+#  endif
+#else
+#  define HAS_WARNING(warning) 1
+#endif
+
+#if HAS_WARNING("-Wmaybe-uninitialized")
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/graphviz.hpp> // keep this at the bottom, ref clus/test/doctest_boost_dijkstra.cxx
+
+#if HAS_WARNING("-Wmaybe-uninitialized")
 #pragma GCC diagnostic pop
+#endif
 
 #include <boost/graph/copy.hpp> // keep this at the bottom, ref clus/test/doctest_boost_dijkstra.cxx
 

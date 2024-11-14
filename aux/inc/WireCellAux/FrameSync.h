@@ -26,7 +26,6 @@
 namespace WireCell::Aux {
 
     class FrameSync : Aux::Logger, public IFrameMerge {
-        bool m_flushing{false};
       public:
 
         FrameSync(const size_t multiplicity = 2);
