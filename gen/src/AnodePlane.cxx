@@ -173,7 +173,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
         if (jface["cathode"].isNumeric()) {
             cathode_xref = jface["cathode"].asDouble();
         }
-        if (jface["cathode"].isMember("x")) {
+        else if (jface["cathode"].isMember("x")) {
             auto xvec = get<std::vector<double>>(jface["cathode"], "x");
             const auto [vmin, vmax] = std::minmax_element(xvec.begin(), xvec.end());
             cathode_xref = *vmin < response_x ? *vmin : *vmax;
