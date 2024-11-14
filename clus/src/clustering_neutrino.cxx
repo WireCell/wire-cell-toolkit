@@ -246,14 +246,15 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster1->nnearby(extreme_pts.second, 15 * units::cm) <= 75 && cluster1->npoints() > 75 ||
                     cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0) &&
                         cluster1->get_length() > 45 * units::cm) {
-                    std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
+                    // std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
+                    const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
+                    auto sep_clusters = cluster1->separate<Cluster, Grouping>(b2id);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
-                    for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        // sep_clusters.at(j)->Create_point_cloud();
-                        if (sep_clusters.at(j)->npoints() > max_num_points) {
-                            max_num_points = sep_clusters.at(j)->npoints();
-                            largest_cluster = sep_clusters.at(j);
+                    for (auto [id, sep_cluster] : sep_clusters) {
+                        if (sep_cluster->npoints() > max_num_points) {
+                            max_num_points = sep_cluster->npoints();
+                            largest_cluster = sep_cluster;
                         }
                     }
 
@@ -410,14 +411,15 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster2->nnearby(extreme_pts.second, 15 * units::cm) <= 75 && cluster2->npoints() > 75 ||
                     cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0) &&
                         cluster2->get_length() > 45 * units::cm) {
-                    std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
+                    // std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
+                    const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
+                    auto sep_clusters = cluster2->separate<Cluster, Grouping>(b2id);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
-                    for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        // sep_clusters.at(j)->Create_point_cloud();
-                        if (sep_clusters.at(j)->npoints() > max_num_points) {
-                            max_num_points = sep_clusters.at(j)->npoints();
-                            largest_cluster = sep_clusters.at(j);
+                    for (auto [id, sep_cluster] : sep_clusters) {
+                        if (sep_cluster->npoints() > max_num_points) {
+                            max_num_points = sep_cluster->npoints();
+                            largest_cluster = sep_cluster;
                         }
                     }
                     temp_extreme_pts = largest_cluster->get_two_extreme_points();

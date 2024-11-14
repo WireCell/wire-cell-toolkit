@@ -408,7 +408,7 @@ namespace WireCell::PointCloud::Facade {
                                                          std::map<int, std::pair<double, double>> &dead_w_index,
                                                          double length);
 
-    std::vector<Cluster *> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
+    std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
 
 
     inline std::function<map_cluster_cluster_vec(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {

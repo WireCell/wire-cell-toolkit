@@ -1124,6 +1124,43 @@ double Cluster::get_length() const
     return m_length;
 }
 
+std::tuple<int, int, int, int> Facade::get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id)
+{
+    std::set<int> u_set;
+    std::set<int> v_set;
+    std::set<int> w_set;
+    std::set<int> t_set;
+    for (size_t i = 0; i != b2id.size(); i++) {
+        if (b2id.at(i) != id) continue;
+        const auto* blob = cluster->children().at(i);
+        for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
+            u_set.insert(i);
+        }
+        for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
+            v_set.insert(i);
+        }
+        for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
+            w_set.insert(i);
+        }
+        for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
+            t_set.insert(i);
+        }
+    }
+    return {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
+}
+
+double Facade::get_length(const Cluster* cluster, const std::vector<int>& b2id, const int id)
+{
+    const auto [u, v, w, t] = Facade::get_uvwt_range(cluster, b2id, id);
+    const auto& tp = cluster->grouping()->get_params();
+    const double pu = u * tp.pitch_u;
+    const double pv = v * tp.pitch_v;
+    const double pw = w * tp.pitch_w;
+    const double pt = t * tp.tick_drift;
+    return std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
+}
+
+
 std::pair<geo_point_t, geo_point_t> Cluster::get_highest_lowest_points(size_t axis) const
 {
     const auto& points = this->points();

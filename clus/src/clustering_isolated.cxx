@@ -46,18 +46,27 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             if (live_clusters.at(i)->get_length() < 60 * units::cm) {
                 if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir, live_clusters.at(i)->get_length(),
                                        time_slice_width)) {
-                    std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
-                    LogDebug(" Cluster " << i << "  separated into " << sep_clusters.size());
+                    // std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
+                    const auto b2id = Separate_2(live_clusters.at(i), 2.5 * units::cm);
+                    std::set<int> ids;
+                    for (const auto& id : b2id) {
+                        ids.insert(id);
+                    }
+                    // auto sep_clusters = live_clusters.at(i)->separate<Cluster, Grouping>(b2id);
+                    // LogDebug(" Cluster " << i << "  separated into " << sep_clusters.size());
                     int max = 0;
                     double max_length = 0;
-                    for (auto it = sep_clusters.begin(); it != sep_clusters.end(); it++) {
+                    // for (auto it = sep_clusters.begin(); it != sep_clusters.end(); it++) {
+                    for (const auto id : ids) {    
                         // std::tuple<int, int, int, int> ranges = (*it)->get_uvwt_range();
-                        std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
+                        // std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
+                        std::tuple<int, int, int, int> ranges_tuple = get_uvwt_range(live_clusters.at(i), b2id, id);
                         std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-                        double length_1 = sqrt(2. / 3. *
-                                                   (pow(mp.pitch_u * ranges.at(0), 2) + pow(mp.pitch_v * ranges.at(1), 2) +
-                                                    pow(mp.pitch_w * ranges.at(2), 2)) +
-                                               pow(time_slice_width * ranges.at(3), 2));
+                        // double length_1 = sqrt(2. / 3. *
+                        //                            (pow(mp.pitch_u * ranges.at(0), 2) + pow(mp.pitch_v * ranges.at(1), 2) +
+                        //                             pow(mp.pitch_w * ranges.at(2), 2)) +
+                        //                        pow(time_slice_width * ranges.at(3), 2));
+                        double length_1 = get_length(live_clusters.at(i), b2id, id);
                         for (int j = 0; j != 4; j++) {
                             if (ranges.at(j) > max) {
                                 max = ranges.at(j);
@@ -67,9 +76,9 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
                         if (max >= range_cut || max_length >= length_cut) break;
                     }
 
-                    for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        delete sep_clusters.at(j);
-                    }
+                    // for (size_t j = 0; j != sep_clusters.size(); j++) {
+                    //     delete sep_clusters.at(j);
+                    // }
 
                     if (max < range_cut && max_length < length_cut) {
                         small_clusters.push_back(live_clusters.at(i));

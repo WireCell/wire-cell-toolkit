@@ -340,6 +340,9 @@ namespace WireCell::PointCloud::Facade {
     void sort_clusters(std::vector<const Cluster*>& clusters);
     void sort_clusters(std::vector<Cluster*>& clusters);
 
+    std::tuple<int, int, int, int> get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id);
+    double get_length(const Cluster* cluster, const std::vector<int>& b2id, const int id);
+
     struct cluster_less_functor {
         bool operator()(const Cluster* a, const Cluster* b) const { return cluster_less(a, b); }
     };
