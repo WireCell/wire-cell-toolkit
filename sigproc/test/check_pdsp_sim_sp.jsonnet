@@ -80,9 +80,9 @@ local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n
 local sp_maker = import 'pgrapher/experiment/pdsp/sp.jsonnet';
 local sp_override = {
     sparse: false,
-    use_roi_debug_mode: true,
-    save_negtive_charge: true,
-    use_multi_plane_protection: true,
+    use_roi_debug_mode: false,
+    save_negtive_charge: false,
+    use_multi_plane_protection: false,
     mp_tick_resolution: 10,
 };
 local sp = sp_maker(params, tools, sp_override);
@@ -149,7 +149,7 @@ local multipass = [
         sinks.decon_pipe[n],
         sinks.debug_pipe[n],
         // sinks.threshold_pipe[n],
-        dnnroi(tools.anodes[n], ts, output_scale=1.0),
+        // dnnroi(tools.anodes[n], ts, output_scale=1.0),
     ], 'multipass%d' % n)
   for n in anode_iota
 ];
