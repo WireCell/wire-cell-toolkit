@@ -46,6 +46,25 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
     m_offset = get(cfg, "offset", m_offset);
     m_gzip = get(cfg, "gzip", m_gzip);
 
+    auto jchunk = cfg["chunk"];
+    if (jchunk.isInt()) {
+        int chunk = jchunk.asInt();
+        m_chunk[0] = chunk;
+        m_chunk[1] = chunk;
+    }
+    else if (jchunk.isArray()) {
+        m_chunk[0] = jchunk[0].asInt();
+        m_chunk[1] = jchunk[1].asInt();
+    }
+    if (!m_chunk[0] || !m_chunk[1]) {
+        // gzip (or any filter) requires chunked.
+        if (m_gzip) {
+            log->warn("gzip filter requires non-zero chunking, output will be uncompressed");
+        }
+        m_gzip = false;
+        m_chunk[0] = m_chunk[1] = 0;
+    }
+
     if (m_gzip) {
         if (!H5Zfilter_avail(H5Z_FILTER_DEFLATE)) {
             raise<ValueError>("HDF5 gzip filter not available");
@@ -57,16 +76,6 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
             raise<ValueError>("HDF5 gzip filter not available for encoding and decoding");
         }
 
-        auto jchunk = cfg["chunk"];
-        if (jchunk.isInt()) {
-            int chunk = jchunk.asInt();
-            m_chunk[0] = chunk;
-            m_chunk[1] = chunk;
-        }
-        else if (jchunk.isArray()) {
-            m_chunk[0] = jchunk[0].asInt();
-            m_chunk[1] = jchunk[1].asInt();
-        }
     }
 
     log->debug("digitize={} baseline={} scale={} offset={} gzip={} chunking:[{},{}]",
@@ -232,12 +241,15 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
             if (dcpl == H5I_INVALID_HID) {
                 raise<IOError>("failed to create dataset creation property list");
             }
+            log->debug("gzip:{} chunks:[{},{}]", m_gzip, m_chunk[0], m_chunk[1]);
+
             if (m_gzip) {
+                // Note, gzip filter requires chunked layout
                 if (H5Pset_deflate (dcpl, m_gzip) < 0) {
-                    raise<IOError>("failed set gzip compression of {}", m_gzip);
+                    raise<IOError>("failed set gzip compression of %s", m_gzip);
                 }
                 if (H5Pset_chunk (dcpl, 2, m_chunk.data()) < 0) {
-                    raise<IOError>("failed set chunk of [{},{}]", m_chunk[0], m_chunk[1]);
+                    raise<IOError>("failed set chunk of [%d,%d]", m_chunk[0], m_chunk[1]);
                 }
             }
 
@@ -252,6 +264,7 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
                 raise<IOError>("failed to create data space of %d x %d", dims[0], dims[1]);
             }
 
+
             hid_t dtype = 0;
             if (m_digitize) {
                 dtype = H5Tcopy(H5T_NATIVE_SHORT);
@@ -260,7 +273,7 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
                 dtype = H5Tcopy(H5T_NATIVE_FLOAT);
             }
             if (dtype == H5I_INVALID_HID) {
-                raise<IOError>("failed to make dtype for {}", m_digitize ? "short int" : "float");
+                raise<IOError>("failed to make dtype for %s", m_digitize ? "short int" : "float");
             }
 
             // The dataset

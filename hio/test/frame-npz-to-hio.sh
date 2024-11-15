@@ -4,15 +4,17 @@
 #  https://github.com/WireCell/wire-cell-toolkit/issues/192
 #
 # This script requires "adc.npz" and "sig.npz" files in WCT "frame file format"
-# (not tdm) to be in PWD.
+# (not tdm) to be in PWD.  Also "pip install h5py"
 
 mydir="$(dirname $(realpath $BASH_SOURCE))"
 
 set -e
+set -x
 
-for gzqual in 1 2 3 4 # 0 5 9
+# Test generating HDF5
+for gzqual in 0 9 # 0-9 possible, 0 is no compression, 9 is most.
 do
-    for chunk in 32 64 128 256 512
+    for chunk in 0 32 64 128 256 512  # Note, chunk=0 implies gz=0.
     do
         post="${gzqual}-${chunk}"
 
@@ -28,10 +30,12 @@ do
     done
 done
 
+# Test consuming HDF5
 for gzqual in 0 9
 do
-    for chunk in 32 512
+    for chunk in 0 32 512
     do
+        post="${gzqual}-${chunk}"
 
         for ext in pdf png
         do
