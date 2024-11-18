@@ -39,7 +39,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         // el_wcps.first.x()/units::cm << " " << el_wcps.second.x()/units::cm << std::endl;
 
         // if (el_wcps.first.x() < -1 * units::cm || el_wcps.second.x() > 257 * units::cm ||
-        if (el_wcps.first.x() < mp.FV_xmin || el_wcps.second.x() > mp.FV_xmax || cluster->get_length() < 6.0 * units::cm)
+        if (el_wcps.first.x() < mp.FV_xmin - mp.FV_xmin_margin || el_wcps.second.x() > mp.FV_xmax + mp.FV_xmax_margin || cluster->get_length() < 6.0 * units::cm)
             continue;
 
         bool flag_fy = false;
@@ -50,17 +50,17 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         bool flag_bz = false;
 
         std::vector<geo_point_t> saved_wcps;
-        if (hl_wcps.first.y() > 101.5 * units::cm) {
+        if (hl_wcps.first.y() > mp.FV_ymax) {
             saved_wcps.push_back(hl_wcps.first);
             flag_fy = true;
         }
 
-        if (hl_wcps.second.y() < -99.5 * units::cm) {
+        if (hl_wcps.second.y() < mp.FV_ymin) {
             saved_wcps.push_back(hl_wcps.second);
             flag_by = true;
         }
 
-        if (fb_wcps.first.z() > 1022 * units::cm) {
+        if (fb_wcps.first.z() > mp.FV_zmax) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - fb_wcps.first.x(), 2) +
@@ -77,7 +77,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (fb_wcps.second.z() < 15 * units::cm) {
+        if (fb_wcps.second.z() < mp.FV_zmin) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - fb_wcps.second.x(), 2) +
@@ -94,7 +94,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (el_wcps.first.x() < 1 * units::cm) {
+        if (el_wcps.first.x() < mp.FV_xmin) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - el_wcps.first.x(), 2) +
@@ -111,7 +111,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (el_wcps.second.x() > 255 * units::cm) {
+        if (el_wcps.second.x() > mp.FV_xmax) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - el_wcps.second.x(), 2) +

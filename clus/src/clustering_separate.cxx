@@ -80,7 +80,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                 independent_points.size() > 0) {
                 bool flag_top = false;
                 for (size_t j = 0; j != independent_points.size(); j++) {
-                    if (independent_points.at(j).y() > 101.5 * units::cm) {
+                    if (independent_points.at(j).y() > mp.FV_ymax) {
                         flag_top = true;
                         break;
                     }
@@ -391,6 +391,8 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length)
 {
+    const auto &mp = cluster->grouping()->get_params();
+
     boundary_points = cluster->get_hull();
     std::vector<geo_point_t> hy_points;
     std::vector<geo_point_t> ly_points;
@@ -425,11 +427,11 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
 
     bool flag_outx = false;
     /// FIXME: hard-coded fiducial volume boundaries, needs to be passed in
-    if (hx_points.at(0).x() > 257 * units::cm || lx_points.at(0).x() < -1 * units::cm) flag_outx = true;
+    if (hx_points.at(0).x() > mp.FV_xmax + mp.FV_xmax_margin || lx_points.at(0).x() < mp.FV_xmin - mp.FV_xmin_margin) flag_outx = true;
 
-    if (hy_points.at(0).y() > 101.5 * units::cm) {
+    if (hy_points.at(0).y() > mp.FV_ymax) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).y() > 101.5 * units::cm) {
+            if (boundary_points.at(j).y() > mp.FV_ymax) {
                 bool flag_save = true;
                 for (size_t k = 0; k != hy_points.size(); k++) {
                     double dis = sqrt(pow(hy_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -445,9 +447,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         }
     }
 
-    if (ly_points.at(0).y() < -99.5 * units::cm) {
+    if (ly_points.at(0).y() < mp.FV_ymin) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).y() < -99.5 * units::cm) {
+            if (boundary_points.at(j).y() < mp.FV_ymin) {
                 bool flag_save = true;
                 for (size_t k = 0; k != ly_points.size(); k++) {
                     double dis = sqrt(pow(ly_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -462,9 +464,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
             }
         }
     }
-    if (hz_points.at(0).z() > 1022 * units::cm) {
+    if (hz_points.at(0).z() > mp.FV_zmax) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).z() > 1022 * units::cm) {
+            if (boundary_points.at(j).z() > mp.FV_zmax) {
                 bool flag_save = true;
                 for (size_t k = 0; k != hz_points.size(); k++) {
                     double dis = sqrt(pow(hz_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -479,9 +481,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
             }
         }
     }
-    if (lz_points.at(0).z() < 15 * units::cm) {
+    if (lz_points.at(0).z() < mp.FV_zmin) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).z() < 15 * units::cm) {
+            if (boundary_points.at(j).z() < mp.FV_zmin) {
                 bool flag_save = true;
                 for (size_t k = 0; k != lz_points.size(); k++) {
                     double dis = sqrt(pow(lz_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -501,9 +503,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
     int num_outx_points = 0;
 
     for (size_t j = 0; j != hy_points.size(); j++) {
-        if (hy_points.at(j).x() >= 1 * units::cm && hy_points.at(j).x() <= 255 * units::cm &&
-            hy_points.at(j).y() >= -99.5 * units::cm && hy_points.at(j).y() <= 101.5 * units::cm &&
-            hy_points.at(j).z() >= 15 * units::cm && hy_points.at(j).z() <= 1022 * units::cm && (!flag_outx))
+        if (hy_points.at(j).x() >= mp.FV_xmin && hy_points.at(j).x() <= mp.FV_xmax &&
+            hy_points.at(j).y() >= mp.FV_ymin && hy_points.at(j).y() <= mp.FV_ymax &&
+            hy_points.at(j).z() >= mp.FV_zmin && hy_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -515,36 +517,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         }
         if (flag_save) {
             independent_points.push_back(hy_points.at(j));
-            if (hy_points.at(j).y() > 104 * units::cm) {
+            if (hy_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (hy_points.at(j).y() < -99.5 * units::cm) {
+            else if (hy_points.at(j).y() < mp.FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (hy_points.at(j).z() > 1025 * units::cm) {
+            else if (hy_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (hy_points.at(j).z() < 12 * units::cm) {
+            else if (hy_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (hy_points.at(j).x() > 255 * units::cm) {
+            else if (hy_points.at(j).x() > mp.FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (hy_points.at(j).x() < 1 * units::cm) {
+            else if (hy_points.at(j).x() < mp.FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (hy_points.at(j).y() > 104 * units::cm || hy_points.at(j).y() < -99.5 * units::cm ||
-                hy_points.at(j).z() < 12 * units::cm || hy_points.at(j).z() > 1025 * units::cm ||
-                hy_points.at(j).x() < 1 * units::cm || hy_points.at(j).x() > 255 * units::cm)
+            if (hy_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || hy_points.at(j).y() < mp.FV_ymin ||
+                hy_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || hy_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
+                hy_points.at(j).x() < mp.FV_xmin || hy_points.at(j).x() > mp.FV_xmax)
                 num_outside_points++;
-            if (hy_points.at(j).x() < -1 * units::cm || hy_points.at(j).x() > 257 * units::cm) num_outx_points++;
+            if (hy_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || hy_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != ly_points.size(); j++) {
-        if (ly_points.at(j).x() >= 1 * units::cm && ly_points.at(j).x() <= 255 * units::cm &&
-            ly_points.at(j).y() >= -99.5 * units::cm && ly_points.at(j).y() <= 101.5 * units::cm &&
-            ly_points.at(j).z() >= 15 * units::cm && ly_points.at(j).z() <= 1022 * units::cm && (!flag_outx))
+        if (ly_points.at(j).x() >= mp.FV_xmin && ly_points.at(j).x() <= mp.FV_xmax &&
+            ly_points.at(j).y() >= mp.FV_ymin && ly_points.at(j).y() <= mp.FV_ymax &&
+            ly_points.at(j).z() >= mp.FV_zmin && ly_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -557,36 +559,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(ly_points.at(j));
 
-            if (ly_points.at(j).y() < -99.5 * units::cm) {
+            if (ly_points.at(j).y() < mp.FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (ly_points.at(j).y() > 104 * units::cm) {
+            else if (ly_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (ly_points.at(j).z() > 1025 * units::cm) {
+            else if (ly_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (ly_points.at(j).z() < 12 * units::cm) {
+            else if (ly_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (ly_points.at(j).x() > 255 * units::cm) {
+            else if (ly_points.at(j).x() > mp.FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (ly_points.at(j).x() < 1 * units::cm) {
+            else if (ly_points.at(j).x() < mp.FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (ly_points.at(j).y() > 104 * units::cm || ly_points.at(j).y() < -99.5 * units::cm ||
-                ly_points.at(j).z() < 12 * units::cm || ly_points.at(j).z() > 1025 * units::cm ||
-                ly_points.at(j).x() < 1 * units::cm || ly_points.at(j).x() > 255 * units::cm)
+            if (ly_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || ly_points.at(j).y() < mp.FV_ymin ||
+                ly_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || ly_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
+                ly_points.at(j).x() < mp.FV_xmin || ly_points.at(j).x() > mp.FV_xmax)
                 num_outside_points++;
-            if (ly_points.at(j).x() < -1 * units::cm || ly_points.at(j).x() > 257 * units::cm) num_outx_points++;
+            if (ly_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || ly_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != hz_points.size(); j++) {
-        if (hz_points.at(j).x() >= 1 * units::cm && hz_points.at(j).x() <= 255 * units::cm &&
-            hz_points.at(j).y() >= -99.5 * units::cm && hz_points.at(j).y() <= 101.5 * units::cm &&
-            hz_points.at(j).z() >= 15 * units::cm && hz_points.at(j).z() <= 1022 * units::cm && (!flag_outx))
+        if (hz_points.at(j).x() >= mp.FV_xmin && hz_points.at(j).x() <= mp.FV_xmax &&
+            hz_points.at(j).y() >= mp.FV_ymin && hz_points.at(j).y() <= mp.FV_ymax &&
+            hz_points.at(j).z() >= mp.FV_zmin && hz_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -599,36 +601,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(hz_points.at(j));
 
-            if (hz_points.at(j).z() > 1025 * units::cm) {
+            if (hz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (hz_points.at(j).z() < 12 * units::cm) {
+            else if (hz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (hz_points.at(j).y() > 104 * units::cm) {
+            else if (hz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (hz_points.at(j).y() < -99.5 * units::cm) {
+            else if (hz_points.at(j).y() < mp.FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (hz_points.at(j).x() > 255 * units::cm) {
+            else if (hz_points.at(j).x() > mp.FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (hz_points.at(j).x() < 1 * units::cm) {
+            else if (hz_points.at(j).x() < mp.FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (hz_points.at(j).y() > 104 * units::cm || hz_points.at(j).y() < -99.5 * units::cm ||
-                hz_points.at(j).z() < 12 * units::cm || hz_points.at(j).z() > 1025 * units::cm ||
-                hz_points.at(j).x() < 1 * units::cm || hz_points.at(j).x() > 255 * units::cm)
+            if (hz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || hz_points.at(j).y() < mp.FV_ymin ||
+                hz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || hz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
+                hz_points.at(j).x() < mp.FV_xmin || hz_points.at(j).x() > mp.FV_xmax)
                 num_outside_points++;
-            if (hz_points.at(j).x() < -1 * units::cm || hz_points.at(j).x() > 257 * units::cm) num_outx_points++;
+            if (hz_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || hz_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != lz_points.size(); j++) {
-        if (lz_points.at(j).x() >= 1 * units::cm && lz_points.at(j).x() <= 255 * units::cm &&
-            lz_points.at(j).y() >= -99.5 * units::cm && lz_points.at(j).y() <= 101.5 * units::cm &&
-            lz_points.at(j).z() >= 15 * units::cm && lz_points.at(j).z() <= 1022 * units::cm && (!flag_outx))
+        if (lz_points.at(j).x() >= mp.FV_xmin && lz_points.at(j).x() <= mp.FV_xmax &&
+            lz_points.at(j).y() >= mp.FV_ymin && lz_points.at(j).y() <= mp.FV_ymax &&
+            lz_points.at(j).z() >= mp.FV_zmin && lz_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -641,36 +643,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(lz_points.at(j));
 
-            if (lz_points.at(j).z() < 12 * units::cm) {
+            if (lz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (lz_points.at(j).z() > 1025 * units::cm) {
+            else if (lz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lz_points.at(j).y() > 104 * units::cm) {
+            else if (lz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lz_points.at(j).y() < -99.5 * units::cm) {
+            else if (lz_points.at(j).y() < mp.FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lz_points.at(j).x() > 255 * units::cm) {
+            else if (lz_points.at(j).x() > mp.FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lz_points.at(j).x() < 1 * units::cm) {
+            else if (lz_points.at(j).x() < mp.FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (lz_points.at(j).y() > 104 * units::cm || lz_points.at(j).y() < -99.5 * units::cm ||
-                lz_points.at(j).z() < 12 * units::cm || lz_points.at(j).z() > 1025 * units::cm ||
-                lz_points.at(j).x() < 1 * units::cm || lz_points.at(j).x() > 255 * units::cm)
+            if (lz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || lz_points.at(j).y() < mp.FV_ymin ||
+                lz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || lz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
+                lz_points.at(j).x() < mp.FV_xmin || lz_points.at(j).x() > mp.FV_xmax)
                 num_outside_points++;
-            if (lz_points.at(j).x() < -1 * units::cm || lz_points.at(j).x() > 257 * units::cm) num_outx_points++;
+            if (lz_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || lz_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != hx_points.size(); j++) {
-        if (hx_points.at(j).x() >= 1 * units::cm && hx_points.at(j).x() <= 255 * units::cm &&
-            hx_points.at(j).y() >= -99.5 * units::cm && hx_points.at(j).y() <= 101.5 * units::cm &&
-            hx_points.at(j).z() >= 15 * units::cm && hx_points.at(j).z() <= 1022 * units::cm && (!flag_outx))
+        if (hx_points.at(j).x() >= mp.FV_xmin && hx_points.at(j).x() <= mp.FV_xmax &&
+            hx_points.at(j).y() >= mp.FV_ymin && hx_points.at(j).y() <= mp.FV_ymax &&
+            hx_points.at(j).z() >= mp.FV_zmin && hx_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -683,38 +685,38 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(hx_points.at(j));
 
-            if (hx_points.at(j).y() > 104 * units::cm || hx_points.at(j).y() < -99.5 * units::cm ||
-                hx_points.at(j).z() < 12 * units::cm || hx_points.at(j).z() > 1025 * units::cm ||
-                hx_points.at(j).x() < 1 * units::cm || hx_points.at(j).x() > 255 * units::cm)
+            if (hx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || hx_points.at(j).y() < mp.FV_ymin ||
+                hx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || hx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
+                hx_points.at(j).x() < mp.FV_xmin || hx_points.at(j).x() > mp.FV_xmax)
                 num_outside_points++;
-            if (hx_points.at(j).x() < -1 * units::cm || hx_points.at(j).x() > 257 * units::cm) {
+            if (hx_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || hx_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) {
                 num_outx_points++;
             }
 
-            if (lx_points.at(j).x() > 255 * units::cm) {
+            if (lx_points.at(j).x() > mp.FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lx_points.at(j).x() < 1 * units::cm) {
+            else if (lx_points.at(j).x() < mp.FV_xmin) {
                 independent_surfaces.insert(5);
             }
-            else if (lx_points.at(j).y() > 104 * units::cm) {
+            else if (lx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lx_points.at(j).y() < -99.5 * units::cm) {
+            else if (lx_points.at(j).y() < mp.FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lx_points.at(j).z() > 1025 * units::cm) {
+            else if (lx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lx_points.at(j).z() < 12 * units::cm) {
+            else if (lx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
         }
     }
     for (size_t j = 0; j != lx_points.size(); j++) {
-        if (lx_points.at(j).x() >= 1 * units::cm && lx_points.at(j).x() <= 255 * units::cm &&
-            lx_points.at(j).y() >= -99.5 * units::cm && lx_points.at(j).y() <= 101.5 * units::cm &&
-            lx_points.at(j).z() >= 15 * units::cm && lx_points.at(j).z() <= 1022 * units::cm && (!flag_outx))
+        if (lx_points.at(j).x() >= mp.FV_xmin && lx_points.at(j).x() <= mp.FV_xmax &&
+            lx_points.at(j).y() >= mp.FV_ymin && lx_points.at(j).y() <= mp.FV_ymax &&
+            lx_points.at(j).z() >= mp.FV_zmin && lx_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -727,30 +729,30 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(lx_points.at(j));
 
-            if (lx_points.at(j).y() > 104 * units::cm || lx_points.at(j).y() < -99.5 * units::cm ||
-                lx_points.at(j).z() < 12 * units::cm || lx_points.at(j).z() > 1025 * units::cm ||
-                lx_points.at(j).x() < 1 * units::cm || lx_points.at(j).x() > 255 * units::cm)
+            if (lx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || lx_points.at(j).y() < mp.FV_ymin ||
+                lx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || lx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
+                lx_points.at(j).x() < mp.FV_xmin || lx_points.at(j).x() > mp.FV_xmax)
                 num_outside_points++;
-            if (lx_points.at(j).x() < -1 * units::cm || lx_points.at(j).x() > 257 * units::cm) {
+            if (lx_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || lx_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) {
                 num_outx_points++;
             }
 
-            if (lx_points.at(j).x() < 1 * units::cm) {
+            if (lx_points.at(j).x() < mp.FV_xmin) {
                 independent_surfaces.insert(5);
             }
-            else if (lx_points.at(j).x() > 255 * units::cm) {
+            else if (lx_points.at(j).x() > mp.FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lx_points.at(j).y() > 104 * units::cm) {
+            else if (lx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lx_points.at(j).y() < -99.5 * units::cm) {
+            else if (lx_points.at(j).y() < mp.FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lx_points.at(j).z() > 1025 * units::cm) {
+            else if (lx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lx_points.at(j).z() < 12 * units::cm) {
+            else if (lx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
         }
