@@ -33,6 +33,7 @@ namespace WireCell::PointCloud::Facade {
        public:
         // MUST call this sometimes after construction if non-default value needed.
         void set_params(const TPCParams& tp) { m_tp = tp; }
+        void set_params(const WireCell::Configuration& cfg);
         const TPCParams& get_params() const { return m_tp; }
         std::tuple<double, double, double> wire_angles() const { return {m_tp.angle_u, m_tp.angle_v, m_tp.angle_w}; }
 

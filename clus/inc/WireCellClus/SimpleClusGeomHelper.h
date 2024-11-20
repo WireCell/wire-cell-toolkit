@@ -1,11 +1,11 @@
 /**
- * A simple implementation of IGeomService which provides a single
+ * A simple implementation of IClusGeomHelper which provides a single
  */
 
 #ifndef WIRECELLGEN_SIMPLEGEOMSERVICE
 #define WIRECELLGEN_SIMPLEGEOMSERVICE
 
-#include "WireCellIface/IGeomService.h"
+#include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/Units.h"
@@ -14,22 +14,22 @@
 namespace WireCell {
     namespace Clus {
 
-        class SimpleGeomService : public Aux::Logger, public IGeomService, public IConfigurable {
+        class SimpleClusGeomHelper : public Aux::Logger, public IClusGeomHelper, public IConfigurable {
            public:
-            SimpleGeomService();
-            virtual ~SimpleGeomService() {}
+            SimpleClusGeomHelper();
+            virtual ~SimpleClusGeomHelper() {}
 
             // IConfigurable interface
             virtual WireCell::Configuration default_configuration() const;
             virtual void configure(const WireCell::Configuration& config);
 
-            /// IGeomService interface
+            /// IClusGeomHelper interface
             virtual WireCell::Configuration get_params(const int apa, const int face) const;
             virtual bool is_in_FV(const WireCell::Point& point, const int apa, const int face) const;
             virtual bool is_in_FV_dim(const WireCell::Point& point, const int dim, const double margin, const int apa,
                                       const int face) const;
             virtual WireCell::Point get_corrected_point(const WireCell::Point& point,
-                                                        const WireCell::IGeomService::CorrectionType type,
+                                                        const WireCell::IClusGeomHelper::CorrectionType type,
                                                         const int apa, const int face) const;
 
             struct FV {

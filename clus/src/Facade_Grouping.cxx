@@ -72,6 +72,17 @@ void Grouping::on_construct(node_type* node)
     }
 }
 
+void Grouping::set_params(const WireCell::Configuration& cfg) {
+    m_tp.pitch_u = get(cfg, "pitch_u", m_tp.pitch_u);
+    m_tp.pitch_v = get(cfg, "pitch_v", m_tp.pitch_v);
+    m_tp.pitch_w = get(cfg, "pitch_w", m_tp.pitch_w);
+    m_tp.angle_u = get(cfg, "angle_u", m_tp.angle_u);
+    m_tp.angle_v = get(cfg, "angle_v", m_tp.angle_v);
+    m_tp.angle_w = get(cfg, "angle_w", m_tp.angle_w);
+    m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
+    /// NOT FINISHED....
+}
+
 size_t Grouping::hash() const
 {
     std::size_t h = 0;

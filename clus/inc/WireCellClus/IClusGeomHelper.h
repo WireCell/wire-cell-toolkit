@@ -2,8 +2,8 @@
  * Interface for a service which provides geometry information.
  */
 
-#ifndef WIRECELLIFACES_IGEOMSERVICE
-#define WIRECELLIFACES_IGEOMSERVICE
+#ifndef WIRECELLCLUS_ICLUSGEOMHELPER
+#define WIRECELLCLUS_ICLUSGEOMHELPER
 
 #include "WireCellUtil/IComponent.h"
 #include "WireCellIface/IConfigurable.h"
@@ -11,9 +11,9 @@
 
 namespace WireCell {
 
-    class IGeomService : public IComponent<IGeomService> {
+    class IClusGeomHelper : public IComponent<IClusGeomHelper> {
        public:
-        virtual ~IGeomService();
+        virtual ~IClusGeomHelper() {};
 
         /// Return WCP style TPC parameters in json format
         virtual Configuration get_params(const int apa, const int face) const = 0;
