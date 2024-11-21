@@ -27,7 +27,7 @@ using namespace WireCell::PointCloud::Tree;
 MultiAlgBlobClustering::MultiAlgBlobClustering()
   : Aux::Logger("MultiAlgBlobClustering", "clus")
   , m_bee_img("uboone", "img")
-  , m_bee_ld("uboone", "live-dead")
+  , m_bee_ld("uboone", "clustering")
   , m_bee_dead("channel-deadarea", 1*units::mm, 3) // tolerance, minpts
 {
 }
@@ -45,8 +45,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
-    m_x_boundary_low_limit = get(cfg, "x_boundary_low_limit", m_x_boundary_low_limit);
-    m_x_boundary_high_limit = get(cfg, "x_boundary_high_limit", m_x_boundary_high_limit);
+    // m_x_boundary_low_limit = get(cfg, "x_boundary_low_limit", m_x_boundary_low_limit);
+    // m_x_boundary_high_limit = get(cfg, "x_boundary_high_limit", m_x_boundary_high_limit);
 
     m_func_cfgs = cfg["func_cfgs"];
 
@@ -54,6 +54,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_perf = get(cfg, "perf", m_perf);
 
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
+
+    m_face = get<int>(cfg, "face", 0);
+
+    m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -232,6 +236,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
     auto grouping = root_live->value.facade<Grouping>();
     grouping->set_anode(m_anode);
+    grouping->set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
     perf("loaded live clusters");
 
     // log->debug("Got live pctree with {} children", root_live->nchildren());

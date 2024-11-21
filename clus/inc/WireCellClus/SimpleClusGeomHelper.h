@@ -2,8 +2,8 @@
  * A simple implementation of IClusGeomHelper which provides a single
  */
 
-#ifndef WIRECELLGEN_SIMPLEGEOMSERVICE
-#define WIRECELLGEN_SIMPLEGEOMSERVICE
+#ifndef WIRECELLCLUS_SIMPLEGEOMSERVICE
+#define WIRECELLCLUS_SIMPLEGEOMSERVICE
 
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellIface/IConfigurable.h"

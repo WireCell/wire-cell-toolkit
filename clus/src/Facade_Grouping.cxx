@@ -80,7 +80,22 @@ void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.angle_v = get(cfg, "angle_v", m_tp.angle_v);
     m_tp.angle_w = get(cfg, "angle_w", m_tp.angle_w);
     m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
-    /// NOT FINISHED....
+    m_tp.tick = get(cfg, "tick", m_tp.tick);
+    m_tp.tick_drift = get(cfg, "tick_drift", m_tp.tick_drift);
+    m_tp.nticks_live_slice = get(cfg, "nticks_live_slice", m_tp.nticks_live_slice);
+
+    m_tp.FV_xmin = get(cfg, "FV_xmin", m_tp.FV_xmin);
+    m_tp.FV_xmax = get(cfg, "FV_xmax", m_tp.FV_xmax);
+    m_tp.FV_ymin = get(cfg, "FV_ymin", m_tp.FV_ymin);
+    m_tp.FV_ymax = get(cfg, "FV_ymax", m_tp.FV_ymax);
+    m_tp.FV_zmin = get(cfg, "FV_zmin", m_tp.FV_zmin);
+    m_tp.FV_zmax = get(cfg, "FV_zmax", m_tp.FV_zmax);
+    m_tp.FV_xmin_margin = get(cfg, "FV_xmin_margin", m_tp.FV_xmin_margin);
+    m_tp.FV_xmax_margin = get(cfg, "FV_xmax_margin", m_tp.FV_xmax_margin);
+    m_tp.FV_ymin_margin = get(cfg, "FV_ymin_margin", m_tp.FV_ymin_margin);
+    m_tp.FV_ymax_margin = get(cfg, "FV_ymax_margin", m_tp.FV_ymax_margin);
+    m_tp.FV_zmin_margin = get(cfg, "FV_zmin_margin", m_tp.FV_zmin_margin);
+    m_tp.FV_zmax_margin = get(cfg, "FV_zmax_margin", m_tp.FV_zmax_margin);
 }
 
 size_t Grouping::hash() const

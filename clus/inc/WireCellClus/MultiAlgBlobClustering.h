@@ -6,6 +6,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/ITerminal.h"
+#include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellUtil/Bee.h"
 
 namespace WireCell::Clus {
@@ -71,13 +72,19 @@ namespace WireCell::Clus {
         int m_dead_live_overlap_offset{2};
 
         // clustering_examine_x_boundary
-        double m_x_boundary_low_limit{-1*units::cm};
-        double m_x_boundary_high_limit{257*units::cm};
+        // double m_x_boundary_low_limit{-1*units::cm};
+        // double m_x_boundary_high_limit{257*units::cm};
 
         Configuration m_func_cfgs;
 
-        // 
+        // the anode to be processed
         IAnodePlane::pointer m_anode;
+
+        // the face to be processed
+        int m_face{0};
+
+        // the geometry helper
+        IClusGeomHelper::pointer m_geomhelper;
     };
 }  // namespace WireCell::Clus
 

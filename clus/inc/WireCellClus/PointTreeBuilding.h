@@ -11,6 +11,7 @@
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellClus/IClusGeomHelper.h"
 
 
 namespace WireCell::Clus {
@@ -33,8 +34,8 @@ namespace WireCell::Clus {
       private:
         // sampling for live/dead
         using node_ptr = WireCell::PointCloud::Tree::Points::node_ptr;
-        node_ptr sample_live(const WireCell::ICluster::pointer cluster) const;
-        node_ptr sample_dead(const WireCell::ICluster::pointer cluster) const;
+        node_ptr sample_live(const WireCell::ICluster::pointer cluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const;
+        node_ptr sample_dead(const WireCell::ICluster::pointer cluster, const double tick) const;
         // add CT point cloud to the root/Grouping
         void add_ctpc(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
         // wind -> xbeg, xend
@@ -45,15 +46,22 @@ namespace WireCell::Clus {
         size_t m_count{0};
 
 
-        double m_tick {0.5*units::us};
-        double m_drift_speed {1.101*units::millimeter/units::us};
-        double m_time_offset {-1600 * units::us};
+        // double m_tick {0.5*units::us};
+        // double m_drift_speed {1.101*units::millimeter/units::us};
+        // double m_time_offset {-1600 * units::us};
         double m_dead_threshold {1e10};
-        /// TODO: pass these to TPCParams?
-        double m_angle_u {1.0472}; // 60 degrees
-        double m_angle_v {-1.0472}; // -60 degrees
-        double m_angle_w {0}; // 0 degrees
+        // double m_angle_u {1.0472}; // 60 degrees
+        // double m_angle_v {-1.0472}; // -60 degrees
+        // double m_angle_w {0}; // 0 degrees
+
+        // the anode to be processed
         IAnodePlane::pointer m_anode;
+
+        // the face to be processed
+        int m_face{0};
+
+        // the geometry helper
+        IClusGeomHelper::pointer m_geomhelper;
         
         /** Configuration: "samplers"
 
