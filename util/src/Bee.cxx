@@ -238,19 +238,43 @@ Bee::Sink::Sink(const std::string& store)
     reset(store);
 }
 
+Bee::Sink::Sink(const std::string& store, size_t initial_index)
+{
+    reset(store, initial_index);
+}
+
+void Bee::Sink::reset(const std::string& store)
+{
+    reset(store, 0);  // Use default index 0
+}
+
 Bee::Sink::~Sink()
 {
     close();
 }
 
-void Bee::Sink::reset(const std::string& store)
+void Bee::Sink::reset(const std::string& store, size_t initial_index)
 {
     close();
     Stream::output_filters(m_out, store);
     if (m_out.empty()) {
         raise<IOError>("no output for %s", store);
     }
+    m_index = initial_index;
 }
+
+void Bee::Sink::set_index(size_t index)
+{
+    m_index = index;
+    m_seen.clear();  // Clear seen items when changing index
+}
+
+size_t Bee::Sink::get_index() const
+{
+    return m_index;
+}
+
+
 
 void Bee::Sink::index(const Object& obj)
 {
@@ -299,18 +323,41 @@ size_t Bee::Sink::write(const Object& obj)
     // WCT stream protocol for actual file.
     {
         const std::string fname = "name " + store_path(obj);
-        const std::string json = obj.json();
+        
+        // Create a new JSON object and copy original data
+        Json::Value json_data = Json::objectValue;  // Initialize as object
+        const Configuration& orig_data = obj.data();
+        
+        // Check if original data is an object and copy it
+        if (orig_data.isObject()) {
+            json_data = orig_data;
+        } 
+        
+        // Add RSE values
+        json_data["runNo"] = std::to_string(m_runNo);
+        json_data["subRunNo"] = std::to_string(m_subRunNo);
+        json_data["eventNo"] = std::to_string(m_eventNo);
+        
+        //std::cout << "Xin: " << m_runNo << " " << m_subRunNo << " " << m_eventNo << std::endl;
+
+
+        // Convert to string
+        //Json::FastWriter writer;
+        std::string json = Persist::dumps(json_data, 0, 6);
+
+        //const std::string json = obj.json();
         const std::string body = fmt::format("body {}\n", json.size());
         m_out << fname << body << json.data();
         m_out.flush();
     }
+
     return m_index;
 }
 
 void Bee::Sink::close()
 {
     if (m_out.empty()) { return; }
-    m_index=0;
+    //m_index=0;
     m_seen.clear();
     m_out.flush();
     m_out.pop();

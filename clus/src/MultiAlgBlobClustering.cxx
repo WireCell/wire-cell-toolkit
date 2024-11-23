@@ -41,7 +41,28 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         log->warn("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
     }
 
-    m_sink.reset(get<std::string>(cfg, "bee_zip", "mabc.zip"));
+    
+    std::string bee_zip = get<std::string>(cfg, "bee_zip", "mabc.zip");
+    // Add new configuration option for initial index
+    m_initial_index = get<int>(cfg, "initial_index", m_initial_index);
+
+    //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
+    m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+
+    // Configure RSE numbers
+    if (cfg.isMember("use_config_rse")) {
+        m_use_config_rse = get(cfg, "use_config_rse", false);
+        if (m_use_config_rse) {
+            // Only read RSE if we're using configured values
+            m_runNo = get(cfg, "runNo", m_runNo);
+            m_subRunNo = get(cfg, "subRunNo", m_subRunNo);
+            m_eventNo = get(cfg, "eventNo", m_eventNo);
+            
+             // Set RSE in sink during configuration
+            m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+    }
+
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
@@ -69,7 +90,16 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["bee_zip"] = "mabc.zip";
     cfg["save_deadarea"] = m_save_deadarea;
 
+    // Add the new parameter to default configuration
+    cfg["initial_index"] = m_initial_index;
+
     cfg["dead_live_overlap_offset"] = m_dead_live_overlap_offset;
+
+    cfg["use_config_rse"] = false;  // By default, don't use configured RSE
+    cfg["runNo"] = m_runNo;
+    cfg["subRunNo"] = m_subRunNo;
+    cfg["eventNo"] = m_eventNo;
+
     return cfg;
 }
 
@@ -214,12 +244,23 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     const int ident = ints->ident();
     if (m_last_ident < 0) {     // first time.
+        if (m_use_config_rse) {
+            // Set RSE in the sink
+            m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+        // Use default behavior
         reset_bee(ident, m_bee_img);
         reset_bee(ident, m_bee_ld);
         m_last_ident = ident;
     }
     else if (m_last_ident != ident) {
         flush(ident);
+        if (m_use_config_rse) {
+            // Update event number for next event
+            m_eventNo++;
+            // Update RSE in sink
+            m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
     }
     // else do nothing when ident is unchanged.
 

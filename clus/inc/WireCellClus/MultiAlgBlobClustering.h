@@ -33,8 +33,15 @@ namespace WireCell::Clus {
          */
         Bee::Sink m_sink;
         int m_last_ident{-1};
+        int m_initial_index{0};  // Default to 0 for backward compatibility
         Bee::Points m_bee_img, m_bee_ld;
         Bee::Patches m_bee_dead;
+        // Add new member variables for run/subrun/event
+        int m_runNo{0};
+        int m_subRunNo{0};
+        int m_eventNo{0};
+        bool m_use_config_rse{false};  // Flag to determine if we use configured RSE
+
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);
 

@@ -62,6 +62,10 @@ namespace WireCell::Bee {
         /// The name must be suitable for use as part of a file name.  It
         /// identifies a Bee class of data (eg "clusters").
         std::string name() const { return m_name; }
+
+        // Method to get JSON data
+        Configuration& data() { return m_data; }
+        const Configuration& data() const { return m_data; }
     };
 
     /// A Bee "object" represents a set of 3D points with attributes.  It maps
@@ -164,6 +168,9 @@ namespace WireCell::Bee {
         size_t m_index{0};
         std::unordered_set<std::string> m_seen; // names at current index
 
+        int m_runNo{0};
+        int m_subRunNo{0};
+        int m_eventNo{0};
     public:
 
         /// Construct a sink of Bee objects.  The "store" indicates some
@@ -172,11 +179,32 @@ namespace WireCell::Bee {
         Sink();
         Sink(const std::string& store);
 
+        /// Construct with store path and initial index
+        Sink(const std::string& store, size_t initial_index);
+
         /// Close current if exists and initialize a new store.
         void reset(const std::string& store);
 
+        /// Reset store path with initial index
+        void reset(const std::string& store, size_t initial_index);
+
+        /// Set index directly
+        void set_index(size_t index);
+        
+        /// Get current index
+        size_t get_index() const;
+
         /// Destruct the sink.  This must be done in order to close the store.
         ~Sink();
+
+        // Add method to set RSE
+        void set_rse(int run, int subrun, int event) {
+            m_runNo = run;
+            m_subRunNo = subrun;
+            m_eventNo = event;
+        }    
+        
+    
 
         /// Write one Bee objects to the sink store.
         ///
@@ -198,6 +226,7 @@ namespace WireCell::Bee {
     private:
 
         void index(const Object& obj);
+
 
     };
 
