@@ -804,7 +804,7 @@ double Cluster::get_closest_dis(const geo_point_t& point) const
     }
 
     const auto& [_, dis] = results[0];
-    return dis;
+    return sqrt(dis);
 }
 
 std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) const{

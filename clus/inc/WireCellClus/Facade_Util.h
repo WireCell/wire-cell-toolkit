@@ -332,7 +332,7 @@ namespace WireCell::PointCloud::Facade {
             return {m_points[plane][0][ind], m_points[plane][1][ind]};
         }
         void add(const geo_point_t& new_pt);
-        size_t get_num_points() const { return m_points[0][0].size(); }
+        size_t get_num_points(const size_t plane) const { return m_points[plane][0].size(); }
         const nfkd_t& kd(const size_t plane, const bool rebuild=false) const;
         nfkd_t& kd(const size_t plane, const bool rebuild=false);
         std::pair<int, double> get_closest_2d_dis(const geo_point_t &p, size_t plane) const;

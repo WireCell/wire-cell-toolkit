@@ -215,14 +215,14 @@ std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d
         LogDebug(" res " << r.first << " " << r.second);
         const auto p2d = point(plane, r.first);
         LogDebug(" 2dp" << plane << " " << p2d[0] << " " << p2d[1] << " dist2 " << (x-p2d[0])*(x-p2d[0]) + (y-p2d[1])*(y-p2d[1]));
-        ret.push_back(std::make_pair(r.first, r.second));
+        ret.push_back(std::make_pair(r.first, sqrt(r.second)));
     }
     return ret;
 }
 
 std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dpc)
 {
-    os << "Multi2DPointCloud " << " get_num_points " << m2dpc.get_num_points();
+    os << "Multi2DPointCloud " << " get_num_points " << m2dpc.get_num_points(0) << " " << m2dpc.get_num_points(1) << " " << m2dpc.get_num_points(2);
     return os;
 }
 
@@ -391,7 +391,7 @@ std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointClou
     std::vector<std::tuple<double, const Cluster*, size_t>> return_results;
 
     for (size_t i = 0; i != results.size(); i++) {
-        return_results.push_back(std::make_tuple(results.at(i).second, m_clusters.at(results.at(i).first),
+        return_results.push_back(std::make_tuple(sqrt(results.at(i).second), m_clusters.at(results.at(i).first),
                                                  (size_t)results.at(i).first));
     }
 
@@ -411,7 +411,7 @@ std::tuple<double, const Cluster*, size_t> Facade::DynamicPointCloud::get_closes
     const auto cluster = m_clusters.at(results.at(0).first);
     LogDebug(" 3d " << p3d << " " << results.at(0).second);
     LogDebug(" cluster.npoints() " << cluster->npoints());
-    return std::make_tuple(results.at(0).second, m_clusters.at(results.at(0).first), (size_t)results.at(0).first);
+    return std::make_tuple(sqrt(results.at(0).second), m_clusters.at(results.at(0).first), (size_t)results.at(0).first);
 }
 
 
