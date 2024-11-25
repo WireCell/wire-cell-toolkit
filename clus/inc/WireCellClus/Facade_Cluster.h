@@ -254,7 +254,8 @@ namespace WireCell::PointCloud::Facade {
         /// @attention has distance-based cuts
         void Establish_close_connected_graph() const;
         /// @attention some distance-based cuts
-        void Connect_graph(const bool use_ctpc = false) const;
+        void Connect_graph(const bool use_ctpc) const;
+        void Connect_graph() const;
 
         ///
         void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true) const;

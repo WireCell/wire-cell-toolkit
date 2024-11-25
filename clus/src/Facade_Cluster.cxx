@@ -1371,7 +1371,7 @@ void Cluster::Create_graph(const bool use_ctpc) const
     m_graph = std::make_unique<MCUGraph>(nbpoints());
     Establish_close_connected_graph();
     if (use_ctpc) Connect_graph(true);
-    Connect_graph(false);
+    Connect_graph();
 }
 
 void Cluster::Establish_close_connected_graph() const
@@ -2147,6 +2147,252 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
     }  // j
 }
 // #define LogDebug(x)
+
+void Cluster::Connect_graph() const{
+    // now form the connected components
+    std::vector<int> component(num_vertices(*m_graph));
+    const size_t num = connected_components(*m_graph, &component[0]);
+    LogDebug(" npoints " << npoints() << " nconnected " << num);
+    if (num <= 1) return;
+
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
+    // use this to link the global index to the local index
+    std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
+    for (size_t i = 0; i != num; i++) {
+        pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
+    }
+    for (size_t i = 0; i != component.size(); ++i) {
+        pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});
+        pt_clouds_global_indices.at(component[i]).push_back(i);
+    }
+    /// DEBUGONLY:
+    if (0) {
+        for (size_t i = 0; i != num; i++) {
+            std::cout << *pt_clouds.at(i) << std::endl;
+            std::cout << "global indices: ";
+            for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
+                std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+
+     // Initiate dist. metrics
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
+        num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(
+        num, std::vector<std::tuple<int, int, double>>(num));
+
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(
+        num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(
+        num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(
+        num, std::vector<std::tuple<int, int, double>>(num));
+
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = 0; k != num; k++) {
+            index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+
+            index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+        }
+    }
+
+    boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
+                              boost::property<boost::edge_weight_t, double>>
+    temp_graph(num);
+
+    for (int j=0;j!=num;j++){
+      for (int k=j+1;k!=num;k++){
+            index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
+            int index1 = j;
+            int index2 = k;
+            auto edge = add_edge(index1,index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+      }
+    }
+
+    {
+        std::vector<int> possible_root_vertex;
+        std::vector<int> component(num_vertices(temp_graph));
+        const int num1 = connected_components(temp_graph, &component[0]);
+        possible_root_vertex.resize(num1);
+        std::vector<int>::size_type i;
+        for (i = 0; i != component.size(); ++i) {
+            possible_root_vertex.at(component[i]) = i;
+        }
+
+        for (size_t i = 0; i != possible_root_vertex.size(); i++) {
+            std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
+
+            prim_minimum_spanning_tree(temp_graph, &predecessors[0],
+                                        boost::root_vertex(possible_root_vertex.at(i)));
+
+            for (size_t j = 0; j != predecessors.size(); ++j) {
+                if (predecessors[j] != j) {
+                    if (j < predecessors[j]) {
+                        index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
+                    }
+                    else {
+                        index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
+                    }
+                    // std::cout << j << " " << predecessors[j] << " " << std::endl;
+                }
+                else {
+                    // std::cout << j << " " << std::endl;
+                }
+            }
+        }
+    }
+
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            if (std::get<2>(index_index_dis[j][k])<3*units::cm){
+	            index_index_dis_mst[j][k] = index_index_dis[j][k];
+	        }
+
+            if (num < 100)
+	        if (pt_clouds.at(j)->get_num_points()>100 && pt_clouds.at(k)->get_num_points()>100 &&
+	            (pt_clouds.at(j)->get_num_points()+pt_clouds.at(k)->get_num_points()) > 400){
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+            
+                geo_point_t dir1 = vhough_transform(p1, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(j), pt_clouds_global_indices.at(j));
+                geo_point_t dir2 = vhough_transform(p2, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                dir1 = dir1 * -1;
+                dir2 = dir2 * -1;
+
+                std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(
+                    p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+
+                if (result1.first >= 0) {
+                    index_index_dis_dir1[j][k] =
+                        std::make_tuple(std::get<0>(index_index_dis[j][k]), result1.first, result1.second);
+                }
+
+                std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(
+                    p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+
+                if (result2.first >= 0) {
+                    index_index_dis_dir2[j][k] =
+                        std::make_tuple(result2.first, std::get<1>(index_index_dis[j][k]), result2.second);
+                }
+            }
+        }
+    }
+
+    // MST for the directionality ...
+    {
+        boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
+                              boost::property<boost::edge_weight_t, double>>
+        temp_graph(num);
+
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                int index1 = j;
+                int index2 = k;
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    add_edge(
+                        index1, index2,
+                        std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])),
+                        temp_graph);
+                    // LogDebug(index1 << " " << index2 << " "
+                    //                 << std::min(std::get<2>(index_index_dis_dir1[j][k]),
+                    //                             std::get<2>(index_index_dis_dir2[j][k])));
+                }
+            }
+        }
+
+        {
+            std::vector<int> possible_root_vertex;
+            std::vector<int> component(num_vertices(temp_graph));
+            const int num1 = connected_components(temp_graph, &component[0]);
+            possible_root_vertex.resize(num1);
+            std::vector<int>::size_type i;
+            for (i = 0; i != component.size(); ++i) {
+                possible_root_vertex.at(component[i]) = i;
+            }
+
+            for (size_t i = 0; i != possible_root_vertex.size(); i++) {
+                std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
+                prim_minimum_spanning_tree(temp_graph, &predecessors[0],
+                                           boost::root_vertex(possible_root_vertex.at(i)));
+                for (size_t j = 0; j != predecessors.size(); ++j) {
+                    if (predecessors[j] != j) {
+                        if (j < predecessors[j]) {
+                            index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
+                        }
+                        else {
+                            index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
+                        }
+                        // std::cout << j << " " << predecessors[j] << " " << std::endl;
+                    }
+                    else {
+                        // std::cout << j << " " << std::endl;
+                    }
+                }
+            }
+        }
+    }
+
+    // now complete graph according to the direction
+    // according to direction ...
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            if (std::get<0>(index_index_dis_mst[j][k]) >= 0) {
+                const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
+                const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
+                auto edge =
+                    add_edge(gind1, gind2, *m_graph);
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_mst[j][k]));
+                if (edge.second) {
+                    if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
+                        (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
+                    }
+                    else {
+                        (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
+                    }
+                }
+            }
+
+            if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
+                    auto edge = add_edge(gind1, gind2, *m_graph);
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir1[j][k]));
+                    if (edge.second) {
+                        if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]) * 1.2;
+                        }
+                        else {
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]);
+                        }
+                    }
+                }
+                if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
+                    auto edge = add_edge(gind1, gind2, *m_graph);
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir2[j][k]));
+                    if (edge.second) {
+                        if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]) * 1.2;
+                        }
+                        else {
+                            (*m_graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]);
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+
+
+}
 
 void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
 {
