@@ -285,7 +285,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             if (final_sep_cluster != 0) {  // 2
                                 // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                                 const auto b2id = Separate_2(final_sep_cluster);
-                                auto final_sep_clusters = final_sep_cluster->separate<Cluster, Grouping>(b2id);
+                                // auto final_sep_clusters = final_sep_cluster->separate<Cluster, Grouping>(b2id);
+                                auto final_sep_clusters = NaryTree::separate<Cluster, Grouping>(final_sep_cluster, b2id);
                                 // for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
                                 //     new_clusters.push_back(*it);
                                 // }
@@ -327,7 +328,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
                         // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                         const auto b2id = Separate_2(final_sep_cluster);
-                        auto final_sep_clusters = final_sep_cluster->separate<Cluster, Grouping>(b2id);
+                        // auto final_sep_clusters = final_sep_cluster->separate<Cluster, Grouping>(b2id);
+                        auto final_sep_clusters = NaryTree::separate<Cluster, Grouping>(final_sep_cluster, b2id);
                         // for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
                         //     new_clusters.push_back(*it);
                         // }
@@ -1420,7 +1422,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
     }
     // std::cout << "before separate, cluster has " << cluster->nchildren() << " children " << " with " << groupids.size() << " groups" << std::endl;
-    auto clusters_step0 = cluster->separate<Cluster, Grouping>(b2groupid);
+    // auto clusters_step0 = cluster->separate<Cluster, Grouping>(b2groupid);
+    auto clusters_step0 = NaryTree::separate<Cluster, Grouping>(cluster, b2groupid);
     // std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
     // for (int id : groupids) {
     //     std::cout << "separated cluster " << id << " has " << clusters_step0[id]->nchildren() << " children" << std::endl;
@@ -1430,7 +1433,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     if (clusters_step0.find(1) != clusters_step0.end()) {
         // other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
         const auto b2id = Separate_2(clusters_step0[1], 5 * units::cm);
-        auto other_clusters = clusters_step0[1]->separate<Cluster, Grouping>(b2id);
+        // auto other_clusters = clusters_step0[1]->separate<Cluster, Grouping>(b2id);
+        auto other_clusters = NaryTree::separate<Cluster, Grouping>(clusters_step0[1], b2id);
     }
     // delete cluster2;
     // if (flag_debug_porting) {

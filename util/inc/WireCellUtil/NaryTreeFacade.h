@@ -204,41 +204,44 @@ namespace WireCell::NaryTree {
         // assumes it has a parent and children, make a vector of SelfType* and each one has
         // a subset of children. the length of gorups must match the number of children.
         // children with negative group number will be removed
-        template<typename SelfType, typename ParentType>
-        std::unordered_map<int, SelfType*> separate(const std::vector<int>& groups, bool notify_value=true) {
-            // std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
-            if(groups.size() != nchildren()) {
-                raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
-            }
-            auto parent = this->m_node->parent;
-            auto parent_facade = parent->value.template facade<ParentType>();
-            parent_facade->invalidate_children(); // clear the facade cache
-            std::unordered_map<int, SelfType*> id2facade;
-            const auto orig_children = children(); // make a copy
-            for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
-                // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
-                // remove children with negative group number 
-                if (groups[ichild] < 0) continue;
-                auto* child = orig_children[ichild];
-                if (id2facade.find(groups[ichild]) == id2facade.end()) {
-                    node_type* new_snode = parent->insert(notify_value);
-                    new_snode->value.set_facade(std::make_unique<SelfType>());
-                    auto new_facade = new_snode->value.template facade<SelfType>();
-                    id2facade[groups[ichild]] = new_facade;
-                }
-                // std::cout << "id2facade size: " << id2facade.size() << std::endl;
-                auto new_facade = id2facade[groups[ichild]];
-                new_facade->m_node->insert(child->node(), notify_value);
-                // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
-            }
-            // remove self from parent
-            parent->remove(this->m_node, notify_value);
-            return id2facade;
-        }
+        // template<typename SelfType, typename ParentType>
+        // std::unordered_map<int, SelfType*> separate(const std::vector<int>& groups, bool notify_value=true) {
+        //     // std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
+        //     if(groups.size() != nchildren()) {
+        //         raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
+        //     }
+        //     auto parent = this->m_node->parent;
+        //     auto parent_facade = parent->value.template facade<ParentType>();
+        //     parent_facade->invalidate_children(); // clear the facade cache
+        //     std::unordered_map<int, SelfType*> id2facade;
+        //     const auto orig_children = children(); // make a copy
+        //     for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
+        //         // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+        //         // remove children with negative group number 
+        //         if (groups[ichild] < 0) continue;
+        //         auto* child = orig_children[ichild];
+        //         if (id2facade.find(groups[ichild]) == id2facade.end()) {
+        //             node_type* new_snode = parent->insert(notify_value);
+        //             new_snode->value.set_facade(std::make_unique<SelfType>());
+        //             auto new_facade = new_snode->value.template facade<SelfType>();
+        //             id2facade[groups[ichild]] = new_facade;
+        //         }
+        //         // std::cout << "id2facade size: " << id2facade.size() << std::endl;
+        //         auto new_facade = id2facade[groups[ichild]];
+        //         new_facade->m_node->insert(child->node(), notify_value);
+        //         // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+        //     }
+        //     // remove self from parent
+        //     // parent->remove(this->m_node, notify_value);
+        //     return id2facade;
+        // }
 
         void invalidate_children() {
             m_children.clear();
         }
+
+        template <typename SelfType, typename ParentType>
+        friend std::unordered_map<int, SelfType*> separate(SelfType* cluster, const std::vector<int>& groups, bool notify_value);
 
     private:
         // Lazy cache of children facades.
@@ -246,5 +249,42 @@ namespace WireCell::NaryTree {
 
 
     };
+
+
+
+    // assumes it has a parent and children, make a vector of SelfType* and each one has
+    // a subset of children. the length of gorups must match the number of children.
+    // children with negative group number will be removed
+    template<typename SelfType, typename ParentType>
+    std::unordered_map<int, SelfType*> separate(SelfType* cluster, const std::vector<int>& groups, bool notify_value=true) {
+        // std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
+        if(groups.size() != cluster->nchildren()) {
+            raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), cluster->nchildren());
+        }
+        auto parent = cluster->m_node->parent;
+        auto parent_facade = parent->value.template facade<ParentType>();
+        parent_facade->invalidate_children(); // clear the facade cache
+        std::unordered_map<int, SelfType*> id2facade;
+        const auto orig_children = cluster->children(); // make a copy
+        for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
+            // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+            // remove children with negative group number 
+            if (groups[ichild] < 0) continue;
+            auto* child = orig_children[ichild];
+            if (id2facade.find(groups[ichild]) == id2facade.end()) {
+                auto* new_snode = parent->insert(notify_value);
+                new_snode->value.set_facade(std::make_unique<SelfType>());
+                auto new_facade = new_snode->value.template facade<SelfType>();
+                id2facade[groups[ichild]] = new_facade;
+            }
+            // std::cout << "id2facade size: " << id2facade.size() << std::endl;
+            auto new_facade = id2facade[groups[ichild]];
+            new_facade->m_node->insert(child->node(), notify_value);
+            // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
+        }
+        // remove self from parent
+        parent->remove(cluster->m_node, notify_value);
+        return id2facade;
+    }
 }
 #endif
