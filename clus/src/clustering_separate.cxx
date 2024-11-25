@@ -75,6 +75,9 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             //     << std::endl;
             // }
 
+            std::cout << "Info: " << cluster->nchildren() << " " << cluster->get_length() << std::endl;
+
+
             if (!flag_proceed && cluster->get_length() > 100 * units::cm &&
                 JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width) &&
                 independent_points.size() > 0) {
@@ -85,6 +88,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         break;
                     }
                 }
+
                 // if (flag_debug_porting) {
                 //     std::cout << "flag_top " << flag_top << std::endl;
                 // }
@@ -155,11 +159,12 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
                     const size_t orig_nchildren = cluster->nchildren();
-                    // std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
+                    std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
                                    dead_v_index, dead_w_index, cluster->get_length());
-                    // std::cout << "Separate Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                    
+                    std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                     Cluster *cluster1 = sep_clusters.at(0);
                     new_clusters.push_back(cluster1);
 
@@ -188,6 +193,9 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points,
                                                dead_u_index, dead_v_index, dead_w_index, length_1);
+
+                                std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+
                                 Cluster *cluster3 = sep_clusters.at(0);
                                 new_clusters.push_back(cluster3);
 
@@ -259,7 +267,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points,
                                         dead_u_index, dead_v_index, dead_w_index, length_1);
-
+                                    std::cout << "Separate Separate_1 2 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                                     //	      std::cerr << em("sep sep4") << std::endl;
 
                                     Cluster *cluster5 = sep_clusters.at(0);
@@ -291,7 +299,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                 //     new_clusters.push_back(*it);
                                 // }
 
-                                temp_del_clusters.push_back(final_sep_cluster);
+                                //temp_del_clusters.push_back(final_sep_cluster);
                             }
                         }
 
@@ -321,7 +329,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             new_clusters.push_back(sep_clusters.at(k));
                         }
 
-                        std::vector<Cluster *> temp_del_clusters;
+                        //std::vector<Cluster *> temp_del_clusters;
                         Cluster *cluster2 = sep_clusters.at(1);
                         double length_1 = cluster2->get_length();
                         Cluster *final_sep_cluster = cluster2;
@@ -333,7 +341,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         // for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
                         //     new_clusters.push_back(*it);
                         // }
-                        temp_del_clusters.push_back(final_sep_cluster);
+                        //temp_del_clusters.push_back(final_sep_cluster);
                         //	  delete final_sep_cluster;
 
                         // for (auto it = temp_del_clusters.begin(); it != temp_del_clusters.end(); it++) {
@@ -1425,26 +1433,35 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     // auto clusters_step0 = cluster->separate<Cluster, Grouping>(b2groupid);
     auto clusters_step0 = NaryTree::separate<Cluster, Grouping>(cluster, b2groupid);
     // std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
+    // for (size_t i=0;i!=clusters_step0.size();i++) {
+    //      std::cout << "cluster " << clusters_step0[i]->nchildren() << " children" << std::endl;
+    // }
     // for (int id : groupids) {
     //     std::cout << "separated cluster " << id << " has " << clusters_step0[id]->nchildren() << " children" << std::endl;
     // }
 
     std::vector<Cluster*> other_clusters;
+
     if (clusters_step0.find(1) != clusters_step0.end()) {
         // other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
         const auto b2id = Separate_2(clusters_step0[1], 5 * units::cm);
         // auto other_clusters = clusters_step0[1]->separate<Cluster, Grouping>(b2id);
-        auto other_clusters = NaryTree::separate<Cluster, Grouping>(clusters_step0[1], b2id);
+        auto other_clusters1 = NaryTree::separate<Cluster, Grouping>(clusters_step0[1], b2id);
+        for (auto it = other_clusters1.begin(); it != other_clusters1.end(); it++) {
+            other_clusters.push_back(it->second);
+        }
     }
     // delete cluster2;
     // if (flag_debug_porting) {
-    //     std::cout << "other_clusters.size() " << other_clusters.size() << std::endl;
+    std::cout << "other_clusters.size() " << other_clusters.size() << std::endl;
     //     for (size_t i = 0; i != other_clusters.size(); i++) {
     //         std::cout << "other_cluster " << i << " has " << other_clusters.at(i)->nchildren() << " children" << std::endl;
     //     }
     // }
 
-    if (clusters_step0.find(0) != clusters_step0.end()) {
+
+//    if (clusters_step0.find(0) != clusters_step0.end()) {
+    if (clusters_step0[0]->nchildren() > 0) {
         // merge some clusters from other_clusters to clusters_step0[0]
         {
             // cluster1->Create_point_cloud();
@@ -1481,6 +1498,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
             for (auto temp_cluster : temp_merge_clusters) {
                 clusters_step0[0]->take_children(*temp_cluster, true);
                 grouping->remove_child(*temp_cluster);
+                other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
             }
 
             final_clusters.push_back(clusters_step0[0]);
@@ -1571,11 +1589,13 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
             cluster2.take_children(*to_be_merged_clusters[i], true);
             grouping->remove_child(*to_be_merged_clusters[i]);
         }
+        to_be_merged_clusters.clear();
 
         final_clusters.push_back(&cluster2);
         for (size_t i = 0; i != saved_clusters.size(); i++) {
             final_clusters.push_back(saved_clusters.at(i));
         }
+        //saved_clusters.clear();
     }
     else {
         for (size_t i = 0; i != other_clusters.size(); i++) {
