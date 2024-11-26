@@ -247,6 +247,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0) &&
                         cluster1->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
+                    const double orig_cluster_length = cluster1->get_length();
+                    std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
                     // auto sep_clusters = cluster1->separate<Cluster, Grouping>(b2id);
                     auto sep_clusters = NaryTree::separate<Cluster, Grouping>(cluster1, b2id);
@@ -267,7 +269,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     // largest_cluster->Create_point_cloud();
 
                     // std::cout << cluster1->get_cluster_id() << " " << num_clusters << std::endl;
-                    if (cluster1->get_length() > 25 * units::cm) {
+                    if (orig_cluster_length > 25 * units::cm) {
                         temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
                         temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
                     }
@@ -276,9 +278,16 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     temp_dir1 = largest_cluster->vhough_transform(temp_extreme_pts.first, 30 * units::cm);
                     temp_dir2 = largest_cluster->vhough_transform(temp_extreme_pts.second, 30 * units::cm);
 
+                    // for (size_t j = 0; j != sep_clusters.size(); j++) {
+                    //     delete sep_clusters.at(j);
+                    // }
+                    // merge back ...
+                    cluster1 = &(live_grouping.make_child());
                     for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        delete sep_clusters.at(j);
+                        cluster1->take_children(*sep_clusters.at(j), true);
+                        live_grouping.remove_child(*sep_clusters.at(j));
                     }
+                    std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                 }
 
                 dir1 *= -1;
@@ -413,6 +422,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0) &&
                         cluster2->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
+                    std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
+                    const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
                     // auto sep_clusters = cluster2->separate<Cluster, Grouping>(b2id);
                     auto sep_clusters = NaryTree::separate<Cluster, Grouping>(cluster2, b2id);
@@ -432,7 +443,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
                     // largest_cluster->Create_point_cloud();
 
-                    if (cluster2->get_length() > 25 * units::cm) {
+                    if (orig_cluster_length > 25 * units::cm) {
                         temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
                         temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
                     }
@@ -441,9 +452,16 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     temp_dir1 = largest_cluster->vhough_transform(temp_extreme_pts.first, 30 * units::cm);
                     temp_dir2 = largest_cluster->vhough_transform(temp_extreme_pts.second, 30 * units::cm);
 
+                    // for (size_t j = 0; j != sep_clusters.size(); j++) {
+                    //     delete sep_clusters.at(j);
+                    // }
+                    // merge back ...
+                    cluster2 = &(live_grouping.make_child());
                     for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        delete sep_clusters.at(j);
+                        cluster2->take_children(*sep_clusters.at(j), true);
+                        live_grouping.remove_child(*sep_clusters.at(j));
                     }
+                    std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                 }
 
                 dir1 *= -1;
