@@ -75,7 +75,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             //     << std::endl;
             // }
 
-            std::cout << "Info: " << cluster->nchildren() << " " << cluster->get_length() << std::endl;
+            // std::cout << "Info: " << cluster->nchildren() << " " << cluster->get_length() << std::endl;
 
 
             if (!flag_proceed && cluster->get_length() > 100 * units::cm &&
@@ -159,12 +159,12 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
                     const size_t orig_nchildren = cluster->nchildren();
-                    std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
+                    //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
                                    dead_v_index, dead_w_index, cluster->get_length());
                     
-                    std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                    //std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                     Cluster *cluster1 = sep_clusters.at(0);
                     new_clusters.push_back(cluster1);
 
@@ -194,7 +194,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points,
                                                dead_u_index, dead_v_index, dead_w_index, length_1);
 
-                                std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                                //std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                                 Cluster *cluster3 = sep_clusters.at(0);
                                 new_clusters.push_back(cluster3);
@@ -267,7 +267,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points,
                                         dead_u_index, dead_v_index, dead_w_index, length_1);
-                                    std::cout << "Separate Separate_1 2 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                                    //std::cout << "Separate Separate_1 2 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                                     //	      std::cerr << em("sep sep4") << std::endl;
 
                                     Cluster *cluster5 = sep_clusters.at(0);
@@ -311,7 +311,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                 }
                 else if (cluster->get_length() < 6 * units::m) {
                     const size_t orig_nchildren = cluster->nchildren();
-                    // std::cout << "Stripping Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
+                    //std::cout << "Stripping Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
@@ -1152,6 +1152,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         start_wcpoint = cluster->get_furthest_wcpoint(start_wcpoint, inv_dir, 1 * units::cm, 0);
         end_wcpoint = cluster->get_furthest_wcpoint(start_wcpoint, dir);
 
+        
+
         if (sqrt(pow(start_wcpoint.x() - end_wcpoint.x(), 2) + pow(start_wcpoint.y() - end_wcpoint.y(), 2) +
                  pow(start_wcpoint.z() - end_wcpoint.z(), 2)) < length / 3.) {  // reverse again ...
             start_wcpoint = end_wcpoint;
@@ -1200,6 +1202,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     //     std::cout << "start_wcpoint: " << start_wcpoint << std::endl;
     //     std::cout << "end_wcpoint: " << end_wcpoint << std::endl;
     // }
+
+    // std::cout << "Start Point: " << start_wcpoint.x() << " " << start_wcpoint.y() << " " << start_wcpoint.z() << std::endl;
+    // std::cout << "End Point: " << end_wcpoint.x() << " " << end_wcpoint.y() << " " << end_wcpoint.z() << std::endl;
+
     cluster->dijkstra_shortest_paths(start_wcpoint_idx, use_ctpc);
     cluster->cal_shortest_path(end_wcpoint_idx);
 
@@ -1453,7 +1459,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     }
     // delete cluster2;
     // if (flag_debug_porting) {
-    std::cout << "other_clusters.size() " << other_clusters.size() << std::endl;
+    //std::cout << "other_clusters.size() " << other_clusters.size() << std::endl;
     //     for (size_t i = 0; i != other_clusters.size(); i++) {
     //         std::cout << "other_cluster " << i << " has " << other_clusters.at(i)->nchildren() << " children" << std::endl;
     //     }
