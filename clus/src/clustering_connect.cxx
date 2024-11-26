@@ -67,6 +67,11 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+
+        // if (cluster->get_length()/units::cm>5){
+        //     std::cout << "Connect 0: " << cluster->get_length()/units::cm << " " << cluster->get_center() << std::endl;
+        // }
+
         LogDebug("#b " << cluster->nchildren() << " length " << cluster->get_length());
 
         #ifdef __DEBUG__
@@ -218,6 +223,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
         }
         
         LogDebug("#b " << cluster->nchildren() << " flag_para_1 " << flag_para_1 << " flag_prol_1 " << flag_prol_1 << " flag_para_2 " << flag_para_2 << " flag_prol_2 " << flag_prol_2);
+
+        
 
         if (i == 0) {
             if (flag_para_1 || flag_prol_1) {
@@ -546,6 +553,11 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                         }
                     }
 
+                    // if (max_cluster != 0)
+                    // if (fabs(cluster->get_length()/units::cm - 20) < 5 ){
+                    //     std::cout << "Check: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                    // }
+
                     // if overlap a lot merge
                     if ((max_value[0] + max_value[1] + max_value[2]) >
                             0.75 * (num_total_points + num_total_points + num_total_points) &&
@@ -560,6 +572,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                             // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                             boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                             ilive2desc[map_cluster_index[max_cluster]], g);
+                            // std::cout << "Connect 1 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                             // curr_cluster = max_cluster;
                         }
 
@@ -614,6 +627,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
+
+                                // std::cout << "Connect 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                                 // curr_cluster = max_cluster;
                                 flag_merge = true;
                             }
@@ -623,6 +638,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
+
+                                // std::cout << "Connect 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                                 flag_merge = true;
                             }
 
@@ -633,6 +650,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
+                                // std::cout << "Connect 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                                 flag_merge = true;
                             }
                         }
@@ -641,6 +659,11 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
             }  // length cut ...
 
             LogDebug("#b " << cluster->nchildren() << " flag_add_dir1 " << flag_add_dir1 << " flag_add_dir2 " << flag_add_dir2);
+
+            // if (cluster->get_length()/units::cm>5){
+            //     std::cout << "Connect 0-1: " << cluster->get_length()/units::cm << " " << cluster->get_center() << " " << flag_add_dir1 << " " << flag_add_dir2 << " " << flag_para_1 << " " << flag_prol_1 << " " << flag_para_2 << " " << flag_prol_2 << " " << extreme_points.first << " " << extreme_points.second << " " << dir1 << " " << dir2 << " " << extending_dis << " " << angle << std::endl;
+            // }
+
             if (flag_add_dir1) {
                 // add extension points in ...
                 if (flag_para_1 || flag_prol_1) {
@@ -820,6 +843,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                     // to_be_merged_pairs.insert(std::make_pair(cluster_1, cluster_2));
                     boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                     ilive2desc[map_cluster_index[cluster_2]], g2);
+                    // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << cluster_1->get_center() << " " << cluster_2->get_center() << std::endl;
                     flag_merge = true;
                 }
                 else if ((angle_diff > 87) && (angle_diff1 > 90 - 1.5 * (90 - angle_diff)) &&
@@ -831,6 +855,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                     // to_be_merged_pairs.insert(std::make_pair(cluster_1, cluster_2));
                     boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                     ilive2desc[map_cluster_index[cluster_2]], g2);
+                    // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << cluster_1->get_center() << " " << cluster_2->get_center() << std::endl;
                     flag_merge = true;
                 }
             }
