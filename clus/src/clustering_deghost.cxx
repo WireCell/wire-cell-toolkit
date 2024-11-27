@@ -93,6 +93,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                     }
                     #endif
 
+                    
+
                     if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
                         if (cluster->point3d(j).x() >= dead_u_index[winds[0][j]].first &&
                             cluster->point3d(j).x() <= dead_u_index[winds[0][j]].second) {
@@ -100,9 +102,13 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         }
                     }
 
+                    
+
                     if (!flag_dead) {
                         std::tuple<double, const Cluster *, size_t> results =
                             global_point_cloud->get_closest_2d_point_info(test_point, 0);
+
+                        if (cluster->nchildren()==801 && j==0)  std::cout  << j << " AU " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
 
                         if (std::get<0>(results) <= dis_cut / 3.) {
                             if (map_cluster_num[0].find(std::get<1>(results)) == map_cluster_num[0].end()) {
@@ -114,6 +120,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         }
                         else {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0);
+
+                            if (cluster->nchildren()==801 && j==0)  std::cout  << j << " BU " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+
                             if (std::get<0>(results) <= dis_cut * 2.0) {
                                 if (map_cluster_num[0].find(std::get<1>(results)) == map_cluster_num[0].end()) {
                                     map_cluster_num[0][std::get<1>(results)] = 1;
@@ -158,6 +167,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         #endif
                         std::tuple<double, const Cluster *, size_t> results =
                             global_point_cloud->get_closest_2d_point_info(test_point, 1);
+
+                        if (cluster->nchildren()==801 && j==0)  std::cout  << j << " AV " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+
                         #ifdef __DEBUG__
                         if (num_total_points == 134) {
                             const auto c = std::get<1>(results);
@@ -175,6 +187,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         }
                         else {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1);
+
+                            if (cluster->nchildren()==801 && j==0)  std::cout  << j << " BV " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+
                             if (std::get<0>(results) <= dis_cut * 2.0) {
                                 if (map_cluster_num[1].find(std::get<1>(results)) == map_cluster_num[1].end()) {
                                     map_cluster_num[1][std::get<1>(results)] = 1;
@@ -204,6 +219,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                     if (!flag_dead) {
                         std::tuple<double, const Cluster *, size_t> results =
                             global_point_cloud->get_closest_2d_point_info(test_point, 2);
+
+                        if (cluster->nchildren()==801 && j==0)  std::cout  << j << " AW " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+
                         if (std::get<0>(results) <= dis_cut / 3.) {
                             if (map_cluster_num[2].find(std::get<1>(results)) == map_cluster_num[2].end()) {
                                 map_cluster_num[2][std::get<1>(results)] = 1;
@@ -214,6 +232,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         }
                         else {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2);
+
+                            if (cluster->nchildren()==801 && j==0)  std::cout  << j << " BW " << test_point <<  " " <<std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+
                             if (std::get<0>(results) <= dis_cut * 2.0) {
                                 if (map_cluster_num[2].find(std::get<1>(results)) == map_cluster_num[2].end()) {
                                     map_cluster_num[2][std::get<1>(results)] = 1;
@@ -231,6 +252,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         num_dead[2]++;
                     }
 
+                    if (cluster->nchildren()==801 && j==0) std::cout << j << " " << test_point << " " << cluster->point3d(j).x() << " " << flag_dead << " " << num_unique[0] << " " << num_dead[0] << " " << num_unique[1] << " " << num_dead[1] << " " << num_unique[2] << " " << num_dead[2] << std::endl;
+
                     if ((num_unique[1] + num_unique[0] + num_unique[2]) >= 0.24 * num_total_points &&
                         (num_unique[1] + num_unique[0] + num_unique[2]) > 25)
                         break;
@@ -240,6 +263,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                 LogDebug("num_dead[0] = " << num_dead[0] << ", num_dead[1] = " << num_dead[1] << ", num_dead[2] = " << num_dead[2]);
 
                 bool flag_save = false;
+
+                if (cluster->nchildren()==801) std::cout << cluster->get_length()/units::cm << " " << num_total_points << " " << num_unique[0] << " " << num_dead[0] << " " << num_unique[1] << " " << num_dead[1] << " " << num_unique[2] << " " << num_dead[2] << " " << std::endl;
 
                 if (((num_unique[0] <= 0.1 * (num_total_points - num_dead[0]) ||
                       num_unique[0] <= 0.1 * num_total_points && num_unique[0] <= 8) &&
@@ -384,6 +409,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                         }
                     }
                     if (flag_remove) {
+                        if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 1: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                         to_be_removed_clusters.push_back(cluster);
                     }
                 }
@@ -447,6 +473,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                                                         ilive2desc[map_cluster_index[max_cluster_u]], g);
                                     }
                                     else {
+                                        if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 2: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                                         to_be_removed_clusters.push_back(cluster);
                                     }
                                 }
@@ -461,6 +488,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                                                         ilive2desc[map_cluster_index[max_cluster_v]], g);
                                     }
                                     else {
+                                        if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 3: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                                         to_be_removed_clusters.push_back(cluster);
                                     }
                                 }
@@ -475,6 +503,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                                                         ilive2desc[map_cluster_index[max_cluster_w]], g);
                                     }
                                     else {
+                                        if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 4: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                                         to_be_removed_clusters.push_back(cluster);
                                     }
                                 }
@@ -495,6 +524,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                                                     ilive2desc[map_cluster_index[max_cluster_u]], g);
                                 }
                                 else {
+                                    if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 5: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                                     to_be_removed_clusters.push_back(cluster);
                                 }
                             }
@@ -514,6 +544,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                                                     ilive2desc[map_cluster_index[max_cluster_v]], g);
                                 }
                                 else {
+                                    if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 6: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                                     to_be_removed_clusters.push_back(cluster);
                                 }
                             }
@@ -533,6 +564,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                                                     ilive2desc[map_cluster_index[max_cluster_w]], g);
                                 }
                                 else {
+                                    if (cluster->get_length() > 100*units::cm) std::cout << "Remove cluster 7: " << cluster->nchildren() << " " << cluster->get_length()/units::cm << std::endl;
                                     to_be_removed_clusters.push_back(cluster);
                                 }
                             }
@@ -570,6 +602,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
     // remove clusters
     LogDebug("to_be_removed_clusters.size() = " << to_be_removed_clusters.size());
     for (auto live : to_be_removed_clusters) {
+        std::cout << "Remove cluster " << live->nchildren() << " " << live->get_length()/units::cm << std::endl;
         live_grouping.remove_child(*live);
     } 
 

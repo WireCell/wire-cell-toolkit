@@ -184,7 +184,7 @@ std::pair<int, double> Facade::Multi2DPointCloud::get_closest_2d_dis(const geo_p
     const auto& res = kd(plane).knn(1, query);
 
     if (res.size() == 1)
-        return std::make_pair(res[0].first, sqrt(res[0].second)); /// Note, res.second is the square of the distance!
+        return std::make_pair(res[0].first, sqrt(res[0].second)); /// Note, res.second is distance now
     else
         return std::make_pair(-1, 1e9);
 }
@@ -197,7 +197,7 @@ std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d
     const auto& res = kd(plane).radius(radius * radius, query);
     std::vector<std::pair<size_t, double>> ret;
     for (const auto& r : res) {
-        ret.push_back(std::make_pair(r.first, sqrt(r.second)));
+        ret.push_back(std::make_pair(r.first, r.second));  // (internal functions) return radius squared ...
     }
     return ret;
 }
@@ -215,7 +215,7 @@ std::vector<std::pair<size_t, double>> Facade::Multi2DPointCloud::get_closest_2d
         LogDebug(" res " << r.first << " " << r.second);
         const auto p2d = point(plane, r.first);
         LogDebug(" 2dp" << plane << " " << p2d[0] << " " << p2d[1] << " dist2 " << (x-p2d[0])*(x-p2d[0]) + (y-p2d[1])*(y-p2d[1]));
-        ret.push_back(std::make_pair(r.first, sqrt(r.second)));
+        ret.push_back(std::make_pair(r.first, r.second)); // (internal functions) return radius squared ...
     }
     return ret;
 }
