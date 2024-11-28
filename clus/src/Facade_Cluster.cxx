@@ -28,69 +28,7 @@ using spdlog::debug;
 #endif
 
 
-void process_mst_deterministically(
-    const boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
-        boost::no_property, boost::property<boost::edge_weight_t, double>>& temp_graph,
-    std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
-    std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst) 
-{
-    // Get connected components
-    std::vector<int> component(num_vertices(temp_graph));
-    const int num1 = connected_components(temp_graph, &component[0]);
 
-    // Create ordered components
-    std::vector<ComponentInfo> ordered_components;
-    ordered_components.reserve(num1);
-    for(int i = 0; i < num1; ++i) {
-        ordered_components.emplace_back(i);
-    }
-
-    // Add vertices to components
-    for(size_t i = 0; i < component.size(); ++i) {
-        ordered_components[component[i]].add_vertex(i);
-    }
-
-    // Sort components deterministically
-    std::sort(ordered_components.begin(), ordered_components.end(),
-        [](const ComponentInfo& a, const ComponentInfo& b) {
-            if (a.vertex_indices.size() != b.vertex_indices.size()) {
-                return a.vertex_indices.size() > b.vertex_indices.size();
-            }
-            return a.min_vertex < b.min_vertex;
-        });
-
-    // Process each ordered component
-    for(const auto& comp : ordered_components) {
-        // Sort vertices within component
-        std::vector<size_t> comp_vertices = comp.vertex_indices;
-        std::sort(comp_vertices.begin(), comp_vertices.end());
-        
-        // Use minimum vertex as root
-        size_t root_vertex = comp_vertices[0];
-        
-        std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
-        prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-                                boost::root_vertex(root_vertex));
-
-        // Process MST edges deterministically
-        std::vector<std::pair<size_t, size_t>> edges;
-        for(size_t j = 0; j < predecessors.size(); ++j) {
-            if(predecessors[j] != j && component[j] == comp.component_id) {
-                size_t src = std::min(j, (size_t)predecessors[j]);
-                size_t dst = std::max(j, (size_t)predecessors[j]);
-                edges.emplace_back(src, dst);
-            }
-        }
-
-        // Sort edges
-        std::sort(edges.begin(), edges.end());
-
-        // Record edges
-        for(const auto& edge : edges) {
-            index_index_dis_mst[edge.first][edge.second] = index_index_dis[edge.first][edge.second];
-        }
-    }
-}
 
 
 

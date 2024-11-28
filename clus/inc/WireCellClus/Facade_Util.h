@@ -334,6 +334,12 @@ namespace WireCell::PointCloud::Facade {
         std::vector<const Blob*> m_blobs;
     };
 
+    void process_mst_deterministically(
+            const boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
+            boost::no_property, boost::property<boost::edge_weight_t, double>>& temp_graph,
+            std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
+            std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst) ;
+
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double time);
     double drift2time(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,

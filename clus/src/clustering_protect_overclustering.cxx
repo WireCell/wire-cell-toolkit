@@ -599,31 +599,68 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
     // now form the connected components, point -> component
     std::vector<int> component(num_vertices(*graph));
     const int num = connected_components(*graph, &component[0]);
-    if (num > 1) {
-        // For each component, create a point cloud
-        std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
-        std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
-        for (int j = 0; j != num; j++) {
-            pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
-        }
 
+    // Create ordered components
+    std::vector<ComponentInfo> ordered_components;
+    ordered_components.reserve(component.size());
+    for (size_t i = 0; i < component.size(); ++i) {
+        ordered_components.emplace_back(i);
+    }
+
+    // Assign vertices to components
+    for (size_t i = 0; i < component.size(); ++i) {
+        ordered_components[component[i]].add_vertex(i);
+    }
+
+    // Sort components by minimum vertex index
+    std::sort(ordered_components.begin(), ordered_components.end(), 
+        [](const ComponentInfo& a, const ComponentInfo& b) {
+            return a.min_vertex < b.min_vertex;
+        });
+
+    if (num <= 1) return {};
+
+
+
+    // if (num > 1) {
+        // For each component, create a point cloud
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
+    std::vector<std::vector<size_t>> pt_clouds_global_indices;
+    for (const auto& comp : ordered_components) {
+        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
+        std::vector<size_t> global_indices;
+        
+        for (size_t vertex_idx : comp.vertex_indices) {
+            geo_point_t pt = cluster->point3d(vertex_idx);
+            pt_cloud->add({pt.x(), pt.y(), pt.z()});
+            global_indices.push_back(vertex_idx);
+        }
+        
+        pt_clouds.push_back(pt_cloud);
+        pt_clouds_global_indices.push_back(global_indices);
+    }
+
+        // for (int j = 0; j != num; j++) {
+        //     pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
+        // }
+
+        // // std::vector<int>::size_type i;
+        // // for (i = 0; i != component.size(); ++i) {
+        // //     pt_clouds.at(component[i])->AddPoint(cloud.pts[i], cloud_u.pts[i], cloud_v.pts[i], cloud_w.pts[i]);
+        // //     //   std::cout << "Vertex " << i << " " << cloud.pts[i].x << " " << cloud.pts[i].y << " " << cloud.pts[i].z
+        // //     //   << " " << cloud.pts[i].index_u << " " << cloud.pts[i].index_v << " " << cloud.pts[i].index_w << " " <<
+        // //     //   cloud.pts[i].mcell << " " << cloud.pts[i].mcell->GetTimeSlice()  << " is in component " << component[i]
+        // //     //   << std::endl;
+        // // }
+        // // for (int j = 0; j != num; j++) {
+        // //     pt_clouds.at(j)->build_kdtree_index();
+        // // }
         // std::vector<int>::size_type i;
         // for (i = 0; i != component.size(); ++i) {
-        //     pt_clouds.at(component[i])->AddPoint(cloud.pts[i], cloud_u.pts[i], cloud_v.pts[i], cloud_w.pts[i]);
-        //     //   std::cout << "Vertex " << i << " " << cloud.pts[i].x << " " << cloud.pts[i].y << " " << cloud.pts[i].z
-        //     //   << " " << cloud.pts[i].index_u << " " << cloud.pts[i].index_v << " " << cloud.pts[i].index_w << " " <<
-        //     //   cloud.pts[i].mcell << " " << cloud.pts[i].mcell->GetTimeSlice()  << " is in component " << component[i]
-        //     //   << std::endl;
+        //     geo_point_t pt = cluster->point3d(i);
+        //     pt_clouds.at(component[i])->add({pt.x(), pt.y(), pt.z()});
+        //     pt_clouds_global_indices.at(component[i]).push_back(i);
         // }
-        // for (int j = 0; j != num; j++) {
-        //     pt_clouds.at(j)->build_kdtree_index();
-        // }
-        std::vector<int>::size_type i;
-        for (i = 0; i != component.size(); ++i) {
-            geo_point_t pt = cluster->point3d(i);
-            pt_clouds.at(component[i])->add({pt.x(), pt.y(), pt.z()});
-            pt_clouds_global_indices.at(component[i]).push_back(i);
-        }
 
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
             num, std::vector<std::tuple<int, int, double>>(num));
@@ -791,39 +828,42 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                 }
             }
 
-            {
-                std::vector<int> possible_root_vertex;
-                std::vector<int> component(num_vertices(temp_graph));
-                const int num1 = connected_components(temp_graph, &component[0]);
-                possible_root_vertex.resize(num1);
-                std::vector<int>::size_type i;
-                for (i = 0; i != component.size(); ++i) {
-                    possible_root_vertex.at(component[i]) = i;
-                }
+             // Process MST
+            process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
 
-                for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-                    std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(
-                        num_vertices(temp_graph));
+            // {
+            //     std::vector<int> possible_root_vertex;
+            //     std::vector<int> component(num_vertices(temp_graph));
+            //     const int num1 = connected_components(temp_graph, &component[0]);
+            //     possible_root_vertex.resize(num1);
+            //     std::vector<int>::size_type i;
+            //     for (i = 0; i != component.size(); ++i) {
+            //         possible_root_vertex.at(component[i]) = i;
+            //     }
 
-                    prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-                                               boost::root_vertex(possible_root_vertex.at(i)));
+            //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
+            //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(
+            //             num_vertices(temp_graph));
 
-                    for (size_t j = 0; j != predecessors.size(); ++j) {
-                        if (predecessors[j] != j) {
-                            if (j < predecessors[j]) {
-                                index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-                            }
-                            else {
-                                index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-                            }
-                            // std::cout << j << " " << predecessors[j] << " " << std::endl;
-                        }
-                        else {
-                            // std::cout << j << " " << std::endl;
-                        }
-                    }
-                }
-            }
+            //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
+            //                                    boost::root_vertex(possible_root_vertex.at(i)));
+
+            //         for (size_t j = 0; j != predecessors.size(); ++j) {
+            //             if (predecessors[j] != j) {
+            //                 if (j < predecessors[j]) {
+            //                     index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
+            //                 }
+            //                 else {
+            //                     index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
+            //                 }
+            //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
+            //             }
+            //             else {
+            //                 // std::cout << j << " " << std::endl;
+            //             }
+            //         }
+            //     }
+            // }
         }
 
         // deal with MST for directionality
@@ -845,37 +885,38 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                 }
             }
 
-            {
-                std::vector<int> possible_root_vertex;
-                std::vector<int> component(num_vertices(temp_graph));
-                const int num1 = connected_components(temp_graph, &component[0]);
-                possible_root_vertex.resize(num1);
-                std::vector<int>::size_type i;
-                for (i = 0; i != component.size(); ++i) {
-                    possible_root_vertex.at(component[i]) = i;
-                }
+            process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_dir_mst);
+            // {
+            //     std::vector<int> possible_root_vertex;
+            //     std::vector<int> component(num_vertices(temp_graph));
+            //     const int num1 = connected_components(temp_graph, &component[0]);
+            //     possible_root_vertex.resize(num1);
+            //     std::vector<int>::size_type i;
+            //     for (i = 0; i != component.size(); ++i) {
+            //         possible_root_vertex.at(component[i]) = i;
+            //     }
 
-                for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-                    std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(
-                        num_vertices(temp_graph));
-                    prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-                                               boost::root_vertex(possible_root_vertex.at(i)));
-                    for (size_t j = 0; j != predecessors.size(); ++j) {
-                        if (predecessors[j] != j) {
-                            if (j < predecessors[j]) {
-                                index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-                            }
-                            else {
-                                index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-                            }
-                            // std::cout << j << " " << predecessors[j] << " " << std::endl;
-                        }
-                        else {
-                            // std::cout << j << " " << std::endl;
-                        }
-                    }
-                }
-            }
+            //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
+            //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(
+            //             num_vertices(temp_graph));
+            //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
+            //                                    boost::root_vertex(possible_root_vertex.at(i)));
+            //         for (size_t j = 0; j != predecessors.size(); ++j) {
+            //             if (predecessors[j] != j) {
+            //                 if (j < predecessors[j]) {
+            //                     index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
+            //                 }
+            //                 else {
+            //                     index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
+            //                 }
+            //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
+            //             }
+            //             else {
+            //                 // std::cout << j << " " << std::endl;
+            //             }
+            //         }
+            //     }
+            // }
         }
 
         for (int j = 0; j != num; j++) {
@@ -977,7 +1018,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
         //     delete pt_clouds.at(i);
         // }
 
-    }  // if (num > 1)
+    // }  // if (num > 1)
 
     // delete graph;
     // return new_clusters;
