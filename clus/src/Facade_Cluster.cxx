@@ -882,99 +882,157 @@ double Cluster::get_closest_dis(const geo_point_t& point) const
 
 std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) const{
 
-    int p1_index = 0;
-    int p2_index = 0;
-    geo_point_t p1 = point3d(p1_index);
-    geo_point_t p2 = other.point3d(p2_index);
-    int p1_save = 0;
-    int p2_save = 0;
     double min_dis = 1e9;
+    int p1_save = 0, p2_save = 0;
 
-    int prev_index1 = -1;
-    int prev_index2 = -1;
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        p2_index = other.get_closest_point_index(p1);
-        p2 = other.point3d(p2_index);
-        p1_index = get_closest_point_index(p2);
-        p1 = point3d(p1_index);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
+    // Sample points from this cluster at regular intervals 
+    // Using ~20 sample points as initial probes
+    int stride = std::max(1, (int)(npoints() / 20)); 
 
-    prev_index1 = -1;
-    prev_index2 = -1;
-    p1_index = npoints() - 1;
-    p2_index = 0;
-    p1 = point3d(p1_index);
-    p2 = other.point3d(p2_index);
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        p2_index = other.get_closest_point_index(p1);
-        p2 = other.point3d(p2_index);
-        p1_index = get_closest_point_index(p2);
-        p1 = point3d(p1_index);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
+    for(int i = 0; i < npoints(); i += stride) {
+        // Get initial point from this cluster
+        geo_point_t p1 = point3d(i);
+        
+        // Get K nearest neighbors from other cluster using its kd-tree
+        auto knn_results = other.kd3d().knn(5, p1); // Get 5 nearest candidates
+        
+        // Refine search around these neighbors
+        for(const auto& [idx2, dist2] : knn_results) {
+            if(sqrt(dist2) > min_dis) continue; // Skip if already farther than best found
 
-    prev_index1 = -1;
-    prev_index2 = -1;
-    p1_index = 0;
-    p2_index = other.npoints() - 1;
-    p1 = point3d(p1_index);
-    p2 = other.point3d(p2_index);
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        p2_index = other.get_closest_point_index(p1);
-        p2 = other.point3d(p2_index);
-        p1_index = get_closest_point_index(p2);
-        p1 = point3d(p1_index);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
-    }
+            int curr_idx1 = i;
+            geo_point_t p2 = other.point3d(idx2);
+            int curr_idx2 = idx2;
+            // Local refinement by alternating closest point lookups
+            // This is similar to the original algorithm's refinement
+            // but starts from better initial positions
+            int prev_idx1 = -1, prev_idx2 = -1;
+            const int max_iterations = 3; // Limit refinement iterations
+            int iter = 0;
 
-    prev_index1 = -1;
-    prev_index2 = -1;
-    p1_index = npoints() - 1;
-    p2_index = other.npoints() - 1;
-    p1 = point3d(p1_index);
-    p2 = other.point3d(p2_index);
-    while (p1_index != prev_index1 || p2_index != prev_index2) {
-        prev_index1 = p1_index;
-        prev_index2 = p2_index;
-        p2_index = other.get_closest_point_index(p1);
-        p2 = other.point3d(p2_index);
-        p1_index = get_closest_point_index(p2);
-        p1 = point3d(p1_index);
-    }
-    // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-    dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-    if (dis < min_dis) {
-        min_dis = dis;
-        p1_save = p1_index;
-        p2_save = p2_index;
+            while(iter++ < max_iterations && 
+                  (curr_idx1 != prev_idx1 || curr_idx2 != prev_idx2)) {
+                prev_idx1 = curr_idx1;
+                prev_idx2 = curr_idx2;
+
+                // Alternating closest point refinement
+                curr_idx2 = other.get_closest_point_index(p1);
+                p2 = other.point3d(curr_idx2);
+                curr_idx1 = get_closest_point_index(p2);
+                p1 = point3d(curr_idx1);
+
+                double dis = sqrt(pow(p1.x()-p2.x(),2) + 
+                                pow(p1.y()-p2.y(),2) + 
+                                pow(p1.z()-p2.z(),2));
+
+                if(dis < min_dis) {
+                    min_dis = dis;
+                    p1_save = curr_idx1;
+                    p2_save = curr_idx2;
+                // Early termination if we find a very close pair
+                    if(dis < 0.1) { // Threshold can be adjusted
+                        return std::make_tuple(p1_save, p2_save, min_dis);
+                    }
+                }
+            }
+        }
     }
 
     return std::make_tuple(p1_save, p2_save, min_dis);
+
+    // int p1_index = 0;
+    // int p2_index = 0;
+    // geo_point_t p1 = point3d(p1_index);
+    // geo_point_t p2 = other.point3d(p2_index);
+    // int p1_save = 0;
+    // int p2_save = 0;
+    // double min_dis = 1e9;
+
+    // int prev_index1 = -1;
+    // int prev_index2 = -1;
+    // while (p1_index != prev_index1 || p2_index != prev_index2) {
+    //     prev_index1 = p1_index;
+    //     prev_index2 = p2_index;
+    //     p2_index = other.get_closest_point_index(p1);
+    //     p2 = other.point3d(p2_index);
+    //     p1_index = get_closest_point_index(p2);
+    //     p1 = point3d(p1_index);
+    // }
+    // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    // double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    // if (dis < min_dis) {
+    //     min_dis = dis;
+    //     p1_save = p1_index;
+    //     p2_save = p2_index;
+    // }
+
+    // prev_index1 = -1;
+    // prev_index2 = -1;
+    // p1_index = npoints() - 1;
+    // p2_index = 0;
+    // p1 = point3d(p1_index);
+    // p2 = other.point3d(p2_index);
+    // while (p1_index != prev_index1 || p2_index != prev_index2) {
+    //     prev_index1 = p1_index;
+    //     prev_index2 = p2_index;
+    //     p2_index = other.get_closest_point_index(p1);
+    //     p2 = other.point3d(p2_index);
+    //     p1_index = get_closest_point_index(p2);
+    //     p1 = point3d(p1_index);
+    // }
+    // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    // dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    // if (dis < min_dis) {
+    //     min_dis = dis;
+    //     p1_save = p1_index;
+    //     p2_save = p2_index;
+    // }
+
+    // prev_index1 = -1;
+    // prev_index2 = -1;
+    // p1_index = 0;
+    // p2_index = other.npoints() - 1;
+    // p1 = point3d(p1_index);
+    // p2 = other.point3d(p2_index);
+    // while (p1_index != prev_index1 || p2_index != prev_index2) {
+    //     prev_index1 = p1_index;
+    //     prev_index2 = p2_index;
+    //     p2_index = other.get_closest_point_index(p1);
+    //     p2 = other.point3d(p2_index);
+    //     p1_index = get_closest_point_index(p2);
+    //     p1 = point3d(p1_index);
+    // }
+    // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    // dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    // if (dis < min_dis) {
+    //     min_dis = dis;
+    //     p1_save = p1_index;
+    //     p2_save = p2_index;
+    // }
+
+    // prev_index1 = -1;
+    // prev_index2 = -1;
+    // p1_index = npoints() - 1;
+    // p2_index = other.npoints() - 1;
+    // p1 = point3d(p1_index);
+    // p2 = other.point3d(p2_index);
+    // while (p1_index != prev_index1 || p2_index != prev_index2) {
+    //     prev_index1 = p1_index;
+    //     prev_index2 = p2_index;
+    //     p2_index = other.get_closest_point_index(p1);
+    //     p2 = other.point3d(p2_index);
+    //     p1_index = get_closest_point_index(p2);
+    //     p1 = point3d(p1_index);
+    // }
+    // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
+    // dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+    // if (dis < min_dis) {
+    //     min_dis = dis;
+    //     p1_save = p1_index;
+    //     p2_save = p2_index;
+    // }
+
+    // return std::make_tuple(p1_save, p2_save, min_dis);
 }
 
 geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis) const
