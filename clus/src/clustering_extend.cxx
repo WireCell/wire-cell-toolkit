@@ -34,11 +34,8 @@ void WireCell::PointCloud::Facade::clustering_extend(
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::map<const Cluster*, int> map_cluster_index;
-  // const auto& live_clusters = live_grouping.children();
-  std::vector<Cluster *> live_clusters = live_grouping.children(); 
-  std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-      return cluster1->get_length() > cluster2->get_length();
-  });
+  const auto& live_clusters = live_grouping.children();
+  
 
 
 
