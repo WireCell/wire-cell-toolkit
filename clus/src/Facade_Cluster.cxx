@@ -930,7 +930,7 @@ std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) c
                     p1_save = curr_idx1;
                     p2_save = curr_idx2;
                 // Early termination if we find a very close pair
-                    if(dis < 0.1) { // Threshold can be adjusted
+                    if(dis < 0.5*units::cm) { // Threshold can be adjusted
                         return std::make_tuple(p1_save, p2_save, min_dis);
                     }
                 }
@@ -2749,6 +2749,11 @@ void Cluster::cal_shortest_path(const size_t dest_wcp_index) const
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {
+    // add cached ...
+    if (m_hull_calculated) {
+        return m_hull_points;
+    }
+
     quickhull::QuickHull<float> qh;
     std::vector<quickhull::Vector3<float>> pc;
     const auto& points = this->points();
@@ -2762,11 +2767,19 @@ std::vector<geo_point_t> Cluster::get_hull() const
         indices.insert(hull.getIndexBuffer().at(i));
     }
 
-    std::vector<geo_point_t> results;
+    m_hull_points.clear();
     for (auto i : indices) {
-        results.push_back({points[0][i], points[1][i], points[2][i]});
+        m_hull_points.push_back({points[0][i], points[1][i], points[2][i]});
     }
-    return results;
+    
+    m_hull_calculated = true;
+    return m_hull_points;
+
+    // std::vector<geo_point_t> results;
+    // for (auto i : indices) {
+    //     results.push_back({points[0][i], points[1][i], points[2][i]});
+    // }
+    // return results;
 }
 
 void Cluster::Calc_PCA() const

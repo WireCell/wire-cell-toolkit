@@ -303,6 +303,9 @@ namespace WireCell::PointCloud::Facade {
 
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
 
+        // Add to private members in Facade_Cluster.h:
+        mutable std::vector<geo_point_t> m_hull_points;
+        mutable bool m_hull_calculated{false};
 
         // Cached and lazily calculated in get_length().
         // Getting a new node invalidates by setting to 0.

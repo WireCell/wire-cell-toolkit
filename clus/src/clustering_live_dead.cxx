@@ -30,16 +30,16 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     sort_clusters(live_clusters);
 
     // debug block, free to remove it
-    {
-        std::set<Cluster*> seen;
-        for (size_t ind=0; ind<live_clusters.size(); ++ind) {
-            Cluster* cl = live_clusters[ind];
-            if (seen.find(cl) == seen.end()) {
-                seen.insert(cl);
-                continue;
-            }
-        }
-    }
+    // {
+    //     std::set<Cluster*> seen;
+    //     for (size_t ind=0; ind<live_clusters.size(); ++ind) {
+    //         Cluster* cl = live_clusters[ind];
+    //         if (seen.find(cl) == seen.end()) {
+    //             seen.insert(cl);
+    //             continue;
+    //         }
+    //     }
+    // }
 
     auto dead_clusters = dead_grouping.children(); // copy
     sort_clusters(dead_clusters);
@@ -307,7 +307,7 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
                                 else if (length_2 > 12 * units::cm && length_1 <= 12 * units::cm) {
                                     // one is short
                                     if ((dis <= 3 * units::cm) &&
-                                            ((angle_diff2 <= 45 || angle_diff2 <= 45) && (angle_diff3 < 60) ||
+                                            ((angle_diff1 <= 45 || angle_diff2 <= 45) && (angle_diff3 < 60) ||
                                              (flag_para && (angle_diff1 <= 90 || angle_diff2 <= 90) &&
                                               angle_diff3 < 120)) ||
                                         dis <= 5 * units::cm && angle_diff2 <= 30 && angle_diff3 < 60 ||

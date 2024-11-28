@@ -16,6 +16,12 @@
 namespace WireCell::PointCloud::Facade {
     using namespace WireCell::PointCloud::Tree;
 
+    struct ClusterLess {
+        bool operator()(const Cluster* a, const Cluster* b) const {
+            return cluster_less(a, b);
+        }
+    };
+
     using cluster_set_t = std::set<const Cluster*>;
 
     using cluster_connectivity_graph_t = boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS, int>;
@@ -55,7 +61,12 @@ namespace WireCell::PointCloud::Facade {
         int dead_live_overlap_offset_{2};
     };
 
+
+
     // clustering_extend.cxx
+
+    std::vector<std::pair<geo_point_t, const Blob*>> get_strategic_points(const Cluster& cluster);
+
     //helper function ..
     double Find_Closest_Points(const Cluster& cluster1,
 			       const Cluster& cluster2,
