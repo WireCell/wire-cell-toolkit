@@ -12,6 +12,11 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
     )
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
+    // sort the clusters by length using a lambda function
+    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+        return cluster1->get_length() > cluster2->get_length();
+    });
+
     const auto &tp = live_grouping.get_params();
     // this is for 4 time slices
     double time_slice_width = tp.nticks_live_slice * tp.tick_drift;

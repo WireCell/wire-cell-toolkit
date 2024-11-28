@@ -27,7 +27,10 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     std::map<const Cluster*, std::vector<std::vector<const Blob*>>> dead_live_mcells_mapping;
 
     std::vector<Cluster*> live_clusters = live_grouping.children(); // copy
-    sort_clusters(live_clusters);
+    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+        return cluster1->get_length() > cluster2->get_length();
+    });
+    // sort_clusters(live_clusters);
 
     // debug block, free to remove it
     // {
