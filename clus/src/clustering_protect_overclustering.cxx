@@ -179,16 +179,21 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                         // int index2 = wcp2.index;
                         // std::cout << index1 << " " << index2 << std::endl;
                         // add edge ...
-                        auto edge = add_edge(index1, index2, *graph);
+                        //auto edge = add_edge(index1, index2, *graph);
+                        const geo_point_t wcp1 = cluster->point3d(index1);
+                        const geo_point_t wcp2 = cluster->point3d(index2);
+                        double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
+                        // if (edge.second) {
+                            
+                        //     (*graph)[edge.first].dist = dis;
+                        //     num_edges++;
+                        //     // std::cout << wcp1.x << " " << wcp1.y << " " << wcp1.z << " " << wcp1.index_u << " " <<
+                        //     // wcp1.index_v << " " << wcp1.index_w << " " << wcp2.index_u << " " << wcp2.index_v << " "
+                        //     // << wcp2.index_w << std::endl;
+                        // }
+                        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                         if (edge.second) {
-                            const geo_point_t wcp1 = cluster->point3d(index1);
-                            const geo_point_t wcp2 = cluster->point3d(index2);
-                            double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
-                            (*graph)[edge.first].dist = dis;
                             num_edges++;
-                            // std::cout << wcp1.x << " " << wcp1.y << " " << wcp1.z << " " << wcp1.index_u << " " <<
-                            // wcp1.index_v << " " << wcp1.index_w << " " << wcp2.index_u << " " << wcp2.index_v << " "
-                            // << wcp2.index_w << std::endl;
                         }
                     }
                 }
@@ -207,7 +212,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
     std::vector<std::pair<const Blob *, const Blob *>> connected_mcells;
 
     for (size_t i = 0; i != time_slices.size(); i++) {
-        const std::set<const Blob*> &mcells_set = time_cells_set_map.at(time_slices.at(i));
+        const std::set<const Blob*, blob_less_functor> &mcells_set = time_cells_set_map.at(time_slices.at(i));
 
         // create graph for points in mcell inside the same time slice
         if (mcells_set.size() >= 2) {
@@ -225,7 +230,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
             }
         }
         // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
-        std::vector<std::set<const Blob*>> vec_mcells_set;
+        std::vector<std::set<const Blob*, blob_less_functor>> vec_mcells_set;
         if (i + 1 < time_slices.size()) {
             if (time_slices.at(i + 1) - time_slices.at(i) == 1*tp.nticks_live_slice) {
                 vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
@@ -240,7 +245,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
         //    bool flag = false;
         for (size_t j = 0; j != vec_mcells_set.size(); j++) {
             //      if (flag) break;
-            std::set<const Blob*> &next_mcells_set = vec_mcells_set.at(j);
+            std::set<const Blob*, blob_less_functor> &next_mcells_set = vec_mcells_set.at(j);
             for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
                 const Blob *mcell1 = (*it1);
                 for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
@@ -255,7 +260,8 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
     }
 
     // establish edge ...
-    std::map<std::pair<int, int>, std::pair<int, double>> closest_index;
+    int max_num_nodes = 5;
+    std::map<std::pair<int, int>, std::set<std::pair<double, int>>> closest_index;
 
     // std::cout << connected_mcells.size() << std::endl;
     for (auto it = connected_mcells.begin(); it != connected_mcells.end(); it++) {
@@ -360,19 +366,36 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                         const geo_point_t wcp1 = cluster->point3d(index1);
                         const geo_point_t wcp2 = cluster->point3d(index2);
                         double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
-
                         const int time2 = cluster->blob_with_point(index2)->slice_index_min();
+                        auto key = std::make_pair(index1, time2);
 
-                        if (closest_index.find(std::make_pair(index1, time2)) ==
-                            closest_index.end()) {
-                            closest_index[std::make_pair(index1, time2)] =
-                                std::make_pair(index2, dis);
+                        if (closest_index.find(key) == closest_index.end()) {
+                            std::set<std::pair<double, int> > temp_sets;
+                            temp_sets.insert(std::make_pair(dis,index2));
+                            closest_index[key] = temp_sets;
                         }
                         else {
-                            if (dis < closest_index[std::make_pair(index1, time2)].second)
-                                closest_index[std::make_pair(index1, time2)] =
-                                    std::make_pair(index2, dis);
+                            closest_index[key].insert(std::make_pair(dis,index2));
+                            if (closest_index[key].size()>max_num_nodes){
+                                auto it5 = closest_index[key].begin();
+                                for (int qx = 0; qx!=max_num_nodes;qx++){
+                                    it5++;
+                                }
+                                closest_index[key].erase(it5,closest_index[key].end());
+                            }
+                            //if (dis < closest_index[key].second || (std::abs(dis - closest_index[key].second) < 1e-10 && pind2 < closest_index[key].first)) closest_index[key] = std::make_pair(pind2, dis);
                         }
+
+                        // if (closest_index.find(std::make_pair(index1, time2)) ==
+                        //     closest_index.end()) {
+                        //     closest_index[std::make_pair(index1, time2)] =
+                        //         std::make_pair(index2, dis);
+                        // }
+                        // else {
+                        //     if (dis < closest_index[std::make_pair(index1, time2)].second)
+                        //         closest_index[std::make_pair(index1, time2)] =
+                        //             std::make_pair(index2, dis);
+                        // }
                     }
                 }
 
@@ -484,17 +507,35 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                         double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
 
                         const int time2 = cluster->blob_with_point(index2)->slice_index_min();
+                        auto key = std::make_pair(index1, time2);
 
-                        if (closest_index.find(std::make_pair(index1, time2)) ==
-                            closest_index.end()) {
-                            closest_index[std::make_pair(index1, time2)] =
-                                std::make_pair(index2, dis);
+                        if (closest_index.find(key) == closest_index.end()) {
+                            std::set<std::pair<double, int> > temp_sets;
+                            temp_sets.insert(std::make_pair(dis,index2));
+                            closest_index[key] = temp_sets;
                         }
                         else {
-                            if (dis < closest_index[std::make_pair(index1, time2)].second)
-                                closest_index[std::make_pair(index1, time2)] =
-                                    std::make_pair(index2, dis);
+                            closest_index[key].insert(std::make_pair(dis,index2));
+                            if (closest_index[key].size()>max_num_nodes){
+                                auto it5 = closest_index[key].begin();
+                                for (int qx = 0; qx!=max_num_nodes;qx++){
+                                    it5++;
+                                }
+                                closest_index[key].erase(it5,closest_index[key].end());
+                            }
+                            //if (dis < closest_index[key].second || (std::abs(dis - closest_index[key].second) < 1e-10 && pind2 < closest_index[key].first)) closest_index[key] = std::make_pair(pind2, dis);
                         }
+
+                        // if (closest_index.find(std::make_pair(index1, time2)) ==
+                        //     closest_index.end()) {
+                        //     closest_index[std::make_pair(index1, time2)] =
+                        //         std::make_pair(index2, dis);
+                        // }
+                        // else {
+                        //     if (dis < closest_index[std::make_pair(index1, time2)].second)
+                        //         closest_index[std::make_pair(index1, time2)] =
+                        //             std::make_pair(index2, dis);
+                        // }
                     }
                 }
 
@@ -527,13 +568,31 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
 
     for (auto it4 = closest_index.begin(); it4 != closest_index.end(); it4++) {
         int index1 = it4->first.first;
-        int index2 = it4->second.first;
-        double dis = it4->second.second;
-        auto edge = add_edge(index1, index2, *graph);
-        if (edge.second) {
-            (*graph)[edge.first].dist = dis;
-            num_edges++;
+        for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
+            int index2 = (*it5).second;
+            double dis = (*it5).first;
+            auto edge = add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+            if (edge.second){
+                //      (*graph)[edge.first].dist = dis;
+                num_edges ++;
+            }
+            // protect against dead cells ...
+            //std::cout << dis/units::cm << std::endl;
+            if (it5 == it4->second.begin() && dis > 0.25*units::cm)
+                break;
         }
+
+        // int index2 = it4->second.first;
+        // double dis = it4->second.second;
+        // // auto edge = add_edge(index1, index2, *graph);
+        // // if (edge.second) {
+        // //     (*graph)[edge.first].dist = dis;
+        // //     num_edges++;
+        // // }
+        // auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+        // if (edge.second) {
+        //     num_edges++;
+        // }
     }
     // end of copying ...
 
@@ -827,42 +886,50 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
 
                 // establish the path ...
                 if (std::get<0>(index_index_dis_mst[j][k]) >= 0) {
-                    auto edge = add_edge(std::get<0>(index_index_dis_mst[j][k]), std::get<1>(index_index_dis_mst[j][k]),
-                                         *graph);
-                    if (edge.second) {
-                        if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
-                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
-                        }
-                        else {
-                            (*graph)[edge.first].dist = std::get<2>(index_index_dis_mst[j][k]);
-                        }
+                    // auto edge = add_edge(std::get<0>(index_index_dis_mst[j][k]), std::get<1>(index_index_dis_mst[j][k]),
+                    //                      *graph);
+                    // if (edge.second) {
+                    float dis;
+                    if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
+                        dis = std::get<2>(index_index_dis_mst[j][k]);
                     }
+                    else {
+                        dis = std::get<2>(index_index_dis_mst[j][k]);
+                    }
+                    // }
+
+                    auto edge = add_edge(std::get<0>(index_index_dis_mst[j][k]), std::get<1>(index_index_dis_mst[j][k]), WireCell::PointCloud::Facade::EdgeProp(dis),
+                                         *graph);
                 }
 
                 if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
                     if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
-                        auto edge = add_edge(std::get<0>(index_index_dis_dir1[j][k]),
-                                             std::get<1>(index_index_dis_dir1[j][k]), *graph);
-                        if (edge.second) {
-                            if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
-                                (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]);
-                            }
-                            else {
-                                (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir1[j][k]);
-                            }
+                        // auto edge = add_edge(std::get<0>(index_index_dis_dir1[j][k]),
+                        //                      std::get<1>(index_index_dis_dir1[j][k]), *graph);
+                        // if (edge.second) {
+                        float dis;
+                        if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
+                            dis = std::get<2>(index_index_dis_dir1[j][k]);
                         }
+                        else {
+                            dis = std::get<2>(index_index_dis_dir1[j][k]);
+                        }
+                        // }
+                        auto edge = add_edge(std::get<0>(index_index_dis_dir1[j][k]), std::get<1>(index_index_dis_dir1[j][k]), WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                     }
                     if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
-                        auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]),
-                                             std::get<1>(index_index_dis_dir2[j][k]), *graph);
-                        if (edge.second) {
-                            if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
-                                (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]);
-                            }
-                            else {
-                                (*graph)[edge.first].dist = std::get<2>(index_index_dis_dir2[j][k]);
-                            }
+                        // auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]),
+                        //                      std::get<1>(index_index_dis_dir2[j][k]), *graph);
+                        // if (edge.second) {
+                        float dis;
+                        if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
+                            dis = std::get<2>(index_index_dis_dir2[j][k]);
                         }
+                        else {
+                            dis = std::get<2>(index_index_dis_dir2[j][k]);
+                        }
+                        // }
+                        auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]), std::get<1>(index_index_dis_dir2[j][k]), WireCell::PointCloud::Facade::EdgeProp(dis), *graph);
                     }
                 }
                 // end check ...

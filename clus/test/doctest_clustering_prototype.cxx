@@ -275,9 +275,10 @@ static void print_MCUGraph(const MCUGraph& g) {
 
     std::cout << "Edge Properties:" << std::endl;
     auto erange = boost::edges(g);
+    auto weightMap = get(edge_weight, g);
     for (auto eit = erange.first; eit != erange.second; ++eit) {
         auto e = *eit;
-        std::cout << "Edge " << e << ": Distance = " << g[e].dist << std::endl;
+        std::cout << "Edge " << e << ": Distance = " << get(weightMap, e) << std::endl;
     }
 }
 

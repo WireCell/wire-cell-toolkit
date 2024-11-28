@@ -193,6 +193,9 @@ bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
     }
     return a < b;
 }
+
+
+
 void Facade::sort_blobs(std::vector<const Blob*>& blobs) { std::sort(blobs.rbegin(), blobs.rend(), blob_less); }
 void Facade::sort_blobs(std::vector<Blob*>& blobs) { std::sort(blobs.rbegin(), blobs.rend(), blob_less); }
 

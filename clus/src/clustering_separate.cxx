@@ -1212,7 +1212,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     const auto& path_wcps = cluster->get_path_wcps();
     // if (flag_debug_porting) {
     //     // std::cout << " graph: " << cluster->dump_graph() << std::endl;
-    //     std::cout << "path_wcps.size()" << path_wcps.size() << std::endl;
+        //  std::cout << cluster->nchildren() << " " << "path_wcps.size()" << path_wcps.size() << " " << start_wcpoint << " " << end_wcpoint << std::endl;
     // }
     std::vector<bool> flag_u_pts, flag_v_pts, flag_w_pts;
     std::vector<bool> flag1_u_pts, flag1_v_pts, flag1_w_pts;
@@ -1231,12 +1231,17 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
     std::vector<geo_point_t> pts;
 
+    // double acc_dis = 0;
+
     size_t prev_wcp_idx = path_wcps.front();
     for (auto it = path_wcps.begin(); it != path_wcps.end(); it++) {
         geo_point_t current_wcp = cluster->point3d(*it);
         geo_point_t prev_wcp = cluster->point3d(prev_wcp_idx);
         double dis = sqrt(pow(current_wcp.x() - prev_wcp.x(), 2) + pow(current_wcp.y() - prev_wcp.y(), 2) +
                           pow(current_wcp.z() - prev_wcp.z(), 2));
+        // acc_dis += dis;
+        // if (cluster->nchildren()==3449) std::cout << current_wcp << " " << dis/units::cm << " " << acc_dis/units::cm << std::endl;
+
         if (dis <= 1.0 * units::cm) {
             geo_point_t current_pt(current_wcp.x(), current_wcp.y(), current_wcp.z());
             pts.push_back(current_pt);
@@ -1634,7 +1639,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
         time_slices.push_back((*it1).first);
     }
 
-    using BlobSet = std::set<const Blob*>;
+    using BlobSet = std::set<const Blob*, blob_less_functor>;
     std::vector<std::pair<const Blob *, const Blob *>> connected_mcells;
     for (size_t i = 0; i != time_slices.size(); i++) {
         const BlobSet &mcells_set = time_cells_set_map.at(time_slices.at(i));
@@ -1702,10 +1707,11 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
     for (auto it = connected_mcells.begin(); it != connected_mcells.end(); it++) {
         int index1 = mcell_index_map[it->first];
         int index2 = mcell_index_map[it->second];
-        auto edge = add_edge(index1, index2, graph);
-        if (edge.second) {
-            (graph)[edge.first].dist = 1;
-        }
+        // auto edge = add_edge(index1, index2, graph);
+        // if (edge.second) {
+        //     (graph)[edge.first].dist = 1;
+        // }
+        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
     }
 
     {
@@ -1734,10 +1740,11 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
                     if (std::get<2>(temp_results) < dis_cut) {
                         int index1 = vec_vec[j].front();
                         int index2 = vec_vec[k].front();
-                        auto edge = add_edge(index1, index2, graph);
-                        if (edge.second) {
-                            (graph)[edge.first].dist = 1;
-                        }
+                        // auto edge = add_edge(index1, index2, graph);
+                        // if (edge.second) {
+                        //     (graph)[edge.first].dist = 1;
+                        // }
+                        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
                     }
                 }
             }

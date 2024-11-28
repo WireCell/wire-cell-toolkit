@@ -50,6 +50,7 @@ namespace WireCell::PointCloud::Facade {
         // Note, this may trigger the underlying k-d build.
         using kd3d_t = sv3d_t::nfkd_t;
         const kd3d_t& kd3d() const;
+        const kd3d_t& kd() const;
 
         using kd_results_t = kd3d_t::results_type;
         // Perform a k-d tree radius query.  This radius is linear distance
@@ -281,7 +282,7 @@ namespace WireCell::PointCloud::Facade {
         // duplicated, example usage:
         // https://github.com/HaiwangYu/learn-cpp/blob/main/test-multimap.cxx
         // WCP: get_time_cells_set_map
-        using BlobSet = std::set<const Blob*>;
+        using BlobSet = std::set<const Blob*, blob_less_functor>;
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
 
@@ -349,6 +350,23 @@ namespace WireCell::PointCloud::Facade {
     };
     typedef std::map<Cluster*, std::vector<std::pair<Cluster*,double>>, cluster_less_functor> map_cluster_cluster_vec;
 
+   struct ComponentInfo {
+        int component_id;
+        std::vector<size_t> vertex_indices;
+        size_t min_vertex;
+        double total_weight;  // Add this member
+
+        ComponentInfo(int id) 
+            : component_id(id)
+            , min_vertex(std::numeric_limits<size_t>::max())
+            , total_weight(0.0)  // Initialize in constructor
+        {}
+
+        void add_vertex(size_t vertex_idx) {
+            vertex_indices.push_back(vertex_idx);
+            min_vertex = std::min(min_vertex, vertex_idx);
+        }
+    };
 
 }  // namespace WireCell::PointCloud::Facade
 

@@ -103,8 +103,15 @@ namespace WireCell::PointCloud::Facade {
     // instead of begin()/end()..
     bool blob_less(const Blob* a, const Blob* b);
     // Apply standard sort to put blobs in descending order.
+
     void sort_blobs(std::vector<const Blob*>& blobs);
     void sort_blobs(std::vector<Blob*>& blobs);
+
+    struct blob_less_functor {
+        bool operator()(const Facade::Blob* a, const Facade::Blob* b) const {
+        return Facade::blob_less(a, b);  
+        }
+    };
 
 }  // namespace WireCell::PointCloud::Facade
 
