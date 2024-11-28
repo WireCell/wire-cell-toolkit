@@ -37,8 +37,6 @@ void WireCell::PointCloud::Facade::clustering_extend(
   const auto& live_clusters = live_grouping.children();
   
 
-
-
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     const auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;

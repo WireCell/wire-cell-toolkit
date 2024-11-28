@@ -13,9 +13,9 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() > cluster2->get_length();
-    });
+    // std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+    //     return cluster1->get_length() > cluster2->get_length();
+    // });
 
     const auto &tp = live_grouping.get_params();
     // this is for 4 time slices
@@ -30,7 +30,7 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
         if (cluster->get_length() > 5 * units::cm && cluster->get_length() < 150 * units::cm) {
             // cluster->Create_point_cloud();
             // std::cout << "Cluster " << i << " old pointer " << cluster << " nchildren " << cluster->nchildren() << std::endl;
-            std::unordered_map<int, Cluster*> id2clusters = cluster->examine_x_boundary(tp.FV_xmin, tp.FV_xmax);
+            std::unordered_map<int, Cluster*> id2clusters = cluster->examine_x_boundary(tp.FV_xmin - tp.FV_xmin_margin, tp.FV_xmax + tp.FV_xmax_margin);
             // std::cout << "Cluster " << i << " is seperated into " << id2clusters.size() << " clusters" << std::endl;
             // for (auto [id, ncluster] : id2clusters) {
             //     std::cout << "id " << id << " new pointer " << ncluster << " nchildren " << ncluster->nchildren() << std::endl;
