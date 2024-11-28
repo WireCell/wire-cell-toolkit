@@ -988,9 +988,9 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() > cluster2->get_length();
-    });
+    // std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+    //     return cluster1->get_length() > cluster2->get_length();
+    // });
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
