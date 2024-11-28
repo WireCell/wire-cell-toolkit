@@ -554,8 +554,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                     }
 
                     // if (max_cluster != 0)
-                    // if (fabs(cluster->get_length()/units::cm - 20) < 5 ){
-                    //     std::cout << "Check: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                    // if (fabs(cluster->get_length()/units::cm - 50) < 5 ){
+                    //     std::cout << "Check: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << " " << max_value[0] << " " << max_value[1] << " " << max_value[2] << " " << num_total_points << " " << num_unique[0] << " " << num_unique[1] << " " << num_unique[2] << " "  << std::endl;
                     // }
 
                     // if overlap a lot merge
@@ -564,6 +564,9 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                         ((num_unique[1] + num_unique[0] + num_unique[2]) < 0.24 * num_total_points ||
                          ((num_unique[1] + num_unique[0] + num_unique[2]) < 0.45 * num_total_points &&
                           (num_unique[1] + num_unique[0] + num_unique[2]) < 25))) {
+
+                        
+
                         if (fabs(dir1.angle(map_cluster_dir1[max_cluster]) - 3.1415926 / 2.) >= 70 * 3.1415926 / 180. ||
                             fabs(dir1.angle(map_cluster_dir2[max_cluster]) - 3.1415926 / 2.) >= 70 * 3.1415926 / 180. ||
                             fabs(dir2.angle(map_cluster_dir1[max_cluster]) - 3.1415926 / 2.) >= 70 * 3.1415926 / 180. ||
@@ -617,6 +620,10 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                             double dis1 =
                                 sqrt(pow(p1_c.x() - p2_c.x(), 2) + pow(p1_c.y() - p2_c.y(), 2) + pow(p1_c.z() - p2_c.z(), 2));
 
+                            // if (fabs(cluster->get_length()/units::cm - 50) < 5 ){
+                            //     std::cout << "Check 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << angle_diff << " " << dis/units::cm << " " << dis1/units::cm << " " << angle1_drift << " " << angle2_drift << std::endl;
+                            // }
+
                             if ((angle_diff < 5 || angle_diff > 175 ||
                                  fabs(angle1_drift - 90) < 5 && fabs(angle2_drift - 90) < 5 &&
                                      fabs(angle1_drift - 90) + fabs(angle2_drift - 90) < 6 &&
@@ -628,7 +635,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
 
-                                // std::cout << "Connect 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                                // std::cout << "Connect 1 2: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                                 // curr_cluster = max_cluster;
                                 flag_merge = true;
                             }
@@ -639,7 +646,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
 
-                                // std::cout << "Connect 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                                // std::cout << "Connect 1 3: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                                 flag_merge = true;
                             }
 
@@ -650,7 +657,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
-                                // std::cout << "Connect 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                                // std::cout << "Connect 1 4: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
                                 flag_merge = true;
                             }
                         }
@@ -835,6 +842,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                 if (p2_dir.magnitude() != 0) p2_dir = p2_dir.norm();
 
                 bool flag_merge = false;
+
+                // if (cluster_1->get_length()>300*units::cm) std::cout << "Check 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << angle_diff << " " << dis/units::cm << " " << dis1/units::cm << " " << angle_diff1 << " " << angle_diff2 << std::endl;
 
                 if (((angle_diff > 85) && (angle_diff1 > 90 - 1.5 * (90 - angle_diff)) &&
                          (angle_diff2 > 90 - 1.5 * (90 - angle_diff)) && dis < 2.5 * units::cm ||
