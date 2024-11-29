@@ -930,6 +930,8 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     // auto edge = add_edge(std::get<0>(index_index_dis_mst[j][k]), std::get<1>(index_index_dis_mst[j][k]),
                     //                      *graph);
                     // if (edge.second) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
                     float dis;
                     if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
                         dis = std::get<2>(index_index_dis_mst[j][k]);
@@ -939,8 +941,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     }
                     // }
 
-                    auto edge = add_edge(std::get<0>(index_index_dis_mst[j][k]), std::get<1>(index_index_dis_mst[j][k]), WireCell::PointCloud::Facade::EdgeProp(dis),
-                                         *graph);
+                    auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                 }
 
                 if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -948,6 +949,8 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                         // auto edge = add_edge(std::get<0>(index_index_dis_dir1[j][k]),
                         //                      std::get<1>(index_index_dis_dir1[j][k]), *graph);
                         // if (edge.second) {
+                        const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
+                        const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
                         float dis;
                         if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
                             dis = std::get<2>(index_index_dis_dir1[j][k]);
@@ -956,12 +959,14 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                             dis = std::get<2>(index_index_dis_dir1[j][k]);
                         }
                         // }
-                        auto edge = add_edge(std::get<0>(index_index_dis_dir1[j][k]), std::get<1>(index_index_dis_dir1[j][k]), WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                        auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                     }
                     if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                         // auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]),
                         //                      std::get<1>(index_index_dis_dir2[j][k]), *graph);
                         // if (edge.second) {
+                        const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
+                        const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
                         float dis;
                         if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
                             dis = std::get<2>(index_index_dis_dir2[j][k]);
@@ -970,13 +975,14 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                             dis = std::get<2>(index_index_dis_dir2[j][k]);
                         }
                         // }
-                        auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]), std::get<1>(index_index_dis_dir2[j][k]), WireCell::PointCloud::Facade::EdgeProp(dis), *graph);
+                        auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *graph);
                     }
                 }
                 // end check ...
             }
         }
 
+        // std::cout << "Check: " << cluster->nchildren() << " " << num << std::endl;
         // study the independent component again ...
         {
             // point -> component
@@ -984,6 +990,9 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
             const int num1 = connected_components(*graph, &component1[0]);
 
             if (num1 > 1) {
+
+                // std::cout << "Check1: " << cluster->nchildren() << " " << num << " " << num1 << std::endl;
+
                 // form new clusters ...
                 // WCP logic ...
                 // std::vector<std::set<const Blob*>> vec_mcells_set;
