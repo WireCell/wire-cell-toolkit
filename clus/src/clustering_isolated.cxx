@@ -265,7 +265,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
     LogDebug("clustering big ones " << to_be_merged_pairs.size());
 
     // merge clusters
-    std::vector<std::set<Cluster *>> merge_clusters;
+    std::vector<std::set<Cluster *>> merged_clusters;
     std::set<Cluster *> used_clusters;
 
     for (auto it = to_be_merged_pairs.begin(); it != to_be_merged_pairs.end(); it++) {
@@ -280,7 +280,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
 
         bool flag_new = true;
         std::vector<std::set<Cluster *>> temp_set;
-        for (auto it1 = merge_clusters.begin(); it1 != merge_clusters.end(); it1++) {
+        for (auto it1 = merged_clusters.begin(); it1 != merged_clusters.end(); it1++) {
             std::set<Cluster *> &clusters = (*it1);
             if (clusters.find(cluster1) != clusters.end() || clusters.find(cluster2) != clusters.end()) {
                 clusters.insert(cluster1);
@@ -294,7 +294,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             std::set<Cluster *> clusters;
             clusters.insert(cluster1);
             clusters.insert(cluster2);
-            merge_clusters.push_back(clusters);
+            merged_clusters.push_back(clusters);
         }
         if (temp_set.size() > 1) {
             // merge them further ...
@@ -303,9 +303,9 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
                 for (auto it1 = temp_set.at(i).begin(); it1 != temp_set.at(i).end(); it1++) {
                     clusters.insert(*it1);
                 }
-                merge_clusters.erase(find(merge_clusters.begin(), merge_clusters.end(), temp_set.at(i)));
+                merged_clusters.erase(find(merged_clusters.begin(), merged_clusters.end(), temp_set.at(i)));
             }
-            merge_clusters.push_back(clusters);
+            merged_clusters.push_back(clusters);
         }
     }
 
@@ -314,13 +314,13 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
         if (used_clusters.find(cluster) == used_clusters.end()) {
             std::set<Cluster *> temp_clusters;
             temp_clusters.insert(cluster);
-            merge_clusters.push_back(temp_clusters);
+            merged_clusters.push_back(temp_clusters);
         }
     }
 
     // new stuff ...
     map_cluster_cluster_vec results;
-    for (auto it = merge_clusters.begin(); it != merge_clusters.end(); it++) {
+    for (auto it = merged_clusters.begin(); it != merged_clusters.end(); it++) {
         std::set<Cluster *> &cluster_set = (*it);
         double max_length = 0;
         Cluster *max_cluster;
@@ -349,6 +349,32 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
         }
     }
     LogDebug("results.size() = " << results.size());
+
+    {
+        // This is a hack to allow Bee to check the results 
+        // prepare a graph ...
+        cluster_connectivity_graph_t g;
+        std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+        std::map<const Cluster*, int> map_cluster_index;
+        for (const Cluster* live : live_grouping.children()) {
+            size_t ilive = map_cluster_index.size();
+            map_cluster_index[live] = ilive;
+            ilive2desc[ilive] = boost::add_vertex(ilive, g);
+        }
+        for (auto it = results.begin(); it != results.end(); it++) {
+            const Cluster* live = it->first;
+            size_t ilive = ilive2desc[map_cluster_index[live]];
+            for (const auto& pair : it->second) {
+                const Cluster* live2 = pair.first;
+                size_t ilive2 = ilive2desc[map_cluster_index[live2]];
+                auto edge = add_edge(ilive, ilive2, g);
+            }
+        }
+        cluster_set_t temp_clusters;
+        merge_clusters(g, live_grouping, temp_clusters);
+        // currently there is no way to hold this data in the root_live grouping ...
+    }
+
 
     return results;
 }
