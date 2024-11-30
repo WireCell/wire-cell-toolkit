@@ -176,7 +176,7 @@ local retagger = g.pnode({
 local sink = sim.frame_sink;
 local graph = g.pipeline([wcls_input.depos, drifter, wcls_simchannel_sink, bagger, bi_manifold, retagger, wcls_output.sim_digits, sink]); //<- standard SimDepoSource source and Drifter
 local app = {
-  type: 'Pgrapher', //TbbFlow Pgrapher changed Ewerton 2023-03-14
+  type: 'TbbFlow', //TbbFlow Pgrapher changed Ewerton 2023-03-14
   data: {
     edges: g.edges(graph),
   },
