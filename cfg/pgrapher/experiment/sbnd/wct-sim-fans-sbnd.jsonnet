@@ -30,7 +30,6 @@ local tools = tools_all {anodes: [tools_all.anodes[n] for n in [0,1]]}; //added 
 
 
 // added Ewerton 2023-09-08
-local art_label = std.extVar("art_label");
 local wiener_label = std.extVar("input_wiener_label");
 local gauss_label = std.extVar("input_gauss_label");
 local badmasks_label = std.extVar("badmasks_inputTag");
@@ -41,12 +40,10 @@ local wcls_input = g.pnode({
     type: 'wclsCookedFrameSource', //added wcls Ewerton 2023-07-27
     name: 'sigs',
     data: {
-        art_tag: art_label,                   // art inputTag for recob::Wire (no need to setup it up if imaging=true below)
         nticks: params.daq.nticks,
         wiener_inputTag: wiener_label,        // input recob::Wire (wiener)
         gauss_inputTag: gauss_label,          // input recob::Wire (gauss)
-        //badmasks_inputTag: badmasks_label,    // input bad masks
-        badmasks_inputTag: ["wctsp:badmasks"], //["wctsp:bad0masks","wctsp:bad1masks"],
+        badmasks_inputTag: [badmasks_label],    // input bad masks
         threshold_inputTag: threshold_label,  // input threshold
         frame_tags: ["orig"],                 // frame tags (only one frame in this module)
         cmm_tag: "bad",                        // single label for now
