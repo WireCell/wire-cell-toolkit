@@ -6,6 +6,7 @@ local g = import "pgraph.jsonnet";
 {
     fanpipe :: g.fan.pipe,
     fansink :: g.fan.sink,
+    fanout :: g.fan.fanout,
 
     // a multi-layer fanout-pipelines-fanin structure
     // nnodes: number of nodes per layer

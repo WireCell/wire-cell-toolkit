@@ -1,5 +1,5 @@
 local g = import "pgraph.jsonnet";
-local f = import "pgrapher/experiment/sbnd/funcs.jsonnet";
+local f = import "pgrapher/common/funcs.jsonnet";
 local wc = import "wirecell.jsonnet";
 
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
@@ -52,48 +52,32 @@ local wcls_input = g.pnode({
     },
 }, nin=0, nout=1);
 
-/* uncomment this only if used in this jsonnet
-local anode = tools.anodes[0]; //added Ewerton 2024-01-22 
-local mag_test = g.pnode({
-          type: 'MagnifySink',
-          //name: 'magimgtest0', //commented Ewerton 2024-01-22
-          name: 'magimgtest', //added Ewerton 2024-01-22
-          data: {
-                output_filename: "magoutput-cooked.root",
-                root_file_mode: 'UPDATE',
-                frames: ['gauss', 'wiener'],
-                summaries: ['wiener'],
-                summary_operator: { ['wiener']: 'set' },
-                trace_has_tag: true,
-                //anode: wc.tn(tools.anodes), //commented Ewerton 2024-01-22
-                anode: wc.tn(anode), //added Ewerton 2024-01-22
-          },
-}, nin=1, nout=1);
-*/
-
-// Parallel part //////////////////////////////////////////////////////////////////////////////
-
-local img = import 'pgrapher/experiment/sbnd/img.jsonnet'; //added Ewerton 2023-06-09
+local img = import 'pgrapher/experiment/sbnd/img.jsonnet';
 local img_maker = img();
-local img_pipes = [img_maker.per_anode(a) for a in tools.anodes];
+local img_pipes = [img_maker.per_anode(a, "multi", add_dump = true) for a in tools.anodes];
 
-// added Ewerton 2023-09-08 
-  local parallel_pipes = [
-    g.pipeline([
-                  img_pipes[n],
-            ],
-            'parallel_pipe_%d' % n)
-  for n in std.range(0, std.length(tools.anodes) - 1)];
-
-
-// added Ewerton 2023-09-10
-local parallel_graph = f.fanpipe2('FrameFanout', parallel_pipes, 'FrameFanin', 'fanout'); //added Ewerton 2023-09-14
-
-
-// Final pipeline //////////////////////////////////////////////////////////////////////////////
+local fanout_apa_rules =
+[
+    {
+        frame: {
+            //'.*': 'number%d' % n,
+            //'.*': 'gauss%d' % n,
+            //'.*': 'framefanout%d ' % n,
+            '.*': 'orig%d' % n,
+        },
+        trace: {
+            // fake doing Nmult SP pipelines
+            //orig: ['wiener', 'gauss'],
+            gauss: 'gauss%d' % n, //uncommented Ewerton 2023-09-27
+            wiener: 'wiener%d' % n, //created Ewerton 2023-09-27
+            //'.*': 'orig',
+        },
+    }
+    for n in std.range(0, std.length(tools.anodes) - 1)
+];
+local parallel_graph = f.fanout("FrameFanout", img_pipes, "parallel_graph", fanout_apa_rules);
 
 local graph = g.pipeline([wcls_input, parallel_graph], "main"); // added Ewerton 2023-09-08
-//local graph = g.pipeline([wcls_input, mag_test, parallel_graph], "main"); // added Ewerton 2023-09-08
 
 local app = {
   type: 'Pgrapher', //Pgrapher, TbbFlow

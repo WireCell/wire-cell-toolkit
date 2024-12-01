@@ -314,7 +314,7 @@ local img = {
 };
 
 function() {
-    local imgpipe (anode, multi_slicing) =
+    local imgpipe (anode, multi_slicing, add_dump = true) =
     if multi_slicing == "single"
     then g.pipeline([
             // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
@@ -323,35 +323,38 @@ function() {
             img.tiling(anode, anode.name),
             img.solving(anode, anode.name),
             // img.clustering(anode, anode.name),
-            img.dump(anode, anode.name, params.lar.drift_speed),])
+            ] + if add_dump then [
+            img.dump(anode, anode.name, params.lar.drift_speed),] else [])
     else if multi_slicing == "active"
     then g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
             img.solving(anode, anode.name+"-ms-active"),
             // img.clustering(anode, anode.name+"-ms-active"),
-            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed)])
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else [])
     else if multi_slicing == "masked"
     then g.pipeline([
             img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500),
             img.clustering(anode, anode.name+"-ms-masked"),
-            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed)])
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
         local active_fork = g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
             img.solving(anode, anode.name+"-ms-active"),
-            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),
-        ]),
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
         local masked_fork = g.pipeline([
             img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592)
             img.clustering(anode, anode.name+"-ms-masked"),
-            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),
-        ]),
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else []),
         ret: g.fan.fanout("FrameFanout",[active_fork,masked_fork], "fan_active_masked-%s"%anode.name),
     }.ret,
 
 
-    per_anode(anode) :: g.pipeline([
+    per_anode(anode, multi_slicing = "single", add_dump = true) :: g.pipeline([
         img.pre_proc(anode, anode.name),
-        imgpipe(anode, "multi"),
+        imgpipe(anode, multi_slicing, add_dump),
         ], "per_anode"),
 }
