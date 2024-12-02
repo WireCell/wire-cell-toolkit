@@ -54,7 +54,22 @@ local wcls_input = g.pnode({
 
 local img = import 'pgrapher/experiment/sbnd/img.jsonnet';
 local img_maker = img();
-local img_pipes = [img_maker.per_anode(a, "multi", add_dump = true) for a in tools.anodes];
+local img_pipes = [img_maker.per_anode(a, "multi", add_dump = false) for a in tools.anodes];
+
+local clus = import 'pgrapher/experiment/sbnd/clus.jsonnet';
+local clus_maker = clus();
+local clus_pipes = [clus_maker.per_volume(a) for a in tools.anodes];
+
+local img_clus_pipe = [g.intern(
+    innodes = [img_pipes[n]],
+    centernodes = [],
+    outnodes = [clus_pipes[n]],
+    edges = [
+        g.edge(img_pipes[n], clus_pipes[n], p, p)
+        for p in std.range(0, 1)
+    ]
+)
+for n in std.range(0, std.length(tools.anodes) - 1)];
 
 local fanout_apa_rules =
 [
@@ -75,7 +90,7 @@ local fanout_apa_rules =
     }
     for n in std.range(0, std.length(tools.anodes) - 1)
 ];
-local parallel_graph = f.fanout("FrameFanout", img_pipes, "parallel_graph", fanout_apa_rules);
+local parallel_graph = f.fanout("FrameFanout", img_clus_pipe, "parallel_graph", fanout_apa_rules);
 
 local graph = g.pipeline([wcls_input, parallel_graph], "main"); // added Ewerton 2023-09-08
 

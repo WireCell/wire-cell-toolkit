@@ -1,47 +1,36 @@
 local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import 'pgrapher/common/funcs.jsonnet';
-local params = import "pgrapher/experiment/uboone/simparams.jsonnet";
+local params = import "pgrapher/experiment/sbnd/simparams.jsonnet";
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anodes = tools.anodes;
 
-local cluster_source(fname) = g.pnode({
-    type: "ClusterFileSource",
-    name: fname,
-    data: {
-        inname: fname,
-        anodes: [wc.tn(a) for a in anodes],
-    }
-}, nin=0, nout=1, uses=anodes);
-
-function (
-    active_clusters = "active-clusters-anode0.npz",
-    masked_clusters = "masked-clusters-anode0.npz",
-    output = "tensor-apa-uboone.tar.gz",
+local clus (
+    anode,
+    face = 0,
+    drift_speed = 1.101 * wc.mm / wc.us,
+    time_offset = -1600 * wc.us, // -1600 * wc.us + 6 * wc.mm/self.drift_speed,
     bee_dir = "data",
     bee_zip = "mabc.zip",
     initial_index = "0",
     initial_runNo = "1",
     initial_subRunNo = "1",
-    initial_eventNo = "1")
+    initial_eventNo = "1") =
+{
+    local index = std.parseInt(initial_index),
 
-    local index = std.parseInt(initial_index);
-
-    local LrunNo = std.parseInt(initial_runNo);
-    local LsubRunNo = std.parseInt(initial_subRunNo);
-    local LeventNo  = std.parseInt(initial_eventNo);
-
-    local active = cluster_source(active_clusters);
-    local masked = cluster_source(masked_clusters);
+    local LrunNo = std.parseInt(initial_runNo),
+    local LsubRunNo = std.parseInt(initial_subRunNo),
+    local LeventNo  = std.parseInt(initial_eventNo),
 
     // Note, the "sampler" must be unique to the "sampling".
     local bs_live = {
         type: "BlobSampler",
         name: "bs_live",
         data: {
-            drift_speed: 1.101 * wc.mm / wc.us,
-            time_offset: -1600 * wc.us + 6 * wc.mm/self.drift_speed,
+            drift_speed: drift_speed,
+            time_offset: time_offset,
             strategy: [
                 // "center",
                 // "corner",
@@ -58,7 +47,7 @@ function (
             // extra: [".*"] // want all the extra
             extra: [".*wire_index"] //
             // extra: [] //
-        }};
+        }},
     local bs_dead = {
         type: "BlobSampler",
         name: "bs_dead",
@@ -67,7 +56,7 @@ function (
                 "center",
             ],
             extra: [".*"] // want all the extra
-        }};
+        }},
 
     
     local geom_helper = {
@@ -81,10 +70,10 @@ function (
                 angle_u: 1.0472,    // 60 degrees
                 angle_v: -1.0472,   // -60 degrees
                 angle_w: 0,         // 0 degrees
-                drift_speed: 1.101 * wc.mm / wc.us,
+                drift_speed: drift_speed,
                 tick: 0.5 * wc.us,  // 0.5 mm per tick
                 tick_drift: self.drift_speed * self.tick,
-                time_offset: -1600 * wc.us,
+                time_offset: time_offset,
                 nticks_live_slice: 4,
                 FV_xmin: 1 * wc.cm,
                 FV_xmax: 255 * wc.cm,
@@ -99,12 +88,15 @@ function (
                 FV_zmin_margin: 3 * wc.cm,
                 FV_zmax_margin: 3 * wc.cm
             },
+            a1f0: self.a0f0 {
+                drift_speed: -drift_speed,
+            }
         }
-    };
+    },
 
     local ptb = g.pnode({
         type: "PointTreeBuilding",
-        name: "",
+        name: "%s-%d"%[anode.name, face],
         data:  {
             samplers: {
                 "3d": wc.tn(bs_live),
@@ -113,23 +105,14 @@ function (
             multiplicity: 2,
             tags: ["live", "dead"],
             anode: wc.tn(anodes[0]),
-            face: 0,
+            face: face,
             geom_helper: wc.tn(geom_helper),
         }
-    }, nin=2, nout=1, uses=[bs_live, bs_dead]);
-
-    local front_end = g.intern(
-        innodes = [active, masked],
-        outnodes = [ptb],
-        edges = [
-            g.edge(active, ptb, 0, 0),
-            g.edge(masked, ptb, 0, 1),
-        ],
-        name = "front-end");
+    }, nin=2, nout=1, uses=[bs_live, bs_dead]),
 
     local mabc = g.pnode({
         type: "MultiAlgBlobClustering",
-        name: "",
+        name: "%s-%d"%[anode.name, face],
         data:  {
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
@@ -143,7 +126,7 @@ function (
             eventNo: LeventNo,
             save_deadarea: true, 
             anode: wc.tn(anodes[0]),
-            face: 0,
+            face: face,
             geom_helper: wc.tn(geom_helper),
             func_cfgs: [
                 {name: "clustering_live_dead", dead_live_overlap_offset: 2},
@@ -162,33 +145,21 @@ function (
                 {name: "clustering_isolated"},
             ],
         }
-    }, nin=1, nout=1, uses=[geom_helper]);
+    }, nin=1, nout=1, uses=[geom_helper]),
 
     local sink = g.pnode({
         type: "TensorFileSink",
-        name: output,
+        name: "%s-%d"%[anode.name, face],
         data: {
-            outname: output,
+            outname: "clus-%s-face%d.tar.gz"%[anode.name, face],
             prefix: "clustering_", // json, numpy, dummy
             dump_mode: true,
         }
-    }, nin=1, nout=0);
+    }, nin=1, nout=0),
 
-    local graph = g.pipeline([front_end, mabc, sink]);
+    clus_pipe() :: g.pipeline([ptb, mabc, sink], "clus_pipe"),
+};
 
-    local app = {
-        type: 'Pgrapher', //Pgrapher, TbbFlow
-        data: {
-            edges: g.edges(graph),
-        },
-    };
-    local cmdline = {
-        type: "wire-cell",
-        data: {
-            plugins: ["WireCellGen", "WireCellPgraph", /*"WireCellTbb",*/
-                      "WireCellSio", "WireCellSigProc", "WireCellRoot", "WireCellImg", "WireCellClus"],
-        apps: [wc.tn(app)]
-        },
-    };
-
-    [cmdline] + g.uses(graph) + [app]
+function () {
+    per_volume(anode, face=0) :: clus(anode, face=face).clus_pipe(),
+}

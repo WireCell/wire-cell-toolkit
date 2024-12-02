@@ -1,7 +1,6 @@
 local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import 'pgrapher/common/funcs.jsonnet';
-//local params = import "pgrapher/experiment/uboone/simparams.jsonnet";//commented Ewerton 2023-09-10
 local params = import "pgrapher/experiment/sbnd/simparams.jsonnet"; //added Ewerton 2023-09-10
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
