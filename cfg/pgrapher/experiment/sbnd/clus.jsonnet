@@ -9,8 +9,8 @@ local anodes = tools.anodes;
 local clus (
     anode,
     face = 0,
-    drift_speed = 1.101 * wc.mm / wc.us,
-    time_offset = -1600 * wc.us, // -1600 * wc.us + 6 * wc.mm/self.drift_speed,
+    drift_speed = 1.6 * wc.mm / wc.us,
+    time_offset = -200 * wc.us,
     bee_dir = "data",
     bee_zip = "mabc.zip",
     initial_index = "0",
@@ -24,12 +24,15 @@ local clus (
     local LsubRunNo = std.parseInt(initial_subRunNo),
     local LeventNo  = std.parseInt(initial_eventNo),
 
+    local drift_sign = if anode.data.ident%2 == 0  then 1 else -1,
+    // local drift_sign = 1,
+
     // Note, the "sampler" must be unique to the "sampling".
     local bs_live = {
         type: "BlobSampler",
-        name: "bs_live",
+        name: "%s-%d"%[anode.name, face],
         data: {
-            drift_speed: drift_speed,
+            drift_speed: drift_speed*drift_sign,
             time_offset: time_offset,
             strategy: [
                 // "center",
@@ -50,7 +53,7 @@ local clus (
         }},
     local bs_dead = {
         type: "BlobSampler",
-        name: "bs_dead",
+        name: "%s-%d"%[anode.name, face],
         data: {
             strategy: [
                 "center",
@@ -70,7 +73,7 @@ local clus (
                 angle_u: 1.0472,    // 60 degrees
                 angle_v: -1.0472,   // -60 degrees
                 angle_w: 0,         // 0 degrees
-                drift_speed: drift_speed,
+                drift_speed: drift_speed*1,
                 tick: 0.5 * wc.us,  // 0.5 mm per tick
                 tick_drift: self.drift_speed * self.tick,
                 time_offset: time_offset,
@@ -89,7 +92,7 @@ local clus (
                 FV_zmax_margin: 3 * wc.cm
             },
             a1f0: self.a0f0 {
-                drift_speed: -drift_speed,
+                drift_speed: drift_speed*-1,
             }
         }
     },
@@ -117,8 +120,9 @@ local clus (
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
             perf: true,
-            bee_dir: bee_dir, // "data/0/0",
-            bee_zip: bee_zip,
+            bee_dir: bee_dir, // "data/0/0", // not used
+            bee_zip: "mabc-%s-face%d.zip"%[anode.name, face],
+            bee_detector: "sbnd",
             initial_index: index,   // New RSE configuration
             use_config_rse: true,  // Enable use of configured RSE
             runNo: LrunNo,
