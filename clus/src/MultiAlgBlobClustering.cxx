@@ -5,6 +5,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/ExecMon.h"
+#include "WireCellUtil/String.h"
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
@@ -40,8 +41,6 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     if (cfg.isMember("bee_dir")) {
         log->warn("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
     }
-
-    
     std::string bee_zip = get<std::string>(cfg, "bee_zip", "mabc.zip");
     // Add new configuration option for initial index
     m_initial_index = get<int>(cfg, "initial_index", m_initial_index);
@@ -77,6 +76,11 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
 
     m_face = get<int>(cfg, "face", 0);
+
+    m_bee_img.detector(get<std::string>(cfg, "bee_detector", "uboone"));
+    m_bee_img.algorithm(String::format("%s-%d-%d", m_bee_img.algorithm().c_str(), m_anode->ident(), m_face));
+    m_bee_ld.detector(get<std::string>(cfg, "bee_detector", "uboone"));
+    m_bee_ld.algorithm(String::format("%s-%d-%d", m_bee_ld.algorithm().c_str(), m_anode->ident(), m_face));
 
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 }
@@ -282,6 +286,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     // log->debug("Got live pctree with {} children", root_live->nchildren());
     // log->debug(em("got live pctree"));
+    log->debug("as_pctree from \"{}\"", inpath + "/dead");
     auto root_dead = as_pctree(intens, inpath + "/dead");
     if (!root_dead) {
         log->error("Failed to get dead point cloud tree from \"{}\"", inpath + "/dead");
