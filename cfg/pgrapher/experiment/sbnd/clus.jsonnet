@@ -9,7 +9,7 @@ local anodes = tools.anodes;
 local clus (
     anode,
     face = 0,
-    drift_speed = 1.6 * wc.mm / wc.us,
+    drift_speed = 1.56 * wc.mm / wc.us, // 1.56 for sbnd
     time_offset = -200 * wc.us,
     bee_dir = "data",
     bee_zip = "mabc.zip",
@@ -67,6 +67,7 @@ local clus (
         name: "uboone",
         data: {
             a0f0: {
+                face: 0,
                 pitch_u: 3 * wc.mm,
                 pitch_v: 3 * wc.mm,
                 pitch_w: 3 * wc.mm,
@@ -91,7 +92,8 @@ local clus (
                 FV_zmin_margin: 3 * wc.cm,
                 FV_zmax_margin: 3 * wc.cm
             },
-            a1f0: self.a0f0 {
+            a1f1: self.a0f0 {
+                face: 1,
                 drift_speed: drift_speed*-1,
             }
         }
@@ -107,7 +109,7 @@ local clus (
             },
             multiplicity: 2,
             tags: ["live", "dead"],
-            anode: wc.tn(anodes[0]),
+            anode: wc.tn(anode),
             face: face,
             geom_helper: wc.tn(geom_helper),
         }
@@ -129,7 +131,7 @@ local clus (
             subRunNo: LsubRunNo,
             eventNo: LeventNo,
             save_deadarea: true, 
-            anode: wc.tn(anodes[0]),
+            anode: wc.tn(anode),
             face: face,
             geom_helper: wc.tn(geom_helper),
             func_cfgs: [

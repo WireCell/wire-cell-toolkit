@@ -54,11 +54,11 @@ local wcls_input = g.pnode({
 
 local img = import 'pgrapher/experiment/sbnd/img.jsonnet';
 local img_maker = img();
-local img_pipes = [img_maker.per_anode(a, "multi", add_dump = false) for a in tools.anodes];
+local img_pipes = [img_maker.per_anode(a, "multi-3view", add_dump = false) for a in tools.anodes];
 
 local clus = import 'pgrapher/experiment/sbnd/clus.jsonnet';
 local clus_maker = clus();
-local clus_pipes = [clus_maker.per_volume(a) for a in tools.anodes];
+local clus_pipes = [clus_maker.per_volume(tools.anodes[0], 0), clus_maker.per_volume(tools.anodes[1], 1)];
 
 local img_clus_pipe = [g.intern(
     innodes = [img_pipes[n]],

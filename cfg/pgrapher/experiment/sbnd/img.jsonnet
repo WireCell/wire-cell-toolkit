@@ -137,6 +137,7 @@ local img = {
             data: {
                 tick_span: span,
                 wiener_tag: "wiener%d" % anode.data.ident,
+                summary_tag: "wiener%d" % anode.data.ident,
                 charge_tag: "gauss%d" % anode.data.ident,
                 error_tag: "gauss_error%d" % anode.data.ident,
                 anode: wc.tn(anode),
@@ -338,8 +339,13 @@ function() {
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
+        local st = if multi_slicing == "multi-2view"
+        then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4)
+        else g.pipeline([
+            img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
+            img.tiling(anode, anode.name),]),
         local active_fork = g.pipeline([
-            img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
+            st,
             img.solving(anode, anode.name+"-ms-active"),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
