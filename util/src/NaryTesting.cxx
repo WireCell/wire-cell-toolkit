@@ -79,6 +79,13 @@ bool NaryTesting::Introspective::on_remove(const std::vector<node_type*>& path)
     return true;
 }
 
+bool NaryTesting::Introspective::on_ordered(const std::vector<node_type*>& path)
+{
+    debug("order {} {}", name, path.size());
+    ++nactions["ordered"];
+    return true;
+}
+
 
 std::ostream& NaryTesting::operator<<(std::ostream& o, const NaryTesting::Introspective& obj)
 {

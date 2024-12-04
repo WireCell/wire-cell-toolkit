@@ -67,6 +67,39 @@ The ~child_values()~ and ~child_nodes()~ provide an iterator range to
 access the child *values* or to acess the children as simple ~Node*~,
 respectively.
 
+* Depth first search
+
+One may perform a depth-first search (DFS, really a "visit") using iterators.
+#+begin_src c++
+  for (const auto& node : root->depth()) {
+      // use node
+  }
+#+end_src
+
+* Order and stability
+
+By default, the list of children owned by a parent is in the order of insertion
+of the children.  This order is well defined and stable (not random).  The owner
+of a constructed tree may apply a custom ordering to any parent's child list.
+
+For example, assume the tree nodes have a value type with a ~Value::quantity~ data
+member.  To sort all children lists by this quantity:
+
+#+begin_src c++
+  template<Value>
+  bool by_quantity(const NaryTree<Value>::owned_ptr& a,
+                   const NaryTree<Value>::owned_ptr& b)
+  {
+      return a->value.quantity < b->value.quantity;
+  }
+  for (auto& node : root->depth()) {
+      root->sort_children(by_quantity);
+  }
+#+end_src
+
+As DFS iterates first on parent and then children, it is safe to perform this
+sort as part of a DFS.
+
 * Notification
 
 The ~Value~ of a ~Node~ will be informed of major state changes in the ~Node~ that is holding the ~Value~ if the ~Value~ defines a method matching this signature:
@@ -80,6 +113,7 @@ The ~action~ is an enum determines the state change:
 - *constructed* :: the node was just constructed.  
 - inserted :: the node is a child that was just inserted to a parent.  
 - removing :: the node is a child that will next be removed from its parent.
+- ordered :: the children of a node have had a custom order applied.
 
 The ~Value~ type may wish to propagate notifications up the parentage.
 For example, to freshen or invalidate caches held by a parent and that
@@ -93,6 +127,7 @@ A ~Value~ type may inherit from this type and define zero or more of these metho
 virtual void on_construct(node_type* node);
 virtual bool on_insert(const std::vector<node_type*>& path);
 virtual bool on_remove(const std::vector<node_type*>& path);
+virtual bool on_ordered(const std::vector<node_type*>& path);
 #+end_src
 The ~path~ argument gives the tree path to the node that triggered the notification.
 

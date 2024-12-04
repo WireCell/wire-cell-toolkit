@@ -62,6 +62,7 @@ namespace WireCell::NaryTree {
         constructed,            // the node is constructed
         inserted,               // the node has been inserted into a parent's children list
         removing,               // the node has been removed from a parent's children list
+        ordered,                // the node has just had its children list ordered
     };
 
 
@@ -208,7 +209,6 @@ namespace WireCell::NaryTree {
         // Return a nursery of all children, leaving the one in this node empty.
         // If notify_child is true, notify the children of their removal.
         nursery_type remove_children(bool notify_value=true) {
-            // std::cerr << "NaryTree::Node::remove_children() removing " << nursery_.size() << "\n";
             nursery_type ret;
             while (nursery_.begin() != nursery_.end()) {
                 auto orphan = remove(nursery_.begin(), notify_value);
@@ -234,8 +234,8 @@ namespace WireCell::NaryTree {
         }
 
         // Iterator locating self in list of siblings.  If parent is
-        // null, this iterator is invalid.  It is set which this node
-        // is inserted as a anothers child.
+        // null, this iterator is invalid.  It is set when this node
+        // is inserted as a another node's child.
         sibling_iter sibling_;
         sibling_iter sibling() const {
             if (!parent) {
@@ -304,6 +304,13 @@ namespace WireCell::NaryTree {
             return sib->get();
         }
 
+        // Return the number of parents this node has.  Ie, it's layer in the
+        // tree.
+        size_t nparents() const {
+            if (!parent) return 0;
+            return 1 + parent->nparents();
+        }
+
         // Return the number of descendants (children, grand children, etc)
         // reached from this node.  The count does not include this node.  Eg, a
         // node that lacks children will also have zero descendants.
@@ -351,6 +358,19 @@ namespace WireCell::NaryTree {
             return child_node_const_range{ nursery_.cbegin(), nursery_.cend() };
         }
                 
+        // Sort children according to a comparison.  Note, this should be safe
+        // to call directly on a node visited in a DFS as it will sort children
+        // in the context of a parent and before descending on the children
+        // list.
+        template<typename Compare>
+        void sort_children(Compare comp, bool notify_value=true) {
+            nursery_.sort(comp); // Any existing iterators are stable.
+            if (notify_value) {
+                notify<Value>(Action::ordered, this);
+            }
+        }
+
+
         // Iterable range for depth first traversal, parent then children.
         // Iterators yield a reference to the node.
         // Level=0 will traverse to the leaves.

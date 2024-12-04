@@ -24,7 +24,6 @@ namespace WireCell::NaryTree {
 
         // Called when a Node is constructed on a Notified.
         virtual void on_construct(node_type* node) {
-            // std::cerr << "defaulting action: constructed\n";
         }
 
         // Called when a Node with a Notified is inserted.  The path
@@ -32,7 +31,6 @@ namespace WireCell::NaryTree {
         // and ending with the Node holding the Notified being called.
         // Return true to continue propagating toward the root node.
         virtual bool on_insert(const std::vector<node_type*>& path) {
-            // std::cerr << "defaulting action: inserted\n";
             return true;
         }
 
@@ -41,10 +39,16 @@ namespace WireCell::NaryTree {
         // and ending with the Node holding the Notified being called. 
         // Return true to continue propagating toward the root node.
         virtual bool on_remove(const std::vector<node_type*>& path) {
-            // std::cerr << "defaulting action: removing\n";
             return true;
         }
 
+        // Called when a Node with a Notified has its children ordered.  The
+        // path holds a sequence of Nodes starting with the ordered node and
+        // ending with the Node holding the Notified being called.  Return true
+        // to continue propagating toward the root node.
+        virtual bool on_ordered(const std::vector<node_type*>& path) {
+            return true;
+        }
       public:
 
         // This is the hook that Node will call.  Note, Node will use template
@@ -67,6 +71,10 @@ namespace WireCell::NaryTree {
                 propagate_remove_(path);
                 return;
             }
+            if (action == Action::ordered) {
+                propagate_ordered_(path);
+                return;
+            }
         }
 
       private:
@@ -84,6 +92,14 @@ namespace WireCell::NaryTree {
             if (!node->parent) return;
             path.push_back(node->parent);
             node->parent->value.propagate_remove_(path);
+        }
+
+        void propagate_ordered_(std::vector<node_type*> path) {
+            if (! on_ordered(path)) return; // notify subclass
+            node_type* node = path.back();
+            if (!node->parent) return;
+            path.push_back(node->parent);
+            node->parent->value.propagate_ordered_(path);
         }
     };
 }

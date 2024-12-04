@@ -36,6 +36,7 @@ namespace WireCell::NaryTesting {
         virtual void on_construct(node_type* node);
         virtual bool on_insert(const std::vector<node_type*>& path);
         virtual bool on_remove(const std::vector<node_type*>& path);
+        virtual bool on_ordered(const std::vector<node_type*>& path);
 
 
     };

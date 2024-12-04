@@ -74,6 +74,101 @@ TEST_CASE("nary tree node construction copy") {
 }
 
 
+bool compare_introspective(const Introspective::owned_ptr& a,
+                           const Introspective::owned_ptr& b)
+{
+    return b->value.name < a->value.name;
+}
+
+void dump_introspective(const Introspective& i, const std::string& prefix="", const std::string title="")
+{
+    // fixme: spdlog::debug is not working so we use std io for now.
+
+    if (title.size()) {
+        debug(title);
+    }
+
+    debug("{} {}", prefix, i);
+    for (const auto& [k,v] : i.nactions) {
+        debug("{}\t {} {}", prefix, k, v);
+    }
+    for ( const auto* cnode : i.node->children() ) {
+        dump_introspective(cnode->value, prefix + "\t");
+    }
+}
+
+void dump_introspective_dfs(const Introspective& i)
+{
+    for (const auto& node : i.node->depth()) {
+        debug(node.value.name);
+    }
+}
+
+TEST_CASE("nary tree node ordered") 
+{
+    std::list<size_t> layer_sizes ={10,};
+    auto root = make_layered_tree(layer_sizes);
+    dump_introspective(root->value);
+    root->sort_children(compare_introspective);
+    dump_introspective(root->value);
+    CHECK(root->value.nactions["ordered"] == 1);
+}
+
+
+TEST_CASE("nary tree node deeply ordered") 
+{
+    // Consider a tree with 4 layers:
+    // 0 - root node with 2 children
+    // 1 - 2 nodes each with 2 children
+    // 2 - 4 nodes each with 2 children
+    // 3 - 8 leaf nodes with no children
+    std::list<size_t> layer_sizes ={2,2,2};
+    auto root = make_layered_tree(layer_sizes);
+    auto root2 = make_layered_tree(layer_sizes);
+    // This tree is WELL ORDERED in order of insertion.
+    debug("original tree");
+    dump_introspective_dfs(root->value);
+
+    // For some reason we now want to apply a new ordering (which will be a
+    // reversal) to the children of each node in layer 1.  We do this in two
+    // steps. First, select all the nodes in the desired layer via DFS visit.
+    // Second, sort their children.
+
+    debug("two step ordering");
+    std::vector<Introspective::node_type*> to_order;
+
+    // We can limit DFS to layer 1 as we just need the parents.  Note, depth()
+    // layer 1 refers to just the root so we need 1+1
+    for (auto& node : root->depth(1+1)) {
+        if (node.nparents() != 1) {
+            continue;
+        }
+        // two parents mean the node is at layer 3
+        to_order.push_back(&node);
+    }
+    
+    for (auto* node : to_order) {
+        node->sort_children(compare_introspective);
+        CHECK(node->value.nactions["ordered"] == 1);
+    }
+    dump_introspective_dfs(root->value);
+
+    CHECK(root->value.nactions["ordered"] == 2);
+
+    debug("one step ordering");
+    // Now try again but sort in place and see if the DFS freaks out.
+    for (auto& node : root2->depth(1+1)) {
+        if (node.nparents() != 1) {
+            continue;
+        }
+        node.sort_children(compare_introspective);
+    }
+
+    dump_introspective_dfs(root2->value);
+    CHECK(root2->value.nactions["ordered"] == 2);
+}
+
+
 TEST_CASE("nary tree simple tree tests") {
 
     const size_t live_count = Introspective::live_count;
@@ -269,6 +364,10 @@ TEST_CASE("nary tree child iter")
 
 TEST_CASE("nary tree notify")
 {
+    // Note, Introspective counts the actions tested here only when the
+    // notification path is size one. See the ordered test for that notification
+    // which counts more broadly.
+
     {
         Introspective::node_type node;
         auto& nactions = node.value.nactions;
