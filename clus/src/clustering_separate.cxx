@@ -1206,6 +1206,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     // std::cout << "Start Point: " << start_wcpoint.x() << " " << start_wcpoint.y() << " " << start_wcpoint.z() << std::endl;
     // std::cout << "End Point: " << end_wcpoint.x() << " " << end_wcpoint.y() << " " << end_wcpoint.z() << std::endl;
 
+    // std::cout << "dijkstra_shortest_paths, face: " << tp.face << std::endl;
     cluster->dijkstra_shortest_paths(start_wcpoint_idx, use_ctpc);
     cluster->cal_shortest_path(end_wcpoint_idx);
 

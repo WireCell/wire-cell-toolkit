@@ -62,6 +62,7 @@ namespace WireCell::PointCloud::Facade {
 
     // FIXME: refactor to vector<pitch>, etc?  or vector<TPCPlane> with ::pitch/::angle?
     struct TPCParams {
+        int face{0};
         float_t pitch_u{3 * units::mm};
         float_t pitch_v{3 * units::mm};
         float_t pitch_w{3 * units::mm};

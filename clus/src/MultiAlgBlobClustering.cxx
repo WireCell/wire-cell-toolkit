@@ -79,8 +79,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_bee_img.detector(get<std::string>(cfg, "bee_detector", "uboone"));
     m_bee_img.algorithm(String::format("%s-%d-%d", m_bee_img.algorithm().c_str(), m_anode->ident(), m_face));
+    log->debug("m_bee_img.algorithm: {}", m_bee_img.algorithm());
     m_bee_ld.detector(get<std::string>(cfg, "bee_detector", "uboone"));
     m_bee_ld.algorithm(String::format("%s-%d-%d", m_bee_ld.algorithm().c_str(), m_anode->ident(), m_face));
+    log->debug("m_bee_ld.algorithm: {}", m_bee_ld.algorithm());
 
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 }

@@ -73,6 +73,7 @@ void Grouping::on_construct(node_type* node)
 }
 
 void Grouping::set_params(const WireCell::Configuration& cfg) {
+    m_tp.face = get(cfg, "face", m_tp.face);
     m_tp.pitch_u = get(cfg, "pitch_u", m_tp.pitch_u);
     m_tp.pitch_v = get(cfg, "pitch_v", m_tp.pitch_v);
     m_tp.pitch_w = get(cfg, "pitch_w", m_tp.pitch_w);
@@ -132,14 +133,15 @@ void Grouping::fill_proj_centers_pitch_mags() const
         raise<ValueError>("anode is null");
     }
     for (const auto& face : m_anode->faces()) {
+        // std::cout<< "fill_proj_centers_pitch_mags: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
         const auto& coords = face->raygrid();
         // skip dummy layers so the vector matches 0, 1, 2 plane order
         for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
             const auto& pitch_dir = coords.pitch_dirs()[layer];
             const auto& center = coords.centers()[layer];
             double proj_center = center.dot(pitch_dir);
-            m_proj_centers[face->which()][layer-ndummy_layers] = proj_center;
-            m_pitch_mags[face->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+            m_proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
+            m_pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
         }
     }
 }
@@ -207,7 +209,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     }
     const auto& iface = m_anode->face(face);
     if (iface == nullptr) {
-        raise<ValueError>("Face is null");
+        raise<ValueError>("anode %d has no face %d", m_anode->ident(), face);
     }
 
     const auto [angle_u,angle_v,angle_w] = wire_angles();

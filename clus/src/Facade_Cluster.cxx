@@ -1925,6 +1925,7 @@ void Cluster::Establish_close_connected_graph() const
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) const {
+    const auto& tp = grouping()->get_params();
     // now form the connected components
     std::vector<int> component(num_vertices(*m_graph));
     const size_t num = connected_components(*m_graph, &component[0]);
@@ -2064,9 +2065,8 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
-                        /// FIXME: how to add face information?
-                        const int face = 0;
-                        const bool good_point = grouping()->is_good_point(test_p, face);
+                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
                         if (!good_point) num_bad++;
                     }
                 }
@@ -2092,9 +2092,8 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
-                        /// FIXME: how to add face information?
-                        const int face = 0;
-                        const bool good_point = grouping()->is_good_point(test_p, face);
+                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
                         if (!good_point) num_bad++;
                     }
                 }
@@ -2120,9 +2119,8 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
-                        /// FIXME: how to add face information?
-                        const int face = 0;
-                        const bool good_point = grouping()->is_good_point(test_p, face);
+                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
                         if (!good_point) num_bad++;
                     }
                 }
