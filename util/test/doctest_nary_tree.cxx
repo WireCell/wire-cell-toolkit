@@ -97,7 +97,7 @@ void dump_introspective(const Introspective& i, const std::string& prefix="", co
     }
 }
 
-void dump_introspective_dfs(const Introspective& i)
+static void dump_introspective_dfs(const Introspective& i)
 {
     for (const auto& node : i.node->depth()) {
         debug(node.value.name);
@@ -168,6 +168,19 @@ TEST_CASE("nary tree node deeply ordered")
     CHECK(root2->value.nactions["ordered"] == 2);
 }
 
+TEST_CASE("nary tree separate") 
+{
+    // Make a root with 10 children each with 2 and separate the 10.
+    std::list<size_t> layer_sizes = {10,2};
+    auto root = make_layered_tree(layer_sizes);
+    // Separate, explicitly skipping some and underspecifying.
+    auto nurseries = root->separate({0,0,-1,1,1,-1,2,2,-1});
+    REQUIRE(nurseries.size() == 3);
+    REQUIRE(root->nchildren() == 4);
+    REQUIRE(nurseries[0].size() == 2);
+    REQUIRE(nurseries[1].size() == 2);
+    REQUIRE(nurseries[2].size() == 2);
+}
 
 TEST_CASE("nary tree simple tree tests") {
 

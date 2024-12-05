@@ -36,7 +36,7 @@
 #include <boost/type_traits/is_convertible.hpp>
 #include <boost/utility/enable_if.hpp>
 
-// #include <iostream>             // debug
+#include <iostream>             // debug
 
 namespace WireCell::NaryTree {
 
@@ -87,6 +87,8 @@ namespace WireCell::NaryTree {
         using nursery_type = std::list<owned_ptr>; 
         using sibling_iter = typename nursery_type::iterator;
         using sibling_const_iter = typename nursery_type::const_iterator;
+        // groups of nurseries
+        using nursery_group_type = std::unordered_map<int, nursery_type>;
 
         // A depth first descent range
         using range = depth_range<self_type>;
@@ -182,7 +184,8 @@ namespace WireCell::NaryTree {
                                 });
         }
         
-        // Remove and return child node.
+        // Remove and return child node.  If notify_value is true, the
+        // "removing" notification is emitted PRIOR to removal.
         owned_ptr remove(sibling_iter sib, bool notify_value=true) {
             if (sib == nursery_.end()) return nullptr;
 
@@ -196,6 +199,56 @@ namespace WireCell::NaryTree {
             ret->sibling_ = nursery_.end();
             ret->parent = nullptr;
             
+            return ret;
+        }
+
+        // Return and remove a subset of children grouped into separate
+        // nurseries.  Each nursery is indexed by a non-negative group ID as
+        // provided by the "group" vector.  Only non-negative group IDs are
+        // processed.  If the group vector is shorter than this node's nursery
+        // list, the remaining children are unprocessed.  If longer, the
+        // additional group IDs are ignored.  Unprocessed children are retained
+        // by this node.  Note, this node is otherwise left as-is and in
+        // particular it is not (directly) removed from its parent (if it has
+        // one) even when all children are removed.  If notify value is true
+        // then "removing" notification is emitted prior to removal and
+        // "ordered" notification is emitted after.  Notifications are emitted
+        // only when changes to this node are actually performed.
+        nursery_group_type separate(std::vector<int> group, bool notify_value=true) {
+            nursery_group_type ret;
+
+            group.resize(nursery_.size(), -1);
+            if (!std::any_of(group.begin(), group.end(), [](int gid) { return gid >= 0; })) {
+                return ret;
+            }
+
+            auto nit = nursery_.begin();
+            auto end = nursery_.end();
+            auto git = group.begin();
+
+            while (nit != end) {
+                const int groupid = *(git++);
+                if (groupid < 0) { // skip negatives
+                    ++nit;
+                    continue;
+                }
+                // Get nursery for group.
+                auto& nur = ret[groupid];
+
+                // we no mimic remove().  We can not simply call it as we need
+                // to advance our nit.
+                if (notify_value) {
+                    notify<Value>(Action::removing, (*nit).get());
+                }
+
+                // Transfer ownership of ptr to nursery.
+                nur.emplace_back(std::move(*nit)); 
+                // Self-locate the child and nullify parent pointer
+                nur.back()->sibling_ = std::prev(nur.end()); 
+                nur.back()->parent = nullptr;
+
+                nit = nursery_.erase(nit); // advances nit
+            }
             return ret;
         }
 
@@ -219,7 +272,6 @@ namespace WireCell::NaryTree {
 
         // Insert children in given nursery, depleting it.
         void adopt_children(nursery_type& kids, bool notify_value=true) {
-            // std::cerr << "NaryTree::Node::adopt_children() adopting " << kids.size() << "\n";
             for (auto it = kids.begin(); it != kids.end(); ++it) {
                 insert(std::move(*it), notify_value);
             }
@@ -228,7 +280,6 @@ namespace WireCell::NaryTree {
 
         // Transfer children from other to self.
         void take_children(self_type& other, bool notify_value = true) {
-            // std::cerr << "NaryTree::Node::take_children() taking " << other.nchildren() << "\n";
             auto kids = other.remove_children(notify_value);
             adopt_children(kids, notify_value);
         }
@@ -236,7 +287,6 @@ namespace WireCell::NaryTree {
         // Iterator locating self in list of siblings.  If parent is
         // null, this iterator is invalid.  It is set when this node
         // is inserted as a another node's child.
-        sibling_iter sibling_;
         sibling_iter sibling() const {
             if (!parent) {
                 raise<ValueError>("node with no parent is not a sibling");
@@ -392,20 +442,22 @@ namespace WireCell::NaryTree {
 
         template <class T, std::enable_if_t<has_notify<T>::value>* = nullptr>
         void notify(Action action, Node* node) {
-            // std::cerr << "sending action: "<<action<<" \n";
             node->value.notify(node, action);
         }
 
         template <class T, std::enable_if_t<!has_notify<T>::value>* = nullptr>
         void notify(Action action, Node* node) {
-            // std::cerr << "missing action: "<<action<<" \n";
             return; // no-op
         }
 
       private:
 
-        // friend class child_value_iter<Value>;
+        // Our children
         nursery_type nursery_;
+
+        // Node must know where we are in a parent's nursery in order to
+        // implement DFS.  This iter MUST be updated whenever we are rehomed.
+        sibling_iter sibling_;
 
     };                          // Node
 

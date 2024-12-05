@@ -3,6 +3,8 @@
 
 #include "WireCellUtil/NaryTreeNotified.h"
 
+#include <iostream>             // debug
+
 namespace WireCell::NaryTree {
 
     // A Facade provides a polymorphic base that can be used via a Faced to
@@ -120,7 +122,6 @@ namespace WireCell::NaryTree {
         // Intercept notices from the node in order to forward to the held
         // facade (and to this).
         virtual void notify(node_type* node, Action action) {
-            // std::cerr << "NaryTree::Faced::notify(" << (void*)node << "," << action << ")\n";
             this->base_type::notify(node, action);
             if (m_facade) {
                 m_facade->notify(node, action);
@@ -179,7 +180,6 @@ namespace WireCell::NaryTree {
         // Adopt the other's children into this parent.  This leaves
         // other parent childless.
         void take_children(self_type& other, bool notify_value=true) {
-            // std::cerr << "take_children() " << other.nchildren() << "\n";
             this->m_node->take_children(*other.node(), notify_value);
             invalidate_children();
             other.invalidate_children();
@@ -200,41 +200,47 @@ namespace WireCell::NaryTree {
             return *cnode->value.template facade<child_type>();
         }
 
+        // Return new facade instances of this facade's type.  Each new facade
+        // has its node added to this facade's node's parent.  Each new facade
+        // node will contain a subset of children that were previously owned by
+        // this facade's node as specified by the "groups" vector.  The groups
+        // vector is a "connected components" type array giving a group ID for
+        // each child node initially owned by this facade's node.  Group IDs are
+        // then used as keys in the returned map.  Negative group IDs are
+        // ignored and the corresponding child will remain as a child of this
+        // facade's node.  See node-level NaryTree::Node::separate() for further
+        // description.  Note, this facade's node is left as it was in its
+        // parent's children list and new facade nodes are appended to the
+        // parent's children list.  This facade's node must have a parent.  
+        std::unordered_map<int, self_type*> separate(const std::vector<int> groups, bool notify_value=true) {
+            std::unordered_map<int, self_type*> ret;
+            auto nurseries = this->m_node->separate(groups, notify_value);
+            if (nurseries.empty()) { return ret; }
 
-        // assumes it has a parent and children, make a vector of SelfType* and each one has
-        // a subset of children. the length of gorups must match the number of children.
-        // children with negative group number will be removed
-        // template<typename SelfType, typename ParentType>
-        // std::unordered_map<int, SelfType*> separate(const std::vector<int>& groups, bool notify_value=true) {
-        //     // std::cout << "groups size: " << groups.size() << " nchildren: " << nchildren() << std::endl;
-        //     if(groups.size() != nchildren()) {
-        //         raise<ValueError>("group size %d mismatch in nchildren %d", groups.size(), nchildren());
-        //     }
-        //     auto parent = this->m_node->parent;
-        //     auto parent_facade = parent->value.template facade<ParentType>();
-        //     parent_facade->invalidate_children(); // clear the facade cache
-        //     std::unordered_map<int, SelfType*> id2facade;
-        //     const auto orig_children = children(); // make a copy
-        //     for (size_t ichild = 0; ichild < orig_children.size(); ++ichild) {
-        //         // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
-        //         // remove children with negative group number 
-        //         if (groups[ichild] < 0) continue;
-        //         auto* child = orig_children[ichild];
-        //         if (id2facade.find(groups[ichild]) == id2facade.end()) {
-        //             node_type* new_snode = parent->insert(notify_value);
-        //             new_snode->value.set_facade(std::make_unique<SelfType>());
-        //             auto new_facade = new_snode->value.template facade<SelfType>();
-        //             id2facade[groups[ichild]] = new_facade;
-        //         }
-        //         // std::cout << "id2facade size: " << id2facade.size() << std::endl;
-        //         auto new_facade = id2facade[groups[ichild]];
-        //         new_facade->m_node->insert(child->node(), notify_value);
-        //         // std::cout << "ichild: " << ichild << " group: " << groups[ichild] << std::endl;
-        //     }
-        //     // remove self from parent
-        //     // parent->remove(this->m_node, notify_value);
-        //     return id2facade;
-        // }
+            auto parent = this->m_node->parent;
+            if (!parent) {
+                raise<LogicError>("can not separate the children of a facade that lacks a parent");
+            }
+            
+            // Make a new facades of our type with their nodes added to our
+            // parent node.  Parent node may not have ParentFacade nor even have
+            // a Facade so we must dig into the node level to do this.
+            // for (auto& [gid, nur] : nurseries) {
+            for (auto& nit : nurseries) {
+
+                // Make a new sibling node.
+                node_type* node = parent->insert(notify_value);
+                // Give the node its new children.
+                node->adopt_children(nit.second, notify_value);
+                // Give the node a facade of our type.
+                node->value.set_facade(std::make_unique<self_type>());
+                // Get the bare facade pointer for return.
+                ret[nit.first] = node->value.template facade<self_type>();
+            }
+            invalidate_children();
+            return ret;
+        }
+
 
         void invalidate_children() {
             m_children.clear();

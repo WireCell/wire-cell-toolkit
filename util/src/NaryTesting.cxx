@@ -56,6 +56,8 @@ NaryTesting::Introspective::~Introspective()
 
 void NaryTesting::Introspective::on_construct(node_type* n)
 {
+    this->NaryTree::Faced<Introspective>::on_construct(n);
+
     node = n;
     debug("constructed {} with node@0x{}", name, (void*)node);
     ++nactions["constructed"];
