@@ -1,11 +1,13 @@
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/doctest.h"
-#include <iostream>
+#include "WireCellUtil/Logging.h"
+#include <sstream>
+using spdlog::debug;
 
 using namespace Eigen;
 
-TEST_CASE("simple pca")
+TEST_CASE("eigen pca simple")
 {
     // Define and initialize the 3x3 matrix
     Eigen::Matrix3d cov_matrix;
@@ -14,15 +16,20 @@ TEST_CASE("simple pca")
     // Compute the eigenvalues and eigenvectors
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
 
-    if (eigenSolver.info() != Eigen::Success) {
-        std::cerr << "Failed to compute eigenvalues and eigenvectors." << std::endl;
-    }
+    CHECK(eigenSolver.info() == Eigen::Success);
 
     // Output the eigenvalues
-    std::cout << "Eigenvalues:\n" << eigenSolver.eigenvalues() << std::endl;
-
-    // Output the eigenvectors
-    std::cout << "Eigenvectors:\n" << eigenSolver.eigenvectors() << std::endl;
+    {
+        std::stringstream ss;
+        ss << eigenSolver.eigenvalues();
+        debug("Eigenvalues: {}", ss.str());
+    }
+    {
+        std::stringstream ss;
+        ss << eigenSolver.eigenvectors();
+        // Output the eigenvectors
+        debug("Eigenvectors: {}", ss.str());
+    }
 
     const auto eigen = WireCell::Array::pca(cov_matrix);
     auto eigen_values = eigen.eigenvalues();
@@ -31,7 +38,10 @@ TEST_CASE("simple pca")
     for (int i = 0; i != 3; i++) {
         double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + eigen_vectors(1, i) * eigen_vectors(1, i) +
                            eigen_vectors(2, i) * eigen_vectors(2, i));
-        std::cout << "WireCell " << i << " E Value " << eigen_values(i) << " E Vector " << eigen_vectors(0, i) / norm << " "
-                  << eigen_vectors(1, i) / norm << " " << eigen_vectors(2, i) / norm << std::endl;
+        debug("WireCell {} eigen value={} vector=({},{},{})",
+              i, eigen_values(i), 
+              eigen_vectors(0, i) / norm,
+              eigen_vectors(1, i) / norm,
+              eigen_vectors(2, i) / norm);
     }
 }
