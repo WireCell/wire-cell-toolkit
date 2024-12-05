@@ -42,6 +42,10 @@ namespace WireCell::PointCloud::Facade {
         Grouping* grouping();
         const Grouping* grouping() const;
 
+        // Reimplement separate() provided by base class to bake-in
+        // specialization of Cluster facade type.
+        std::unordered_map<int, Cluster*> separate(std::vector<int> groups, bool notify_value=true);
+
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
         const sv3d_t& sv3d() const;

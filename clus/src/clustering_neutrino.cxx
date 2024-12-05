@@ -250,8 +250,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const double orig_cluster_length = cluster1->get_length();
                     std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
-                    // auto sep_clusters = cluster1->separate<Cluster, Grouping>(b2id);
-                    auto sep_clusters = NaryTree::separate<Cluster, Grouping>(cluster1, b2id);
+                    auto sep_clusters = cluster1->separate(b2id);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
                     for (auto [id, sep_cluster] : sep_clusters) {
@@ -425,8 +424,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
-                    // auto sep_clusters = cluster2->separate<Cluster, Grouping>(b2id);
-                    auto sep_clusters = NaryTree::separate<Cluster, Grouping>(cluster2, b2id);
+                    auto sep_clusters = cluster2->separate(b2id);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
                     for (auto [id, sep_cluster] : sep_clusters) {

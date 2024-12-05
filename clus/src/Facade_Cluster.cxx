@@ -50,6 +50,14 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
 Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
 
+std::unordered_map<int, Cluster*> Cluster::separate(std::vector<int> groups, bool notify_value)
+{
+    // This method is provided simply to erase the need to specify the <Cluster> type.
+    return this->NaryTree::FacadeParent<Blob, points_t>::separate<Cluster>(groups, notify_value);
+}
+
+
+
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {
         std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() 
@@ -2887,8 +2895,7 @@ std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_l
             // if (cluster_3 != 0) clusters.push_back(cluster_3);
         }
     }
-    // return this->separate<Cluster, Grouping>(b2groupid);
-    return NaryTree::separate<Cluster, Grouping>(this, b2groupid);
+    return this->separate(b2groupid);
 }
 
 bool Cluster::judge_vertex(geo_point_t& p_test, const double asy_cut, const double occupied_cut)

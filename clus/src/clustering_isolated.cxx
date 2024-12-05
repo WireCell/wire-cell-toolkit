@@ -57,7 +57,6 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
                     for (const auto& id : b2id) {
                         ids.insert(id);
                     }
-                    // auto sep_clusters = live_clusters.at(i)->separate<Cluster, Grouping>(b2id);
                     // LogDebug(" Cluster " << i << "  separated into " << sep_clusters.size());
                     int max = 0;
                     double max_length = 0;
