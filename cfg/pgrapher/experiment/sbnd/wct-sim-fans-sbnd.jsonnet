@@ -41,13 +41,13 @@ local wcls_input = g.pnode({
     name: 'sigs',
     data: {
         nticks: params.daq.nticks,
-        wiener_inputTag: wiener_label,        // input recob::Wire (wiener)
-        gauss_inputTag: gauss_label,          // input recob::Wire (gauss)
-        badmasks_inputTag: [badmasks_label],    // input bad masks
-        threshold_inputTag: threshold_label,  // input threshold
-        frame_tags: ["orig"],                 // frame tags (only one frame in this module)
-        cmm_tag: "bad",                        // single label for now
         scale: 50,                             // scale up input recob::Wire by this factor
+        frame_tags: ["orig"],                 // frame tags (only one frame in this module)
+        recobwire_tags: ["sptpc2d:gauss", "sptpc2d:wiener"],
+        trace_tags: ["gauss", "wiener"],
+        summary_tags: ["", "sptpc2d:wienersummary"],
+        input_mask_tags: ["sptpc2d:badmasks"],
+        output_mask_tags: ["bad"],
         debug_channel: 6800                   // debug purposes. Deleteme later. 
     },
 }, nin=0, nout=1);
