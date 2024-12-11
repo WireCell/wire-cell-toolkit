@@ -50,6 +50,7 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 }
 
 
+
 void Grouping::on_construct(node_type* node)
 {
     this->NaryTree::Facade<points_t>::on_construct(node);

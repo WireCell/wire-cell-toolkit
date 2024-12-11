@@ -2,6 +2,10 @@
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
 
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
@@ -10,10 +14,12 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
+static
+std::unordered_map<int, Cluster*> Separate_overclustering(Cluster *cluster)
 {
     // can follow ToyClustering_separate to add clusters ...
-    const auto &tp = cluster->grouping()->get_params();
+    auto* grouping = cluster->grouping();
+    const auto &tp = grouping->get_params();
 
     // copy the create_graph from the PR3D Cluster ...
 
@@ -260,7 +266,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
     }
 
     // establish edge ...
-    int max_num_nodes = 5;
+    const size_t max_num_nodes = 5;
     std::map<std::pair<int, int>, std::set<std::pair<double, int>>> closest_index;
 
     // std::cout << connected_mcells.size() << std::endl;
@@ -824,7 +830,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     int index1 = j;
                     int index2 = k;
                     if (std::get<0>(index_index_dis[j][k]) >= 0)
-                        auto edge = add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+                        /*auto edge =*/ add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
                 }
             }
 
@@ -878,7 +884,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     int index1 = j;
                     int index2 = k;
                     if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || std::get<0>(index_index_dis_dir2[j][k]) >= 0)
-                        auto edge = add_edge(
+                        /*auto edge =*/ add_edge(
                             index1, index2,
                             std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])),
                             temp_graph);
@@ -941,7 +947,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     }
                     // }
 
-                    auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                 }
 
                 if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -959,7 +965,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                             dis = std::get<2>(index_index_dis_dir1[j][k]);
                         }
                         // }
-                        auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                     }
                     if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                         // auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]),
@@ -975,7 +981,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                             dis = std::get<2>(index_index_dis_dir2[j][k]);
                         }
                         // }
-                        auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *graph);
+                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *graph);
                     }
                 }
                 // end check ...
@@ -1018,7 +1024,7 @@ std::unordered_map<int, Cluster*> Examine_overclustering(Cluster *cluster)
                     const int bind = cluster->kd3d().major_index(i);
                     b2groupid.at(bind) = component1[i];
                 }
-                return cluster->separate(b2groupid);
+                return grouping->separate(cluster, b2groupid, true); 
             }
         }
 
@@ -1043,6 +1049,6 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
-        Examine_overclustering(cluster);
+        Separate_overclustering(cluster);
     }
 }

@@ -298,7 +298,7 @@ Facade::DynamicPointCloud::DynamicPointCloud(const double angle_u, const double 
 
 void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const int flag, const double step)
 {
-    size_t current_size = get_num_points();
+    // size_t current_size = get_num_points();
     const auto& winds = cluster->wire_indices();
 
     if (flag == 0) {
@@ -314,7 +314,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const int fla
         // cloud_w.pts.resize(current_size + pcloud.pts.size());
         // vec_index_cluster.resize(current_size + pcloud.pts.size());
 
-        for (size_t i = 0; i != cluster->npoints(); i++) {
+        for (int i = 0; i != cluster->npoints(); i++) {
             // vec_index_cluster.at(current_size + i) = cluster;
             m_clusters.push_back(cluster);
             m_pc3d.add({cluster->point3d(i).x(), cluster->point3d(i).y(), cluster->point3d(i).z()});
@@ -365,7 +365,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const int fla
             }
             else {
                 int num_points = int(dis / (step)) + 1;
-                double dis_seg = dis / num_points;
+                // double dis_seg = dis / num_points;
                 for (int k = 0; k != num_points; k++) {
                     geo_point_t current_pt(prev_wcp.x() + (k + 1.) / num_points * (test_point.x() - prev_wcp.x()),
                                            prev_wcp.y() + (k + 1.) / num_points * (test_point.y() - prev_wcp.y()),
@@ -426,7 +426,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const geo_poi
                                                               const geo_point_t& dir_unmorm, const double range,
                                                               const double step, const double angle)
 {
-    size_t current_size = get_num_points();
+    // size_t current_size = get_num_points();
     geo_point_t dir = dir_unmorm.norm();
 
     int num_points = int(range / (step)) + 1;
@@ -472,10 +472,10 @@ std::tuple<double, const Cluster*, size_t> Facade::DynamicPointCloud::get_closes
     if (results.size() != 1) {
         return std::make_tuple(1e9, nullptr, -1);
     }
-    const auto p3d = m_pc3d.point(results.at(0).first);
-    const auto cluster = m_clusters.at(results.at(0).first);
-    LogDebug(" 3d " << p3d << " " << results.at(0).second);
-    LogDebug(" cluster.npoints() " << cluster->npoints());
+    // const auto p3d = m_pc3d.point(results.at(0).first);
+    // const auto cluster = m_clusters.at(results.at(0).first);
+    // LogDebug(" 3d " << p3d << " " << results.at(0).second);
+    // LogDebug(" cluster.npoints() " << cluster->npoints());
     return std::make_tuple(sqrt(results.at(0).second), m_clusters.at(results.at(0).first), (size_t)results.at(0).first);
 }
 
@@ -492,11 +492,11 @@ static double theta_angle(const Vector& dir)
     const Vector Z(0, 0, 1);
     return acos(Z.dot(dir));
 }
-static double theta_cosine(const Vector& dir)
-{
-    const Vector Z(0, 0, 1);
-    return Z.dot(dir);
-}
+// static double theta_cosine(const Vector& dir)
+// {
+//     const Vector Z(0, 0, 1);
+//     return Z.dot(dir);
+// }
 static double phi_angle(const Vector& dir)
 {
     const Vector X(1, 0, 0);

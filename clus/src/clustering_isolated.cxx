@@ -7,6 +7,10 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
 #define __DEBUG__
 #ifdef __DEBUG__
 #define LogDebug(x) std::cout << "[isolated]: " << __LINE__ << " : " << x << std::endl
@@ -366,7 +370,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
             for (const auto& pair : it->second) {
                 const Cluster* live2 = pair.first;
                 size_t ilive2 = ilive2desc[map_cluster_index[live2]];
-                auto edge = add_edge(ilive, ilive2, g);
+                /*auto edge =*/ add_edge(ilive, ilive2, g);
             }
         }
         cluster_set_t temp_clusters;

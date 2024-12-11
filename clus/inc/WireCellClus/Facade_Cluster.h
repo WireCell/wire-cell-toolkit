@@ -42,9 +42,6 @@ namespace WireCell::PointCloud::Facade {
         Grouping* grouping();
         const Grouping* grouping() const;
 
-        // Reimplement separate() provided by base class to bake-in
-        // specialization of Cluster facade type.
-        std::unordered_map<int, Cluster*> separate(std::vector<int> groups, bool notify_value=true);
 
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
@@ -290,9 +287,10 @@ namespace WireCell::PointCloud::Facade {
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
 
-        /// @brief break a cluster if it crosses the boundary
-        /// @return if breaking, return broken clusters, if not, return empty map
-        std::unordered_map<int, Cluster*> examine_x_boundary(const double low_limit = -1*units::cm, const double high_limit = 257*units::cm);
+        /// @brief Determine if a cluster may be separated due to crossing the boundary.
+        /// @return connected components array or empty if separation is not warranted.
+        std::vector<int>
+        examine_x_boundary(const double low_limit = -1*units::cm, const double high_limit = 257*units::cm);
 
         /// @brief get_mcell_indices in WCP
         /// TODO: currently return copy, return a const reference?

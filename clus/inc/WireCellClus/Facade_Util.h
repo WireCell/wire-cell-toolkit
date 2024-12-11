@@ -100,7 +100,7 @@ namespace WireCell::PointCloud::Facade {
         // Sample points from first cloud at regular intervals
         int stride = std::max(1, (int)(one.points()[0].size() / 20)); // Sample ~20 points
         
-        for(int i = 0; i < one.points()[0].size(); i += stride) {
+        for(size_t i = 0; i < one.points()[0].size(); i += stride) {
             // Get K nearest neighbors from second cloud
             auto p1 = one.point(i);
             auto knn = two.kd().knn(5, p1); // Get 5 nearest neighbors

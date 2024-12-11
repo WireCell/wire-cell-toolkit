@@ -331,7 +331,29 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     for (const auto& func_cfg : m_func_cfgs) {
         std::cout << "func_cfg: " << func_cfg << std::endl;
         auto func = getClusteringFunction(func_cfg);
+
+        // bv
+        std::cerr << func_cfg["name"] << " input nclusters=" << live_grouping.nchildren() << "\n";
+
         func(live_grouping, dead_grouping, cluster_connected_dead);
+
+        // bv
+        std::cerr << func_cfg["name"] << " output nclusters=" << live_grouping.nchildren() << "\n";
+        int count = -1;
+        for (const auto& cfac : live_grouping.children()) {
+            ++count;
+
+            if (!cfac) {
+                std::cerr << func_cfg["name"] << "\tNULL cluster facade at child " << count << "\n";
+                continue;
+            }
+            if (cfac->nchildren() > 0) {
+                continue;
+            }
+            std::cerr << func_cfg["name"] << "\tno blobs cluster facade @ " << (void*)cfac
+                      << " node @ " << (void*)cfac->node() << count << "\n";
+        }
+
         perf.dump(func_cfg["name"].asString(), live_grouping);
     }
 #ifndef __HIDE__

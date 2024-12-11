@@ -1,5 +1,9 @@
 #include <WireCellClus/ClusteringFuncs.h>
 
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
@@ -250,7 +254,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const double orig_cluster_length = cluster1->get_length();
                     std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
-                    auto sep_clusters = cluster1->separate(b2id);
+                    auto sep_clusters = live_grouping.separate(cluster1, b2id, true);
+                    assert(cluster1 == nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
                     for (auto [id, sep_cluster] : sep_clusters) {
@@ -267,7 +272,6 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     num_clusters = sep_clusters.size();
                     // largest_cluster->Create_point_cloud();
 
-                    // std::cout << cluster1->get_cluster_id() << " " << num_clusters << std::endl;
                     if (orig_cluster_length > 25 * units::cm) {
                         temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
                         temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
@@ -424,7 +428,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
-                    auto sep_clusters = cluster2->separate(b2id);
+                    auto sep_clusters = live_grouping.separate(cluster2, b2id, true);
+                    assert(cluster2 == nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
                     for (auto [id, sep_cluster] : sep_clusters) {
@@ -567,6 +572,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             // ToyPointCloud *cloud2_ext = cluster_cloud_map[cluster2];
             auto cloud1_ext = cluster_cloud_map[cluster1];
             auto cloud2_ext = cluster_cloud_map[cluster2];
+            assert(cloud2_ext);
 
             int merge_type = 0;
             bool flag_merge = false;

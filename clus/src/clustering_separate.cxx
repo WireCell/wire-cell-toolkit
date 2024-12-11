@@ -1,5 +1,6 @@
 #include <WireCellClus/ClusteringFuncs.h>
 
+// The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
@@ -158,7 +159,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                 if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width)) {
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
-                    const size_t orig_nchildren = cluster->nchildren();
+                    // const size_t orig_nchildren = cluster->nchildren();
                     //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
@@ -168,7 +169,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     Cluster *cluster1 = sep_clusters.at(0);
                     new_clusters.push_back(cluster1);
 
-                    del_clusters.push_back(cluster);
+                    // del_clusters.push_back(cluster);
                     // delete cluster;
 
                     if (sep_clusters.size() >= 2) {  // 1
@@ -293,7 +294,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             if (final_sep_cluster != 0) {  // 2
                                 // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                                 const auto b2id = Separate_2(final_sep_cluster);
-                                auto final_sep_clusters = final_sep_cluster->separate(b2id);
+                                auto final_sep_clusters = live_grouping.separate(final_sep_cluster,b2id,true); 
+                                assert(final_sep_cluster == nullptr);
                                 // for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
                                 //     new_clusters.push_back(*it);
                                 // }
@@ -309,7 +311,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     }
                 }
                 else if (cluster->get_length() < 6 * units::m) {
-                    const size_t orig_nchildren = cluster->nchildren();
+                    // const size_t orig_nchildren = cluster->nchildren();
                     //std::cout << "Stripping Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
                     std::vector<Cluster *> sep_clusters =
@@ -330,12 +332,15 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
                         //std::vector<Cluster *> temp_del_clusters;
                         Cluster *cluster2 = sep_clusters.at(1);
-                        double length_1 = cluster2->get_length();
+                        // double length_1 = cluster2->get_length();
                         Cluster *final_sep_cluster = cluster2;
 
                         // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                         const auto b2id = Separate_2(final_sep_cluster);
-                        auto final_sep_clusters = final_sep_cluster->separate(b2id);
+                        auto final_sep_clusters = live_grouping.separate(final_sep_cluster, b2id, true);
+                        assert(final_sep_cluster == nullptr);
+                        cluster2 = final_sep_cluster = sep_clusters[1] = nullptr;
+
                         // for (auto it = final_sep_clusters.begin(); it != final_sep_clusters.end(); it++) {
                         //     new_clusters.push_back(*it);
                         // }
@@ -938,8 +943,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     // for(auto idx : boundary_points_idxs) {
     //     boundary_points[idx] = point3d(boundary_points_idxs.at(idx));
     // }
+    auto* grouping = cluster->grouping();
 
-    const auto& tp = cluster->grouping()->get_params();
+    const auto& tp = grouping->get_params();
     // TPCParams &mp = Singleton<TPCParams>::Instance();
     // double pitch_u = mp.get_pitch_u();
     // double pitch_v = mp.get_pitch_v();
@@ -991,10 +997,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     geo_point_t dir;
 
     double min_dis = 1e9;
-    double max_pca_dis;
+    // double max_pca_dis;
     int min_index = 0;
     double max_dis = -1e9;
-    double min_pca_dis;
+    // double min_pca_dis;
     int max_index = 0;
     // if (flag_debug_porting) {
     //     std::cout << "independent_points.size(): " << independent_points.size() << std::endl;
@@ -1005,7 +1011,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
                         independent_points.at(j).z() - cluster_center.z());
         geo_point_t temp_p(independent_points.at(j).x(), independent_points.at(j).y(), independent_points.at(j).z());
         double dis = dir.dot(main_dir);
-        double dis_to_pca = dir.cross(main_dir).magnitude();
+        // double dis_to_pca = dir.cross(main_dir).magnitude();
         // std::cout << j << " " << dis << " " << dir.Mag() << " " << sqrt(dir.Mag()*dir.Mag() - dis*dis) << std::endl;
         bool flag_connect = false;
         int num_points = cluster->nnearby(temp_p, 15 * units::cm);
@@ -1022,12 +1028,12 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         if (dis < min_dis && flag_connect) {
             min_dis = dis;
             min_index = j;
-            min_pca_dis = dis_to_pca;
+            // min_pca_dis = dis_to_pca;
         }
         if (dis > max_dis && flag_connect) {
             max_dis = dis;
             max_index = j;
-            max_pca_dis = dis_to_pca;
+            // max_pca_dis = dis_to_pca;
         }
     }
     // if (flag_debug_porting) {
@@ -1246,7 +1252,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
         else {
             int num_points = int(dis / (1.0 * units::cm)) + 1;
-            double dis_seg = dis / num_points;
+            // double dis_seg = dis / num_points;
             for (int k = 0; k != num_points; k++) {
                 geo_point_t current_pt(prev_wcp.x() + (k + 1.) / num_points * (current_wcp.x() - prev_wcp.x()),
                                        prev_wcp.y() + (k + 1.) / num_points * (current_wcp.y() - prev_wcp.y()),
@@ -1398,7 +1404,6 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
     std::vector<Cluster *> final_clusters;
 
-    auto grouping = cluster->grouping();
     // Cluster& cluster1 = grouping.make_child();
     // Cluster& cluster2 = grouping.make_child();
 
@@ -1439,7 +1444,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
     }
     // std::cout << "before separate, cluster has " << cluster->nchildren() << " children " << " with " << groupids.size() << " groups" << std::endl;
-    auto clusters_step0 = cluster->separate(b2groupid);
+    auto clusters_step0 = grouping->separate(cluster, b2groupid, true);
+    assert(cluster == nullptr);
+
     // std::cout << "separated into " << clusters_step0.size() << " clusters" << std::endl;
     // for (size_t i=0;i!=clusters_step0.size();i++) {
     //      std::cout << "cluster " << clusters_step0[i]->nchildren() << " children" << std::endl;
@@ -1453,7 +1460,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     if (clusters_step0.find(1) != clusters_step0.end()) {
         // other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
         const auto b2id = Separate_2(clusters_step0[1], 5 * units::cm);
-        auto other_clusters1 = clusters_step0[1]->separate(b2id);
+        auto other_clusters1 = grouping->separate(clusters_step0[1],b2id, true); // the cluster is now nullptr
+        assert(clusters_step0[1] == nullptr);
+
         for (auto it = other_clusters1.begin(); it != other_clusters1.end(); it++) {
             other_clusters.push_back(it->second);
         }
@@ -1531,7 +1540,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
             if (length_1 < 30 * units::cm && std::get<2>(temp_dis) < 5 * units::cm) {
                 int temp_total_points = other_clusters.at(i)->npoints();
                 int temp_close_points = 0;
-                for (size_t j = 0; j != other_clusters.at(i)->npoints(); j++) {
+                for (int j = 0; j != other_clusters.at(i)->npoints(); j++) {
                     geo_point_t test_point = other_clusters.at(i)->point3d(j);
                     double close_dis = clusters_step0[0]->get_closest_dis(test_point);
                     if (close_dis < 10 * units::cm) {
@@ -1546,7 +1555,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
             else if (std::get<2>(temp_dis) < 2.5 * units::cm && length_1 >= 30 * units::cm) {
                 int temp_total_points = other_clusters.at(i)->npoints();
                 int temp_close_points = 0;
-                for (size_t j = 0; j != other_clusters.at(i)->npoints(); j++) {
+                for (int j = 0; j != other_clusters.at(i)->npoints(); j++) {
                     geo_point_t test_point = other_clusters.at(i)->point3d(j);
                     if (clusters_step0[0]->get_closest_dis(test_point) < 10 * units::cm) {
                         temp_close_points++;
@@ -1658,13 +1667,13 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
         // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
         std::vector<BlobSet> vec_mcells_set;
         if (i + 1 < time_slices.size()) {
-            if (time_slices.at(i + 1) - time_slices.at(i) == 1*ticks_per_slice) {
+            if (time_slices.at(i + 1) - time_slices.at(i) == (int)(1*ticks_per_slice)) {
                 vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
                 if (i + 2 < time_slices.size())
-                    if (time_slices.at(i + 2) - time_slices.at(i) == 2*ticks_per_slice)
+                    if (time_slices.at(i + 2) - time_slices.at(i) == (int)(2*ticks_per_slice))
                         vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 2)));
             }
-            else if (time_slices.at(i + 1) - time_slices.at(i) == 2*ticks_per_slice) {
+            else if (time_slices.at(i + 1) - time_slices.at(i) == (int)(2*ticks_per_slice)) {
                 vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
             }
         }
@@ -1707,7 +1716,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
         // if (edge.second) {
         //     (graph)[edge.first].dist = 1;
         // }
-        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
+        /*auto edge =*/ add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
     }
 
     {
@@ -1740,7 +1749,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
                         // if (edge.second) {
                         //     (graph)[edge.first].dist = 1;
                         // }
-                        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
+                        /*auto edge =*/ add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
                     }
                 }
             }
@@ -1767,7 +1776,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
     // delete graph;
     // return final_clusters;
     std::vector<int> component(num_vertices(graph));
-    const int num = connected_components(graph, &component[0]);
+    /*const int num =*/ connected_components(graph, &component[0]);
     return component;
     // auto id2cluster = cluster->separate<Cluster, Grouping>(component);
     // std::vector<Cluster*> ret;

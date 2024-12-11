@@ -10,6 +10,13 @@
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 
+#include "WireCellUtil/Logging.h"
+
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
+
 using namespace WireCell;
 using namespace WireCell::PointCloud;
 using namespace WireCell::PointCloud::Facade;
@@ -17,7 +24,7 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 // using WireCell::PointCloud::Tree::named_pointclouds_t;
 
-#include "WireCellUtil/Logging.h"
+
 using spdlog::debug;
 
 // #define __DEBUG__
@@ -49,13 +56,6 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
 
 Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
-
-std::unordered_map<int, Cluster*> Cluster::separate(std::vector<int> groups, bool notify_value)
-{
-    // This method is provided simply to erase the need to specify the <Cluster> type.
-    return this->NaryTree::FacadeParent<Blob, points_t>::separate<Cluster>(groups, notify_value);
-}
-
 
 
 void Cluster::print_blobs_info() const{
@@ -321,7 +321,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     size_t low_idxes[3] = {start_idx, start_idx, start_idx};
     size_t high_idxes[3] = {end_idx, end_idx, end_idx};
 
-    for (size_t pt_idx = 0; pt_idx != npoints(); pt_idx++) {
+    for (int pt_idx = 0; pt_idx != npoints(); pt_idx++) {
         geo_point_t current = point3d(pt_idx);
         if (current.x() > high_x || current.x() < low_x) continue;
         for (size_t pind = 0; pind != 3; ++pind) {
@@ -449,7 +449,7 @@ bool Cluster::construct_skeleton(const bool use_ctpc)
     //         lowest_wcp = cloud.pts[i];
     //     }
     // }
-    for (size_t i = 1; i < npoints(); i++) {
+    for (int i = 1; i < npoints(); i++) {
         temp_pt.set(point3d(i).x() - center.x(), point3d(i).y() - center.y(), point3d(i).z() - center.z());
         double value = temp_pt.dot(main_dir);
         if (value > highest_value) {
@@ -1279,7 +1279,7 @@ std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
     for (int i = 0; i != 6; i++) {
         extreme_wcp[i] = point3d(0);
     }
-    for (size_t i = 1; i < npoints(); i++) {
+    for (int i = 1; i < npoints(); i++) {
         if (point3d(i).y() > extreme_wcp[0].y()) extreme_wcp[0] = point3d(i);
         if (point3d(i).y() < extreme_wcp[1].y()) extreme_wcp[1] = point3d(i);
 
@@ -2276,7 +2276,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
                 // }
-                auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -2294,7 +2294,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
                     // }
-                    auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -2310,7 +2310,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
                 }
             }
 
@@ -2410,8 +2410,8 @@ void Cluster::Connect_graph() const{
                               boost::property<boost::edge_weight_t, double>>
     temp_graph(num);
 
-    for (int j=0;j!=num;j++){
-      for (int k=j+1;k!=num;k++){
+    for (size_t j=0;j!=num;j++){
+      for (size_t k=j+1;k!=num;k++){
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
 
             // geo_point_t test_p3 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
@@ -2421,7 +2421,7 @@ void Cluster::Connect_graph() const{
 
             int index1 = j;
             int index2 = k;
-            auto edge = add_edge(index1,index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+            /*auto edge =*/ add_edge(index1,index2, std::get<2>(index_index_dis[j][k]), temp_graph);
       }
     }
 
@@ -2576,7 +2576,7 @@ void Cluster::Connect_graph() const{
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
                 // }
-                auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -2599,7 +2599,7 @@ void Cluster::Connect_graph() const{
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
                     // }
-                    auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -2620,7 +2620,7 @@ void Cluster::Connect_graph() const{
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    auto edge = add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
                 }
             }
 
@@ -2633,7 +2633,7 @@ void Cluster::Connect_graph() const{
 void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
 {
     if (m_graph == nullptr) Create_graph(use_ctpc);
-    if (pt_idx == m_source_pt_index) return;
+    if ((int)pt_idx == m_source_pt_index) return;
     m_source_pt_index = pt_idx;
     m_parents.resize(num_vertices(*m_graph));
     m_distances.resize(num_vertices(*m_graph));
@@ -2809,7 +2809,9 @@ double Cluster::get_pca_value(int axis) const {
 
 }
 
-std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_limit, const double high_limit)
+
+// std::unordered_map<int, Cluster*> 
+std::vector<int> Cluster::examine_x_boundary(const double low_limit, const double high_limit)
 {
     double num_points[3] = {0, 0, 0};
     double x_max = -1e9;
@@ -2895,7 +2897,7 @@ std::unordered_map<int, Cluster*> Cluster::examine_x_boundary(const double low_l
             // if (cluster_3 != 0) clusters.push_back(cluster_3);
         }
     }
-    return this->separate(b2groupid);
+    return b2groupid;
 }
 
 bool Cluster::judge_vertex(geo_point_t& p_test, const double asy_cut, const double occupied_cut)

@@ -31,6 +31,7 @@ namespace WireCell::PointCloud::Facade {
         IAnodePlane::pointer m_anode{nullptr};
 
        public:
+
         // MUST call this sometimes after construction if non-default value needed.
         void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);

@@ -1,5 +1,10 @@
 #include <WireCellClus/ClusteringFuncs.h>
 
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
@@ -34,7 +39,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
+    // double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
 
     auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
 
@@ -67,6 +72,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        assert (cluster->npoints() > 0); // preempt segfault in get_two_extreme_points()
 
         // if (cluster->get_length()/units::cm>5){
         //     std::cout << "Connect 0: " << cluster->get_length()/units::cm << " " << cluster->get_center() << std::endl;
@@ -268,7 +274,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                 const auto& winds = cluster->wire_indices();
                 int num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
                 std::map<const Cluster *, int> map_cluster_num[3];
-                for (size_t j = 0; j != num_total_points; j++) {
+                for (int j = 0; j != num_total_points; j++) {
                     geo_point_t test_point(cluster->point3d(j).x(), cluster->point3d(j).y(), cluster->point3d(j).z());
 
                     bool flag_dead = false;
@@ -841,7 +847,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                 if (p1_dir.magnitude() != 0) p1_dir = p1_dir.norm();
                 if (p2_dir.magnitude() != 0) p2_dir = p2_dir.norm();
 
-                bool flag_merge = false;
+                // bool flag_merge = false;
 
                 // if (cluster_1->get_length()>300*units::cm) std::cout << "Check 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << angle_diff << " " << dis/units::cm << " " << dis1/units::cm << " " << angle_diff1 << " " << angle_diff2 << std::endl;
 
@@ -853,7 +859,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                     boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                     ilive2desc[map_cluster_index[cluster_2]], g2);
                     // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << cluster_1->get_center() << " " << cluster_2->get_center() << std::endl;
-                    flag_merge = true;
+                    // flag_merge = true;
                 }
                 else if ((angle_diff > 87) && (angle_diff1 > 90 - 1.5 * (90 - angle_diff)) &&
                          (angle_diff2 > 90 - 1.5 * (90 - angle_diff)) && dis < 4.0 * units::cm &&
@@ -865,7 +871,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
                     boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                     ilive2desc[map_cluster_index[cluster_2]], g2);
                     // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << cluster_1->get_center() << " " << cluster_2->get_center() << std::endl;
-                    flag_merge = true;
+                    // flag_merge = true;
                 }
             }
         }

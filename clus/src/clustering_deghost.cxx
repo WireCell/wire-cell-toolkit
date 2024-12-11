@@ -7,6 +7,9 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
 
 // #define __DEBUG__
 #ifdef __DEBUG__
@@ -31,7 +34,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
 
     const auto &tp = live_grouping.get_params();
     // this is for 4 time slices
-    double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
+    // double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
 
     // Create two point clouds ...
     // One for the points ... point --> index --> cluster (vector) ...
@@ -74,9 +77,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
                 // cluster->Create_point_cloud();
                 // WCP::WCPointCloud<double> &cloud = cluster->get_point_cloud()->get_cloud();
                 // int num_total_points = cloud.pts.size();  // total number of points
-                int num_total_points = cluster->npoints();  // total number of points
-                int num_dead[3] = {0, 0, 0};              // dead wires in each view
-                int num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
+                const size_t num_total_points = cluster->npoints();  // total number of points
+                size_t num_dead[3] = {0, 0, 0};              // dead wires in each view
+                size_t num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
                 std::map<const Cluster *, int> map_cluster_num[3];
 
                 double dis_cut = 1.2 * units::cm;
