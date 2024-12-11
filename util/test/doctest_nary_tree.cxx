@@ -180,6 +180,13 @@ TEST_CASE("nary tree separate")
     REQUIRE(nurseries[0].size() == 2);
     REQUIRE(nurseries[1].size() == 2);
     REQUIRE(nurseries[2].size() == 2);
+
+    // Merge back
+    for (auto& [gid,nur] : nurseries) {
+        root->adopt_children(nur);
+        REQUIRE(nur.empty());
+    }
+    REQUIRE(root->nchildren() == 10);
 }
 
 TEST_CASE("nary tree simple tree tests") {

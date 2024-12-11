@@ -256,7 +256,7 @@ namespace WireCell::NaryTree {
         // removed.  Notifications are emitted only when changes to this node
         // are actually performed.  The nurseries and nodes returned carry now
         // connections to this node or its parent.  See also
-        // NaryTree::Facade::separate().
+        // NaryTree::FacadeParent::separate().
         nursery_group_type separate(std::vector<int> group, bool notify_value=true) {
             nursery_group_type ret;
 

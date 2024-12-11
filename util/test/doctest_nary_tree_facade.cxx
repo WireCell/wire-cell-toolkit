@@ -150,6 +150,17 @@ TEST_CASE("nary tree facade separate retain") {
         REQUIRE(l0->inserted == 3);
         REQUIRE(l0->removed == 0);
     }
+
+    // Merge back.
+    for (auto& [gid, fac] : splits) {
+        l0c0->take_children(*fac);
+        l0->destroy_child(fac);
+        // note, we do not catch the uniqe_ptr<node> returned above so
+        // corresponding facade should be gone.
+        REQUIRE(fac == nullptr);
+    }
+    REQUIRE(l0->nchildren() == 2);
+
 }
 
 TEST_CASE("nary tree facade separate remove") {

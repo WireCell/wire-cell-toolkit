@@ -71,7 +71,7 @@ namespace WireCell::NaryTree {
         Faced(Faced&& other) = default;
         Faced& operator=(Faced&& other) = default;
       
-        virtual ~Faced() {};
+        virtual ~Faced() { }
 
         /// Access the facade as type.  May return nullptr.  Ownership is
         /// retained.
@@ -213,6 +213,12 @@ namespace WireCell::NaryTree {
             return this->m_node->remove(kid.node(), notify_value);
         }
 
+        // Remove and destroy node of kid and thus kid itself.
+        void destroy_child(child_type*& kid, bool notify_value=true) {
+            remove_child(*kid, notify_value); // do not catch return.
+            kid = nullptr;
+        }
+
         // Make a new child, returning its facade.
         child_type& make_child(bool notify_value=true) {
             invalidate_children();
@@ -267,7 +273,6 @@ namespace WireCell::NaryTree {
 
             return ret;
         }
-
 
         void invalidate_children() {
             m_children.clear();
