@@ -27,16 +27,14 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/DetectionIdiom.h"
 
-#include <vector>
-#include <list>
-#include <memory>
-
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/indirect_iterator.hpp>
 #include <boost/type_traits/is_convertible.hpp>
 #include <boost/utility/enable_if.hpp>
 
-#include <iostream>             // debug
+#include <vector>
+#include <list>
+#include <memory>
 
 namespace WireCell::NaryTree {
 
@@ -159,15 +157,20 @@ namespace WireCell::NaryTree {
             }
             node->parent = this;
             nursery_.push_back(std::move(node));
-            nursery_.back()->sibling_ = std::prev(nursery_.end());
             Node* child = nursery_.back().get();
             if (!child) {
                 throw std::runtime_error("NaryTree::Node insert on null child node");
             }
+            child->sibling_ = std::prev(nursery_.end());
             if (notify_value) {
                 notify<Value>(Action::inserted, child);
             }
             return child;
+        }
+
+        bool owns_child(const Node* node) const {
+            if (!node) return false;
+            return find(node) != nursery_.end();
         }
 
         // Return iterator to node or end.  This is a linear search.
@@ -187,7 +190,9 @@ namespace WireCell::NaryTree {
         // Remove and return child node.  If notify_value is true, the
         // "removing" notification is emitted PRIOR to removal.
         owned_ptr remove(sibling_iter sib, bool notify_value=true) {
-            if (sib == nursery_.end()) return nullptr;
+            if (sib == nursery_.end()) {
+                return nullptr;
+            }
 
             Node* child = (*sib).get();
             if (notify_value) {
@@ -195,60 +200,13 @@ namespace WireCell::NaryTree {
             }
 
             owned_ptr ret = std::move(*sib);
+            *sib = nullptr;
             nursery_.erase(sib);
-            ret->sibling_ = nursery_.end();
+
+            static nursery_type dummy;
+            ret->sibling_ = dummy.end();
             ret->parent = nullptr;
             
-            return ret;
-        }
-
-        // Return and remove a subset of children grouped into separate
-        // nurseries.  Each nursery is indexed by a non-negative group ID as
-        // provided by the "group" vector.  Only non-negative group IDs are
-        // processed.  If the group vector is shorter than this node's nursery
-        // list, the remaining children are unprocessed.  If longer, the
-        // additional group IDs are ignored.  Unprocessed children are retained
-        // by this node.  Note, this node is otherwise left as-is and in
-        // particular it is not (directly) removed from its parent (if it has
-        // one) even when all children are removed.  If notify value is true
-        // then "removing" notification is emitted prior to removal and
-        // "ordered" notification is emitted after.  Notifications are emitted
-        // only when changes to this node are actually performed.
-        nursery_group_type separate(std::vector<int> group, bool notify_value=true) {
-            nursery_group_type ret;
-
-            group.resize(nursery_.size(), -1);
-            if (!std::any_of(group.begin(), group.end(), [](int gid) { return gid >= 0; })) {
-                return ret;
-            }
-
-            auto nit = nursery_.begin();
-            auto end = nursery_.end();
-            auto git = group.begin();
-
-            while (nit != end) {
-                const int groupid = *(git++);
-                if (groupid < 0) { // skip negatives
-                    ++nit;
-                    continue;
-                }
-                // Get nursery for group.
-                auto& nur = ret[groupid];
-
-                // we no mimic remove().  We can not simply call it as we need
-                // to advance our nit.
-                if (notify_value) {
-                    notify<Value>(Action::removing, (*nit).get());
-                }
-
-                // Transfer ownership of ptr to nursery.
-                nur.emplace_back(std::move(*nit)); 
-                // Self-locate the child and nullify parent pointer
-                nur.back()->sibling_ = std::prev(nur.end()); 
-                nur.back()->parent = nullptr;
-
-                nit = nursery_.erase(nit); // advances nit
-            }
             return ret;
         }
 
@@ -282,6 +240,60 @@ namespace WireCell::NaryTree {
         void take_children(self_type& other, bool notify_value = true) {
             auto kids = other.remove_children(notify_value);
             adopt_children(kids, notify_value);
+        }
+
+        // Return and remove a subset of children grouped into separate
+        // nurseries.  Each nursery is indexed by a non-negative group ID as
+        // provided by the "group" vector.  Only non-negative group IDs are
+        // processed.  If the group vector is shorter than this node's nursery
+        // list, the remaining children are unprocessed.  If longer, the
+        // additional group IDs are ignored.  Unprocessed children are retained
+        // by this node.  Note, this node is otherwise left as-is and in
+        // particular it is not (directly) removed from its parent (if it has
+        // one) even when all children are removed.  If notify value is true
+        // then the "removing" notification is emitted prior to removal and
+        // "ordered" notification is emitted after all separated children are
+        // removed.  Notifications are emitted only when changes to this node
+        // are actually performed.  The nurseries and nodes returned carry now
+        // connections to this node or its parent.  See also
+        // NaryTree::Facade::separate().
+        nursery_group_type separate(std::vector<int> group, bool notify_value=true) {
+            nursery_group_type ret;
+
+            group.resize(nursery_.size(), -1);
+            if (!std::any_of(group.begin(), group.end(), [](int gid) { return gid >= 0; })) {
+                return ret;
+            }
+
+            auto nit = nursery_.begin();
+            auto end = nursery_.end();
+            auto git = group.begin();
+
+            while (nit != end) {
+                const int groupid = *(git++);
+                if (groupid < 0) { // skip negatives
+                    ++nit;
+                    continue;
+                }
+                // Get/make a nursery for the group.
+                auto& nur = ret[groupid];
+
+                // Here we copy-paste the guts of remove().  We can not call it
+                // directly as we need to advance our nit which remove() will
+                // not do.
+                if (notify_value) {
+                    notify<Value>(Action::removing, (*nit).get());
+                }
+
+                // Transfer ownership of ptr to nursery.
+                nur.emplace_back(std::move(*nit)); 
+                // Self-locate the child and nullify parent pointer
+                nur.back()->sibling_ = std::prev(nur.end()); 
+                nur.back()->parent = nullptr;
+
+                nit = nursery_.erase(nit); // advances nit
+            }
+            return ret;
         }
 
         // Iterator locating self in list of siblings.  If parent is
@@ -432,23 +444,39 @@ namespace WireCell::NaryTree {
 
       private:
 
-        // Detect Value::notify(const Node<Value>* node, Action action)
+        // Note: these must be class-scoped so that the "Node" type is valid for
+        // is_detected.
 
+        // Detect existence of a Value::notify(const Node<Value>* node, Action action)
         template <typename T, typename ...Ts>
         using notify_type = decltype(std::declval<T>().notify(std::declval<Ts>()...));
 
         template<typename T>
-        using has_notify = is_detected<notify_type, T, Node*, Action>;
+        using has_notify = is_detected<notify_type, T, std::vector<Node*>, Action>;
 
         template <class T, std::enable_if_t<has_notify<T>::value>* = nullptr>
         void notify(Action action, Node* node) {
-            node->value.notify(node, action);
+            std::vector<self_type*> path;
+            while (node) {
+                path.push_back(node);
+                bool propagate = node->value.notify(path, action);
+                if (action == Action::constructed) {
+                    break;          // special case, call only on constructed.
+                }
+                if (!propagate) {
+                    break;
+                }
+                node = node->parent;
+            };
         }
 
         template <class T, std::enable_if_t<!has_notify<T>::value>* = nullptr>
         void notify(Action action, Node* node) {
+
             return; // no-op
         }
+
+        
 
       private:
 

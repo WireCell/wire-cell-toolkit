@@ -3,8 +3,6 @@
 
 #include "WireCellUtil/NaryTreeNotified.h"
 
-#include <iostream>             // debug
-
 namespace WireCell::NaryTree {
 
     // A Facade provides a polymorphic base that can be used via a Faced to
@@ -52,7 +50,8 @@ namespace WireCell::NaryTree {
     // notification from the node in order to forward to itself and to the held
     // facade.  
     //
-    // A Faced may be used as a NaryTree::Node Value.
+    // A Faced may be used as a NaryTree::Node Value.  Of particular note,
+    // PointCloud::Tree::Points is a Faced.
     //
     // A Facade used by a Face must be default constructable.
     template<typename Value>
@@ -72,7 +71,7 @@ namespace WireCell::NaryTree {
         Faced(Faced&& other) = default;
         Faced& operator=(Faced&& other) = default;
       
-        virtual ~Faced() {}
+        virtual ~Faced() {};
 
         /// Access the facade as type.  May return nullptr.  Ownership is
         /// retained.
@@ -114,18 +113,27 @@ namespace WireCell::NaryTree {
         /// facade type has a default constructor.
         void set_facade(facade_ptr fac) {
             m_facade = std::move(fac);
-            if (this->m_node) {
-                m_facade->notify(this->m_node, Action::constructed);
+            if (m_facade && this->m_node) {
+                // Call on facade directly and NOT this->notify().
+                m_facade->notify({this->m_node}, Action::constructed);
             }
         }
 
-        // Intercept notices from the node in order to forward to the held
-        // facade (and to this).
-        virtual void notify(node_type* node, Action action) {
-            this->base_type::notify(node, action);
-            if (m_facade) {
-                m_facade->notify(node, action);
+        // This overrides the base in order to also dispatch notice to the
+        // facade, if set.
+        //
+        // Note, this will NOT set a facade as a side-effect.  If your facade is
+        // not getting notices you must call facade<T>() or set_facade() prior
+        // to generating any notifications.
+        virtual bool notify(std::vector<node_type*> path, Action action) {
+            bool propagate = this->base_type::notify(path, action);
+            if (!propagate) {
+                return false;
             }
+            if (m_facade) {
+                return m_facade->notify(path, action);
+            }
+            return true;
         }
 
     private:
@@ -150,6 +158,19 @@ namespace WireCell::NaryTree {
 
         virtual ~FacadeParent() {}
 
+
+        // React to someone removing a cluster node from our node
+        virtual bool on_remove(const std::vector<node_type*>& path) {
+            invalidate_children();
+            return true;
+        }
+
+        virtual bool on_insert(const std::vector<node_type*>& path) {
+            invalidate_children();
+            return true;
+        }
+
+
         // Access collection of children facades.  Const version.
         const children_type& children() const {
             return const_cast<const children_type&>(const_cast<self_type*>(this)->children());
@@ -157,7 +178,7 @@ namespace WireCell::NaryTree {
 
         // Non-const version.  
         children_type& children() {
-            if (m_children.empty()) {
+            if (m_children.empty() || m_children.size() != nchildren()) {
                 for (auto* cnode : this->m_node->children()) {
                     child_type* child = cnode->value.template facade<child_type>();
                     if (!child) {
@@ -200,45 +221,50 @@ namespace WireCell::NaryTree {
             return *cnode->value.template facade<child_type>();
         }
 
-        // Return new facade instances of this facade's type.  Each new facade
-        // has its node added to this facade's node's parent.  Each new facade
-        // node will contain a subset of children that were previously owned by
-        // this facade's node as specified by the "groups" vector.  The groups
-        // vector is a "connected components" type array giving a group ID for
-        // each child node initially owned by this facade's node.  Group IDs are
-        // then used as keys in the returned map.  Negative group IDs are
-        // ignored and the corresponding child will remain as a child of this
-        // facade's node.  See node-level NaryTree::Node::separate() for further
-        // description.  Note, this facade's node is left as it was in its
-        // parent's children list and new facade nodes are appended to the
-        // parent's children list.  This facade's node must have a parent.  
-        template <typename FacadeType = self_type>
-        std::unordered_map<int, FacadeType*> separate(const std::vector<int> groups, bool notify_value=true) {
-            std::unordered_map<int, FacadeType*> ret;
-            auto nurseries = this->m_node->separate(groups, notify_value);
-            if (nurseries.empty()) { return ret; }
+        // Apply the "separate" operation to the kid's children (a subset of our
+        // grandchildren).  Return a map from a non-negative group number to a
+        // newly created children facades (kid's siblings).
+        //
+        // The "groups" vector associates a "group ID" to each child of kid.
+        // Negative group IDs will leave the corresponding kid's child in place.
+        // Otherwise a child of kid will be added to a new parent and that
+        // parents facade will be provided in the returned map at the
+        // corresponding group ID key.
+        //
+        // If remove is true, then the kid's node will be removed from our
+        // children nodes.  The kid facade is invalidated and the kid ptr nullified.
+        std::unordered_map<int, child_type*> separate(child_type*& kid,
+                                                      const std::vector<int> groups,
+                                                      bool remove=false,
+                                                      bool notify_value=true) {
 
-            auto parent = this->m_node->parent;
-            if (!parent) {
-                raise<LogicError>("can not separate the children of a facade that lacks a parent");
+            std::unordered_map<int, child_type*> ret;
+
+            if (!kid) {
+                raise<ValueError>("NaryTree::Facade::separate given a null kid");
             }
-            
-            // Make a new facades of our type with their nodes added to our
-            // parent node.  Parent node may not have ParentFacade nor even have
-            // a Facade so we must dig into the node level to do this.
-            // for (auto& [gid, nur] : nurseries) {
+            if (!this->m_node->owns_child(kid->node())) {
+                raise<ValueError>("NaryTree::Facade::separate given a kid not our own");
+            }
+
+            auto nurseries = kid->node()->separate(groups, notify_value);
             for (auto& nit : nurseries) {
 
                 // Make a new sibling node.
-                node_type* node = parent->insert(notify_value);
+                node_type* node = this->m_node->insert(notify_value);
                 // Give the node its new children.
                 node->adopt_children(nit.second, notify_value);
-                // Give the node a facade of our type.
-                node->value.set_facade(std::make_unique<FacadeType>());
                 // Get the bare facade pointer for return.
-                ret[nit.first] = node->value.template facade<FacadeType>();
+                child_type* facade = node->value.template facade<child_type>();
+                ret[nit.first] = facade;
+
             }
-            invalidate_children();
+
+            if (remove) {
+                this->remove_child(*kid, notify_value);
+                kid = nullptr;
+            }
+
             return ret;
         }
 

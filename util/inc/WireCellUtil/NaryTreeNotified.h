@@ -51,56 +51,26 @@ namespace WireCell::NaryTree {
         }
       public:
 
-        // This is the hook that Node will call.  Note, Node will use template
-        // tests to determine if the this method exists in the Value type.
+        // Dispatch a notification to corresponding "on_*()" method.
         //
-        // A subclass may override this, for example to intercept all
-        // notifications.
-        virtual void notify(node_type* node, Action action) {
-            // std::cerr << "NaryTree::Notified::notify(" << (void*)node << "," << action << ")\n";
-            if (action == Action::constructed) {
-                on_construct(node);
-                return;
+        virtual bool notify(std::vector<node_type*> path, Action action) {
+
+            if (path.size() == 1 && action == Action::constructed) {
+                on_construct(path.back());
+                return true;    // assume caller mediates propagation 
             }
-            std::vector<node_type*> path = { node };
             if (action == Action::inserted) {
-                propagate_insert_(path);
-                return;
+                return on_insert(path);
             }
             if (action == Action::removing) {
-                propagate_remove_(path);
-                return;
+                return on_remove(path);
             }
             if (action == Action::ordered) {
-                propagate_ordered_(path);
-                return;
+                return on_ordered(path);
             }
+            return false;       // fixme:  add exception?  warning?
         }
-
-      private:
-        void propagate_insert_(std::vector<node_type*> path) {
-            if (! on_insert(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_insert_(path);
-        }
-
-        void propagate_remove_(std::vector<node_type*> path) {
-            if (! on_remove(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_remove_(path);
-        }
-
-        void propagate_ordered_(std::vector<node_type*> path) {
-            if (! on_ordered(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_ordered_(path);
-        }
+        
     };
 }
 #endif
