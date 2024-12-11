@@ -423,7 +423,8 @@ namespace WireCell::NaryTree {
         // Sort children according to a comparison.  Note, this should be safe
         // to call directly on a node visited in a DFS as it will sort children
         // in the context of a parent and before descending on the children
-        // list.
+        // list.  Compare is a callable like:
+        //   compare(const owned_ptr& a, const owned_ptr& b)
         template<typename Compare>
         void sort_children(Compare comp, bool notify_value=true) {
             nursery_.sort(comp); // Any existing iterators are stable.

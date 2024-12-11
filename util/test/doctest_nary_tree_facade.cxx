@@ -232,3 +232,19 @@ TEST_CASE("nary tree facade remove") {
     REQUIRE(l0children_after.size() == 1);
 
 }
+TEST_CASE("nary tree facade sort") {
+    std::list<size_t> layer_sizes ={10,2};
+    auto root = make_layered_tree(layer_sizes);
+    debug("initial tree");
+    dump_introspective_dfs(root->value);
+
+    auto* l0 = root->value.facade<L0>();
+    l0->sort_children([](const L1* a, const L1* b) -> bool {
+        // No interesting fodder for sort directly inside these facades so we
+        // reverse the children list based on inverted ordering on the "name".
+        return b->node()->value.name < a->node()->value.name;
+    });
+    debug("after sort");
+    dump_introspective_dfs(root->value);
+    REQUIRE(l0->children()[0]->node()->value.name == "0.9"); // last becomes first
+}

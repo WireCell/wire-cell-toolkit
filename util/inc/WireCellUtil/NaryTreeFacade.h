@@ -227,6 +227,22 @@ namespace WireCell::NaryTree {
             return *cnode->value.template facade<child_type>();
         }
 
+        // Sort children according to a comparison between children facades.
+        // The comparison function must be callable like:
+        //
+        //     compare(const child_type* a, const child_type* b)
+        // 
+        // See also NaryTree::Node::sort_children() which this wraps..
+        template<typename Compare>
+        void sort_children(Compare comp, bool notify_value=true) {
+            
+            this->node()->sort_children([&](const node_ptr& na, const node_ptr& nb) {
+                const child_type* fa = na->value.template facade<child_type>();
+                const child_type* fb = nb->value.template facade<child_type>();
+                return comp(fa, fb);
+            }, notify_value);
+        }
+
         // Apply the "separate" operation to the kid's children (a subset of our
         // grandchildren).  Return a map from a non-negative group number to a
         // newly created children facades (kid's siblings).
