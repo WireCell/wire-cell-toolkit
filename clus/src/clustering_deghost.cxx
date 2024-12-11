@@ -606,7 +606,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
     LogDebug("to_be_removed_clusters.size() = " << to_be_removed_clusters.size());
     for (auto live : to_be_removed_clusters) {
         // std::cout << "Remove cluster " << live->nchildren() << " " << live->get_length()/units::cm << std::endl;
-        live_grouping.remove_child(*live);
+        live_grouping.destroy_child(live);
+        assert(live == nullptr);
     } 
 
     // // merge clusters

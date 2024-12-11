@@ -288,7 +288,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster1 = &(live_grouping.make_child());
                     for (size_t j = 0; j != sep_clusters.size(); j++) {
                         cluster1->take_children(*sep_clusters.at(j), true);
-                        live_grouping.remove_child(*sep_clusters.at(j));
+                        live_grouping.destroy_child(sep_clusters.at(j));
+                        assert(sep_clusters.at(j) == nullptr);
                     }
                     std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                 }
@@ -462,7 +463,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster2 = &(live_grouping.make_child());
                     for (size_t j = 0; j != sep_clusters.size(); j++) {
                         cluster2->take_children(*sep_clusters.at(j), true);
-                        live_grouping.remove_child(*sep_clusters.at(j));
+                        live_grouping.destroy_child(sep_clusters.at(j));
+                        assert(sep_clusters.at(j) == nullptr);
                     }
                     std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                 }

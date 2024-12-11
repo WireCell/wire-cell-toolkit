@@ -1513,7 +1513,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
             for (auto temp_cluster : temp_merge_clusters) {
                 clusters_step0[0]->take_children(*temp_cluster, true);
-                grouping->remove_child(*temp_cluster);
+                grouping->destroy_child(temp_cluster);
+                assert(temp_cluster == nullptr);
                 other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
             }
 
@@ -1603,7 +1604,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         Cluster& cluster2 = grouping->make_child();
         for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
             cluster2.take_children(*to_be_merged_clusters[i], true);
-            grouping->remove_child(*to_be_merged_clusters[i]);
+            grouping->destroy_child(to_be_merged_clusters[i]);
+            assert(to_be_merged_clusters[i] == nullptr);
         }
         to_be_merged_clusters.clear();
 

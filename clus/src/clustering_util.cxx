@@ -53,8 +53,9 @@ void WireCell::PointCloud::Facade::merge_clusters(
             auto live = live_clusters[idx];
             fresh_cluster.take_children(*live, true);
 
-            live_grouping.remove_child(*live);
             cluster_connected_dead.erase(live);
+            live_grouping.destroy_child(live);
+            assert(live == nullptr);
         }
         cluster_connected_dead.insert(&fresh_cluster);
     }
