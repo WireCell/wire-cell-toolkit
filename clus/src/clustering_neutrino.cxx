@@ -254,7 +254,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const double orig_cluster_length = cluster1->get_length();
                     std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
-                    auto sep_clusters = live_grouping.separate(cluster1, b2id, true);
+                    // false: do not remove the cluster1
+                    auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
                     assert(cluster1 == nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
@@ -285,7 +286,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     //     delete sep_clusters.at(j);
                     // }
                     // merge back ...
-                    cluster1 = &(live_grouping.make_child());
+                    // cluster1 = &(live_grouping.make_child());
                     for (size_t j = 0; j != sep_clusters.size(); j++) {
                         cluster1->take_children(*sep_clusters.at(j), true);
                         live_grouping.destroy_child(sep_clusters.at(j));
@@ -429,7 +430,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
-                    auto sep_clusters = live_grouping.separate(cluster2, b2id, true);
+                    auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
                     assert(cluster2 == nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
@@ -460,7 +461,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     //     delete sep_clusters.at(j);
                     // }
                     // merge back ...
-                    cluster2 = &(live_grouping.make_child());
+                    // cluster2 = &(live_grouping.make_child());
                     for (size_t j = 0; j != sep_clusters.size(); j++) {
                         cluster2->take_children(*sep_clusters.at(j), true);
                         live_grouping.destroy_child(sep_clusters.at(j));
