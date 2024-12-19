@@ -151,6 +151,17 @@ bool CMMModifier::operator()(const input_pointer& in, output_pointer& out)
 
     // copy a CMM from input frame
     auto cmm = in->masks();
+
+    // // ------------ Debug Ewerton 2024-02-29 -----------
+    // //auto mycmm = in->masks();
+    // for(auto x : cmm) //cmm[m_cm_tag])
+    // {
+    //   std::cout << "\n [CMMModifier-Ew] cmm.first=" << x.first << "\n";// " (" << x.second.first << ", " << x.second.second << ")\n";
+    // }
+    // std::cout << "\n [CMMModifier-Ew] end of inmasks loop" ;
+    // // ------------ End debug Ewerton 2024-02-29 -----------
+                                   
+
     if (cmm.find(m_cm_tag)==cmm.end()) {
         log->warn("no ChannelMask with name \""+m_cm_tag+"\", will create one");
     }
@@ -303,6 +314,15 @@ bool CMMModifier::operator()(const input_pointer& in, output_pointer& out)
 
     // Basic frame stays the same.
     auto sfout = new Aux::SimpleFrame(in->ident(), in->time(), out_traces, in->tick(), cmm);
+
+    // // ------------ Debug Ewerton 2024-02-29 -----------
+    // // ChannelMaskMap = typedef std::map<std::string, ChannelMasks>
+    // auto mycmm = in->masks();  
+    // for(auto x : mycmm) //cmm[m_cm_tag])
+    // {
+    //   std::cout << "\n [CMMModifier-Ew] cmm.first=" << x.first << "\n";// " (" << x.second.first << ", " << x.second.second << ")\n";
+    // }
+    // // ------------ End debug Ewerton 2024-02-29 -----------
 
     // passing through other parts of the original frame
     for (auto ftag : in->frame_tags()) {

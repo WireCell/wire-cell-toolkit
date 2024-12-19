@@ -327,23 +327,25 @@ size_t Bee::Sink::write(const Object& obj)
         // Create a new JSON object and copy original data
         Json::Value json_data = Json::objectValue;  // Initialize as object
         const Configuration& orig_data = obj.data();
-        
+
+        std::string json;
+
         // Check if original data is an object and copy it
         if (orig_data.isObject()) {
             json_data = orig_data;
-        } 
-        
-        // Add RSE values
-        json_data["runNo"] = std::to_string(m_runNo);
-        json_data["subRunNo"] = std::to_string(m_subRunNo);
-        json_data["eventNo"] = std::to_string(m_eventNo);
-        
-        //std::cout << "Xin: " << m_runNo << " " << m_subRunNo << " " << m_eventNo << std::endl;
-
-
-        // Convert to string
-        //Json::FastWriter writer;
-        std::string json = Persist::dumps(json_data, 0, 6);
+            // Add RSE values
+            json_data["runNo"] = std::to_string(m_runNo);
+            json_data["subRunNo"] = std::to_string(m_subRunNo);
+            json_data["eventNo"] = std::to_string(m_eventNo);
+            // Convert to string
+            //Json::FastWriter writer;
+            json = Persist::dumps(json_data, 0, 6);
+        } else {
+            // dead area data is an array not an object
+            // and does not have RSE values
+            // ref: https://www.phy.bnl.gov/twister/bee/set/uboone/imaging/dead-region-2/event/0/channel-deadarea/
+            json = Persist::dumps(orig_data, 0, 6);
+        }
 
         //const std::string json = obj.json();
         const std::string body = fmt::format("body {}\n", json.size());

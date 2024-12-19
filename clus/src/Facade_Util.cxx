@@ -572,11 +572,13 @@ geo_point_t Facade::DynamicPointCloud::vhough_transform(const geo_point_t& origi
 
 // dirft = xorig + xsign * (time + m_time_offset) * m_drift_speed
 double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
+    // std::cout << "time2drift: " << time << " " << time_offset << " " << drift_speed << std::endl;
     const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
     double xsign = colpimpos->axis(0)[0];
     double xorig = anodeface->planes()[2]->wires().front()->center().x();
     const double drift = (time + time_offset)*drift_speed;
     /// TODO: how to determine xsign?
+    // std::cout << "drift: " << xorig + xsign*drift << std::endl;
     return xorig + xsign*drift;
 }
 

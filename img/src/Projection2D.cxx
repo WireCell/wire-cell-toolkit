@@ -202,7 +202,7 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
             for (const auto& chan_desc : map_b2c[bdesc]) {
                 const auto& chan = std::get<channel_t>(cg[chan_desc].ptr);
                 WirePlaneLayer_t layer = chan->planeid().layer();
-                int cident = chan->ident();
+                int cident = chan->index();
                 auto charge = activity[chan].value();
                 auto unc = activity[chan].uncertainty();
                 // TODO: make this configurable and robust

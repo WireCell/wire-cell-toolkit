@@ -62,9 +62,17 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
 
     m_datapath = get(cfg, "datapath", m_datapath);
 
+    log->debug("using anode plane: {}", cfg["anode"].asString());
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
+    if (!m_anode) {
+        raise<ValueError>("failed to get anode plane");
+    }
 
     m_face = get<int>(cfg, "face", 0);
+    log->debug("using face: {}", m_face);
+    if (m_anode->face(m_face) == nullptr) {
+        raise<ValueError>("failed to get face %d", m_face);
+    }
 
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 
@@ -404,7 +412,9 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                 for (const auto& wire : wires) {
                     const auto& wind = wire->index();
                     const auto& plane = wire->planeid().index();
-                    const auto& face = wire->planeid().face();
+                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {}", slice_index, cident, charge, wind, plane, wire->planeid().face());
+                    // const auto& face = wire->planeid().face();
+                    const auto& face = m_face;
                     /// FIXME: is this the way to get face?
                     const auto& x = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
                     const double y = pitch_mags.at(face).at(plane)*wind + proj_centers.at(face).at(plane);
@@ -473,7 +483,9 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
             for (const auto& wire : wires) {
                 const auto& wind = wire->index();
                 const auto& plane = wire->planeid().index();
-                const auto& face = wire->planeid().face();
+                // const auto& face = wire->planeid().face();
+                // log->debug("dead chan {} charge {} wind {} plane {} face {}", ichan->ident(), charge, wind, plane, wire->planeid().face());
+                const auto& face = m_face;
                 /// FIXME: is this the way to get face?
                 const auto& xbeg = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
                 const auto& xend = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start() + slice->span());

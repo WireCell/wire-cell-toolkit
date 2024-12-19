@@ -91,6 +91,7 @@ void Pytorch::DNNROIFinding::configure(const WireCell::Configuration& cfg)
     for (auto one : cfg["intags"]) {
         m_cfg.intags.push_back(one.asString());
     }
+    m_cfg.summary_tag = get(cfg, "summary_tag", m_cfg.summary_tag);
     m_cfg.tick_per_slice = get(cfg, "tick_per_slice", m_cfg.tick_per_slice);
     m_cfg.decon_charge_tag = get(cfg, "decon_charge_tag", m_cfg.decon_charge_tag);
     m_cfg.outtag = get(cfg, "outtag", m_cfg.outtag);
@@ -188,6 +189,24 @@ Array::array_xxf Pytorch::DNNROIFinding::traces_to_eigen(ITrace::vector traces)
     return arr;
 }
 
+IFrame::trace_summary_t Pytorch::DNNROIFinding::get_summary_e(const IFrame::pointer& inframe, const std::string &tag) const {
+    IFrame::trace_summary_t summary_e(m_nrows, 0.0);
+    std::unordered_map<int, size_t> ch2row;
+    for (size_t i = 0; i < m_chlist.size(); ++i) {
+        ch2row[m_chlist[i]] = i;
+    }
+    auto traces = Aux::tagged_traces(inframe, tag);
+    auto summary = inframe->trace_summary(tag);
+    for (size_t i = 0; i < traces.size(); ++i) {
+        const auto& tr = traces[i];
+        const auto& ch = tr->channel();
+        const auto& row = ch2row.find(ch);
+        if (row != ch2row.end()) {
+            summary_e[row->second] = summary[i];
+        }
+    }
+    return summary_e;
+}
 
 ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr)
 {
@@ -306,8 +325,16 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         traces,
         inframe->tick(), inframe->masks());
     sframe->tag_frame("DNNROIFinding");
-    sframe->tag_traces(m_cfg.outtag, m_trace_indices);
+    log->debug("call={} getting summary for tag {}", m_save_count, m_cfg.summary_tag);
+    auto summary = get_summary_e(inframe, m_cfg.summary_tag);
+    std::string ss;
+    for (const auto& rms : summary) {
+        ss += fmt::format("{:.2f} ", rms);
+    }
+    log->trace("call={} summary: {}", m_save_count, ss);
+    sframe->tag_traces(m_cfg.outtag, m_trace_indices, summary);
     outframe = IFrame::pointer(sframe);
+    log->debug("call={} output frame: {}", m_save_count, Aux::taginfo(outframe));
 
     log->debug(tk(fmt::format("call={} finish", m_save_count)));
     ++m_save_count;

@@ -373,6 +373,7 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
 
     // masked slices
     auto cmm = in->masks()["bad"];
+    log->debug("cmm.size(): {}", cmm.size());
     for (auto ch_tbins : cmm) {
         const int chid = ch_tbins.first;
         const auto& tbins = ch_tbins.second;

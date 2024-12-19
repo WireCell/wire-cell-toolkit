@@ -52,6 +52,9 @@ void Clus::SimpleClusGeomHelper::configure(const WireCell::Configuration& cfg)
 WireCell::Configuration Clus::SimpleClusGeomHelper::get_params(const int apa, const int face) const
 {
     const std::string apa_face = format("a%df%d", apa, face);
+    if (!m_tpcparams.isMember(apa_face)) {
+        raise<ValueError>("failed to find params for apa %d face %d", apa, face);
+    }
     WireCell::Configuration cfg = m_tpcparams[apa_face];
     return cfg;
 }

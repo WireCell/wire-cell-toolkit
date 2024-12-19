@@ -68,6 +68,8 @@ namespace WireCell {
             // replaced by the anode number.
             std::vector<std::string> intags;
 
+            std::string summary_tag{""};
+
             // The tag used for the input decon charge.  This is
             // usually "decon_chargeN" with "N" replaced with the
             // anode number.
@@ -126,6 +128,9 @@ namespace WireCell {
             
             // Convert traces to a dense array
             Array::array_xxf traces_to_eigen(ITrace::vector traces);
+
+            // extract trace summary to mathch the eigen format order
+            IFrame::trace_summary_t get_summary_e(const IFrame::pointer& inframe, const std::string &tag) const;
 
             // Convert dense array to (dense) traces
             ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr);
