@@ -749,8 +749,7 @@ std::unordered_map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                         if (true) {
                             /// FIXME: how to add face information?
-                            const int face = 0;
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, face);
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, tp.face);
                             if (!good_point) num_bad++;
                         }
                     }
@@ -777,8 +776,7 @@ std::unordered_map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
                             /// FIXME: how to add face information?
-                            const int face = 0;
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, face);
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, tp.face);
                             if (!good_point) num_bad++;
                         }
                     }
@@ -805,8 +803,7 @@ std::unordered_map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
                             /// FIXME: how to add face information?
-                            const int face = 0;
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, face);
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, tp.face);
                             if (!good_point) num_bad++;
                         }
                     }
