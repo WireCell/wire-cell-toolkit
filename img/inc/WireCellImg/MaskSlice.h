@@ -63,6 +63,7 @@ namespace WireCell::Img {
         IAnodePlane::pointer m_anode;
         int m_tick_span{4};
         std::string m_wiener_tag{"wiener"};
+        std::string m_summary_tag{"wiener"};
         std::string m_charge_tag{"gauss"};
         std::string m_error_tag{"gauss_error"};
         std::vector<int> m_active_planes;
