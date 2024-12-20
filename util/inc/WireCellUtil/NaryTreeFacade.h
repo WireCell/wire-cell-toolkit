@@ -3,6 +3,8 @@
 
 #include "WireCellUtil/NaryTreeNotified.h"
 
+#include <map>
+
 namespace WireCell::NaryTree {
 
     // A Facade provides a polymorphic base that can be used via a Faced to
@@ -255,12 +257,13 @@ namespace WireCell::NaryTree {
         //
         // If remove is true, then the kid's node will be removed from our
         // children nodes.  The kid facade is invalidated and the kid ptr nullified.
-        std::unordered_map<int, child_type*> separate(child_type*& kid,
-                                                      const std::vector<int> groups,
-                                                      bool remove=false,
-                                                      bool notify_value=true) {
+        using child_group_type = std::map<int, child_type*>;
+        child_group_type separate(child_type*& kid,
+                                  const std::vector<int> groups,
+                                  bool remove=false,
+                                  bool notify_value=true) {
 
-            std::unordered_map<int, child_type*> ret;
+            child_group_type ret;
 
             if (!kid) {
                 raise<ValueError>("NaryTree::Facade::separate given a null kid");
@@ -288,6 +291,91 @@ namespace WireCell::NaryTree {
             }
 
             return ret;
+        }
+
+        // Merge our grandchildren held by the given subset of our children
+        // become children of target, creating target if it is nullptr.  Remove
+        // the now empty children unless keep is true.  Return a "connected
+        // components" (CC) type array with each element corresponding to a
+        // child in target.  Existing children in target have group ID.  Any
+        // children of the merged subset have a group ID set by the order of the
+        // collection.  The existing ID is used to mark any existing children in
+        // target in the returned CC array.
+        // 
+        // The children and the target may belong to another parent.
+        template<typename ChildIt>
+        std::vector<int> merge(ChildIt cbeg, ChildIt cend,
+                               child_type* target=nullptr,
+                               bool keep=false, int existingID=0) {
+
+            std::vector<int> cc;
+
+            int groupid = existingID;
+            if (target) {
+                cc.resize(target->nchildren(), groupid);
+            }
+            else {
+                target = &make_child();
+            }
+            for (ChildIt cit = cbeg; cit != cend; ++cit) {
+                ++groupid;
+                child_type* child = *cit;
+                cc.resize(cc.size() + child->nchildren(), groupid);
+                target->take_children(*child);
+                if (keep) {
+                    continue;
+                }
+                // we need not be the parent.
+                auto pnode = child->node()->parent;
+                if (pnode) {
+                    auto pfac = pnode->value.template facade<self_type>(); 
+                    if (pfac) {
+                        pfac->destroy_child(*cit);
+                    }
+                }
+            }
+            return cc;            
+        }
+
+        // Specialize for children provided in a map.  The group IDs for
+        // grandchildren of children are provided explicitly by the map keys.
+        // It is up to the user to assure none coincide with existingID.
+        std::vector<int> merge(
+            typename child_group_type::iterator cbeg,
+            typename child_group_type::iterator cend,
+            child_type* target=nullptr,
+            bool keep=false, int existingID=0) {
+
+            std::vector<int> cc;
+
+            if (target) {
+                cc.resize(target->nchildren(), existingID);
+            }
+            else {
+                target = &make_child();
+            }
+            for (typename child_group_type::iterator cit = cbeg; cit != cend; ++cit) {
+                cc.resize(cc.size() + cit->second->nchildren(), cit->first);
+                target->take_children(*(cit->second));
+                if (keep) {
+                    continue;
+                }
+                // we need not be the parent.
+                auto pnode = cit->second->node()->parent;
+                if (pnode) {
+                    auto pfac = pnode->value.template facade<self_type>(); 
+                    if (pfac) {
+                        pfac->destroy_child(cit->second);
+                    }
+                }
+            }
+            return cc;            
+        }
+
+        // A range version of the iterator-based methods above. 
+        template<typename ChildrenRange>
+        std::vector<int> merge(ChildrenRange& cr, child_type* target=nullptr, bool keep=false, int existingID=0) {
+            return merge(std::begin(cr), std::end(cr), target, keep);
         }
 
         void invalidate_children() {

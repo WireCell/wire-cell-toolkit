@@ -86,7 +86,7 @@ namespace WireCell::NaryTree {
         using sibling_iter = typename nursery_type::iterator;
         using sibling_const_iter = typename nursery_type::const_iterator;
         // groups of nurseries
-        using nursery_group_type = std::unordered_map<int, nursery_type>;
+        using nursery_group_type = std::map<int, nursery_type>;
 
         // A depth first descent range
         using range = depth_range<self_type>;
@@ -260,7 +260,12 @@ namespace WireCell::NaryTree {
         nursery_group_type separate(std::vector<int> group, bool notify_value=true) {
             nursery_group_type ret;
 
-            group.resize(nursery_.size(), -1);
+            // By popular demand we are strict.
+            // group.resize(nursery_.size(), -1);
+            if (group.size() != nursery_.size()) {
+                raise<ValueError>("connected components group array does not span children list");
+            }
+
             if (!std::any_of(group.begin(), group.end(), [](int gid) { return gid >= 0; })) {
                 return ret;
             }
