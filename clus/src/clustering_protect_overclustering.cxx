@@ -15,7 +15,7 @@ using namespace WireCell::PointCloud::Tree;
 
 
 static
-std::unordered_map<int, Cluster*> Separate_overclustering(Cluster *cluster)
+std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
 {
     // can follow ToyClustering_separate to add clusters ...
     auto* grouping = cluster->grouping();

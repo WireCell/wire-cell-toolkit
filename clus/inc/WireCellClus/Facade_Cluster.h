@@ -300,6 +300,62 @@ namespace WireCell::PointCloud::Facade {
         /// @note p_test will be updated
         bool judge_vertex(geo_point_t& p_test, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
+        // Return true if this cluster has a PC array and PC of given names and type.
+        template<typename ElementType=int>
+        bool has_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
+            auto& lpc = node()->value.local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return false;
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return false;
+            }
+            return arr->is_type<ElementType>();
+        }
+
+        // Return as a span an array named "aname" stored in clusters PC named
+        // "pcname".  Returns default span if PC or array not found or there is
+        // a type mismatch.  Note, span uses array data in place.
+        template<typename ElementType=int>
+        PointCloud::Array::span_t<ElementType>
+        get_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
+
+            auto& lpc = node()->value.local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return {};
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return {};
+            }
+            return arr->elements<ElementType>();
+        }
+        // Store vector as an array named "aname" into this cluster's PC named "pcname".
+        // Reminder, all arrays in a PC must have same major size.
+        template<typename ElementType=int>
+        void
+        put_pcarray(const std::vector<ElementType>& vec,
+                    const std::string& aname, const std::string& pcname = "perblob") {
+
+            auto &lpc = node()->value.local_pcs();
+            auto& pc = lpc[pcname];
+
+            PointCloud::Array::shape_t shape = {vec.size()};
+
+            auto arr = pc.get(aname);
+            if (arr) {
+                arr->assign(vec.data(), shape, false);
+            }
+            else {
+                pc.add(aname, Array(vec, shape, false));
+            }
+        }
+
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
 
@@ -353,7 +409,6 @@ namespace WireCell::PointCloud::Facade {
     struct cluster_less_functor {
         bool operator()(const Cluster* a, const Cluster* b) const { return cluster_less(a, b); }
     };
-    typedef std::map<Cluster*, std::vector<std::pair<Cluster*,double>>, cluster_less_functor> map_cluster_cluster_vec;
 
    struct ComponentInfo {
         int component_id;

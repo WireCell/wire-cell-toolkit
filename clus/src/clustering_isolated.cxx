@@ -22,7 +22,7 @@ using namespace WireCell::PointCloud::Tree;
  * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
  * @return large cluster -> {small cluster, distance} 
 */
-map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
+void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
@@ -322,7 +322,7 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
     }
 
     // new stuff ...
-    map_cluster_cluster_vec results;
+    std::map<Cluster*, std::vector<std::pair<Cluster*,double>>, cluster_less_functor> results;
     for (auto it = merged_clusters.begin(); it != merged_clusters.end(); it++) {
         std::set<Cluster *> &cluster_set = (*it);
         double max_length = 0;
@@ -353,31 +353,69 @@ map_cluster_cluster_vec WireCell::PointCloud::Facade::clustering_isolated(Groupi
     }
     LogDebug("results.size() = " << results.size());
 
-    {
-        // This is a hack to allow Bee to check the results 
-        // prepare a graph ...
-        cluster_connectivity_graph_t g;
-        std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-        std::map<const Cluster*, int> map_cluster_index;
-        for (const Cluster* live : live_grouping.children()) {
-            size_t ilive = map_cluster_index.size();
-            map_cluster_index[live] = ilive;
-            ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    /// Xin: please delete this if you are okay with my replacement below.
+    // {
+    //     // This is a hack to allow Bee to check the results 
+    //     // prepare a graph ...
+    //     cluster_connectivity_graph_t g;
+    //     std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+    //     std::map<const Cluster*, int> map_cluster_index;
+    //     for (const Cluster* live : live_grouping.children()) {
+    //         size_t ilive = map_cluster_index.size();
+    //         map_cluster_index[live] = ilive;
+    //         ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    //     }
+    //     for (auto it = results.begin(); it != results.end(); it++) {
+    //         const Cluster* live = it->first;
+    //         size_t ilive = ilive2desc[map_cluster_index[live]];
+    //         for (const auto& pair : it->second) {
+    //             const Cluster* live2 = pair.first;
+    //             size_t ilive2 = ilive2desc[map_cluster_index[live2]];
+    //             /*auto edge =*/ add_edge(ilive, ilive2, g);
+    //         }
+    //     }
+    //     cluster_set_t temp_clusters;
+    //     merge_clusters(g, live_grouping, temp_clusters);
+    //     // currently there is no way to hold this data in the root_live grouping ...
+    //     return results;
+    // }
+
+
+    // Merge result map value clusters into result map key cluster and record
+    // the cc array for later re-separation.
+    for (auto& [primary, donordists] : results) {
+
+        // It seems the "dis" part is not needed.  Or maybe it's just a side
+        // effect to give order?  Removing it above would make the need to do
+        // this repacking.
+        std::vector<Cluster*> donors;
+        for (auto& blerg : donordists) {
+            donors.push_back(blerg.first);
         }
-        for (auto it = results.begin(); it != results.end(); it++) {
-            const Cluster* live = it->first;
-            size_t ilive = ilive2desc[map_cluster_index[live]];
-            for (const auto& pair : it->second) {
-                const Cluster* live2 = pair.first;
-                size_t ilive2 = ilive2desc[map_cluster_index[live2]];
-                /*auto edge =*/ add_edge(ilive, ilive2, g);
-            }
-        }
-        cluster_set_t temp_clusters;
-        merge_clusters(g, live_grouping, temp_clusters);
-        // currently there is no way to hold this data in the root_live grouping ...
+
+        auto cc = live_grouping.merge(donors, primary);
+
+        // The donor clusters are now all removed/destroyed, their child blobs
+        // are now all in children of primary.  The cc records which cluster the
+        // blobs originally came from with the 0 ID indicating primary, 1, 2, 3,
+        // ... counting along the donors vector.
+
+        // Store the cc into the primary's PC named "perblob" (default) with an
+        // array name indicating it came from this here function.
+        primary->put_pcarray(cc, "isolated");
+
+        // Downstream code may use code like the following in order to find this
+        // primary, get the cc and apply it to re-separate.
+        //
+        // for (auto cluster : live_grouping->children()) {
+        //    if (! cluster->has_pcarray("isolated")) { continue; }
+        //    auto cc = cluster->get_pcarray("isolated");
+        //    auto splits = live_grouping->separate(cluster, cc);
+        //    // ...
+        // }
+        //
+        // See elsewhere for details of separate().
     }
 
-
-    return results;
+    return;
 }

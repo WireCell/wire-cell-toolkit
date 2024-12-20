@@ -33,6 +33,7 @@ namespace WireCell::PointCloud::Facade {
        public:
 
         // MUST call this sometimes after construction if non-default value needed.
+        // FIXME: TPCParams should be moved out of the facade!
         void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);
         const TPCParams& get_params() const { return m_tp; }

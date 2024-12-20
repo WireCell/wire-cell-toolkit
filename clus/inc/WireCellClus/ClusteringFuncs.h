@@ -51,10 +51,9 @@ namespace WireCell::PointCloud::Facade {
             dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_);
-            return {};
         }
 
        private:
@@ -101,10 +100,9 @@ namespace WireCell::PointCloud::Facade {
             num_dead_try_ = get(config, "num_dead_try", 3);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_extend(live_clusters, cluster_connected_dead, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
-            return {};
         }
 
        private:
@@ -122,7 +120,7 @@ namespace WireCell::PointCloud::Facade {
             num_try_ = get(config, "num_try", 0);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             // for very busy events do less ...
             int num_try = num_try_;
@@ -142,7 +140,6 @@ namespace WireCell::PointCloud::Facade {
                     clustering_extend(live_clusters, cluster_connected_dead, 4, 35 * units::cm, i);
                 }
             }
-            return {};
         }
 
        private:
@@ -189,10 +186,9 @@ namespace WireCell::PointCloud::Facade {
             flag_enable_extend_ = get(config, "flag_enable_extend", true);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_regular(live_clusters, cluster_connected_dead, length_cut_, flag_enable_extend_);
-            return {};
         }
 
        private:
@@ -220,10 +216,9 @@ namespace WireCell::PointCloud::Facade {
             length_cut_ = get(config, "length_cut", 35*units::cm);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_parallel_prolong(live_clusters, cluster_connected_dead, length_cut_);
-            return {};
         }
 
        private:
@@ -249,10 +244,9 @@ namespace WireCell::PointCloud::Facade {
             length_cut_ = get(config, "length_cut", 1*units::cm);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_close(live_clusters, cluster_connected_dead, length_cut_);
-            return {};
         }
 
        private:
@@ -280,10 +274,9 @@ namespace WireCell::PointCloud::Facade {
             use_ctpc_ = get(config, "use_ctpc", true);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_separate(live_clusters, use_ctpc_);
-            return {};
         }
 
        private:
@@ -297,10 +290,9 @@ namespace WireCell::PointCloud::Facade {
         {
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_connect1(live_clusters);
-            return {};
         }
 
        private:
@@ -318,10 +310,9 @@ namespace WireCell::PointCloud::Facade {
             length_cut_ = get(config, "length_cut", 0);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_deghost(live_clusters, use_ctpc_, length_cut_);
-            return {};
         }
 
        private:
@@ -336,10 +327,9 @@ namespace WireCell::PointCloud::Facade {
         {
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_examine_x_boundary(live_clusters);
-            return {};
         }
 
        private:
@@ -352,10 +342,9 @@ namespace WireCell::PointCloud::Facade {
         {
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             clustering_protect_overclustering(live_clusters);
-            return {};
         }
 
        private:
@@ -370,26 +359,25 @@ namespace WireCell::PointCloud::Facade {
             num_try_ = get(config, "num_try", 1);
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             for (int i = 0; i != num_try_; i++) {
                 clustering_neutrino(live_clusters, i);
             }
-            return {};
         }
 
        private:
         int num_try_{1};
     };
 
-    map_cluster_cluster_vec clustering_isolated(Grouping& live_grouping);
+    void clustering_isolated(Grouping& live_grouping);
     class ClusteringIsolated {
        public:
         ClusteringIsolated(const WireCell::Configuration& config)
         {
         }
 
-        map_cluster_cluster_vec operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             return clustering_isolated(live_clusters);
         }
@@ -422,7 +410,7 @@ namespace WireCell::PointCloud::Facade {
     std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
 
 
-    inline std::function<map_cluster_cluster_vec(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
+    inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
         std::string function_name = config["name"].asString();
 
         if (function_name == "clustering_live_dead") {
