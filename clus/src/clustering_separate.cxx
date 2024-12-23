@@ -1513,10 +1513,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
             }
 
             for (auto temp_cluster : temp_merge_clusters) {
+                other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
                 clusters_step0[0]->take_children(*temp_cluster, true);
                 grouping->destroy_child(temp_cluster);
                 assert(temp_cluster == nullptr);
-                other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
             }
 
             final_clusters.push_back(clusters_step0[0]);
