@@ -293,20 +293,26 @@ namespace WireCell::NaryTree {
             return ret;
         }
 
-        // Merge our grandchildren held by the given subset of our children
-        // become children of target, creating target if it is nullptr.  Remove
-        // the now empty children unless keep is true.  Return a "connected
-        // components" (CC) type array with each element corresponding to a
-        // child in target.  Existing children in target have group ID.  Any
-        // children of the merged subset have a group ID set by the order of the
-        // collection.  The existing ID is used to mark any existing children in
-        // target in the returned CC array.
-        // 
-        // The children and the target may belong to another parent.
+        // Vector-like iterator version of merge.  The target will adopt the
+        // children of the facades given in the iterator range {cbeg,cend}.  If
+        // target is not given, a new target facade one is created.  The range
+        // of facades are removed by default unless keep is true.
+        //
+        // A commented components (CC) style array is returned and records the
+        // provenience of the children now held by the target facade.  Children
+        // that originally came from the target facade are given CC element
+        // value (ID) of 'existingID', default -1.  Children from facades in the
+        // iterator range are given IDs that increment from 'existingID' by one
+        // in order of range iteration.
+        //
+        // See also the std::map version of merge().
+        //
+        // The children and target facades passed to merge() may below to a
+        // parent other than this facade.
         template<typename ChildIt>
         std::vector<int> merge(ChildIt cbeg, ChildIt cend,
                                child_type* target=nullptr,
-                               bool keep=false, int existingID=0) {
+                               bool keep=false, int existingID=-1) {
 
             std::vector<int> cc;
 
@@ -344,7 +350,7 @@ namespace WireCell::NaryTree {
             typename child_group_type::iterator cbeg,
             typename child_group_type::iterator cend,
             child_type* target=nullptr,
-            bool keep=false, int existingID=0) {
+            bool keep=false, int existingID=-1) {
 
             std::vector<int> cc;
 
@@ -374,7 +380,7 @@ namespace WireCell::NaryTree {
 
         // A range version of the iterator-based methods above. 
         template<typename ChildrenRange>
-        std::vector<int> merge(ChildrenRange& cr, child_type* target=nullptr, bool keep=false, int existingID=0) {
+        std::vector<int> merge(ChildrenRange& cr, child_type* target=nullptr, bool keep=false, int existingID=-1) {
             return merge(std::begin(cr), std::end(cr), target, keep);
         }
 

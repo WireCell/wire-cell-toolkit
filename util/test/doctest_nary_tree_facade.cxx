@@ -117,15 +117,37 @@ TEST_CASE("nary tree facade construct") {
 
 }
 
+void dump(const std::vector<int>& cc, const std::string& msg = "")
+{
+    std::stringstream ss;
+    ss << "[" << cc.size() << "] ";
+    for (auto c : cc) {
+        ss << c << " ";
+    }
+    ss << msg;
+    debug(ss.str());
+}
+
+static void cmp(const std::vector<int>& a, const std::vector<int>& b)
+{
+    REQUIRE(a.size() == b.size());
+    for (size_t ind=0; ind<a.size(); ++ind) {
+        REQUIRE(a[ind] == b[ind]);
+    }
+}
+
 TEST_CASE("nary tree facade separate retain merge new") {
     std::list<size_t> layer_sizes ={2,10};
     auto root = make_layered_tree(layer_sizes);
     auto* l0 = root->value.facade<L0>();
     auto* l0c0 = l0->children()[0];
     std::vector<int> cc = {0,0,-1,1,1,-1,2,2,-1,-1};
+    dump(cc, "cc");
     auto splits = l0->separate(l0c0, cc);
     auto cc2 = l0->merge(splits);
+    dump(cc2, "cc2");
     REQUIRE(cc.size() == cc2.size() + 4); // we lose the 4 -1's
+    cmp(cc2, {0, 0, 1, 1, 2, 2,});
 }
 TEST_CASE("nary tree facade separate retain merge reuse") {
     std::list<size_t> layer_sizes ={2,10};
@@ -133,8 +155,11 @@ TEST_CASE("nary tree facade separate retain merge reuse") {
     auto* l0 = root->value.facade<L0>();
     auto* l0c0 = l0->children()[0];
     std::vector<int> cc = {0,0,-1,1,1,-1,2,2,-1,-1};
+    dump(cc, "cc");
     auto splits = l0->separate(l0c0, cc);
     auto cc2 = l0->merge(splits, l0c0);
+    dump(cc2, "cc2");
+    cmp(cc2, {-1, -1, -1, -1, 0, 0, 1, 1, 2, 2,});
     REQUIRE(cc.size() == cc2.size()); // we regain the -1's
 }
 TEST_CASE("nary tree facade vector merge new") {
