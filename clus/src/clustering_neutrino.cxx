@@ -256,7 +256,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
                     // false: do not remove the cluster1
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
-                    assert(cluster1 == nullptr);
+                    assert(cluster1 != nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
                     for (auto [id, sep_cluster] : sep_clusters) {
@@ -431,7 +431,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
-                    assert(cluster2 == nullptr);
+                    assert(cluster2 != nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
                     for (auto [id, sep_cluster] : sep_clusters) {
@@ -575,7 +575,6 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             // ToyPointCloud *cloud2_ext = cluster_cloud_map[cluster2];
             auto cloud1_ext = cluster_cloud_map[cluster1];
             auto cloud2_ext = cluster_cloud_map[cluster2];
-            assert(cloud2_ext);
 
             int merge_type = 0;
             bool flag_merge = false;
