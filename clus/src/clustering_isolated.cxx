@@ -25,7 +25,7 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // sort the clusters by length using a lambda function
+    // sort the clusters by length using a lambda function  (sort from small to large clusters ... )
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
@@ -34,6 +34,8 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     // this is for 4 time slices
     double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
     geo_point_t drift_dir(1, 0, 0);
+
+    // std::cout << mp.nticks_live_slice << std::endl;
 
     int range_cut = 150;
     int length_cut = 20 * units::cm;
@@ -44,10 +46,12 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     for (size_t i = 0; i != live_clusters.size(); i++) {
         std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
         std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
+        ranges.at(3) /= mp.nticks_live_slice;
         int max = 0;
         for (int j = 0; j != 4; j++) {
             if (ranges.at(j) > max) max = ranges.at(j);
         }
+        // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_center() << " " << max << " " << range_cut << std::endl;
         if (max < range_cut && live_clusters.at(i)->get_length() < length_cut) {
             small_clusters.push_back(live_clusters.at(i));
         }
@@ -70,6 +74,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                         // std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
                         std::tuple<int, int, int, int> ranges_tuple = get_uvwt_range(live_clusters.at(i), b2id, id);
                         std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
+                        ranges.at(3) /= mp.nticks_live_slice;
                         // double length_1 = sqrt(2. / 3. *
                         //                            (pow(mp.pitch_u * ranges.at(0), 2) + pow(mp.pitch_v * ranges.at(1), 2) +
                         //                             pow(mp.pitch_w * ranges.at(2), 2)) +
@@ -87,6 +92,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                     // for (size_t j = 0; j != sep_clusters.size(); j++) {
                     //     delete sep_clusters.at(j);
                     // }
+                    // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_center() << " " << max << " " << range_cut << std::endl;
 
                     if (max < range_cut && max_length < length_cut) {
                         small_clusters.push_back(live_clusters.at(i));
@@ -104,7 +110,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
             }
         }
     }
-    LogDebug("big_clusters.size() = " << big_clusters.size() << " small_clusters.size() = " << small_clusters.size());
+    // LogDebug("big_clusters.size() = " << big_clusters.size() << " small_clusters.size() = " << small_clusters.size());
 
     std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
 
@@ -130,12 +136,15 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                 min_dis_cluster = big_cluster;
             }
         }
-        if (min_dis < small_big_dis_cut) {
+        // std::cout << "SB: " << curr_cluster->get_length()/units::cm << " " << min_dis_cluster->get_length()/units::cm << " " << curr_cluster->get_center() << " " << min_dis_cluster->get_center() << " " << min_dis << " " << small_big_dis_cut << std::endl;
+
+        if (min_dis < small_big_dis_cut) {    
+
             to_be_merged_pairs.insert(std::make_pair(min_dis_cluster, curr_cluster));
             used_small_clusters.insert(curr_cluster);
         }
     }
-    LogDebug("to_be_merged_pairs.size() = " << to_be_merged_pairs.size());
+    // LogDebug("to_be_merged_pairs.size() = " << to_be_merged_pairs.size());
 
     // small distance ...
     double small_small_dis_cut = 5 * units::cm;
@@ -154,6 +163,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                     used_small_clusters.find(cluster2) != used_small_clusters.end() &&
                         used_small_clusters.find(cluster1) == used_small_clusters.end()) {
                     to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
+                    // std::cout << "SD: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
                     used_small_clusters.insert(cluster1);
                     used_small_clusters.insert(cluster2);
                 }
@@ -180,11 +190,12 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
             std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
             double dis = std::get<2>(results);
             if (dis < small_small_dis_cut) {
+                // std::cout << "SS: "<< cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
                 to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
             }
         }
     }
-    LogDebug("clustering small with small ones " << to_be_merged_pairs.size());
+    // LogDebug("clustering small with small ones " << to_be_merged_pairs.size());
 
     // clustering big ones ...
     // cloud1 is the longer one
@@ -255,6 +266,9 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
 
                 if (flag_merge) {
                     to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
+
+                    // std::cout << "BB: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+
                     if (cluster1->get_length() < cluster2->get_length()) {
                         used_big_clusters.insert(cluster1);
                     }
@@ -265,7 +279,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
             }
         }
     }
-    LogDebug("clustering big ones " << to_be_merged_pairs.size());
+    // LogDebug("clustering big ones " << to_be_merged_pairs.size());
 
     // merge clusters
     std::vector<std::set<Cluster *>> merged_clusters;
@@ -351,71 +365,72 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
             results[max_cluster].push_back(std::make_pair(temp_cluster, dis));
         }
     }
-    LogDebug("results.size() = " << results.size());
+    // LogDebug("results.size() = " << results.size());
 
     /// Xin: please delete this if you are okay with my replacement below.
-    // {
-    //     // This is a hack to allow Bee to check the results 
-    //     // prepare a graph ...
-    //     cluster_connectivity_graph_t g;
-    //     std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-    //     std::map<const Cluster*, int> map_cluster_index;
-    //     for (const Cluster* live : live_grouping.children()) {
-    //         size_t ilive = map_cluster_index.size();
-    //         map_cluster_index[live] = ilive;
-    //         ilive2desc[ilive] = boost::add_vertex(ilive, g);
-    //     }
-    //     for (auto it = results.begin(); it != results.end(); it++) {
-    //         const Cluster* live = it->first;
-    //         size_t ilive = ilive2desc[map_cluster_index[live]];
-    //         for (const auto& pair : it->second) {
-    //             const Cluster* live2 = pair.first;
-    //             size_t ilive2 = ilive2desc[map_cluster_index[live2]];
-    //             /*auto edge =*/ add_edge(ilive, ilive2, g);
-    //         }
-    //     }
-    //     cluster_set_t temp_clusters;
-    //     merge_clusters(g, live_grouping, temp_clusters);
-    //     // currently there is no way to hold this data in the root_live grouping ...
-    //     return results;
-    // }
-
-
-    // Merge result map value clusters into result map key cluster and record
-    // the cc array for later re-separation.
-    for (auto& [primary, donordists] : results) {
-
-        // It seems the "dis" part is not needed.  Or maybe it's just a side
-        // effect to give order?  Removing it above would make the need to do
-        // this repacking.
-        std::vector<Cluster*> donors;
-        for (auto& blerg : donordists) {
-            donors.push_back(blerg.first);
+    {
+        // This is a hack to allow Bee to check the results 
+        // prepare a graph ...
+        cluster_connectivity_graph_t g;
+        std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+        std::map<const Cluster*, int> map_cluster_index;
+        for (const Cluster* live : live_grouping.children()) {
+            size_t ilive = map_cluster_index.size();
+            map_cluster_index[live] = ilive;
+            ilive2desc[ilive] = boost::add_vertex(ilive, g);
         }
-
-        auto cc = live_grouping.merge(donors, primary);
-
-        // The donor clusters are now all removed/destroyed, their child blobs
-        // are now all in children of primary.  The cc records which cluster the
-        // blobs originally came from with the 0 ID indicating primary, 1, 2, 3,
-        // ... counting along the donors vector.
-
-        // Store the cc into the primary's PC named "perblob" (default) with an
-        // array name indicating it came from this here function.
-        primary->put_pcarray(cc, "isolated");
-
-        // Downstream code may use code like the following in order to find this
-        // primary, get the cc and apply it to re-separate.
-        //
-        // for (auto cluster : live_grouping->children()) {
-        //    if (! cluster->has_pcarray("isolated")) { continue; }
-        //    auto cc = cluster->get_pcarray("isolated");
-        //    auto splits = live_grouping->separate(cluster, cc);
-        //    // ...
-        // }
-        //
-        // See elsewhere for details of separate().
+        for (auto it = results.begin(); it != results.end(); it++) {
+            const Cluster* live = it->first;
+            size_t ilive = ilive2desc[map_cluster_index[live]];
+            for (const auto& pair : it->second) {
+                const Cluster* live2 = pair.first;
+                size_t ilive2 = ilive2desc[map_cluster_index[live2]];
+                /*auto edge =*/ add_edge(ilive, ilive2, g);
+            }
+        }
+        cluster_set_t temp_clusters;
+        merge_clusters(g, live_grouping, temp_clusters);
+        // currently there is no way to hold this data in the root_live grouping ...
+        // return results;
     }
+
+
+    // // Merge result map value clusters into result map key cluster and record
+    // // the cc array for later re-separation.  
+    // Xin: this code somehow is not compatible with Bee ... 
+    // for (auto& [primary, donordists] : results) {
+
+    //     // It seems the "dis" part is not needed.  Or maybe it's just a side
+    //     // effect to give order?  Removing it above would make the need to do
+    //     // this repacking.
+    //     std::vector<Cluster*> donors;
+    //     for (auto& blerg : donordists) {
+    //         donors.push_back(blerg.first);
+    //     }
+
+    //     auto cc = live_grouping.merge(donors, primary);
+
+    //     // The donor clusters are now all removed/destroyed, their child blobs
+    //     // are now all in children of primary.  The cc records which cluster the
+    //     // blobs originally came from with the 0 ID indicating primary, 1, 2, 3,
+    //     // ... counting along the donors vector.
+
+    //     // Store the cc into the primary's PC named "perblob" (default) with an
+    //     // array name indicating it came from this here function.
+    //     primary->put_pcarray(cc, "isolated");
+
+    //     // Downstream code may use code like the following in order to find this
+    //     // primary, get the cc and apply it to re-separate.
+    //     //
+    //     // for (auto cluster : live_grouping->children()) {
+    //     //    if (! cluster->has_pcarray("isolated")) { continue; }
+    //     //    auto cc = cluster->get_pcarray("isolated");
+    //     //    auto splits = live_grouping->separate(cluster, cc);
+    //     //    // ...
+    //     // }
+    //     //
+    //     // See elsewhere for details of separate().
+    // }
 
     return;
 }

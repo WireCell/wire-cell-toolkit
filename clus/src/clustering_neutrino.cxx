@@ -15,7 +15,7 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // sort the clusters by length using a lambda function
+    // sort the clusters by length using a lambda function  from long cluster to short cluster
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
@@ -721,7 +721,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                 }
 
 
-                // if(flag_merge || fabs(cluster1->get_length()-50*units::cm)<0.5*units::cm || fabs(cluster2->get_length()-50*units::cm)<0.5*units::cm) 
+                // if(flag_merge) 
                 //     std::cout << dis1 / units::cm << " " << dis2 / units::cm << " " << dis / units::cm << " "
                 //               << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
                 //               << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
@@ -795,6 +795,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
                     if (merge_type == 1) {
                         used_clusters.insert(cluster1);
+                        if (cluster2->get_length()<15*units::cm && cluster1->get_length() > 2 * cluster2->get_length()) used_clusters.insert(cluster2);
                     }
                     else if (merge_type == 3) {
                         used_clusters.insert(cluster1);
@@ -833,66 +834,5 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     cluster_set_t new_clusters;
     merge_clusters(g, live_grouping, new_clusters);
 
-    // merge clusters
-    // std::vector<std::set<Cluster *>> merge_clusters;
-    // for (auto it = to_be_merged_pairs.begin(); it != to_be_merged_pairs.end(); it++) {
-    //     Cluster *cluster1 = (*it).first;
-    //     Cluster *cluster2 = (*it).second;
-    //     bool flag_new = true;
-    //     std::vector<std::set<Cluster *>> temp_set;
-    //     for (auto it1 = merge_clusters.begin(); it1 != merge_clusters.end(); it1++) {
-    //         std::set<Cluster *> &clusters = (*it1);
-    //         if (clusters.find(cluster1) != clusters.end() || clusters.find(cluster2) != clusters.end()) {
-    //             clusters.insert(cluster1);
-    //             clusters.insert(cluster2);
-    //             flag_new = false;
-    //             temp_set.push_back(clusters);
-    //         }
-    //     }
-    //     if (flag_new) {
-    //         std::set<Cluster *> clusters;
-    //         clusters.insert(cluster1);
-    //         clusters.insert(cluster2);
-    //         merge_clusters.push_back(clusters);
-    //     }
-    //     if (temp_set.size() > 1) {
-    //         // merge them further ...
-    //         std::set<Cluster *> clusters;
-    //         for (size_t i = 0; i != temp_set.size(); i++) {
-    //             for (auto it1 = temp_set.at(i).begin(); it1 != temp_set.at(i).end(); it1++) {
-    //                 clusters.insert(*it1);
-    //             }
-    //             merge_clusters.erase(find(merge_clusters.begin(), merge_clusters.end(), temp_set.at(i)));
-    //         }
-    //         merge_clusters.push_back(clusters);
-    //     }
-    // }
-
-    // merge clusters into new clusters, delete old clusters
-    // for (auto it = merge_clusters.begin(); it != merge_clusters.end(); it++) {
-    //     std::set<Cluster *> &clusters = (*it);
-    //     Cluster *ncluster = new Cluster((*clusters.begin())->get_cluster_id());
-    //     live_clusters.push_back(ncluster);
-
-    //     for (auto it1 = clusters.begin(); it1 != clusters.end(); it1++) {
-    //         Cluster *ocluster = *(it1);
-    //         // std::cout << ocluster->get_cluster_id() << " ";
-    //         SMGCSelection &mcells = ocluster->get_mcells();
-    //         for (auto it2 = mcells.begin(); it2 != mcells.end(); it2++) {
-    //             SlimMergeGeomCell *mcell = (*it2);
-    //             // std::cout << ocluster->get_cluster_id() << " " << mcell << std::endl;
-    //             int time_slice = mcell->GetTimeSlice();
-    //             ncluster->AddCell(mcell, time_slice);
-    //         }
-    //         live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
-    //         cluster_length_map.erase(ocluster);
-    //         delete ocluster;
-    //     }
-    //     std::vector<int> range_v1 = ncluster->get_uvwt_range();
-    //     double length_1 = sqrt(2. / 3. *
-    //                                (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-    //                                 pow(pitch_w * range_v1.at(2), 2)) +
-    //                            pow(time_slice_width * range_v1.at(3), 2));
-    //     cluster_length_map[ncluster] = length_1;
-    // }
+ 
 }
