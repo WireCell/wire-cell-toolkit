@@ -17,7 +17,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() < cluster2->get_length();
+        return cluster1->get_length() > cluster2->get_length();
     });
 
     const auto &mp = live_grouping.get_params();
@@ -252,7 +252,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         cluster1->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
                     const double orig_cluster_length = cluster1->get_length();
-                    std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
+                    // std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
                     // false: do not remove the cluster1
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
@@ -292,7 +292,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         live_grouping.destroy_child(sep_clusters.at(j));
                         assert(sep_clusters.at(j) == nullptr);
                     }
-                    std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
+                    // std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                 }
 
                 dir1 *= -1;
@@ -427,7 +427,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0) &&
                         cluster2->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
-                    std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
+                    // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
@@ -467,7 +467,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         live_grouping.destroy_child(sep_clusters.at(j));
                         assert(sep_clusters.at(j) == nullptr);
                     }
-                    std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
+                    // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                 }
 
                 dir1 *= -1;
@@ -720,6 +720,12 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     }
                 }
 
+
+                // if(flag_merge || fabs(cluster1->get_length()-50*units::cm)<0.5*units::cm || fabs(cluster2->get_length()-50*units::cm)<0.5*units::cm) 
+                //     std::cout << dis1 / units::cm << " " << dis2 / units::cm << " " << dis / units::cm << " "
+                //               << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
+                //               << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+
                 if (dis < 1.8 * units::cm && cluster1->get_length() < 75 * units::cm &&
                     cluster2->get_length() < 75 * units::cm &&
                     (cluster1->get_length() + cluster2->get_length()) < 120 * units::cm) {
@@ -796,6 +802,12 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     }
                 }
             }
+
+        //  if(flag_merge ) 
+        //             std::cout 
+        //                       << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
+        //                       << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+
         }
     }
 
@@ -814,6 +826,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
     }
     for (auto [cluster1, cluster2] : to_be_merged_pairs) {
+        // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
         boost::add_edge(ilive2desc[map_cluster_index[cluster1]],
                         ilive2desc[map_cluster_index[cluster2]], g);
     }
