@@ -24,17 +24,33 @@ namespace WireCell::PointCloud::Facade {
 
     using cluster_set_t = std::set<const Cluster*>;
 
+    // Each vertex of a cluster connectivity graph represents the index of a
+    // cluster in some collection.
     using cluster_connectivity_graph_t = boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS, int>;
 
     using cluster_vector_t = std::vector<Cluster*>;
 
 
     // clustering_util.cxx
-    // merging clustering function
+    //
+    // This function will produce new clusters in live_clusters.  The children
+    // of each "fresh" cluster will be those of the "donor" clusters that are
+    // connected according to the cluster_connectivity_graph_t.  The "fresh"
+    // cluster will be added to and the "donor" clusters will be removed from
+    // "known_clusters".  The "donor" clusters will also be removed from
+    // live_clusters.
+    //
+    // If both aname and pcname are given then store a cc array in any newly
+    // created clusters holding the merged set of blobs.  The cc array will
+    // arbitrarily label each blob with a number corresponding to the original
+    // cluster which was parent to the blob (and which is destroyed after this
+    // function).
+    //
+    // See above for cluster_connectivity_graph_t.
     void merge_clusters(cluster_connectivity_graph_t& g, // 
-			Grouping& live_clusters,
-			cluster_set_t& cluster_connected_dead); // in/out
-    
+			Grouping& grouping,
+			cluster_set_t& known_clusters, // in/out
+                        const std::string& aname="", const std::string& pcname="perblob");
     
     // clustering_live_dead.cxx
     // first function ...

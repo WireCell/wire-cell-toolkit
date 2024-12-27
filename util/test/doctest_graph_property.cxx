@@ -1,8 +1,13 @@
 #include "WireCellUtil/GraphTools.h"
 
+
+#include "WireCellUtil/doctest.h"
+
+#include "WireCellUtil/Logging.h"
+
 #include <string>
 #include <vector>
-#include <iostream>
+#include <sstream>
 
 // namespace helper {
 
@@ -28,20 +33,23 @@ using graph_t = boost::adjacency_list<boost::setS, boost::vecS, boost::undirecte
 using vdesc_t = boost::graph_traits<graph_t>::vertex_descriptor;
 
 using namespace WireCell;
+using spdlog::debug;
 
-int main()
+TEST_CASE("graph property")
 {
     graph_t gr;
     int count=0;
     auto v1 = boost::add_vertex(node_t{count++, 42}, gr);
     auto v2 = boost::add_vertex(node_t{count++, 24}, gr);
     auto [e,ok] = boost::add_edge(v1, v2, gr);
-    std::cerr << "edge: " << e << " " << ok << "\n";
+    REQUIRE(ok);
+
+    std::stringstream ss;
+    ss << e;
+    debug("edge: {} {}", ss.str(), ok);
 
     std::vector<std::string> string_property{"one", "two"};
     for (const auto& vtx : GraphTools::vertex_range(gr)) {
-        std::cerr << "vtx: " << vtx
-                  << " " << string_property[vtx] << "\n";
+        debug("vertex {} property {}", vtx, string_property[vtx]);
     }
-    return 0;
 }

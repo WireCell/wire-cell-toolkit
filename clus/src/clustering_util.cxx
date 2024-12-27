@@ -7,9 +7,9 @@ using namespace WireCell::PointCloud::Facade;
 
 void WireCell::PointCloud::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
-    Grouping& live_grouping,
-    // Live clusters that are "connected" to some dead cluster
-    cluster_set_t& cluster_connected_dead) // in/out
+    Grouping& grouping,
+    cluster_set_t& known_clusters, // in/out
+    const std::string& aname, const std::string& pcname)
 {
     std::unordered_map<int, int> desc2id;
     std::unordered_map<int, std::set<int> > id2desc;
@@ -24,44 +24,52 @@ void WireCell::PointCloud::Facade::merge_clusters(
     // preserve the original order of children facades even as we remove them
     // from the grouping.  As each child facade is removed, it's
     // unique_ptr<node> is returned which we ignore/drop and thus the child
-    // facade dies along with its node.  This leaves the live_clusters element
+    // facade dies along with its node.  This leaves the orig_clusters element
     // that was just holding the pointer to the doomed facade now holding
     // invalid memory.  But, it is okay as we never revisit the same cluster in
     // the grouping.  All that to explain a missing "&"! :)
-    auto live_clusters = live_grouping.children();
-    // std::cerr << "merge_clusters: "
-    //           << live_clusters.size() << " live clusters " 
-    //           << id2desc.size() << " subgraphs\n";
+    auto orig_clusters = grouping.children();
 
+    const bool savecc = aname.size() > 0 && pcname.size() > 0;
 
-    //    debug("id2desc size: {}", id2desc.size());
     for (const auto& [id, descs] : id2desc) {
         if (descs.size() < 2) {
             continue;
         }
-        // std::cerr << "merge_clusters: subgraph id=" << id
-        //           << " with " << descs.size() << " vertices\n";
 
         // it starts with no cluster facade
-        Cluster& fresh_cluster = live_grouping.make_child();
+        Cluster& fresh_cluster = grouping.make_child();
 
+        std::vector<int> cc;
+        int parent_id = 0;
         for (const auto& desc : descs) {
             const int idx = g[desc];
             if (idx < 0) {  // no need anymore ...
                 continue;
             }
-            auto live = live_clusters[idx];
+
+            auto live = orig_clusters[idx];
             fresh_cluster.take_children(*live, true);
 
-            cluster_connected_dead.erase(live);
-            live_grouping.destroy_child(live);
+            if (savecc) {
+                cc.resize(fresh_cluster.nchildren(), parent_id);
+                ++parent_id;
+            }
+
+            known_clusters.erase(live);
+            grouping.destroy_child(live);
             assert(live == nullptr);
         }
-        cluster_connected_dead.insert(&fresh_cluster);
+        if (savecc) {
+            fresh_cluster.put_pcarray(cc, aname, pcname);
+        }
+        known_clusters.insert(&fresh_cluster);
     }
 
-    // sanity check / debugging
-    for (const auto* cluster : live_grouping.children()) {
+
+
+    // fixme: sanity check / debugging.  remove this if you find it committed.
+    for (const auto* cluster : grouping.children()) {
         if (!cluster) {
             std::cerr << "merge_clusters: null live cluster on output!\n";
             continue;

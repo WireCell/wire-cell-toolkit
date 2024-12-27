@@ -384,6 +384,7 @@ namespace WireCell::NaryTree {
             return merge(std::begin(cr), std::end(cr), target, keep);
         }
 
+
         void invalidate_children() {
             m_children.clear();
         }
