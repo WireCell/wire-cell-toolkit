@@ -1,8 +1,8 @@
 #  Between Clustering and Trajectoryand dQ/dx fitting (Current)
 
-## [Opflash (WCP) vs. <span style="color:red">xxx</span> (WCT)](./QLBundles/Opflash.md)
+## [Opflash](./QLBundles/Opflash.md) (WCP) vs. ![Red Text](https://via.placeholder.com/40x20/FF0000/FFFFFF?text=xxx) (WCT)
 
-## [FlashTPCBundle (WCP) vs. <span style="color:red">xxx</span> (WCT)](./QLBundles/Bundle.md)
+## [FlashTPCBundle](./QLBundles/Bundle.md) (WCP) vs. <span style="color:red">xxx</span> (WCT)
 
 ## [Examine_bundles](https://github.com/BNLIF/wire-cell-2dtoy/blob/master/docs/ExamineBundles.md) is a function that we need to port, [Original ExamineBundles Code](https://github.com/BNLIF/wire-cell-2dtoy/blob/a30305052fc54bbbbbd826b096066d6e8777b54d/src/ExamineBundles.cxx)
 - bundle->get_main_cluster()  (WCP) vs. <span style="color:red">xxx</span> (WCT)
