@@ -1,6 +1,6 @@
 #  Between Clustering and Trajectoryand dQ/dx fitting (Current)
 
-## [Opflash](./QLBundles/Opflash.md) (WCP) vs. ![Red Text](https://via.placeholder.com/40x20/FF0000/FFFFFF?text=xxx) (WCT)
+## [Opflash](./QLBundles/Opflash.md) (WCP) vs. <span style="color:red">xxx</span> (WCT)
 
 ## [FlashTPCBundle](./QLBundles/Bundle.md) (WCP) vs. <span style="color:red">xxx</span> (WCT)
 
