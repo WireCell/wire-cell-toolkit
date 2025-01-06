@@ -1,5 +1,6 @@
 #include "WireCellUtil/Stream.h"
 #include "WireCellUtil/Array.h"
+#include <iostream>
 
 using namespace WireCell::Stream;
 using namespace WireCell::Array;
@@ -37,6 +38,7 @@ void do_reading(std::string fname)
 
     std::string aname;
     read(si, aname, arr);
+    std::cerr << "aname is " << aname <<"\n";
     assert(aname == "twodee.npy");
 
     read(si, aname, cols);

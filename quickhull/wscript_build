@@ -1,4 +1,4 @@
 # -*- python -*-
-bld.smplpkg('WCPQuickhull', use='')
+bld.smplpkg('WCPQuickhull', use='ZLib')
 
 

@@ -28,7 +28,7 @@ setup_file () {
 
     run_idempotently -s "$dag_file" -s "$infile" \
                      -t "$img_numpy_file" -t "$img_json_file" -t "$log_file" -- \
-                     wct -l "$log_file" -L debug -c "$dag_file"
+                     wire-cell -l "$log_file" -L debug -c "$dag_file"
     echo $output 1>&3
     [[ -s "$log_file" ]]
 }
@@ -157,7 +157,7 @@ function roundtrip () {
 
     dotify_graph "${dag}.json" "${dag}.png"
 
-    wct -l $lfile -L debug -c "${dag}.json"
+    wire-cell -l $lfile -L debug -c "${dag}.json"
 
     local errors="$(egrep ' W | E ' $lfile)"
     echo "$errors"
@@ -213,7 +213,7 @@ function roundtrip2 () {
 
     dotify_graph "${dag1}.json" "${dag1}.png"
 
-    wct -l $lfile1 -L debug -c ${dag1}.json
+    wire-cell -l $lfile1 -L debug -c ${dag1}.json
     local errors="$(egrep ' W | E ' $lfile1)"
     echo "$errors"
     [[ -z "$errors" ]]
@@ -227,7 +227,7 @@ function roundtrip2 () {
 
     dotify_graph "${dag2}.json" "${dag2}.png"
 
-    wct -l $lfile2 -L debug -c ${dag2}.json
+    wire-cell -l $lfile2 -L debug -c ${dag2}.json
     local errors="$(egrep ' W | E ' $lfile2)"
     echo "$errors"
     [[ -z "$errors" ]]

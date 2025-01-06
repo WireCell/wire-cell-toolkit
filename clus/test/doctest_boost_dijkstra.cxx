@@ -40,12 +40,12 @@ TEST_CASE("standalone dijkstra") {
             .distance_map(&distances[0])
     );
     std::cout << "parents: ";
-    for (int i = 0; i < parents.size(); i++) {
+    for (size_t i = 0; i < parents.size(); i++) {
         std::cout << i << "->" << parents[i] << " ";
     }
     std::cout << std::endl;
     std::cout << "distances: ";
-    for (int i = 0; i < distances.size(); i++) {
+    for (size_t i = 0; i < distances.size(); i++) {
         std::cout << i << "->" << distances[i] << " ";
     }
     std::cout << std::endl;

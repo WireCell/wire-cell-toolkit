@@ -23,7 +23,7 @@ WireCell::Configuration SigProc::FieldResponse::default_configuration() const
 
 void SigProc::FieldResponse::configure(const WireCell::Configuration& cfg)
 {
-    m_fname = get(cfg, "filename", m_fname);
+    m_fname = get<std::string>(cfg, "filename", m_fname);
     if (m_fname.empty()) {
         THROW(ValueError() << errmsg{"must give field response filename"});
     }

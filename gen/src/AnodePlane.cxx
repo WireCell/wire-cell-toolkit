@@ -169,7 +169,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
         const double response_x = jface["response"].asDouble();
         const double anode_x = get(jface, "anode", response_x);
         // const double cathode_x = jface["cathode"].asDouble();
-        double cathode_xref;
+        double cathode_xref=0;
         if (jface["cathode"].isNumeric()) {
             cathode_xref = jface["cathode"].asDouble();
         }

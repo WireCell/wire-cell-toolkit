@@ -3,7 +3,7 @@
 Make a plot with file produced by:
 
   wire-cell -L debug -l stderr --tla-code tags='["orig0"]' \
-    -A infile=frames.npz -A outfile=frames.hdf hio/test/test-frame-npz-to-hio.jsonnet
+    -A infile=frames.npz -A outfile=frames.hdf hio/test/frame-npz-to-hio.jsonnet
 '''
 import sys
 import h5py
