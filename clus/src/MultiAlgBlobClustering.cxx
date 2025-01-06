@@ -296,17 +296,6 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
     perf("loaded dead clusters");
 
-    // FIXME: we do not yet have a replacement for dumpe_deadarea() in WireCell::Bee
-    // BEE debug direct imaging output and dead blobs
-    // if (!m_bee_dir.empty()) {
-    //     std::string sub_dir = String::format("%s/%d", m_bee_dir, ident);
-    //     Persist::assuredir(sub_dir);
-    //     dump_bee(*root_live.get(), String::format("%s/%d-img.json", sub_dir, ident));
-    //     if (m_save_deadarea) {
-    //         dumpe_deadarea(*root_dead.get(), String::format("%s/%d-channel-deadarea.json", sub_dir, ident));
-    //     }
-    //     perf("loaded dump live clusters to bee");
-    // }
     fill_bee_points(m_bee_img, *root_live.get());
     perf("loaded dump live clusters to bee");
     if (m_save_deadarea) {
@@ -333,109 +322,15 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     log->debug("dead_v_index size {}", dead_v_index.size());
     log->debug("dead_w_index size {}", dead_w_index.size());
 
-#define __HIDE__
-
     for (const auto& func_cfg : m_func_cfgs) {
-        std::cout << "func_cfg: " << func_cfg << std::endl;
+        // std::cout << "func_cfg: " << func_cfg << std::endl;
         auto func = getClusteringFunction(func_cfg);
 
         func(live_grouping, dead_grouping, cluster_connected_dead);
 
         perf.dump(func_cfg["name"].asString(), live_grouping);
     }
-#ifndef __HIDE__
-    // dead_live
-    clustering_live_dead(live_grouping, dead_grouping, cluster_connected_dead, m_dead_live_overlap_offset);
-    perf.dump("clustering live-dead", live_grouping);
 
-    // second function ...
-    clustering_extend(live_grouping, cluster_connected_dead, 4, 60 * units::cm, 0, 15 * units::cm, 1);
-    perf.dump("clustering extend", live_grouping);
-
-    // first round clustering
-    clustering_regular(live_grouping, cluster_connected_dead, 60 * units::cm, false);
-    perf.dump("clustering regular no extension", live_grouping);
-
-    clustering_regular(live_grouping, cluster_connected_dead, 30 * units::cm, true);  // do extension
-    perf.dump("clustering regular with extension", live_grouping);
-
-    // dedicated one dealing with parallel and prolonged track
-    clustering_parallel_prolong(live_grouping, cluster_connected_dead, 35 * units::cm);
-    perf.dump("clustering parallel prolong", live_grouping);
-
-    // clustering close distance ones ...
-    clustering_close(live_grouping, cluster_connected_dead, 1.2 * units::cm);
-    perf.dump("clustering close", live_grouping);
-
-    int num_try = 3;
-    // for very busy events do less ...
-    if (live_grouping.nchildren() > 1100) num_try = 1;
-    for (int i = 0; i != num_try; i++) {
-        // extend the track ...
-
-        // deal with prolong case
-        clustering_extend(live_grouping, cluster_connected_dead, 1, 150 * units::cm, 0);
-        perf.dump("clustering extend 1", live_grouping);
-
-        // deal with parallel case
-        clustering_extend(live_grouping, cluster_connected_dead, 2, 30 * units::cm, 0);
-        perf.dump("clustering extend 2", live_grouping);
-
-        // extension regular case
-        clustering_extend(live_grouping, cluster_connected_dead, 3, 15 * units::cm, 0);
-        perf.dump("clustering extend 3", live_grouping);
-
-        // extension ones connected to dead region ...
-        if (i == 0) {
-            clustering_extend(live_grouping, cluster_connected_dead, 4, 60 * units::cm, i);
-        }
-        else {
-            clustering_extend(live_grouping, cluster_connected_dead, 4, 35 * units::cm, i);
-        }
-        perf.dump("clustering extend 4", live_grouping);
-    }
-
-    // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
-    clustering_separate(live_grouping, true);
-    // log->debug("clustering_separate nclusters {}", live_grouping.nchildren());
-    perf.dump("clustering_separate", live_grouping);
-
-    const auto &tp = live_grouping.get_params();
-    auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
-    for (const Cluster *cluster : live_grouping.children()) {
-        global_point_cloud->add_points(cluster, 0);
-    }
-    std::vector<double> cluster_lengths;
-    for (const Cluster *cluster : live_grouping.children()) {
-        cluster_lengths.push_back(cluster->get_length());
-    }
-    std::cout << "large clusters 10mm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 10*units::mm; }) << std::endl;
-    std::cout << "large clusters 5cm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 5*units::cm; }) << std::endl;
-    clustering_connect1(live_grouping, global_point_cloud, dead_u_index, dead_v_index, dead_w_index);
-    cluster_lengths.clear();
-    for (const Cluster *cluster : live_grouping.children()) {
-        cluster_lengths.push_back(cluster->get_length());
-    }
-    std::cout << "large clusters 10mm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 10*units::mm; }) << std::endl;
-    std::cout << "large clusters 5cm " << std::count_if(cluster_lengths.begin(), cluster_lengths.end(), [](double x) { return x > 5*units::cm; }) << std::endl;
-    perf.dump("clustering_connect1", live_grouping);
-
-    clustering_deghost(live_grouping, dead_u_index, dead_v_index, dead_w_index, true);
-    perf.dump("clustering_deghost", live_grouping);
-
-    clustering_examine_x_boundary(live_grouping);
-    perf.dump("clustering_examine_x_boundary", live_grouping);
-
-    clustering_protect_overclustering(live_grouping);
-    perf.dump("clustering_protect_overclustering", live_grouping);
-#endif
-
-    // BEE debug dead-live
-    // if (!m_bee_dir.empty()) {
-    //     std::string sub_dir = String::format("%s/%d", m_bee_dir, ident);
-    //     dump_bee(*root_live.get(), String::format("%s/%d-dead-live.json", sub_dir, ident));
-    //     perf("dump live clusters to bee");
-    // }
     fill_bee_points(m_bee_ld, *root_live.get());
     perf("dump live clusters to bee");
 
