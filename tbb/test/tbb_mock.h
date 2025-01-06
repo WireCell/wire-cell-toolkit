@@ -47,6 +47,7 @@ namespace WireCellTbb {
             WireCell::Point pos(dist, dist, dist);
             out = WireCell::IDepo::pointer(new WireCell::Aux::SimpleDepo(time, pos));
             std::cerr << "Source: " << out->time() / WireCell::units::millimeter << std::endl;
+            ++m_count;
             return true;
         }
     };
