@@ -163,9 +163,13 @@ local clus (
         }
     }, nin=1, nout=0),
 
-    clus_pipe() :: g.pipeline([ptb, mabc, sink], "clus_pipe"),
+    clus_pipe(dump=true) ::
+    if dump then
+        g.pipeline([ptb, mabc, sink], "clus_pipe-%s-%d"%[anode.name, face])
+    else
+        g.pipeline([ptb, mabc], "clus_pipe-%s-%d"%[anode.name, face]),
 };
 
 function () {
-    per_volume(anode, face=0) :: clus(anode, face=face).clus_pipe(),
+    per_volume(anode, face=0, dump=true) :: clus(anode, face=face).clus_pipe(dump),
 }

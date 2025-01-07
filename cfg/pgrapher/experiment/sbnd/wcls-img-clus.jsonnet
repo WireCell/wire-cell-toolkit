@@ -5,7 +5,7 @@ local wc = import "wirecell.jsonnet";
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 
 // added Ewerton 2023-09-06 
-local reality = 'sim'; // <- fixme put this in fcl!!
+local reality = std.extVar('reality');
 local params_maker =
 if reality == 'data' then import 'params.jsonnet'
 else import 'simparams.jsonnet';
@@ -28,13 +28,6 @@ local params = base {
 local tools_all = tools_maker(params);
 local tools = tools_all {anodes: [tools_all.anodes[n] for n in [0,1]]}; //added Ewerton 2023-09-08
 
-
-// added Ewerton 2023-09-08
-local wiener_label = std.extVar("input_wiener_label");
-local gauss_label = std.extVar("input_gauss_label");
-local badmasks_label = std.extVar("badmasks_inputTag");
-local threshold_label = std.extVar("threshold_tag");
-
 // must match name used in fcl
 local wcls_input = g.pnode({
     type: 'wclsCookedFrameSource', //added wcls Ewerton 2023-07-27
@@ -43,12 +36,11 @@ local wcls_input = g.pnode({
         nticks: params.daq.nticks,
         scale: 50,                             // scale up input recob::Wire by this factor
         frame_tags: ["orig"],                 // frame tags (only one frame in this module)
-        recobwire_tags: ["sptpc2d:gauss", "sptpc2d:wiener"],
-        trace_tags: ["gauss", "wiener"],
-        summary_tags: ["", "sptpc2d:wienersummary"],
-        input_mask_tags: ["sptpc2d:badmasks"],
-        output_mask_tags: ["bad"],
-        debug_channel: 6800                   // debug purposes. Deleteme later. 
+        recobwire_tags: std.extVar('recobwire_tags'), // ["sptpc2d:gauss", "sptpc2d:wiener"],
+        trace_tags: std.extVar('trace_tags'), // ["gauss", "wiener"],
+        summary_tags: std.extVar('summary_tags'), // ["", "sptpc2d:wienersummary"],
+        input_mask_tags: std.extVar('input_mask_tags'), // ["sptpc2d:badmasks"],
+        output_mask_tags: std.extVar('output_mask_tags'), // ["bad"],
     },
 }, nin=0, nout=1);
 
@@ -58,7 +50,7 @@ local img_pipes = [img_maker.per_anode(a, "multi-3view", add_dump = false) for a
 
 local clus = import 'pgrapher/experiment/sbnd/clus.jsonnet';
 local clus_maker = clus();
-local clus_pipes = [clus_maker.per_volume(tools.anodes[0], 0), clus_maker.per_volume(tools.anodes[1], 1)];
+local clus_pipes = [clus_maker.per_volume(tools.anodes[0], face=0, dump=true), clus_maker.per_volume(tools.anodes[1], face=1, dump=true)];
 
 local img_clus_pipe = [g.intern(
     innodes = [img_pipes[n]],
