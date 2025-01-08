@@ -37,13 +37,12 @@ local params = base {
     // Electron lifetime
     lifetime: std.extVar('lifetime') * wc.us,
     // Electron drift speed, assumes a certain applied E-field
-    // drift_speed: std.extVar('driftSpeed') * wc.mm / wc.us,    
+    // drift_speed: std.extVar('driftSpeed') * wc.mm / wc.us,
   },
 
-  files: super.files {
-    fields: [ std.extVar('files_fields'), ],
+ files: super.files {
+    fields: std.extVar('files_fields'),
   },
-
 
   rc_resp: if std.extVar('file_rcresp') != "" then
   {
@@ -178,12 +177,72 @@ local setdrifter = g.pnode({
             }
         }, nin=1, nout=1,
         uses=[drifter]);
+
+local localeLiftime = [std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us,std.extVar('lifetime') * wc.us];
+
+local drifters = [{
+        local xregions = wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes])),
+
+        type: "Drifter",
+	name: "drifter%d" %n, //%std.floor(n/45),
+        data: params.lar {
+            rng: wc.tn(tools.random),
+            xregions: xregions,
+            time_offset: params.sim.depo_toffset,
+            drift_speed: params.lar.drift_speed,
+            fluctuate: params.sim.fluctuate,
+
+            DL: params.lar.DL,
+            DT: params.lar.DT,
+            lifetime: localeLiftime[std.floor(n/45)],
+	    charge_scale: 1
+        },
+    } 
+    for n in std.range(0,359)];  
+
+local setdrifters = [g.pnode({
+                     type: 'DepoSetDrifter',
+		     name: 'setdrifters%d' %n, 
+                     data: {
+		              drifters: wc.tn(drifters[n])
+           		   }
+	             }, nin=1, nout=1,
+	             uses=[drifters[n]])
+		     for n in std.range(0,359)];
+
+local scalers = [{
+
+        type: "Scaler",
+	name: "scaler%d" %std.floor(n/45),
+        data: params.lar {
+	        	 yzmap_scale_filename: 'yzmap_gain_icarus_v0.json',
+			 bin_width:  10*wc.cm,
+			 tpc_width: 1500*wc.mm,
+			 bin_height: 10*wc.cm,
+                	 anode: wc.tn(tools.anodes[std.floor(n/45)]),
+		         plane: std.mod(std.floor(n/15),3)	
+        	       	 },
+		} 
+         for n in std.range(0,359)];
+
+local setscaler = [g.pnode({
+			type: 'DepoSetScaler',
+	        	name: 'setscaler%d' %n,
+            		data: {
+                	      scaler: wc.tn(scalers[n])
+           		       }
+        	  }, nin=1, nout=1,
+        	  uses=[scalers[n]])
+		  for n in std.range(0,359)];
+
+
 local bagger = sim.make_bagger();
+
 
 // signal plus noise pipelines
 //local sn_pipes = sim.signal_pipelines;
 // local sn_pipes = sim.splusn_pipelines;
-local analog_pipes = sim.analog_pipelines;
+local analog_pipes = sim.analog_pipelinesyz;
 
 local perfect = import 'pgrapher/experiment/icarus/chndb-base.jsonnet';
 local chndb = [{
@@ -301,6 +360,20 @@ local digitizers = [
     sim.digitizer(mega_anode, name="digitizer%d-" %n + mega_anode.name, tag="TPC%s"%volname[n])
     for n in std.range(0,3)];
 
+local reframer = [
+    g.pnode({
+            type: 'Reframer',
+            name: 'reframer-%d-'%n+mega_anode.name,
+            data: {
+                anode: wc.tn(mega_anode),
+                tags: "TPC%s"%volname[n],           // ?? what do?
+                fill: 0.0,
+                tbin: params.sim.reframer.tbin, 
+                toffset: 0,
+                nticks: params.sim.reframer.nticks,
+            },
+       }, nin=1, nout=1) for n in std.range(0, 3)];
+
 local retaggers = [
 g.pnode({
   type: 'Retagger',
@@ -326,14 +399,32 @@ local frame_summers = [
         type: 'FrameSummer',
         name: 'framesummer%d' %n,
         data: {
-            align: true,
-            offset: 0.0*wc.s,
+	    multiplicity: 90
         },
-    }, nin=2, nout=1) for n in std.range(0, 3)];
+    }, nin=90, nout=1) for n in std.range(0, 3)];
 
-local actpipes = [g.pipeline([noises[n], coh_noises[n], digitizers[n], /*retaggers[n],*/ wcls_output.sim_digits[n]], name="noise-digitizer%d" %n) for n in std.range(0,3)];
+local deposetfilteryz = [ g.pnode({
+            type: 'DepoSetFilterYZ',
+   	    name: 'deposetfilteryz_resp%d-'%std.mod(r,15)+'plane%d-'%std.mod(std.floor(r/15),3)+tools.anodes[std.floor(r/45)].name,
+            data: {
+	    	  yzmap_filename: 'yzmap_icarus_v0.json',
+		  bin_width:  10*wc.cm,
+		  tpc_width: 1500*wc.mm,
+		  bin_height: 10*wc.cm,
+		  resp: std.mod(r,15),	
+                  anode: wc.tn(tools.anodes[std.floor(r/45)]),
+		  plane: std.mod(std.floor(r/15),3)	
+            	  }
+        }, nin=1, nout=1,
+        uses=tools.anodes)
+	for r in std.range(0,359)];
+
 local util = import 'pgrapher/experiment/icarus/funcs.jsonnet';
 local outtags = ['orig%d' % n for n in std.range(0, 3)];
+
+local actpipes = [g.pipeline([reframer[n], noises[n], coh_noises[n], digitizers[n], /*retaggers[n],*/ wcls_output.sim_digits[n]], name="noise-digitizer%d" %n) for n in std.range(0,3)];
+local driftpipes = [g.pipeline([deposetfilteryz[n],setdrifters[n], setscaler[n], /*wcls_simchannel_sink[n]*/], name="depo-set-drifter%d" %n) for n in std.range(0,359)];
+local pipe_drift = util.fandrifter('DepoSetFanout', driftpipes, analog_pipes, frame_summers, actpipes, 'FrameFanin', 'fandrifter', outtags);
 local pipe_reducer = util.fansummer('DepoSetFanout', analog_pipes, frame_summers, actpipes, 'FrameFanin', 'fansummer', outtags);
 
 // local retagger = g.pnode({
@@ -356,9 +447,13 @@ local pipe_reducer = util.fansummer('DepoSetFanout', analog_pipes, frame_summers
 //local frameio = io.numpy.frames(output);
 local sink = sim.frame_sink;
 
+
+
 // local graph = g.pipeline([wcls_input.depos, drifter,  wcls_simchannel_sink.simchannels, bagger, pipe_reducer, retagger, wcls_output.sim_digits, sink]);
 //local graph = g.pipeline([wcls_input.depos, drifter,  wcls_simchannel_sink, bagger, pipe_reducer, sink]);
-local graph = g.pipeline([wcls_input.deposet, setdrifter, wcls_simchannel_sink_old, wcls_simchannel_sink, pipe_reducer, sink]);
+//local graph = g.pipeline([wcls_input.deposet, setdrifter, wcls_simchannel_sink_old, wcls_simchannel_sink, pipe_reducer, sink]);
+
+local graph = g.pipeline([wcls_input.deposet,pipe_drift, sink]);
 
 local app = {
   type: 'Pgrapher',

@@ -19,6 +19,8 @@ Graph::Graph()
 
 void Graph::add_node(Node* node) { m_nodes.insert(node); }
 
+void Graph::set_enable_em(bool flag) { m_enable_em = flag; }
+
 bool Graph::connect(Node* tail, Node* head, size_t tpind, size_t hpind)
 {
     Port& tport = tail->output_ports()[tpind];
@@ -122,7 +124,9 @@ bool Graph::execute()
             m_nodes_timer[node] += (std::clock() - start) / (double) CLOCKS_PER_SEC;
 
             if (ok) {
-                m_em(format("called %d: %s", count, node->ident()));
+                if (m_enable_em) {
+                  m_em(format("called %d: %s", count, node->ident()));
+                }
                 SPDLOG_LOGGER_TRACE(l, "ran node {}: {}", count, node->ident());
                 did_something = true;
                 break;  // start again from bottom of graph

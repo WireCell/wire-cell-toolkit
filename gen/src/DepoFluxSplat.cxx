@@ -58,6 +58,8 @@ WireCell::Configuration Gen::DepoFluxSplat::default_configuration() const
     cfg["reference_time"] = 0;
     cfg["time_offsets"] = Json::arrayValue;
 
+    cfg["process_planes"] = Json::arrayValue;
+
     cfg["smear_long"] = 0.0;
     cfg["smear_tran"] = 0.0;
 
@@ -115,6 +117,16 @@ void Gen::DepoFluxSplat::configure(const WireCell::Configuration& cfg)
 
     // Gaussian cut-off.
     m_nsigma = get(cfg, "nsigma", m_nsigma);
+
+    //Check which plane to work on
+    m_process_planes = {0,1,2};
+
+    if (cfg.isMember("process_planes")) {
+	m_process_planes.clear();
+	for (auto jplane : cfg["process_planes"]) {
+	    m_process_planes.push_back(jplane.asInt());
+	}
+    }
 
     // Additional smearing.
     m_smear_long = get_n(cfg["smear_long"]);
@@ -292,6 +304,10 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
             if (iplane < 0) {
                 ++nplanes_skipped;
                 continue;
+            }
+	    
+	    if (std::find(m_process_planes.begin(),  m_process_planes.end(), iplane) == m_process_planes.end()) {
+		continue;
             }
 
             // Allow for extra smear in time unique to each plane.

@@ -145,6 +145,34 @@ function(params)
             uses: [$.dft, fr, $.elec_resp[plane], $.rc_resp, $.sys_resp],
         } for plane in [0,1,2]], $.fields),
 
+    pirs_n : std.mapWithIndex(function (n, fr) [
+        {
+            type: "PlaneImpactResponse",
+            name : "PIR%splane%d" % [fr.name, plane],
+            data : sim_response_binning {
+                plane: plane,
+                dft: wc.tn($.dft),
+                field_response: wc.tn(fr),
+                // note twice we give rc so we have rc^2 in the final convolution
+                short_responses: if params.sys_status == false
+                                    then [wc.tn($.elec_resp[plane])]
+                                     else [wc.tn($.elec_resp[plane]), wc.tn($.sys_resp)],
+		overall_short_padding: if std.objectHas(params, 'overall_short_padding')
+                                    then params.overall_short_padding
+                                    else if params.sys_status == false
+                                    then 0.1*wc.ms
+                                    // cover the full time range of the convolved short responses
+                                    else 0.1*wc.ms - params.sys_resp.start,
+		// long_responses: [wc.tn($.rc_resp), wc.tn($.rc_resp)],
+        long_responses: if std.objectHas(params, 'rc_resp')
+        then std.makeArray(params.rc_resp.rc_layers, function(x) wc.tn($.rc_resp))
+        else [wc.tn($.rc_resp), wc.tn($.rc_resp)],
+		long_padding: 1.5*wc.ms,
+	    },
+            uses: [$.dft, fr, $.elec_resp[plane], $.rc_resp, $.sys_resp],
+        } for plane in [0,1,2]], $.fields),
+
+
     // One anode per detector "volume"
     anodes : [{
         type : "AnodePlane",

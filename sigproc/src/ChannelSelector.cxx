@@ -83,6 +83,9 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
     size_t ntags = m_tags.size();
     if (!ntags) {
         tracesvin.push_back(Aux::untagged_traces(in));
+        summariesvin.push_back({});
+        log->warn("Untagged summary not supported, summary will be dropped.");
+        // FIXME: need to support summary for untagged traces
         // ntraces += tracesvin[0].size();
     }
     else {

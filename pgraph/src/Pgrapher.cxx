@@ -50,6 +50,7 @@ void Pgrapher::configure(const WireCell::Configuration& cfg)
 
 {
     m_verbosity = get(cfg, "verbosity", m_verbosity);
+    m_graph.set_enable_em((m_verbosity == 2));
 
     Pgraph::Factory fac;
     log->debug("connecting: {} edges", cfg["edges"].size());

@@ -12,6 +12,7 @@
 using namespace WireCell;
 using namespace WireCell::Gen;
 using spdlog::debug;
+using spdlog::info;
 
 class DumbDepo : public WireCell::IDepo {
 public:
@@ -36,7 +37,8 @@ private:
 static void common_setup()
 {
     PluginManager& pm = PluginManager::instance();
-    pm.add("WireCellGen");
+    WireCell::Plugin* pi = pm.add("WireCellGen");
+    REQUIRE(pi != nullptr);
     {
         auto icfg = Factory::lookup<IConfigurable>("Random");
         auto cfg = icfg->default_configuration();
@@ -182,4 +184,34 @@ TEST_CASE("drifter bent cathode")
     common_setup();
     test_bent(+1);
     test_bent(-1);
+}
+
+TEST_CASE("drifter null face")
+{
+    common_setup();
+
+    Drifter drifter;
+    Configuration cfg = drifter.default_configuration();
+    cfg["xregions"][0]["cathode"] = 2*units::meter;
+    cfg["xregions"][0]["response"] = 10*units::cm;
+    cfg["xregions"][0]["anode"] = 0;
+    cfg["xregions"][1] = Json::nullValue;
+    drifter.configure(cfg);
+
+    struct Trial { double x; bool in; };
+
+    std::vector<Trial> trials = {
+        {3*units::meter, false}, // behind cathode
+        {1*units::meter, true},  // inside drift region
+        {5*units::cm, true},     // in response region
+        {-5*units::cm, false},   // behind anode
+    };
+
+    for (auto& [x,want] : trials) {
+        const Point pt(x,0,0);
+        auto depo = std::make_shared<DumbDepo>(pt);
+        bool got = drifter.insert(depo);
+        debug("test point x={} want={} got={}", x, want, got);
+        CHECK(got == want);
+    }
 }

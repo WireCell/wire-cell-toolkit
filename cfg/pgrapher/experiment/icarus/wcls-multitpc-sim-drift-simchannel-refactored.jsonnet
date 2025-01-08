@@ -1,6 +1,5 @@
-// Same configuration as in wcls-sim-drift-simchannel.jsonnet
-// except that this produces four instances of std::vector<RawDigits>
-// one per physics module (WW, WE, EE, EW) in ICARUS
+// Same configuration as in wcls-multitpc-sim-drift-simchannel.jsonnet
+// except the sed_label variable name in wclsDepoFluxWriter set to 'ionization'
 
 local g = import 'pgraph.jsonnet';
 local f = import 'pgrapher/common/funcs.jsonnet';
@@ -37,13 +36,11 @@ local params = base {
     // Electron lifetime
     lifetime: std.extVar('lifetime') * wc.us,
     // Electron drift speed, assumes a certain applied E-field
-    // drift_speed: std.extVar('driftSpeed') * wc.mm / wc.us,    
+    // drift_speed: std.extVar('driftSpeed') * wc.mm / wc.us,
   },
-
   files: super.files {
     fields: [ std.extVar('files_fields'), ],
   },
-
 
   rc_resp: if std.extVar('file_rcresp') != "" then
   {
@@ -97,7 +94,7 @@ local wcls_input = {
         	data: {
             	model: "",
             	scale: -1, //scale is -1 to correct a sign error in the SimDepoSource converter.
-            	art_tag: "ionization", //name of upstream art producer of depos "label:instance:processName"
+		art_tag: "ionization", //name of upstream art producer of depos "label:instance:processName"
             	assn_art_tag: "",
               id_is_track: false,    // Use this for "id-is-index" in the output
         	},
@@ -260,7 +257,7 @@ local wcls_simchannel_sink =
       time_offsets: [std.extVar('time_offset_u') * wc.us, std.extVar('time_offset_v') * wc.us, std.extVar('time_offset_y') * wc.us],
 
       // input from art::Event
-      sed_label: 'largeant:TPCActive',
+      sed_label: 'ionization',
 
       // output to art::Event
       simchan_label: 'simpleSC',

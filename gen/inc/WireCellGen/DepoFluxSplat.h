@@ -96,6 +96,9 @@ namespace WireCell::Gen {
         /// traces for a given plane.
         std::vector<int> m_tick_offsets;
 
+
+	std::vector<int> m_process_planes {0,1,2};
+
         /// smear_tran - Extra smearing applied to the depo in the
         /// transverse direction of each plane.  This given in units of
         /// pitch (ie, smear_tran=2.0 would additionally smear over 2

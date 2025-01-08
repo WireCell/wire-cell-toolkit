@@ -55,6 +55,7 @@ Gen::Drifter::Drifter()
   , m_fluctuate(true)
   , m_speed(1.6 * units::mm / units::us)
   , m_toffset(0.0)
+  , m_scale_factor(1.0)
   , n_dropped(0)
   , n_drifted(0)
 {
@@ -71,6 +72,7 @@ WireCell::Configuration Gen::Drifter::default_configuration() const
     cfg["fluctuate"] = m_fluctuate;
     cfg["drift_speed"] = m_speed;
     cfg["time_offset"] = m_toffset;
+    cfg["charge_scale"] = m_scale_factor;
 
     // see comments in .h file
     cfg["xregions"] = Json::arrayValue;
@@ -90,6 +92,7 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
     m_fluctuate = get<bool>(cfg, "fluctuate", m_fluctuate);
     m_speed = get<double>(cfg, "drift_speed", m_speed);
     m_toffset = get<double>(cfg, "time_offset", m_toffset);
+    m_scale_factor = get<double>(cfg, "charge_scale", m_scale_factor);
 
     auto jxregions = cfg["xregions"];
     if (jxregions.empty()) {
@@ -177,7 +180,7 @@ bool Gen::Drifter::insert(const input_pointer& depo)
     }
 
     auto newdepo = make_shared<Aux::SimpleDepo>(depo->time() + direction * dt + m_toffset,
-                                                pos, Qf, depo, dL, dT, depo->id());
+                                                pos, Qf*m_scale_factor, depo, dL, dT, depo->id());
     xrit->depos.insert(newdepo);
     return true;
 }

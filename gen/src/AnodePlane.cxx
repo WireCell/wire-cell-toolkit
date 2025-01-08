@@ -162,14 +162,14 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
             sensitive_face = false;
             log->debug("anode {} face {} is not sensitive", m_ident, iface);
         }
-        if (!jface["response"].isNumeric() or !jface["anode"].isNumeric()) {
+        else if (!jface["response"].isNumeric() or !jface["anode"].isNumeric()) {
             log->critical("Non-scalar value for response_x or anode_x is not supported.");
             THROW(ValueError() << errmsg{"AnodePlane: error in configuration, expect scalar values for response_x and anode_x."});
         }
         const double response_x = jface["response"].asDouble();
         const double anode_x = get(jface, "anode", response_x);
         // const double cathode_x = jface["cathode"].asDouble();
-        double cathode_xref=0;
+        double cathode_xref = response_x; // illegal/insensitive
         if (jface["cathode"].isNumeric()) {
             cathode_xref = jface["cathode"].asDouble();
         }
@@ -177,6 +177,9 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
             auto xvec = get<std::vector<double>>(jface["cathode"], "x");
             const auto [vmin, vmax] = std::minmax_element(xvec.begin(), xvec.end());
             cathode_xref = *vmin < response_x ? *vmin : *vmax;
+        }
+        else {
+            log->warn("No 'cathode' location defined for xregion, making short drift for face {} anode {}", iface, m_ident);
         }
         const double cathode_x = cathode_xref;
 
