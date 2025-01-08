@@ -2,6 +2,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/Persist.h"
 
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
@@ -39,6 +40,9 @@ Gen::Drifter::Xregion::Xregion(Configuration cfg)
     , bulk(*response, *cathode)
     , near(*anode, *response)
 {
+}
+Gen::Drifter::Xregion::operator bool() const {
+    return anode && response && cathode;
 }
 
 Gen::Drifter::Drifter()
@@ -98,6 +102,10 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
     for (auto jone : jxregions) {
         if (!jone.isNull()) {
           m_xregions.emplace_back(Xregion(jone));
+          if (! m_xregions.back()) {
+              raise<ValueError>("Incomplete Xregion from cfg: %s",
+                                Persist::dumps(jone));
+          }
         }
     }
     log->debug("time offset: {} ms, drift speed: {} mm/us", m_toffset / units::ms,

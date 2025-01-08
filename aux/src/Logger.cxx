@@ -34,12 +34,12 @@ void Aux::Logger::set_name(const std::string& name)
 {
     m_iname = name;
 
-    std::string lname = m_gname + "/" + m_tname + ":" + m_iname;
+    std::string lname = m_gname + "/" + m_tname + "/" + m_iname;
 
     log = Log::logger(lname, false); // uniqe sinks so we can set unique pattern
 
     std::stringstream ss;
-    ss << "[%H:%M:%S.%03e] %L [" << centered(m_gname, 8) << "] <" << m_tname << ":" << m_iname << "> %v";
+    ss << "[%H:%M:%S.%03e] %L [" << centered(m_gname, 8) << "] <" << m_tname << ":" << m_iname << "> %v %@";
 
     log->set_pattern(ss.str());
 

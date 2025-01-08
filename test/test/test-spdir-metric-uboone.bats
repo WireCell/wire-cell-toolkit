@@ -37,7 +37,8 @@ mb_theta_y_deg=( 90 90 90 90 90 90 90 90 90 90 90 90 90 90 )
 theta_xz_deg=( ${mb_theta_xz_deg[@]} )
 theta_y_deg=( ${mb_theta_y_deg[@]} )
 ndirs="${#theta_xz_deg[@]}"
-directions=$(seq 0 $(( $ndirs - 1 )))
+readarray -t directions < <(seq 0 $(( $ndirs - 1 )))
+#directions=$(seq 0 $(( $ndirs - 1 )))
 
 function generate_depos ()
 {
@@ -64,7 +65,7 @@ function generate_depos ()
 @test "spdir metric uboone generate depos" {
     cd_tmp file
 
-    for num in $directions
+    for num in ${directions[*]}
     do
         generate_depos $num
     done

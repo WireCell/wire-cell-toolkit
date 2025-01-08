@@ -1,5 +1,8 @@
 #include "WireCellUtil/Interpolate.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <boost/math/interpolators/cardinal_cubic_b_spline.hpp>
+#pragma GCC diagnostic pop
 
 #include <iomanip>
 #include <iostream>

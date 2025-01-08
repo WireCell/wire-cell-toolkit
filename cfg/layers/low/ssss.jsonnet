@@ -31,6 +31,9 @@ function(nominal,
     ssss_nominal: nominal,
     ssss_smeared: smeared,
 
+    // Used for test-spdir-metric-pdsp.bats
+    spdir: nominal,
+
     // Used for test/scripts/spdir 
     spdir_lofr: smeared {
         detector_data: super.detector_data {

@@ -37,29 +37,29 @@ namespace WireCell {
 
         // IWire
         struct Wire {
-            int ident;
-            int channel;
-            int segment;
+            int ident{0};
+            int channel{0};
+            int segment{0};
             Point tail, head;  // end points, direction of signal to channel
         };
 
         struct Plane {
-            int ident;
+            int ident{0};
             std::vector<int> wires;
         };
 
         struct Face {
-            int ident;
+            int ident{0};
             std::vector<int> planes;
         };
 
         struct Anode {
-            int ident;
+            int ident{0};
             std::vector<int> faces;
         };
 
         struct Detector {
-            int ident;
+            int ident{0};
             std::vector<int> anodes;
         };
 

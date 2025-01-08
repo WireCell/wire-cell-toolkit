@@ -52,7 +52,7 @@ bool DepoSetFilter::operator()(const input_pointer& in, output_pointer& out)
     auto indepos = in->depos();
     for (auto idepo : *indepos) {
         for (auto box : m_boxes) {
-            WireCell::Ray r = box.bounds();
+            // WireCell::Ray r = box.bounds();
             if (! box.inside(idepo->pos())) {
                 continue;
             }

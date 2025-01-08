@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# Upload a Bee zip file to Bee on twister (current default).
+#
+# Will load result in web browser or print to stdout the URL.
+# Other messages may go to stderr.
+#
+# usage: bee-upload bee.zip|bee_dir/
+
+# set -x
+bee_url=https://www.phy.bnl.gov/twister/bee
+
+cache=$HOME/.cache/bee-upload
+mkdir -p $cache
+log="$cache/log"
+cookies="$cache/cookies.txt"
+curl_cmd="curl -k -s -c $cookies -b $cookies -e $bee_url"
+
+bee-login () {
+    $curl_cmd $bee_url >> $log 2>&1
+    if [ "$?" != 0 ] ; then
+        echo "bee login failed, see $log" 1>&2
+        exit 1
+    fi
+}
+
+bee-token () {
+    if [ ! -f "$cookies" ] ; then
+        bee-login
+    fi
+    grep csrftoken "$cookies" | sed 's/^.*csrftoken\s*//'
+}
+
+bee-zip () {
+    local data="${1:-data}"
+    local dir="$(mktemp -d /tmp/bee-upload.XXXXX)"
+    zip -r "$dir/bee.zip" "$data"  >> $log
+    if [ "$?" = 0 ] ; then
+        echo "$dir/bee.zip" 1>&2
+        return
+    fi
+    exit 1
+}
+
+bee-upload () {
+    local token=$(bee-token)
+    local filename="$1"
+    got="$($curl_cmd -H "X-CSRFToken: $token" -F "file=@$filename" $bee_url/upload/)"
+    if [ "$?" = 0 ] ; then
+        echo "$bee_url/set/$got/event/list/"
+        return
+    fi
+    echo $got  1>&2
+    exit 1
+}
+
+bee-main () {
+    local input="${1:-data}"
+
+    if [ -z "$input" ] ; then
+        echo "no input" 1>&2
+        exit 1
+    fi
+    if [ ! -e "$input" ] ; then
+        echo "input does not exist: $input" 1>&2
+        exit 1
+    fi
+
+    # deal with case we are given bee dir instead of bee zip
+    local purge=""
+    if [ -d "$input" ] ; then
+        input=$(bee-zip "$input")
+        purge="$input"
+    fi
+    
+    local url=$(bee-upload $input)
+    if [ -n "$purge" ] ; then
+        rm "$input"
+        rmdir "$(dirname $input)"
+    fi
+
+    if [ -z "$url" ] ; then
+        echo "upload failed" 1>&2
+        exit 2
+    fi
+
+    if [ -n "$BROWSER" ] ; then
+        echo "opening in your browser: $url" 1>&2
+        "$BROWSER" "$url" 1>&2
+    else
+        echo "$url"
+    fi
+}
+
+bee-main $@
+    

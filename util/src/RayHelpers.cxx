@@ -36,7 +36,7 @@ ray_pair_vector_t RayGrid::symmetric_raypairs(double width, double height, doubl
     const Ray rayv1(ll + why * mjumpv2 / (why.dot(pjumpv)), ll + zee * mjumpv2 / (zee.dot(pjumpv)));
 
     // |-wires
-    const Vector dw = why;
+    // const Vector dw = why;
     const Vector pw = zee;
     const Vector pjumpw = pitch_mag * pw;
     const Ray rayw0(ll + 0.0 * pjumpw, ul + 0.0 * pjumpw);

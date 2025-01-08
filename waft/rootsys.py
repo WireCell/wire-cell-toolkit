@@ -1,7 +1,7 @@
 import os
 import os.path as osp
 import waflib
-import waflib.Utils
+from waflib.Utils import to_list
 from waflib.Configure import conf
 from waflib.Logs import debug
 
@@ -62,16 +62,17 @@ def gen_rootcling_dict(bld, name, linkdef, headers = '', includes = '', use=''):
     '''
     rootcling -f NAMEDict.cxx -rml libNAME.so -rmf libNAME.rootmap myHeader1.h myHeader2.h ... LinkDef.h
     '''
-    use = waflib.Utils.to_list(use) + ['ROOTSYS']
-    includes = waflib.Utils.to_list(includes)
-    for u in use:
-        more = bld.env['INCLUDES_'+u]
-        debug('root: USE(%s)=%s: %s' % (name, u, more))
-        includes += more
+    use = to_list(use) + ['ROOTSYS']
+    includes = to_list(includes)
+    # for u in use:
+    #     more = bld.env['INCLUDES_'+u]
+    #     debug('root: USE(%s)=%s: %s' % (name, u, more))
+    #     includes += more
 
     # make into -I...
     incs = list()
     for inc in includes:
+        debug(f'root: INC({name}): {inc}')
         if inc.startswith('/'):
             newinc = '-I%s' % inc
         else:
@@ -91,8 +92,9 @@ def gen_rootcling_dict(bld, name, linkdef, headers = '', includes = '', use=''):
 
     if type(linkdef) == type(""):
         linkdef = bld.path.find_resource(linkdef)
-    source_nodes = headers + [linkdef]
+    source_nodes = to_list(headers) + [linkdef]
     sources = ' '.join([x.abspath() for x in source_nodes])
+    debug(f'root: SOURCES({name}): {sources}')
     rule = '${ROOTCLING} -f ${TGT[0].abspath()} -rml %s -rmf ${TGT[1].abspath()} %s %s' % (dict_lib, incs, sources)
     bld(source = source_nodes,
         target = [dict_src, dict_map, dict_pcm],
@@ -112,8 +114,8 @@ def gen_rootcint_dict(bld, name, linkdef, headers = '', includes=''):
     '''Generate a rootcint dictionary, compile it to a shared lib,
     produce its rootmap file and install it all.
     '''
-    headers = waflib.Utils.to_list(headers)
-    incs = ['-I%s' % bld.path.find_dir(x).abspath() for x in waflib.Utils.to_list(includes)]
+    headers = to_list(headers)
+    incs = ['-I%s' % bld.path.find_dir(x).abspath() for x in to_list(includes)]
     incs = ' '.join(incs)
     
     dict_src = name + 'Dict.cxx'

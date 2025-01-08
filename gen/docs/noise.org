@@ -112,3 +112,9 @@ This spectral mean must be reduced to the spectral mode by multiplying by $\sqrt
 
 
 
+* Meta :noexport:
+
+
+#+begin_src sh :results none
+scp -r noise.html noise.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

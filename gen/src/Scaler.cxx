@@ -95,8 +95,6 @@ bool Gen::Scaler::operator()(const input_pointer& depo, output_queue& outq)
   }
 
   for (auto box : m_boxes) {
-    WireCell::Ray r = box.bounds();
-
     if (box.inside(depo->pos()) == false) {
       return false;
     }

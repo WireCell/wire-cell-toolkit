@@ -20,6 +20,7 @@ using namespace std;
 using namespace WireCell;
 
 namespace WireCell {
+    /// fixme: why invent TracelessFrame instead of using SimpleFrame with no traces?
     class TracelessFrame : public IFrame {
        public:
         TracelessFrame(int ident, double time = 0, double tick = 0.5 * units::microsecond)
@@ -69,6 +70,9 @@ WireCell::Configuration Img::MaskSliceBase::default_configuration() const
     // Used to judge active or not
     cfg["wiener_tag"] = m_wiener_tag;
 
+    // Used to judge active or not
+    cfg["summary_tag"] = m_summary_tag;
+
     // Assign charge for activities
     cfg["charge_tag"] = m_charge_tag;
 
@@ -113,6 +117,7 @@ void Img::MaskSliceBase::configure(const WireCell::Configuration& cfg)
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());  // throws
     m_tick_span = get(cfg, "tick_span", m_tick_span);
     m_wiener_tag = get<std::string>(cfg, "wiener_tag", m_wiener_tag);
+    m_summary_tag = get<std::string>(cfg, "summary_tag", m_wiener_tag); // if not given, use wiener_tag
     m_charge_tag = get<std::string>(cfg, "charge_tag", m_charge_tag);
     m_error_tag = get<std::string>(cfg, "error_tag", m_error_tag);
     m_dummy_charge = get<double>(cfg, "dummy_charge", m_dummy_charge);
@@ -224,6 +229,7 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
         return;
     }
 
+    /// fixme: this should be created once in the calling function and given to each slice.
     // needed by ISlice
     auto tlframe = new TracelessFrame(in->ident(), in->time(), in->tick());
     auto tlframe_ptr = IFrame::pointer(tlframe);
@@ -265,9 +271,9 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
     }
 
     // get RMS for traces
-    auto const& summary = in->trace_summary(m_wiener_tag);
+    auto const& summary = in->trace_summary(m_summary_tag);
     if (summary.size()!=wiener_traces.size()) {
-        log->error("size unmatched for tag \"{}\", trace: {}, summary: {}. needed for threshold calc.", m_wiener_tag, wiener_traces.size(), summary.size());
+        log->error("size unmatched for tag \"{}\", trace: {}, summary: {}. needed for threshold calc.", m_summary_tag, wiener_traces.size(), summary.size());        
         THROW(RuntimeError() << errmsg{"size unmatched"});
     }
 
@@ -371,6 +377,7 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
 
     // masked slices
     auto cmm = in->masks()["bad"];
+    log->debug("cmm.size(): {}", cmm.size());
     for (auto ch_tbins : cmm) {
         const int chid = ch_tbins.first;
         const auto& tbins = ch_tbins.second;

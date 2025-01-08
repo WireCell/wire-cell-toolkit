@@ -2,7 +2,10 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Testing.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include "WireCellUtil/svg.hpp"
+#pragma GCC diagnostic pop
 
 #include <iostream>
 
@@ -147,7 +150,7 @@ int main(int argc, char* argv[])
 
             
             auto w1 = ws.front();
-            auto w2 = ws.back();
+            // auto w2 = ws.back();
             // w1.tail.x(0); w1.head.x(0); w2.tail.x(0); w2.head.x(0);
 
             auto half1 = 0.5*(w1.tail + w1.head);

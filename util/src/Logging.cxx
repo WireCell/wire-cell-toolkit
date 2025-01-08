@@ -1,4 +1,5 @@
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/String.h"
 
 
 #include "spdlog/sinks/basic_file_sink.h"
@@ -8,6 +9,7 @@
 #include "spdlog/cfg/env.h"
 
 #include <vector>
+#include <unordered_map>
 
 using namespace WireCell;
 
@@ -110,6 +112,8 @@ void Log::add_stderr(bool color, std::string level)
     }
 }
 
+static std::vector<std::string> g_needs_level;
+
 Log::logptr_t Log::logger(std::string name, bool shared_sinks)
 {
     wct_base_logger();  // make sure base logger is installed.
@@ -135,6 +139,8 @@ Log::logptr_t Log::logger(std::string name, bool shared_sinks)
         // l = std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
     }
 
+    g_needs_level.push_back(name);
+
     // peak under the hood of spdlog.  We want shared loggers to
     // get configured with the default level.
     try {
@@ -148,8 +154,12 @@ Log::logptr_t Log::logger(std::string name, bool shared_sinks)
     return l;
 }
 
+static std::unordered_map<std::string, std::string> g_has_level;
+
 void Log::set_level(std::string level, std::string which)
 {
+    g_has_level[which] = level;
+
     auto lvl = spdlog::level::from_str(level);
 
     if (which.empty()) {
@@ -158,6 +168,33 @@ void Log::set_level(std::string level, std::string which)
     }
     logger(which)->set_level(lvl);
 }
+
+void Log::fill_levels()
+{
+    std::vector<std::string> has;
+    for (auto it : g_has_level) {
+        has.push_back(it.first);
+    }
+
+    // biggest first.
+    std::sort(has.begin(), has.end(), [](const std::string& a, const std::string& b) {
+        if (a.size() < b.size()) return false;
+        if (a.size() > b.size()) return true;
+        return a == b;          // tie breaker
+    });
+
+    for (const std::string& lname : g_needs_level) {
+        for (const std::string& maybe : has) {
+            if (lname.size() <= maybe.size()) continue;
+            if (String::startswith(lname, maybe)) {
+                auto lvl = spdlog::level::from_str(g_has_level[maybe]);
+                spdlog::get(lname)->set_level(lvl);
+            }
+        }
+    }
+
+}
+
 
 void Log::set_pattern(std::string pattern, std::string which)
 {

@@ -1,5 +1,7 @@
 #include "WireCellUtil/Configuration.h"
 
+#include <boost/container_hash/hash.hpp>
+
 using namespace WireCell;
 using namespace std;
 
@@ -46,4 +48,11 @@ WireCell::Configuration WireCell::append(Configuration& a, Configuration& b)
         ret.append(x);
     }
     return ret;
+}
+
+size_t WireCell::hash(const Configuration& cfg)
+{
+    std::stringstream ss;
+    ss << cfg;
+    return std::hash<std::string>{}(ss.str());
 }

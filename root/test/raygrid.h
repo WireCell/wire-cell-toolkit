@@ -35,7 +35,7 @@ ray_pair_vector_t make_raypairs(double width, double height, double pitch_mag, d
     const Ray rayv1(ll + why * mjumpv2 / (why.dot(pjumpv)), ll + zee * mjumpv2 / (zee.dot(pjumpv)));
 
     // |-wires
-    const Vector dw = why;
+    /* const Vector dw = why; */
     const Vector pw = zee;
     const Vector pjumpw = pitch_mag * pw;
     const Ray rayw0(ll + 0.0 * pjumpw, ul + 0.0 * pjumpw);

@@ -24,7 +24,6 @@ namespace WireCell::NaryTree {
 
         // Called when a Node is constructed on a Notified.
         virtual void on_construct(node_type* node) {
-            // std::cerr << "defaulting action: constructed\n";
         }
 
         // Called when a Node with a Notified is inserted.  The path
@@ -32,7 +31,6 @@ namespace WireCell::NaryTree {
         // and ending with the Node holding the Notified being called.
         // Return true to continue propagating toward the root node.
         virtual bool on_insert(const std::vector<node_type*>& path) {
-            // std::cerr << "defaulting action: inserted\n";
             return true;
         }
 
@@ -41,50 +39,38 @@ namespace WireCell::NaryTree {
         // and ending with the Node holding the Notified being called. 
         // Return true to continue propagating toward the root node.
         virtual bool on_remove(const std::vector<node_type*>& path) {
-            // std::cerr << "defaulting action: removing\n";
             return true;
         }
 
+        // Called when a Node with a Notified has its children ordered.  The
+        // path holds a sequence of Nodes starting with the ordered node and
+        // ending with the Node holding the Notified being called.  Return true
+        // to continue propagating toward the root node.
+        virtual bool on_ordered(const std::vector<node_type*>& path) {
+            return true;
+        }
       public:
 
-        // This is the hook that Node will call.  Note, Node will use template
-        // tests to determine if the this method exists in the Value type.
+        // Dispatch a notification to corresponding "on_*()" method.
         //
-        // A subclass may override this, for example to intercept all
-        // notifications.
-        virtual void notify(node_type* node, Action action) {
-            // std::cerr << "NaryTree::Notified::notify(" << (void*)node << "," << action << ")\n";
-            if (action == Action::constructed) {
-                on_construct(node);
-                return;
+        virtual bool notify(std::vector<node_type*> path, Action action) {
+
+            if (path.size() == 1 && action == Action::constructed) {
+                on_construct(path.back());
+                return true;    // assume caller mediates propagation 
             }
-            std::vector<node_type*> path = { node };
             if (action == Action::inserted) {
-                propagate_insert_(path);
-                return;
+                return on_insert(path);
             }
             if (action == Action::removing) {
-                propagate_remove_(path);
-                return;
+                return on_remove(path);
             }
+            if (action == Action::ordered) {
+                return on_ordered(path);
+            }
+            return false;       // fixme:  add exception?  warning?
         }
-
-      private:
-        void propagate_insert_(std::vector<node_type*> path) {
-            if (! on_insert(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_insert_(path);
-        }
-
-        void propagate_remove_(std::vector<node_type*> path) {
-            if (! on_remove(path)) return; // notify subclass
-            node_type* node = path.back();
-            if (!node->parent) return;
-            path.push_back(node->parent);
-            node->parent->value.propagate_remove_(path);
-        }
+        
     };
 }
 #endif

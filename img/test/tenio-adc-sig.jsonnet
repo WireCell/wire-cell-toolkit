@@ -7,7 +7,8 @@ function(detector, variant="nominal",
          outfiles="frames-sig-%(anode)s.npz",
          anode_iota=null)
 
-    local mid = high.mid(detector, variant, options={sparse:false});
+    local params = high.params(detector, variant);  
+    local mid = high.api(detector, params, options={sparse:false});
 
     local anodes = mid.anodes();
     local iota = if std.type(anode_iota) == "null" then std.range(0, std.length(anodes)-1) else anode_iota;
@@ -18,8 +19,8 @@ function(detector, variant="nominal",
         pg.pipeline([
             high.fio.frame_tensor_file_source(std.format(infiles, acfg)),
 
-            mid.sigproc.nf(anode),
-            mid.sigproc.sp(anode),
+            mid.nf(anode),
+            mid.sp(anode),
 
             high.fio.frame_tensor_file_sink(std.format(outfiles, acfg)),
 

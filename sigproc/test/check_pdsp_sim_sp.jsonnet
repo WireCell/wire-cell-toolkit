@@ -78,11 +78,30 @@ local nf_maker = import 'pgrapher/experiment/pdsp/nf.jsonnet';
 local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n) for n in anode_iota];
 
 local sp_maker = import 'pgrapher/experiment/pdsp/sp.jsonnet';
-local sp = sp_maker(params, tools, {sparse: false});
+local sp_override = {
+    sparse: false,
+    use_roi_debug_mode: false,
+    save_negtive_charge: false,
+    use_multi_plane_protection: false,
+    mp_tick_resolution: 10,
+};
+local sp = sp_maker(params, tools, sp_override);
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
 
-local magoutput = 'protodune-sim-check-wct.root';
-local magnify = import 'pgrapher/experiment/pdsp/magnify-sinks.jsonnet';
+
+local dnnroi = import 'pgrapher/experiment/dune-vd/dnnroi.jsonnet';
+local ts = {
+    type: "TorchService",
+    name: "dnnroi",
+    data: {
+        model: "ts-model/unet-l23-cosmic500-e50.ts",
+        device: "gpucpu",
+        concurrency: 1,
+    },
+};
+
+local magoutput = 'mag.root';
+local magnify = import 'pgrapher/experiment/dune-vd/magnify-sinks.jsonnet';
 local sinks = magnify(tools, magoutput);
 
 local sio_sinks = g.pnode({
@@ -94,6 +113,31 @@ local sio_sinks = g.pnode({
         },
     }, nin=1, nout=0);
 
+local hio_sp = [g.pnode({
+      type: 'HDF5FrameTap',
+      name: 'hio_sp%d' % n,
+      data: {
+        anode: wc.tn(tools.anodes[n]),
+        trace_tags: ['loose_lf%d' % n 
+        , 'tight_lf%d' % n 
+        , 'cleanup_roi%d' % n 
+        , 'break_roi_1st%d' % n 
+        , 'break_roi_2nd%d' % n 
+        , 'shrink_roi%d' % n 
+        , 'extend_roi%d' % n 
+        , 'mp3_roi%d' % n 
+        , 'mp2_roi%d' % n 
+        , 'decon_charge%d' % n 
+        , 'gauss%d' % n], 
+        filename: "g4-rec-%d.h5" % n,
+        // chunk: [1, 1], // ncol, nrow
+        gzip: 2,
+        high_throughput: true,
+      },
+    }, nin=1, nout=1),
+    for n in std.range(0, std.length(tools.anodes) - 1)
+];
+
 local multipass = [
     g.pipeline([
         sn_pipes[n],
@@ -101,8 +145,11 @@ local multipass = [
         // sio_sinks[n],
         // nf_pipes[n],
         sp_pipes[n],
-        // sinks.decon_pipe[n],
+        // hio_sp[n],
+        sinks.decon_pipe[n],
+        sinks.debug_pipe[n],
         // sinks.threshold_pipe[n],
+        // dnnroi(tools.anodes[n], ts, output_scale=1.0),
     ], 'multipass%d' % n)
   for n in anode_iota
 ];
@@ -137,7 +184,7 @@ local depo_source  = g.pnode({
 }, nin=0, nout=1);
 
 local graph = g.pipeline([depo_source, setdrifter, bi_manifold, retagger, sio_sinks]);
-local plugins = [ "WireCellSio", "WireCellGen", "WireCellSigProc","WireCellApps", "WireCellPgraph", "WireCellTbb", "WireCellRoot"];
+local plugins = [ "WireCellSio", "WireCellGen", "WireCellSigProc","WireCellApps", "WireCellPgraph", "WireCellTbb", "WireCellRoot", "WireCellHio", "WireCellPytorch"];
 
 // Pgrapher or TbbFlow
 local engine = "Pgrapher";

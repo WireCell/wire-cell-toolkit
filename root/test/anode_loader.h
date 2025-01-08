@@ -91,6 +91,7 @@ std::vector<std::string> anode_loader(std::string detector)
             auto cfg = icfg->default_configuration();
             cfg["ident"] = ianode;
             cfg["wire_schema"] = ws_tn;
+            cfg["faces"][0]["anode"] = 0;
             cfg["faces"][0]["response"] = 10 * units::cm - 6 * units::mm;
             cfg["faces"][0]["cathode"] = 2.5604 * units::m;
             cerr << cfg << endl;

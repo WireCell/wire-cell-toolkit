@@ -49,25 +49,144 @@ size_t nodes_in_uniform_tree(const std::list<size_t>& layer_sizes)
 
 
 
-TEST_CASE("nary tree node construction") {
+TEST_CASE("nary tree node construction move") 
+{
+    Introspective d("moved");
+    Introspective::node_type n(std::move(d));
+    CHECK(n.value.nctor == 1);
+    CHECK(n.value.nmove == 1);
+    CHECK(n.value.ncopy == 0);
+    CHECK(n.value.ndef == 0);
+    size_t nkids = n.ndescendants();
+    CHECK(nkids == 0);
+}
+TEST_CASE("nary tree node construction copy") {
 
-    {
-        Introspective d("moved");
-        Introspective::node_type n(std::move(d));
-        CHECK(n.value.nctor == 1);
-        CHECK(n.value.nmove == 1);
-        CHECK(n.value.ncopy == 0);
-        CHECK(n.value.ndef == 0);
+
+    Introspective d("copied");
+    Introspective::node_type n(d);
+    CHECK(n.value.nctor == 1);
+    CHECK(n.value.nmove == 0);
+    CHECK(n.value.ncopy == 1);
+    CHECK(n.value.ndef == 0);
+    size_t nkids = n.ndescendants();
+    CHECK(nkids == 0);
+}
+
+
+bool compare_introspective(const Introspective::owned_ptr& a,
+                           const Introspective::owned_ptr& b)
+{
+    return b->value.name < a->value.name;
+}
+
+void dump_introspective(const Introspective& i, const std::string& prefix="", const std::string title="")
+{
+    // fixme: spdlog::debug is not working so we use std io for now.
+
+    if (title.size()) {
+        debug(title);
     }
 
-    {
-        Introspective d("copied");
-        Introspective::node_type n(d);
-        CHECK(n.value.nctor == 1);
-        CHECK(n.value.nmove == 0);
-        CHECK(n.value.ncopy == 1);
-        CHECK(n.value.ndef == 0);
+    debug("{} {}", prefix, i);
+    for (const auto& [k,v] : i.nactions) {
+        debug("{}\t {} {}", prefix, k, v);
     }
+    for ( const auto* cnode : i.node->children() ) {
+        dump_introspective(cnode->value, prefix + "\t");
+    }
+}
+
+static void dump_introspective_dfs(const Introspective& i)
+{
+    for (const auto& node : i.node->depth()) {
+        debug(node.value.name);
+    }
+}
+
+TEST_CASE("nary tree node ordered") 
+{
+    std::list<size_t> layer_sizes ={10,};
+    auto root = make_layered_tree(layer_sizes);
+    dump_introspective(root->value);
+    root->sort_children(compare_introspective);
+    dump_introspective(root->value);
+    CHECK(root->value.nactions["ordered"] == 1);
+}
+
+
+TEST_CASE("nary tree node deeply ordered") 
+{
+    // Consider a tree with 4 layers:
+    // 0 - root node with 2 children
+    // 1 - 2 nodes each with 2 children
+    // 2 - 4 nodes each with 2 children
+    // 3 - 8 leaf nodes with no children
+    std::list<size_t> layer_sizes ={2,2,2};
+    auto root = make_layered_tree(layer_sizes);
+    auto root2 = make_layered_tree(layer_sizes);
+    // This tree is WELL ORDERED in order of insertion.
+    debug("original tree");
+    dump_introspective_dfs(root->value);
+
+    // For some reason we now want to apply a new ordering (which will be a
+    // reversal) to the children of each node in layer 1.  We do this in two
+    // steps. First, select all the nodes in the desired layer via DFS visit.
+    // Second, sort their children.
+
+    debug("two step ordering");
+    std::vector<Introspective::node_type*> to_order;
+
+    // We can limit DFS to layer 1 as we just need the parents.  Note, depth()
+    // layer 1 refers to just the root so we need 1+1
+    for (auto& node : root->depth(1+1)) {
+        if (node.nparents() != 1) {
+            continue;
+        }
+        // two parents mean the node is at layer 3
+        to_order.push_back(&node);
+    }
+    
+    for (auto* node : to_order) {
+        node->sort_children(compare_introspective);
+        CHECK(node->value.nactions["ordered"] == 1);
+    }
+    dump_introspective_dfs(root->value);
+
+    CHECK(root->value.nactions["ordered"] == 2);
+
+    debug("one step ordering");
+    // Now try again but sort in place and see if the DFS freaks out.
+    for (auto& node : root2->depth(1+1)) {
+        if (node.nparents() != 1) {
+            continue;
+        }
+        node.sort_children(compare_introspective);
+    }
+
+    dump_introspective_dfs(root2->value);
+    CHECK(root2->value.nactions["ordered"] == 2);
+}
+
+TEST_CASE("nary tree separate") 
+{
+    // Make a root with 10 children each with 2 and separate the 10.
+    std::list<size_t> layer_sizes = {10,2};
+    auto root = make_layered_tree(layer_sizes);
+    // Separate, spanning all children
+    auto nurseries = root->separate({0,0,-1,1,1,-1,2,2,-1,-1});
+    REQUIRE(nurseries.size() == 3);
+    REQUIRE(root->nchildren() == 4);
+    REQUIRE(nurseries[0].size() == 2);
+    REQUIRE(nurseries[1].size() == 2);
+    REQUIRE(nurseries[2].size() == 2);
+
+    // Merge back
+    for (auto& [gid,nur] : nurseries) {
+        root->adopt_children(nur);
+        REQUIRE(nur.empty());
+    }
+    REQUIRE(root->nchildren() == 10);
 }
 
 TEST_CASE("nary tree simple tree tests") {
@@ -265,6 +384,10 @@ TEST_CASE("nary tree child iter")
 
 TEST_CASE("nary tree notify")
 {
+    // Note, Introspective counts the actions tested here only when the
+    // notification path is size one. See the ordered test for that notification
+    // which counts more broadly.
+
     {
         Introspective::node_type node;
         auto& nactions = node.value.nactions;
@@ -312,6 +435,9 @@ TEST_CASE("nary tree flatten")
         }
         debug("\t\tpath: {}  \t (\"{}\")", path, value.name);
     }
+    size_t nkids = root.ndescendants();
+    CHECK(nkids == 8);
+
 }
 
 static size_t count_delim(const std::string& s, const std::string& d = ".")

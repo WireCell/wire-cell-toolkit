@@ -114,7 +114,7 @@ bool Gen::FrameFanout::operator()(const input_pointer& in, output_vector& outv)
 
     for (size_t ind = 0; ind < m_multiplicity; ++ind) {
         // Basic frame stays the same.
-        auto sfout = new SimpleFrame(in->ident(), in->time(), *in->traces(), in->tick());
+        auto sfout = new SimpleFrame(in->ident(), in->time(), *in->traces(), in->tick(), in->masks());
 
         // Transform any frame tags based on a per output port ruleset
         auto fouttags = m_ft.transform(ind, "frame", fintags);

@@ -37,8 +37,8 @@ mb_theta_y_deg=( 90 90 90 90 90 90 90 90 90 90 90 90 90 90 )
 theta_xz_deg=( ${mb_theta_xz_deg[@]} )
 theta_y_deg=( ${mb_theta_y_deg[@]} )
 ndirs="${#theta_xz_deg[@]}"
-directions=$(seq 0 $(( $ndirs - 1 )))
-
+# directions=$(seq 0 $(( $ndirs - 1 )))
+readarray -t directions < <(seq 0 $(( $ndirs - 1 )))
 function generate_depos ()
 {
     local num="$1" ; shift
@@ -64,7 +64,7 @@ function generate_depos ()
 @test "spdir metric pdsp generate depos" {
     cd_tmp file
 
-    for num in $directions
+    for num in ${directions[*]}
     do
         generate_depos $num
     done
@@ -82,12 +82,7 @@ function generate_depos ()
     local signals="$(gen_fname signals "$num")"
     local pdf="$(gen_fname graph "$num" pdf)"
     local log="$(gen_fname wct "$num" log)"
-    wirecell-pgraph dotify \
-                    -A input="$depos" \
-                    -A output="{drift:\"$drifts\",splat:\"$splats\",sp:\"$signals\"}" \
-                    -A detector=$DETECTOR \
-                    -A variant="$VARIANT" \
-                    "$cfg_file" "$pdf"
+    wirecell-pgraph dotify -A input="$depos" -A output="{drift:\"$drifts\",splat:\"$splats\",sp:\"$signals\"}" -A detector=$DETECTOR -A variant="$VARIANT" "$cfg_file" "$pdf"
 }
 
 @test "spdir metric pdsp sim+nf+sp run job" {

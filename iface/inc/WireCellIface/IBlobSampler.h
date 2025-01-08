@@ -11,6 +11,8 @@
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellIface/IBlob.h"
 
+#include <tuple>
+
 namespace WireCell {
 
     class IBlobSampler : public IComponent<IBlobSampler> {
@@ -18,9 +20,10 @@ namespace WireCell {
 
         virtual ~IBlobSampler();
         
-        // Return a dataset of points that sample a blob.  The blob
+        // Return 0: a dataset of points that sample a blob.  The blob
         // index identifies the blob in the caller's context.
-        virtual PointCloud::Dataset sample_blob(const IBlob::pointer& blob,
+        // Return 1: Auxilliary data
+        virtual std::tuple<PointCloud::Dataset, PointCloud::Dataset> sample_blob(const IBlob::pointer& blob,
             int blob_index=0) = 0;
 
     };

@@ -452,8 +452,8 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
         if 'ROOTSYS' in use:
             linkdef = dictdir.find_resource('LinkDef.h')
             bld.gen_rootcling_dict(name, linkdef,
-                                   headers = headers,
-                                   includes = includes, 
+                                   # headers = headers,
+                                   # includes = includes, 
                                    use = use)
             source.append(bld.path.find_or_declare(name+'Dict.cxx'))
         else:
@@ -488,12 +488,12 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
 int main(int argc, char** argv) {
-    WireCell::Log::default_logging("stderr","info",true);
+    WireCell::Log::default_logging("stderr","%s",true);
     doctest::Context context;
     context.applyCommandLine(argc, argv);
     return context.run();
 
-}'''
+}''' % bld.options.with_spdlog_active_level
         out.write(text)
         return
 

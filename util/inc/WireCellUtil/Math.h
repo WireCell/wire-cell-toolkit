@@ -4,7 +4,11 @@
 #ifndef WIRECELL_UTIL_MATH
 #define WIRECELL_UTIL_MATH
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <boost/math/constants/constants.hpp>
+#pragma GCC diagnostic pop
+
 #include <algorithm>
 
 namespace WireCell {

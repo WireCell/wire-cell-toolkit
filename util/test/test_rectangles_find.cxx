@@ -1,5 +1,8 @@
 #include "WireCellUtil/Rectangles.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include "WireCellUtil/svg.hpp"
+#pragma GCC diagnostic pop
 
 #include <random>
 #include <string>

@@ -30,7 +30,7 @@ namespace WireCell {
         blobvec_t overlap(const blobref_t& blob, const blobproj_t& proj, layer_index_t layer, grid_index_t tolerance, const bool verbose);
         inline blobvec_t overlap(const blobref_t& blob, const blobproj_t& proj, layer_index_t layer) {
             return overlap(blob, proj, layer, 0, false);
-        };
+        }
 
         // Return true if a's strips are all inside b's strips or vice versa.
         bool surrounding(const blobref_t& a, const blobref_t& b);

@@ -1,0 +1,27 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+# This workflow runs various jobs to test aspects of the wire-cell prototype porting.
+
+uboone_data = "/home/bv/wrk/wct/pctree-speed/result_5384_130_6501.root"
+uboone_config = "/home/bv/wrk/wct/pctree-speed/toolkit/root/test/uboone-blobs.jsonnet"
+
+rule uboone_blobset:
+    input:
+        data = uboone_data,
+        cfg = uboone_config
+    output:
+        data = "blobsets-{livedead}-{views}.npz",
+        log = "blobsets-{livedead}-{views}.log"
+    shell: '''
+    wire-cell -l {output.log} -L debug \
+        -A iname="{input.data}" -A oname="{output.data}" \
+        -A kind="{wildcards.livedead}" -A views="{wildcards.views}" \
+        {input.cfg}    
+    '''
+
+rule uboone_blobset_all:
+    input:
+        expand(rules.uboone_blobset.output.data, livedead=["live"], views=["uvw","uv","vw","wu"]),
+        expand(rules.uboone_blobset.output.data, livedead=["dead"], views=["uv","vw","wu"]),
+        

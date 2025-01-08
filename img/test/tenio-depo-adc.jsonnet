@@ -11,10 +11,11 @@ function(detector, variant="nominal",
          outfiles="frames-adc-%(anode)s.npz",
          frame_mode="sparse", anode_iota=null)
 
-    local mid = high.mid(detector, variant, options={sparse:false});
+    local params = high.params(detector, variant);  
+    local mid = high.api(detector, params, options={sparse:false});
 
     local source = if std.type(indepos) == "null"
-                  then mid.sim.track_depos()
+                  then mid.track_depos()
                   else high.fio.depo_file_source(indepos);
 
     local drifter = mid.drifter();
@@ -26,9 +27,9 @@ function(detector, variant="nominal",
         local anode = anodes[aid];
         local ofile = std.format(outfiles, {anode: anode.data.ident});
         pg.pipeline([
-            mid.sim.signal(anode),
-            mid.sim.noise(anode),
-            mid.sim.digitizer(anode),
+            mid.signal(anode),
+            mid.noise(anode),
+            mid.digitizer(anode),
 
             high.fio.frame_tensor_file_sink(ofile,mode=frame_mode, digitize=true)
 
@@ -39,7 +40,8 @@ function(detector, variant="nominal",
     local graph = pg.pipeline([source, drifter, body], "main");
     local executor = "TbbFlow";
     // local executor = "Pgrapher";
-    high.main(graph, executor)
 
+    high.main(graph, executor)
+    // std.objectFields(mid)
 
 

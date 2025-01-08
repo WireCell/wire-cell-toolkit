@@ -28,7 +28,7 @@ Gen::ImpactTransform::ImpactTransform(IPlaneImpactResponse::pointer pir,
     m_num_group = std::round(m_pir->pitch() / m_pir->impact()) + 1;  // 11
     m_num_pad_wire = std::round((m_pir->nwires() - 1) / 2.);         // 10 for wires, 5 for PCB strips
 
-    const auto pimpos = m_bd.pimpos();
+    // const auto pimpos = m_bd.pimpos();
     
     //std::cerr << "ImpactTransform: num_group:" << m_num_group << " num_pad_wire:" << m_num_pad_wire << std::endl;
     for (int i = 0; i != m_num_group; i++) {

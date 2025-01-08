@@ -254,7 +254,7 @@ void draw_raygrid(Printer& print, const Coordinates& coords,
     const int i = 10, j = 16;
 
     const auto rij = coords.ray_crossing({ui, i}, {vi, j});
-    const auto r0j = coords.ray_crossing({ui, 0}, {vi, j});
+    /* const auto r0j = coords.ray_crossing({ui, 0}, {vi, j}); */
     const auto ri0 = coords.ray_crossing({ui, i}, {vi, 0});
 
     const double wpij = coords.pitch_location({ui, i}, {vi, j}, wi);

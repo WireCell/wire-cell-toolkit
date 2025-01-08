@@ -36,7 +36,8 @@ def depo_summary(log):
             off = len(want) + line.find(want) + 1
             parts = [p.strip() for p in line[off:-2].split(" --> ")]
             p1 = numpy.array(list(map(float, parts[0][1:-1].split(" "))))/units.mm
-            p2 = numpy.array(list(map(float, parts[1][1:-1].split(" "))))/units.mm
+            # print(parts[1])
+            p2 = numpy.array(list(map(float, parts[1][1:-2].split(" "))))/units.mm
             print(f'''
 #+caption: Sensitive volume diagonal and ideal line track endpoints.
 #+name: tab:diagonal-endpoints
@@ -177,6 +178,8 @@ def plot_ticks(ax, t0, tf, drift, f1, f2, channel_ranges, speed = 1.565*units.mm
     # ax.plot(h[1][:-1], h[0], label='depo charge')
 
     for p,chans in zip("UVW",channel_ranges):
+        if not isinstance(chans, slice):
+            chans = slice(*chans)
         val1 = f1[chans,:].sum(axis=0)
         val2 = f2[chans,:].sum(axis=0)
         ax.plot(times[:-1], val1, label=p+' splat')
@@ -225,6 +228,8 @@ def plot_frame(gs, f, e, o="lower", channel_ranges=None, which="splat", tit=""):
     tax.plot(t[:-1], tval)
     if channel_ranges:
         for p,chans in zip("UVW",channel_ranges):
+            if not isinstance(chans, slice):
+                chans = slice(*chans)
             val = f[chans,:].sum(axis=0)
             c1 = chans.start
             c2 = chans.stop

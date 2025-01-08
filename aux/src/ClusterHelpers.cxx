@@ -16,7 +16,7 @@ using namespace WireCell;
 using WireCell::GraphTools::mir;
 using slice_t = cluster_node_t::slice_t;
 
-std::string WireCell::Aux::dumps(const cluster_graph_t& cgraph)
+std::string WireCell::Aux::dumps(const cluster_graph_t& cgraph, bool fingerprint)
 {
     const size_t nbcats = BlobCategory::size();
     std::vector<size_t> blob_cats(nbcats, 0);
@@ -64,31 +64,37 @@ std::string WireCell::Aux::dumps(const cluster_graph_t& cgraph)
         ss << " " << code << ":" << num;
     }
 
-    /// try to extract some kind of "finger prints"
-    auto hasher = [](const size_t oldhash, const int newnum) {
-        std::hash<int> hasher;
-        size_t newhash = hasher(newnum) + 0x9e3779b9 + (oldhash << 6) + (oldhash >> 2);
-        return oldhash ^ (newhash+1);
-    };
+    if (fingerprint) {
 
-    ss << "\n channels: ";
-    size_t channel_hash = 0;
-    size_t limit_count = 0;
-    double total_blob_charge = 0;
-    for (auto vtx : mir(boost::vertices(cgraph))) {
-        const auto& node = cgraph[vtx];
-        if (node.code() == 'c') {
-            const auto& ichan = std::get<cluster_node_t::channel_t>(node.ptr);
-            channel_hash = hasher(channel_hash, ichan->ident());
-            if (++limit_count < 10) ss << " " << ichan << " " << ichan->ident();
+        /// try to extract some kind of "finger prints"
+        auto hasher = [](const size_t oldhash, const int newnum) {
+            std::hash<int> hasher;
+            size_t newhash = hasher(newnum) + 0x9e3779b9 + (oldhash << 6) + (oldhash >> 2);
+            return oldhash ^ (newhash+1);
+        };
+
+
+        ss << "\n channels: ";
+
+        size_t channel_hash = 0;
+        int limit_count = 0;
+        double total_blob_charge = 0;
+        for (auto vtx : mir(boost::vertices(cgraph))) {
+            const auto& node = cgraph[vtx];
+            if (node.code() == 'c') {
+                const auto& ichan = std::get<cluster_node_t::channel_t>(node.ptr);
+                channel_hash = hasher(channel_hash, ichan->ident());
+                if (++limit_count < 10) ss << " " << ichan << " " << ichan->ident();
+            }
+            if (node.code() == 'b') {
+                const auto& iblob = std::get<cluster_node_t::blob_t>(node.ptr);
+                total_blob_charge += iblob->value();
+            }
         }
-        if (node.code() == 'b') {
-            const auto& iblob = std::get<cluster_node_t::blob_t>(node.ptr);
-            total_blob_charge += iblob->value();
-        }
+        ss << " channel hash: " << channel_hash;
+
+        ss << " total blob charge: " << std::setprecision(std::numeric_limits<double>::digits10 + 1)<< total_blob_charge;
     }
-    ss << " channel hash: " << channel_hash;
-    ss << " total blob charge: " << std::setprecision(std::numeric_limits<double>::digits10 + 1)<< total_blob_charge;
 
     return ss.str();
 }

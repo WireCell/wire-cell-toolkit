@@ -11,7 +11,7 @@ function(services, params) function(anode, name)
         type: 'WaveformMap',
         name: name,
         data: {
-            filename: params.img.charge_error_file,
+            filename: params.detector_data.qerr, // img.charge_error_file,
         },
     };
 
@@ -54,7 +54,8 @@ function(services, params) function(anode, name)
 
     low.pg.pipeline([
         sigunc,
-        slicing(span=params.img.span),
+        //slicing(span=params.img.span),
+        slicing(span=5),
         img.tiling(),
         img.clustering(),
         img.grouping(),

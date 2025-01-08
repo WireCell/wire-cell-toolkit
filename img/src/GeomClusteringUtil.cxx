@@ -29,6 +29,15 @@ static bool adjacent(const std::set<double>& times, const double& time1, const d
     return (std::distance(iter1, iter2) == 1);
 }
 
+/// two slices are adjacent if they are within an offset, e.g., 4 ticks, of each other
+/// TODO: confirm with Xin
+static bool adjacent_dead(const ISlice::pointer slice1, const ISlice::pointer slice2, const double offset = 4*500*units::us)
+{
+    if (slice2->start() >= slice1->start() and slice2->start() < slice1->start() + slice1->span() + offset) return true;
+    if (slice1->start() >= slice2->start() and slice1->start() < slice2->start() + slice1->span() + offset) return true;
+    return false;
+}
+
 void WireCell::Img::geom_clustering(cluster_indexed_graph_t& grind, IBlobSet::vector::iterator beg,
                                     IBlobSet::vector::iterator end, std::string policy)
 {
@@ -38,7 +47,7 @@ void WireCell::Img::geom_clustering(cluster_indexed_graph_t& grind, IBlobSet::ve
         return;
     }
 
-    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local"};
+    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local", "dead_clus"};
     if (known_policies.find(policy) == known_policies.end()) {
         THROW(ValueError() << errmsg{String::format("policy \"%s\" not implemented!", policy)});
     }
@@ -195,7 +204,7 @@ void WireCell::Img::geom_clustering(cluster_indexed_graph_t& grind, IBlobSet::ve
 void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string policy,
                                             const std::unordered_map<cluster_vertex_t, int> groups)
 {
-    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local"};
+    std::unordered_set<std::string> known_policies = {"simple", "uboone", "uboone_local", "dead_clus"};
     if (known_policies.find(policy) == known_policies.end()) {
         THROW(ValueError() << errmsg{String::format("policy \"%s\" not implemented!", policy)});
     }
@@ -212,6 +221,11 @@ void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string pol
     if (policy == "simple") {
         // max_rel_diff = 1;
         map_gap_tol = {{1, 0}};
+    }
+
+    if (policy == "dead_clus") {
+        // max_rel_diff = 1;
+        map_gap_tol = {{0, 1}, {1, 1}};
     }
 
     // overlap + tolerance
@@ -258,6 +272,13 @@ void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string pol
             int rel_diff = std::round(fabs((islice1->start() - islice2->start()) / islice1->span()));
             if (map_gap_tol.find(rel_diff) == map_gap_tol.end()) continue;
             if (policy == "uboone_local" && !adjacent(slice_times, islice1->start(), islice2->start())) continue;
+            if (policy == "dead_clus") {
+                std::cout << "adjacent_dead: "
+                          << islice1->start() << " " << islice1->span() << " "
+                          << islice2->start() << " " << islice2->span() << std::endl;
+                if (!adjacent_dead(islice1, islice2)) continue;
+                rel_diff = 0; // use 1 as wire offset
+            }
             auto bdescs2 = neighbors_oftype<cluster_node_t::blob_t>(cg, *siter2);
 
             RayGrid::blobs_t blobs2 = gen(bdescs2);

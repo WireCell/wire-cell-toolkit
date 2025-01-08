@@ -6,7 +6,7 @@ local pg = import "pgraph.jsonnet";
 
 local basic_plugins = [
     "WireCellSio", "WireCellAux",
-    "WireCellGen", "WireCellSigProc", "WireCellImg", 
+    "WireCellGen", "WireCellSigProc", "WireCellImg", "WireCellClus",
     "WireCellApps"];
 
 local app_plugins = {

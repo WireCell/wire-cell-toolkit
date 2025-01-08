@@ -46,7 +46,9 @@ IAnodePlane::vector Testing::anodes(std::string detector)
     {
         auto icfg = Factory::lookup<IConfigurable>(ws_tn);
         auto cfg = icfg->default_configuration();
-        cfg["filename"] = kd["wires"];
+        auto wires = kd["wires"];
+        // std::cerr << "using wires file: " << wires << "\n";
+        cfg["filename"] = wires;
         icfg->configure(cfg);
     }
 
@@ -54,20 +56,29 @@ IAnodePlane::vector Testing::anodes(std::string detector)
     {
         auto icfg = Factory::lookup<IConfigurable>(fr_tn);
         auto cfg = icfg->default_configuration();
-        cfg["filename"] = kd["fields"];
+        auto fields = kd["fields"];
+        if (fields.isNull()) {
+          raise<ValueError>("unknown fields file for detector \"%s\"", detector);
+        }
+        if (fields.isArray()) {
+          fields = fields[0];
+        }
+        cfg["filename"] = fields;
         icfg->configure(cfg);
     }
 
     auto iwsf = Factory::lookup_tn<IWireSchema>(ws_tn);
     const auto& wstore = iwsf->wire_schema_store();
     const auto& wdets = wstore.detectors();
-    const auto& wanodes = wstore.detectors();
+    const auto& wanodes = wstore.anodes();
 
     IAnodePlane::vector ret;
     for (const auto& det : wdets) {
         for (const auto& anode_index : det.anodes) {
             const auto& anode = wanodes[anode_index];
             const int ianode = anode.ident;
+
+            // std::cerr << "anode index: " << anode_index << " anode ident: " << anode.ident << "\n";
             
             std::string tn = String::format("AnodePlane:%d", ianode);
             auto icfg = Factory::lookup_tn<IConfigurable>(tn);
@@ -76,10 +87,13 @@ IAnodePlane::vector Testing::anodes(std::string detector)
             cfg["wire_schema"] = ws_tn;
 
             // FIXME: this is NOT general and needs to be retrieved from detectors.jsonnet somehow!!!!
+            cfg["faces"][0]["anode"] = 10 * units::cm - 6 * units::mm;
             cfg["faces"][0]["response"] = 10 * units::cm - 6 * units::mm;
             cfg["faces"][0]["cathode"] = 2.5604 * units::m;
 
             icfg->configure(cfg);
+            // std::cerr << "Configured AnodePlane with: " << cfg << "\n";
+
             ret.push_back(Factory::find_tn<IAnodePlane>(tn));
         }
     }

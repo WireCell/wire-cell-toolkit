@@ -21,11 +21,11 @@ do
         time wire-cell -L debug -l adc-${post}.log --tla-code tags='["orig0"]' \
                   -A digitize=yes -A infile=adc.npz -A outfile=adc-${post}.hdf \
                   -A chunk=$chunk -A gzip=$gzqual \
-                  $mydir/test-frame-npz-to-hio.jsonnet
+                  $mydir/frame-npz-to-hio.jsonnet
         wire-cell -L debug -l sig-${post}.log --tla-code tags='["gauss0"]' \
                   -A digitize=no -A infile=sig.npz -A outfile=sig-${post}.hdf \
                   -A chunk=$chunk -A gzip=$gzqual \
-                  $mydir/test-frame-npz-to-hio.jsonnet
+                  $mydir/frame-npz-to-hio.jsonnet
 
     done
 done

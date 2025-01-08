@@ -192,3 +192,9 @@ additional metadata:
 
 Note, it is undefined behavior if no matching index tensor exists.
 
+* Meta :noexport:
+
+
+#+begin_src sh :results none :output none
+scp -r frame-tensor.html frame-tensor.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

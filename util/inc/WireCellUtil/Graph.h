@@ -14,6 +14,9 @@
 //  next line.
 // #define BOOST_ALLOW_DEPRECATED_HEADERS 1
 #include <boost/graph/graph_traits.hpp>
+#include <boost/graph/filtered_graph.hpp>
+#include <boost/graph/dijkstra_shortest_paths.hpp>
+#include <boost/graph/prim_minimum_spanning_tree.hpp>
 
 #ifdef __clang__
 #  if defined(__has_warning)
@@ -32,15 +35,14 @@
 #endif
 
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/graphviz.hpp>
 #include <boost/graph/connected_components.hpp>
+#include <boost/graph/graphviz.hpp> // keep this at the bottom, ref clus/test/doctest_boost_dijkstra.cxx
 
 #if HAS_WARNING("-Wmaybe-uninitialized")
 #pragma GCC diagnostic pop
 #endif
 
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/copy.hpp>
+#include <boost/graph/copy.hpp> // keep this at the bottom, ref clus/test/doctest_boost_dijkstra.cxx
 
 
 

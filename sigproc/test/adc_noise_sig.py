@@ -187,7 +187,7 @@ def render_params(w):
     args = "-c {cmap} -a '{aname}' --vmin {vmin} --vmax {vmax} -z '{zoomrange}' -b {pedestal}"
     return args.format(**pp)
 
-masked_value = numpy.NaN
+masked_value = numpy.nan
 
 def make_diffarr(wc, arrs, pars):
     aarr, barr = arrs

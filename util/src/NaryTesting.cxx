@@ -56,14 +56,16 @@ NaryTesting::Introspective::~Introspective()
 
 void NaryTesting::Introspective::on_construct(node_type* n)
 {
+    this->NaryTree::Faced<Introspective>::on_construct(n);
+
     node = n;
-    debug("constructed {} with node@0x{}", name, (void*)node);
+    debug("Introspective::on_construct {} with node@0x{}", name, (void*)node);
     ++nactions["constructed"];
 }
 
 bool NaryTesting::Introspective::on_insert(const std::vector<node_type*>& path)
 {
-    debug("insert {} {}", name, path.size());
+    debug("Introspective::on_insert {} {}", name, path.size());
     if (path.size() == 1) {
         ++nactions["inserted"];
     }
@@ -72,10 +74,17 @@ bool NaryTesting::Introspective::on_insert(const std::vector<node_type*>& path)
 
 bool NaryTesting::Introspective::on_remove(const std::vector<node_type*>& path)
 {
-    debug("remove {} {}", name, path.size());
+    debug("Introspective::on_remove {} {}", name, path.size());
     if (path.size() == 1) { 
         ++nactions["removing"];
     }
+    return true;
+}
+
+bool NaryTesting::Introspective::on_ordered(const std::vector<node_type*>& path)
+{
+    debug("Introspective::on_ordered {} {}", name, path.size());
+    ++nactions["ordered"];
     return true;
 }
 

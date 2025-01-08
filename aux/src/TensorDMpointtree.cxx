@@ -1,7 +1,8 @@
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensor.h"
-#include <iostream>
+
+#include <iostream>             // debug
 
 
 using namespace WireCell;
@@ -46,9 +47,11 @@ ITensor::vector WireCell::Aux::TensorDM::as_tensors(
     // Lookup from node to index.
     std::unordered_map<const WireCell::PointCloud::Tree::Points::node_t*, size_t> nodesindex;
 
+    const size_t nnodes = root.ndescendants() + 1;
+
     // Store the flattened tree structure.  Each element represents a node in
     // the DFS order and holds index representing parent or self-index if root.
-    std::vector<parentage_index_type> parentage;
+    std::vector<parentage_index_type> parentage(nnodes, 0);
 
     // Concatenated local point clouds in DFS order.  Key is PC name.
     PointCloud::Tree::named_pointclouds_t pointclouds;
@@ -57,6 +60,7 @@ ITensor::vector WireCell::Aux::TensorDM::as_tensors(
     // become a pcdataset.
     std::map<std::string, std::vector<lpcmaps_index_type>> lpcmaps;
 
+
     // Visit each node in tree in depth-first descent order.
     for (const auto& noderef : descent) {
         const auto* node = &noderef;
@@ -64,7 +68,6 @@ ITensor::vector WireCell::Aux::TensorDM::as_tensors(
         nodesindex[node] = index;
 
         // Extend parentage map
-        parentage.resize(index + 1);
         if (node->parent) {
             // DFS: we've already seen this parent so no need to find().
             parentage[index] = nodesindex[node->parent];
@@ -76,9 +79,9 @@ ITensor::vector WireCell::Aux::TensorDM::as_tensors(
 
         // Extend pointclouds and lpcmaps
         for (const auto& [pcname,pcds] : node->value.local_pcs()) {
-            auto& lpcmap = lpcmaps[pcname];
-            lpcmap.resize(index + 1, 0);
-            lpcmap[index] = pcds.size_major();
+            // Either get existing or construct zero-filled on first call.
+            auto [it, _] = lpcmaps.try_emplace(pcname, nnodes, 0);
+            it->second[index] = pcds.size_major();
 
             auto& cpc = pointclouds[pcname];
             cpc.append(pcds);

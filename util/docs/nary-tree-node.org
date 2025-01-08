@@ -67,38 +67,78 @@ The ~child_values()~ and ~child_nodes()~ provide an iterator range to
 access the child *values* or to acess the children as simple ~Node*~,
 respectively.
 
+* Depth first search
+
+One may perform a depth-first search (DFS, really a "visit") using iterators.
+#+begin_src c++
+  for (const auto& node : root->depth()) {
+      // use node
+  }
+#+end_src
+
+* Order and stability
+
+By default, the list of children owned by a parent is in the order of insertion
+of the children.  This order is well defined and stable (not random).  The owner
+of a constructed tree may apply a custom ordering to any parent's child list.
+
+For example, assume the tree nodes have a value type with a ~Value::quantity~ data
+member.  To sort all children lists by this quantity:
+
+#+begin_src c++
+  template<Value>
+  bool by_quantity(const NaryTree<Value>::owned_ptr& a,
+                   const NaryTree<Value>::owned_ptr& b)
+  {
+      return a->value.quantity < b->value.quantity;
+  }
+  for (auto& node : root->depth()) {
+      root->sort_children(by_quantity);
+  }
+#+end_src
+
+As DFS iterates first on parent and then children, it is safe to perform this
+sort as part of a DFS.
+
 * Notification
 
-The ~Value~ of a ~Node~ will be informed of major state changes in the ~Node~ that is holding the ~Value~ if the ~Value~ defines a method matching this signature:
+The ~Value~ of a ~Node~ will be informed of state changes to the tree on which it is rooted but only if the ~Value~ defines a method matching this signature:
 
 #+begin_example
-void Value::notify(Node<Value>* node, Action action);
+bool Value::notify(std::vector<Node<Value>*> path, Action action);
 #+end_example
 
-The ~action~ is an enum determines the state change:
+The ~path~ provides an ordered list of nodes.  The front of the list is the node "implicated" by the action.  The ~notify()~ is called on the ~Value~ of that implicated node first, with a ~path~ containing only that node.  If that ~notify()~ returns ~true~ then the parent not of the implicated node, if it exists, is added to ~path~ and ~notify()~ is called on that parent node.  Etc for the parent's parent.  This upward propagation ceases when a node is the root (lacks a parent) or when a ~notify()~ returns ~false~.
 
-- *constructed* :: the node was just constructed.  
+The ~action~ is an enum that determines the nature of the state change.  A notification may carry one of the following action signifiers: 
+
+- *constructed* :: the node was just constructed.
 - inserted :: the node is a child that was just inserted to a parent.  
 - removing :: the node is a child that will next be removed from its parent.
+- ordered :: the children of a node have had a custom order applied.
 
-The ~Value~ type may wish to propagate notifications up the parentage.
-For example, to freshen or invalidate caches held by a parent and that
-span child nodes.
+Note, the *constructed* action is special.  It is not propagated and only the ~Value~ of the constructed node is notified.
 
-The ~NaryTree::Notified<Value>~ class defined in ~NaryTreeNotified.h~ provides a base class for a ~Value~ type
-([[https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern][CRTP]]) that helps dispatch an action by hits value to a matching method call.
-A ~Value~ type may inherit from this type and define zero or more of these methods:
+The ~NaryTree::Notified<Value>~ class defined in ~NaryTreeNotified.h~ provides a
+base class for a ~Value~ type ([[https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern][CRTP]]) that helps dispatch an action to a
+corresponding virtual method.  A ~Value~ type may inherit from this type and
+define zero or more of these methods:
 
 #+begin_src c++
 virtual void on_construct(node_type* node);
 virtual bool on_insert(const std::vector<node_type*>& path);
 virtual bool on_remove(const std::vector<node_type*>& path);
+virtual bool on_ordered(const std::vector<node_type*>& path);
 #+end_src
-The ~path~ argument gives the tree path to the node that triggered the notification.
+
 
 * Facade
 
-The ~NaryTree::~ name space provides additional classes to facilitate building a tree of nodes with some heterogeneity of ~Value~ types.  It does this through the idea of a "facade" which represents some code that is "attached" to a node.  Code that is both external or internal to *facade*, *value* and *node* can all inter-navigate between these objects.  A facade instance is held by ~std::unique_ptr~.  This means the lifetime of the facade is bound to that of the node (and the value).  It also means the facade may be of a polymorphic type and this is what allows for heterogeneity of type across the tree nodes.  Note, these all follow the CRTP.
+A node holds a ~Value~ by value.  The ~Value~ type determines if the tree is comprised of a homogeneous or a heterogeneous set of nodes.  The ~Value~ may provide a mix of types if it holds one or more objects by polymorphic pointer.  The developer is free to provide such ~Value~ types, however ~NaryTree~ provides a mechanism called "facade" that allows the developer to provide a homotypic ~Value~ and "bolt on" a polymorphic type.
+
+In particular, the "facade" mechanism supports connecting a C++ class hierarchy to the tree node hierarchy.  Specifically, one may assign a specific facade type to the nodes in a specific layer of the tree.  The facade and value can have access to each other and to their associated and owning node (and thus the rest of the tree).  
+
+The facade mechanism is provided by intermediate templated classes that follow the CRTP and "wrap" an otherwise non-polymorphic ~Value~ type.  These are:
 
 - ~Facade<Value>~ is a ~Notified<Value>~ and will use the ~on_construct()~ notification to collect the node pointer and make it available to external code or a sub class.
 
@@ -117,5 +157,8 @@ Putting this together, here is an example excerpted from ~doctest-pointtree-faca
   auto* l0 = root->facade<L0>();
   auto* l1 = l0->children()[0];    // an L1 facade
   auto* l2 = l1->children()[0];    // an L2 facade
+
+  // navigate from facade to node to value
+  auto name0 = l0->node()->value.name;
 #+end_src
 

@@ -27,16 +27,14 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/DetectionIdiom.h"
 
-#include <vector>
-#include <list>
-#include <memory>
-
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/indirect_iterator.hpp>
 #include <boost/type_traits/is_convertible.hpp>
 #include <boost/utility/enable_if.hpp>
 
-// #include <iostream>             // debug
+#include <vector>
+#include <list>
+#include <memory>
 
 namespace WireCell::NaryTree {
 
@@ -62,6 +60,7 @@ namespace WireCell::NaryTree {
         constructed,            // the node is constructed
         inserted,               // the node has been inserted into a parent's children list
         removing,               // the node has been removed from a parent's children list
+        ordered,                // the node has just had its children list ordered
     };
 
 
@@ -86,6 +85,8 @@ namespace WireCell::NaryTree {
         using nursery_type = std::list<owned_ptr>; 
         using sibling_iter = typename nursery_type::iterator;
         using sibling_const_iter = typename nursery_type::const_iterator;
+        // groups of nurseries
+        using nursery_group_type = std::map<int, nursery_type>;
 
         // A depth first descent range
         using range = depth_range<self_type>;
@@ -156,15 +157,20 @@ namespace WireCell::NaryTree {
             }
             node->parent = this;
             nursery_.push_back(std::move(node));
-            nursery_.back()->sibling_ = std::prev(nursery_.end());
             Node* child = nursery_.back().get();
             if (!child) {
                 throw std::runtime_error("NaryTree::Node insert on null child node");
             }
+            child->sibling_ = std::prev(nursery_.end());
             if (notify_value) {
                 notify<Value>(Action::inserted, child);
             }
             return child;
+        }
+
+        bool owns_child(const Node* node) const {
+            if (!node) return false;
+            return find(node) != nursery_.end();
         }
 
         // Return iterator to node or end.  This is a linear search.
@@ -181,9 +187,12 @@ namespace WireCell::NaryTree {
                                 });
         }
         
-        // Remove and return child node.
+        // Remove and return child node.  If notify_value is true, the
+        // "removing" notification is emitted PRIOR to removal.
         owned_ptr remove(sibling_iter sib, bool notify_value=true) {
-            if (sib == nursery_.end()) return nullptr;
+            if (sib == nursery_.end()) {
+                return nullptr;
+            }
 
             Node* child = (*sib).get();
             if (notify_value) {
@@ -191,8 +200,11 @@ namespace WireCell::NaryTree {
             }
 
             owned_ptr ret = std::move(*sib);
+            *sib = nullptr;
             nursery_.erase(sib);
-            ret->sibling_ = nursery_.end();
+
+            static nursery_type dummy;
+            ret->sibling_ = dummy.end();
             ret->parent = nullptr;
             
             return ret;
@@ -208,7 +220,6 @@ namespace WireCell::NaryTree {
         // Return a nursery of all children, leaving the one in this node empty.
         // If notify_child is true, notify the children of their removal.
         nursery_type remove_children(bool notify_value=true) {
-            // std::cerr << "NaryTree::Node::remove_children() removing " << nursery_.size() << "\n";
             nursery_type ret;
             while (nursery_.begin() != nursery_.end()) {
                 auto orphan = remove(nursery_.begin(), notify_value);
@@ -219,7 +230,6 @@ namespace WireCell::NaryTree {
 
         // Insert children in given nursery, depleting it.
         void adopt_children(nursery_type& kids, bool notify_value=true) {
-            // std::cerr << "NaryTree::Node::adopt_children() adopting " << kids.size() << "\n";
             for (auto it = kids.begin(); it != kids.end(); ++it) {
                 insert(std::move(*it), notify_value);
             }
@@ -228,15 +238,72 @@ namespace WireCell::NaryTree {
 
         // Transfer children from other to self.
         void take_children(self_type& other, bool notify_value = true) {
-            // std::cerr << "NaryTree::Node::take_children() taking " << other.nchildren() << "\n";
             auto kids = other.remove_children(notify_value);
             adopt_children(kids, notify_value);
         }
 
+        // Return and remove a subset of children grouped into separate
+        // nurseries.  Each nursery is indexed by a non-negative group ID as
+        // provided by the "group" vector.  Only non-negative group IDs are
+        // processed.  If the group vector is shorter than this node's nursery
+        // list, the remaining children are unprocessed.  If longer, the
+        // additional group IDs are ignored.  Unprocessed children are retained
+        // by this node.  Note, this node is otherwise left as-is and in
+        // particular it is not (directly) removed from its parent (if it has
+        // one) even when all children are removed.  If notify value is true
+        // then the "removing" notification is emitted prior to removal and
+        // "ordered" notification is emitted after all separated children are
+        // removed.  Notifications are emitted only when changes to this node
+        // are actually performed.  The nurseries and nodes returned carry now
+        // connections to this node or its parent.  See also
+        // NaryTree::FacadeParent::separate().
+        nursery_group_type separate(std::vector<int> group, bool notify_value=true) {
+            nursery_group_type ret;
+
+            // By popular demand we are strict.
+            // group.resize(nursery_.size(), -1);
+            if (group.size() != nursery_.size()) {
+                raise<ValueError>("connected components group array does not span children list");
+            }
+
+            if (!std::any_of(group.begin(), group.end(), [](int gid) { return gid >= 0; })) {
+                return ret;
+            }
+
+            auto nit = nursery_.begin();
+            auto end = nursery_.end();
+            auto git = group.begin();
+
+            while (nit != end) {
+                const int groupid = *(git++);
+                if (groupid < 0) { // skip negatives
+                    ++nit;
+                    continue;
+                }
+                // Get/make a nursery for the group.
+                auto& nur = ret[groupid];
+
+                // Here we copy-paste the guts of remove().  We can not call it
+                // directly as we need to advance our nit which remove() will
+                // not do.
+                if (notify_value) {
+                    notify<Value>(Action::removing, (*nit).get());
+                }
+
+                // Transfer ownership of ptr to nursery.
+                nur.emplace_back(std::move(*nit)); 
+                // Self-locate the child and nullify parent pointer
+                nur.back()->sibling_ = std::prev(nur.end()); 
+                nur.back()->parent = nullptr;
+
+                nit = nursery_.erase(nit); // advances nit
+            }
+            return ret;
+        }
+
         // Iterator locating self in list of siblings.  If parent is
-        // null, this iterator is invalid.  It is set which this node
-        // is inserted as a anothers child.
-        sibling_iter sibling_;
+        // null, this iterator is invalid.  It is set when this node
+        // is inserted as a another node's child.
         sibling_iter sibling() const {
             if (!parent) {
                 raise<ValueError>("node with no parent is not a sibling");
@@ -304,6 +371,21 @@ namespace WireCell::NaryTree {
             return sib->get();
         }
 
+        // Return the number of parents this node has.  Ie, it's layer in the
+        // tree.
+        size_t nparents() const {
+            if (!parent) return 0;
+            return 1 + parent->nparents();
+        }
+
+        // Return the number of descendants (children, grand children, etc)
+        // reached from this node.  The count does not include this node.  Eg, a
+        // node that lacks children will also have zero descendants.
+        size_t ndescendants() const {
+            auto d = depth();
+            return std::distance(d.begin(), d.end()) - 1;
+        }
+
         // Access collection of child nodes as bare pointers.
         size_t nchildren() const { return nursery_.size(); }
         children_const_vector children() const {
@@ -318,11 +400,6 @@ namespace WireCell::NaryTree {
                            [](const auto& up) { return up.get(); });
             return ret;
         }
-
-        // FIXME TEMPORARY ACCESS WHILE FIXING CLUSTERING 
-        // Access the owning nursery of children directly.
-        // const nursery_type& nursery() const { return nursery_; }
-        // nursery_type& nursery() { return nursery_; }
 
         using child_value_range = iter_range<child_value_iter<Value>>;
         auto child_values() {
@@ -348,6 +425,20 @@ namespace WireCell::NaryTree {
             return child_node_const_range{ nursery_.cbegin(), nursery_.cend() };
         }
                 
+        // Sort children according to a comparison.  Note, this should be safe
+        // to call directly on a node visited in a DFS as it will sort children
+        // in the context of a parent and before descending on the children
+        // list.  Compare is a callable like:
+        //   compare(const owned_ptr& a, const owned_ptr& b)
+        template<typename Compare>
+        void sort_children(Compare comp, bool notify_value=true) {
+            nursery_.sort(comp); // Any existing iterators are stable.
+            if (notify_value) {
+                notify<Value>(Action::ordered, this);
+            }
+        }
+
+
         // Iterable range for depth first traversal, parent then children.
         // Iterators yield a reference to the node.
         // Level=0 will traverse to the leaves.
@@ -359,30 +450,48 @@ namespace WireCell::NaryTree {
 
       private:
 
-        // Detect Value::notify(const Node<Value>* node, Action action)
+        // Note: these must be class-scoped so that the "Node" type is valid for
+        // is_detected.
 
+        // Detect existence of a Value::notify(const Node<Value>* node, Action action)
         template <typename T, typename ...Ts>
         using notify_type = decltype(std::declval<T>().notify(std::declval<Ts>()...));
 
         template<typename T>
-        using has_notify = is_detected<notify_type, T, Node*, Action>;
+        using has_notify = is_detected<notify_type, T, std::vector<Node*>, Action>;
 
         template <class T, std::enable_if_t<has_notify<T>::value>* = nullptr>
         void notify(Action action, Node* node) {
-            // std::cerr << "sending action: "<<action<<" \n";
-            node->value.notify(node, action);
+            std::vector<self_type*> path;
+            while (node) {
+                path.push_back(node);
+                bool propagate = node->value.notify(path, action);
+                if (action == Action::constructed) {
+                    break;          // special case, call only on constructed.
+                }
+                if (!propagate) {
+                    break;
+                }
+                node = node->parent;
+            };
         }
 
         template <class T, std::enable_if_t<!has_notify<T>::value>* = nullptr>
         void notify(Action action, Node* node) {
-            // std::cerr << "missing action: "<<action<<" \n";
+
             return; // no-op
         }
 
+        
+
       private:
 
-        // friend class child_value_iter<Value>;
+        // Our children
         nursery_type nursery_;
+
+        // Node must know where we are in a parent's nursery in order to
+        // implement DFS.  This iter MUST be updated whenever we are rehomed.
+        sibling_iter sibling_;
 
     };                          // Node
 

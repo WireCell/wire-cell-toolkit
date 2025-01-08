@@ -1,5 +1,6 @@
 #+title: WCT Noise Modeling
 #+include: ../../docs/include-topic.org
+#+export_file_name: noise-aux
 
 * Overview
 
@@ -209,3 +210,9 @@ Or, run it all together as:
 #+begin_example
 aux/test/test-noise-roundtrip.sh 
 #+end_example
+
+* Meta :noexport:
+
+#+begin_src sh :results none :output none
+scp -r noise-aux.html noise-aux.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src

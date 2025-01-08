@@ -3,14 +3,14 @@
 #ifndef WIRECELLUTIL_NARYTESTING
 #define WIRECELLUTIL_NARYTESTING
 
-#include "WireCellUtil/NaryTreeNotified.h"
+#include "WireCellUtil/NaryTreeFacade.h"
 #include "WireCellUtil/Spdlog.h"
 
 namespace WireCell::NaryTesting {
 
     // Simple node data that tracks its copies/moves and receives
     // notification of "actions" from the node.
-    struct Introspective : public NaryTree::Notified<Introspective>
+    struct Introspective : public NaryTree::Faced<Introspective>
     {
 
         using node_type = NaryTree::Node<Introspective>;
@@ -36,6 +36,7 @@ namespace WireCell::NaryTesting {
         virtual void on_construct(node_type* node);
         virtual bool on_insert(const std::vector<node_type*>& path);
         virtual bool on_remove(const std::vector<node_type*>& path);
+        virtual bool on_ordered(const std::vector<node_type*>& path);
 
 
     };
