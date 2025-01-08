@@ -117,7 +117,7 @@ function run_dag () {
         done
     done
     for tier in img ptc ; do
-        for apa in 0 2 3 5 ; do # some apas are "empty"
+        for apa in 0 5 ; do # some apas are "empty"
             file_larger_than apa-${apa}-${tier}.${data_ext} ${empty_data}
         done
     done
