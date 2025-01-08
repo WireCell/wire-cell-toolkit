@@ -86,7 +86,7 @@ int main(int argc, char* argv[])
     IWireSummary::pointer ws;
     ok = (*wser)(wires, ws);
     Assert(ok);
-    WireCell::BoundingBox bb2 = ws->box();
+    // WireCell::BoundingBox bb2 = ws->box();
 
     cout << tk("Made wire summary") << endl;
     cout << mu("Made wire summary") << endl;
