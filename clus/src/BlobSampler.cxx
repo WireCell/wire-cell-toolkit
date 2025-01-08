@@ -498,14 +498,14 @@ struct Grid : public BlobSampler::Sampler
     
     double step{1.0};
     // default planes to use
-    std::vector<size_t> planes = {0,1,2}; 
+    std::vector<size_t> planes = {0,1}; 
     
     virtual void configure(const Configuration& cfg)
     {
         step = get(cfg, "step", step);
         planes = get(cfg, "planes", planes);
         if (planes.size() != 2) {
-            THROW(ValueError() << errmsg{"illegal size Grid.planes"});
+            raise<ValueError>("illegal size for Grid.planes: %d", planes.size());
         }
         size_t tot = planes[0] + planes[1];
         //                                  x,0+1,0+2, 1+2
