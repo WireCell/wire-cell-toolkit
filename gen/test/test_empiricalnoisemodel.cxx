@@ -83,10 +83,17 @@ int main(int argc, char* argv[])
 
     std::map<uint32_t, IChannelSpectrum::amplitude_t> amps;
 
+    size_t bad_sizes = 0;
     for (auto chid : anodes[0]->channels()) {
         const auto& spec = enm->channel_spectrum(chid);
         if (spec.size() != nsamples) {
-            std::cerr << "EmpiricalNoiseModel is broken: ask for " << nsamples << " got " << spec.size() << "\n";
+            if (! bad_sizes) {
+                std::cerr << "EmpiricalNoiseModel is broken: I asked for " << nsamples
+                          << " sampled but got " << spec.size()
+                          << " on channel ID " << chid
+                          << " will repeat this error\n";
+            }
+            ++bad_sizes;
         }
         //assert(spec.size() == nsamples);
 
@@ -99,6 +106,10 @@ int main(int argc, char* argv[])
         auto key = crc.checksum();
         amps[key] = spec;
     }
+    if (bad_sizes) {
+        std::cerr << "Got " << bad_sizes << " channels that give spectrum sizes that I did not request\n";
+    }
+
     std::cerr << "Got " << amps.size() << " unique spectra\n";
     int count=0;
     for (const auto& [key,amp] : amps) {
