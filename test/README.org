@@ -36,3 +36,48 @@ topic for each supported language is avilable:
 
 
 
+* Release procedure
+
+Follow this procedure for a major release or merge.
+
+** Local tests
+
+Check out the branch to release/merge and build it in your favorite local environment.
+#+begin_example
+$ ./wcb configure [...]
+$ ./wcb
+$ ./wcb install
+$ ./wcb --tests --alltests
+#+end_example
+
+Fix and commit any failures found.
+
+** Wide coverage tests
+
+Apply wide-coverage tests using [[https://github.com/brettviren/winch][winch]].
+#+begin_example
+$ uv tool install git+https://github.com/brettviren/winch
+#+end_example
+To install and get the configuration file if needed.
+#+begin_example
+$ wget https://raw.githubusercontent.com/brettviren/winch/refs/heads/master/example/wct.toml
+$ emacs wct.toml
+#+end_example
+Change the ~gitref~ in ~[wctdev]~ to be set (or include) the branch for release/merge and then:
+#+begin_example
+$ winch -c wct.toml list
+$ winch -c wct.toml build -i all
+#+end_example
+
+Fix and commit any failures found.  To exercise code in a layer
+
+#+begin_example
+$ podman run -it <image-name>
+> cd /winch/toolkit
+#+end_example
+
+Changes made to the image are not saved.
+
+** Other tests
+
+Add them as WCT tests.
