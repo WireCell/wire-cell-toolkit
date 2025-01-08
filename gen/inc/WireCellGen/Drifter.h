@@ -183,6 +183,8 @@ namespace WireCell {
                 typedef std::set<IDepo::pointer, DepoTimeCompare> ordered_depos_t;
                 ordered_depos_t depos;  // buffer depos
 
+                // return false if any bounds are nullptr.
+                explicit operator bool() const;
             };
             std::vector<Xregion> m_xregions;
 

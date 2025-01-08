@@ -218,8 +218,10 @@ int main(int argc, char* argv[])
         // cerr << cfg << endl;
         cfg["drift_speed"] = 1.0 * units::mm / units::us;
         cfg["xregions"][0]["cathode"] = 2 * units::m;
+        cfg["xregions"][0]["response"] = 20 * units::cm;
         cfg["xregions"][0]["anode"] = 10 * units::cm;
         cfg["xregions"][1]["anode"] = -10 * units::cm;
+        cfg["xregions"][1]["response"] = -20 * units::cm;
         cfg["xregions"][1]["cathode"] = -2 * units::m;
         icfg->configure(cfg);
     }
