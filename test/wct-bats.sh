@@ -342,7 +342,7 @@ function saveout () {
         esac
     done
           
-    if [ "${#src[@]}" -eq - ] ; then
+    if [ "${#src[@]}" -eq 0 ] ; then
         die "saveout: no source given"
     fi
 

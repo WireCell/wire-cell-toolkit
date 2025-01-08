@@ -9,7 +9,8 @@ function(detector, variant="nominal",
          outfiles="pointcloud-img-%(anode)s.npz",
          anode_iota=null)
 
-    local mid = high.mid(detector, variant, options={sparse:false});
+    local params = high.params(detector, variant);  
+    local mid = high.api(detector, params, options={sparse:false});
 
     local anodes = mid.anodes();
     local iota = if std.type(anode_iota) == "null" then std.range(0, std.length(anodes)-1) else anode_iota;

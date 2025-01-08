@@ -39,35 +39,35 @@ local builder(mid, anode, stages, outputs, dense=true) = {
             // sink branch of the tap
         ],
         sim: [
-            mid.sim.signal(anode),
-            mid.sim.noise(anode),
-            mid.sim.digitizer(anode),
+            mid.signal(anode),
+            mid.noise(anode),
+            mid.digitizer(anode),
         ],
         sig: [
-            mid.sim.signal(anode),
+            mid.signal(anode),
         ],
         noi: [
-            mid.sim.noise(anode),
+            mid.noise(anode),
         ],
         dig: [
-            mid.sim.digitizer(anode),
+            mid.digitizer(anode),
         ],
         nf: [
-            mid.sigproc.nf(anode),
+            mid.nf(anode),
         ],
         sp: [
-            mid.sigproc.sp(anode),
+            mid.sp(anode),
         ]
     },
     pre_sink(stage) :: 
         if stage == "splat"
-        then [ mid.sim.splat(anode) ]
+        then [ mid.splat(anode) ]
         else [],
 
     reframer(stage) ::
         local reframers = {
-            splat: [mid.sim.reframer(anode, name=outputs[stage])],
-            sp: [mid.sim.reframer(anode, name=outputs[stage], tags=["gauss0"])],
+            splat: [mid.reframer(anode, name=outputs[stage])],
+            sp: [mid.reframer(anode, name=outputs[stage], tags=["gauss0"])],
         };
         if dense
         then std.get(reframers, stage, [])
@@ -119,7 +119,9 @@ local output_objectify(stages, output) =
 // - dense :: if false, save frames sparsely, else add reframers to make dense 
 // - variant :: the layers mids detector variant name 
 function (detector, input, output, tasks="drift,splat,sim,nf,sp", dense=true, variant="nominal")
-    local mid = high.mid(detector, variant);
+    local params = high.params(detector, variant);  
+    local mid = high.api(detector, params, options={sparse:false});
+    // local mid = high.mid(detector, variant);
     local stages = wc.listify(tasks);
     local outfiles = output_objectify(stages, output); // stage->filename
 

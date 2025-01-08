@@ -28,6 +28,9 @@ function (imp)
 
     // Input DepoSet (original depos) output DepoSet (drifted depos). 
     drifter(name="") : imp.drifter(name),
+
+  track_depos : imp.track_depos
+
 }
 + call_it("signal")
 + call_it("noise")

@@ -21,7 +21,7 @@ function make_dag () {
     args+=( -A "outfiles=apa-%(anode)s-${tgt}.${data_ext}")
     local cfg_file="$(relative_path tenio-${src}-${tgt}.jsonnet)"
     run_idempotently -s "$cfg_file" -t "dag-${tgt}.json" -- \
-        compile_jsonnet "$cfg_file" "dag-${tgt}.json" "${args[@]}"
+        wcsonnet -o "dag-${tgt}.json" "${args[@]}" "$cfg_file"
     [[ -s dag-${tgt}.json ]]
     run_idempotently -s "dag-${tgt}.json" -t "dag-${tgt}.png" -- \
         dotify_graph "dag-${tgt}.json" "dag-${tgt}.png"
