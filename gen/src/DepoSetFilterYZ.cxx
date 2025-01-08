@@ -89,8 +89,6 @@ bool DepoSetFilterYZ::operator()(const input_pointer& in, output_pointer& out)
     bool pass_anod = false;
 
     for (auto box : m_boxes) {
-      WireCell::Ray r = box.bounds();
-
       if (box.inside(idepo->pos())) {
 	pass_anod = true;
 	break;
