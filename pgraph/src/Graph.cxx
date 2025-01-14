@@ -17,7 +17,13 @@ Graph::Graph()
 {
 }
 
-void Graph::add_node(Node* node) { m_nodes.insert(node); }
+void Graph::add_node(Node* node)
+{
+    if (!node) {
+        raise<ValueError>("Pgraph::Graph given null node");
+    }
+    m_nodes[node->instance()] = node;
+}
 
 void Graph::set_enable_em(bool flag) { m_enable_em = flag; }
 
@@ -59,23 +65,24 @@ std::vector<Node*> Graph::sort_kahn()
     }
 
     std::vector<Node*> ret;
-    std::unordered_set<Node*> seeds;
+    std::map<size_t, Node*> seeds;
 
     for (auto it : nincoming) {
         if (it.second == 0) {
-            seeds.insert(it.first);
+            Node* node = it.first;
+            seeds[node->instance()] = node;
         }
     }
 
     while (!seeds.empty()) {
-        Node* t = *seeds.begin();
-        seeds.erase(t);
-        ret.push_back(t);
+        auto [instance, node] = *seeds.begin();
+        seeds.erase(instance);
+        ret.push_back(node);
 
-        for (auto h : m_edges_forward[t]) {
+        for (auto h : m_edges_forward[node]) {
             nincoming[h] -= 1;
             if (nincoming[h] == 0) {
-                seeds.insert(h);
+                seeds[h->instance()] = h;
             }
         }
     }
@@ -158,11 +165,11 @@ bool Graph::call_node(Node* node)
 bool Graph::connected()
 {
     bool okay = true;
-    for (auto n : m_nodes) {
-        auto bad = n->disconnected_ports();
+    for (auto& [instance, node] : m_nodes) {
+        auto bad = node->disconnected_ports();
         if (bad.empty()) continue;
         okay = false;
-        l->warn("disconnected node: {}", n->ident());
+        l->warn("disconnected node #{}: {}", instance, node->ident());
         for (const auto& p : bad) {
             l->warn("\tport: {}", p.ident());
         }

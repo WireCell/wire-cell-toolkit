@@ -9,8 +9,10 @@ namespace WireCell {
         // A node in the DFP graph must inherit from Node.
         class Node {
            public:
-            Node() {}  // constructures may wish to resize/populate m_ports.
-            virtual ~Node() {}
+            Node() {
+                m_instance = m_instances++;
+            }  // constructures may wish to resize/populate m_ports.
+            virtual ~Node();
 
             // Concrete Node must implement this to consume inputs
             // and/or produce outputs.
@@ -74,9 +76,15 @@ namespace WireCell {
                 return ret;
             }
 
+            size_t instance() const { return m_instance; }
+
            protected:
             // Concrete class should fill during construction
             PortList m_ports[Port::ntypes];
+           private:
+            size_t m_instance;
+            static size_t m_instances;
+
         };
     }  // namespace Pgraph
 }  // namespace WireCell

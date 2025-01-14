@@ -70,7 +70,8 @@ namespace WireCell {
 
            private:
             std::vector<std::pair<Node*, Node*> > m_edges;
-            std::unordered_set<Node*> m_nodes;
+            //std::unordered_set<Node*> m_nodes;
+            std::map<size_t, Node*> m_nodes;
             std::unordered_map<Node*, std::vector<Node*> > m_edges_forward, m_edges_backward;
             Log::logptr_t l;
             Log::logptr_t l_timer;
