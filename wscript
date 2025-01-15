@@ -22,7 +22,12 @@ def determine_version():
         if os.path.exists("version.txt"):
             return open("version.txt", "r").readlines()[0].strip()
         raise FileNotFoundError("Wire-Cell Toolkit must either be built from a git clone or a version.txt must be provided in the source distribution")
-    return proc.stdout.decode().strip()
+    version = proc.stdout.decode().strip()
+    proc = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True)
+    branch = proc.stdout.decode().strip()
+    if branch == "master" or branch[0].isdecimal():
+        return version
+    return f'{branch}-{version}'
 
 VERSION = determine_version()
 
