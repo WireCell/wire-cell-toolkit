@@ -178,7 +178,11 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
         };
 
         if (tag(iport).size()) {
-            IFrame::trace_list_t tl(traces->size());
+            size_t tsize = 0;
+            if (traces) {
+                tsize = traces->size();
+            }
+            IFrame::trace_list_t tl(tsize);
             std::iota(tl.begin(), tl.end(), trace_offset);
             by_port[iport] = tl;
         }
