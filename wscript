@@ -7,22 +7,32 @@
 # according to the LICENSE file provided as also part of this project.
 
 import os
+import sys
+import subprocess
 
 # fixme: move into waft/
-from waflib.Build import BuildContext
-from waflib.Logs import debug, info, error, warn
+from waflib.Logs import debug, info
 
 TOP = '.'
 APPNAME = 'WireCell'
-VERSION = os.popen("git describe --tags").read().strip()
 
-# to avoid adding tooldir="waft" in all the load()'s
-import os
-import sys
-sys.path.insert(0, os.path.realpath("./waft"))
+def determine_version():
+    proc = subprocess.run(["git", "describe", "--tags"], capture_output=True)
+    if proc.returncode:
+        if os.path.exists("version.txt"):
+            return open("version.txt", "r").readlines()[0].strip()
+        raise FileNotFoundError("Wire-Cell Toolkit must either be built from a git clone or a version.txt must be provided in the source distribution")
+    return proc.stdout.decode().strip()
 
+VERSION = determine_version()
+
+
+# Valid log level identifiers
 log_levels = "trace debug info warn error critical off "
 log_levels = (log_levels + log_levels.upper()).split()
+
+# to avoid adding tooldir="waft" in all the load()'s
+sys.path.insert(0, os.path.realpath("./waft"))
 
 def options(opt):
     opt.load("wcb")
@@ -30,6 +40,9 @@ def options(opt):
     # this used in cfg/wscript_build
     opt.add_option('--install-config', type=str, default="",
                    help="Install configuration files for given experiment")
+
+    opt.add_option('--build-mode', type=str, default="",
+                   help="Force the build mode (default, detect based on git branch)")
 
     # fixme: add to spdlog entry in wcb.py
     opt.add_option('--with-spdlog-static', type=str, default="yes",
@@ -43,10 +56,31 @@ def options(opt):
                    help="Set the value for the compiler's --std= option, default 'c++17'")
 
 
+def is_development():
+    '''
+    Return True if we are sitting on a "development" branch.
+
+    A "development" branch is any that is not master or a numerical release
+    branch.
+    '''
+    if VERSION == "master" or VERSION[0].isdecimal():
+        return False
+    return True
+
+
 def configure(cfg):
     # Save to BuildConfig.h and env
     cfg.define("WIRECELL_VERSION", VERSION)
     cfg.env.VERSION = VERSION
+
+    # see waft/wcb.py for how this is consumed.
+    cfg.env.IS_DEVELOPMENT = is_development()
+    if cfg.env.IS_DEVELOPMENT:
+        info(f"configuring for DEVELOPMENT ({VERSION})")
+        cfg.define("WIRECELL_DEVELOPMENT", VERSION)
+    else:
+        info(f"configuring for RELEASE ({VERSION})")
+        cfg.define("WIRECELL_RELEASE", VERSION)
 
     # See https://github.com/WireCell/wire-cell-toolkit/issues/337
     if not cfg.options.libdir and cfg.env.LIBDIR.endswith("lib64"):
