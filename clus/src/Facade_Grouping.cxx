@@ -180,6 +180,52 @@ bool Grouping::is_good_point(const geo_point_t& point, const int face, double ra
     return false;
 }
 
+bool Grouping::is_good_point_wc(const geo_point_t& point, const int face, double radius, int ch_range, int allowed_bad) const 
+{
+    const int nplanes = 3;
+    int matched_planes = 0;
+    
+    // Loop through U,V,W planes
+    for (int pind = 0; pind < nplanes; pind++) {
+        int weight = (pind == 2) ? 2 : 1; // W plane counts double
+        if (get_closest_points(point, radius, face, pind).size() > 0) {
+            matched_planes += weight;
+        }
+        else if (get_closest_dead_chs(point, ch_range, face, pind)) {
+            matched_planes += weight;
+        }
+    }
+
+    return matched_planes >= 4 - allowed_bad;
+}
+
+std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int face, 
+    double radius, int ch_range) const 
+{
+    std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
+    
+    // Check each plane (0,1,2)
+    for (int pind = 0; pind < 3; ++pind) {
+        // Get closest points for this plane
+        const auto closest_pts = get_closest_points(point, radius, face, pind);
+        
+        if (closest_pts.size() > 0) {
+            // Has hits in this plane
+            num_planes[pind]++;
+        }
+        else {
+            // No hits, check if it's in dead region
+            if (get_closest_dead_chs(point, ch_range, face, pind)) {
+                num_planes[pind + 3]++;
+            }
+        }
+    }
+    
+    return num_planes;
+}
+
+
+
 Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int face,
                                                     int pind) const
 {
@@ -232,6 +278,13 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     const int tind = std::round(time / params.tick);
 
     return {tind, wind};
+}
+
+size_t Grouping::get_num_points(const int face, const int pind) const {
+    const auto sname = String::format("ctpc_f%dp%d", face, pind);
+    Tree::Scope scope = {sname, {"x", "y"}, 1};
+    const auto& sv = m_node->value.scoped_view(scope);
+    return sv.npoints();
 }
 
 // Local Variables:

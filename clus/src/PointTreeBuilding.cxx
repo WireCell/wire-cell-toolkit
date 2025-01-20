@@ -405,6 +405,8 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
                 if(charge.uncertainty() > m_dead_threshold) {
+                    // if (charge.value() >0)
+                    // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
                     continue;
                 } 
                 const auto& cident = ichan->ident();

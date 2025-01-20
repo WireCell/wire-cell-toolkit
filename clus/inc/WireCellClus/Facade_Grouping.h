@@ -60,6 +60,13 @@ namespace WireCell::PointCloud::Facade {
 
         bool is_good_point(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
                            const int allowed_bad = 1) const;
+        // In Facade_Grouping.h, inside the Grouping class declaration
+        bool is_good_point_wc(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, 
+                            const int ch_range = 1, const int allowed_bad = 1) const;
+        // In the Grouping class declaration in Facade_Grouping.h
+        std::vector<int> test_good_point(const geo_point_t& point, const int face, 
+                                double radius = 0.6 * units::cm, int ch_range = 1) const;
+
 
         /// @brief
         /// @param point
@@ -74,6 +81,12 @@ namespace WireCell::PointCloud::Facade {
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;
+
+        /// @brief Get number of points for a given plane
+        /// @param plane The plane index (0=U, 1=V, 2=W)
+        /// @return Number of points in the specified plane
+        size_t get_num_points(const int face, const int pind) const;
+
 
        private:
         void fill_proj_centers_pitch_mags() const;
