@@ -595,7 +595,7 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
     // double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     // y = mag * wind + center
     double y = cos(angle) * point[2] - sin(angle) * point[1];
-    double wind = (y - center) / pitch;
+    double wind = (y - center) / pitch - 0.5; // subtract 0.5 to match WCP (wire center vs. edge difference ...) ...
     return std::round(wind);
 }
 

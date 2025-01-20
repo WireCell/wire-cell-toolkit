@@ -84,6 +84,7 @@ void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
     m_tp.tick = get(cfg, "tick", m_tp.tick);
     m_tp.tick_drift = get(cfg, "tick_drift", m_tp.tick_drift);
+    m_tp.time_offset = get(cfg, "time_offset", m_tp.time_offset);
     m_tp.nticks_live_slice = get(cfg, "nticks_live_slice", m_tp.nticks_live_slice);
 
     m_tp.FV_xmin = get(cfg, "FV_xmin", m_tp.FV_xmin);
@@ -218,9 +219,15 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     const double angle = angles[pind];
     const double pitch = pitch_mags().at(face).at(pind);
     const double center = proj_centers().at(face).at(pind);
+
+    // std::cout << "Test: " << pitch/units::cm << " " << center/units::cm << std::endl;
+
     const int wind = point2wind(point, angle, pitch, center);
 
     const auto params = get_params();
+
+    //std::cout << "Test: " << params.time_offset/units::us << " " << params.drift_speed/(units::mm/units::us) << " " << point[0] << std::endl;
+
     const double time = drift2time(iface, params.time_offset, params.drift_speed, point[0]);
     const int tind = std::round(time / params.tick);
 

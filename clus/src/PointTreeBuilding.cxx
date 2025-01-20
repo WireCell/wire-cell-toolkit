@@ -416,8 +416,12 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     // const auto& face = wire->planeid().face();
                     const auto& face = m_face;
                     /// FIXME: is this the way to get face?
+
+//                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
+
                     const auto& x = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
-                    const double y = pitch_mags.at(face).at(plane)*wind + proj_centers.at(face).at(plane);
+                    const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
+
                     // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
                     //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
                     //                wind, plane, face, x, y);
@@ -495,13 +499,24 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 // }
                 faces.insert(face);
                 planes.insert(plane);
+
                 auto & dead_winds = grouping->get_dead_winds(face, plane);
+                // fix a bug how do we know the smaller or bigger value of xbeg and xend?
+                // if (dead_winds.find(wind) == dead_winds.end()) {
+                //     dead_winds[wind] = {xbeg, xend};
+                // } else {
+                //     const auto& [xbeg_now, xend_now] = dead_winds[wind];
+                //     dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
+                // }
                 if (dead_winds.find(wind) == dead_winds.end()) {
-                    dead_winds[wind] = {xbeg, xend};
+                    dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
                 } else {
                     const auto& [xbeg_now, xend_now] = dead_winds[wind];
-                    dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
+                    dead_winds[wind] = {std::min(std::min(xbeg,xend)-0.1*units::cm, xbeg_now), std::max(std::max(xbeg,xend) + 0.1*units::cm, xend_now)};
                 }
+                
+
+
                 // if (cident == 903) {
                 //     log->debug("wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
                 // }
