@@ -81,12 +81,37 @@ namespace WireCell::PointCloud::Facade {
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;
+        // In class Grouping definition
+        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane) const;
 
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
         /// @return Number of points in the specified plane
         size_t get_num_points(const int face, const int pind) const;
 
+        // In Facade_Grouping.h, add to public section:
+        double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0) const;
+        double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0) const;
+
+        /// @brief Get ranges of dead channels that overlap with given time and channel window
+        /// @param min_time Minimum time
+        /// @param max_time Maximum time  
+        /// @param min_ch Minimum channel
+        /// @param max_ch Maximum channel
+        /// @param face Face number
+        /// @param pind Plane index
+        /// @param flag_ignore_time If true, ignore time window check
+        /// @return Vector of pairs representing ranges of dead channels
+        std::vector<std::pair<int, int>> get_overlap_dead_chs(const int min_time, const int max_time, 
+            const int min_ch, const int max_ch, const int face, const int pind, 
+            const bool flag_ignore_time=false) const;
+
+        // In Facade_Grouping.h, inside the Grouping class public section:
+        std::map<int, std::pair<int, int>> get_all_dead_chs(const int face, const int pind, int expand = 12) const;
+        // Get overlapping good channel charges in a time-channel window
+        std::map<std::pair<int,int>, std::pair<double,double>> get_overlap_good_ch_charge(
+            int min_time, int max_time, int min_ch, int max_ch, 
+            const int face, const int pind) const;
 
        private:
         void fill_proj_centers_pitch_mags() const;

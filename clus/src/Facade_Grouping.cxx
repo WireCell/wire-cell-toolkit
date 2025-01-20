@@ -224,6 +224,54 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
     return num_planes;
 }
 
+double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const double radius, const int face) const {
+    double charge = 0;
+    int ncount = 0;
+    const int nplanes = 3;
+    // Check all three planes
+    for (int pind = 0; pind < nplanes; ++pind) {
+        if (!get_closest_dead_chs(point, 1, face, pind)) {
+            charge += get_ave_charge(point, radius, face, pind);
+            ncount++;
+        }
+    }
+
+    if (ncount != 0) {
+        charge /= ncount;
+    }
+    return charge;
+}
+
+double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double radius, const int face, const int pind) const {
+    double sum_charge = 0;
+    double ncount = 0;
+
+    // Get closest points within radius
+    auto nearby_points = get_closest_points(point, radius, face, pind);
+
+    // Access the charge information from ctpc dataset
+    const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
+    const auto& local_pcs = m_node->value.local_pcs();
+    
+    if (local_pcs.find(ds_name) == local_pcs.end()) {
+        return 0.0;
+    }
+
+    const auto& ds = local_pcs.at(ds_name);
+    const auto& charges = ds.get("charge")->elements<float_t>();
+    
+    // Sum charges for nearby points
+    for (const auto& [ind, dist] : nearby_points) {
+        sum_charge += charges[ind];
+        ncount++;
+    }
+
+    if (ncount != 0) {
+        sum_charge /= ncount;
+    }
+    return sum_charge;
+}
+
 
 
 Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int face,
@@ -280,11 +328,152 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     return {tind, wind};
 }
 
+std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane) const 
+{
+    if (m_anode == nullptr) {
+        raise<ValueError>("Anode is null");
+    }
+    const auto& iface = m_anode->face(face);
+    if (iface == nullptr) {
+        raise<ValueError>("anode %d has no face %d", m_anode->ident(), face);
+    }
+    const int nplanes = 3;
+    const auto params = get_params();
+    const auto& pitch_mags = this->pitch_mags();
+    const auto& proj_centers = this->proj_centers();
+    
+    // Convert time to x position
+    const double x = time2drift(iface, params.time_offset, params.drift_speed, timeslice * params.tick);
+    
+    // Get y position based on channel and plane
+    double y;
+    if (plane >= 0 && plane < nplanes) {
+        const double pitch = pitch_mags.at(face).at(plane);
+        const double center = proj_centers.at(face).at(plane);
+        y = pitch * (channel+0.5) + center;
+    }
+    else {
+        raise<ValueError>("invalid plane index %d", plane);
+    }
+
+    return std::make_pair(x, y);
+}
+
+
 size_t Grouping::get_num_points(const int face, const int pind) const {
     const auto sname = String::format("ctpc_f%dp%d", face, pind);
     Tree::Scope scope = {sname, {"x", "y"}, 1};
     const auto& sv = m_node->value.scoped_view(scope);
     return sv.npoints();
+}
+
+std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const int min_time, const int max_time,
+    const int min_ch, const int max_ch, const int face, const int pind, const bool flag_ignore_time) const 
+{
+    if (!m_anode) {
+        raise<ValueError>("anode is null");
+    }
+    const auto& params = get_params();
+    
+    // Convert time to position
+    const double min_xpos = time2drift(m_anode->face(face), params.time_offset, params.drift_speed, min_time);
+    const double max_xpos = time2drift(m_anode->face(face), params.time_offset, params.drift_speed, max_time);
+
+    std::set<int> dead_chs;
+    const auto& dead_winds = get_dead_winds(face, pind);
+
+    // Find overlapping dead channels
+    for (const auto& [wind, xrange] : dead_winds) {
+        const int temp_ch = wind;
+        const double temp_min_xpos = xrange.first;
+        const double temp_max_xpos = xrange.second;
+
+        if (flag_ignore_time) {
+            if (temp_ch >= min_ch && temp_ch <= max_ch) {
+                dead_chs.insert(temp_ch);
+            }
+        }
+        else {
+            if (temp_ch >= min_ch && temp_ch <= max_ch &&
+                max_xpos >= temp_min_xpos && min_xpos <= temp_max_xpos) {
+                dead_chs.insert(temp_ch);
+            }
+        }
+    }
+
+    // Convert set of channels to ranges
+    std::vector<std::pair<int, int>> dead_ch_range;
+    for (const auto ch : dead_chs) {
+        if (dead_ch_range.empty()) {
+            dead_ch_range.push_back(std::make_pair(ch, ch));
+        }
+        else {
+            if (ch - dead_ch_range.back().second == 1) {
+                dead_ch_range.back().second = ch;
+            }
+            else {
+                dead_ch_range.push_back(std::make_pair(ch, ch));
+            }
+        }
+    }
+
+    return dead_ch_range;
+}
+
+std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int face, const int pind, int expand) const
+{
+    std::map<int, std::pair<int, int>> results;
+    
+    const auto& dead_winds = get_dead_winds(face, pind);
+
+    // Add entries for this face/plane's dead channels
+    for (const auto& [wind, xrange] : dead_winds) {
+        int temp_ch = wind;
+        
+        // Convert position range to time ticks using drift parameters
+        int min_time = std::round(drift2time(m_anode->face(face), 
+                                           m_tp.time_offset,
+                                           m_tp.drift_speed, 
+                                           xrange.first)) - expand;
+        int max_time = std::round(drift2time(m_anode->face(face),
+                                           m_tp.time_offset,
+                                           m_tp.drift_speed,
+                                           xrange.second)) + expand;
+        
+        results[temp_ch] = std::make_pair(std::min(min_time, max_time), std::max(min_time, max_time));
+    }
+    
+    return results;
+}
+
+std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_overlap_good_ch_charge(
+    int min_time, int max_time, int min_ch, int max_ch, 
+    const int face, const int pind) const 
+{
+    std::map<std::pair<int,int>, std::pair<double,double>> map_time_ch_charge;
+    
+    // Get the point cloud for this face/plane
+    const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
+    if (m_node->value.local_pcs().find(ds_name) == m_node->value.local_pcs().end()) {
+        return map_time_ch_charge; // Return empty if dataset not found
+    }
+    
+    const auto& ctpc = m_node->value.local_pcs().at(ds_name);
+    const auto& slice_index = ctpc.get("slice_index")->elements<int_t>();
+    const auto& wind = ctpc.get("wind")->elements<int_t>();
+    const auto& charge = ctpc.get("charge")->elements<float_t>();
+    const auto& charge_err = ctpc.get("charge_err")->elements<float_t>();
+
+    // Fill the map for points within the specified window
+    for (size_t i = 0; i < slice_index.size(); ++i) {
+        if (slice_index[i] >= min_time && slice_index[i] <= max_time &&
+            wind[i] >= min_ch && wind[i] <= max_ch) {
+            map_time_ch_charge[std::make_pair(slice_index[i], wind[i])] = 
+                std::make_pair(charge[i], charge_err[i]);
+        }
+    }
+
+    return map_time_ch_charge;
 }
 
 // Local Variables:
