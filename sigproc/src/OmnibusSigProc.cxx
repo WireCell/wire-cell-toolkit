@@ -1117,6 +1117,8 @@ void OmnibusSigProc::decon_2D_init(int plane)
 
 void OmnibusSigProc::pad_data(int plane) {
 
+  //If empty, skip padding
+  if (!m_nwires_separate_planes.size()) return;
   //Get the number of separate planes we need to pad between
   auto nwires_separate_planes = m_nwires_separate_planes[plane];
   int npad_blocks = nwires_separate_planes.size();
@@ -1168,6 +1170,8 @@ void OmnibusSigProc::pad_data(int plane) {
 }
 
 void OmnibusSigProc::unpad_data(int plane) {
+    //If empty, skip unpadding
+    if (!m_nwires_separate_planes.size()) return;
     //Get the nwires for the separate, concatenated planes
     std::vector<int> nwires_separate_planes = m_nwires_separate_planes[plane];
     //Check that we actually need to unpad
