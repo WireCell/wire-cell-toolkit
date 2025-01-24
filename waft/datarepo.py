@@ -20,6 +20,10 @@ else:
     urlopen = request.urlopen
 import tarfile
 
+import ssl
+# www.phy.bnl.gov cert is in a format that is legit but not correctly parsed by python
+ssl_context = ssl._create_unverified_context()
+
 def options(opt):
     # fixme: need to provide "official" URL.  For now:
     # https://www.phy.bnl.gov/~bviren/tmp/wcttest/data_repo
@@ -55,7 +59,7 @@ def download_and_untar(task):
     path = unode.parent().abspath()
 
     debug(f'datarepo: getting {url}')
-    web = urlopen(url)
+    web = urlopen(url, context=ssl_context)
     if web.getcode() != 200:
         return web.getcode()
     # tarfile needs seekable file object
@@ -107,7 +111,7 @@ class datarepo_provision(Task):
         path = path.abspath()
 
         debug(f'datarepo: getting {url}')
-        web = urlopen(url)
+        web = urlopen(url, context=ssl_context)
         if web.getcode() != 200:
             return web.getcode()
 
