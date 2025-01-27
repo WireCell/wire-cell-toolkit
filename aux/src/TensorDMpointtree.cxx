@@ -161,7 +161,10 @@ WireCell::Aux::TensorDM::as_pctree(const TensorIndex& ti,
 
     // Loop cross product of (PC name,node)
     for (const auto& [pcname, pcds] : pointclouds) {
-
+        if (!lpcmaps_ds.get(pcname)) {
+            /// TODO: @BV what does this mean?
+            continue;
+        }
         // Get local PC map vector as a span on DS array.
         auto lpcmap = lpcmaps_ds.get(pcname)->elements<lpcmaps_index_type>();
 
