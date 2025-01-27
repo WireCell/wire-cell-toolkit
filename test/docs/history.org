@@ -1,34 +1,42 @@
 #+title: Historical tests
 #+include: ../../docs/include-topic.org
 
-The WCT testing framework supports "historical tests" and "historical
-files".  A "historical file" is simply one produced by a test and
-saved to the "history" category of the test data repository (see the [[file::datarepo.org][data repository topic]]).
-A "historical test" is then a test that consumes
-these files.
+The WCT testing framework supports "historical tests" and "historical files".  A
+"historical file" is simply one produced by a test and saved to the "history"
+category of the test data repository (see the [[file::datarepo.org][data repository topic]]).  A
+"historical test" is then a test that consumes these files.
 
 * Versions
 
-A historical test may itself only run software from the current software version under test.  A historical test can not execute any code from other versions, though it may access historical files produced by other code versions.
+A "historical test" may itself only run software from the repository form which
+it was built and run.  But it may access "historical files" produced by tests
+that were run from previous versions of the software.  This is made possible by
+saving the prior output to the test data repository and getting copies of those
+past files locally for the "historical test" to consume.
 
-The versions that are available for a historical file is given at build time by:
+
+The default set of versions of historical files are hard-coded by the WCT developers (see [[file:../../waft/datarepo.py][waft/datarepo.py]]).  A user may override this list at the build configure stage:
 
 #+begin_example
 wcb configure [--test-data-versions=<versions>] [--tests] [...]
 #+end_example
 
-This is an optional argument.  The WCT developers have hard-coded a list of suitable versions in the built.  However, the user is free to to override that list.  As always, tests are not on by default and the ~--tests~ option may be given at configure time so the build "remembers" tests.
-
-During the build phase:
+The local data repository will be populated with files during the build stage.
 
 #+begin_example
 wcb [--tests]
 #+end_example
 
-The data repository will be populated with files for the configured tests data versions.
 
-Historical tests should only assume versions in this list but may also include the current version.
+Historical tests should only assume versions in this list but may also include
+the current version.
 
-* Support
+* Accessing historical files
 
-See the [[file::bats.org][BATS topic]] for description of support for historical tests written as BATS files.  
+See the [[file:bats.org][Bats topic]] on [[file:bats.org::*Creating and finding persistent files][Creating and finding persistent files]] for description of the support provided for writing historical files and reading them into historical tests.
+
+For any type of test that lacks similar support, the historical files can be found under
+
+#+begin_example
+build/tests/history/<version>/<path...>
+#+end_example

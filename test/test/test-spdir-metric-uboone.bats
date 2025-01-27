@@ -30,8 +30,11 @@ function gen_fname () {
 # 2) It samples U/V wire direction space differently than W.  Event when the
 # "primed" (U/V) angle theta_xz' matches the W angle theta_xz, the theta_y' and
 # theta_y differ.  And so it is not trivial to make U/V vs W comparisons.
-mb_theta_xz_deg=( 0  1  3  5 10 20 30 45 60 75 80 82 84 89 )
-mb_theta_y_deg=( 90 90 90 90 90 90 90 90 90 90 90 90 90 90 )
+# mb_theta_xz_deg=( 0  1  3  5 10 20 30 45 60 75 80 82 84 89 )
+# mb_theta_y_deg=( 90 90 90 90 90 90 90 90 90 90 90 90 90 90 )
+# reduce for testing speed
+mb_theta_xz_deg=( 0 10 45 89 )
+mb_theta_y_deg=( 90 90 90 90 )
 
 # In future, perhaps we pick others.  For now, accept MB's
 theta_xz_deg=( ${mb_theta_xz_deg[@]} )
