@@ -124,6 +124,10 @@ std::unique_ptr<WireCell::PointCloud::Tree::Points::node_t>
 WireCell::Aux::TensorDM::as_pctree(const ITensor::vector& tens,
                                    const std::string& datapath)
 {
+    /// TODO: FIXME: this works, but need to understand why
+    if (tens.size() <= 2) {
+        return std::make_unique<WireCell::PointCloud::Tree::Points::node_t>();
+    }
     TensorIndex ti(tens);
     return as_pctree(ti, datapath);
 }
