@@ -34,6 +34,7 @@ namespace WireCell::PointCloud::Facade {
 
     class Cluster;
     class Blob;
+    class Grouping;
 
     // map for face, plane to something
     /// TODO: face (ident? which?) -> plane (index) -> Dataset
@@ -384,6 +385,8 @@ namespace WireCell::PointCloud::Facade {
         if (num >= num_cut) return true;
         return false;
     }
+
+    void graph2json(const Grouping& grouping, const std::string& filename);
 
 }  // namespace WireCell::PointCloud::Facade
 

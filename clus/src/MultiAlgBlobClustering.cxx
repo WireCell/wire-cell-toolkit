@@ -334,6 +334,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     fill_bee_points(m_bee_ld, *root_live.get());
     perf("dump live clusters to bee");
 
+    graph2json(live_grouping, "graph2json.npz");
+
     std::string outpath = m_outpath;
     if (outpath.find("%") != std::string::npos) {
         outpath = String::format(outpath, ident);

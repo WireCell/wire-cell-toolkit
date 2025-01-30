@@ -1,6 +1,8 @@
 #include "WireCellClus/Facade.h"
 #include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/Facade_Grouping.h"
 #include <boost/container_hash/hash.hpp>
+#include "WireCellAux/SimpleTensor.h"
 
 using namespace WireCell;
 using namespace WireCell::PointCloud;
@@ -597,6 +599,93 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     double wind = (y - center) / pitch;
     return std::round(wind);
+}
+
+
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#include <boost/iostreams/filtering_stream.hpp>
+#pragma GCC diagnostic pop
+#include "WireCellUtil/Stream.h"
+void Facade::graph2json(const Grouping& grouping, const std::string& filename)
+{
+    typedef boost::multi_array<float, 2> MultiArray;
+    int npoints = 0;
+    int nedges = 0;
+    for (const auto& cluster : grouping.children()) {
+        /// TODO: use ctpc?
+        cluster->Create_graph(true);
+        const MCUGraph& g = *(cluster->get_graph());
+        npoints += boost::num_vertices(g);
+        nedges += boost::num_edges(g);
+    }
+
+    // x, y, z, q
+    MultiArray apoints(boost::extents[npoints][4]);
+    // head node, tail node, weight
+    MultiArray aedges(boost::extents[nedges][3]);
+
+    // global point index
+    int gpidx = 0;
+    int geidx = 0;
+    int gpoffset = 0;
+    for (const auto& cluster : grouping.children()) {
+        const MCUGraph& g = *(cluster->get_graph());
+        auto vrange = boost::vertices(g);
+        for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+            auto v = *vit;
+            gpidx = gpoffset + v;
+            if (gpidx >= npoints) {
+                raise<ValueError>("graph2json: gpidx %d >= npoints %d", gpidx, npoints);
+            }
+            apoints[gpidx][0] = cluster->point3d(g[v].index).x();
+            apoints[gpidx][1] = cluster->point3d(g[v].index).y();
+            apoints[gpidx][2] = cluster->point3d(g[v].index).z();
+            /// TODO: placeholder for charge
+            apoints[gpidx][3] = 1.0;
+        }
+        auto erange = boost::edges(g);
+        for (auto eit = erange.first; eit != erange.second; ++eit) {
+            auto e = *eit;
+            auto source = boost::source(e, g);
+            auto target = boost::target(e, g);
+            aedges[geidx][0] = source+gpoffset;
+            aedges[geidx][1] = target+gpoffset;
+            /// TODO: placeholder
+            aedges[geidx][2] = 1.0;
+            geidx++;
+        }
+        gpoffset += boost::num_vertices(g);
+    }
+
+        
+    using ostream_t = boost::iostreams::filtering_ostream;
+    ostream_t m_out;
+    custard::output_filters(m_out, filename);
+    if (m_out.empty()) {
+        raise<ValueError>("graph2json: unsupported outname: %s", filename.c_str());
+    }
+    // write points
+    {
+        std::vector<size_t> shape = {apoints.shape()[0], apoints.shape()[1]};
+        Json::Value md = Json::objectValue;
+        auto ten = std::make_shared<Aux::SimpleTensor>(shape, apoints.data(), md);
+        const std::string fname = "apoints";
+        Stream::write(m_out, fname, ten->data(), shape, ten->dtype());
+        m_out.flush();
+    }
+    // write edges
+    {
+        std::vector<size_t> shape = {aedges.shape()[0], aedges.shape()[1]};
+        Json::Value md = Json::objectValue;
+        auto ten = std::make_shared<Aux::SimpleTensor>(shape, aedges.data(), md);
+        const std::string fname = "aedges";
+        Stream::write(m_out, fname, ten->data(), shape, ten->dtype());
+        m_out.flush();
+    }
+    m_out.pop();
+
 }
 
 // Local Variables:
