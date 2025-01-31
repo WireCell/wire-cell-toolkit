@@ -608,9 +608,44 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
 #include <boost/iostreams/filtering_stream.hpp>
 #pragma GCC diagnostic pop
 #include "WireCellUtil/Stream.h"
+
+
+/// @param arr: 2D array
+/// @param fname: file name
+/// @param pname: package name
+static void arr2file(const boost::multi_array<float, 2>& arr, const std::string& fname, boost::iostreams::filtering_ostream& m_out)
+{
+    std::vector<size_t> shape = {arr.shape()[0], arr.shape()[1]};
+    // Stream::write(m_out, fname, arr.data(), shape, "float");
+    Json::Value md = Json::objectValue;
+    auto ten = std::make_shared<Aux::SimpleTensor>(shape, arr.data(), md);
+    Stream::write(m_out, fname, ten->data(), shape, ten->dtype());
+    std::cout << "ten->dtype() " << ten->dtype() << std::endl;
+    m_out.flush();
+}
+
 void Facade::graph2json(const Grouping& grouping, const std::string& filename)
 {
+
     typedef boost::multi_array<float, 2> MultiArray;
+    size_t nblobs = 0;
+    for (const auto& cluster : grouping.children()) {
+        nblobs += cluster->children().size();
+    }
+    // x, y, z, q, npoints
+    MultiArray ablobs(boost::extents[nblobs][5]);
+    int gbidx = 0;
+    for (const auto& cluster : grouping.children()) {
+        for (const auto& blob : cluster->children()) {
+            ablobs[gbidx][0] = blob->center_x();
+            ablobs[gbidx][1] = blob->center_y();
+            ablobs[gbidx][2] = blob->center_z();
+            ablobs[gbidx][3] = blob->charge();
+            ablobs[gbidx][4] = blob->npoints();
+            gbidx++;
+        }
+    }
+
     int npoints = 0;
     int nedges = 0;
     for (const auto& cluster : grouping.children()) {
@@ -659,31 +694,15 @@ void Facade::graph2json(const Grouping& grouping, const std::string& filename)
         gpoffset += boost::num_vertices(g);
     }
 
-        
     using ostream_t = boost::iostreams::filtering_ostream;
     ostream_t m_out;
     custard::output_filters(m_out, filename);
     if (m_out.empty()) {
-        raise<ValueError>("graph2json: unsupported outname: %s", filename.c_str());
+        raise<ValueError>("ten2file: unsupported outname: %s", filename.c_str());
     }
-    // write points
-    {
-        std::vector<size_t> shape = {apoints.shape()[0], apoints.shape()[1]};
-        Json::Value md = Json::objectValue;
-        auto ten = std::make_shared<Aux::SimpleTensor>(shape, apoints.data(), md);
-        const std::string fname = "apoints";
-        Stream::write(m_out, fname, ten->data(), shape, ten->dtype());
-        m_out.flush();
-    }
-    // write edges
-    {
-        std::vector<size_t> shape = {aedges.shape()[0], aedges.shape()[1]};
-        Json::Value md = Json::objectValue;
-        auto ten = std::make_shared<Aux::SimpleTensor>(shape, aedges.data(), md);
-        const std::string fname = "aedges";
-        Stream::write(m_out, fname, ten->data(), shape, ten->dtype());
-        m_out.flush();
-    }
+    arr2file(ablobs, "ablobs", m_out);
+    arr2file(apoints, "apoints", m_out);
+    arr2file(aedges, "aedges", m_out);
     m_out.pop();
 
 }
