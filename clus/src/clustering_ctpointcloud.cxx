@@ -73,4 +73,20 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
     auto good_chs_w = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,4800,0,2);
 
     std::cout << "Test all good chs: " << good_chs_u.size() << " " << good_chs_v.size() << " " << good_chs_w.size() << std::endl;
+
+// run 5384 130 6501 results
+//     Test CTPointCloud
+// Test: (-1204.49 -57.85 5635)
+// Test is_good_point: 1 1
+// Test get_closest_points: 5 5 6
+// Test get_closest_dead_chs: 0 0 0
+// Test convert_3Dpoint_time_ch: 253 1294 3655 6678
+// Test Number of Points: 42097 42335 42029
+// Test test_good_point: 1 1 1 0 0 0
+// Test Ave Charge: 3549.97 3189.11 4524.67 2936.12 
+// Test 2D Conversion -1739.58 -984.392 -1739.58 -967.591 -1739.58 32.5
+// Test Overlap dead chs: 33 40 22
+// Test all dead chs: 1027
+// Test all good chs: 11233 11063 12483
+
 }

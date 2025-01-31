@@ -43,6 +43,7 @@ namespace WireCell::PointCloud::Facade {
         const Grouping* grouping() const;
 
 
+
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
         const sv3d_t& sv3d() const;
@@ -93,6 +94,11 @@ namespace WireCell::PointCloud::Facade {
 
         // Return charge-weighted average position of points of blobs within distance of point.
         geo_point_t calc_ave_pos(const geo_point_t& origin, const double dis) const;
+        geo_point_t calc_ave_pos(const geo_point_t& origin, int N) const;
+
+
+        // In the public section of the Cluster class:
+        geo_vector_t calc_dir(const geo_point_t& p_test, const geo_point_t& p, double dis) const;
 
         // Return blob containing the returned point that is closest to the given point.
         using point_blob_map_t = std::map<geo_point_t, const Blob*>;
@@ -178,6 +184,8 @@ namespace WireCell::PointCloud::Facade {
         // WCP: get_front_back_wcps
         std::pair<geo_point_t, geo_point_t> get_front_back_points() const;
 
+        std::pair<geo_point_t, geo_point_t> get_main_axis_points() const;
+
         /// TODO: old_wcp and dir are used as local vars inside the function, make the IO more clear?
         geo_point_t get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step = 5*units::cm, const int allowed_nstep = 12) const;
 
@@ -258,6 +266,7 @@ namespace WireCell::PointCloud::Facade {
         /// @attention some distance-based cuts
         void Connect_graph(const bool use_ctpc) const;
         void Connect_graph() const;
+        std::vector<int> examine_graph(const bool use_ctpc = true) const;
 
         ///
         void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true) const;
@@ -268,7 +277,13 @@ namespace WireCell::PointCloud::Facade {
 
         ///
         inline const std::list<size_t>& get_path_wcps() const { return m_path_wcps; }
-        
+        inline const std::list<const Blob*>& get_path_blobs() const { return m_path_mcells; }
+        // In class declaration: 
+        std::vector<geo_point_t> indices_to_points(const std::list<size_t>& path_indices) const;
+        void organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
+        void organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
+
+
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;
         const wire_indices_t& wire_indices() const;
@@ -278,6 +293,8 @@ namespace WireCell::PointCloud::Facade {
         geo_point_t get_center() const;
         geo_vector_t get_pca_axis(int axis) const;
         double get_pca_value(int axis) const;
+        // Add this inline member function in the class definition:
+        inline void reset_pca() { m_pca_calculated = false; }
 
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
@@ -286,13 +303,16 @@ namespace WireCell::PointCloud::Facade {
         using BlobSet = std::set<const Blob*, blob_less_functor>;
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
+   
+
 
         /// @brief Determine if a cluster may be separated due to crossing the boundary.
         /// @return connected components array or empty if separation is not warranted.
         std::vector<int>
         examine_x_boundary(const double low_limit = -1*units::cm, const double high_limit = 257*units::cm);
 
-        /// @brief get_mcell_indices in WCP
+        /// @brief get_mcell_indices 
+        /// WCP: get_cell_times_set_map
         /// TODO: currently return copy, return a const reference?
         std::vector<int> get_blob_indices(const Blob*) const;
 
@@ -358,7 +378,6 @@ namespace WireCell::PointCloud::Facade {
 
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
-
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
 
         // Add to private members in Facade_Cluster.h:
@@ -372,6 +391,10 @@ namespace WireCell::PointCloud::Facade {
         mutable int m_npoints{0};
 
         void Calc_PCA() const;
+        void Calc_PCA(std::vector<geo_point_t>& points) const;
+        // Calculate PCA direction for a set of points around a center point
+        geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const;
+
         mutable bool m_pca_calculated{false};
         // lazy, do not access directly.
         mutable geo_point_t m_center;

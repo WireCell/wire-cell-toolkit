@@ -1002,6 +1002,58 @@ geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis) c
     return ret;
 }
 
+geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, int N) const
+{
+    // average position
+    geo_point_t ret(0, 0, 0);
+    double charge = 0;
+
+    auto blob_pts = get_closest_blob(origin, N * units::cm);
+    for (auto [blob, _] : blob_pts) {
+        double q = blob->charge(); 
+        if (q == 0) q = 1;  // protection against zero charge
+        ret += blob->center_pos() * q;
+        charge += q;
+    }
+
+    if (charge != 0) {
+        ret = ret / charge;
+    }
+
+    return ret;
+}
+
+geo_vector_t Cluster::calc_dir(const geo_point_t& p_test, const geo_point_t& p, double dis) const
+{
+    // Initialize direction vector
+    geo_vector_t dir(0, 0, 0);
+    
+    // Get nearby blobs using existing interface
+    auto blob_pts = get_closest_blob(p, dis);
+    
+    // Calculate weighted direction
+    for (const auto& [blob, _] : blob_pts) {
+        const geo_point_t point = blob->center_pos();
+        const double q = blob->charge();
+        
+        // Calculate direction vector from p_test to point
+        geo_vector_t dir1(point.x() - p_test.x(),
+                         point.y() - p_test.y(), 
+                         point.z() - p_test.z());
+                         
+        // Add weighted contribution
+        dir += dir1 * q;
+    }
+
+    // Normalize if non-zero
+    if (dir.magnitude() != 0) {
+        dir = dir.norm();
+    }
+    
+    return dir;
+}
+
+
 #include <boost/histogram.hpp>
 #include <boost/histogram/algorithm/sum.hpp>
 namespace bh = boost::histogram;
@@ -1271,6 +1323,40 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_earliest_latest_points() const
 std::pair<geo_point_t, geo_point_t> Cluster::get_front_back_points() const
 {
     return get_highest_lowest_points(2);
+}
+
+std::pair<geo_point_t, geo_point_t> Cluster::get_main_axis_points() const
+{
+    // Get first point as initial values
+    geo_point_t highest_point = point3d(0);
+    geo_point_t lowest_point = point3d(0);
+
+    // Get main axis and ensure consistent direction (y>0)
+    geo_point_t main_axis = get_pca_axis(0); 
+    if (main_axis.y() < 0) {
+        main_axis = main_axis * -1;
+    }
+
+    // Initialize extreme values using projections of first point
+    double high_value = highest_point.dot(main_axis);
+    double low_value = high_value;
+
+    // Loop through all points to find extremes along main axis
+    for (int i = 1; i < npoints(); i++) {
+        geo_point_t current = point3d(i);
+        double value = current.dot(main_axis);
+        
+        if (value > high_value) {
+            highest_point = current;
+            high_value = value; 
+        }
+        if (value < low_value) {
+            lowest_point = current;
+            low_value = value;
+        }
+    }
+
+    return std::make_pair(highest_point, lowest_point);
 }
 
 std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
@@ -2628,6 +2714,45 @@ void Cluster::Connect_graph() const{
 
 }
 
+// In Facade_Cluster.cxx
+std::vector<int> Cluster::examine_graph(const bool use_ctpc) const 
+{
+    // Create new graph
+    if (m_graph != nullptr) {
+        m_graph.reset();
+    }
+    
+    m_graph = std::make_unique<MCUGraph>(npoints());
+    
+    // Establish connections
+    Establish_close_connected_graph();
+    
+    // Connect using overclustering protection
+    Connect_graph(use_ctpc); 
+    
+    // Find connected components
+    std::vector<int> component(num_vertices(*m_graph));
+    const int num_components = connected_components(*m_graph, &component[0]);
+
+    // If only one component, no need for mapping
+    if (num_components <= 1) {
+        return std::vector<int>();
+    }
+
+    // Create mapping from blob indices to component groups
+    std::vector<int> b2groupid(nchildren(), -1);
+    
+    // For each point in the graph
+    for (size_t i = 0; i < component.size(); ++i) {
+        // Get the blob index for this point
+        const int bind = kd3d().major_index(i);
+        // Map the blob to its component
+        b2groupid.at(bind) = component[i];
+    }
+
+    return b2groupid;
+}
+
 void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
 {
     if (m_graph == nullptr) Create_graph(use_ctpc);
@@ -2690,6 +2815,91 @@ void Cluster::cal_shortest_path(const size_t dest_wcp_index) const
     if (src_mcell != m_path_mcells.front())
         m_path_mcells.push_front(src_mcell);
 }
+
+std::vector<geo_point_t> Cluster::indices_to_points(const std::list<size_t>& path_indices) const 
+{
+    std::vector<geo_point_t> points;
+    points.reserve(path_indices.size());
+    for (size_t idx : path_indices) {
+        points.push_back(point3d(idx));
+    }
+    return points;
+}
+
+void Cluster::organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const
+{
+    std::vector<geo_point_t> temp_points = path_points;
+    path_points.clear();
+
+    // First pass: filter based on distance
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (path_points.empty()) {
+            path_points.push_back(temp_points[i]);
+        }
+        else if (i + 1 == temp_points.size()) {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            if (dis > low_dis_limit * 0.75) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+        else {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
+
+            if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.75)) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+    }
+
+    // Second pass: filter based on angle
+    temp_points = path_points;
+    std::vector<double> angles;
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (i == 0 || i + 1 == temp_points.size()) {
+            angles.push_back(M_PI);
+        }
+        else {
+            geo_vector_t v1 = temp_points[i] - temp_points[i - 1];
+            geo_vector_t v2 = temp_points[i] - temp_points[i + 1];
+            angles.push_back(v1.angle(v2));
+        }
+    }
+
+    path_points.clear();
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (angles[i] * 180.0 / M_PI >= 75) {
+            path_points.push_back(temp_points[i]);
+        }
+    }
+}
+
+void Cluster::organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const
+{
+    std::vector<geo_point_t> temp_points = path_points;
+    path_points.clear();
+
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (path_points.empty()) {
+            path_points.push_back(temp_points[i]);
+        }
+        else if (i + 1 == temp_points.size()) {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            if (dis > low_dis_limit * 0.5) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+        else {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
+
+            if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.5)) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+    }
+}
+
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {
@@ -2781,6 +2991,124 @@ void Cluster::Calc_PCA() const
     }
 
     m_pca_calculated = true;
+}
+
+void Cluster::Calc_PCA(std::vector<geo_point_t>& points) const
+{
+    // Reset center
+    m_center.set(0, 0, 0);
+    int nsum = 0;
+
+    // Calculate center
+    for (auto it = children().begin(); it != children().end(); it++) {
+        for (size_t k = 0; k != points.size(); k++) {
+            m_center += points[k];
+            nsum++;
+        }
+    }
+
+    // Reset PCA axes
+    for (int i = 0; i != 3; i++) {
+        m_pca_axis[i].set(0, 0, 0);
+    }
+
+    // Early return if not enough points
+    if (nsum < 3) {
+        return;
+    }
+
+    // Normalize center
+    m_center = m_center / nsum;
+
+    // Calculate covariance matrix using Eigen
+    Eigen::MatrixXd cov_matrix(3, 3);
+
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (auto it = children().begin(); it != children().end(); it++) {
+                for (size_t k = 0; k != points.size(); k++) {
+                    cov_matrix(i, j) += (points[k][i] - m_center[i]) * (points[k][j] - m_center[j]);
+                }
+            }
+        }
+    }
+
+    // Fill symmetric part of matrix
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+
+    // Compute eigenvalues and eigenvectors
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_values = eigenSolver.eigenvalues();
+    auto eigen_vectors = eigenSolver.eigenvectors();
+
+    // Store eigenvalues and eigenvectors in descending order
+    // Note: Eigen returns in ascending order, we want descending
+    for (int i = 0; i != 3; i++) {
+        m_pca_values[2-i] = eigen_values(i);
+        double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + 
+                         eigen_vectors(1, i) * eigen_vectors(1, i) +
+                         eigen_vectors(2, i) * eigen_vectors(2, i));
+        
+        m_pca_axis[2-i].set(eigen_vectors(0, i) / norm,
+                           eigen_vectors(1, i) / norm,
+                           eigen_vectors(2, i) / norm);
+    }
+
+    m_pca_calculated = true;
+}
+
+geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const
+{
+    // Create covariance matrix
+    Eigen::MatrixXd cov_matrix(3, 3);
+
+    // Calculate covariance matrix elements
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (const auto& p : points) {
+                if (i == 0 && j == 0) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.x() - center.x());
+                }
+                else if (i == 0 && j == 1) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.y() - center.y());
+                }
+                else if (i == 0 && j == 2) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.z() - center.z());
+                }
+                else if (i == 1 && j == 1) {
+                    cov_matrix(i, j) += (p.y() - center.y()) * (p.y() - center.y());
+                }
+                else if (i == 1 && j == 2) {
+                    cov_matrix(i, j) += (p.y() - center.y()) * (p.z() - center.z());
+                }
+                else if (i == 2 && j == 2) {
+                    cov_matrix(i, j) += (p.z() - center.z()) * (p.z() - center.z());
+                }
+            }
+        }
+    }
+
+    // Fill symmetric parts
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+
+    // Calculate eigenvalues/eigenvectors using Eigen
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_vectors = eigenSolver.eigenvectors();
+
+    // Get primary direction (first eigenvector)
+    double norm = sqrt(eigen_vectors(0, 0) * eigen_vectors(0, 0) + 
+                      eigen_vectors(1, 0) * eigen_vectors(1, 0) + 
+                      eigen_vectors(2, 0) * eigen_vectors(2, 0));
+
+    return geo_vector_t(eigen_vectors(0, 0) / norm,
+                       eigen_vectors(1, 0) / norm, 
+                       eigen_vectors(2, 0) / norm);
 }
 
 
