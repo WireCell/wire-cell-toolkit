@@ -304,7 +304,10 @@ namespace WireCell::PointCloud::Facade {
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
    
-
+        // PCA helper functions
+        void Calc_PCA(std::vector<geo_point_t>& points) const;
+        // Calculate PCA direction for a set of points around a center point
+        geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const;
 
         /// @brief Determine if a cluster may be separated due to crossing the boundary.
         /// @return connected components array or empty if separation is not warranted.
@@ -391,9 +394,7 @@ namespace WireCell::PointCloud::Facade {
         mutable int m_npoints{0};
 
         void Calc_PCA() const;
-        void Calc_PCA(std::vector<geo_point_t>& points) const;
-        // Calculate PCA direction for a set of points around a center point
-        geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const;
+        
 
         mutable bool m_pca_calculated{false};
         // lazy, do not access directly.

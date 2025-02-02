@@ -3092,6 +3092,10 @@ geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<
         }
     }
 
+    // std::cout << "Test: " << center << " " << points.at(0) << std::endl;
+    // std::cout << "Test: " << center << " " << points.at(1) << std::endl;
+    // std::cout << "Test: " << center << " " << points.at(2) << std::endl;
+
     // Fill symmetric parts
     cov_matrix(1, 0) = cov_matrix(0, 1);
     cov_matrix(2, 0) = cov_matrix(0, 2);
@@ -3101,14 +3105,16 @@ geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
     auto eigen_vectors = eigenSolver.eigenvectors();
 
-    // Get primary direction (first eigenvector)
-    double norm = sqrt(eigen_vectors(0, 0) * eigen_vectors(0, 0) + 
-                      eigen_vectors(1, 0) * eigen_vectors(1, 0) + 
-                      eigen_vectors(2, 0) * eigen_vectors(2, 0));
+    // std::cout << "Test: " << eigen_vectors(0,0) << " " << eigen_vectors(1,0) << " " << eigen_vectors(2,0) << std::endl;
 
-    return geo_vector_t(eigen_vectors(0, 0) / norm,
-                       eigen_vectors(1, 0) / norm, 
-                       eigen_vectors(2, 0) / norm);
+    // Get primary direction (first eigenvector)
+    double norm = sqrt(eigen_vectors(0, 2) * eigen_vectors(0, 2) + 
+                      eigen_vectors(1, 2) * eigen_vectors(1, 2) + 
+                      eigen_vectors(2, 2) * eigen_vectors(2, 2));
+
+    return geo_vector_t(eigen_vectors(0, 2) / norm,
+                       eigen_vectors(1, 2) / norm, 
+                       eigen_vectors(2, 2) / norm);
 }
 
 

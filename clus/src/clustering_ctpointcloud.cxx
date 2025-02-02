@@ -89,4 +89,28 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
 // Test all dead chs: 1027
 // Test all good chs: 11233 11063 12483
 
+    std::cout << "Test new functions in Facade::Cluster " << std::endl;
+    std::vector<Cluster *> live_clusters = live_grouping.children();
+    for (size_t i = 0; i != live_clusters.size(); i++) {
+        auto results = live_clusters.at(i)->get_closest_wcpoint(p);
+        if (live_clusters.at(i)->get_length()/units::cm >239){
+            std::cout << "Test: " << live_clusters.at(i)->get_length()/units::cm << " " << results.second << std::endl;
+            auto points = live_clusters.at(i)->get_main_axis_points();
+            std::cout << "Test: " << points.first << " " << points.second << std::endl;
+
+            auto dir1 = live_clusters.at(i)->calc_dir(points.first, points.second, 10*units::cm);
+            std::cout << "Test: " << dir1 << std::endl;
+
+            std::vector<geo_point_t> points1;
+            points1.push_back(points.first);
+            points1.push_back(points.second);
+            points1.push_back(p);
+            live_clusters.at(i)->Calc_PCA(points1);
+            std::cout << "Test: " << live_clusters.at(i)->get_center() << " " << live_clusters.at(i)->get_pca_axis(0) << " " << live_clusters.at(i)->get_pca_axis(1) << " " << live_clusters.at(i)->get_pca_axis(2) << std::endl;
+
+            geo_point_t p2(0,0,0);
+            auto dir2 = live_clusters.at(i)->calc_pca_dir(p2, points1);
+            std::cout << "Test: " << dir2 << std::endl;
+        }
+    }
 }
