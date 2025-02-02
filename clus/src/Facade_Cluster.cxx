@@ -782,6 +782,36 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
     return ret;
 }
 
+std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& point, int N) const 
+{
+    struct Best {
+        size_t point_index;
+        double metric;
+    };
+    std::unordered_map<size_t, Best> best_blob_point;
+
+    const auto& kd = kd3d();
+    auto results = kd.knn(N, point);
+    for (const auto& [point_index, metric] : results) {
+        const size_t major_index = kd.major_index(point_index);
+        auto it = best_blob_point.find(major_index);
+        if (it == best_blob_point.end()) {  // first time seen
+            best_blob_point[major_index] = {point_index, metric};
+            continue;
+        }
+        if (metric < it->second.metric) {
+            it->second.point_index = point_index;
+            it->second.metric = metric;
+        }
+    }
+
+    std::map<const Blob*, geo_point_t> ret;
+    for (const auto& [mi, bb] : best_blob_point) {
+        ret[blob_with_point(bb.point_index)] = point3d(bb.point_index);
+    }
+    return ret;
+}
+
 std::pair<geo_point_t, const Blob*> Cluster::get_closest_point_blob(const geo_point_t& point) const
 {
     auto results = kd_knn(1, point);
@@ -1008,7 +1038,7 @@ geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, int N) const
     geo_point_t ret(0, 0, 0);
     double charge = 0;
 
-    auto blob_pts = get_closest_blob(origin, N * units::cm);
+    auto blob_pts = get_closest_blob(origin, N);
     for (auto [blob, _] : blob_pts) {
         double q = blob->charge(); 
         if (q == 0) q = 1;  // protection against zero charge

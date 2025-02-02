@@ -132,6 +132,8 @@ namespace WireCell::PointCloud::Facade {
         // Note: radius must provide a LINEAR distance measure.
         using const_blob_point_map_t = std::map<const Blob*, geo_point_t>;
         const_blob_point_map_t get_closest_blob(const geo_point_t& point, double radius) const;
+        const_blob_point_map_t get_closest_blob(const geo_point_t& point, int N) const;
+
 
         std::pair<geo_point_t, double> get_closest_point_along_vec(geo_point_t& p_test, geo_point_t dir,
                                                                    double test_dis, double dis_step, double angle_cut,

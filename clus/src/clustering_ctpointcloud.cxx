@@ -111,6 +111,9 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
             geo_point_t p2(0,0,0);
             auto dir2 = live_clusters.at(i)->calc_pca_dir(p2, points1);
             std::cout << "Test: " << dir2 << std::endl;
+
+            auto p5 = live_clusters.at(i)->calc_ave_pos(points.first, 10);
+            std::cout << "Test: " << p5 << std::endl;
         }
     }
 }
