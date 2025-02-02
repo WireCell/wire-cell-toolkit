@@ -2748,6 +2748,115 @@ void Cluster::Connect_graph() const{
 
 }
 
+
+void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const {
+    // Constants for wire angles
+    const auto& tp = grouping()->get_params();
+    const double pi = 3.141592653589793;
+    const geo_vector_t drift_dir(1, 0, 0); 
+    const geo_vector_t U_dir(0, cos(60./180.*pi), sin(60./180.*pi));
+    const geo_vector_t V_dir(0, cos(60./180.*pi), -sin(60./180.*pi)); 
+    const geo_vector_t W_dir(0, 1, 0);
+
+    // Form connected components
+    std::vector<int> component(num_vertices(*m_graph));
+    const size_t num = connected_components(*m_graph, &component[0]);
+    
+    LogDebug(" npoints " << npoints() << " nconnected " << num);
+    if (num <= 1) return;
+
+    // Create point clouds using connected components
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
+    std::vector<std::vector<size_t>> pt_clouds_global_indices;
+    
+    // Create ordered components  
+    std::vector<ComponentInfo> ordered_components;
+    ordered_components.reserve(component.size());
+    for (size_t i = 0; i < component.size(); ++i) {
+        ordered_components.emplace_back(i);
+    }
+    
+    // Assign vertices to components
+    for (size_t i = 0; i < component.size(); ++i) {
+        ordered_components[component[i]].add_vertex(i);
+    }
+
+    // Sort components by minimum vertex index
+    std::sort(ordered_components.begin(), ordered_components.end(),
+        [](const ComponentInfo& a, const ComponentInfo& b) {
+            return a.min_vertex < b.min_vertex;
+        });
+
+    // Create point clouds for each component
+    for (const auto& comp : ordered_components) {
+        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
+        std::vector<size_t> global_indices;
+        
+        for (size_t vertex_idx : comp.vertex_indices) {
+            pt_cloud->add({points()[0][vertex_idx], points()[1][vertex_idx], points()[2][vertex_idx]});
+            global_indices.push_back(vertex_idx);
+        }
+        pt_clouds.push_back(pt_cloud);
+        pt_clouds_global_indices.push_back(global_indices);
+    }
+
+    // Initialize distance metrics 
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(num, std::vector<std::tuple<int, int, double>>(num));
+
+    // Initialize all distances to inf
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = 0; k != num; k++) {
+            index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+        }
+    }
+
+    // Calculate distances between components
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            // Get closest points between components
+            index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
+
+            // Skip small clouds
+            if ((num >= 100 || pt_clouds.at(j)->get_num_points() <= 100 || pt_clouds.at(k)->get_num_points() <= 100 ||
+                 (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) <= 400) &&
+                (pt_clouds.at(j)->get_num_points() <= 500 || pt_clouds.at(k)->get_num_points() <= 500)) {
+                continue;
+            }
+
+            // Get closest points and calculate directions
+            geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+            geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+
+            geo_vector_t dir1 = vhough_transform(p1, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(j), 
+                                               pt_clouds_global_indices.at(j));
+            geo_vector_t dir2 = vhough_transform(p2, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(k),
+                                               pt_clouds_global_indices.at(k)); 
+            dir1 = dir1 * -1;
+            dir2 = dir2 * -1;
+
+            // Check path quality along directions
+            // check_path_quality(j, k, p1, p2, dir1, dir2, pt_clouds, index_index_dis, index_index_dis_dir1, 
+            //                  index_index_dis_dir2, tp, drift_dir, U_dir, V_dir, W_dir);
+        }
+    }
+
+    // // Process MST for base distances and directional distances
+    // process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
+
+    // // Update graph with MST edges
+    // update_graph_with_mst(index_index_dis_mst, index_index_dis_dir_mst, index_index_dis_dir1, index_index_dis_dir2,
+    //                      pt_clouds_global_indices);
+}
+
+
 // In Facade_Cluster.cxx
 std::vector<int> Cluster::examine_graph(const bool use_ctpc) const 
 {
@@ -2761,12 +2870,14 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     // Establish connections
     Establish_close_connected_graph();
     
-    // Connect using overclustering protection
-    Connect_graph(use_ctpc); 
+    // Connect using overclustering protection (not easy to debug ...)
+    Connect_graph_overclustering_protection(use_ctpc); 
     
     // Find connected components
     std::vector<int> component(num_vertices(*m_graph));
     const int num_components = connected_components(*m_graph, &component[0]);
+
+    std::cout << "Test: num components " << num_components << std::endl;
 
     // If only one component, no need for mapping
     if (num_components <= 1) {

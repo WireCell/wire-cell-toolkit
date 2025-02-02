@@ -487,6 +487,8 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
 
             live_clusters.at(i)->organize_path_points(points6,0.6*units::cm);
             std::cout << "Test: " << points6.size() << " " << points6.at(0) << " " << points6.at(points6.size()-1) << std::endl;
+
+            live_clusters.at(i)->examine_graph(true);
         }
     }
 }
