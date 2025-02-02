@@ -1562,6 +1562,7 @@ void Cluster::Create_graph(const bool use_ctpc) const
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(nbpoints());
+    // std::cout << "Test:" << "Create Graph!" << std::endl;
     Establish_close_connected_graph();
     if (use_ctpc) Connect_graph(true);
     Connect_graph();
@@ -1730,6 +1731,7 @@ void Cluster::Establish_close_connected_graph() const
     }
 
     LogDebug("in-blob edges: " << num_edges);
+    // std::cout << "Test: in-blob edges: " << num_edges << std::endl;
 
     std::vector<int> time_slices;
     for (auto [time, _] : this->time_blob_map()) {
@@ -2046,6 +2048,8 @@ void Cluster::Establish_close_connected_graph() const
     // end of copying ...
 
     LogDebug("all edges: " << num_edges);
+    // std::cout << "Test: all edges: " << num_edges << std::endl;
+
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) const {
@@ -2904,10 +2908,13 @@ void Cluster::organize_points_path_vec(std::vector<geo_point_t>& path_points, do
     }
 }
 
+// this is different from WCP implementation, the path_points is the input ...
 void Cluster::organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const
 {
-    std::vector<geo_point_t> temp_points = path_points;
+    //    std::vector<geo_point_t> temp_points = path_points;
     path_points.clear();
+    auto indices = get_path_wcps();
+    auto temp_points = indices_to_points(indices);
 
     for (size_t i = 0; i != temp_points.size(); i++) {
         if (path_points.empty()) {
