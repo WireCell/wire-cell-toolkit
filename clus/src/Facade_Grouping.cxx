@@ -81,6 +81,7 @@ void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.angle_u = get(cfg, "angle_u", m_tp.angle_u);
     m_tp.angle_v = get(cfg, "angle_v", m_tp.angle_v);
     m_tp.angle_w = get(cfg, "angle_w", m_tp.angle_w);
+    m_tp.time_offset = get(cfg, "time_offset", m_tp.time_offset);
     m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
     m_tp.tick = get(cfg, "tick", m_tp.tick);
     m_tp.tick_drift = get(cfg, "tick_drift", m_tp.tick_drift);

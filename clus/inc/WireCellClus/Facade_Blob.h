@@ -60,6 +60,8 @@ namespace WireCell::PointCloud::Facade {
         int_t get_max_wire_type() const { return max_wire_type_;}
         int_t get_min_wire_type() const { return min_wire_type_;}
 
+        std::vector<geo_point_t> corners() const { return corners_; }
+
         // Return a value representing the content of this blob.
         size_t hash() const;
 
@@ -91,6 +93,8 @@ namespace WireCell::PointCloud::Facade {
         int_t min_wire_interval_{-1};
         int_t max_wire_type_{-1}; // 0: u, 1: v, 2: w
         int_t min_wire_type_{-1}; // 0: u, 1: v, 2: w
+
+        std::vector<geo_point_t> corners_;
 
        protected:
         // Receive notification when this facade is created on a node.

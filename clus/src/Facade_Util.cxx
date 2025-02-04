@@ -1,6 +1,7 @@
 #include "WireCellClus/Facade.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/Facade_Blob.h"
 #include <boost/container_hash/hash.hpp>
 #include "WireCellAux/SimpleTensor.h"
 
@@ -632,16 +633,21 @@ void Facade::graph2json(const Grouping& grouping, const std::string& filename)
     for (const auto& cluster : grouping.children()) {
         nblobs += cluster->children().size();
     }
-    // x, y, z, q, npoints
-    MultiArray ablobs(boost::extents[nblobs][5]);
+    // q, ncorners, corner0_x, corner0_y, corner0_z, ... corner11_z [max 12 corners, 36 columns]
+    MultiArray ablobs(boost::extents[nblobs][38]);
     int gbidx = 0;
+    std::unordered_map<const Blob*, int> b2idx;
     for (const auto& cluster : grouping.children()) {
         for (const auto& blob : cluster->children()) {
-            ablobs[gbidx][0] = blob->center_x();
-            ablobs[gbidx][1] = blob->center_y();
-            ablobs[gbidx][2] = blob->center_z();
-            ablobs[gbidx][3] = blob->charge();
-            ablobs[gbidx][4] = blob->npoints();
+            ablobs[gbidx][0] = blob->charge();
+            int ncorners = std::min(12, int(blob->corners().size()));
+            ablobs[gbidx][1] = ncorners;
+            for(int i=0; i<ncorners; ++i) {
+                ablobs[gbidx][2+i*3] = blob->corners().at(i).x();
+                ablobs[gbidx][3+i*3] = blob->corners().at(i).y();
+                ablobs[gbidx][4+i*3] = blob->corners().at(i).z();
+            }
+            b2idx[blob] = gbidx;
             gbidx++;
         }
     }
@@ -656,8 +662,8 @@ void Facade::graph2json(const Grouping& grouping, const std::string& filename)
         nedges += boost::num_edges(g);
     }
 
-    // x, y, z, q
-    MultiArray apoints(boost::extents[npoints][4]);
+    // x, y, z, q, bidx
+    MultiArray apoints(boost::extents[npoints][5]);
     // head node, tail node, weight
     MultiArray aedges(boost::extents[nedges][3]);
 
@@ -678,7 +684,9 @@ void Facade::graph2json(const Grouping& grouping, const std::string& filename)
             apoints[gpidx][1] = cluster->point3d(g[v].index).y();
             apoints[gpidx][2] = cluster->point3d(g[v].index).z();
             /// TODO: placeholder for charge
-            apoints[gpidx][3] = 1.0;
+            const auto [tmppt, blob] = cluster->get_closest_point_blob({apoints[gpidx][0], apoints[gpidx][1], apoints[gpidx][2]});
+            apoints[gpidx][3] = blob->charge()/blob->npoints();
+            apoints[gpidx][4] = b2idx[blob];
         }
         auto erange = boost::edges(g);
         for (auto eit = erange.first; eit != erange.second; ++eit) {
@@ -688,7 +696,7 @@ void Facade::graph2json(const Grouping& grouping, const std::string& filename)
             aedges[geidx][0] = source+gpoffset;
             aedges[geidx][1] = target+gpoffset;
             /// TODO: placeholder
-            aedges[geidx][2] = 1.0;
+            aedges[geidx][2] = boost::get(boost::edge_weight, g, e);
             geidx++;
         }
         gpoffset += boost::num_vertices(g);
@@ -700,9 +708,9 @@ void Facade::graph2json(const Grouping& grouping, const std::string& filename)
     if (m_out.empty()) {
         raise<ValueError>("ten2file: unsupported outname: %s", filename.c_str());
     }
-    arr2file(ablobs, "ablobs", m_out);
-    arr2file(apoints, "apoints", m_out);
-    arr2file(aedges, "aedges", m_out);
+    arr2file(ablobs, "blobs", m_out);
+    arr2file(apoints, "points", m_out);
+    arr2file(aedges, "ppedges", m_out);
     m_out.pop();
 
 }

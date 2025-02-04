@@ -1,6 +1,7 @@
 #include "WireCellClus/PointTreeBuilding.h"
 #include "WireCellImg/Projection2D.h"
 #include "WireCellClus/Facade.h"
+#include "WireCellClus/Facade_Util.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
 #include "WireCellUtil/GraphTools.h"
@@ -201,7 +202,9 @@ namespace {
     }
 
     /// extract corners
-    Dataset make_corner_dataset(const IBlob::pointer iblob)
+    /// if drift is true, the corner x would be drifted x insetead of the wire plane x
+    Dataset make_corner_dataset(const IBlob::pointer iblob, const bool drift = false, const double time_offset = 0,
+                                const double drift_speed = 1.6 * units::mm / units::us)
     {
         using float_t = double;
 
@@ -223,6 +226,9 @@ namespace {
         std::vector<float_t> corner_x;
         std::vector<float_t> corner_y;
         std::vector<float_t> corner_z;
+
+        std::vector<float_t> corner_x_start;
+        std::vector<float_t> corner_x_end;
         
         for (const auto& crossing : crossings) {
             const auto& [one, two] = crossing;
@@ -241,12 +247,32 @@ namespace {
             //     if (is_higher(two)) o2.grid += 1;
             // }
             auto opt = coords.ray_crossing(o1, o2);
-            corner_x.push_back(opt.x());
-            corner_y.push_back(opt.y());
-            corner_z.push_back(opt.z());
+            if (drift) {
+                double x_start = Facade::time2drift(iblob->face(), time_offset, drift_speed, iblob->slice()->start());
+                double x_end = Facade::time2drift(iblob->face(), time_offset, drift_speed, iblob->slice()->start() + iblob->slice()->span());
+                corner_x_start.push_back(x_start);
+                corner_x_end.push_back(x_end);
+                corner_y.push_back(opt.y());
+                corner_z.push_back(opt.z());
+                // std::cout << "[delete] start" << iblob->slice()->start() << " time offset: " << time_offset << " drift speed: " << drift_speed << " start: " << x_start << " end: " << x_end << std::endl;
+
+            } else {
+                corner_x.push_back(opt.x());
+                corner_y.push_back(opt.y());
+                corner_z.push_back(opt.z());
+            }
             // std::cout << "orig: " << one.layer << " " << one.grid << ", " << two.layer << " " << two.grid
             //           << " new: " << o1.grid << " " << o2.grid << " corner: " << opt.x() << " " << opt.y() << " "
             //           << opt.z() << std::endl;
+        }
+        if (drift) {
+            corner_x.reserve(corner_x_start.size() + corner_x_end.size());
+            corner_x.insert(corner_x.end(), corner_x_start.begin(), corner_x_start.end());
+            corner_x.insert(corner_x.end(), corner_x_end.begin(), corner_x_end.end());
+            corner_y.reserve(corner_y.size() * 2);
+            corner_y.insert(corner_y.end(), corner_y.begin(), corner_y.end());
+            corner_z.reserve(corner_z.size() * 2);
+            corner_z.insert(corner_z.end(), corner_z.begin(), corner_z.end());
         }
 
         ds.add("x", Array(corner_x));
@@ -276,8 +302,10 @@ static Dataset make2dds (const Dataset& ds3d, const double angle) {
     return ds;
 }
 
-Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
-
+// Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
+void PointTreeBuilding::sample_live(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
+    auto grouping = root->value.facade<Facade::Grouping>();
+    const auto& tp = grouping->get_params();
     using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
@@ -285,7 +313,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     auto clusters = get_geom_clusters(gr);
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
-    Points::node_ptr root = std::make_unique<Points::node_t>();
+    // Points::node_ptr root = std::make_unique<Points::node_t>();
     auto& sampler = m_samplers.at("3d");
     for (auto& [cluster_id, vdescs] : clusters) {
         auto cnode = root->insert();
@@ -299,11 +327,13 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
             auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
             pcs.emplace("3d", pc3d);
-            pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-            pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-            pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+            pcs.emplace("2dp0", make2dds(pc3d, tp.angle_u));
+            pcs.emplace("2dp1", make2dds(pc3d, tp.angle_v));
+            pcs.emplace("2dp2", make2dds(pc3d, tp.angle_w));
+            pcs.emplace("corner", make_corner_dataset(iblob, true, tp.time_offset, tp.drift_speed));
             const Point center = calc_blob_center(pcs["3d"]);
-            auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
+            // std::cout << "[delete] center: " << center.x() << " " << center.y() << " " << center.z() << std::endl;
+            auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tp.tick);
             int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
             int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
             int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
@@ -320,7 +350,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     }
     
     log->debug("sampled {} live blobs to tree with {} children", nblobs, root->nchildren());
-    return root;
+    // return root;
 }
 
 Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointer icluster, const double tick) const {
@@ -583,11 +613,17 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
 
     const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
-    Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
-                                             tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
+    Points::node_ptr root_live = std::make_unique<Points::node_t>();
     auto grouping = root_live->value.facade<Facade::Grouping>();
     grouping->set_anode(m_anode);
     grouping->set_params(tp_json);
+    // {
+    //     const auto& tp = grouping->get_params();
+    //     std::cout << "[delete] sample_live: tp.time_offset: " << tp.time_offset << " tp.drift_speed: " << tp.drift_speed << std::endl;
+    // }
+    sample_live(root_live, iclus_live);
+    // Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
+    //                                          tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
     /// TODO: remove after debugging
