@@ -45,11 +45,11 @@ bool WireCell::WirePlaneId::valid() const
     return 0 <= ind && ind < 3;
 }
 
-bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) { return m_pack == rhs.m_pack; }
+bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) const { return m_pack == rhs.m_pack; }
 
-bool WireCell::WirePlaneId::operator!=(const WirePlaneId& rhs) { return !(*this == rhs); }
+bool WireCell::WirePlaneId::operator!=(const WirePlaneId& rhs) const { return !(*this == rhs); }
 
-bool WireCell::WirePlaneId::operator<(const WirePlaneId& rhs)
+bool WireCell::WirePlaneId::operator<(const WirePlaneId& rhs) const
 {
     if (!this->valid() || !rhs.valid()) {
         return false;
