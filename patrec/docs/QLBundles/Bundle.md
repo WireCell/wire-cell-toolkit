@@ -1,6 +1,6 @@
 ## Describe FlashTPCBundle in WCP
 
-For more detailed information, please refer to the [OpFlash documentation](https://github.com/BNLIF/wire-cell-data/blob/master/docs/FlashTPCBundle.md).
+See also the [OpFlash documentation](https://github.com/BNLIF/wire-cell-data/blob/master/docs/FlashTPCBundle.md) for specifics about that data product.  
 
 ## Example prototype jobs or files ...
 
@@ -111,6 +111,54 @@ Opflash are saved in
 ```
 
 ## Describe WCT version
+
+### Review uboone blob loading
+
+The `Trun`, `TC` and `TDC` ROOT trees may be loaded into WCT via [`UbooneBlobSource`](../../../root/src/UbooneBlobSource.cxx) to produce an `IBlobSet` of either "live" or "dead" blobs.  Two sources are needed to load both "live" and "dead" blobs simultaneously.
+
+The [`uboone-blobs.smake` Snakemake workflow](../../../root/test/uboone-blobs.smake) runs `wire-cell` on [`uboone-blobs.jsonnet`](../../../root/test/uboone-blobs.jsonnet) in three kinds of modes: "live", "dead" and "clus".  
+
+The "live" and "dead" modes each produce a *WCT cluster file* with a graph like:
+
+```
+UbooneBlobSources -> BlobClustering -> GlobalGeomClustering -> ClusterFileSink
+```
+
+The "live" mode has four sources `live-{uvw,uv,vw,wu}` and "dead" has three sources `dead-{uv,vw,wu}`.  
+
+The "clus" job is like:
+
+```
+ClusterFileSources -> PointTreeBuilding -> MultiAlgBlobClustering -> TensorFileSink
+```
+There are two sources here loading each of "live" and "dead" cluster files.
+
+The output of ["MABC"](../../../clus/src/MultiAlgBlobClustering.cxx) is a point-cloud tree in *WCT tensor data model* representation (`ITensorSet`).
+
+:warning: This workflow uses uboone blobs but ignores uboone cluster info (`cluster_id`).
+
+### Uboone cluster and flash loading
+
+In order to consider `cluster_id` when loading `TC` and `T_Flash` information into WCT requires a complex procedure.  This is in large part due to the fact that WCT clusters are not "identified" per se but rather are emergent from the "connected components" graph operation.  After the operation we may identify a cluster by its ID in the "connected components" array which is effectively arbitrary.  Thus we must form WCT clusters in a context that still retains the association between blobs and their `cluster_id`.  But further, to represent the cluster-flash associations requires point-cloud level data tier.  And this requires blob sampling.  
+
+We will call this new component `UbooneClusterSource` which supplies these operations:
+
+- Load `TC` to form a `std::vector<int> bcmap` giving per-blob cluster IDs.
+  - Assert `cluster_id` is sequential
+- Internally run `UbooneBlobSource` to get `IBlobSet`
+  - Assert `IBlobSet` is same size as `bcmap` and `IBlob::ident` are sequential.
+- Copy-paste `PointTreeBuilding::sample_live()` and use to produce initial pc-tree.
+  - Modify code to use `bcmap` to define clusters.
+  - The "cluster" nodes that are made children of the root "grouping" node must be in the same order as sequential cluster IDs held in `bcmap`.  That they are first made by iterating on `range(max(bcmap))` and then `bcmap` walked to add blob children.
+- Load `T_flash` to produce **light**, **flash** and **flashlight** data as described in the tensor-data-model.
+  - Store each of these three as arrays in a "local" PC on the "grouping" pc-tree node.
+- Load `T_match1` to get cluster-flash associations.
+  - Assert `T_match1::cluster_id` is sequential.
+  - This `cluster_id` is then the index of the corresponding WCT cluster in the grouping children list.
+  - Add to each cluster node a local PC with scalar array holding flash ID (index into **flash** data).
+- Convert pc-tree to `ITensorSet` and output.
+  
+
 
 ## Example WCT jobs or files ... 
 

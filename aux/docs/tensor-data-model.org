@@ -93,7 +93,9 @@ To start with, every tensor has provides an associated *datatype* attribute of v
 - cledgeset :: an array describing a set of ~ICluster~ graph edges between all nodes of one type to all nodes of another.
 
 - light :: measures of activity from optical detector elements (PMT, SiPM).
+- flashid :: identifying information about flashes
 - flash :: reconstructed summary of activity consistent with light measures.
+- flashlight :: association of flashes to light. 
 
 Where pertinent, the recommended *datapath* root path for the type is given in parenthesis.
 
@@ -338,32 +340,28 @@ The *datatype* of *light* indicates a tensor representing measured values from o
 
 Requirements on the content:
 
-- The ~ID~ must be an integer no larger than 2^24.
+- The ~ID~ must be an integer no larger than 2^24 and indicates the optical detector (PMT, SiPM) from which the light was measured.
 
 - The units of ~q~ must be in the WCT system-of-units but the unit may be application-specific.  Eg, it may be ~[charge]~ or number of PEs depending on application or even on a per-ID basis.
 
+
 ** flash
 
-The *datatype* of *flash* indicates a tensor representing a reconstructed summaries of activity consistent with *light* measurements.  The tensor carries no metadata.  The array is of type ~float32~ and may come in one of two shapes where ~N~ spans the number of "flashes" and the number of columns depends on if uncertainties are provided or not:
+The *datatype* of *flash* collects summary information of the flashes.   It has no metadata.  The array part is of type float and shape ~(Nflashes,5)~ or  ~(Nflashes,7)~.  The columns hold:
 
-- ~(N, 5)~ :: One row per ~N~ flashes, each row: ~(t,x,y,z,q)~
-- ~(N, 10)~ :: One row per ~N~ flashes, each row: ~(t,x,y,z,q,dt,dx,dy,dz,dq)~
+- 0 :: (time) the representative central time for the flash
+- 1 :: (tmin) the start of a finite time duration of the flash.
+- 2 :: (tmax) the end of a finite time duration of the flash.
+- 3 :: (value) the intensity of the flash (PEs, charge)
+- 4 :: (uncertainty) the uncertainty or error in the value.
+- 5 :: (ident) an application-specific identifier.
+- 6 :: (type) a number representing a type of flash.
 
-Requirements on the content:
+Note, "ident" and "type" are optional and may be omitted to produce ~(N,5)~.  They may be integers less than 2^24 but are otherwise unspecified.
 
-- The columns ~(t,x,y,z,q)~ provide central values and ~(dt,dx,dy,dz,dq)~ provide uncertainties on those CVs.
+** flashlight
 
-- The time ~t~ of *flashes* must be provided on the same clock as used by *light* measures.
-
-- The ~x,y,z~ must be provided in global detector coordinates.
-
-- An algorithm that produces no uncertainties must use the ~(N,5)~ form.
-
-- An algorithm that produces any uncertainties must produce the ~(N,10)~ form.
-
-- An algorithm that does not produce a particular CV must fill in a value outside the allowed domain.
-
-- An algorithm that does not produce a particular uncertainty must fill in -1.
+The *datatype* of *flashlight* represents the association of an element of the *flash* array  with the elements of the *light* array from which the flash element was constructed.  It has not metadata.  The array part is 2D integer of shape ~(Npair,2)~ provides pairs of indices into *flash* (and *flashid*) and *light* arrays.
 
 
 
