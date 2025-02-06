@@ -1,4 +1,4 @@
-function(params) {
+function(params, options = {}) {
     sim: {
         er: {
             type: "ColdElecResponse",
@@ -8,7 +8,7 @@ function(params) {
         fr: {
             type: "FieldResponse",
             name: "sim",
-            data: { filename: params.ductor.field_file }
+            data: { filename: std.get(options, "fields", params.ductor.field_file) }
         },
         rc: {
             type: 'RCResponse',
@@ -19,7 +19,7 @@ function(params) {
         fr: {
             type: "FieldResponse",
             name: "nf",
-            data: { filename: params.nf.field_file }
+            data: { filename: std.get(options, "fields", params.nf.field_file) }
         },
     },
     sp: {
@@ -31,7 +31,7 @@ function(params) {
         fr: {
             type: "FieldResponse",
             name: "sp",
-            data: { filename: params.sp.field_file }
+            data: { filename: std.get(options, "fields", params.sp.field_file) }
         },
     },
         
