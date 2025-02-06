@@ -92,6 +92,9 @@ To start with, every tensor has provides an associated *datatype* attribute of v
 - clnodeset :: an array of attributes for set of monotypical ~ICluster~ graph nodes.
 - cledgeset :: an array describing a set of ~ICluster~ graph edges between all nodes of one type to all nodes of another.
 
+- light :: measures of activity from optical detector elements (PMT, SiPM).
+- flash :: reconstructed summary of activity consistent with light measures.
+
 Where pertinent, the recommended *datapath* root path for the type is given in parenthesis.
 
 The tensor set has a *datatype* of *tensorset* and is merely a generic container of tensors produced in some context (eg an "event").  The *tensorset* may provide an optional attribute *tensors* to reference *datapath* of the tensors.  For persistent serial files, such references are redundant with the file (in-archive) naming convention described below. 
@@ -326,6 +329,44 @@ The *datatype* of *cledgeset* indicates a tensor representing an edge array in /
 The array is of type ~i4~ and is 2D with each row representing one edge.  First column represents edge tail and second column edge head.  Values are row indices into a *clnodeset* array.
 The tensor MD may be empty.
   
+** light
+
+The *datatype* of *light* indicates a tensor representing measured values from optical detectors such as PMT or SiPM.  A *light* array spans some period of time (eg, a window around one "event").  The tensor carries no metadata.  The array is of type ~float32~ and may come in one of two shapes where ~N~ spans the number of measures and the number of columns depends on if the measures have uncertainty or not:
+
+- ~(N, 3)~ :: One row per ~N~ measures, each row: ~(ID, t, q)~
+- ~(N, 5)~ :: One row per ~N~ measures, each row: ~(ID, t, q, dt, dq)~
+
+Requirements on the content:
+
+- The ~ID~ must be an integer no larger than 2^24.
+
+- The units of ~q~ must be in the WCT system-of-units but the unit may be application-specific.  Eg, it may be ~[charge]~ or number of PEs depending on application or even on a per-ID basis.
+
+** flash
+
+The *datatype* of *flash* indicates a tensor representing a reconstructed summaries of activity consistent with *light* measurements.  The tensor carries no metadata.  The array is of type ~float32~ and may come in one of two shapes where ~N~ spans the number of "flashes" and the number of columns depends on if uncertainties are provided or not:
+
+- ~(N, 5)~ :: One row per ~N~ flashes, each row: ~(t,x,y,z,q)~
+- ~(N, 10)~ :: One row per ~N~ flashes, each row: ~(t,x,y,z,q,dt,dx,dy,dz,dq)~
+
+Requirements on the content:
+
+- The columns ~(t,x,y,z,q)~ provide central values and ~(dt,dx,dy,dz,dq)~ provide uncertainties on those CVs.
+
+- The time ~t~ of *flashes* must be provided on the same clock as used by *light* measures.
+
+- The ~x,y,z~ must be provided in global detector coordinates.
+
+- An algorithm that produces no uncertainties must use the ~(N,5)~ form.
+
+- An algorithm that produces any uncertainties must produce the ~(N,10)~ form.
+
+- An algorithm that does not produce a particular CV must fill in a value outside the allowed domain.
+
+- An algorithm that does not produce a particular uncertainty must fill in -1.
+
+
+
 * Tensor archive files
 
 WCT provides the DFP graph node components ~TensorFileSink~ and ~TensorFileSource~ that persist ~ITensorSet~ through an archive file (Zip or Tar, with optional compression) using WCT iostreams.  The archive file will contain files with names matching these patterns:
