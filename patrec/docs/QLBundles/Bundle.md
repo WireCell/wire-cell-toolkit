@@ -143,19 +143,22 @@ In order to consider `cluster_id` when loading `TC` and `T_Flash` information in
 
 We will call this new component `UbooneClusterSource` which supplies these operations:
 
-- Load `TC` to form a `std::vector<int> bcmap` giving per-blob cluster IDs.
-  - Assert `cluster_id` is sequential
-- Internally run `UbooneBlobSource` to get `IBlobSet`
-  - Assert `IBlobSet` is same size as `bcmap` and `IBlob::ident` are sequential.
+- Load `TC` to form a `std::vector<int> bcmap` giving per-blob cluster IDs in blob-order.
+  - We do not assume `cluster_id` is an index.
+  - Not all blobs may have a cluster.
+- Internally, run `UbooneBlobSource` to get `IBlobSet`
+  - Check that this retains blob order in `IBlobSet` matching ROOT's `TTree::entry`.
 - Copy-paste `PointTreeBuilding::sample_live()` and use to produce initial pc-tree.
-  - Modify code to use `bcmap` to define clusters.
-  - The "cluster" nodes that are made children of the root "grouping" node must be in the same order as sequential cluster IDs held in `bcmap`.  That they are first made by iterating on `range(max(bcmap))` and then `bcmap` walked to add blob children.
+  - Look to refactor common code from both contexts into a function in `aux/`.
+  - We must define clusters based on `cluster_id` and not "connected components".
+  - Initially, empty cluster nodes must be made and added to the root "grouping".
+    - During this `map<int,node*> cnodes` collects mapping from `cluster_id` to node pointer.
+    - The `bcmap` is walked to add blob level info to corresponding clusters, including sample points.
 - Load `T_flash` to produce **light**, **flash** and **flashlight** data as described in the tensor-data-model.
   - Store each of these three as arrays in a "local" PC on the "grouping" pc-tree node.
 - Load `T_match1` to get cluster-flash associations.
-  - Assert `T_match1::cluster_id` is sequential.
-  - This `cluster_id` is then the index of the corresponding WCT cluster in the grouping children list.
-  - Add to each cluster node a local PC with scalar array holding flash ID (index into **flash** data).
+  - Use `cnodes` to resolve `cluster_id` to a cluster node.
+  - Add to the cluster node a local PC with scalar array holding flash ID (index into **flash** data).
 - Convert pc-tree to `ITensorSet` and output.
   
 
