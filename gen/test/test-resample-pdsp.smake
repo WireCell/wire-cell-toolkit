@@ -1,0 +1,620 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+# Suggested running:
+#
+# /path/to/test-resample-pdsp.smake --config time_pad=linear --directory linear-padding
+# /path/to/test-resample-pdsp.smake --config time_pad=zero --directory zero-padding
+#
+# Full run takes less than 1 minute on 8 x 3.5 GHz.
+
+#############
+# The name of the file output by each rule is build from input file names by
+# pre-pending a label.  Labels are composed of an "tier" identifier and a clock
+# tick in ns.  Eg, fr100 is field response sampled at 100ns.  
+#
+# File names end in {detector}.{ext}.
+#############
+
+
+import json
+import numpy
+from pathlib import Path
+from subprocess import check_output
+
+for k,v in dict(
+        installdir = Path.home() / "sync/docs/edg/lmn/figures/lartpc",
+
+        # Run things for LMN FR resampling test for detector:
+        detector="pdsp",
+        # The field sampling periods in ns.  The first one MUST be the native fr tick.  Note, strings, not numbers.
+        frticks=["100", "64"],
+        # The ADC sampling periods in ns corresponding to fr ticks.  Note, strings, not numbers.
+        adcticks=["500", "512"],
+        # depo generator, file name will be appended
+        depogen="wirecell-gen depo-line "
+        "--electron-density -5000 --first -3578.36*mm,76.1*mm,3.3497*mm "
+        "--last -1.5875*mm,6060*mm,2303.37*mm --sigma 1*mm,1*mm --output ",
+        # padding strategy (zero, linear, first, last)
+        time_pad = 'linear',
+
+        # variations of the FRs, "full" must be first.
+        #spans=["full","oned"],
+        spans=["full"],
+
+
+).items():
+    config.setdefault(k,v)
+
+# import the original FR
+path = 'wirecell-util resolve -k fields {detector} | head -1'
+path = Path(check_output(path.format(**config), shell=True).decode().strip())
+fields_original_path = str(path.absolute()),
+
+
+# 'fields-{frtick}-{span}-{detector}.{ext}'
+
+rule fix_fr_period:
+    input:
+        fields_original_path
+    output:
+        f"fields-{config['frticks'][0]}-{{span}}-{{detector}}.json.bz2"
+    shell: '''
+    wirecell-resp condition -P {config[frticks][0]}*ns -o {output} {input}
+    '''
+
+rule resample_fr:
+    input:
+        f"fields-{config['frticks'][0]}-{{span}}-{{detector}}.json.bz2"
+    output:
+        f"fields-{config['frticks'][1]}-{{span}}-{{detector}}.json.bz2"
+    shell: '''
+    wirecell-resp resample -p zero -t {config[frticks][1]}*ns -o {output} {input}
+    '''
+
+def respan_fr_args(w):
+    if w.span == "quasi":
+        return ""               # default for frzero
+    if w.span == "oned":
+        return "--uniform 3"    # use a least-extreme ipulse
+    if w.span == "coarse":
+        return "--uniform 3 --number 10"
+    raise ValueError(f'respanning to "{w.span}" would be a no-op, not supported')
+
+rule respan_fr:
+    input:
+        'fields-{frtick}-full-{detector}.json.bz2'
+    output:
+        'fields-{frtick}-oned-{detector}.json.bz2'
+    params:
+        args = respan_fr_args
+    shell: '''
+    wirecell-sigproc frzero {params.args} --output {output} {input}
+    '''
+
+rule plot_response:
+    input:
+        'fields-{frtick}-{span}-{detector}.json.bz2'
+    output:
+        'fields-{frtick}-{span}-{detector}.png'
+    shell: '''
+    wirecell-sigproc plot-response --title "{wildcards.span} {wildcards.frtick}ns" {input} {output}
+    '''
+
+
+rule all_plot_response:
+    input:
+        expand(rules.plot_response.output, span=config['spans'],
+               frtick=config['frticks'], detector=[config['detector']])
+
+rule gen_depos:
+    output:
+        "diagonal-depos-{detector}.npz"
+    params:
+        depogen=config['depogen']
+    shell:
+        '{params.depogen} {output}'
+
+
+rule nul_depos:
+    output:
+        "empty-depos.npz"
+    shell:
+        'wirecell-gen depo-point -n 0 -o {output}'
+
+rule loc_depos:
+    '''use detlinegen to make localized depos in one wire region for each plane so we do no trigger any interpolation across regions'''
+
+rule all_depos:
+    input:
+        expand(rules.gen_depos.output, detector=[config['detector']]),
+        rules.nul_depos.output
+
+def wc_field_arg(w):
+    '''
+    We override the nominal field file from the Jsonnet TLA.
+    '''
+    ff = f'fields-{w.frtick}-{w.span}-{w.detector}.json.bz2'
+    return """--tla-code 'options={fields:"%s"}'""" % ff
+    
+rule signal:
+    input:
+        depos=rules.gen_depos.output,
+        fr='fields-{frtick}-{span}-{detector}.json.bz2'
+    output:
+        log="signal-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="signal-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    params:
+        field = wc_field_arg
+    shell:'''
+    wire-cell -l {output.log} -L debug \
+    -A detector={wildcards.detector} \
+    -A variant=resample_{wildcards.adctick}ns \
+    -A tasks="drift,sig" \
+    -A input={input.depos} \
+    -A output={output.npz} \
+    {params.field} \
+    layers/omnijob.jsonnet    
+    '''
+
+def expand_ticks(pattern):
+    ret = list();
+    for ind in range(len(config['frticks'])):
+        ret += expand(pattern,
+                      frtick=[config['frticks'][ind]],
+                      adctick=[config['adcticks'][ind]],
+                      allow_missing=True)
+    return ret
+    
+rule all_signal:
+    input:
+        expand(expand_ticks(rules.signal.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
+
+
+# Note, we make noise as if it is signal+noise but with "null" depos.  The
+# "fields" label it gets is kind of pointless and we use more CPU than we need.
+# But, it helps keep the naming consistent without complicating the rules.
+# Laziness wins today.
+rule noise:
+    input:
+        depos=rules.nul_depos.output,
+        fr='fields-{frtick}-{span}-{detector}.json.bz2'
+    output:
+        log="noise-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="noise-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    params:
+        field = wc_field_arg
+    shell:'''
+    wire-cell -l {output.log} -L debug \
+    -A detector={config[detector]} \
+    -A variant=resample_{wildcards.adctick}ns \
+    -A tasks="drift,sig,noi" \
+    -A input={input.depos} \
+    -A output={output.npz} \
+    {params.field} \
+    layers/omnijob.jsonnet    
+    '''
+
+rule all_noise:
+    input:
+        expand(expand_ticks(rules.noise.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
+
+
+def sum_frames(fins, fout):
+    frames = list()
+    nticks = list()
+    for fin in fins:
+        f = numpy.load(fin)
+        fr = f[f.files[0]]
+        frames.append(fr)
+        nticks.append(fr.shape[1])
+    nmin = min(nticks)
+    frame = numpy.zeros((frames[0].shape[0], nmin), dtype=frames[0].dtype)
+    for fr in frames:
+        frame += fr[:,:nmin]
+        
+    f0 = numpy.load(fins[0])
+    fname = f0.files[0]
+    f0 = dict(f0)
+    f0[fname] = frame
+    numpy.savez_compressed(fout[0], **f0)
+
+rule signoi:
+    input:
+        signal = rules.signal.output.npz,
+        noise = rules.noise.output.npz
+    output:
+        npz="signoi-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    run: sum_frames(input, output)
+
+rule all_signoi:
+    input:
+        expand(expand_ticks(rules.signoi.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
+
+rule digitize:
+    input:
+        "signoi-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    output:
+        log="sigdig-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="sigdig-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    shell: '''
+    wire-cell -l {output.log} -L debug \
+    -A detector={config[detector]} \
+    -A variant=resample_{wildcards.adctick}ns \
+    -A tasks="dig" \
+    -A input={input} \
+    -A output={output.npz} \
+    layers/omnijob.jsonnet
+    '''
+
+rule all_sigdig:
+    input:
+        expand(expand_ticks(rules.digitize.output.npz),
+               span=config['spans'],
+               detector=[config['detector']])
+
+
+rule sigxxx_resample:
+    input:
+        "{sigxxx}-{adctick}-fields-{frtick}-{span}-{detector}.npz",
+    output:
+        log="resample-{newtick}-{sigxxx}-{adctick}-fields-{frtick}-{span}-{detector}.log",
+        npz="resample-{newtick}-{sigxxx}-{adctick}-fields-{frtick}-{span}-{detector}.npz"
+    params:
+        time_pad = config['time_pad']
+    shell:'''
+    wire-cell -l {output.log} -L debug \
+    -A period_ns={wildcards.newtick} \
+    -A input={input} -A output={output.npz} \
+    -A time_pad={config[time_pad]} \
+    -c layers/resample.jsonnet
+    '''
+
+def expand_upsamplings(pattern):
+    ret = list()
+    ticks = config['adcticks']
+    for tind, tick in enumerate(ticks):
+        for new_tick in ticks:
+            if new_tick >= tick:  # not downsample
+                continue
+            ret += expand(pattern,
+                          frtick=[config['frticks'][tind]],
+                          adctick=[config['adcticks'][tind]],
+                          newtick=[new_tick],
+                          allow_missing=True)
+    return ret;
+
+
+
+rule all_resample:
+    input:
+        expand(expand_upsamplings(rules.sigxxx_resample.output.npz),
+               sigxxx=['signal', 'signoi', 'sigdig'],
+               detector=[config['detector']],
+               span=config['spans'])
+
+from matplotlib.backends.backend_pdf import PdfPages
+from wirecell.util.frames import load as load_frames
+from wirecell import units
+from wirecell.util import plottools
+def plot_signal_with_diff(ofile, ifiles, diffinds=[0,2], diffmult=10):
+    '''
+    Specialize guts of "wirecell-plot channels" for the "signal" sigxxx.  to
+    include a diff between waves given by diffinds.
+    '''
+
+    # hard-wire
+    legends= ["500 ns sampling sim",  # this requires matching order in ifiles!
+              "512 ns sampling sim",
+              "512 to 500 ns resampling"]
+    channels = [215,1100,2260]
+    trange = [1050*units.us,1200*units.us]
+    frange = [0,1*units.MHz]
+    indvmm=3.2e-8
+    indyrange=(-indvmm,indvmm)
+    colyrange=(-0.1e-7, 1.6e-7)
+    yranges = [ indyrange, indyrange, colyrange ]
+    ylabel="Voltage"
+
+    frames = [list(load_frames(ff))[0] for ff in ifiles]
+
+    progressive = True
+    drawstyle = None
+    
+    with PdfPages(ofile) as out:
+
+        for ich, chan in enumerate(channels):
+
+            yrange = yranges[ich]
+
+            fig,axes = plt.subplots(nrows=1, ncols=2, figsize=(8,3))
+            fig.suptitle(f'channel {chan}')
+
+            if diffinds:
+                f0 = frames[diffinds[0]]
+                f1 = frames[diffinds[1]]
+                wdiff = (f1.waves(chan)[:6000] - f0.waves(chan)[:6000])*diffmult
+                tus = f1.times[:6000]/units.us
+                axes[0].plot(tus, wdiff, linestyle='dashed', linewidth=0.5, color='gray')
+                
+
+            for ind, fr in enumerate(frames):
+
+                if progressive:
+                    linewidth = len(frames) - ind
+                else:
+                    linewidth = 1
+
+                wave = fr.waves(chan)
+                # if baseline:
+                #     wave = wave - baseline
+                axes[0].set_title("waveforms")
+                axes[0].plot(fr.times/units.us, wave, linewidth=linewidth, drawstyle=drawstyle)
+                axes[0].set_xlim(trange[0]/units.us, trange[1]/units.us)
+                axes[0].set_ylim(*yrange)
+                # if yrange:
+                #     axes[0].set_ylim(*yrange)
+                # else:
+                #     plottools.rescaley(axes[0], times, wave,
+                #                        (trange[0]/units.us, trange[1]/units.us))
+                axes[0].set_xlabel("time [us]")
+
+                label = legends[ind]
+                
+                spec = numpy.abs(numpy.fft.fft(wave))
+                # if baseline is None:
+                #     spec[0] = 0
+                axes[1].set_title("spectra")
+                axes[1].plot(fr.freqs_MHz, spec, linewidth=linewidth, label=label)
+                if frange:
+                    axes[1].set_xlim(frange[0]/units.MHz, frange[1]/units.MHz)
+                else:
+                    axes[1].set_xlim(0, fr.freqs_MHz[fr.nticks//2])
+                axes[1].set_xlabel("frequency [MHz]")
+                if ylabel:
+                    axes[0].set_ylabel(ylabel)
+
+            if diffinds:
+                axes[1].plot([],[], linestyle='dashed', linewidth=0.5, color='gray',
+                             label=f'500 ns difference x{diffmult}')                    
+            axes[1].legend(loc='center right')
+                
+            plt.tight_layout()
+            out.savefig()
+            plt.clf()
+
+
+
+
+ylabels = dict(signal="Voltage", sigdig="ADC", signoi="ADC", sigproc="electrons")
+rule sigxxx_plots:
+    input:
+        expand_ticks("{sigxxx}-{adctick}-fields-{frtick}-{span}-{detector}.npz"),
+        expand_upsamplings("resample-{newtick}-{sigxxx}-{adctick}-fields-{frtick}-{span}-{detector}.npz")
+    output:        
+        "{sigxxx}-{span}-{detector}.pdf"
+    params:
+        channels="215,1100,2260",
+        trange="1050*us,1200*us",
+        ylabel=lambda w: ylabels[w.sigxxx]
+    wildcard_constraints:
+        sigxxx='signoi|sigdig'
+    shell:'''
+    wirecell-plot channels \
+    -o {output} \
+    --ylabel {params.ylabel} \
+    --drawstyle=progressive \
+    --legends='500 ns sampling sim;512 ns sampling sim;512 to 500 ns resampling'  \
+    --trange '{params.trange}' \
+    --channel {params.channels} \
+    {input}
+    '''
+
+
+rule signal_plots:
+    input:
+        "signal-500-fields-100-full-pdsp.npz",
+        "signal-512-fields-64-full-pdsp.npz",
+        "resample-500-signal-512-fields-64-full-pdsp.npz"
+    output:        
+        "signal-full-pdsp.pdf"
+    wildcard_constraints:
+        sigxxx='signal'
+    run: plot_signal_with_diff(output[0], input)
+
+
+### added to satisfy reviewer request
+def do_sigdiff(ip, op):
+    nat = numpy.load(ip.native)
+    res = numpy.load(ip.resample)
+
+    out = dict()
+    for name in 'channels_*_0 tickinfo_*_0'.split():  # pass through
+        out[name] = nat[name]
+    nframe = nat["frame_*_0"]
+    nticks = nframe.shape[1]
+    rframe = res["frame_*_0"][:,:nticks]
+    out["frame_*_0"] = rframe - nframe
+    numpy.savez_compressed(op.npz, **out)
+    open(op.log, "w").write(f'Wrote sigdiff to {op.npz}\n')
+
+rule sigdiff:
+    input:
+        native="signal-500-fields-100-full-pdsp.npz",
+        resample="resample-500-signal-512-fields-64-full-pdsp.npz"
+    output:
+        log="sigdiff-500-full.log",
+        npz="sigdiff-500-full.npz"
+    run:
+        do_sigdiff(input, output)
+
+
+rule sigdiff_separate_plots:
+    input:
+        rules.sigdiff.output.npz
+    output:
+        "sigdiff-500-full-separate.pdf"
+    params:
+        channels="215,1100,2260",
+        trange="1050*us,1200*us"
+    shell:'''
+    wirecell-plot channels \
+    -o {output} \
+    --drawstyle=progressive \
+    --legends='ch 215;ch 1100;ch 2260'  \
+    --trange '{params.trange}' \
+    --channel {params.channels} \
+    {input}
+    '''
+
+import matplotlib.pyplot as plt
+
+def do_sigdiff_plot(ip, op, channels=[215,1100,2260]):
+    nat = numpy.load(ip.native)["frame_*_0"][:,:6000]
+    res = numpy.load(ip.resample)["frame_*_0"][:,:6000]
+    dif = res - nat
+
+    fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(6,3))
+    fig.suptitle(f'Native to resampled waveform differences')
+    trange = slice(1050*2,1200*2)
+    time = (numpy.arange(6000)*0.5)[trange]
+
+    colors=["tab:blue","tab:orange","tab:green"]
+    
+    for ind,ch in enumerate(channels):
+        nwave = nat[ch,trange]
+        ax.plot(time, nwave, color=colors[ind], linestyle='dashed', alpha=0.5)
+        rwave = res[ch,trange]
+        ax.plot(time, rwave, color=colors[ind], linestyle='solid', alpha=0.25)
+    for ind, ch in enumerate(channels):
+        dwave = dif[ch,trange]
+        ax.plot(time, dwave, color=colors[ind], label=f'ch {ch}')
+    ax.set_ylim(-0.5e-9,1.5e-9)
+    ax.set_xlabel("time [us]")
+    ax.set_ylabel("Voltage")
+    ax.legend()
+    fig.tight_layout()
+    plt.savefig(op[0])
+
+
+rule sigdiff_plots:
+    input:
+        native="signal-500-fields-100-full-pdsp.npz",
+        resample="resample-500-signal-512-fields-64-full-pdsp.npz"
+    output:
+        "sigdiff-500-full.pdf"
+    run: do_sigdiff_plot(input, output)
+
+### above hardwires everything
+
+        
+
+rule all_sigxxx_plots:
+    default_target: True
+    input:
+        expand(rules.sigxxx_plots.output,
+               sigxxx=['signal','signoi','sigdig'], span=config['spans'], detector=[config['detector']])
+
+
+
+rule sigproc_native:
+    input:
+        frames = "sigdig-500-fields-100-{span}-{detector}.npz",
+        fr='fields-100-{span}-{detector}.json.bz2'
+    output:
+        log="sigproc-native-{span}-{detector}.log",
+        npz="sigproc-native-{span}-{detector}.npz",
+    shell: '''
+    wire-cell -l {output.log} -L debug \
+    -A detector={config[detector]} \
+    -A variant=resample_500ns \
+    -A tasks="sp" \
+    -A input={input.frames} \
+    -A output={output.npz} \
+    --tla-code 'options={{fields:"{input.fr}"}}' \
+    layers/omnijob.jsonnet
+    '''
+
+rule sigproc_resample:
+    input:
+        frames = "resample-500-sigdig-512-fields-64-{span}-{detector}.npz",
+        fr='fields-100-{span}-{detector}.json.bz2'
+    output:
+        log="sigproc-resample-{span}-{detector}.log",
+        npz="sigproc-resample-{span}-{detector}.npz",
+    shell: '''
+    wire-cell -l {output.log} -L debug \
+    -A detector={config[detector]} \
+    -A variant=resample_500ns \
+    -A tasks="sp" \
+    -A input={input.frames} \
+    -A output={output.npz} \
+    --tla-code 'options={{fields:"{input.fr}"}}' \
+    layers/omnijob.jsonnet
+    '''
+
+rule sigproc_plots:
+    input:
+        'sigproc-native-{span}-{detector}.npz',
+        'sigproc-resample-{span}-{detector}.npz'
+    output:        
+        "sigproc-{span}-{detector}.pdf"
+    params:
+        channels="215,1100,2260",
+        trange="1020*us,1100*us"
+    shell:'''
+    wirecell-plot channels \
+    -o {output} \
+    --drawstyle=progressive \
+    --legends='native ns;resampled ns' \
+    --trange '{params.trange}' \
+    --channel {params.channels} \
+    {input}
+    '''
+
+rule all_sigproc:
+    input:
+        expand(rules.sigproc_native.output.npz,
+               detector=[config['detector']], span=config['spans']),
+        expand(rules.sigproc_resample.output.npz,
+               detector=[config['detector']], span=config['spans']),
+        expand(rules.sigproc_plots.output,
+               detector=[config['detector']],span=config['spans'])
+
+
+
+rule pdsp_fr:
+    input:
+        fields_original_path
+    output:
+        "pdsp-fr.png"
+    shell: '''
+    wirecell-sigproc plot-response --planes 0 pdsp {output}
+    '''
+
+
+rule install:
+    input:
+        expand("{sigxxx}-{span}-{detector}.pdf",
+               sigxxx=['signal','signoi','sigdig', 'sigproc'],
+               span=config['spans'], detector=[config['detector']]),
+        rules.pdsp_fr.output,
+        rules.sigdiff_plots.output
+    output:
+        expand(config['installdir'] / "{sigxxx}-{span}-{detector}.pdf",
+               sigxxx=['signal','signoi','sigdig','sigproc'],
+               span=config['spans'], detector=[config['detector']]),
+        config['installdir'] / rules.pdsp_fr.output[0],
+        config['installdir'] / rules.sigdiff_plots.output[0]
+
+    shell: '''
+    cp {input} {config[installdir]}
+    '''
+
+

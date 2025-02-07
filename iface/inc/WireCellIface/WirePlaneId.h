@@ -6,6 +6,7 @@
 #include "WireCellUtil/Spdlog.h"
 #include <ostream>
 #include <functional>
+#include "WireCellUtil/Spdlog.h"
 
 namespace WireCell {
 
