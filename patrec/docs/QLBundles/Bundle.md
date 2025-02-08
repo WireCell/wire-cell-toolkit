@@ -143,18 +143,23 @@ In order to consider `cluster_id` when loading `TC` and `T_Flash` information in
 
 We will call this new component `UbooneClusterSource` which supplies these operations:
 
-- Load `TC` to form a `std::vector<int> bcmap` giving per-blob cluster IDs in blob-order.
+- Job has the usual 4 `UbooneBlobSource`'s to get `IBlobSet`'s spanning uvw/uv/vw/wu view cases.
+- A `BlobSetMerge` follows to provide 4-to-1 fan-in.
+
+`UbooneClusterSource` follows and:
+
+- Receives the `IBlobSet`
+  - The `IBLobs` carry the ROOT `TTree::entry` number for their `TC` origin giving "blob order".
+-  Loads `TC` to form a `std::vector<int> bcmap` giving per-blob cluster IDs in blob-order.
+  - User **must** configure `Uboone*Source` to use the same stream of ROOT files.
   - We do not assume `cluster_id` is an index.
-  - Not all blobs may have a cluster.
-- Internally, run `UbooneBlobSource` to get `IBlobSet`
-  - Check that this retains blob order in `IBlobSet` matching ROOT's `TTree::entry`.
 - Copy-paste `PointTreeBuilding::sample_live()` and use to produce initial pc-tree.
   - Look to refactor common code from both contexts into a function in `aux/`.
   - We must define clusters based on `cluster_id` and not "connected components".
-  - Initially, empty cluster nodes must be made and added to the root "grouping".
-    - During this `map<int,node*> cnodes` collects mapping from `cluster_id` to node pointer.
+  - Initially, empty cluster nodes must be made and added to the PC-tree root "grouping" node.
+    - During this, a `map<int,node*> cnodes` collects mapping from `cluster_id` to node pointer.
     - The `bcmap` is walked to add blob level info to corresponding clusters, including sample points.
-- Load `T_flash` to produce **light**, **flash** and **flashlight** data as described in the tensor-data-model.
+- Load `T_flash` ROOT TTree to produce **light**, **flash** and **flashlight** data as described in the tensor-data-model.
   - Store each of these three as arrays in a "local" PC on the "grouping" pc-tree node.
 - Load `T_match1` to get cluster-flash associations.
   - Use `cnodes` to resolve `cluster_id` to a cluster node.
