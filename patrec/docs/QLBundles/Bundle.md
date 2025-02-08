@@ -154,7 +154,8 @@ We will call this new component `UbooneClusterSource` which supplies these opera
   - User **must** configure `Uboone*Source` to use the same stream of ROOT files.
   - We do not assume `cluster_id` is an index.
 - Copy-paste `PointTreeBuilding::sample_live()` and use to produce initial pc-tree.
-  - Look to refactor common code from both contexts into a function in `aux/`.
+  - ~~Look to refactor common code from both contexts into a function in `aux/`.~~  
+    - No.  That code rather badly violates many quality things and should be changed.  I will start fresh.  Perhaps later we fix it.
   - We must define clusters based on `cluster_id` and not "connected components".
   - Initially, empty cluster nodes must be made and added to the PC-tree root "grouping" node.
     - During this, a `map<int,node*> cnodes` collects mapping from `cluster_id` to node pointer.

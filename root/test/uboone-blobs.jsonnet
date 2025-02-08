@@ -124,6 +124,40 @@ local bs_dead = {
         ],
         extra: [".*"] // want all the extra
     }};
+
+// monstrosity
+local geom_helper = {
+    type: "SimpleClusGeomHelper",
+    name: "uboone",
+    data: {
+        a0f0: {
+            pitch_u: 3 * wc.mm,
+            pitch_v: 3 * wc.mm,
+            pitch_w: 3 * wc.mm,
+            angle_u: 1.0472,    // 60 degrees
+            angle_v: -1.0472,   // -60 degrees
+            angle_w: 0,         // 0 degrees
+            drift_speed: 1.101 * wc.mm / wc.us,
+            tick: 0.5 * wc.us,  // 0.5 mm per tick
+            tick_drift: self.drift_speed * self.tick,
+            time_offset: -1600 * wc.us + 6 * wc.mm/self.drift_speed,
+            nticks_live_slice: 4,
+            FV_xmin: 1 * wc.cm,
+            FV_xmax: 255 * wc.cm,
+            FV_ymin: -99.5 * wc.cm,
+            FV_ymax: 101.5 * wc.cm,
+            FV_zmin: 15 * wc.cm,
+            FV_zmax: 1022 * wc.cm,
+            FV_xmin_margin: 2 * wc.cm,
+            FV_xmax_margin: 2 * wc.cm,
+            FV_ymin_margin: 2.5 * wc.cm,
+            FV_ymax_margin: 2.5 * wc.cm,
+            FV_zmin_margin: 3 * wc.cm,
+            FV_zmax_margin: 3 * wc.cm
+        },
+    }
+};
+
 local PointTreeBuilding() = pg.pnode({
     type: "PointTreeBuilding",
     name: "",
@@ -135,8 +169,10 @@ local PointTreeBuilding() = pg.pnode({
         multiplicity: 2,
         tags: ["live", "dead"],
         anode: wc.tn(anodes[0]),
+        face: 0,
+        geom_helper: wc.tn(geom_helper),
     }
-}, nin=2, nout=1, uses=[bs_live, bs_dead]);
+}, nin=2, nout=1, uses=[bs_live, bs_dead, geom_helper]);
 local point_tree_source = function(livefn, deadfn)
     local livesrc = ClusterFileSource(livefn);
     local deadsrc = ClusterFileSource(deadfn);
@@ -170,17 +206,40 @@ local BeeBlobTap = function(fname)
 
 local MultiAlgBlobClustering(beezip) = pg.pnode({
     type: "MultiAlgBlobClustering",
-        name: beezip,
-        data:  {
-            inpath: "pointtrees/%d",
-            outpath: "pointtrees/%d",
-            perf: true,
-            bee_zip: beezip,
-            save_deadarea: true, 
-            dead_live_overlap_offset: 2,
-            anode: wc.tn(anode),
-        }
-    }, nin=1, nout=1, uses=[anode]);
+    name: "",
+    data:  {
+        inpath: "pointtrees/%d",
+        outpath: "pointtrees/%d",
+        perf: true,
+        bee_zip: beezip,
+        initial_index: 0,
+        use_config_rse: true,  // Enable use of configured RSE
+        runNo: 1,
+        subRunNo: 1,
+        eventNo: 1,
+        save_deadarea: true, 
+        anode: wc.tn(anodes[0]),
+        face: 0,
+        geom_helper: wc.tn(geom_helper),
+        func_cfgs: [
+            {name: "clustering_ctpointcloud"},
+            // {name: "clustering_live_dead", dead_live_overlap_offset: 2},
+            // {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1},
+            // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false},
+            // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true},
+            // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm},
+            // {name: "clustering_close", length_cut: 1.2*wc.cm},
+            // {name: "clustering_extend_loop", num_try: 3},
+            // {name: "clustering_separate", use_ctpc: true},
+            // {name: "clustering_connect1"},
+            // {name: "clustering_deghost"},
+            // {name: "clustering_examine_x_boundary"},
+            // {name: "clustering_protect_overclustering"},
+            // {name: "clustering_neutrino"},
+            // {name: "clustering_isolated"},
+        ],
+    }
+}, nin=1, nout=1, uses=[geom_helper]);
 
 local TensorFileSink(fname) = pg.pnode({
     type: "TensorFileSink",

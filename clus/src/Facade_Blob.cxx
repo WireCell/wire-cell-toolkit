@@ -58,6 +58,10 @@ void Blob::on_construct(node_type* node)
     const auto& lpcs = m_node->value.local_pcs();
     const auto& pc_scalar = lpcs.at("scalar");
 
+    if (pc_scalar.size_major() != 1) {
+        raise<ValueError>("scalar PC is not scalar but size %d", pc_scalar.size_major());
+    }
+
     // fixme: transferring these to cache could/should be made lazy.
 
     // fixme: using a single array of several floats (and etc ints) would avoid

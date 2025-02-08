@@ -9,6 +9,7 @@
 #include "WireCellAux/ClusterHelpers.h"
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
+#include "WireCellAux/SamplingHelpers.h"
 
 WIRECELL_FACTORY(PointTreeBuilding, WireCell::Clus::PointTreeBuilding,
                  WireCell::INamed,
@@ -74,6 +75,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("failed to get face %d", m_face);
     }
 
+    // Fixme: this is an utterly broken thing and should be replaced.
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 
     auto samplers = cfg["samplers"];
@@ -149,56 +151,11 @@ namespace {
     }
 #endif
 
-    // Calculate the average position of a point cloud tree.
-    Point calc_blob_center(const Dataset& ds)
-    {
-        const auto& arr_x = ds.get("x")->elements<Point::coordinate_t>();
-        const auto& arr_y = ds.get("y")->elements<Point::coordinate_t>();
-        const auto& arr_z = ds.get("z")->elements<Point::coordinate_t>();
-        const size_t len = arr_x.size();
-        if(len == 0) {
-            raise<ValueError>("empty point cloud");
-        }
-        Point ret(0,0,0);
-        for (size_t ind=0; ind<len; ++ind) {
-            ret += Point(arr_x[ind], arr_y[ind], arr_z[ind]);
-        }
-        ret = ret / len;
-        return ret;
-    }
-    /// TODO: add more info to the dataset
-    Dataset make_scaler_dataset(const IBlob::pointer iblob, const Point& center, const int npoints = 0, const double tick_span = 0.5*units::us)
-    {
-        using float_t = Facade::float_t;
-        using int_t = Facade::int_t;
-        Dataset ds;
-        ds.add("charge", Array({(float_t)iblob->value()}));
-        ds.add("center_x", Array({(float_t)center.x()}));
-        ds.add("center_y", Array({(float_t)center.y()}));
-        ds.add("center_z", Array({(float_t)center.z()}));
-	ds.add("npoints", Array({(int_t)npoints}));
-        const auto& islice = iblob->slice();
-        // fixme: possible risk of roundoff error + truncation makes _min == _max?
-        ds.add("slice_index_min", Array({(int_t)(islice->start()/tick_span)})); // unit: tick
-        ds.add("slice_index_max", Array({(int_t)((islice->start()+islice->span())/tick_span)}));
-        const auto& shape = iblob->shape();
-        const auto& strips = shape.strips();
-        /// ASSUMPTION: is this always true?
-        std::unordered_map<RayGrid::layer_index_t, std::string> layer_names = {
-            {2, "u"},
-            {3, "v"},
-            {4, "w"}
-        };
-        for (const auto& strip : strips) {
-            // std::cout << "layer " << strip.layer << " bounds " << strip.bounds.first << " " << strip.bounds.second << std::endl;
-            if(layer_names.find(strip.layer) == layer_names.end()) {
-                continue;
-            }
-            ds.add(layer_names[strip.layer]+"_wire_index_min", Array({(int_t)strip.bounds.first}));
-            ds.add(layer_names[strip.layer]+"_wire_index_max", Array({(int_t)strip.bounds.second}));
-        }
-        return ds;
-    }
+    // Moved to aux/SamplingHelpers.
+    // - calc_blob_center
+    // - make_scaler_dataset
+
+
 
     /// extract corners
     Dataset make_corner_dataset(const IBlob::pointer iblob)
