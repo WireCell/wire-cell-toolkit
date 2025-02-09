@@ -8,6 +8,7 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/PointCloudDataset.h"
 
 #include <memory>
 #include <vector>
@@ -44,6 +45,7 @@ namespace WireCell::Root {
             // double eventTime{0};    // 1.45767e9. Unix time?
             double triggerTime{0};  // 1.48822e10. Units?
             int runNo{0};
+            int subRunNo{0};
             int eventNo{0};
             int nrebin{0};
             // float unit_dis{0};
@@ -51,6 +53,7 @@ namespace WireCell::Root {
             void set_addresses(TTree& tree) {
                 tree.SetBranchAddress("triggerTime", &triggerTime);
                 tree.SetBranchAddress("runNo", &runNo);
+                tree.SetBranchAddress("subRunNo", &subRunNo);
                 tree.SetBranchAddress("eventNo", &eventNo);
                 tree.SetBranchAddress("nrebin", &nrebin);
                 // tree.SetBranchAddress("unit_dis",&unit_dis);
@@ -157,14 +160,20 @@ namespace WireCell::Root {
         };
         Bad bad;
 
+        // This is a per-flash tree and NOT per-event.  Must scan for r/s/e.
         struct Flash {
-            int type, flash_id;
-            double time, tmin, tmax, qtot;
-            double light[32], dlight[32];
+            int runNo{0};
+            int subRunNo{0};
+            int eventNo{0};
+            int type{0}, flash_id{0};
+            double time{0}, tmin{0}, tmax{0}, qtot{0};
+            double light[32]={0}, dlight[32]={0};
             std::vector<int>* channels = nullptr;
             
             void set_addresses(TTree& tree) {
-                tree.SetBranchAddress("time",&time);
+                tree.SetBranchAddress("eventNo",&eventNo);
+                tree.SetBranchAddress("subRunNo",&subRunNo);
+                tree.SetBranchAddress("runNo",&runNo);
                 tree.SetBranchAddress("type",&type);
                 tree.SetBranchAddress("flash_id",&flash_id);
                 tree.SetBranchAddress("low_time",&tmin);
@@ -175,17 +184,131 @@ namespace WireCell::Root {
                 tree.SetBranchAddress("fired_channels",&channels);
             }
         };
-        Flash flash;
+        Flash flash;            // these entries are NOT events but must sync with eventno etc.
 
+        // This is a per-match tree and NOT per-event.  Must scan for r/s/e.
         struct Match {
-            int cluster_id, flash_id;
+            int runNo{0};
+            int subRunNo{0};
+            int eventNo{0};
+            int cluster_id{0}, flash_id{0};
 
             void set_addresses(TTree& tree) {
+                tree.SetBranchAddress("eventNo",&eventNo);
+                tree.SetBranchAddress("subRunNo",&subRunNo);
+                tree.SetBranchAddress("runNo",&runNo);
                 tree.SetBranchAddress("tpc_cluster_id", &cluster_id);
                 tree.SetBranchAddress("flash_id", &flash_id);
             }            
         };
         Match match;
+
+        // Call load_light() after per-event tree entry is loaded.  It will
+        // populate this with keys "light", "flash", "flashlight" and "match".
+        std::map<std::string, PointCloud::Dataset> optical;
+
+        void load_optical() {
+            optical.clear();
+
+            std::map<int, size_t> fid_ind;
+
+            // load all T_flash with matching header.runNo, header.subRunNo, header.eventNo
+            const int nflashes = m_flash->GetEntries();
+
+            // TDM flash
+            std::vector<double> ftime(nflashes), ftmin(nflashes), ftmax(nflashes), fval(nflashes);
+            std::vector<int> fident(nflashes), ftype(nflashes);
+
+            // TDM light
+            std::vector<double> lid, lt, lq, ldq;
+
+            // TDM flashlight
+            std::vector<int> fl_flash, fl_light;
+            
+            size_t find = 0;
+            for (int flash_entry = 0; flash_entry < nflashes; ++flash_entry) {
+                m_flash->GetEntry(flash_entry);
+                if (flash.runNo != header.runNo) { continue; }
+                if (flash.subRunNo != header.subRunNo) { continue; }
+                if (flash.eventNo != header.eventNo) { continue; }
+
+                // flash.
+                fid_ind[flash.flash_id] = find;
+                ftime[find] = flash.time;
+                ftmin[find] = flash.tmin;
+                ftmax[find] = flash.tmax;
+                fval[find] = flash.qtot;
+                fident[find] = flash.flash_id;
+                ftype[find] = flash.type;
+
+                for (auto chan : *flash.channels) {
+                    // flashlight
+                    fl_flash.push_back(find);
+                    fl_light.push_back(lid.size());
+
+                    // light.  Must append after flashlight so lid.size() is ID
+                    lid.push_back(chan);
+                    lt.push_back(flash.time);
+                    lq.push_back(flash.light[chan]);
+                    ldq.push_back(flash.dlight[chan]);
+                }                
+                ++find;
+            }
+
+            PointCloud::Dataset light_ds;
+            light_ds.add("ident", PointCloud::Array(lid));
+            light_ds.add("time", PointCloud::Array(lt));
+            light_ds.add("value", PointCloud::Array(lq));
+            light_ds.add("error", PointCloud::Array(ldq));
+
+            PointCloud::Dataset flash_ds;
+            flash_ds.add("time", PointCloud::Array(ftime));
+            flash_ds.add("tmin", PointCloud::Array(ftmin));
+            flash_ds.add("tmax", PointCloud::Array(ftmax));
+            flash_ds.add("value", PointCloud::Array(fval));
+            flash_ds.add("ident", PointCloud::Array(fident));
+            flash_ds.add("type", PointCloud::Array(ftype));
+
+            PointCloud::Dataset flashlight_ds;
+            flashlight_ds.add("flash", PointCloud::Array(fl_flash));
+            flashlight_ds.add("light", PointCloud::Array(fl_light));
+
+            const int nmatches = m_match->GetEntries();
+            // Matches arrays will be in the same order as cluster_id_vec.  The
+            // cf_cluster holds indices in to that and cf_flash indices into the
+            // flash arrays.
+            std::vector<int> cf_cluster, cf_flash;
+            std::unordered_map<int, size_t> cid_ind;
+            for (auto cid : *live.cluster_id_vec) {
+                const size_t ind = cid_ind.size();
+                cid_ind[cid] = ind;
+            }
+            size_t mind = 0;
+            for (int match_entry = 0; match_entry < nmatches; ++match_entry) {
+                m_match->GetEntry(match_entry);
+                if (match.runNo != header.runNo) { continue; }
+                if (match.subRunNo != header.subRunNo) { continue; }
+                if (match.eventNo != header.eventNo) { continue; }
+
+                cf_cluster[mind] = cid_ind[match.cluster_id];
+                cf_flash[mind] = fid_ind[match.flash_id];
+                ++mind;
+            }
+
+            PointCloud::Dataset clusterflash_ds;
+            clusterflash_ds.add("cluster", PointCloud::Array(cf_cluster));
+            clusterflash_ds.add("flash", PointCloud::Array(cf_flash));
+
+            optical.emplace("light", std::move(light_ds));
+            optical.emplace("flash", std::move(flash_ds));
+            optical.emplace("flashlight", std::move(flashlight_ds));
+            // Note, clusterflash is not in the TDM.  Expect to find the "flash"
+            // array in the "scaler" LPC.
+            optical.emplace("clusterflash", std::move(clusterflash_ds));
+
+        }
+
+
 
     public:
 
@@ -236,16 +359,18 @@ namespace WireCell::Root {
 
         void next() {
             ++m_entry;
-            if (m_entry < m_nentries) { 
-                m_activity->GetEntry(m_entry);
-                m_live->GetEntry(m_entry);
-                if (m_dead) {
-                    m_dead->GetEntry(m_entry);
-                }
-                return;
+            if (m_entry >= m_nentries) { 
+                raise<IndexError>("attempt to get entry %d past end of TTree with %d",
+                                  m_entry, m_nentries);
             }
-            raise<IndexError>("attempt to get entry %d past end of TTree with %d",
-                              m_entry, m_nentries);
+            m_activity->GetEntry(m_entry);
+            m_live->GetEntry(m_entry);
+            if (m_dead) {
+                m_dead->GetEntry(m_entry);
+            }
+            if (m_flash && m_match) {
+                load_optical();
+            }
         }
 
         // Get live or dead blob data

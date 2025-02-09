@@ -153,8 +153,25 @@ bool Root::UbooneClusterSource::operator()(const IBlobSet::pointer& in, ITensorS
 
             cnode->insert(Points(std::move(pcs)));
         }
+    }
+    
 
-        
+    if (!m_light_name.empty()) {
+        auto& optical = m_files->trees->optical;
+        auto& cf = optical["clusterflash"];
+
+        auto cf_cind = cf.get("cluster")->elements<int>();
+        auto cf_find = cf.get("flash")->elements<int>();
+        const int nc = cf_cind.size();
+        auto rchildren = root->children();
+        for (int ic = 0; ic < nc; ++ic) {
+            const int iclus = cf_cind[ic];
+            const int iflash = cf_find[ic];
+            rchildren[iclus]->value.local_pcs()["scalar"].add("flash", Array({iflash}));
+        }
+
+        optical.erase("clusterflash");
+        root->value.local_pcs() = std::move(m_files->trees->optical);
     }
 
     return true;
