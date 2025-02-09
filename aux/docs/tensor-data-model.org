@@ -333,35 +333,34 @@ The tensor MD may be empty.
   
 ** light
 
-The *datatype* of *light* indicates a tensor representing measured values from optical detectors such as PMT or SiPM.  A *light* array spans some period of time (eg, a window around one "event").  The tensor carries no metadata.  The array is of type ~float32~ and may come in one of two shapes where ~N~ spans the number of measures and the number of columns depends on if the measures have uncertainty or not:
+The *datatype* of *light* indicates a *pcdataset* representing a number of measured values from optical detectors such as PMT or SiPM.  Values that are not pertinent may be omitted.  The measures span some period of time (eg, a window around one "event").  The following arrays comprise a *light* dataset:
 
-- ~(N, 3)~ :: One row per ~N~ measures, each row: ~(ID, t, q)~
-- ~(N, 5)~ :: One row per ~N~ measures, each row: ~(ID, t, q, dt, dq)~
+- ident :: (int) an application-specific integer identifying the optical detector producing the measure.
 
-Requirements on the content:
+- time :: (double) the time of the measure
 
-- The ~ID~ must be an integer no larger than 2^24 and indicates the optical detector (PMT, SiPM) from which the light was measured.
+- value :: (double) the value of the measure (eg in count of PE or in units of [charge]).
 
-- The units of ~q~ must be in the WCT system-of-units but the unit may be application-specific.  Eg, it may be ~[charge]~ or number of PEs depending on application or even on a per-ID basis.
-
+- error :: (double) uncertainty in the value in same units as val.
 
 ** flash
 
-The *datatype* of *flash* collects summary information of the flashes.   It has no metadata.  The array part is of type float and shape ~(Nflashes,5)~ or  ~(Nflashes,7)~.  The columns hold:
+The *datatype* of *flash* indicates a *pcdataset* representing a collection of related *light*.
 
-- 0 :: (time) the representative central time for the flash
-- 1 :: (tmin) the start of a finite time duration of the flash.
-- 2 :: (tmax) the end of a finite time duration of the flash.
-- 3 :: (value) the intensity of the flash (PEs, charge)
-- 4 :: (uncertainty) the uncertainty or error in the value.
-- 5 :: (ident) an application-specific identifier.
-- 6 :: (type) a number representing a type of flash.
-
-Note, "ident" and "type" are optional and may be omitted to produce ~(N,5)~.  They may be integers less than 2^24 but are otherwise unspecified.
+- time :: (double) the representative central time for the flash
+- tmin :: (double) the start of a finite time duration of the flash.
+- tmax :: (double) the end of a finite time duration of the flash.
+- value :: (double) the intensity of the flash (PEs, charge)
+- error :: (double) the uncertainty or error in the value.
+- ident :: (int) an application-specific identifier of the flash.
+- type :: (int) a number representing a type of flash.
 
 ** flashlight
 
-The *datatype* of *flashlight* represents the association of an element of the *flash* array  with the elements of the *light* array from which the flash element was constructed.  It has not metadata.  The array part is 2D integer of shape ~(Npair,2)~ provides pairs of indices into *flash* (and *flashid*) and *light* arrays.
+The *datatype* of *flashlight* indicates a *pcdataset* which associates elements of *light* and elements of *flash* by their indices into these respective datasets.
+
+- flash :: (int) index into the flash arrays
+- light :: (int) index into the light arrays
 
 
 
