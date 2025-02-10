@@ -172,6 +172,9 @@ namespace WireCell::Aux {
         }
         return merged_graph;
     }
+
+    /// @brief return connected blobs as "WCP Clusters". Original Projection2D::get_geom_clusters
+    std::unordered_map<int, std::set<cluster_vertex_t> > blob_clusters(const cluster_graph_t& cg);
 }
 
 #endif

@@ -1,5 +1,4 @@
 #include "WireCellClus/PointTreeBuilding.h"
-#include "WireCellImg/Projection2D.h"
 #include "WireCellClus/Facade.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
@@ -18,8 +17,6 @@ WIRECELL_FACTORY(PointTreeBuilding, WireCell::Clus::PointTreeBuilding,
 using namespace WireCell;
 using namespace WireCell::GraphTools;
 using namespace WireCell::Clus;
-/// FIXME : move this to aux some day
-using WireCell::Img::Projection2D::get_geom_clusters;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud;
@@ -282,7 +279,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
-    auto clusters = get_geom_clusters(gr);
+    auto clusters = blob_clusters(gr);
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
@@ -328,7 +325,7 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
-    auto clusters = get_geom_clusters(gr);
+    auto clusters = blob_clusters(gr);
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();

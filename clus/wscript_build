@@ -1,2 +1,2 @@
-bld.smplpkg('WireCellClus', use='WireCellAux WireCellImg WCPQuickhull')
+bld.smplpkg('WireCellClus', use='WireCellAux WCPQuickhull')
 
