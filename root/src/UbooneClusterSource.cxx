@@ -1,5 +1,6 @@
 #include "WireCellRoot/UbooneClusterSource.h"
 #include "WireCellAux/SamplingHelpers.h"
+#include "WireCellAux/TensorDMpointtree.h"
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
@@ -14,7 +15,7 @@
 WIRECELL_FACTORY(UbooneClusterSource,
                  WireCell::Root::UbooneClusterSource,
                  WireCell::INamed,
-                 WireCell::IBlobSampling,
+                 WireCell::IBlobTensoring,
                  WireCell::IConfigurable)
 
 
@@ -24,6 +25,8 @@ using WireCell::PointCloud::Tree::Points;
 using WireCell::PointCloud::Tree::named_pointclouds_t;
 using WireCell::PointCloud::Dataset;
 using WireCell::PointCloud::Array;
+using WireCell::Aux::TensorDM::as_tensors;
+using WireCell::Aux::TensorDM::as_tensorset;
 
 Root::UbooneClusterSource::UbooneClusterSource()
     : Aux::Logger("UbooneClusterSource", "root")
@@ -77,6 +80,7 @@ void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
         m_sampler = Factory::find_tn<IBlobSampler>(sampler);
     }
 
+    m_datapath = get(cfg, "datapath", m_datapath);
 
 }
 
@@ -88,43 +92,99 @@ WireCell::Configuration Root::UbooneClusterSource::default_configuration() const
     cfg["light"] = "";               // optional
     cfg["flash"] = "";               // optional
     cfg["flashlight"] = "";          // optional
+    cfg["datapath"] = m_datapath;    // optional, default
     return cfg;
 }
 
 
-
-bool Root::UbooneClusterSource::operator()(const IBlobSet::pointer& in, ITensorSet::pointer& out)
+// dig out the frame ID
+static int frame_ident(const IBlobSet::pointer& bs)
 {
-    out = nullptr;
-    if (!in) { return true; }   // eos
+    return bs->slice()->frame()->ident();
+}
 
+bool Root::UbooneClusterSource::new_frame(const input_pointer& newbs) const
+{
+    if (m_cache.empty()) return false;
+    return frame_ident(newbs) != frame_ident(m_cache[0]);
+}
+
+
+bool Root::UbooneClusterSource::operator()(const IBlobSet::pointer& in, output_queue& outq)
+{
+    // This flushes to the output queue on EOS or if the blobs' frame ID
+    // changes.  A nullptr is appended to queue only on EOS.
+
+    if (!in) {                  // eos
+        bool ok = flush(outq);
+        outq.push_back(nullptr); // forward eos
+        log->debug("flush on eos at call {} okay:{}", m_calls, ok);
+        ++m_calls;
+        return ok;
+    }
+
+    if (new_frame(in)) {
+        bool ok = flush(outq);
+        log->debug("flush on new frame at call {} okay:{}", m_calls, ok);
+        if (!ok) return ok;
+    }
+
+    m_cache.push_back(in);
+    ++m_calls;
+    return true;
+}
+
+
+bool Root::UbooneClusterSource::flush(output_queue& outq)
+{
     bool load_ok = m_files->next();
     if (!load_ok) {
-        log->error("failed to load uboone cluster event");
+        log->error("failed to load uboone cluster event at call {}", m_calls);
         return false;
     }
 
-    const auto& tblob = m_files->trees->live;
-    const auto& cluster_ids = *tblob.cluster_id_vec; // spans blobs in "event"
+    // The root node on which we grow the point tree.
+    Points::node_t root;
 
-    // We make an initial pass to make a cluster node for each unique cluster ID.
-    Points::node_ptr root = std::make_unique<Points::node_t>();
-    // Will need to navigate from cluster_id -> pc tree cluster node below.
+
+    // Create cluster nodes.  These start out empty/anonymous but we map them by
+    // their uboone cluster ID for later personalizing.  This also puts them in
+    // CLUSTER ID ORDER as defined by the UbooneTTrees.
     std::unordered_map<int, Points::node_t*> cnodes; 
-    for (int cluster_id : cluster_ids) {
-        auto cit = cnodes.find(cluster_id);
-        if (cit != cnodes.end()) { continue; }
-        cnodes[cluster_id] = root->insert();
+    for (int cid : m_files->trees->cluster_ids) {
+        auto* cnode = root.insert();
+        cnodes[cid] = cnode;
+        auto& spc = cnode->value.local_pcs()["cluster_scalar"];
+        spc.add("flash", Array({(int)-1}));
+        spc.add("cluster_id", Array({cid}));
     }
 
-    // Iterate on blobs, make their blob-node, sample, add to cluster node.
-    size_t nblobs = cluster_ids.size();
-    const auto& iblobs = in->blobs();
-    for (size_t bind=0; bind<nblobs; ++bind) {
+    // Collect all the IBlobs from all cached IBlobSets
+    std::vector<IBlob::pointer> iblobs;
+    for (const auto& ibs : m_cache) {
+        const auto& fresh = ibs->blobs();
+        iblobs.insert(iblobs.end(), fresh.begin(), fresh.end());
+    }
+    m_cache.clear();
+
+    // From uboone TTrees
+    const auto& tblob = m_files->trees->live;
+    const auto& blob_cids = *tblob.cluster_id_vec; // spans blobs in "event"
+
+    size_t nublobs = blob_cids.size();
+    size_t niblobs = iblobs.size();
+
+    log->debug("blobs: ub={} ib={} in {} clusters", nublobs, niblobs, cnodes.size());
+    if (nublobs != niblobs) {
+        raise<ValueError>("blob count mismatch, job is malformed input gives %d, root file gives %d",
+                          niblobs, nublobs);
+    }
+
+    for (size_t bind=0; bind<niblobs; ++bind) {
         const IBlob::pointer iblob = iblobs[bind];
         // This MUST be the TTree entry number as set by UbooneBlobSource!
-        const int entry = iblob->ident(); 
-        const int cluster_id = cluster_ids[entry];
+        const int entry = iblob->ident(); // HUGE TRUST HERE!!!
+        const int cluster_id = blob_cids[entry];
         auto cit = cnodes.find(cluster_id);
         if (cit == cnodes.end()) {
             raise<ValueError>("malformed job");
@@ -156,24 +216,32 @@ bool Root::UbooneClusterSource::operator()(const IBlobSet::pointer& in, ITensorS
     }
     
 
+    size_t nmatch=0;
     if (!m_light_name.empty()) {
-        auto& optical = m_files->trees->optical;
-        auto& cf = optical["clusterflash"];
+        root.value.local_pcs() = std::move(m_files->trees->optical);
 
-        auto cf_cind = cf.get("cluster")->elements<int>();
-        auto cf_find = cf.get("flash")->elements<int>();
-        const int nc = cf_cind.size();
-        auto rchildren = root->children();
-        for (int ic = 0; ic < nc; ++ic) {
-            const int iclus = cf_cind[ic];
-            const int iflash = cf_find[ic];
-            rchildren[iclus]->value.local_pcs()["scalar"].add("flash", Array({iflash}));
+        const auto& cf = m_files->trees->cluster_flash;
+        nmatch = cf.size();
+
+        for ( const auto& [cid, find] : cf) {
+            auto* cnode = cnodes[cid];
+            auto& spc = cnode->value.local_pcs()["cluster_scalar"];
+            auto farr = spc.get("flash"); // initially set undefined/-1 above
+            farr->element<int>(0) = find;
         }
 
-        optical.erase("clusterflash");
-        root->value.local_pcs() = std::move(m_files->trees->optical);
     }
 
+    std::string datapath = m_datapath;
+    if (datapath.find("%") != std::string::npos) {
+        datapath = String::format(datapath, m_calls);
+    }
+    auto tens = as_tensors(root, datapath);
+
+    log->debug("made pc-tree ncluster={} nblob={} nmatch={} in {} tensors at call {}",
+               cnodes.size(), niblobs, nmatch, tens.size(), m_calls);
+    auto out = as_tensorset(tens, m_calls);
+    outq.push_back(out);
     return true;
 }
 

@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <set>
 
 #include "TFile.h"
 #include "TTree.h"
@@ -203,12 +204,38 @@ namespace WireCell::Root {
         };
         Match match;
 
-        // Call load_light() after per-event tree entry is loaded.  It will
-        // populate this with keys "light", "flash", "flashlight" and "match".
-        std::map<std::string, PointCloud::Dataset> optical;
 
+        // Loading live will fill map from unique cluster ID to its index in a
+        // cluster-id-ordered array.  An ordered set is also filled.
+        std::map<int, size_t> cluster_id_index;
+        std::set<int> cluster_ids;
+        void load_live() {
+            // Define a CLUSTER ID ORDERING to follow cluster_id.  And, record
+            // map from cluster ID to its index in the ordering.
+            cluster_id_index.clear();
+            cluster_ids.clear();
+            
+            m_live->GetEntry(m_entry);
+
+            for (auto cid : *live.cluster_id_vec) {
+                cluster_ids.insert(cid);
+            }
+            for (int cid : cluster_ids) {
+                size_t ind = cluster_id_index.size();
+                cluster_id_index[cid] = ind;
+            }
+        }
+
+        // Call load_optical() after per-event tree entry is loaded.  It will
+        // populate this with keys "light", "flash", "flashlight" and "match".
+        // If this is called, it MUST be called after load_live().
+        std::map<std::string, PointCloud::Dataset> optical;
+        // Also from load_optical.  This maps from cluster ID to flash INDEX
+        // into the flash array.
+        std::map<int, size_t> cluster_flash;
         void load_optical() {
             optical.clear();
+            cluster_flash.clear();
 
             std::map<int, size_t> fid_ind;
 
@@ -273,39 +300,19 @@ namespace WireCell::Root {
             flashlight_ds.add("flash", PointCloud::Array(fl_flash));
             flashlight_ds.add("light", PointCloud::Array(fl_light));
 
+            optical.emplace("light", std::move(light_ds));
+            optical.emplace("flash", std::move(flash_ds));
+            optical.emplace("flashlight", std::move(flashlight_ds));
+
             const int nmatches = m_match->GetEntries();
-            // Matches arrays will be in the same order as cluster_id_vec.  The
-            // cf_cluster holds indices in to that and cf_flash indices into the
-            // flash arrays.
-            std::vector<int> cf_cluster, cf_flash;
-            std::unordered_map<int, size_t> cid_ind;
-            for (auto cid : *live.cluster_id_vec) {
-                const size_t ind = cid_ind.size();
-                cid_ind[cid] = ind;
-            }
-            size_t mind = 0;
             for (int match_entry = 0; match_entry < nmatches; ++match_entry) {
                 m_match->GetEntry(match_entry);
                 if (match.runNo != header.runNo) { continue; }
                 if (match.subRunNo != header.subRunNo) { continue; }
                 if (match.eventNo != header.eventNo) { continue; }
 
-                cf_cluster[mind] = cid_ind[match.cluster_id];
-                cf_flash[mind] = fid_ind[match.flash_id];
-                ++mind;
+                cluster_flash[match.cluster_id] = fid_ind[match.flash_id];
             }
-
-            PointCloud::Dataset clusterflash_ds;
-            clusterflash_ds.add("cluster", PointCloud::Array(cf_cluster));
-            clusterflash_ds.add("flash", PointCloud::Array(cf_flash));
-
-            optical.emplace("light", std::move(light_ds));
-            optical.emplace("flash", std::move(flash_ds));
-            optical.emplace("flashlight", std::move(flashlight_ds));
-            // Note, clusterflash is not in the TDM.  Expect to find the "flash"
-            // array in the "scaler" LPC.
-            optical.emplace("clusterflash", std::move(clusterflash_ds));
-
         }
 
 
@@ -364,7 +371,7 @@ namespace WireCell::Root {
                                   m_entry, m_nentries);
             }
             m_activity->GetEntry(m_entry);
-            m_live->GetEntry(m_entry);
+            load_live();
             if (m_dead) {
                 m_dead->GetEntry(m_entry);
             }

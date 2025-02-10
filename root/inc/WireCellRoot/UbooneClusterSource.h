@@ -31,7 +31,7 @@
 
 #include "WireCellAux/Logger.h"
 
-#include "WireCellIface/IBlobSampling.h"
+#include "WireCellIface/IBlobTensoring.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IConfigurable.h"
 
@@ -39,7 +39,7 @@
 namespace WireCell::Root {
 
     class UbooneClusterSource : public Aux::Logger,
-                                public IBlobSampling,
+                                public IBlobTensoring,
                                 public IConfigurable
     {
     public:
@@ -50,7 +50,7 @@ namespace WireCell::Root {
         virtual WireCell::Configuration default_configuration() const;
         
         
-        virtual bool operator()(const IBlobSet::pointer& in, ITensorSet::pointer& out);
+        virtual bool operator()(const WireCell::IBlobSet::pointer& in, output_queue& outq);
 
     private:
 
@@ -85,9 +85,27 @@ namespace WireCell::Root {
         */
         IBlobSampler::pointer m_sampler;
 
+        /** Configuration: "datapath" (optional)
+
+            Give a tensor data model path for the resulting ITensorSet
+            representation.  If the datapath contains "%d" it will be
+            interpolated against the "ident" (execution count of this node).
+
+        */
+        std::string m_datapath = "pointtrees/%d/uboone";
+
+
         // for logging
         size_t m_calls{0};
 
+        // Collect blob sets
+        IBlobSet::vector m_cache;
+
+        // flush graph to output queue
+        bool flush(output_queue& outq);
+
+        // Return true if newbs is from a new frame
+        bool new_frame(const input_pointer& newbs) const;
 
 
     };
