@@ -223,7 +223,7 @@ namespace WireCell {
             std::string m_frame_tag{"sigproc"};
 
             bool m_use_roi_debug_mode{false};
-            bool m_save_negtive_charge{false};
+            bool m_m_save_negative_charge{true};
             bool m_use_roi_refinement{true};
             std::string m_tight_lf_tag{"tight_lf"};
             std::string m_loose_lf_tag{"loose_lf"};

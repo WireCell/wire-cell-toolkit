@@ -162,7 +162,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_frame_tag = get(config, "frame_tag", m_frame_tag);
 
     m_use_roi_debug_mode = get(config, "use_roi_debug_mode", m_use_roi_debug_mode);
-    m_save_negtive_charge = get(config, "save_negtive_charge", m_save_negtive_charge);
+    m_m_save_negative_charge = get(config, "m_save_negative_charge", m_m_save_negative_charge);
     m_use_roi_refinement = get(config, "use_roi_refinement", m_use_roi_refinement);
     m_tight_lf_tag = get(config, "tight_lf_tag", m_tight_lf_tag);
     m_loose_lf_tag = get(config, "loose_lf_tag", m_loose_lf_tag);
@@ -434,7 +434,7 @@ void OmnibusSigProc::save_data(
             const float q = m_r_data[plane](och.wire, itick);
             // charge.at(itick) = q > 0.0 ? q : 0.0;
             // charge.at(itick) = q ;
-            if (m_use_roi_debug_mode && m_save_negtive_charge) {
+            if (m_use_roi_debug_mode && m_m_save_negative_charge) {
                 charge.at(itick) = q;  // debug mode: save all decons
             }
             else {              // nominal: threshold at zero.

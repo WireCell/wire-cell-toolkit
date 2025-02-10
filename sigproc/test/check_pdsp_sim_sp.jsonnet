@@ -81,7 +81,7 @@ local sp_maker = import 'pgrapher/experiment/pdsp/sp.jsonnet';
 local sp_override = {
     sparse: false,
     use_roi_debug_mode: false,
-    save_negtive_charge: false,
+    m_save_negative_charge: false,
     use_multi_plane_protection: false,
     mp_tick_resolution: 10,
 };
