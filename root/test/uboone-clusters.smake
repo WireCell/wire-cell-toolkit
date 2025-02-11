@@ -53,8 +53,7 @@ rule dump:
         dat = wcpdat
     output:
         log='dump.log',
-        err='dump.err',
-        dat='dump.npz'
+        err='dump.err'
     shell: '''
     wire-cell -l {output.log} -L debug -A infiles={input.dat} {input.cfg} 2> {output.err}
     '''
