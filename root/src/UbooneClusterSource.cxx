@@ -159,9 +159,16 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         spc.add("cluster_id", Array({cid}));
     }
 
+    int ident = -1;
+
+
     // Collect all the IBlobs from all cached IBlobSets
     std::vector<IBlob::pointer> iblobs;
     for (const auto& ibs : m_cache) {
+        if (ident < 0) {
+            ident = ibs->slice()->frame()->ident();
+            log->debug("using ident {} from first blob set frame", ident);
+        }
         const auto& fresh = ibs->blobs();
         iblobs.insert(iblobs.end(), fresh.begin(), fresh.end());
     }
@@ -234,13 +241,13 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
 
     std::string datapath = m_datapath;
     if (datapath.find("%") != std::string::npos) {
-        datapath = String::format(datapath, m_calls);
+        datapath = String::format(datapath, ident);
     }
     auto tens = as_tensors(root, datapath);
 
-    log->debug("made pc-tree ncluster={} nblob={} nmatch={} in {} tensors at call {}",
-               cnodes.size(), niblobs, nmatch, tens.size(), m_calls);
-    auto out = as_tensorset(tens, m_calls);
+    log->debug("made pc-tree ncluster={} nblob={} nmatch={} in {} tensors at {} with ident {} in call {}",
+               cnodes.size(), niblobs, nmatch, tens.size(), datapath, ident, m_calls);
+    auto out = as_tensorset(tens, ident);
     outq.push_back(out);
     return true;
 }
