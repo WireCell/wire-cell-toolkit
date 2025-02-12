@@ -6,6 +6,7 @@
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/ExecMon.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
@@ -249,6 +250,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     Perf perf{m_perf, log};
 
     const int ident = ints->ident();
+    log->debug("loading tensor set ident={} (last={})", ident, m_last_ident);
     if (m_last_ident < 0) {     // first time.
         if (m_use_config_rse) {
             // Set RSE in the sink
@@ -289,12 +291,16 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // log->debug("Got live pctree with {} children", root_live->nchildren());
     // log->debug(em("got live pctree"));
     log->debug("as_pctree from \"{}\"", inpath + "/dead");
-    auto root_dead = as_pctree(intens, inpath + "/dead");
-    if (!root_dead) {
-        log->error("Failed to get dead point cloud tree from \"{}\"", inpath + "/dead");
-        raise<ValueError>("Failed to get dead point cloud tree from \"%s\"", inpath);
+    const std::string deadinpath = inpath + "/dead";
+    Points::node_ptr root_dead;
+    try {
+        root_dead = as_pctree(intens, deadinpath);
+        perf("loaded dead clusters");
     }
-    perf("loaded dead clusters");
+    catch (WireCell::KeyError& err) {
+        log->warn("No pc-tree at datapath {}, assuming no 'dead' clusters", deadinpath);
+        root_dead = std::make_unique<Points::node_t>();
+    }
 
     fill_bee_points(m_bee_img, *root_live.get());
     perf("loaded dump live clusters to bee");
