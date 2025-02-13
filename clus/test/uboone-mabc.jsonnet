@@ -251,7 +251,8 @@ local ub = {
         pg.intern(innodes=[fan], centernodes=[sink],
                   edges=[ pg.edge(fan, sink, 1, 0) ]),
 
-    MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, geom_helper = $.SimpleClusGeomHelper()) :: pg.pnode({
+    MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, sampler=$.bs_live,
+                           geom_helper = $.SimpleClusGeomHelper()) :: pg.pnode({
         type: "MultiAlgBlobClustering",
         name: "",
         data:  {
@@ -266,7 +267,7 @@ local ub = {
             eventNo: 1,
             save_deadarea: true, 
             anode: wc.tn(anode),
-            face: 0,
+            face: 0,            // FIXME: take an IAnodeFace!
             geom_helper: wc.tn(geom_helper),
             func_cfgs: [
                 {name: "clustering_ctpointcloud"},
@@ -284,9 +285,10 @@ local ub = {
                 // {name: "clustering_protect_overclustering"},
                 // {name: "clustering_neutrino"},
                 // {name: "clustering_isolated"},
+                {name: "clustering_retile", sampler: wc.tn(sampler), anode: wc.tn(anode)},
             ],
         }
-    }, nin=1, nout=1, uses=[geom_helper]),
+    }, nin=1, nout=1, uses=[geom_helper, sampler, anode]),
 
     TensorFileSink(fname) :: pg.pnode({
         type: "TensorFileSink",

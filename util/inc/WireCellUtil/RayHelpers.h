@@ -17,10 +17,10 @@ namespace WireCell::RayGrid {
 
     // Trivial, aka bogus, "simulation".  Points "hits" closest wire.
     using measure_t = std::vector<Activity::value_t>;
-    std::vector<measure_t> make_measures(Coordinates& coords, const std::vector<Point>& points);
+    std::vector<measure_t> make_measures(const Coordinates& coords, const std::vector<Point>& points);
 
     // Turn "measures" into activities
-    activities_t make_activities(Coordinates& coords, std::vector<measure_t>& measures);
+    activities_t make_activities(const Coordinates& coords, std::vector<measure_t>& measures);
 
 }
 #endif

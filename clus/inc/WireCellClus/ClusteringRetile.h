@@ -79,18 +79,21 @@ namespace WireCell::PointCloud::Facade {
         */
         WireCell::IBlobSampler::pointer m_sampler;
 
-
         // fixme: this restricts ClusteringRetile to single-anode-face clusters.
         // As such, it will likely freak out if fed clusters that have been
         // stitched across anode faces.  Since tiling is inherently a per-face
         // operation, this may be okay.
-        /** Configuration "face" (required)
+        /** Configuration "face" (optional, default is 0)
 
-            The type/name of the IAnodeFace from which any input clusters are
-            derived.
+            The INDEX of the face in the anode's list of faces to use.
         */
         IAnodeFace::pointer m_face;
 
+        /** Configuration "anode" (required)
+
+            The type/name of the anode.
+        */
+        // nothing to store.
     };
 }
 

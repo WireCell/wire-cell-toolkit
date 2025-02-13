@@ -11,6 +11,7 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/PointTree.h"
+#include "WireCellUtil/RayHelpers.h"
 
 using namespace WireCell;
 
@@ -25,41 +26,69 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
 {
     auto sampler = get<std::string>(cfg, "sampler","");
     if (sampler.empty()) {
-        raise<ValueError>("ClusteringRetile requires an IBlobSampler type/name");
+        raise<ValueError>("ClusteringRetile requires an IBlobSampler type/name in 'sampler' parameter");
     }
-    auto face = get<std::string>(cfg, "face","");
-    if (face.empty()) {
-        raise<ValueError>("ClusteringRetile requires an IAnodeFace type/name");
+    m_sampler = Factory::find_tn<IBlobSampler>(sampler);
+
+    auto anode_tn = get<std::string>(cfg, "anode","");
+    if (anode_tn.empty()) {
+        raise<ValueError>("ClusteringRetile requires an IAnodePlane type/name in 'anode' parameter");
+    }
+    int face_index = get(cfg, "face", 0);
+
+    auto anode = Factory::find_tn<IAnodePlane>(anode_tn);
+    m_face = anode->faces()[face_index];
+    if (!m_face) {
+        raise<ValueError>("ClusteringRetile got null IAnodeFace at index=%d from %s", face_index, anode_tn);
     }
 
-    m_sampler = Factory::find_tn<IBlobSampler>(sampler);
-    m_face = Factory::find_tn<IAnodeFace>(face);
+    const auto& coords = m_face->raygrid();
+    if (coords.nlayers() != 5) {
+        raise<ValueError>("unexpected number of ray grid layers: %d", coords.nlayers());
+    }
 }
 
 
 // Step 1. Build activities from blobs in a cluster.
 WRG::activities_t WCC::ClusteringRetile::get_activity(const Cluster& cluster) const
 {
+    const int nlayers = 2+3;
+    std::vector<WRG::measure_t> measures(nlayers);
+
+    // checkme: this assumes "iend" is the usual one-past-last aka [ibeg,iend)
+    // forms a half-open range.  I'm not sure if PointTreeBuilding is following
+    // this or not.
+
+    int (WCC::Blob::*wmin[])(void) const = {
+        &WCC::Blob::u_wire_index_min,
+        &WCC::Blob::v_wire_index_min,
+        &WCC::Blob::w_wire_index_min
+    };
+
+    int (WCC::Blob::*wmax[])(void) const = {
+        &WCC::Blob::u_wire_index_max,
+        &WCC::Blob::v_wire_index_max,
+        &WCC::Blob::w_wire_index_max
+    };
+        
     const double hit=1.0;       // actual charge value does not matter to tiling.
 
-    WRG::activities_t ret;
+    for (int index=0; index<3; ++index) {
+        const int layer = index + 2;
+        WRG::measure_t& m = measures[layer];
 
-    // first the horizontal/vertical bounds
-    ret.emplace_back(0, 1, hit);
-    ret.emplace_back(1, 1, hit);
-
-    // fixme: this assumes "iend" is the usual one-past-last aka forming thigh
-    // side of a half-open range.  I'm not sure if PointTreeBuilding is
-    // violating that or not.
-    auto tedious = [&](int ilayer, int ibeg, int iend) { ret.emplace_back(ilayer, iend-ibeg, hit, ibeg); };
-
-    for (const auto& fblob : cluster.children()) {
-        tedious(2, fblob->u_wire_index_min(), fblob->u_wire_index_max());
-        tedious(3, fblob->v_wire_index_min(), fblob->v_wire_index_max());
-        tedious(4, fblob->w_wire_index_min(), fblob->w_wire_index_max());
+        // Make each "wire" in each blob's bounds of this plane "hit".
+        for (const auto* fblob : cluster.children()) {
+            int ibeg = (fblob->*wmin[index])();
+            int iend = (fblob->*wmax[index])();
+            m.reserve(iend);
+            while (ibeg < iend) {
+                m[ibeg++] = hit;
+            }
+        }
     }
 
-    return ret;
+    return RayGrid::make_activities(m_face->raygrid(), measures);
 }
 
 
@@ -86,8 +115,10 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(const WRG::activi
 {
     std::vector<IBlob::pointer> ret;
 
+    const auto& coords = m_face->raygrid();
+
     // Do the actual tiling.
-    auto bshapes = WRG::make_blobs(m_face->raygrid(), activity);
+    auto bshapes = WRG::make_blobs(coords, activity);
 
     // Convert RayGrid blob shapes into IBlobs 
     const float blob_value = 0.0;  // tiling doesn't consider particular charge
@@ -149,7 +180,9 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
             // Sample the iblob, make a new blob node.
             PointCloud::Tree::named_pointclouds_t pcs;
+
             auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
+            
             pcs.emplace("3d", pc3d);
             /// These seem unused and bring in yet more copy-paste code
             // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
