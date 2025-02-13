@@ -84,3 +84,6 @@ styles
 *.svg
 AutoDict_*
 spng
+.cache
+.clangd
+junk*

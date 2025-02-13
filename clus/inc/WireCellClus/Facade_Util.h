@@ -24,6 +24,82 @@
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
 namespace WireCell::PointCloud::Facade {
+
+    // The Grouping/Cluster/Facade inherit from this to gain additional methods
+    // that are common to all three facade types.  The mixin itself needs to
+    // know its facade type and value but specifically does not include anything
+    // that requires parent or child types or values.
+    template<typename SelfType>
+    class Mixin {
+        SelfType& self;
+        std::string scalar_pc_name, ident_array_name;
+    public:
+        Mixin(SelfType& self, const std::string& scalar_pc_name, const std::string& ident_array_name = "ident")
+            : self(self)
+            , scalar_pc_name(scalar_pc_name)
+            , ident_array_name(ident_array_name) {
+            
+        }
+
+        // Get the map from name to PC for all local PCs.
+        WireCell::PointCloud::Tree::named_pointclouds_t& local_pcs()
+        {
+            return self.value().local_pcs();
+        }
+        const WireCell::PointCloud::Tree::named_pointclouds_t& local_pcs() const
+        {
+            return self.value().local_pcs();
+        }
+
+        // Return an "identifying number" from the "scalar" PC of the node.  As
+        // with all "ident" values in WCT, there is no meaning ascribed to the
+        // actual value (by WCT).  It is meant to refer to some external
+        // identity.  If the scalar PC or the ident array are not found, the
+        // default is returned.
+        //
+        // This is a special case method that merely delegates to get_scalar().
+        int ident(int def = -1) const
+        {
+            return get_scalar<int>(ident_array_name, def);
+        }
+
+        // Set an ident number, delegating to set_scalar().
+        void set_ident(int id)
+        {
+            set_scalar<int>(ident_array_name, id);
+        }
+
+        // Return a value from the scalar PC
+        template <typename T = int>
+        T get_scalar(const std::string& name, T def = 0) const {
+            const auto& lpcs = local_pcs();
+            auto it = lpcs.find(scalar_pc_name);
+            if (it == lpcs.end()) {
+                return def;
+            }
+            const auto arr = it->second.get("name");
+            if (!arr) {
+                return def;
+            }
+            return arr->template element<T>(0);
+        }
+        
+        // Set a value on the scalar PC
+        template <typename T = int>
+        void set_scalar(const std::string& name, T val = 0) {
+            auto& lpcs = local_pcs();
+            auto cs = lpcs[scalar_pc_name]; // create if not existing
+            auto arr = cs.get(name);
+            if (!arr) {
+                cs.add(name, PointCloud::Array({(T)val}));
+                return;
+            }
+            arr->template element<T>(0) = (T)val;
+        }
+        
+    };
+
+
     using points_t = Tree::Points;
     using node_t = Tree::Points::node_t;
     using node_ptr = std::unique_ptr<node_t>;
@@ -46,7 +122,14 @@ namespace WireCell::PointCloud::Facade {
     using int_t = int;
 
 
-    using namespace boost;
+    // AVOID DOING THIS in headers!!!  In this case it causes conflict between
+    // boost::units and WireCell::Units in imp files that #include this one.
+    //
+    // If typing the namespace:: is too much, then one can do select "using
+    // namespace::symbol".
+    // 
+    // using namespace boost;
+
     struct VertexProp {
         int index;
         // WCPointCloud<double>::WCPoint wcpoint;
@@ -56,9 +139,9 @@ namespace WireCell::PointCloud::Facade {
     // struct EdgeProp {
     //     float dist;  // edge distance
     // };
-    typedef adjacency_list<setS, vecS, undirectedS, VertexProp, EdgeProp> MCUGraph;
-    typedef graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
-    typedef graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
+    typedef boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, VertexProp, EdgeProp> MCUGraph;
+    typedef boost::graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
+    typedef boost::graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
 
     // FIXME: refactor to vector<pitch>, etc?  or vector<TPCPlane> with ::pitch/::angle?
     struct TPCParams {

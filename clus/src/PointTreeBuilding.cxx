@@ -153,7 +153,7 @@ namespace {
 
     // Moved to aux/SamplingHelpers.
     // - calc_blob_center
-    // - make_scaler_dataset
+    // - make_scalar_dataset
 
 
 
@@ -260,16 +260,16 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             pcs.emplace("2dp1", make2dds(pc3d, angle_v));
             pcs.emplace("2dp2", make2dds(pc3d, angle_w));
             const Point center = calc_blob_center(pcs["3d"]);
-            auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
+            auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
             int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
             int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
             int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
             int_t min_wire_type = aux.get("min_wire_type")->elements<int_t>()[0];
-            scaler_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
-            scaler_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
-            scaler_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
-            scaler_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
-            pcs.emplace("scalar", std::move(scaler_ds));
+            scalar_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
+            scalar_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
+            scalar_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
+            scalar_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
+            pcs.emplace("scalar", std::move(scalar_ds));
             cnode->insert(Points(std::move(pcs)));
 
             ++nblobs;
@@ -302,12 +302,12 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             }
             auto iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
             named_pointclouds_t pcs;
-            auto scaler_ds = make_scaler_dataset(iblob, {0,0,0}, 0, tick);
-            scaler_ds.add("max_wire_interval", Array({(int_t)-1}));
-            scaler_ds.add("min_wire_interval", Array({(int_t)-1}));
-            scaler_ds.add("max_wire_type", Array({(int_t)-1}));
-            scaler_ds.add("min_wire_type", Array({(int_t)-1}));
-            pcs.emplace("scalar", scaler_ds);
+            auto scalar_ds = make_scalar_dataset(iblob, {0,0,0}, 0, tick);
+            scalar_ds.add("max_wire_interval", Array({(int_t)-1}));
+            scalar_ds.add("min_wire_interval", Array({(int_t)-1}));
+            scalar_ds.add("max_wire_type", Array({(int_t)-1}));
+            scalar_ds.add("min_wire_type", Array({(int_t)-1}));
+            pcs.emplace("scalar", scalar_ds);
             pcs.emplace("corner", make_corner_dataset(iblob));
             // for (const auto& [name, pc] : pcs) {
             //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());

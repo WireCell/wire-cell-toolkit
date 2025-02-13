@@ -15,6 +15,7 @@
 #include "WireCellIface/IAnodeFace.h"
 
 #include "WireCellClus/Facade_Util.h"
+#include "WireCellClus/Facade_Blob.h"
 
 
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
@@ -24,7 +25,8 @@ namespace WireCell::PointCloud::Facade {
     class Grouping;
 
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
-    class Cluster : public NaryTree::FacadeParent<Blob, points_t> {
+    class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster> {
+
         // The expected scope.
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
@@ -35,14 +37,12 @@ namespace WireCell::PointCloud::Facade {
         };
 
        public:
-        Cluster() = default;
+        Cluster() : Mixin<Cluster>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
 
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
-
-
 
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
@@ -329,7 +329,7 @@ namespace WireCell::PointCloud::Facade {
         // Return true if this cluster has a PC array and PC of given names and type.
         template<typename ElementType=int>
         bool has_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
-            auto& lpc = node()->value.local_pcs();
+            auto& lpc = local_pcs();
             auto lit = lpc.find(pcname);
             if (lit == lpc.end()) {
                 return false;
@@ -349,7 +349,7 @@ namespace WireCell::PointCloud::Facade {
         PointCloud::Array::span_t<ElementType>
         get_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
 
-            auto& lpc = node()->value.local_pcs();
+            auto& lpc = local_pcs();
             auto lit = lpc.find(pcname);
             if (lit == lpc.end()) {
                 return {};
@@ -368,7 +368,7 @@ namespace WireCell::PointCloud::Facade {
         put_pcarray(const std::vector<ElementType>& vec,
                     const std::string& aname, const std::string& pcname = "perblob") {
 
-            auto &lpc = node()->value.local_pcs();
+            auto &lpc = local_pcs();
             auto& pc = lpc[pcname];
 
             PointCloud::Array::shape_t shape = {vec.size()};

@@ -24,13 +24,15 @@ namespace WireCell::PointCloud::Facade {
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
     // nodes that are related in some way.
-    class Grouping : public NaryTree::FacadeParent<Cluster, points_t> {
+    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>, public Mixin<Grouping> {
 
         TPCParams m_tp{};  // use default value by default.
         /// TODO: replace TPCParams with this in the future?
         IAnodePlane::pointer m_anode{nullptr};
 
        public:
+
+        Grouping() : Mixin<Grouping>(*this, "grouping_scalar") {}
 
         // MUST call this sometimes after construction if non-default value needed.
         // FIXME: TPCParams should be moved out of the facade!

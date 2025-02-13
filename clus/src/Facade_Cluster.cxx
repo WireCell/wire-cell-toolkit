@@ -36,9 +36,6 @@ using spdlog::debug;
 
 
 
-
-
-
 std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluster)
 {
     const auto uvwt_min = cluster.get_uvwt_min();
@@ -100,7 +97,7 @@ std::string Cluster::dump_graph() const{
 
     ss << "Edge Properties:" << std::endl;
     auto erange = boost::edges(g);
-    auto weightMap = get(edge_weight, g);
+    auto weightMap = get(boost::edge_weight, g);
     for (auto eit = erange.first; eit != erange.second; ++eit) {
         auto e = *eit;
         auto src = source(e, g);
@@ -2689,7 +2686,7 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
     const auto& tp = grouping()->get_params();
     std::cout << "Test: face " << tp.face << std::endl;
 
-    const double pi = 3.141592653589793;
+    // const double pi = 3.141592653589793;
     const geo_vector_t drift_dir(1, 0, 0); 
     const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles();
     const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
@@ -3257,7 +3254,7 @@ void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) 
 
     vertex_descriptor v0 = vertex(pt_idx, *m_graph);
     // making a param object
-    const auto& param = weight_map(get(edge_weight, *m_graph))
+    const auto& param = weight_map(get(boost::edge_weight, *m_graph))
 				   .predecessor_map(&m_parents[0])
 				   .distance_map(&m_distances[0]);
     // const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *m_graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);

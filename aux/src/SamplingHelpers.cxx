@@ -4,7 +4,7 @@ using namespace WireCell;
 using WireCell::PointCloud::Dataset;
 using WireCell::PointCloud::Array;
 WireCell::PointCloud::Dataset
-Aux::make_scaler_dataset(const IBlob::pointer iblob, const Point& center,
+Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
                          const int npoints, const double tick)
 {
     Dataset ds;

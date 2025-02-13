@@ -156,7 +156,7 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         cnodes[cid] = cnode;
         auto& spc = cnode->value.local_pcs()["cluster_scalar"];
         spc.add("flash", Array({(int)-1}));
-        spc.add("cluster_id", Array({cid}));
+        spc.add("ident", Array({cid}));
     }
 
     int ident = -1;
@@ -198,28 +198,32 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         }
         auto* cnode = cit->second;
 
-        if (m_sampler) {
-            named_pointclouds_t pcs;
-            auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
-            pcs.emplace("3d", pc3d);
-            /// These seem unused and bring in horrible code
-            // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-            // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-            // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
-            const Point center = calc_blob_center(pcs["3d"]);
-            auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-            int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-            int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-            int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-            int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-            scaler_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-            scaler_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-            scaler_ds.add("max_wire_type", Array({(int)max_wire_type}));
-            scaler_ds.add("min_wire_type", Array({(int)min_wire_type}));
-            pcs.emplace("scalar", std::move(scaler_ds));
-
-            cnode->insert(Points(std::move(pcs)));
+        // No sampling requested so we simply make an "empty" blob node.
+        if (!m_sampler) {
+            cnode->insert();
+            continue;
         }
+
+        named_pointclouds_t pcs;
+        auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
+        pcs.emplace("3d", pc3d);
+        /// These seem unused and bring in horrible code
+        // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
+        // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
+        // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+        const Point center = calc_blob_center(pcs["3d"]);
+        auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
+        int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
+        int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
+        int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
+        int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
+        scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
+        scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
+        scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
+        scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
+        pcs.emplace("scalar", std::move(scalar_ds));
+
+        cnode->insert(Points(std::move(pcs)));
     }
     
 

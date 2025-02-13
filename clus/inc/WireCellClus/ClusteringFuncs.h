@@ -1,5 +1,6 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade.h"
+#include "WireCellClus/ClusteringRetile.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
@@ -446,6 +447,9 @@ namespace WireCell::PointCloud::Facade {
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
         std::string function_name = config["name"].asString();
 
+        if (function_name == "clustering_retile") {
+            return ClusteringRetile(config);
+        }
         if (function_name == "clustering_live_dead") {
             return ClusteringLiveDead(config);
         }

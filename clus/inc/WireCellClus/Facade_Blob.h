@@ -24,9 +24,9 @@ namespace WireCell::PointCloud::Facade {
     class Cluster;
 
     /// Give a node "Blob" semantics
-    class Blob : public NaryTree::Facade<points_t> {
+    class Blob : public NaryTree::Facade<points_t>, public Mixin<Blob> {
        public:
-        Blob() = default;
+        Blob() : Mixin<Blob>(*this, "scalar") {}
         virtual ~Blob() {}
 
         // Return the cluster to which this blob is a child.  May be nullptr.

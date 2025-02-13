@@ -8,7 +8,7 @@ namespace WireCell::Aux {
 
     // Some crufty stuff used in PointTreeBuilding and UbooneClusterSource.
     PointCloud::Dataset
-    make_scaler_dataset(const IBlob::pointer iblob, const Point& center,
+    make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
                         const int npoints = 0, const double tick_span = 0.5*units::us);
 
     // Calculate the average position of a point cloud tree.
