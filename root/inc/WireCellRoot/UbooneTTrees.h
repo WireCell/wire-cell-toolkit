@@ -177,6 +177,7 @@ namespace WireCell::Root {
                 tree.SetBranchAddress("runNo",&runNo);
                 tree.SetBranchAddress("type",&type);
                 tree.SetBranchAddress("flash_id",&flash_id);
+                tree.SetBranchAddress("time",&time);
                 tree.SetBranchAddress("low_time",&tmin);
                 tree.SetBranchAddress("high_time",&tmax);
                 tree.SetBranchAddress("total_PE",&qtot);
