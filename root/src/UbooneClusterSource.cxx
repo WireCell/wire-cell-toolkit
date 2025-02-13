@@ -187,6 +187,8 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
                           niblobs, nublobs);
     }
 
+    //std::cout << "Test: " << niblobs << " " << nublobs << std::endl;
+
     for (size_t bind=0; bind<niblobs; ++bind) {
         const IBlob::pointer iblob = iblobs[bind];
         // This MUST be the TTree entry number as set by UbooneBlobSource!
@@ -239,6 +241,8 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
             auto& spc = cnode->value.local_pcs()["cluster_scalar"];
             auto farr = spc.get("flash"); // initially set undefined/-1 above
             farr->element<int>(0) = find;
+
+          //  std::cout << "Test: " << cid << " " << find << " " << farr->element<float>(1) << std::endl;
         }
 
     }

@@ -309,6 +309,9 @@ void Root::UbooneBlobSource::load_live()
     const auto& live_data = m_files->trees->live;
     const RayGrid::Coordinates& coords = m_iface->raygrid();
     const size_t nblobs = live_data.cluster_id_vec->size();
+
+    //std::cout << "Test: " << nblobs << std::endl;
+
     size_t n_blobs_loaded = 0;
     IBlob::vector iblobs;
     for (size_t bind=0; bind<nblobs; ++bind) {
@@ -363,6 +366,8 @@ void Root::UbooneBlobSource::load_dead()
     const RayGrid::Coordinates& coords = m_iface->raygrid();
     const size_t nblobs = dead_data.cluster_id_vec->size();
     size_t n_blobs_loaded = 0;
+
+    // std::cout << "Test: " << nblobs << std::endl;
 
     for (size_t bind=0; bind<nblobs; ++bind) {
 
