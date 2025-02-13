@@ -77,7 +77,7 @@ namespace WireCell::PointCloud::Facade {
             if (it == lpcs.end()) {
                 return def;
             }
-            const auto arr = it->second.get("name");
+            const auto arr = it->second.get(name);
             if (!arr) {
                 return def;
             }
