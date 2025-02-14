@@ -49,8 +49,6 @@ void Root::UbooneBlobSource::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("UbooneBlobSource: anode face is required");
     }        
 
-    m_kind = get(cfg, "kind", m_kind);
-
     auto check_file = [](const auto& jstr) -> std::string {
         auto got = Persist::resolve(jstr.asString());
         if (got.empty()) {
@@ -73,6 +71,8 @@ void Root::UbooneBlobSource::configure(const WireCell::Configuration& cfg)
             input_paths.push_back(check_file(one));
         }
     }
+
+    m_kind = get(cfg, "kind", m_kind);
     std::vector<std::string> kinds = {m_kind};
     m_files = std::make_unique<UbooneTFiles>(input_paths, kinds, log);
 

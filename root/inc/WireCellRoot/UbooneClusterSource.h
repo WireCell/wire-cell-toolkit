@@ -64,6 +64,17 @@ namespace WireCell::Root {
         */
         std::unique_ptr<UbooneTFiles> m_files;
 
+        /** Configuration: kind
+
+            A string "live" or "dead" describing what kind of blobs and slices to produce.
+
+            Both require the Trun and TC TTrees.  In addition, "dead" requires
+            the TDC TTree.  If the TTree named T_bad_ch exists it will also be
+            loaded for both "live" and "dead".
+
+            This configuration must match that given to the upstream UbooneBlobSources.
+        */
+
         /** Configurations: "light", "flash", "flashlight" (optional)
 
             The names for the PCs to hold optical data of corresponding type.
@@ -82,6 +93,9 @@ namespace WireCell::Root {
             Name an IBlobSampler for producing the "3d" point cloud.
 
             If not given, blob in PC-tree nodes will have no point clouds.
+
+            If given, this configuration must match that given to the upstream
+            UbooneBlobSources.
         */
         IBlobSampler::pointer m_sampler;
 

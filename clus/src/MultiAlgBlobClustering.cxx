@@ -287,6 +287,21 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     grouping->set_anode(m_anode);
     grouping->set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
     perf("loaded live clusters");
+    {
+        size_t npoints_total = 0;
+        size_t nzero = 0;
+        for (const auto* cluster : grouping->children()) {
+            int n = cluster->npoints();
+            if (n == 0) {
+                ++nzero;
+            }
+            npoints_total += n;
+        }
+        log->debug("loaded live grouping with {} clusters, {} points, and {} clusters with no points",
+                   grouping->nchildren(), npoints_total, nzero);
+        // It is probably an error if nzero is not zero.
+    }
+
 
     // log->debug("Got live pctree with {} children", root_live->nchildren());
     // log->debug(em("got live pctree"));

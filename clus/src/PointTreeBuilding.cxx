@@ -154,64 +154,7 @@ namespace {
     // Moved to aux/SamplingHelpers.
     // - calc_blob_center
     // - make_scalar_dataset
-
-
-
-    /// extract corners
-    Dataset make_corner_dataset(const IBlob::pointer iblob)
-    {
-        using float_t = double;
-
-        Dataset ds;
-        const auto& shape = iblob->shape();
-        const auto& crossings = shape.corners();
-        const auto& anodeface = iblob->face();
-        const auto& coords = anodeface->raygrid();
-
-        // ray center
-        Facade::geo_point_t center;
-        for (const auto& crossing : crossings) {
-            const auto& [one, two] = crossing;
-            auto pt = coords.ray_crossing(one, two);
-            center += pt;
-        }
-        center = center / crossings.size();
-
-        std::vector<float_t> corner_x;
-        std::vector<float_t> corner_y;
-        std::vector<float_t> corner_z;
-        
-        for (const auto& crossing : crossings) {
-            const auto& [one, two] = crossing;
-            RayGrid::coordinate_t o1 = one;
-            RayGrid::coordinate_t o2 = two;
-            // {
-            //     auto pt = coords.ray_crossing(one, two);
-            //     auto is_higher = [&](const RayGrid::coordinate_t& c) {
-            //         if (c.layer < 2) {
-            //             return false;
-            //         }
-            //         const double diff = (pt - center).dot(coords.pitch_dirs()[c.layer]);
-            //         return diff > 0;
-            //     };
-            //     if (is_higher(one)) o1.grid += 1;
-            //     if (is_higher(two)) o2.grid += 1;
-            // }
-            auto opt = coords.ray_crossing(o1, o2);
-            corner_x.push_back(opt.x());
-            corner_y.push_back(opt.y());
-            corner_z.push_back(opt.z());
-            // std::cout << "orig: " << one.layer << " " << one.grid << ", " << two.layer << " " << two.grid
-            //           << " new: " << o1.grid << " " << o2.grid << " corner: " << opt.x() << " " << opt.y() << " "
-            //           << opt.z() << std::endl;
-        }
-
-        ds.add("x", Array(corner_x));
-        ds.add("y", Array(corner_y));
-        ds.add("z", Array(corner_z));
-        
-        return ds;
-    }
+    // - make_corner_dataset
 }
 
 static Dataset make2dds (const Dataset& ds3d, const double angle) {

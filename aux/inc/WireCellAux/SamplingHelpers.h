@@ -14,4 +14,7 @@ namespace WireCell::Aux {
     // Calculate the average position of a point cloud tree.
     WireCell::Point calc_blob_center(const PointCloud::Dataset& ds);
 
+    // Calculate a dataset of blob corners
+    PointCloud::Dataset make_corner_dataset(const IBlob::pointer iblob);
+
 }

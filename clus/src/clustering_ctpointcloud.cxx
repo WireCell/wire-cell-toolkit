@@ -92,38 +92,46 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
     std::cout << "Test new functions in Facade::Cluster " << std::endl;
     std::vector<Cluster *> live_clusters = live_grouping.children();
     for (size_t i = 0; i != live_clusters.size(); i++) {
-        auto results = live_clusters.at(i)->get_closest_wcpoint(p);
-        if (live_clusters.at(i)->get_length()/units::cm >239){
-            std::cout << "Test: " << live_clusters.at(i)->get_length()/units::cm << " " << results.second << std::endl;
-            auto points = live_clusters.at(i)->get_main_axis_points();
+        const auto* live_cluster = live_clusters.at(i);
+        // std::cerr << "live cluster " << i << " has " << live_cluster->npoints() << " points\n";
+
+        if (live_cluster->npoints() == 0) {
+            raise<ValueError>("malformed job, live cluster has no points");
+        }
+
+
+        auto results = live_cluster->get_closest_wcpoint(p);
+        if (live_cluster->get_length()/units::cm >239){
+            std::cout << "Test: " << live_cluster->get_length()/units::cm << " " << results.second << std::endl;
+            auto points = live_cluster->get_main_axis_points();
             std::cout << "Test: " << points.first << " " << points.second << std::endl;
 
-            auto dir1 = live_clusters.at(i)->calc_dir(points.first, points.second, 10*units::cm);
+            auto dir1 = live_cluster->calc_dir(points.first, points.second, 10*units::cm);
             std::cout << "Test: " << dir1 << std::endl;
 
             std::vector<geo_point_t> points1;
             points1.push_back(points.first);
             points1.push_back(points.second);
             points1.push_back(p);
-            live_clusters.at(i)->Calc_PCA(points1);
-            std::cout << "Test: " << live_clusters.at(i)->get_center() << " " << live_clusters.at(i)->get_pca_axis(0) << " " << live_clusters.at(i)->get_pca_axis(1) << " " << live_clusters.at(i)->get_pca_axis(2) << std::endl;
+            live_cluster->Calc_PCA(points1);
+            std::cout << "Test: " << live_cluster->get_center() << " " << live_cluster->get_pca_axis(0) << " " << live_cluster->get_pca_axis(1) << " " << live_cluster->get_pca_axis(2) << std::endl;
 
             geo_point_t p2(0,0,0);
-            auto dir2 = live_clusters.at(i)->calc_pca_dir(p2, points1);
+            auto dir2 = live_cluster->calc_pca_dir(p2, points1);
             std::cout << "Test: " << dir2 << std::endl;
 
-            auto p5 = live_clusters.at(i)->calc_ave_pos(points.first, 10);
+            auto p5 = live_cluster->calc_ave_pos(points.first, 10);
             std::cout << "Test: " << p5 << std::endl;
 
             // test shortest path 
-            auto start_wcpoint_idx = live_clusters.at(i)->get_closest_point_index(points.first);
-            auto end_wcpoint_idx = live_clusters.at(i)->get_closest_point_index(points.second);
+            auto start_wcpoint_idx = live_cluster->get_closest_point_index(points.first);
+            auto end_wcpoint_idx = live_cluster->get_closest_point_index(points.second);
 
-            live_clusters.at(i)->dijkstra_shortest_paths(start_wcpoint_idx, true);
-            live_clusters.at(i)->cal_shortest_path(end_wcpoint_idx);
+            live_cluster->dijkstra_shortest_paths(start_wcpoint_idx, true);
+            live_cluster->cal_shortest_path(end_wcpoint_idx);
 
-            auto indices = live_clusters.at(i)->get_path_wcps();
-            auto points2 = live_clusters.at(i)->indices_to_points(indices);
+            auto indices = live_cluster->get_path_wcps();
+            auto points2 = live_cluster->indices_to_points(indices);
             std::cout << "Test shortest path: " << points2.size() << " " << points2.at(0) << " " << points2.at(points2.size()-1) << std::endl;
 
             std::vector<geo_point_t> points6;
@@ -482,13 +490,13 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
             std::cout << "Test: " << points6.size() << " " << points6.at(0) << " " << points6.at(points6.size()-1) << std::endl;
             
 
-            live_clusters.at(i)->organize_points_path_vec(points6,0.6*units::cm);
+            live_cluster->organize_points_path_vec(points6,0.6*units::cm);
             std::cout << "Test: " << points6.size() << " " << points6.at(0) << " " << points6.at(points6.size()-1) << std::endl;
 
-            live_clusters.at(i)->organize_path_points(points6,0.6*units::cm);
+            live_cluster->organize_path_points(points6,0.6*units::cm);
             std::cout << "Test: " << points6.size() << " " << points6.at(0) << " " << points6.at(points6.size()-1) << std::endl;
 
-            live_clusters.at(i)->examine_graph(true);
+            live_cluster->examine_graph(true);
         }
     }
 }

@@ -18,6 +18,8 @@
 #include "TFile.h"
 #include "TTree.h"
 
+#include <iostream>             // debug
+
 namespace WireCell::Root {
 
     /**
@@ -82,6 +84,8 @@ namespace WireCell::Root {
 
         // TC and TDC are nearly the same.
         struct Blob {
+            virtual ~Blob() {}
+
             std::vector<int> *cluster_id_vec{nullptr};
 
             // 0 value indicates the view for a blob is "dead"
@@ -96,12 +100,14 @@ namespace WireCell::Root {
             // Lord, forgive us our sins.
             std::vector<std::vector<int>*> flag_uvw;
 
+            virtual const std::vector<int>& cluster_ids() const
+            {
+                return *cluster_id_vec;
+            }
+
+
             void set_addresses(TTree& tree) {
-                // tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
-                // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
-                // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
-                // not directly used in T_match tree
-                tree.SetBranchAddress("parent_cluster_id", &cluster_id_vec); 
+                tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
                 tree.SetBranchAddress("flag_u", &flag_u_vec);
                 tree.SetBranchAddress("flag_v", &flag_v_vec);
                 tree.SetBranchAddress("flag_w", &flag_w_vec);
@@ -115,10 +121,23 @@ namespace WireCell::Root {
         };
 
         struct TC : Blob { 
+            virtual ~TC() {}
+
             std::vector<int> *time_slice_vec{nullptr};               // TC: singular
             std::vector<double> *q_vec{nullptr};
+            std::vector<int> *parent_cluster_id_vec{nullptr};
+
+            virtual const std::vector<int>& cluster_ids() const
+            {
+                return *parent_cluster_id_vec;
+            }
 
             void set_addresses(TTree& tree) {
+                // tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
+                // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
+                // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
+                // not directly used in T_match tree
+                tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec); 
                 Blob::set_addresses(tree);
                 tree.SetBranchAddress("q", &q_vec);
                 tree.SetBranchAddress("time_slice", &time_slice_vec);
@@ -127,6 +146,7 @@ namespace WireCell::Root {
         TC live;
 
         struct TDC : Blob {
+            virtual ~TDC() {}
             std::vector<std::vector<int>> *time_slices_vec{nullptr}; // TDC: plural
 
             void set_addresses(TTree& tree) {
@@ -135,6 +155,20 @@ namespace WireCell::Root {
             };
         };
         TDC dead;
+
+        // Return true if we are in "live" mode.  We always load m_live so we
+        // are "live" only when we are "not dead".
+        bool is_live() const
+        {
+            return m_dead == nullptr;
+        }
+
+        // Return the base blob depending on what "kind" of blobs we load.
+        const struct Blob &blobs() const
+        {
+            if (is_live()) return live;
+            return dead;
+        }
 
         // Bad channels may override an activity map entry or delete it.
         class Bad {
@@ -210,19 +244,23 @@ namespace WireCell::Root {
         Match match;
 
 
-        // Loading live will fill map from unique cluster ID to its index in a
-        // cluster-id-ordered array.  An ordered set is also filled.
+        // Filled by load_clusters. This maps from the externally defined
+        // cluster ID to an sequential index
         std::map<int, size_t> cluster_id_index;
+
+        // Filled by load_clusters. This holds external cluster IDs in ascending
+        // order.  Note, this holds either live or dead depending on "kind".
+        // Take care this is a set and lacks any association with blobs.  See
+        // blobs().cluster_ids() for that association.
         std::set<int> cluster_ids;
-        void load_live() {
+
+        void load_clusters() {
             // Define a CLUSTER ID ORDERING to follow cluster_id.  And, record
             // map from cluster ID to its index in the ordering.
             cluster_id_index.clear();
             cluster_ids.clear();
-            
-            m_live->GetEntry(m_entry);
 
-            for (auto cid : *live.cluster_id_vec) {
+            for (auto cid : blobs().cluster_ids()) {
                 cluster_ids.insert(cid);
             }
             for (int cid : cluster_ids) {
@@ -231,13 +269,17 @@ namespace WireCell::Root {
             }
         }
 
-        // Call load_optical() after per-event tree entry is loaded.  It will
-        // populate this with keys "light", "flash", "flashlight" and "match".
-        // If this is called, it MUST be called after load_live().
+        // Filled by load_optical().  It will populate the map with keys
+        // "light", "flash", "flashlight" and "match".
         std::map<std::string, PointCloud::Dataset> optical;
-        // Also from load_optical.  This maps from cluster ID to flash INDEX
-        // into the flash array.
+
+        // Filled by load_optical().  This maps from external cluster ID to a
+        // flash INDEX into the flash array.  This will be empty for "dead"
+        // cluster.
         std::map<int, size_t> cluster_flash;
+
+        // Load optical data.  It does not make sense to call this for "dead"
+        // clusters.
         void load_optical() {
             optical.clear();
             cluster_flash.clear();
@@ -305,6 +347,7 @@ namespace WireCell::Root {
             flashlight_ds.add("flash", PointCloud::Array(fl_flash));
             flashlight_ds.add("light", PointCloud::Array(fl_light));
 
+            // These typically become "local PCs" on root "grouping" node.
             optical.emplace("light", std::move(light_ds));
             optical.emplace("flash", std::move(flash_ds));
             optical.emplace("flashlight", std::move(flashlight_ds));
@@ -327,6 +370,7 @@ namespace WireCell::Root {
         // Construct the interface to the trees.
         //
         // This does NOT load any entry.  Must call next() to load first entry, etc.
+        // The "kinds" may include "dead" or "light" (or both).  "live" is always implied.
         UbooneTTrees(const std::string& tfile_name, const std::vector<std::string>& kinds) {
             
             m_tfile.reset(TFile::Open(tfile_name.c_str(), "READ"));
@@ -376,11 +420,14 @@ namespace WireCell::Root {
                                   m_entry, m_nentries);
             }
             m_activity->GetEntry(m_entry);
-            load_live();
+            m_live->GetEntry(m_entry);
             if (m_dead) {
                 m_dead->GetEntry(m_entry);
             }
-            if (m_flash && m_match) {
+
+            load_clusters();
+
+            if (!m_dead && m_flash && m_match) {
                 load_optical();
             }
         }
