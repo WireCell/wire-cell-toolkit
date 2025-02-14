@@ -162,7 +162,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_frame_tag = get(config, "frame_tag", m_frame_tag);
 
     m_use_roi_debug_mode = get(config, "use_roi_debug_mode", m_use_roi_debug_mode);
-    m_m_save_negative_charge = get(config, "m_save_negative_charge", m_m_save_negative_charge);
+    m_save_negative_charge = get(config, "save_negative_charge", m_save_negative_charge);
     m_use_roi_refinement = get(config, "use_roi_refinement", m_use_roi_refinement);
     m_tight_lf_tag = get(config, "tight_lf_tag", m_tight_lf_tag);
     m_loose_lf_tag = get(config, "loose_lf_tag", m_loose_lf_tag);
@@ -417,7 +417,8 @@ void OmnibusSigProc::save_data(
     int plane,
     const std::vector<float>& perwire_rmses,
     IFrame::trace_summary_t& threshold,
-    const std::string& loglabel)
+    const std::string& loglabel,
+    const bool save_negative_charge)
 {
     check_data(plane, loglabel + " before save");
 
@@ -434,7 +435,7 @@ void OmnibusSigProc::save_data(
             const float q = m_r_data[plane](och.wire, itick);
             // charge.at(itick) = q > 0.0 ? q : 0.0;
             // charge.at(itick) = q ;
-            if (m_use_roi_debug_mode && m_m_save_negative_charge) {
+            if (save_negative_charge) {
                 charge.at(itick) = q;  // debug mode: save all decons
             }
             else {              // nominal: threshold at zero.
@@ -1533,7 +1534,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         std::vector<double> dummy;
         // [wgu] save decon result after tight LF
         if (m_use_roi_debug_mode and !m_tight_lf_tag.empty()) {
-            save_data(*itraces, tight_lf_traces, iplane, perwire_rmses, dummy, "tight_lf");
+            save_data(*itraces, tight_lf_traces, iplane, perwire_rmses, dummy, "tight_lf", true);
         }
 
         // Form loose ROIs
@@ -1542,7 +1543,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
             if (m_use_roi_debug_mode) {
                 decon_2D_looseROI_debug_mode(iplane);
                 if (!m_loose_lf_tag.empty()) {
-                    save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf");
+                    save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf", true);
                 }
             }
 
@@ -1557,7 +1558,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         // but save something to be consistent
         if (m_use_roi_debug_mode and iplane == 2) {
             if (!m_loose_lf_tag.empty()) {
-                save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf");
+                save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf", true);
             }
         }
 
@@ -1570,7 +1571,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
             // special case to dump decon without needs of ROIs
             if (m_use_roi_debug_mode and !m_decon_charge_tag.empty()) {
                 decon_2D_charge(iplane);
-                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy, "decon");
+                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy, "decon", true);
             }
             m_c_data[iplane].resize(0, 0);  // clear memory
             m_r_data[iplane].resize(0, 0);  // clear memory
@@ -1664,14 +1665,14 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 // We only use an intermediate index list here to give
                 // some clarity to log msg about range added
                 IFrame::trace_list_t perframe;
-                save_data(*itraces, perframe, iplane, perwire_rmses, thresholds, "wiener");
+                save_data(*itraces, perframe, iplane, perwire_rmses, thresholds, "wiener", m_save_negative_charge);
                 wiener_traces.insert(wiener_traces.end(), perframe.begin(), perframe.end());
             }
 
             decon_2D_charge(iplane);
             std::vector<double> dummy_thresholds;
             if (m_use_roi_debug_mode and !m_decon_charge_tag.empty()) {
-                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy_thresholds, "decon");
+                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy_thresholds, "decon", true);
             }
             roi_refine.apply_roi(iplane, m_r_data[iplane]);
             // roi_form.apply_roi(iplane, m_r_data[plane],1);
@@ -1679,7 +1680,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 // We only use an intermediate index list here to give
                 // some clarity to log msg about range added
                 IFrame::trace_list_t perframe;
-                save_data(*itraces, perframe, iplane, perwire_rmses, dummy_thresholds, "gauss");
+                save_data(*itraces, perframe, iplane, perwire_rmses, dummy_thresholds, "gauss", m_save_negative_charge);
                 gauss_traces.insert(gauss_traces.end(), perframe.begin(), perframe.end());
             }
 
