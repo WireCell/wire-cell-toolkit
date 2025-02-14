@@ -24,22 +24,35 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
     std::cout << "Test Examine Bundles" << std::endl;
 
     std::vector<Cluster *> live_clusters = live_grouping.children();
-    for (size_t i = 0; i != live_clusters.size(); i++) {
-       auto blobs = live_clusters.at(i)->kd_blobs();
-       int nblobs = blobs.size();
+    // for (size_t i = 0; i != live_clusters.size(); i++) {
+    //    auto blobs = live_clusters.at(i)->kd_blobs();
+    //    int nblobs = blobs.size();
 
-       if(nblobs > 10){
-        std::cout << "Test: " << nblobs << " " <<  std::endl;
-        auto local_pcs = live_clusters.at(i)->local_pcs();
-        for (auto it = local_pcs.begin(); it !=local_pcs.end(); it++){
-            auto keys = it->second.keys();
-            for (auto it1 = keys.begin(); it1 != keys.end(); it1++){
-                std::cout << "Test: " << it->first << " " << *it1 << std::endl;
-            }
-        }
-        auto flash = live_clusters.at(i)->get_scalar<int>("flash");
-        std::cout << "Test: Flash: " << flash << std::endl;
-       }
+    //    if(nblobs > 10){
+    //     std::cout << "Test: " << nblobs << " " <<  std::endl;
+    //     auto local_pcs = live_clusters.at(i)->local_pcs();
+    //     for (auto it = local_pcs.begin(); it !=local_pcs.end(); it++){
+    //         auto keys = it->second.keys();
+    //         for (auto it1 = keys.begin(); it1 != keys.end(); it1++){
+    //             std::cout << "Test: " << it->first << " " << *it1 << std::endl;
+    //         }
+    //     }
+    //     auto flash = live_clusters.at(i)->get_scalar<int>("flash");
+    //     std::cout << "Test: Flash: " << flash << std::endl;
+    //    }
+    // }
+
+
+    for (size_t i=0;i!=live_clusters.size();i++){
+        // if there is a cc component, record the main cluster as id of the blobs???
+
+        // currently reset the cc component (todo: find the main component)
+
+        // do the examine graph
+        auto b2groupid = live_clusters.at(i)->examine_graph(true);
+    
+        // find the main cluster and set it to the cc tree ...
+
     }
 
 }

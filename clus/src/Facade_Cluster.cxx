@@ -2684,7 +2684,7 @@ void Cluster::Connect_graph() const{
 void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const {
     // Constants for wire angles
     const auto& tp = grouping()->get_params();
-    std::cout << "Test: face " << tp.face << std::endl;
+    //std::cout << "Test: face " << tp.face << std::endl;
 
     // const double pi = 3.141592653589793;
     const geo_vector_t drift_dir(1, 0, 0); 
@@ -3223,7 +3223,7 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     std::vector<int> component(num_vertices(*m_graph));
     const int num_components = connected_components(*m_graph, &component[0]);
 
-    std::cout << "Test: num components " << num_components << std::endl;
+    //std::cout << "Test: num components " << num_components << std::endl;
 
     // If only one component, no need for mapping
     if (num_components <= 1) {
