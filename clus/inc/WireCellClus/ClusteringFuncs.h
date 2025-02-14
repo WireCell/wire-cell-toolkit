@@ -354,6 +354,24 @@ namespace WireCell::PointCloud::Facade {
     };
 
 
+    // this is a function to test the implementation of examine bundles ...
+    void clustering_examine_bundles(Grouping& live_grouping, const bool use_ctpc);
+    class ClusteringExamineBundles {
+       public:
+        ClusteringExamineBundles(const WireCell::Configuration& config)
+        {
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_examine_bundles(live_clusters, use_ctpc_);
+        }
+
+       private:
+        double use_ctpc_{true};
+    };
+
+
     void clustering_examine_x_boundary(Grouping& live_grouping);
     class ClusteringExamineXBoundary {
        public:
@@ -491,6 +509,9 @@ namespace WireCell::PointCloud::Facade {
         }
         else if (function_name == "clustering_ctpointcloud") {
             return ClusteringCTPointCloud(config);
+        }
+        else if (function_name == "clustering_examine_bundles") {
+            return ClusteringExamineBundles(config);
         }
         else {
             throw std::invalid_argument("Unknown function name in configuration");

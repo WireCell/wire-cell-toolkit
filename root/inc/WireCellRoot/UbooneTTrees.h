@@ -300,6 +300,8 @@ namespace WireCell::Root {
             std::vector<int> fl_flash, fl_light;
             
             size_t find = 0;
+            // default id
+            fid_ind[-1] = -1;
             for (int flash_entry = 0; flash_entry < nflashes; ++flash_entry) {
                 m_flash->GetEntry(flash_entry);
                 if (flash.runNo != header.runNo) { continue; }
