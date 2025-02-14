@@ -3874,6 +3874,56 @@ void Facade::sort_clusters(std::vector<Cluster*>& clusters)
     std::sort(clusters.rbegin(), clusters.rend(), cluster_less);
 }
 
+
+Facade::Cluster::Flash Facade::Cluster::get_flash() const
+{
+    Flash flash;                // starts invalid
+
+    const auto* p = node()->parent;
+    if (!p) return flash;
+    const auto* g = p->value.facade<Grouping>();
+    if (!g) return flash;
+
+    const int flash_index = g->get_scalar("flash", -1);
+    if (flash_index < 0) {
+        return flash;
+    }
+
+    if (! g->has_pc("flash")) {
+        return flash;
+    }
+    flash.m_valid = true;
+        
+    // These are kind of inefficient as we get the "flash" PC each time.
+    flash.m_time = g->get_element<double>("flash", "time", flash_index, 0);
+    flash.m_value = g->get_element<double>("flash", "value", flash_index, 0);
+    flash.m_ident = g->get_element<int>("flash", "ident", flash_index, -1);
+    flash.m_type = g->get_element<int>("flash", "type", flash_index, -1);
+
+    if (!(g->has_pc("light") && g->has_pc("flashlight"))) {
+        return flash;           // valid, but no vector info.
+    }
+    
+    // These are spans.  We walk the fl to look up in the l.
+    const auto fl_flash = g->get_pcarray<int>("flashlight", "flash");
+    const auto fl_light = g->get_pcarray<int>("flashlight", "light");
+    const auto l_times = g->get_pcarray<double>("light", "time");
+    const auto l_values = g->get_pcarray<double>("light", "value");
+    const auto l_errors = g->get_pcarray<double>("light", "error");
+
+    const size_t nfl = fl_light.size();
+    for (size_t ifl = 0; ifl < nfl; ++ifl) {
+        if (fl_flash[ifl] != flash_index) continue;
+        const int light_index = fl_light[ifl];
+        
+        flash.m_times.push_back(l_times[light_index]);
+        flash.m_values.push_back(l_values[light_index]);
+        flash.m_errors.push_back(l_errors[light_index]);
+    }
+    return flash;
+}
+
+
 // Local Variables:
 // mode: c++
 // c-basic-offset: 4

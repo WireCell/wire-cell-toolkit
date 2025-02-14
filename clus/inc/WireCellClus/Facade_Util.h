@@ -69,34 +69,141 @@ namespace WireCell::PointCloud::Facade {
             set_scalar<int>(ident_array_name, id);
         }
 
-        // Return a value from the scalar PC
         template <typename T = int>
-        T get_scalar(const std::string& name, T def = 0) const {
+        T get_element(const std::string& pcname, const std::string& aname, size_t index, T def = 0) const {
             const auto& lpcs = local_pcs();
             auto it = lpcs.find(scalar_pc_name);
             if (it == lpcs.end()) {
                 return def;
             }
-            const auto arr = it->second.get(name);
+            const auto arr = it->second.get(aname);
             if (!arr) {
                 return def;
             }
-            return arr->template element<T>(0);
+            return arr->template element<T>(index);
+        }
+
+        // Return a value from the scalar PC
+        template <typename T = int>
+        T get_scalar(const std::string& aname, T def = 0) const {
+            return get_element(scalar_pc_name, aname, 0, def);
         }
         
         // Set a value on the scalar PC
         template <typename T = int>
-        void set_scalar(const std::string& name, T val = 0) {
+        void set_scalar(const std::string& aname, T val = 0) {
             auto& lpcs = local_pcs();
             auto cs = lpcs[scalar_pc_name]; // create if not existing
-            auto arr = cs.get(name);
+            auto arr = cs.get(aname);
             if (!arr) {
-                cs.add(name, PointCloud::Array({(T)val}));
+                cs.add(aname, PointCloud::Array({(T)val}));
                 return;
             }
             arr->template element<T>(0) = (T)val;
         }
-        
+
+        bool has_pc(const std::string& pcname) const
+        {
+            static PointCloud::Dataset dummy;
+            const auto& lpcs = local_pcs();
+            auto it = lpcs.find(pcname);
+            if (it == lpcs.end()) {
+                return false;
+            }
+            return true;
+        }
+
+        // Get a local PC/Dataset
+        const PointCloud::Dataset& get_pc(const std::string& pcname) const
+        {
+            static PointCloud::Dataset dummy;
+            const auto& lpcs = local_pcs();
+            auto it = lpcs.find(pcname);
+            if (it == lpcs.end()) {
+                return dummy;
+            }
+            return it.second;
+        }
+        // Will create if not there.
+        PointCloud::Dataset& get_pc(const std::string& pcname)
+        {
+            static PointCloud::Dataset dummy;
+            const auto& lpcs = local_pcs();
+            return lpcs[pcname];
+        }
+
+        // Return true if this cluster has a PC array and PC of given names and type.
+        template<typename ElementType=int>
+        bool has_pcarray(const std::string& aname, const std::string& pcname) const {
+            auto& lpc = local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return false;
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return false;
+            }
+            return arr->template is_type<ElementType>();
+        }
+
+        // Return as a span an array named "aname" stored in clusters PC named
+        // "pcname".  Returns default span if PC or array not found or there is
+        // a type mismatch.  Note, span uses array data in place.
+        template<typename ElementType=int>
+        PointCloud::Array::span_t<ElementType>
+        get_pcarray(const std::string& aname, const std::string& pcname) {
+
+            auto& lpc = local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return {};
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return {};
+            }
+            return arr->template elements<ElementType>();
+        }
+        template<typename ElementType=int>
+        const PointCloud::Array::span_t<ElementType>
+        get_pcarray(const std::string& aname, const std::string& pcname) const {
+
+            auto& lpc = local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return {};
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return {};
+            }
+            return arr->template elements<ElementType>();
+        }
+
+        // Store vector as an array named "aname" into this cluster's PC named "pcname".
+        // Reminder, all arrays in a PC must have same major size.
+        template<typename ElementType=int>
+        void
+        put_pcarray(const std::vector<ElementType>& vec,
+                    const std::string& aname, const std::string& pcname) {
+
+            auto &lpc = local_pcs();
+            auto& pc = lpc[pcname];
+
+            PointCloud::Array::shape_t shape = {vec.size()};
+
+            auto arr = pc.get(aname);
+            if (arr) {
+                arr->template assign(vec.data(), shape, false);
+            }
+            else {
+                pc.add(aname, Array(vec, shape, false));
+            }
+        }
     };
 
 
