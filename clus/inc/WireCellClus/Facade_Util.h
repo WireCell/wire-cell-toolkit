@@ -72,7 +72,7 @@ namespace WireCell::PointCloud::Facade {
         template <typename T = int>
         T get_element(const std::string& pcname, const std::string& aname, size_t index, T def = 0) const {
             const auto& lpcs = local_pcs();
-            auto it = lpcs.find(scalar_pc_name);
+            auto it = lpcs.find(pcname);
             if (it == lpcs.end()) {
                 return def;
             }
@@ -80,6 +80,7 @@ namespace WireCell::PointCloud::Facade {
             if (!arr) {
                 return def;
             }
+            // std::cout << "test1 " << pcname << " " << aname << " " << index << " " << arr->template element<T>(index) << std::endl;
             return arr->template element<T>(index);
         }
 
