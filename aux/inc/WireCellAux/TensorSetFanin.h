@@ -53,7 +53,7 @@ namespace WireCell::Aux {
         /// The concatenation will honor any duplicate or missing port numbers.
         /// Ports count from 0.
         ///
-        std::vector<size_t> m_tensor_order = {0};
+        std::vector<int> m_tensor_order = {0};
 
         /// Configuration: "multiplicity" (required)
         ///

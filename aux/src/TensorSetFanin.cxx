@@ -47,6 +47,9 @@ void Aux::TensorSetFanin::configure(const WireCell::Configuration& cfg)
     }
 
     m_tensor_order = get(cfg, "tensor_order", m_tensor_order);
+    if (m_tensor_order.size() != (size_t)m_multiplicity) {
+        log->warn("configured to ignore some ports, I hope this is what you want");
+    }
 
 }
 
@@ -79,6 +82,7 @@ bool Aux::TensorSetFanin::operator()(const input_vector& in_tss, output_pointer&
 
     for (int iport : m_tensor_order) {
         ITensorSet::pointer ts = in_tss[iport];
+        log->debug("port={} ident={} md={}", iport, ts->ident(), ts->metadata());
         const auto& tens = ts->tensors();
         tensors.insert(tensors.end(), tens->begin(), tens->end());
     }
