@@ -23,7 +23,7 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
 {
     std::cout << "Test Examine Bundles" << std::endl;
 
-    // std::vector<Cluster *> live_clusters = live_grouping.children();
+    std::vector<Cluster *> live_clusters = live_grouping.children();
     // for (size_t i = 0; i != live_clusters.size(); i++) {
     //    auto blobs = live_clusters.at(i)->kd_blobs();
     //    int nblobs = blobs.size();
