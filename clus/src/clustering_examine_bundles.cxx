@@ -23,23 +23,36 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
 {
     std::cout << "Test Examine Bundles" << std::endl;
 
-    std::vector<Cluster *> live_clusters = live_grouping.children();
+    // std::vector<Cluster *> live_clusters = live_grouping.children();
     // for (size_t i = 0; i != live_clusters.size(); i++) {
     //    auto blobs = live_clusters.at(i)->kd_blobs();
     //    int nblobs = blobs.size();
 
-    //    if(nblobs > 10){
-    //     std::cout << "Test: " << nblobs << " " <<  std::endl;
-    //     auto local_pcs = live_clusters.at(i)->local_pcs();
-    //     for (auto it = local_pcs.begin(); it !=local_pcs.end(); it++){
-    //         auto keys = it->second.keys();
-    //         for (auto it1 = keys.begin(); it1 != keys.end(); it1++){
-    //             std::cout << "Test: " << it->first << " " << *it1 << std::endl;
+    //     //    if(nblobs > 10){
+    //         // std::cout << "Test: " << nblobs << " " <<  std::endl;
+
+    //     auto flash = live_clusters.at(i)->get_flash();
+    //     if (flash) {
+    //         std::cout << "Tests: " << nblobs << " at time " << flash.time() << "\n";
+
+    //         auto values = flash.values();
+    //         std::cout << values.size() << " ";
+    //         for (const auto& value : values) {
+    //             std::cout << value << " ";
     //         }
+    //         std::cout << std::endl;
     //     }
-    //     auto flash = live_clusters.at(i)->get_scalar<int>("flash");
-    //     std::cout << "Test: Flash: " << flash << std::endl;
-    //    }
+
+    //         // auto local_pcs = live_clusters.at(i)->local_pcs();
+    //         // for (auto it = local_pcs.begin(); it !=local_pcs.end(); it++){
+    //         //     auto keys = it->second.keys();
+    //         //     for (auto it1 = keys.begin(); it1 != keys.end(); it1++){
+    //         //         std::cout << "Test: " << it->first << " " << *it1 << std::endl;
+    //         //     }
+    //         // }
+    //         // auto flash = live_clusters.at(i)->get_scalar<int>("flash");
+    //         // std::cout << "Test: Flash: " << flash << std::endl;
+    //         //    }
     // }
 
 
@@ -115,7 +128,7 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
                     longest_cluster_id = pair.first;
                 }
             }
-            std::cout << "Test: " << longest_cluster_id << " " << max_length << std::endl;
+           // std::cout << "Test: " << longest_cluster_id << " " << max_length << std::endl;
             
             // Mark longest cluster as main
             for (auto& id : b2groupid) {
@@ -127,18 +140,18 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
 
         live_clusters.at(i)->put_pcarray(b2groupid, "isolated", "perblob");
 
-        auto blobs = live_clusters.at(i)->kd_blobs();
-        int nblobs = blobs.size();
+        // auto blobs = live_clusters.at(i)->kd_blobs();
+        // int nblobs = blobs.size();
 
         // for (const auto& id : b2groupid) {
         //     std::cout << id << " ";
         // }
         // std::cout << std::endl;
 
-        if (nblobs > 10){
-            // find the main cluster and set it to the cc tree ...
-            std::cout << "Test: " << nblobs << " " << old_cc_array.size() << " " << b2groupid.size() << std::endl;
-        }
+        // if (nblobs > 10){
+        //     // find the main cluster and set it to the cc tree ...
+        //     std::cout << "Test: " << nblobs << " " << old_cc_array.size() << " " << b2groupid.size() << std::endl;
+        // }
     }
 
 }

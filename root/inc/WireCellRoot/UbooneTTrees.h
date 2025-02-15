@@ -134,6 +134,7 @@ namespace WireCell::Root {
             virtual const std::vector<int>& cluster_ids() const
             {
                 return *parent_cluster_id_vec;
+                // return *cluster_id_vec;
             }
 
             void set_addresses(TTree& tree) {
@@ -321,6 +322,8 @@ namespace WireCell::Root {
                 fident[find] = flash.flash_id;
                 ftype[find] = flash.type;
 
+                //std::cout << "Test1: " << flash.flash_id << " " << find << " " << flash.time << " " << flash.qtot << std::endl;
+
                 for (auto chan : *flash.channels) {
                     // flashlight
                     fl_flash.push_back(find);
@@ -331,7 +334,8 @@ namespace WireCell::Root {
                     lt.push_back(flash.time);
                     lq.push_back(flash.light[chan]);
                     ldq.push_back(flash.dlight[chan]);
-                }                
+                }             
+                // std::cout << "Test2: " << lid.size() << " " << lt.size() << " " << lq.size() << " " << ldq.size() << std::endl;   
                 ++find;
             }
 
