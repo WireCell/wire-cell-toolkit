@@ -3223,12 +3223,12 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     std::vector<int> component(num_vertices(*m_graph));
     const int num_components = connected_components(*m_graph, &component[0]);
 
-    //std::cout << "Test: num components " << num_components << std::endl;
+    std::cout << "Test: num components " << num_components << std::endl;
 
     // If only one component, no need for mapping
-    if (num_components <= 1) {
-        return std::vector<int>();
-    }
+    // if (num_components <= 1) {
+    //     return std::vector<int>();
+    // }
 
     // Create mapping from blob indices to component groups
     std::vector<int> b2groupid(nchildren(), -1);
