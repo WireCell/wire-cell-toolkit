@@ -142,7 +142,10 @@ namespace WireCell::Root {
                 // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
                 // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
                 // not directly used in T_match tree
-                tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec); 
+                if (tree.GetBranch("parent_cluster_id"))
+                    tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec); 
+                else
+                    tree.SetBranchAddress("cluster_id", &parent_cluster_id_vec); 
                 Blob::set_addresses(tree);
                 tree.SetBranchAddress("q", &q_vec);
                 tree.SetBranchAddress("time_slice", &time_slice_vec);
