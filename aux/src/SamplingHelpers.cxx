@@ -111,3 +111,113 @@ Dataset Aux::make_corner_dataset(const IBlob::pointer iblob)
         
     return ds;
 }
+
+double Aux::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
+    // std::cout << "time2drift: " << time << " " << time_offset << " " << drift_speed << std::endl;
+    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
+    double xsign = colpimpos->axis(0)[0];
+    double xorig = anodeface->planes()[2]->wires().front()->center().x();
+    const double drift = (time + time_offset)*drift_speed;
+    /// TODO: how to determine xsign?
+    // std::cout << "drift: " << xorig + xsign*drift << std::endl;
+    return xorig + xsign*drift;
+}
+
+template <typename T>
+using mapfp_t = std::unordered_map<int, std::unordered_map<int, T>>;
+void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlobSet::vector ibsv,
+                   const IAnodeFace::pointer iface, const int face, const double time_offset, const double drift_speed,
+                   const double tick, const double dead_threshold)
+{
+    mapfp_t<std::vector<double>> ds_x, ds_y, ds_charge, ds_charge_err;
+    mapfp_t<std::vector<int>> ds_cident, ds_wind, ds_slice_index;
+    mapfp_t<double> proj_centers;
+    mapfp_t<double> pitch_mags;
+
+    const auto& coords = iface->raygrid();
+    const int ndummy_layers = 2;
+    // skip dummy layers so the vector matches 0, 1, 2 plane order
+    for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+        const auto& pitch_dir = coords.pitch_dirs()[layer];
+        const auto& center = coords.centers()[layer];
+        double proj_center = center.dot(pitch_dir);
+        proj_centers[iface->which()][layer-ndummy_layers] = proj_center;
+        pitch_mags[iface->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+    }
+
+    size_t nslices = 0;
+    for (const auto& ibs : ibsv) {
+        const auto& slice = ibs->slice();
+        {
+            // auto& slice = std::get<slice_t>(cgnode.ptr);
+            ++nslices;
+            const auto& slice_index = slice->start()/tick;
+            const auto& activity = slice->activity();
+            for (const auto& [ichan, charge] : activity) {
+                if(charge.uncertainty() > dead_threshold) {
+                    // if (charge.value() >0)
+                    // std::cout << "Test: dead_threshold " << dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
+                    continue;
+                } 
+                const auto& cident = ichan->ident();
+                const auto& wires = ichan->wires();
+                for (const auto& wire : wires) {
+                    const auto& wind = wire->index();
+                    const auto& plane = wire->planeid().index();
+                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {}", slice_index, cident, charge, wind, plane, wire->planeid().face());
+                    // const auto& face = wire->planeid().face();
+                    // const auto& face = m_face;
+                    /// FIXME: is this the way to get face?
+
+//                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
+
+                    const auto& x = time2drift(iface, time_offset, drift_speed, slice->start());
+                    const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
+
+                    // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
+                    //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                    //                wind, plane, face, x, y);
+                    // }
+                    ds_x[face][plane].push_back(x);
+                    ds_y[face][plane].push_back(y);
+                    ds_charge[face][plane].push_back(charge.value());
+                    ds_charge_err[face][plane].push_back(charge.uncertainty());
+                    ds_cident[face][plane].push_back(cident);
+                    ds_wind[face][plane].push_back(wind);
+                    ds_slice_index[face][plane].push_back(slice_index);
+                }
+            }
+            // log->debug("ds_x.size() {}", ds_x.size());
+        }
+    }
+    // log->debug("got {} slices", nslices);
+
+    for (const auto& [face, planes] : ds_x) {
+        for (const auto& [plane, x] : planes) {
+            // log->debug("ds_x {} ds_y {} ds_charge {} ds_charge_err {} ds_cident {} ds_wind {} ds_slice_index {}",
+            //            x.size(), ds_y[face][plane].size(), ds_charge[face][plane].size(),
+            //            ds_charge_err[face][plane].size(), ds_cident[face][plane].size(), ds_wind[face][plane].size(),
+            //            ds_slice_index[face][plane].size());
+            // std::cout << "[yuhw] " << " face " << face << " plane " << plane << " x " << x.size() << " y "
+            //           << ds_y[face][plane].size() << " charge " << ds_charge[face][plane].size() << " charge_err "
+            //           << ds_charge_err[face][plane].size() << " cident " << ds_cident[face][plane].size() << " wind "
+            //           << ds_wind[face][plane].size() << " slice_index " << ds_slice_index[face][plane].size()
+            //           << std::endl;
+            Dataset ds;
+            ds.add("x", Array(x));
+            ds.add("y", Array(ds_y[face][plane]));
+            ds.add("charge", Array(ds_charge[face][plane]));
+            ds.add("charge_err", Array(ds_charge_err[face][plane]));
+            ds.add("cident", Array(ds_cident[face][plane]));
+            ds.add("wind", Array(ds_wind[face][plane]));
+            ds.add("slice_index", Array(ds_slice_index[face][plane]));
+            const std::string ds_name = String::format("ctpc_f%dp%d", face, plane);
+            // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
+            root.value.local_pcs().emplace(ds_name, ds);
+            // log->debug("added point cloud {} with {} points", ds_name, x.size());
+        }
+    }
+    // for (const auto& [name, pc] : root->value.local_pcs()) {
+    //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    // }
+}

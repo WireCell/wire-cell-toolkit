@@ -86,6 +86,8 @@ void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
     // }
     m_datapath = get(cfg, "datapath", m_datapath);
 
+    m_time_offset = get(cfg, "time_offset", m_time_offset);
+    m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
 }
 
 WireCell::Configuration Root::UbooneClusterSource::default_configuration() const
@@ -172,15 +174,19 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
 
     // Collect all the IBlobs from all cached IBlobSets
     std::vector<IBlob::pointer> iblobs;
+    IAnodeFace::pointer iface = nullptr;
     for (const auto& ibs : m_cache) {
         if (ident < 0) {
             ident = ibs->slice()->frame()->ident();
             log->debug("using ident {} from first blob set frame", ident);
         }
+        // use the first iface we find
+        if (!iface && ibs->blobs().size()) {
+            iface = ibs->blobs().front()->face();
+        }
         const auto& fresh = ibs->blobs();
         iblobs.insert(iblobs.end(), fresh.begin(), fresh.end());
     }
-    m_cache.clear();
 
     size_t nublobs = blob_cluster_ids.size();
     size_t niblobs = iblobs.size();
@@ -275,6 +281,13 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
     std::string datapath = m_datapath;
     if (datapath.find("%") != std::string::npos) {
         datapath = String::format(datapath, ident);
+    }
+
+    Aux::add_ctpc(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
+    m_cache.clear();
+
+    for (const auto& [name, pc] : root.value.local_pcs()) {
+        log->debug("contains point cloud {} size_major {}", name, pc.size_major());
     }
     auto tens = as_tensors(root, datapath);
 

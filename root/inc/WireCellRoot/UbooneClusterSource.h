@@ -121,7 +121,8 @@ namespace WireCell::Root {
         // Return true if newbs is from a new frame
         bool new_frame(const input_pointer& newbs) const;
 
-
+        double m_drift_speed{1.101 * units::mm / units::us};
+        double m_time_offset{-1600 * units::us + 6 * units::mm/(1.101 * units::mm / units::us)};
     };
 }
 
