@@ -78,12 +78,8 @@ WRG::activities_t WCC::ClusteringRetile::get_activity(const Cluster& cluster) co
     const double hit=1.0;       // actual charge value does not matter to tiling.
 
     // what to do the first two views???
-    for (int index = 0; index < 2; ++index){
-        const int layer  = index;
-        WRG::measure_t& m = measures[layer];
-        m.reserve(1);
-        m[0] = hit;
-    }
+    measures[0].push_back(1);
+    measures[1].push_back(1);
 
     // the three views ...
     for (int index=0; index<3; ++index) {
@@ -199,9 +195,26 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     // make a shadow cluster
                     auto& shad_cluster = shadow.make_child();
                     shad_cluster.set_ident(cluster->ident());
+                    //std::cout << cluster->ident() << std::endl;
 
                     if (id==-1) shadow_orig_cluster = &shad_cluster;
                     else shadow_splits[id] = &shad_cluster;
+
+                    
+                    // find the highest and lowest points
+                    std::pair<geo_point_t, geo_point_t> pair_points = cluster->get_highest_lowest_points();
+                    //std::cout << pair_points.first << " " << pair_points.second << std::endl;
+                    int high_idx = cluster->get_closest_point_index(pair_points.first);
+                    int low_idx = cluster->get_closest_point_index(pair_points.second);
+                    cluster->dijkstra_shortest_paths(high_idx, false);
+                    cluster->cal_shortest_path(low_idx);
+
+                    // check path ... 
+                    auto path_wcps = cluster->get_path_wcps();
+                    for (const auto& wcp : path_wcps) {
+                        auto point = cluster->point3d(wcp);
+                        std::cout << point << std::endl;
+                    }
 
                     // Step 1.
                     auto orig_activity = get_activity(*cluster);
