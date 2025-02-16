@@ -284,6 +284,7 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
     }
 
     Aux::add_ctpc(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
+    Aux::add_dead_winds(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
     m_cache.clear();
 
     for (const auto& [name, pc] : root.value.local_pcs()) {

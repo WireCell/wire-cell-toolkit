@@ -21,7 +21,7 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping,
     const bool use_ctpc)
 {
-    std::cout << "Test Examine Bundles" << std::endl;
+    // std::cout << "Test Examine Bundles" << std::endl;
 
     std::vector<Cluster *> live_clusters = live_grouping.children();
     // for (size_t i = 0; i != live_clusters.size(); i++) {

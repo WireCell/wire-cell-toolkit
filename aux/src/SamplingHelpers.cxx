@@ -221,3 +221,69 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
     //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
     // }
 }
+
+void Aux::add_dead_winds(PointCloud::Tree::Points::node_t& root, const IBlobSet::vector ibsv,
+    const IAnodeFace::pointer iface, const int face ,
+    const double time_offset ,
+    const double drift_speed ,
+    const double tick, const double dead_threshold){
+
+    std::set<int> faces;
+    std::set<int> planes;
+
+    std::map<std::pair<int,int>, std::unordered_map<int, std::pair<double, double>> > map_dead_winds;
+    mapfp_t<std::vector<double>> xbegs, xends;
+    mapfp_t<std::vector<int>> winds;
+
+    for (const auto& ibs : ibsv) {
+        const auto& slice = ibs->slice();
+        {
+            const auto& slice_index = slice->start()/tick;
+            const auto& activity = slice->activity();
+            for (const auto& [ichan, charge] : activity) {
+                if(charge.uncertainty() < dead_threshold) continue;
+                const auto& wires = ichan->wires();
+                for (const auto& wire : wires) {
+                    const auto& wind = wire->index();
+                    const auto& plane = wire->planeid().index();
+                    //                     const auto& x = time2drift(iface, time_offset, drift_speed, slice->start());
+                    const auto& xbeg = time2drift(iface, time_offset, drift_speed, slice->start());
+                    const auto& xend = time2drift(iface, time_offset, drift_speed, slice->start() + slice->span());
+
+                    auto& dead_winds = map_dead_winds[std::make_pair(face, plane)];
+                    if (dead_winds.find(wind) == dead_winds.end()) {
+                        dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
+                    } else {
+                        const auto& [xbeg_now, xend_now] = dead_winds[wind];
+                        dead_winds[wind] = {std::min(std::min(xbeg,xend)-0.1*units::cm, xbeg_now), std::max(std::max(xbeg,xend) + 0.1*units::cm, xend_now)};
+                    }
+                    faces.insert(face);
+                    planes.insert(plane);
+
+                }
+            }
+        }
+    }
+    
+    for (const auto& face : faces) {
+        for (const auto& plane : planes) {
+            for (const auto& [wind, xbeg_xend] : map_dead_winds[std::make_pair(face, plane)]) {
+                xbegs[face][plane].push_back(xbeg_xend.first);
+                xends[face][plane].push_back(xbeg_xend.second);
+                winds[face][plane].push_back(wind);
+            }
+        }
+    }
+    for (const auto& face : faces) {
+        for (const auto& plane : planes) {
+            Dataset ds;
+            ds.add("xbeg", Array(xbegs[face][plane]));
+            ds.add("xend", Array(xends[face][plane]));
+            ds.add("wind", Array(winds[face][plane]));
+            const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
+            root.value.local_pcs().emplace(ds_name, ds);
+            // log->debug("added point cloud {} with {} points", ds_name, xbeg.size());
+        }
+    }
+
+}

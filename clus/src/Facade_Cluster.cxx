@@ -2749,7 +2749,7 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
     //     pt_clouds_global_indices[component[i]].push_back(i);
     // }
 
-    std::cout << "Test: "<< num << std::endl;
+    // std::cout << "Test: "<< num << std::endl;
 
     // Initialize distance metrics 
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, std::vector<std::tuple<int, int, double>>(num));
@@ -2857,12 +2857,12 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                     }
                 }
 
-                if (kd_blobs().size()==244){
-                    std::cout << "Test: Dis: " << p1 << " " << p2 << " " << dis << std::endl;
-                    std::cout << "Test: num_bad1: " << num_bad1[0] << " " << num_bad1[1] << " " << num_bad1[2] << " " << num_bad1[3] << std::endl;
-                    std::cout << "Test: num_bad2: " << num_bad2[0] << " " << num_bad2[1] << " " << num_bad2[2] << std::endl;
-                    std::cout << "Test: num_bad: " << num_bad[0] << " " << num_bad[1] << " " << num_bad[2] << " " << num_bad[3] << std::endl;
-                }
+                // if (kd_blobs().size()==244){
+                //     std::cout << "Test: Dis: " << p1 << " " << p2 << " " << dis << std::endl;
+                //     std::cout << "Test: num_bad1: " << num_bad1[0] << " " << num_bad1[1] << " " << num_bad1[2] << " " << num_bad1[3] << std::endl;
+                //     std::cout << "Test: num_bad2: " << num_bad2[0] << " " << num_bad2[1] << " " << num_bad2[2] << std::endl;
+                //     std::cout << "Test: num_bad: " << num_bad[0] << " " << num_bad[1] << " " << num_bad[2] << " " << num_bad[3] << std::endl;
+                // }
                 // Calculate angles between directions
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
@@ -3119,7 +3119,7 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
         boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
                               boost::property<boost::edge_weight_t, double>>
             temp_graph(num);
-        int temp_count = 0;
+        // int temp_count = 0;
         for (size_t j = 0; j != num; j++) {
             for (size_t k = j + 1; k != num; k++) {
                 int index1 = j;
@@ -3127,11 +3127,11 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 if (std::get<0>(index_index_dis[j][k]) >= 0) {
                     add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
                     // LogDebug(index1 << " " << index2 << " " << std::get<2>(index_index_dis[j][k]));
-                    temp_count ++;
+                    // temp_count ++;
                 }
             }
         }
-        std::cout << "Test: Count: " << temp_count << std::endl;
+        // std::cout << "Test: Count: " << temp_count << std::endl;
 
         // Process MST
         process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
@@ -3249,7 +3249,7 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     std::vector<int> component(num_vertices(*m_graph));
     const int num_components = connected_components(*m_graph, &component[0]);
 
-    std::cout << "Test: num components " << num_components << " " << kd_blobs().size() << std::endl;
+    // std::cout << "Test: num components " << num_components << " " << kd_blobs().size() << std::endl;
 
     // If only one component, no need for mapping
     // if (num_components <= 1) {

@@ -203,7 +203,7 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
     double radius, int ch_range) const 
 {
     std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
-    
+    // std::cout << "abc: " << point << " " << radius << " " << ch_range << std::endl;
     // Check each plane (0,1,2)
     for (int pind = 0; pind < 3; ++pind) {
         // Get closest points for this plane
@@ -219,6 +219,7 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
                 num_planes[pind + 3]++;
             }
         }
+        // std::cout << closest_pts.size() << " " << get_closest_dead_chs(point, ch_range, face, pind) << " " << num_planes[pind] << " " << num_planes[pind+3] << std::endl;
     }
     
     return num_planes;
