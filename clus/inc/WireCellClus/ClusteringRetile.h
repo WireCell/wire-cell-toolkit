@@ -89,6 +89,16 @@ namespace WireCell::PointCloud::Facade {
         */
         IAnodeFace::pointer m_face;
 
+        /** Configuration "cut_time_low" (optional, default is -1e9)
+            Lower bound for time cut in nanoseconds
+        */
+        double m_cut_time_low;
+
+        /** Configuration "cut_time_high" (optional, default is 1e9)
+            Upper bound for time cut in nanoseconds
+        */
+        double m_cut_time_high;
+
         /** Configuration "anode" (required)
 
             The type/name of the anode.

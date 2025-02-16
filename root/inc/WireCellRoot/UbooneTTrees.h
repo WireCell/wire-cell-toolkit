@@ -9,6 +9,8 @@
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/PointCloudDataset.h"
+#include "WireCellUtil/Units.h"
+
 
 #include <memory>
 #include <vector>
@@ -318,9 +320,9 @@ namespace WireCell::Root {
 
                 // flash.
                 fid_ind[flash.flash_id] = find;
-                ftime[find] = flash.time;
-                ftmin[find] = flash.tmin;
-                ftmax[find] = flash.tmax;
+                ftime[find] = flash.time * units::us;
+                ftmin[find] = flash.tmin * units::us;
+                ftmax[find] = flash.tmax * units::us;
                 fval[find] = flash.qtot;
                 fident[find] = flash.flash_id;
                 ftype[find] = flash.type;
@@ -334,7 +336,7 @@ namespace WireCell::Root {
 
                     // light.  Must append after flashlight so lid.size() is ID
                     lid.push_back(chan);
-                    lt.push_back(flash.time);
+                    lt.push_back(flash.time * units::us);
                     lq.push_back(flash.light[chan]);
                     ldq.push_back(flash.dlight[chan]);
                 }             

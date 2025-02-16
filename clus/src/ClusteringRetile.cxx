@@ -46,6 +46,10 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
     if (coords.nlayers() != 5) {
         raise<ValueError>("unexpected number of ray grid layers: %d", coords.nlayers());
     }
+
+    // Add time cut configuration
+    m_cut_time_low = get(cfg, "cut_time_low", -1e9);
+    m_cut_time_high = get(cfg, "cut_time_high", 1e9);
 }
 
 
@@ -149,64 +153,80 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
     for (auto* orig_cluster : original.children()) {
 
-        auto& shad_cluster = shadow.make_child();
+        // find the flash time:
+        auto flash = orig_cluster->get_flash();
+        int nblobs = orig_cluster->kd_blobs().size();
+        
+        // Apply time cut
+        if (flash) {
+            double flash_time = flash.time();
+            // if (flash_time < m_cut_time_low || flash_time > m_cut_time_high) {
+            //     continue;  // Skip clusters outside the time window
+            // }
+            if (flash_time >= m_cut_time_low && flash_time <= m_cut_time_high) {
+//            std::cout << "Tests: " << nblobs << " at time " << flash_time/units::us << " " << m_cut_time_low/units::us << " " << m_cut_time_high/units::us << "\n";
+          
 
-        // FIXME: These two methods need to be added to the Cluster Facade.
-        // They should set/get "cluster_id" from the "cluster_scalar" PC.
-        shad_cluster.set_ident(orig_cluster->ident());
+                auto& shad_cluster = shadow.make_child();
 
-        // Step 1.
-        auto orig_activity = get_activity(*orig_cluster);
+                // FIXME: These two methods need to be added to the Cluster Facade.
+                // They should set/get "cluster_id" from the "cluster_scalar" PC.
+                shad_cluster.set_ident(orig_cluster->ident());
 
-        // Step 2.
-        auto shad_activity = hack_activity(orig_activity); // may need more args
+                // Step 1.
+                auto orig_activity = get_activity(*orig_cluster);
 
-        // Step 3.  Must make IBlobs for this is what the sampler takes.
-        auto shad_iblobs = make_iblobs(shad_activity); // may need more args
+                // Step 2.
+                auto shad_activity = hack_activity(orig_activity); // may need more args
 
-        // Steps 4-6.
-        auto niblobs = shad_iblobs.size();
-        // Forgive me (and small-f fixme), but this is now the 3rd generation of
-        // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
-        // PointTreeBuilding.  The reason for the copy-pastes is insufficient
-        // factoring of the de-factor standard sampling code in PointTreeBuilding.
-        // Over time, it is almost guaranteed these copy-pastes become out-of-sync.  
-        for (size_t bind=0; bind<niblobs; ++bind) {
-            if (!m_sampler) {
-                shad_cluster.make_child();
-                continue;
+                // Step 3.  Must make IBlobs for this is what the sampler takes.
+                auto shad_iblobs = make_iblobs(shad_activity); // may need more args
+
+                // Steps 4-6.
+                auto niblobs = shad_iblobs.size();
+                // Forgive me (and small-f fixme), but this is now the 3rd generation of
+                // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
+                // PointTreeBuilding.  The reason for the copy-pastes is insufficient
+                // factoring of the de-factor standard sampling code in PointTreeBuilding.
+                // Over time, it is almost guaranteed these copy-pastes become out-of-sync.  
+                for (size_t bind=0; bind<niblobs; ++bind) {
+                    if (!m_sampler) {
+                        shad_cluster.make_child();
+                        continue;
+                    }
+                    const IBlob::pointer iblob = shad_iblobs[bind];
+
+                    // Sample the iblob, make a new blob node.
+                    PointCloud::Tree::named_pointclouds_t pcs;
+
+                    auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
+                    
+                    pcs.emplace("3d", pc3d);
+                    /// These seem unused and bring in yet more copy-paste code
+                    // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
+                    // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
+                    // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+                    const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
+                    auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
+                    int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
+                    int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
+                    int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
+                    int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
+                    scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
+                    scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
+                    scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
+                    scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
+                    pcs.emplace("scalar", std::move(scalar_ds));
+
+                    shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
+                }
+
+                // FIXME: above we add cluster_id to the "cluster_scalar" PC.  Do we
+                // want to also try to copy over the "light" index entry?
             }
-            const IBlob::pointer iblob = shad_iblobs[bind];
 
-            // Sample the iblob, make a new blob node.
-            PointCloud::Tree::named_pointclouds_t pcs;
-
-            auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
-            
-            pcs.emplace("3d", pc3d);
-            /// These seem unused and bring in yet more copy-paste code
-            // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-            // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-            // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
-            const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
-            auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-            int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-            int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-            int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-            int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-            scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-            scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-            scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-            scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-            pcs.emplace("scalar", std::move(scalar_ds));
-
-            shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
-        }
-
-        // FIXME: above we add cluster_id to the "cluster_scalar" PC.  Do we
-        // want to also try to copy over the "light" index entry?
-    }
     // FIXME: do we need/want to copy over any PCs in the grouping?
     // Specifically optical light/flash/flashlight PCs?
-
+        }
+    }
 }
