@@ -391,6 +391,8 @@ WCC::ClusteringRetile::process_groupings(WCC::Grouping& original, WCC::Grouping&
         }
     }
     
+    std::cout << "haha: " << orig_to_shadow.size() << " " << original.children().size() << " " << shadow.children().size() << std::endl;
+
     // Step 2: Process each pair
     for (const auto& [orig_cluster, shad_cluster] : orig_to_shadow) {
         std::cout << orig_cluster << " " << shad_cluster << std::endl;
@@ -434,11 +436,17 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // other cluster functions this second grouping is interpreted as holding
     // "dead" clusters.
 
-    std::cout << shadow.children().size() << std::endl;
-    shadow.local_pcs().clear();
-    std::cout << shadow.children().size() << std::endl;
 
-    /*
+    // reset the dead clusters ... 
+    // std::cout << shadow.children().size() << std::endl;
+    shadow.local_pcs().clear();
+    for (auto* fcluster : shadow.children()) {
+        shadow.remove_child(*fcluster);
+    }
+    shadow.reset_cache();
+    // std::cout << shadow.children().size() << std::endl;
+
+    
     for (auto* orig_cluster : original.children()) {
 
         // find the flash time:
@@ -471,10 +479,12 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 std::map<int, Cluster*> shadow_splits;
 
                 for (auto& [id, cluster] : map_id_cluster) {
+                    
                     // make a shadow cluster
                     auto& shad_cluster = shadow.make_child();
                     shad_cluster.set_ident(cluster->ident());
-                    //std::cout << cluster->ident() << std::endl;
+                    
+                    std::cout <<"bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
 
                     if (id==-1) shadow_orig_cluster = &shad_cluster;
                     else shadow_splits[id] = &shad_cluster;
@@ -619,7 +629,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
         }
     }
-        */
+
 
     // Process groupings after all shadow clusters are created
     auto cluster_mapping = process_groupings(original, shadow);

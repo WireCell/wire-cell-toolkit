@@ -73,6 +73,19 @@ void Grouping::on_construct(node_type* node)
     }
 }
 
+void Grouping::reset_cache()
+{
+    // Clear all cached information
+    m_proj_centers.clear();
+    m_pitch_mags.clear();
+    m_dead_winds.clear();
+    
+    // Note: After clearing, these will be rebuilt on next access through:
+    // - proj_centers() which calls fill_proj_centers_pitch_mags()
+    // - pitch_mags() which calls fill_proj_centers_pitch_mags()
+    // - get_dead_winds() which rebuilds on access
+}
+
 void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.face = get(cfg, "face", m_tp.face);
     m_tp.pitch_u = get(cfg, "pitch_u", m_tp.pitch_u);

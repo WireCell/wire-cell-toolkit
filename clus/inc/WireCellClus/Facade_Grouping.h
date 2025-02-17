@@ -34,6 +34,8 @@ namespace WireCell::PointCloud::Facade {
 
         Grouping() : Mixin<Grouping>(*this, "grouping_scalar") {}
 
+        void reset_cache();
+        
         // MUST call this sometimes after construction if non-default value needed.
         // FIXME: TPCParams should be moved out of the facade!
         void set_params(const TPCParams& tp) { m_tp = tp; }
