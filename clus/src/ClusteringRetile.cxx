@@ -122,7 +122,7 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
         }
     }
 
-    std::cout << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
+    std::cout << "Test: Org: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
 
 }
 
@@ -170,7 +170,10 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
         auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
         auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
         //std::cout << time_tick_u <<  " " << u_wire << " " << v_wire << " " << w_wire << std::endl;
-        
+
+        int aligned_tick = (time_tick_u / tick_span) * tick_span;
+        std::pair<int, int> tick_range = std::make_pair(aligned_tick, aligned_tick + tick_span);
+
         // Check for activity in neighboring wires/time
         // For each plane (U,V,W), count activity in current and adjacent wires
         std::vector<int> wire_hits = {0,0,0}; // counts for U,V,W planes
@@ -183,7 +186,6 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
                 if (wire < wire_limits[plane].first || wire > wire_limits[plane].second) 
                     continue;
                     
-                std::pair<int, int> tick_range = std::make_pair(time_tick_u, time_tick_u + tick_span);
                 int layer = plane + 2;
                 if (map_slices_measures.find(tick_range) != map_slices_measures.end()) {
                     if (map_slices_measures[tick_range][layer][wire] > 0) {
@@ -215,11 +217,12 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
         auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 0);
         auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
         auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
-        //std::cout << time_tick_u <<  " " << u_wire << " " << v_wire << " " << w_wire << std::endl;
+
+        int aligned_tick = (time_tick_u / tick_span) * tick_span;
 
         // Add activity around this point
         for (int dt = -3; dt <= 3; dt++) {
-            int time_slice = time_tick_u + dt * tick_span;
+            int time_slice = aligned_tick + dt * tick_span;
             if (time_slice < 0) continue;
 
             // Find or create time slice in measures map
@@ -249,6 +252,18 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
             }
         }
     }
+
+
+    std::cout << "Test: Alt: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
+
+    // for (auto it = map_slices_measures.begin(); it!= map_slices_measures.end(); it++){
+    //     std::cout << it->first.first << " " << it->first.second << " " << it->second.size() << std::endl;
+    //     // for (int i=0; i!=5; i++){
+    //     //     std::cout << it->second[i].size() << " ";
+    //     // }
+    //     // std::cout << std::endl;
+    // }
+
 }
 
 
@@ -291,10 +306,16 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
             ret.push_back(iblob);
         }
     }
+
+    std::cout << "Test: Blobs: " << ret.size() << std::endl;
+
     return ret;
 }
 
-
+void WCC::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster) const
+{
+    // Implementation here
+}
 
 void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& shadow, cluster_set_t&) const
 {
@@ -414,7 +435,8 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                         }
                     }
 
-                     // remove blobs after creating facade_blobs ... 
+                    remove_bad_blobs(*cluster, shad_cluster);
+                    // remove blobs after creating facade_blobs ... 
                     // How to call overlap_fast ??? 
                     // for (auto* fblob : shad_cluster.children()) {
                     //     shad_cluster.remove_child(*fblob);
