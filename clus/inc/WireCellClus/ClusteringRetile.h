@@ -37,6 +37,8 @@
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellUtil/RayHelpers.h"
+#include "WireCellAux/PlaneTools.h"
+
 
 #include <vector>
 
@@ -100,6 +102,8 @@ namespace WireCell::PointCloud::Facade {
             Upper bound for time cut in nanoseconds
         */
         double m_cut_time_high;
+
+        std::vector<Aux::WirePlaneInfo> m_plane_infos;
 
         /** Configuration "anode" (required)
 

@@ -52,6 +52,12 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
     // Add time cut configuration
     m_cut_time_low = get(cfg, "cut_time_low", -1e9);
     m_cut_time_high = get(cfg, "cut_time_high", 1e9);
+
+    // Get wire info for each plane
+    m_plane_infos.clear();
+    m_plane_infos.push_back(Aux::get_wire_plane_info(m_face, kUlayer));
+    m_plane_infos.push_back(Aux::get_wire_plane_info(m_face, kVlayer));
+    m_plane_infos.push_back(Aux::get_wire_plane_info(m_face, kWlayer));
 }
 
 
@@ -63,6 +69,13 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
     // checkme: this assumes "iend" is the usual one-past-last aka [ibeg,iend)
     // forms a half-open range.  I'm not sure if PointTreeBuilding is following
     // this or not.
+
+    
+
+    // for (auto& info : plane_infos) {
+    //     std::cout << "test1: " << info.start_index << " " << info.end_index << " " << info.total_wires << std::endl;
+    // }
+
 
     int (WCC::Blob::*wmin[])(void) const = {
         &WCC::Blob::u_wire_index_min,
@@ -83,11 +96,17 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
         int tslice_end = fblob->slice_index_max();
 
         auto& measures = map_slices_measures[std::make_pair(tslice_beg, tslice_end)];
-        measures.resize(nlayers);
-
-        // what to do the first two views???
-        measures[0].push_back(1);
-        measures[1].push_back(1);
+        
+        if (measures.size()==0){
+            measures.resize(nlayers);
+            // what to do the first two views???
+            measures[0].push_back(1);
+            measures[1].push_back(1);
+            measures[2].resize(m_plane_infos[0].total_wires, 0);
+            measures[3].resize(m_plane_infos[1].total_wires, 0);
+            measures[4].resize(m_plane_infos[2].total_wires, 0);
+            // std::cout << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
+        }
 
         // the three views ...
         for (int index=0; index<3; ++index) {
@@ -95,10 +114,7 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
             WRG::measure_t& m = measures[layer];
             // Make each "wire" in each blob's bounds of this plane "hit".
             int ibeg = (fblob->*wmin[index])();
-            int iend = (fblob->*wmax[index])();
-            if (iend > m.size()) {
-                m.resize(iend);
-            }
+            int iend = (fblob->*wmax[index])();    
             while (ibeg < iend) {
                 m[ibeg++] = hit;
             }

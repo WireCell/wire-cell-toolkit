@@ -16,7 +16,16 @@ namespace WireCell {
         /// determined by the order of channels w/in the face.
         IChannel::vector plane_channels(IAnodePlane::pointer anode,
                                         int wire_plane_index);
-         
+
+        struct WirePlaneInfo {
+            int start_index;
+            int end_index;
+            int total_wires;
+        };
+        // Get wire information for a specific plane from IAnodeFace
+        WirePlaneInfo get_wire_plane_info(IAnodeFace::pointer face, WirePlaneLayer_t layer);
+
+
     }
 }
 #endif
