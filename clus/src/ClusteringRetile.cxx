@@ -130,18 +130,125 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
 // Step 2. Modify activity to suit.
 void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures) const
 {
-     // check path ... 
-     auto path_wcps = cluster.get_path_wcps();
-     for (const auto& wcp : path_wcps) {
-         auto point = cluster.point3d(wcp);
-         std::cout << point << std::endl;
-     }
+    const double low_dis_limit = 0.3 * units::cm;
+    // Get path points
+    auto path_wcps = cluster.get_path_wcps();
+    std::vector<geo_point_t> path_pts;
 
-    // FIXME: Xin, delete this line and add your "hacks".  Note, your
-    // "hackgorithm" may require more arguments to come in to this method that I
-    // write here.  Since I don't know what you need, I only give the minimal.
-    // More can be added as needed.
+    // Convert list points to vector with interpolation
+    for (const auto& wcp : path_wcps) {
+        geo_point_t p= cluster.point3d(wcp);
+        if (path_pts.empty()) {
+            path_pts.push_back(p);
+        } else {
+            double dis = (p - path_pts.back()).magnitude();
+            if (dis < low_dis_limit) {
+                path_pts.push_back(p);
+            } else {
+                int ncount = int(dis/low_dis_limit) + 1;
+                for (int i=0; i < ncount; i++) {
+                    Point p1;
+                    p1 = path_pts.back() + (p - path_pts.back()) * (i+1)/ncount;
+                    path_pts.push_back(p1);
+                }
+            }
+        }
+    }
 
+    std::vector<std::pair<int,int>> wire_limits;
+    for (int i=0; i!=3; i++){
+        wire_limits.push_back(std::make_pair(m_plane_infos[i].start_index, m_plane_infos[i].end_index));
+    }
+
+    // this is to get the end of the time tick range = start_tick + tick_span
+    int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
+
+    // Flag points that have sufficient activity around them
+    std::vector<bool> path_pts_flag(path_pts.size(), false);
+    for (size_t i = 0; i < path_pts.size(); i++) {
+        auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 0);
+        auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
+        auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
+        //std::cout << time_tick_u <<  " " << u_wire << " " << v_wire << " " << w_wire << std::endl;
+        
+        // Check for activity in neighboring wires/time
+        // For each plane (U,V,W), count activity in current and adjacent wires
+        std::vector<int> wire_hits = {0,0,0}; // counts for U,V,W planes
+        std::vector<int> wires = {u_wire, v_wire, w_wire};
+        
+        for (size_t plane = 0; plane < 3; plane++) {
+            // Check activity in current and adjacent wires
+            for (int delta : {-1, 0, 1}) {
+                int wire = wires[plane] + delta;
+                if (wire < wire_limits[plane].first || wire > wire_limits[plane].second) 
+                    continue;
+                    
+                std::pair<int, int> tick_range = std::make_pair(time_tick_u, time_tick_u + tick_span);
+                int layer = plane + 2;
+                if (map_slices_measures.find(tick_range) != map_slices_measures.end()) {
+                    if (map_slices_measures[tick_range][layer][wire] > 0) {
+                        wire_hits[plane] += (delta == 0) ? 1 : (delta == -1) ? 2 : 1;
+                    }
+                }
+            }
+        }
+        
+        // Set flag if sufficient activity found
+        if (wire_hits[0] > 0 && wire_hits[1] > 0 && wire_hits[2] > 0 && 
+            (wire_hits[0] + wire_hits[1] + wire_hits[2] >= 6)) {
+            path_pts_flag[i] = true;
+        }
+        // std::cout << wire_hits[0] << " " << wire_hits[1] << " " << wire_hits[2] << " " << path_pts_flag[i] << std::endl;    
+    }
+
+    // Add missing activity based on path points
+    for (size_t i = 0; i < path_pts.size(); i++) {
+        // Skip if point is well-covered by existing activity
+        if (i == 0) {
+            if (path_pts_flag[i] && path_pts_flag[i+1]) continue;
+        } else if (i+1 == path_pts.size()) {
+            if (path_pts_flag[i] && path_pts_flag[i-1]) continue;
+        } else {
+            if (path_pts_flag[i-1] && path_pts_flag[i] && path_pts_flag[i+1]) continue;
+        }
+
+        auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 0);
+        auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
+        auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
+        //std::cout << time_tick_u <<  " " << u_wire << " " << v_wire << " " << w_wire << std::endl;
+
+        // Add activity around this point
+        for (int dt = -3; dt <= 3; dt++) {
+            int time_slice = time_tick_u + dt * tick_span;
+            if (time_slice < 0) continue;
+
+            // Find or create time slice in measures map
+            auto slice_key = std::make_pair(time_slice, time_slice+tick_span);  
+            if (map_slices_measures.find(slice_key) == map_slices_measures.end()) {
+                auto& measures = map_slices_measures[slice_key];
+                measures = std::vector<WRG::measure_t>(5);  // 2+3 layers
+                measures[0].push_back(1);  // First layer measurement 
+                measures[1].push_back(1);  // Second layer measurement
+                measures[2].resize(m_plane_infos[0].total_wires, 0);
+                measures[3].resize(m_plane_infos[1].total_wires, 0); 
+                measures[4].resize(m_plane_infos[2].total_wires, 0);
+            }
+
+            // Add activity for each plane
+            std::vector<int> wires = {u_wire, v_wire, w_wire};
+            for (size_t plane = 0; plane < 3; plane++) {
+                auto& measures = map_slices_measures[slice_key][plane+2]; // +2 to skip first two layers
+                
+                for (int dw = -3; dw <= 3; dw++) {
+                    int wire = wires[plane] + dw;
+                    if (wire < wire_limits[plane].first || wire > wire_limits[plane].second ||
+                        std::abs(dw) + std::abs(dt) > 3) 
+                        continue;
+                    measures[wire] = 1.0;  // Set activity
+                }
+            }
+        }
+    }
 }
 
 
@@ -178,9 +285,9 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
             IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
                                                                  blob_error, bshape, slice, m_face);
             //     std::cout << "Test: " << iblob << std::endl;
-    //     // FIXME: (maybe okay?) GridTiling produces an IBlobSet here which holds
-    //     // ISlice info.  Are we losing anything important not including that
-    //     // info?
+            // FIXME: (maybe okay?) GridTiling produces an IBlobSet here which holds
+            // ISlice info.  Are we losing anything important not including that
+            // info?
             ret.push_back(iblob);
         }
     }
