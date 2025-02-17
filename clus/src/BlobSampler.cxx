@@ -768,6 +768,8 @@ struct Stepped : public BlobSampler::Sampler
         }
         max_wires_set.insert(smax.bounds.second-1);
 
+        // std::cout << min_wires_set.size() << " " << max_wires_set.size() << " " << smin.bounds.first << " " << smin.bounds.second << " " << smax.bounds.first << " " << smax.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second << " " << smin.layer << " " << smax.layer <<  " " << smid.layer << std::endl;
+
         for (auto it_gmin = min_wires_set.begin(); it_gmin != min_wires_set.end(); it_gmin++){
 //        for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) {
             coordinate_t cmin{smin.layer, *it_gmin};
@@ -784,6 +786,7 @@ struct Stepped : public BlobSampler::Sampler
                 // if (smax.bounds.first==1006 && smax.bounds.second==1011)
                 //     std::cout << smax.bounds.first << " " << smax.bounds.second << " " << smin.bounds.first << " " << smin.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second 
                 //         << " " << *it_gmax << " " << *it_gmin << " " << pitch << " " << pitch_relative << " " << pitch_adjust << " " << max_id << " " << min_id << " " << mid_id << std::endl;
+                // if (smid.bounds.first == 707) std::cout << pitch_relative << std::endl;
                 if (pitch_relative > smid.bounds.first - tolerance && pitch_relative < smid.bounds.second + tolerance){
                     const auto pt = coords.ray_crossing(cmin, cmax);
                     points.push_back(pt + adjust);

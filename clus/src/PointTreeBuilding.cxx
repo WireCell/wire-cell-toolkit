@@ -198,6 +198,10 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             named_pointclouds_t pcs;
             /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
             auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
+            if (pc3d.get("x")->size_major() == 0) {
+                log->debug("blob {} has no points", iblob->ident());
+                continue;
+            }
             pcs.emplace("3d", pc3d);
             pcs.emplace("2dp0", make2dds(pc3d, angle_u));
             pcs.emplace("2dp1", make2dds(pc3d, angle_v));

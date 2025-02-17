@@ -143,7 +143,7 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
         WRG::activities_t activities = RayGrid::make_activities(m_face->raygrid(), it->second);
         auto bshapes = WRG::make_blobs(coords, activities);
 
-        // std::cout << "abc: " << bshapes.size() << " " << activities.size() << " " << std::endl;
+        //std::cout << "abc: " << bshapes.size() << " " << activities.size() << " " << std::endl;
         // for (const auto& activity : activities) {
         //     std::cout << activity.as_string() << std::endl;
         // }
@@ -155,15 +155,13 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
         for (const auto& bshape : bshapes) {
             IFrame::pointer sframe = nullptr;
 
-            ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first, it->first.second - it->first.first);
+            // 500 ns should be passed from outside?
+            ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*500*units::ns, (it->first.second - it->first.first)*500*units::ns);
 
-    //     ISlice::pointer slice = nullptr; // fixme: okay?
+            //     ISlice::pointer slice = nullptr; // fixme: okay?
             IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
                                                                  blob_error, bshape, slice, m_face);
-    //     std::cout << "Test: " << iblob << std::endl;
-
-           // How to call overlap_fast ??? 
-
+            //     std::cout << "Test: " << iblob << std::endl;
     //     // FIXME: (maybe okay?) GridTiling produces an IBlobSet here which holds
     //     // ISlice info.  Are we losing anything important not including that
     //     // info?
@@ -262,30 +260,50 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                         auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
                         
                         // how to sample points ... 
-                        std::cout << pc3d.size() << " " << aux.size() << std::endl;
+                        // std::cout << pc3d.size() << " " << aux.size() << " " <<  pc3d.get("x")->size_major() << " " << pc3d.get("y")->size_major() << " " << pc3d.get("z")->size_major() << std::endl;
+                        // const auto& arr_x1 = pc3d.get("x")->elements<Point::coordinate_t>();
 
-                        // pcs.emplace("3d", pc3d);
-                        // /// These seem unused and bring in yet more copy-paste code
-                        // // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-                        // // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-                        // // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
-                        // const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
-                        // auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-                        // int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-                        // int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-                        // int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-                        // int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-                        // scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-                        // scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-                        // scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-                        // scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-                        // pcs.emplace("scalar", std::move(scalar_ds));
+                        pcs.emplace("3d", pc3d);
+                        /// These seem unused and bring in yet more copy-paste code
+                        // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
+                        // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
+                        // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+                        // std::cout << pcs["3d"].get("x")->size_major() << " " << pcs["3d"].get("y")->size_major() << " " << pcs["3d"].get("z")->size_major() << std::endl;
+                        // const auto& arr_x = pcs["3d"].get("x")->elements<Point::coordinate_t>();
+                        // std::cout << arr_x.size() << " " << arr_x1.size() << std::endl;
+                        // std::cout << iblob->shape() << std::endl;
+                        if (pc3d.get("x")->size_major() > 0){
+                            const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
+                            auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
+                            int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
+                            int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
+                            int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
+                            int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
+                            scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
+                            scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
+                            scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
+                            scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
+                            pcs.emplace("scalar", std::move(scalar_ds));
 
-                        // shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
+                            shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
+                        }else{
+                            SPDLOG_WARN("blob {} has no points", iblob->ident());
+                        }
                     }
 
-                    std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
+                     // remove blobs after creating facade_blobs ... 
+                    // How to call overlap_fast ??? 
+                    // for (auto* fblob : shad_cluster.children()) {
+                    //     shad_cluster.remove_child(*fblob);
+                    // }
+
+                    // std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
                 }
+
+               
+
+                
+
 
                 //     // FIXME: These two methods need to be added to the Cluster Facade.
                 //     // They should set/get "cluster_id" from the "cluster_scalar" PC.
