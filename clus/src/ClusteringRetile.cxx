@@ -171,7 +171,7 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
         auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
         //std::cout << time_tick_u <<  " " << u_wire << " " << v_wire << " " << w_wire << std::endl;
 
-        int aligned_tick = (time_tick_u / tick_span) * tick_span;
+        int aligned_tick = std::round(time_tick_u *1.0/ tick_span) * tick_span;
         std::pair<int, int> tick_range = std::make_pair(aligned_tick, aligned_tick + tick_span);
 
         // Check for activity in neighboring wires/time
@@ -200,6 +200,7 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
             (wire_hits[0] + wire_hits[1] + wire_hits[2] >= 6)) {
             path_pts_flag[i] = true;
         }
+        // std::cout << path_pts[i] << " " << wire_hits[0] << " " << wire_hits[1] << " " << wire_hits[2] << " " << path_pts_flag[i] << " " << aligned_tick/tick_span << " " << u_wire << " " << v_wire << " " << w_wire << " " << time_tick_u << " " << std::round(time_tick_u / tick_span) << std::endl;
         // std::cout << wire_hits[0] << " " << wire_hits[1] << " " << wire_hits[2] << " " << path_pts_flag[i] << std::endl;    
     }
 
@@ -218,7 +219,7 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
         auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
         auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
 
-        int aligned_tick = (time_tick_u / tick_span) * tick_span;
+        int aligned_tick = std::round(time_tick_u *1.0/ tick_span) * tick_span;
 
         // Add activity around this point
         for (int dt = -3; dt <= 3; dt++) {
@@ -479,7 +480,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 std::map<int, Cluster*> shadow_splits;
 
                 for (auto& [id, cluster] : map_id_cluster) {
-                    
+
                     // make a shadow cluster
                     auto& shad_cluster = shadow.make_child();
                     shad_cluster.set_ident(cluster->ident());
@@ -584,22 +585,24 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                     std::cout << "Test: remove: " << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
                
-                    // shad cluster getting highest and lowest points and then do shortest path ... 
-                    // find the highest and lowest points
-                    std::pair<geo_point_t, geo_point_t> shad_pair_points = shad_cluster.get_highest_lowest_points();
-                    //std::cout << pair_points.first << " " << pair_points.second << std::endl;
-                    int shad_high_idx = shad_cluster.get_closest_point_index(shad_pair_points.first);
-                    int shad_low_idx = shad_cluster.get_closest_point_index(shad_pair_points.second);
-                    shad_cluster.dijkstra_shortest_paths(shad_high_idx, false);
-                    shad_cluster.cal_shortest_path(shad_low_idx);
-                    {
-                        auto path_wcps = shad_cluster.get_path_wcps();                
-                        // Convert list points to vector with interpolation
-                        for (const auto& wcp : path_wcps) {
-                            geo_point_t p= shad_cluster.point3d(wcp);
-                            std::cout << p << std::endl;
-                        }
-                    }
+                    // Example code to access shadown cluster information ...
+                    // // shad cluster getting highest and lowest points and then do shortest path ... 
+                    // // find the highest and lowest points
+                    // std::pair<geo_point_t, geo_point_t> shad_pair_points = shad_cluster.get_highest_lowest_points();
+                    // //std::cout << pair_points.first << " " << pair_points.second << std::endl;
+                    // int shad_high_idx = shad_cluster.get_closest_point_index(shad_pair_points.first);
+                    // int shad_low_idx = shad_cluster.get_closest_point_index(shad_pair_points.second);
+                    // shad_cluster.dijkstra_shortest_paths(shad_high_idx, false);
+                    // shad_cluster.cal_shortest_path(shad_low_idx);
+                    // {
+                    //     auto path_wcps = shad_cluster.get_path_wcps();                
+                    //     // Convert list points to vector with interpolation
+                    //     for (const auto& wcp : path_wcps) {
+                    //         geo_point_t p= shad_cluster.point3d(wcp);
+                    //         std::cout << p << std::endl;
+                    //     }
+                    // }
+
                 }
 
                 //     // FIXME: These two methods need to be added to the Cluster Facade.
