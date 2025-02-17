@@ -11,7 +11,6 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/PointTree.h"
-#include "WireCellUtil/RayHelpers.h"
 
 using namespace WireCell;
 
@@ -54,10 +53,9 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
 
 
 // Step 1. Build activities from blobs in a cluster.
-WRG::activities_t WCC::ClusteringRetile::get_activity(const Cluster& cluster) const
+void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures) const
 {
     const int nlayers = 2+3;
-    std::vector<WRG::measure_t> measures(nlayers);
 
     // checkme: this assumes "iend" is the usual one-past-last aka [ibeg,iend)
     // forms a half-open range.  I'm not sure if PointTreeBuilding is following
@@ -77,17 +75,22 @@ WRG::activities_t WCC::ClusteringRetile::get_activity(const Cluster& cluster) co
         
     const double hit=1.0;       // actual charge value does not matter to tiling.
 
-    // what to do the first two views???
-    measures[0].push_back(1);
-    measures[1].push_back(1);
+    for (const auto* fblob : cluster.children()) {
+        int tslice_beg = fblob->slice_index_min();
+        int tslice_end = fblob->slice_index_max();
 
-    // the three views ...
-    for (int index=0; index<3; ++index) {
-        const int layer = index + 2;
-        WRG::measure_t& m = measures[layer];
+        auto& measures = map_slices_measures[std::make_pair(tslice_beg, tslice_end)];
+        measures.resize(nlayers);
 
-        // Make each "wire" in each blob's bounds of this plane "hit".
-        for (const auto* fblob : cluster.children()) {
+        // what to do the first two views???
+        measures[0].push_back(1);
+        measures[1].push_back(1);
+
+        // the three views ...
+        for (int index=0; index<3; ++index) {
+            const int layer = index + 2;
+            WRG::measure_t& m = measures[layer];
+            // Make each "wire" in each blob's bounds of this plane "hit".
             int ibeg = (fblob->*wmin[index])();
             int iend = (fblob->*wmax[index])();
             m.reserve(iend);
@@ -98,54 +101,56 @@ WRG::activities_t WCC::ClusteringRetile::get_activity(const Cluster& cluster) co
         }
     }
 
-    return RayGrid::make_activities(m_face->raygrid(), measures);
+    std::cout << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
+
 }
 
 
 // Step 2. Modify activity to suit.
-WRG::activities_t WCC::ClusteringRetile::hack_activity(const WRG::activities_t& activity) const
+void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures) const
 {
-    WRG::activities_t ret;
-
+     // check path ... 
+     auto path_wcps = cluster.get_path_wcps();
+     for (const auto& wcp : path_wcps) {
+         auto point = cluster.point3d(wcp);
+         std::cout << point << std::endl;
+     }
 
     // FIXME: Xin, delete this line and add your "hacks".  Note, your
     // "hackgorithm" may require more arguments to come in to this method that I
     // write here.  Since I don't know what you need, I only give the minimal.
     // More can be added as needed.
-    ret = activity;
 
-
-    return ret;
 }
 
 
 
 // Step 3. Form IBlobs from activities.
-std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(const WRG::activities_t& activity) const
+std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures) const
 {
     std::vector<IBlob::pointer> ret;
 
-    const auto& coords = m_face->raygrid();
+    // const auto& coords = m_face->raygrid();
 
-    // Do the actual tiling.
-    auto bshapes = WRG::make_blobs(coords, activity);
+    // // Do the actual tiling.
+    // auto bshapes = WRG::make_blobs(coords, activity);
 
-    std::cout << bshapes.size() << " " << activity.size() << std::endl;
+    // std::cout << bshapes.size() << " " << activity.size() << std::endl;
 
-    // Convert RayGrid blob shapes into IBlobs 
-    const float blob_value = 0.0;  // tiling doesn't consider particular charge
-    const float blob_error = 0.0;  // tiling doesn't consider particular charge
-    int blob_ident=0;
-    for (const auto& bshape : bshapes) {
-        ISlice::pointer slice = nullptr; // fixme: okay?
-        IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
-                                                                 blob_error, bshape, slice, m_face);
-        std::cout << "Test: " << iblob << std::endl;
-        // FIXME: (maybe okay?) GridTiling produces an IBlobSet here which holds
-        // ISlice info.  Are we losing anything important not including that
-        // info?
-        ret.push_back(iblob);
-    }
+    // // Convert RayGrid blob shapes into IBlobs 
+    // const float blob_value = 0.0;  // tiling doesn't consider particular charge
+    // const float blob_error = 0.0;  // tiling doesn't consider particular charge
+    // int blob_ident=0;
+    // for (const auto& bshape : bshapes) {
+    //     ISlice::pointer slice = nullptr; // fixme: okay?
+    //     IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
+    //                                                              blob_error, bshape, slice, m_face);
+    //     std::cout << "Test: " << iblob << std::endl;
+    //     // FIXME: (maybe okay?) GridTiling produces an IBlobSet here which holds
+    //     // ISlice info.  Are we losing anything important not including that
+    //     // info?
+    //     ret.push_back(iblob);
+    // }
     return ret;
 }
 
@@ -209,63 +214,57 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     cluster->dijkstra_shortest_paths(high_idx, false);
                     cluster->cal_shortest_path(low_idx);
 
-                    // check path ... 
-                    auto path_wcps = cluster->get_path_wcps();
-                    for (const auto& wcp : path_wcps) {
-                        auto point = cluster->point3d(wcp);
-                        std::cout << point << std::endl;
-                    }
-
                     // Step 1.
-                    auto orig_activity = get_activity(*cluster);
+                    std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
+                    get_activity(*cluster, map_slices_measures);
 
                     // Step 2.
-                    auto shad_activity = hack_activity(orig_activity); // may need more args
+                    hack_activity(*cluster, map_slices_measures); // may need more args
 
-                    // Step 3.  Must make IBlobs for this is what the sampler takes.
-                    auto shad_iblobs = make_iblobs(shad_activity); // may need more args
+                    // // Step 3.  Must make IBlobs for this is what the sampler takes.
+                    // auto shad_iblobs = make_iblobs(shad_activity); // may need more args
 
-                    // Steps 4-6.
-                    auto niblobs = shad_iblobs.size();
+                    // // Steps 4-6.
+                    // auto niblobs = shad_iblobs.size();
                     // Forgive me (and small-f fixme), but this is now the 3rd generation of
                     // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
                     // PointTreeBuilding.  The reason for the copy-pastes is insufficient
                     // factoring of the de-factor standard sampling code in PointTreeBuilding.
                     // Over time, it is almost guaranteed these copy-pastes become out-of-sync.  
-                    for (size_t bind=0; bind<niblobs; ++bind) {
-                        if (!m_sampler) {
-                            shad_cluster.make_child();
-                            continue;
-                        }
-                        const IBlob::pointer iblob = shad_iblobs[bind];
+                    // for (size_t bind=0; bind<niblobs; ++bind) {
+                    //     if (!m_sampler) {
+                    //         shad_cluster.make_child();
+                    //         continue;
+                    //     }
+                    //     const IBlob::pointer iblob = shad_iblobs[bind];
 
-                        // Sample the iblob, make a new blob node.
-                        PointCloud::Tree::named_pointclouds_t pcs;
+                    //     // Sample the iblob, make a new blob node.
+                    //     PointCloud::Tree::named_pointclouds_t pcs;
 
-                        auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
+                    //     auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
                         
-                        pcs.emplace("3d", pc3d);
-                        /// These seem unused and bring in yet more copy-paste code
-                        // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-                        // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-                        // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
-                        const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
-                        auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-                        int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-                        int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-                        int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-                        int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-                        scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-                        scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-                        scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-                        scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-                        pcs.emplace("scalar", std::move(scalar_ds));
+                    //     pcs.emplace("3d", pc3d);
+                    //     /// These seem unused and bring in yet more copy-paste code
+                    //     // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
+                    //     // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
+                    //     // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+                    //     const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
+                    //     auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
+                    //     int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
+                    //     int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
+                    //     int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
+                    //     int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
+                    //     scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
+                    //     scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
+                    //     scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
+                    //     scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
+                    //     pcs.emplace("scalar", std::move(scalar_ds));
 
-                        shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
-                        std::cout << "test " << std::endl;
-                    }
+                    //     shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
+                    //     std::cout << "test " << std::endl;
+                    // }
 
-                    std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
+                    // std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
                 }
 
                 //     // FIXME: These two methods need to be added to the Cluster Facade.

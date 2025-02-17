@@ -36,6 +36,7 @@
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Cluster.h"
+#include "WireCellUtil/RayHelpers.h"
 
 #include <vector>
 
@@ -61,13 +62,14 @@ namespace WireCell::PointCloud::Facade {
     private:
 
         // Step 1. Build activities from blobs in a cluster.
-        WireCell::RayGrid::activities_t get_activity(const Cluster& cluster) const;
+        void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
+
 
         // Step 2. Modify activity to suit.
-        WireCell::RayGrid::activities_t hack_activity(const WireCell::RayGrid::activities_t& activity) const;
+        void hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
 
         // Step 3. Form IBlobs from activities.
-        std::vector<WireCell::IBlob::pointer> make_iblobs(const WireCell::RayGrid::activities_t& activity) const;
+        std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
 
         // Remaining steps are done in the operator() directly.
 
