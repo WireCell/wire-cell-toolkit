@@ -55,6 +55,40 @@ Grouping* Cluster::grouping() { return this->m_node->parent->value.template faca
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
 
 
+
+// Add this to the public section of the Cluster class:
+void Cluster::reset_cache() {
+    // Reset time-blob mapping
+    m_time_blob_map.clear();
+    
+    // Reset blob-indices mapping
+    m_map_mcell_indices.clear();
+    
+    // Reset hull data
+    m_hull_points.clear();
+    m_hull_calculated = false;
+    
+    // Reset length and point count
+    m_length = 0;
+    m_npoints = 0;
+    
+    // Reset PCA data
+    m_pca_calculated = false;
+    m_center = geo_point_t();
+    for(int i = 0; i < 3; i++) {
+        m_pca_axis[i] = geo_vector_t();
+        m_pca_values[i] = 0;
+    }
+    
+    // Reset graph and path finding data
+    m_graph.reset();
+    m_parents.clear();
+    m_distances.clear();
+    m_source_pt_index = -1;
+    m_path_wcps.clear();
+    m_path_mcells.clear();
+}
+
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {
         std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() 
@@ -1556,6 +1590,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(const bool use_ctpc) const
 {
+    std::cout << "Create Graph!" << std::endl;
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(nbpoints());

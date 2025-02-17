@@ -313,7 +313,7 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
 }
 
 std::set<const WireCell::PointCloud::Facade::Blob*> 
-WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster) const
+WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span) const
 {
     // Implementation here
     // Get time-organized map of original blobs
@@ -327,13 +327,15 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
 
     // Examine each new blob
     for (const auto& [time_slice, new_blobs] : new_time_blob_map) {
+        // std::cout << time_slice << " " << new_blobs.size() << std::endl;
+
         for (const Blob* new_blob : new_blobs) {
             bool flag_good = false;
             
             // Check overlap with blobs in previous time slice
-            if (orig_time_blob_map.find(time_slice - 1) != orig_time_blob_map.end()) {
-                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice - 1)) {
-                    if (new_blob->overlap_fast(*orig_blob, 0)) {
+            if (orig_time_blob_map.find(time_slice - tick_span) != orig_time_blob_map.end()) {
+                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice - tick_span)) {
+                    if (new_blob->overlap_fast(*orig_blob, 1)) {
                         flag_good = true;
                         break;
                     }
@@ -343,7 +345,7 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
             // Check overlap with blobs in same time slice
             if (!flag_good && orig_time_blob_map.find(time_slice) != orig_time_blob_map.end()) {
                 for (const Blob* orig_blob : orig_time_blob_map.at(time_slice)) {
-                    if (new_blob->overlap_fast(*orig_blob, 0)) {
+                    if (new_blob->overlap_fast(*orig_blob, 1)) {
                         flag_good = true;
                         break;
                     }
@@ -351,9 +353,9 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
             }
             
             // Check overlap with blobs in next time slice
-            if (!flag_good && orig_time_blob_map.find(time_slice + 1) != orig_time_blob_map.end()) {
-                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice + 1)) {
-                    if (new_blob->overlap_fast(*orig_blob, 0)) {
+            if (!flag_good && orig_time_blob_map.find(time_slice + tick_span) != orig_time_blob_map.end()) {
+                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice + tick_span)) {
+                    if (new_blob->overlap_fast(*orig_blob, 1)) {
                         flag_good = true;
                         break;
                     }
@@ -491,12 +493,25 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                         }
                     }
 
+                    int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
+
+                    std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
                     // remove blobs after creating facade_blobs ... 
-                    auto blobs_to_remove = remove_bad_blobs(*cluster, shad_cluster);
+                    auto blobs_to_remove = remove_bad_blobs(*cluster, shad_cluster, tick_span);
                     for (const Blob* blob : blobs_to_remove) {
                         Blob& b = const_cast<Blob&>(*blob);
+
                         shad_cluster.remove_child(b);
                     }
+                    shad_cluster.reset_cache();
+                    
+                    // // Reset cached data that depends on cluster contents
+                    // shad_cluster.reset_pca();         // Reset PCA calculations
+                    // // Force rebuild of time blob map by accessing it
+                    // shad_cluster.time_blob_map();
+                    // shad_cluster.point3d(0); // This will trigger PC tree rebuild
+                    std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
+
                     // How to call overlap_fast ??? 
                     // for (auto* fblob : shad_cluster.children()) {
                     //     shad_cluster.remove_child(*fblob);
@@ -520,6 +535,8 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                             std::cout << p << std::endl;
                         }
                     }
+
+
                 }
 
                

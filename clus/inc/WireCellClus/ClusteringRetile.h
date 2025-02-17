@@ -73,7 +73,7 @@ namespace WireCell::PointCloud::Facade {
         // Step 3. Form IBlobs from activities.
         std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
 
-        std::set<const WireCell::PointCloud::Facade::Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster) const;
+        std::set<const WireCell::PointCloud::Facade::Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span) const;
 
         // Remaining steps are done in the operator() directly.
 

@@ -40,6 +40,8 @@ namespace WireCell::PointCloud::Facade {
         Cluster() : Mixin<Cluster>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
 
+        void reset_cache();
+
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
