@@ -312,9 +312,65 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
     return ret;
 }
 
-void WCC::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster) const
+std::set<const WireCell::PointCloud::Facade::Blob*> 
+WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster) const
 {
     // Implementation here
+    // Get time-organized map of original blobs
+    const auto& orig_time_blob_map = cluster.time_blob_map();
+    
+    // Get time-organized map of newly created blobs
+    const auto& new_time_blob_map = shad_cluster.time_blob_map();
+    
+    // Track blobs that need to be removed
+    std::set<const Blob*> blobs_to_remove;
+
+    // Examine each new blob
+    for (const auto& [time_slice, new_blobs] : new_time_blob_map) {
+        for (const Blob* new_blob : new_blobs) {
+            bool flag_good = false;
+            
+            // Check overlap with blobs in previous time slice
+            if (orig_time_blob_map.find(time_slice - 1) != orig_time_blob_map.end()) {
+                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice - 1)) {
+                    if (new_blob->overlap_fast(*orig_blob, 0)) {
+                        flag_good = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Check overlap with blobs in same time slice
+            if (!flag_good && orig_time_blob_map.find(time_slice) != orig_time_blob_map.end()) {
+                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice)) {
+                    if (new_blob->overlap_fast(*orig_blob, 0)) {
+                        flag_good = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Check overlap with blobs in next time slice
+            if (!flag_good && orig_time_blob_map.find(time_slice + 1) != orig_time_blob_map.end()) {
+                for (const Blob* orig_blob : orig_time_blob_map.at(time_slice + 1)) {
+                    if (new_blob->overlap_fast(*orig_blob, 0)) {
+                        flag_good = true;
+                        break;
+                    }
+                }
+            }
+            
+            // If no overlap found with original blobs in nearby time slices, mark for removal
+            if (!flag_good) {
+                blobs_to_remove.insert(new_blob);
+            }
+        }
+    }
+    
+    // Remove the bad blobs
+    return blobs_to_remove;
+   
+    
 }
 
 void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& shadow, cluster_set_t&) const
@@ -435,14 +491,35 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                         }
                     }
 
-                    remove_bad_blobs(*cluster, shad_cluster);
                     // remove blobs after creating facade_blobs ... 
+                    auto blobs_to_remove = remove_bad_blobs(*cluster, shad_cluster);
+                    for (const Blob* blob : blobs_to_remove) {
+                        Blob& b = const_cast<Blob&>(*blob);
+                        shad_cluster.remove_child(b);
+                    }
                     // How to call overlap_fast ??? 
                     // for (auto* fblob : shad_cluster.children()) {
                     //     shad_cluster.remove_child(*fblob);
                     // }
 
-                    // std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
+                    std::cout << "Test: remove: " << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
+               
+                    // shad cluster getting highest and lowest points and then do shortest path ... 
+                    // find the highest and lowest points
+                    std::pair<geo_point_t, geo_point_t> shad_pair_points = shad_cluster.get_highest_lowest_points();
+                    //std::cout << pair_points.first << " " << pair_points.second << std::endl;
+                    int shad_high_idx = shad_cluster.get_closest_point_index(shad_pair_points.first);
+                    int shad_low_idx = shad_cluster.get_closest_point_index(shad_pair_points.second);
+                    shad_cluster.dijkstra_shortest_paths(shad_high_idx, false);
+                    shad_cluster.cal_shortest_path(shad_low_idx);
+                    {
+                        auto path_wcps = shad_cluster.get_path_wcps();                
+                        // Convert list points to vector with interpolation
+                        for (const auto& wcp : path_wcps) {
+                            geo_point_t p= shad_cluster.point3d(wcp);
+                            std::cout << p << std::endl;
+                        }
+                    }
                 }
 
                
