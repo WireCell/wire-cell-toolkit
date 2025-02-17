@@ -112,6 +112,9 @@ namespace WireCell::PointCloud::Facade {
             The type/name of the anode.
         */
         // nothing to store.
+
+        // Process original and shadow groupings to create a mapping between clusters
+        std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>> process_groupings(Grouping& original, Grouping& shadow, const std::string& aname = "isolated", const std::string& pname = "perblob") const;
     };
 }
 

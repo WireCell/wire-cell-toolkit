@@ -375,6 +375,57 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
     
 }
 
+std::map<WCC::Cluster*, std::tuple<WCC::Cluster*, int, WCC::Cluster*>> 
+WCC::ClusteringRetile::process_groupings(WCC::Grouping& original, WCC::Grouping& shadow, const std::string& aname, const std::string& pname) const {
+    // current cluster,  corresponding shadow_cluster, its id, the main cluster of this cluster ...
+    std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>> result;
+    
+    // Step 1: Map original clusters to shadow clusters
+    std::map<Cluster*, Cluster*> orig_to_shadow;
+    for (auto* orig_cluster : original.children()) {
+        for (auto* shad_cluster : shadow.children()) {
+            if (orig_cluster->ident() == shad_cluster->ident()) {
+                orig_to_shadow[orig_cluster] = shad_cluster;
+                break;
+            }
+        }
+    }
+    
+    // Step 2: Process each pair
+    for (const auto& [orig_cluster, shad_cluster] : orig_to_shadow) {
+        std::cout << orig_cluster << " " << shad_cluster << std::endl;
+    //     // Get cluster index array
+    //     auto cc = orig_cluster->get_pcarray(aname, pname);
+    //     std::vector<int> cc_vec(cc.begin(), cc.end());
+    //     // Create a non-const pointer for separate()
+    //     Cluster* mutable_cluster = orig_cluster;
+    //     // Separate clusters
+    //     auto orig_splits = original.separate(mutable_cluster, cc_vec);
+
+    //     // Get cluster index array
+    //     auto shad_cc = shad_cluster->get_pcarray(aname, pname);
+    //     std::vector<int> shad_cc_vec(shad_cc.begin(), shad_cc.end());
+    //     // Create a non-const pointer for separate()
+    //     Cluster* mutable_shad_cluster = shad_cluster;
+    //     // Separate clusters
+    //     auto shad_splits = shadow.separate(mutable_shad_cluster, shad_cc_vec);
+
+    //     // fill in the main cluster information ...
+    //     result[mutable_cluster] = std::make_tuple(mutable_shad_cluster, -1, mutable_cluster);
+
+    //     for (const auto& [id1, cluster1] : orig_splits) {
+    //         for (const auto& [id2, cluster2] : shad_splits){
+    //             if (id2==id1){
+    //                 result[cluster1] = std::make_tuple(cluster2, id1, mutable_cluster);
+    //                 break;
+    //             }
+    //        }
+    //     }
+    }
+    
+    return result;
+}
+
 void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& shadow, cluster_set_t&) const
 {
     // FIXME: With #377 fixed, we would make the shadow grouping here from
@@ -382,8 +433,12 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // smash whatever is in the 2nd grouping to fill with "shadow" clusters.  In
     // other cluster functions this second grouping is interpreted as holding
     // "dead" clusters.
-    shadow.local_pcs().clear();
 
+    std::cout << shadow.children().size() << std::endl;
+    shadow.local_pcs().clear();
+    std::cout << shadow.children().size() << std::endl;
+
+    /*
     for (auto* orig_cluster : original.children()) {
 
         // find the flash time:
@@ -495,7 +550,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                     int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
 
-                    std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
+                    // std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
                     // remove blobs after creating facade_blobs ... 
                     auto blobs_to_remove = remove_bad_blobs(*cluster, shad_cluster, tick_span);
                     for (const Blob* blob : blobs_to_remove) {
@@ -510,7 +565,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     // // Force rebuild of time blob map by accessing it
                     // shad_cluster.time_blob_map();
                     // shad_cluster.point3d(0); // This will trigger PC tree rebuild
-                    std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
+                    // std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
 
                     // How to call overlap_fast ??? 
                     // for (auto* fblob : shad_cluster.children()) {
@@ -535,14 +590,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                             std::cout << p << std::endl;
                         }
                     }
-
-
                 }
-
-               
-
-                
-
 
                 //     // FIXME: These two methods need to be added to the Cluster Facade.
                 //     // They should set/get "cluster_id" from the "cluster_scalar" PC.
@@ -563,11 +611,37 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 std::cout << std::endl;
                 shadow_orig_cluster->put_pcarray(cc3, "isolated", "perblob");
 
-            }
+                
 
+            }
         // FIXME: do we need/want to copy over any PCs in the grouping?
         // Specifically optical light/flash/flashlight PCs?
 
         }
     }
+        */
+
+    // Process groupings after all shadow clusters are created
+    auto cluster_mapping = process_groupings(original, shadow);
+    
+
+    // create a new function to take in the original_grouping and the newly created shadow_grouping
+    // the return of this new function should be a std::map<Cluster*, std::pair<Cluster*, Cluster*> >. 
+    // The first Cluster should be the original cluster, the first of the pair Clusters should be the corresponding shadow_cluster, the second of the pair Cluster should be the main cluster due to separation. 
+    // Inside this function, the algorithm should run as the following
+    // 1. Loop over all clusters in the original Grouping, and find the corresponnding cluster in the shadow grouping. form a map between the two clusters.
+    // 2. loop through these pairs, and doing separation using splits and using get_pcarray("isolated","perblob")
+    // 3. form the output pairs using the key of the splits, and the corresponding the main cluster.
+    // Use the mapping as needed
+    for (const auto& [orig_cluster, tuple] : cluster_mapping) {
+        std::cout << orig_cluster << " " << std::get<0>(tuple) << " " << std::get<1>(tuple) << std::get<2>(tuple) << std::endl;
+    //     auto* shad_cluster = pair.first;
+    //     auto* main_cluster = pair.second;
+        
+    //     // You can now use these mapped clusters for further processing
+    //     // For example, transfer any necessary properties or perform additional operations
+    }
+
+    
+
 }
