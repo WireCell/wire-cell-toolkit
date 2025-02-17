@@ -93,7 +93,9 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
             // Make each "wire" in each blob's bounds of this plane "hit".
             int ibeg = (fblob->*wmin[index])();
             int iend = (fblob->*wmax[index])();
-            m.reserve(iend);
+            if (iend > m.size()) {
+                m.resize(iend);
+            }
             while (ibeg < iend) {
                 m[ibeg++] = hit;
             }
@@ -130,18 +132,23 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
 {
     std::vector<IBlob::pointer> ret;
 
-    // const auto& coords = m_face->raygrid();
+    const auto& coords = m_face->raygrid();
+    int blob_ident=0;
+    for (auto it = map_slices_measures.begin(); it != map_slices_measures.end(); it++){
+        // Do the actual tiling.
+        WRG::activities_t activities = RayGrid::make_activities(m_face->raygrid(), it->second);
+        auto bshapes = WRG::make_blobs(coords, activities);
 
-    // // Do the actual tiling.
-    // auto bshapes = WRG::make_blobs(coords, activity);
+        // std::cout << "abc: " << bshapes.size() << " " << activities.size() << " " << std::endl;
+        // for (const auto& activity : activities) {
+        //     std::cout << activity.as_string() << std::endl;
+        // }
 
-    // std::cout << bshapes.size() << " " << activity.size() << std::endl;
-
-    // // Convert RayGrid blob shapes into IBlobs 
-    // const float blob_value = 0.0;  // tiling doesn't consider particular charge
-    // const float blob_error = 0.0;  // tiling doesn't consider particular charge
-    // int blob_ident=0;
-    // for (const auto& bshape : bshapes) {
+        // Convert RayGrid blob shapes into IBlobs 
+        const float blob_value = 0.0;  // tiling doesn't consider particular charge
+        const float blob_error = 0.0;  // tiling doesn't consider particular charge
+    
+        for (const auto& bshape : bshapes) {
     //     ISlice::pointer slice = nullptr; // fixme: okay?
     //     IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
     //                                                              blob_error, bshape, slice, m_face);
@@ -150,7 +157,8 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
     //     // ISlice info.  Are we losing anything important not including that
     //     // info?
     //     ret.push_back(iblob);
-    // }
+        }
+    }
     return ret;
 }
 
@@ -205,7 +213,6 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     if (id==-1) shadow_orig_cluster = &shad_cluster;
                     else shadow_splits[id] = &shad_cluster;
 
-                    
                     // find the highest and lowest points
                     std::pair<geo_point_t, geo_point_t> pair_points = cluster->get_highest_lowest_points();
                     //std::cout << pair_points.first << " " << pair_points.second << std::endl;
@@ -221,11 +228,11 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     // Step 2.
                     hack_activity(*cluster, map_slices_measures); // may need more args
 
-                    // // Step 3.  Must make IBlobs for this is what the sampler takes.
-                    // auto shad_iblobs = make_iblobs(shad_activity); // may need more args
+                    // Step 3.  Must make IBlobs for this is what the sampler takes.
+                    auto shad_iblobs = make_iblobs(map_slices_measures); // may need more args
 
-                    // // Steps 4-6.
-                    // auto niblobs = shad_iblobs.size();
+                    // Steps 4-6.
+                    auto niblobs = shad_iblobs.size();
                     // Forgive me (and small-f fixme), but this is now the 3rd generation of
                     // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
                     // PointTreeBuilding.  The reason for the copy-pastes is insufficient
