@@ -12,6 +12,9 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/PointTree.h"
 
+#include "WireCellAux/SimpleSlice.h"
+
+
 using namespace WireCell;
 
 // Segregate this weird choice for namespace.
@@ -134,6 +137,7 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
 
     const auto& coords = m_face->raygrid();
     int blob_ident=0;
+    int slice_ident = 0;
     for (auto it = map_slices_measures.begin(); it != map_slices_measures.end(); it++){
         // Do the actual tiling.
         WRG::activities_t activities = RayGrid::make_activities(m_face->raygrid(), it->second);
@@ -149,14 +153,21 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
         const float blob_error = 0.0;  // tiling doesn't consider particular charge
     
         for (const auto& bshape : bshapes) {
+            IFrame::pointer sframe = nullptr;
+
+            ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first, it->first.second - it->first.first);
+
     //     ISlice::pointer slice = nullptr; // fixme: okay?
-    //     IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
-    //                                                              blob_error, bshape, slice, m_face);
+            IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
+                                                                 blob_error, bshape, slice, m_face);
     //     std::cout << "Test: " << iblob << std::endl;
+
+           // How to call overlap_fast ??? 
+
     //     // FIXME: (maybe okay?) GridTiling produces an IBlobSet here which holds
     //     // ISlice info.  Are we losing anything important not including that
     //     // info?
-    //     ret.push_back(iblob);
+            ret.push_back(iblob);
         }
     }
     return ret;
@@ -238,40 +249,42 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     // PointTreeBuilding.  The reason for the copy-pastes is insufficient
                     // factoring of the de-factor standard sampling code in PointTreeBuilding.
                     // Over time, it is almost guaranteed these copy-pastes become out-of-sync.  
-                    // for (size_t bind=0; bind<niblobs; ++bind) {
-                    //     if (!m_sampler) {
-                    //         shad_cluster.make_child();
-                    //         continue;
-                    //     }
-                    //     const IBlob::pointer iblob = shad_iblobs[bind];
+                    for (size_t bind=0; bind<niblobs; ++bind) {
+                        if (!m_sampler) {
+                            shad_cluster.make_child();
+                            continue;
+                        }
+                        const IBlob::pointer iblob = shad_iblobs[bind];
 
-                    //     // Sample the iblob, make a new blob node.
-                    //     PointCloud::Tree::named_pointclouds_t pcs;
+                        // Sample the iblob, make a new blob node.
+                        PointCloud::Tree::named_pointclouds_t pcs;
 
-                    //     auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
+                        auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
                         
-                    //     pcs.emplace("3d", pc3d);
-                    //     /// These seem unused and bring in yet more copy-paste code
-                    //     // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-                    //     // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-                    //     // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
-                    //     const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
-                    //     auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-                    //     int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-                    //     int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-                    //     int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-                    //     int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-                    //     scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-                    //     scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-                    //     scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-                    //     scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-                    //     pcs.emplace("scalar", std::move(scalar_ds));
+                        // how to sample points ... 
+                        std::cout << pc3d.size() << " " << aux.size() << std::endl;
 
-                    //     shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
-                    //     std::cout << "test " << std::endl;
-                    // }
+                        // pcs.emplace("3d", pc3d);
+                        // /// These seem unused and bring in yet more copy-paste code
+                        // // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
+                        // // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
+                        // // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+                        // const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
+                        // auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
+                        // int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
+                        // int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
+                        // int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
+                        // int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
+                        // scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
+                        // scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
+                        // scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
+                        // scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
+                        // pcs.emplace("scalar", std::move(scalar_ds));
 
-                    // std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
+                        // shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
+                    }
+
+                    std::cout << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
                 }
 
                 //     // FIXME: These two methods need to be added to the Cluster Facade.
