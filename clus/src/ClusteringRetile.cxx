@@ -611,17 +611,17 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 //     // want to also try to copy over the "light" index entry?
 
                 auto cc2 = original.merge(splits,orig_cluster);
-                for (const auto& val : cc2) {
-                    std::cout << val << " ";
-                }
-                std::cout << std::endl;
+                // for (const auto& val : cc2) {
+                //     std::cout << val << " ";
+                // }
+                // std::cout << std::endl;
                 orig_cluster->put_pcarray(cc2, "isolated", "perblob");
 
                 auto cc3 = shadow.merge(shadow_splits,shadow_orig_cluster);
-                for (const auto& val : cc3) {
-                    std::cout << val << " ";
-                }
-                std::cout << std::endl;
+                // for (const auto& val : cc3) {
+                //     std::cout << val << " ";
+                // }
+                // std::cout << std::endl;
                 shadow_orig_cluster->put_pcarray(cc3, "isolated", "perblob");
 
                 

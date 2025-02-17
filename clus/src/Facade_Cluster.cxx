@@ -1590,7 +1590,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(const bool use_ctpc) const
 {
-    std::cout << "Create Graph!" << std::endl;
+    // std::cout << "Create Graph!" << std::endl;
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(nbpoints());
