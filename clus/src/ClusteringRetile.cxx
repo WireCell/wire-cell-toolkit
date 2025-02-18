@@ -13,6 +13,7 @@
 #include "WireCellUtil/PointTree.h"
 
 #include "WireCellAux/SimpleSlice.h"
+#include "WireCellClus/GroupingHelper.h"
 
 
 using namespace WireCell;
@@ -122,7 +123,7 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
         }
     }
 
-    std::cout << "Test: Org: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
+    // std::cout << "Test: Org: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
 
 }
 
@@ -255,7 +256,7 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
     }
 
 
-    std::cout << "Test: Alt: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
+    // std::cout << "Test: Alt: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
 
     // for (auto it = map_slices_measures.begin(); it!= map_slices_measures.end(); it++){
     //     std::cout << it->first.first << " " << it->first.second << " " << it->second.size() << std::endl;
@@ -308,7 +309,7 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
         }
     }
 
-    std::cout << "Test: Blobs: " << ret.size() << std::endl;
+    // std::cout << "Test: Blobs: " << ret.size() << std::endl;
 
     return ret;
 }
@@ -376,58 +377,7 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
     
 }
 
-std::map<WCC::Cluster*, std::tuple<WCC::Cluster*, int, WCC::Cluster*>> 
-WCC::ClusteringRetile::process_groupings(WCC::Grouping& original, WCC::Grouping& shadow, const std::string& aname, const std::string& pname) const {
-    // current cluster,  corresponding shadow_cluster, its id, the main cluster of this cluster ...
-    std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>> result;
-    
-    // Step 1: Map original clusters to shadow clusters
-    std::map<Cluster*, Cluster*> orig_to_shadow;
-    for (auto* orig_cluster : original.children()) {
-        for (auto* shad_cluster : shadow.children()) {
-            if (orig_cluster->ident() == shad_cluster->ident()) {
-                orig_to_shadow[orig_cluster] = shad_cluster;
-                break;
-            }
-        }
-    }
-    
-    std::cout << "haha: " << orig_to_shadow.size() << " " << original.children().size() << " " << shadow.children().size() << std::endl;
 
-    // Step 2: Process each pair
-    for (const auto& [orig_cluster, shad_cluster] : orig_to_shadow) {
-        std::cout << orig_cluster << " " << shad_cluster << std::endl;
-    //     // Get cluster index array
-    //     auto cc = orig_cluster->get_pcarray(aname, pname);
-    //     std::vector<int> cc_vec(cc.begin(), cc.end());
-    //     // Create a non-const pointer for separate()
-    //     Cluster* mutable_cluster = orig_cluster;
-    //     // Separate clusters
-    //     auto orig_splits = original.separate(mutable_cluster, cc_vec);
-
-    //     // Get cluster index array
-    //     auto shad_cc = shad_cluster->get_pcarray(aname, pname);
-    //     std::vector<int> shad_cc_vec(shad_cc.begin(), shad_cc.end());
-    //     // Create a non-const pointer for separate()
-    //     Cluster* mutable_shad_cluster = shad_cluster;
-    //     // Separate clusters
-    //     auto shad_splits = shadow.separate(mutable_shad_cluster, shad_cc_vec);
-
-    //     // fill in the main cluster information ...
-    //     result[mutable_cluster] = std::make_tuple(mutable_shad_cluster, -1, mutable_cluster);
-
-    //     for (const auto& [id1, cluster1] : orig_splits) {
-    //         for (const auto& [id2, cluster2] : shad_splits){
-    //             if (id2==id1){
-    //                 result[cluster1] = std::make_tuple(cluster2, id1, mutable_cluster);
-    //                 break;
-    //             }
-    //        }
-    //     }
-    }
-    
-    return result;
-}
 
 void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& shadow, cluster_set_t&) const
 {
@@ -438,7 +388,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // "dead" clusters.
 
 
-    // reset the dead clusters ... 
+    // reset the shadown clusters' content ... 
     // std::cout << shadow.children().size() << std::endl;
     shadow.local_pcs().clear();
     for (auto* fcluster : shadow.children()) {
@@ -481,11 +431,13 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                 for (auto& [id, cluster] : map_id_cluster) {
 
-                    // make a shadow cluster
+                    // make a shadow cluster, insert ID ...
                     auto& shad_cluster = shadow.make_child();
-                    shad_cluster.set_ident(cluster->ident());
+                    auto& spc = shad_cluster.local_pcs()["cluster_scalar"];
+                    spc.add("ident", Array({cluster->ident()}));
+                    //shad_cluster.set_ident(cluster->ident());
                     
-                    std::cout <<"bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
+                    // std::cout <<"bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
 
                     if (id==-1) shadow_orig_cluster = &shad_cluster;
                     else shadow_splits[id] = &shad_cluster;
@@ -583,7 +535,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     //     shad_cluster.remove_child(*fblob);
                     // }
 
-                    std::cout << "Test: remove: " << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
+                    // std::cout << "Test: remove: " << m_sampler << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size() << " " << niblobs << std::endl;
                
                     // Example code to access shadown cluster information ...
                     // // shad cluster getting highest and lowest points and then do shortest path ... 
@@ -634,27 +586,27 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     }
 
 
-    // Process groupings after all shadow clusters are created
-    auto cluster_mapping = process_groupings(original, shadow);
-    
-
-    // create a new function to take in the original_grouping and the newly created shadow_grouping
-    // the return of this new function should be a std::map<Cluster*, std::pair<Cluster*, Cluster*> >. 
-    // The first Cluster should be the original cluster, the first of the pair Clusters should be the corresponding shadow_cluster, the second of the pair Cluster should be the main cluster due to separation. 
-    // Inside this function, the algorithm should run as the following
-    // 1. Loop over all clusters in the original Grouping, and find the corresponnding cluster in the shadow grouping. form a map between the two clusters.
-    // 2. loop through these pairs, and doing separation using splits and using get_pcarray("isolated","perblob")
-    // 3. form the output pairs using the key of the splits, and the corresponding the main cluster.
-    // Use the mapping as needed
-    for (const auto& [orig_cluster, tuple] : cluster_mapping) {
-        std::cout << orig_cluster << " " << std::get<0>(tuple) << " " << std::get<1>(tuple) << std::get<2>(tuple) << std::endl;
-    //     auto* shad_cluster = pair.first;
-    //     auto* main_cluster = pair.second;
+    // // Process groupings after all shadow clusters are created
+    // auto cluster_mapping = process_groupings(original, shadow);
+    // for (const auto& [orig_cluster, tuple] : cluster_mapping) {
+    //     std::cout << orig_cluster << " " << std::get<0>(tuple) << " " << std::get<1>(tuple) << " " << std::get<2>(tuple) << std::endl;
+    // //     auto* shad_cluster = pair.first;
+    // //     auto* main_cluster = pair.second;
         
-    //     // You can now use these mapped clusters for further processing
-    //     // For example, transfer any necessary properties or perform additional operations
-    }
+    // //     // You can now use these mapped clusters for further processing
+    // //     // For example, transfer any necessary properties or perform additional operations
+    // }
 
     
 
+}
+
+std::map<WCC::Cluster*, std::tuple<WCC::Cluster*, int, WCC::Cluster*>> 
+WCC::ClusteringRetile::process_groupings(
+    WCC::Grouping& original,
+    WCC::Grouping& shadow,
+    const std::string& aname,
+    const std::string& pname) const
+{
+  return process_groupings_helper(original, shadow, aname, pname);
 }
