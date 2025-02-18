@@ -94,7 +94,7 @@ namespace WireCell::PointCloud::Facade {
         template <typename T = int>
         void set_scalar(const std::string& aname, T val = 0) {
             auto& lpcs = local_pcs();
-            auto cs = lpcs[scalar_pc_name]; // create if not existing
+            auto& cs = lpcs[scalar_pc_name]; // create if not existing
             auto arr = cs.get(aname);
             if (!arr) {
                 cs.add(aname, PointCloud::Array({(T)val}));
