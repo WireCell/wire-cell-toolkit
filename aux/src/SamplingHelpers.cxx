@@ -151,7 +151,7 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
         {
             // auto& slice = std::get<slice_t>(cgnode.ptr);
             ++nslices;
-            const auto& slice_index = slice->start()/tick;
+            const auto slice_index = slice->start()/tick;
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
                 if(charge.uncertainty() > dead_threshold) {
@@ -238,7 +238,7 @@ void Aux::add_dead_winds(PointCloud::Tree::Points::node_t& root, const IBlobSet:
     for (const auto& ibs : ibsv) {
         const auto& slice = ibs->slice();
         {
-            const auto& slice_index = slice->start()/tick;
+            // const auto& slice_index = slice->start()/tick;
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
                 if(charge.uncertainty() < dead_threshold) continue;

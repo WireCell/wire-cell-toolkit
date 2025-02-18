@@ -3282,7 +3282,8 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     
     // Find connected components
     std::vector<int> component(num_vertices(*m_graph));
-    const int num_components = connected_components(*m_graph, &component[0]);
+    // const int num_components =
+    connected_components(*m_graph, &component[0]);
 
     // std::cout << "Test: num components " << num_components << " " << kd_blobs().size() << std::endl;
 

@@ -402,7 +402,8 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
         // find the flash time:
         auto flash = orig_cluster->get_flash();
-        int nblobs = orig_cluster->kd_blobs().size();
+        // int nblobs =
+        // orig_cluster->kd_blobs().size();
         
         // Apply time cut
         if (flash) {
