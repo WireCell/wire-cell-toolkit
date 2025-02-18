@@ -434,9 +434,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                     // make a shadow cluster, insert ID ...
                     auto& shad_cluster = shadow.make_child();
-                    auto& spc = shad_cluster.local_pcs()["cluster_scalar"];
-                    spc.add("ident", Array({cluster->ident()}));
-                    //shad_cluster.set_ident(cluster->ident());
+                    shad_cluster.set_ident(cluster->ident());
                     
                     // std::cout <<"bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
 
