@@ -355,7 +355,6 @@ namespace WireCell::PointCloud {
         }
 
     };                          // Array
-
 }
 
 

@@ -50,7 +50,6 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 }
 
 
-
 void Grouping::on_construct(node_type* node)
 {
     this->NaryTree::Facade<points_t>::on_construct(node);
@@ -73,18 +72,32 @@ void Grouping::on_construct(node_type* node)
     }
 }
 
-void Grouping::reset_cache()
+
+void Grouping::fill_cache(GroupingCache& gc) const
 {
-    // Clear all cached information
-    m_proj_centers.clear();
-    m_pitch_mags.clear();
-    m_dead_winds.clear();
-    
-    // Note: After clearing, these will be rebuilt on next access through:
-    // - proj_centers() which calls fill_proj_centers_pitch_mags()
-    // - pitch_mags() which calls fill_proj_centers_pitch_mags()
-    // - get_dead_winds() which rebuilds on access
+    {
+        // In pre-cached code this was Grouping::fill_proj_centers_pitch_mags() const
+
+        const int ndummy_layers = 2;
+        if (!m_anode) {
+            raise<ValueError>("anode is null");
+        }
+        for (const auto& face : m_anode->faces()) {
+            // std::cout<< "fill_cache: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
+            const auto& coords = face->raygrid();
+            // skip dummy layers so the vector matches 0, 1, 2 plane order
+            for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+                const auto& pitch_dir = coords.pitch_dirs()[layer];
+                const auto& center = coords.centers()[layer];
+                double proj_center = center.dot(pitch_dir);
+                gc.proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
+                gc.pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+            }
+        }
+    }
 }
+
+
 
 void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.face = get(cfg, "face", m_tp.face);
@@ -139,40 +152,6 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
     const auto& sv = m_node->value.scoped_view(scope);
     // std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
     return sv.kd();
-}
-
-void Grouping::fill_proj_centers_pitch_mags() const
-{
-    const int ndummy_layers = 2;
-    if (!m_anode) {
-        raise<ValueError>("anode is null");
-    }
-    for (const auto& face : m_anode->faces()) {
-        // std::cout<< "fill_proj_centers_pitch_mags: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
-        const auto& coords = face->raygrid();
-        // skip dummy layers so the vector matches 0, 1, 2 plane order
-        for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
-            const auto& pitch_dir = coords.pitch_dirs()[layer];
-            const auto& center = coords.centers()[layer];
-            double proj_center = center.dot(pitch_dir);
-            m_proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
-            m_pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
-        }
-    }
-}
-
-const Facade::mapfp_t<double>& Grouping::proj_centers() const
-{
-    if (!m_proj_centers.empty()) return m_proj_centers;
-    fill_proj_centers_pitch_mags();
-    return m_proj_centers;
-}
-
-const Facade::mapfp_t<double>& Grouping::pitch_mags() const
-{
-    if (!m_pitch_mags.empty()) return m_pitch_mags;
-    fill_proj_centers_pitch_mags();
-    return m_pitch_mags;
 }
 
 
@@ -488,6 +467,18 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
     }
 
     return map_time_ch_charge;
+}
+
+
+
+void Grouping::clear_cache() const
+{
+    this->Mixin<Grouping, GroupingCache>::clear_cache();
+
+
+    // This is utterly broken.  #381.
+    m_dead_winds.clear(); 
+
 }
 
 // Local Variables:

@@ -394,7 +394,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     for (auto* fcluster : shadow.children()) {
         shadow.remove_child(*fcluster);
     }
-    shadow.reset_cache();
+    shadow.clear_cache();
     // std::cout << shadow.children().size() << std::endl;
 
     

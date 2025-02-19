@@ -7,7 +7,7 @@
 //   -A infiles=nuselEval_5384_137_6852.root \
 //      clus/test/uboone-mabc.jsonnet
 //
-// The "kind" can be "live" or "both" (live and dead).
+// The "kind" can be "live" or "both" (live and dead - the default).
 
 
 local wc = import "wirecell.jsonnet";
@@ -382,5 +382,5 @@ local graphs = {
 local extra_plugins = ["WireCellAux", "WireCellRoot", "WireCellClus"];
 
 // kind can be "live", "dead" or "both".
-function(infiles="uboone.root", beezip="bee.zip", kind="live", datapath=pointtree_datapath)
+function(infiles="uboone.root", beezip="bee.zip", kind="both", datapath=pointtree_datapath)
     ub.main(graphs[kind](infiles, beezip, datapath), "Pgrapher", extra_plugins)

@@ -1,17 +1,20 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade.h"
 #include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/Facade_Summary.h"
+
+
+#include "WireCellAux/TensorDMpointtree.h"
+#include "WireCellAux/TensorDMdataset.h"
+#include "WireCellAux/TensorDMcommon.h"
+#include "WireCellAux/SimpleTensorSet.h"
+
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/ExecMon.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Exceptions.h"
-#include "WireCellAux/TensorDMpointtree.h"
-#include "WireCellAux/TensorDMdataset.h"
-#include "WireCellAux/TensorDMcommon.h"
-#include "WireCellAux/SimpleTensorSet.h"
-
 #include "WireCellUtil/Graph.h"
 
 #include <fstream>
@@ -329,7 +332,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     // initialize clusters ...
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
+
     Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
+    dead_grouping.set_anode(m_anode);
+    dead_grouping.set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
+    
 
     //perf.dump("original live clusters", live_grouping, false, false);
     //perf.dump("original dead clusters", dead_grouping, false, false);
@@ -354,6 +361,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     fill_bee_points(m_bee_ld, *root_live.get());
     perf("dump live clusters to bee");
+
+    {
+        Persist::dump(String::format("live-summary-%d.json", ident), json_summary(live_grouping), true);
+        Persist::dump(String::format("dead-summary-%d.json", ident), json_summary(dead_grouping), true);
+    }
+
 
     std::string outpath = m_outpath;
     if (outpath.find("%") != std::string::npos) {

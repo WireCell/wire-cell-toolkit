@@ -25,20 +25,75 @@
 
 namespace WireCell::PointCloud::Facade {
 
-    // The Grouping/Cluster/Facade inherit from this to gain additional methods
-    // that are common to all three facade types.  The mixin itself needs to
-    // know its facade type and value but specifically does not include anything
-    // that requires parent or child types or values.
-    template<typename SelfType>
+    struct DummyCache{};
+
+    /// The Grouping/Cluster/Facade inherit from this to gain additional methods
+    /// that are common to all three facade types.  The mixin itself needs to
+    /// know its facade type and value but specifically does not include anything
+    /// that requires parent or child types or values.
+    ///
+    /// It provides helper functions to deal with local PCs and an optional
+    /// caching mechanism.  See comments on cache() and fill_cache() and
+    /// clear_cache().  Note, using the cache mechanism does not preclude facade
+    /// doing DIY caching.
+    template<typename SelfType, typename CacheType=DummyCache>
     class Mixin {
         SelfType& self;
         std::string scalar_pc_name, ident_array_name;
+        mutable std::unique_ptr<CacheType> m_cache;
     public:
         Mixin(SelfType& self, const std::string& scalar_pc_name, const std::string& ident_array_name = "ident")
             : self(self)
             , scalar_pc_name(scalar_pc_name)
             , ident_array_name(ident_array_name) {
             
+        }
+
+    protected:
+        /// Facade cache management has three simple rules:
+        ///
+        /// Cache rule 1: The SelfType may call this to access a full and const cache.
+        const CacheType& cache() const
+        {
+            if (! m_cache) {
+                m_cache = std::make_unique<CacheType>();
+                fill_cache(* const_cast<CacheType*>(m_cache.get()));
+            }
+            return *m_cache.get();
+        }
+
+        /// Cache rule 2:
+        ///
+        /// The SelfType overrides this method to fill an empty cache.  This is
+        /// the only place where the cache object can be accessed by Self in
+        /// mutable form.
+        virtual void fill_cache(CacheType& cache) const {}
+        
+    public:
+        /// Cache rule 3:
+        ///
+        /// The SelfType may override clear_cache(), for example to clear cached
+        /// data not in the CacheType.  An override must then forward-call the
+        /// Mixin::clear_cache().  The Mixin, the SelfType implementation and/or
+        /// SelfType users may all call this method thought the goal is to make
+        /// clear_cache() called in response to a tree notification.
+        virtual void clear_cache() const
+        {
+            m_cache = nullptr;
+        }
+
+    public:
+
+        /// Clear my node of all children nodes and purge my local PCs.
+        /// Invalidates any cache.
+        void clear()
+        {
+            // node level:
+            self.node()->remove_children();
+            // value level:
+            self.local_pcs().clear();
+            // facade cache level:
+            clear_cache();
         }
 
         // Get the map from name to PC for all local PCs.
@@ -114,7 +169,8 @@ namespace WireCell::PointCloud::Facade {
             return true;
         }
 
-        // Get a local PC/Dataset
+        // Const access to a local PC/Dataset.  If pcname is missing return
+        // reference to an empty dataset.
         const PointCloud::Dataset& get_pc(const std::string& pcname) const
         {
             static PointCloud::Dataset dummy;
@@ -123,9 +179,10 @@ namespace WireCell::PointCloud::Facade {
             if (it == lpcs.end()) {
                 return dummy;
             }
-            return it.second;
+            return it->second;
         }
-        // Will create if not there.
+        // Mutable access to a local PC/Dataset.  If pcname is missing, a new
+        // dataset of that name will be created.
         PointCloud::Dataset& get_pc(const std::string& pcname)
         {
             static PointCloud::Dataset dummy;
