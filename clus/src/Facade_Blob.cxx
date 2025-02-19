@@ -91,7 +91,7 @@ void Blob::on_construct(node_type* node)
     corners_.resize(size);
     for (size_t ind = 0; ind < size; ++ind) {
         corners_[ind] = {x[ind], y[ind], z[ind]};
-        std::cout << "corner " << corners_[ind] << std::endl;
+        // std::cout << "corner " << corners_[ind] << std::endl;
     }
 }
 
