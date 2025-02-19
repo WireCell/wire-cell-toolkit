@@ -520,7 +520,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                         shad_cluster.remove_child(b);
                     }
-                    shad_cluster.reset_cache();
+                    shad_cluster.clear_cache();
                     
                     // // Reset cached data that depends on cluster contents
                     // shad_cluster.reset_pca();         // Reset PCA calculations

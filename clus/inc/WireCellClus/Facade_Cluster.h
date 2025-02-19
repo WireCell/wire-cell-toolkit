@@ -24,8 +24,10 @@ namespace WireCell::PointCloud::Facade {
     class Blob;
     class Grouping;
 
+    struct ClusterCache { };
+
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
-    class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster> {
+    class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
 
         // The expected scope.
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
@@ -37,10 +39,11 @@ namespace WireCell::PointCloud::Facade {
         };
 
        public:
-        Cluster() : Mixin<Cluster>(*this, "cluster_scalar") {}
+        Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
 
-        void reset_cache();
+        // Override Mixin
+        virtual void clear_cache() const;
 
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();

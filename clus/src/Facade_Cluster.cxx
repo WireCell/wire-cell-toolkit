@@ -56,8 +56,18 @@ const Grouping* Cluster::grouping() const { return this->m_node->parent->value.t
 
 
 
-// Add this to the public section of the Cluster class:
-void Cluster::reset_cache() {
+void Cluster::clear_cache() const {
+
+    // For now, this facade does its own cache management but we forward-call
+    // the Mixin just to be proper.  Since our ClusterCache is the null-struct,
+    // this is in truth pointless.  
+    this->Mixin<Cluster,ClusterCache>::clear_cache();
+
+    // The reason to keep fine-grained cache management is not all cluster users
+    // need all cached values and by putting them all in fill_cache() we'd spoil
+    // fine-grained laziness.  The cost we pay is that every single cached data
+    // element is a chance to introduce a cache bug.
+
     // Reset time-blob mapping
     m_time_blob_map.clear();
     
