@@ -275,6 +275,7 @@ local ub = {
             outpath: pointtree_datapath,
             perf: true,
             bee_zip: beezip,
+            dump_json: false,   // true to produce summary of groupings in JSON for debugging.
             initial_index: 0,
             use_config_rse: true,  // Enable use of configured RSE
             runNo: 1,

@@ -75,6 +75,15 @@ namespace WireCell::Clus {
          */
         bool m_perf{false};
 
+        /** Config: "dump_json"
+         *
+         * If true, dump to files like {live,dead}-summary-<ident>.json a
+         * summary of the groupings.  Default is false.  The dumps are rather
+         * large despite omitting point cloud point data.  Use of jq or other
+         * tool is expected.  These are intended only for debugging / validating.
+         */
+        bool m_dump_json{false};
+
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
 

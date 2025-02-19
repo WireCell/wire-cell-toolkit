@@ -89,6 +89,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     log->debug("m_bee_ld.algorithm: {}", m_bee_ld.algorithm());
 
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
+
+    m_dump_json = get<bool>(cfg, "dump_json", false);
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -362,7 +364,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     fill_bee_points(m_bee_ld, *root_live.get());
     perf("dump live clusters to bee");
 
-    {
+    if (m_dump_json) {
         Persist::dump(String::format("live-summary-%d.json", ident), json_summary(live_grouping), true);
         Persist::dump(String::format("dead-summary-%d.json", ident), json_summary(dead_grouping), true);
     }
