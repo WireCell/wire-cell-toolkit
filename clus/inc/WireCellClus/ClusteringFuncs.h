@@ -336,6 +336,23 @@ namespace WireCell::PointCloud::Facade {
         double length_cut_{0};
     };
 
+    // this is a function to test the implementation of CT point cloud ...
+    void clustering_ctpointcloud(Grouping& live_grouping);
+    class ClusteringCTPointCloud {
+       public:
+        ClusteringCTPointCloud(const WireCell::Configuration& config)
+        {
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_ctpointcloud(live_clusters);
+        }
+
+       private:
+    };
+
+
     void clustering_examine_x_boundary(Grouping& live_grouping);
     class ClusteringExamineXBoundary {
        public:
@@ -467,6 +484,9 @@ namespace WireCell::PointCloud::Facade {
         }
         else if (function_name == "clustering_isolated") {
             return ClusteringIsolated(config);
+        }
+        else if (function_name == "clustering_ctpointcloud") {
+            return ClusteringCTPointCloud(config);
         }
         else {
             throw std::invalid_argument("Unknown function name in configuration");
