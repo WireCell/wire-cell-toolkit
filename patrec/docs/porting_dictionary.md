@@ -198,12 +198,31 @@ WCT: I can only think of some options so I add: :question:
 - An "old" and a "new" grouping (two trees) can be defined.  We may define a new root node (a "versions" node?) which has grouping nodes as children.  We can extend the facade to cover this new root.  If the clusters of the two groupings are 1-to-1 then their map is implicit.  Otherwise, you can store an "edge" array on the new root node.
 
 
-# Include and after Trajectory Fitting (TBD)
+# Trajectory Fitting and Pattern Recognition
 
-## [ProtoSegment](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/protosegment.md) (WCP) vs. **xxx** :warning: (WCT)
+The final portion of porting covers the transformation from clusters of blobs and their points to a "particle flow" description.  This section lists WCP data and algorithm summaries and design and links to development notes for the WCT equivalents (generally under [tjft/](./tjft/) directory).
 
-## [WCShower](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/wcshower.md) (WCP) vs. **xxx** :warning: (WCT)
 
-## [ProtoVertex](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/protovertex.md) (WCP) vs. **xxx** :warning: (WCT)
+## WCP Data
 
-## [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vvs. **xxx** :warning: (WCT)
+- [wcp-data-notes](./tjft/wcp-data-notes.org) notes and questions from reviewing the links to data summaries below.
+
+
+### [ProtoSegment](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/protosegment.md) (WCP) vs. **xxx** :warning: (WCT)
+
+### [ProtoVertex](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/protovertex.md) (WCP) vs. **xxx** :warning: (WCT)
+
+### [WCShower](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/wcshower.md) (WCP) vs. **xxx** :warning: (WCT)
+
+### [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vvs. **xxx** :warning: (WCT)
+
+## WCP Algorithms
+
+- [ ] :question: What is the overall "data flow graph" for these stages. 
+- [ ] :question: What input data is required for each stage, what output is produced?  (can input/output be fully modeled as a graph or is there "extra" data that will not fit that model?)
+- [ ] :question: Is the data flow graph a linear pipeline or a more general DAG?
+- [ ] :question: Will the PC-tree be required throughout all stages?  
+- [ ] :question: Will the PC-tree be required to be output by the final algorithm that produces the particle flow data structure?
+
+
+### [multi dQ/dx fitting](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_multi_dQ_dx_fit.md) (WCP)
