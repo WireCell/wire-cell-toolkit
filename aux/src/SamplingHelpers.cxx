@@ -10,6 +10,7 @@ Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
     Dataset ds;
     // Warning, these types must match consumers.  In particular, PointTreeBuilding.
     ds.add("charge", Array({(double)iblob->value()}));
+    ds.add("face",Array({(int)iblob->face()->which()}));
     ds.add("center_x", Array({(double)center.x()}));
     ds.add("center_y", Array({(double)center.y()}));
     ds.add("center_z", Array({(double)center.z()}));

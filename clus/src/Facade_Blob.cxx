@@ -40,6 +40,8 @@ size_t Blob::hash() const
     boost::hash_combine(h, center_x());
     boost::hash_combine(h, center_y());
     boost::hash_combine(h, center_z());
+    boost::hash_combine(h, face());
+
     boost::hash_combine(h, slice_index_min());
     boost::hash_combine(h, slice_index_max());
     boost::hash_combine(h, u_wire_index_min());
@@ -63,6 +65,7 @@ void Blob::fill_cache(BlobCache& cache) const
     cache.center_x = pc_scalar.get("center_x")->elements<float_t>()[0];
     cache.center_y = pc_scalar.get("center_y")->elements<float_t>()[0];
     cache.center_z = pc_scalar.get("center_z")->elements<float_t>()[0];
+    cache.face = pc_scalar.get("face")->elements<int_t>()[0];
     cache.npoints = pc_scalar.get("npoints")->elements<int_t>()[0];
     cache.slice_index_min = pc_scalar.get("slice_index_min")->elements<int_t>()[0];
     cache.slice_index_max = pc_scalar.get("slice_index_max")->elements<int_t>()[0];
@@ -83,6 +86,8 @@ void Blob::fill_cache(BlobCache& cache) const
 
 bool Blob::overlap_fast(const Blob& b, const int offset) const
 {
+    // check face ...
+    if (face() != b.face()) return false;
     if (u_wire_index_min() > b.u_wire_index_max()-1 + offset) return false;
     if (b.u_wire_index_min() > u_wire_index_max()-1 + offset) return false;
     if (v_wire_index_min() > b.v_wire_index_max()-1 + offset) return false;
@@ -129,6 +134,12 @@ std::vector<geo_point_t> Blob::points() const
 bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
 {
     if (a == b) return false;
+    {
+        const auto naf = a->face();
+        const auto nbf = b->face(); 
+        if (naf < nbf) return true;
+        if (nbf < naf) return false;
+    }
     {
         const auto na = a->npoints();
         const auto nb = b->npoints();
