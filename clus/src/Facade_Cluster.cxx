@@ -36,9 +36,6 @@ using spdlog::debug;
 
 
 
-
-
-
 std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluster)
 {
     const auto uvwt_min = cluster.get_uvwt_min();
@@ -57,6 +54,50 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
 Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
 
+
+
+void Cluster::clear_cache() const {
+
+    // For now, this facade does its own cache management but we forward-call
+    // the Mixin just to be proper.  Since our ClusterCache is the null-struct,
+    // this is in truth pointless.  
+    this->Mixin<Cluster,ClusterCache>::clear_cache();
+
+    // The reason to keep fine-grained cache management is not all cluster users
+    // need all cached values and by putting them all in fill_cache() we'd spoil
+    // fine-grained laziness.  The cost we pay is that every single cached data
+    // element is a chance to introduce a cache bug.
+
+    // Reset time-blob mapping
+    m_time_blob_map.clear();
+    
+    // Reset blob-indices mapping
+    m_map_mcell_indices.clear();
+    
+    // Reset hull data
+    m_hull_points.clear();
+    m_hull_calculated = false;
+    
+    // Reset length and point count
+    m_length = 0;
+    m_npoints = 0;
+    
+    // Reset PCA data
+    m_pca_calculated = false;
+    m_center = geo_point_t();
+    for(int i = 0; i < 3; i++) {
+        m_pca_axis[i] = geo_vector_t();
+        m_pca_values[i] = 0;
+    }
+    
+    // Reset graph and path finding data
+    m_graph.reset();
+    m_parents.clear();
+    m_distances.clear();
+    m_source_pt_index = -1;
+    m_path_wcps.clear();
+    m_path_mcells.clear();
+}
 
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {
@@ -100,7 +141,7 @@ std::string Cluster::dump_graph() const{
 
     ss << "Edge Properties:" << std::endl;
     auto erange = boost::edges(g);
-    auto weightMap = get(edge_weight, g);
+    auto weightMap = get(boost::edge_weight, g);
     for (auto eit = erange.first; eit != erange.second; ++eit) {
         auto e = *eit;
         auto src = source(e, g);
@@ -1559,6 +1600,7 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(const bool use_ctpc) const
 {
+    // std::cout << "Create Graph!" << std::endl;
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(nbpoints());
@@ -2687,9 +2729,9 @@ void Cluster::Connect_graph() const{
 void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const {
     // Constants for wire angles
     const auto& tp = grouping()->get_params();
-    std::cout << "Test: face " << tp.face << std::endl;
+    //std::cout << "Test: face " << tp.face << std::endl;
 
-    const double pi = 3.141592653589793;
+    // const double pi = 3.141592653589793;
     const geo_vector_t drift_dir(1, 0, 0); 
     const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles();
     const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
@@ -2738,6 +2780,22 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
         pt_clouds_global_indices.push_back(global_indices);
     }
 
+    // pt_clouds.resize(num);
+    // pt_clouds_global_indices.resize(num);
+
+    // // Initialize all point clouds
+    // for(size_t j = 0; j < num; j++) {
+    //     pt_clouds[j] = std::make_shared<Simple3DPointCloud>();
+    // }
+
+    // // Add points directly using component mapping
+    // for(size_t i = 0; i < component.size(); ++i) {
+    //     pt_clouds[component[i]]->add({points()[0][i], points()[1][i], points()[2][i]});
+    //     pt_clouds_global_indices[component[i]].push_back(i);
+    // }
+
+    // std::cout << "Test: "<< num << std::endl;
+
     // Initialize distance metrics 
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, std::vector<std::tuple<int, int, double>>(num));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(num, std::vector<std::tuple<int, int, double>>(num));
@@ -2763,45 +2821,47 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
 
             // Skip small clouds
-            if ((num >= 100 || pt_clouds.at(j)->get_num_points() <= 100 || pt_clouds.at(k)->get_num_points() <= 100 ||
-                 (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) <= 400) &&
-                (pt_clouds.at(j)->get_num_points() <= 500 || pt_clouds.at(k)->get_num_points() <= 500)) {
-                continue;
-            }
+            if ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
+                 (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
+                (pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500)) {
+                
+                // Get closest points and calculate directions
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
 
-            // Get closest points and calculate directions
-            geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
-            geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+                geo_vector_t dir1 = vhough_transform(p1, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(j), 
+                                                pt_clouds_global_indices.at(j));
+                geo_vector_t dir2 = vhough_transform(p2, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(k),
+                                                pt_clouds_global_indices.at(k)); 
+                dir1 = dir1 * -1;
+                dir2 = dir2 * -1;
 
-            geo_vector_t dir1 = vhough_transform(p1, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(j), 
-                                               pt_clouds_global_indices.at(j));
-            geo_vector_t dir2 = vhough_transform(p2, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(k),
-                                               pt_clouds_global_indices.at(k)); 
-            dir1 = dir1 * -1;
-            dir2 = dir2 * -1;
+                std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
 
-            std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+                if (result1.first >= 0) {
+                    index_index_dis_dir1[j][k] = std::make_tuple(std::get<0>(index_index_dis[j][k]), 
+                                                                result1.first, result1.second);
+                }
 
-            if (result1.first >= 0) {
-                index_index_dis_dir1[j][k] = std::make_tuple(std::get<0>(index_index_dis[j][k]), 
-                                                            result1.first, result1.second);
-            }
+                std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm); 
 
-            std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm); 
-
-            if (result2.first >= 0) {
-                index_index_dis_dir2[j][k] = std::make_tuple(result2.first,
-                                                            std::get<1>(index_index_dis[j][k]), 
-                                                            result2.second);
+                if (result2.first >= 0) {
+                    index_index_dis_dir2[j][k] = std::make_tuple(result2.first,
+                                                                std::get<1>(index_index_dis[j][k]), 
+                                                                result2.second);
+                }
             }
             // Now check the path 
+
             {
-                geo_point_t p1 = point3d(std::get<0>(index_index_dis[j][k]));
-                geo_point_t p2 = point3d(std::get<1>(index_index_dis[j][k]));
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis/step_dis + 1;
+
+                
 
                 // Track different types of "bad" points
                 int num_bad[4] = {0,0,0,0};   // more than one of three are bad
@@ -2842,6 +2902,12 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                     }
                 }
 
+                // if (kd_blobs().size()==244){
+                //     std::cout << "Test: Dis: " << p1 << " " << p2 << " " << dis << std::endl;
+                //     std::cout << "Test: num_bad1: " << num_bad1[0] << " " << num_bad1[1] << " " << num_bad1[2] << " " << num_bad1[3] << std::endl;
+                //     std::cout << "Test: num_bad2: " << num_bad2[0] << " " << num_bad2[1] << " " << num_bad2[2] << std::endl;
+                //     std::cout << "Test: num_bad: " << num_bad[0] << " " << num_bad[1] << " " << num_bad[2] << " " << num_bad[3] << std::endl;
+                // }
                 // Calculate angles between directions
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
@@ -2940,8 +3006,8 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
 
             // Now check path again ... 
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
-                geo_point_t p1 = point3d(std::get<0>(index_index_dis_dir1[j][k]));
-                geo_point_t p2 = point3d(std::get<1>(index_index_dis_dir1[j][k]));
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k])); //point3d(std::get<0>(index_index_dis_dir1[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k])); //point3d(std::get<1>(index_index_dis_dir1[j][k]));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + 
                                 pow(p1.y() - p2.y(), 2) + 
@@ -3016,8 +3082,8 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
             //Now check path again ... 
             // Now check the path...
             if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
-                geo_point_t p1 = point3d(std::get<0>(index_index_dis_dir2[j][k]));
-                geo_point_t p2 = point3d(std::get<1>(index_index_dis_dir2[j][k]));
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));//point3d(std::get<0>(index_index_dis_dir2[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));//point3d(std::get<1>(index_index_dis_dir2[j][k]));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + 
                                 pow(p1.y() - p2.y(), 2) + 
@@ -3098,7 +3164,7 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
         boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
                               boost::property<boost::edge_weight_t, double>>
             temp_graph(num);
-
+        // int temp_count = 0;
         for (size_t j = 0; j != num; j++) {
             for (size_t k = j + 1; k != num; k++) {
                 int index1 = j;
@@ -3106,9 +3172,11 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 if (std::get<0>(index_index_dis[j][k]) >= 0) {
                     add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
                     // LogDebug(index1 << " " << index2 << " " << std::get<2>(index_index_dis[j][k]));
+                    // temp_count ++;
                 }
             }
         }
+        // std::cout << "Test: Count: " << temp_count << std::endl;
 
         // Process MST
         process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
@@ -3224,14 +3292,15 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     
     // Find connected components
     std::vector<int> component(num_vertices(*m_graph));
-    const int num_components = connected_components(*m_graph, &component[0]);
+    // const int num_components =
+    connected_components(*m_graph, &component[0]);
 
-    std::cout << "Test: num components " << num_components << std::endl;
+    // std::cout << "Test: num components " << num_components << " " << kd_blobs().size() << std::endl;
 
     // If only one component, no need for mapping
-    if (num_components <= 1) {
-        return std::vector<int>();
-    }
+    // if (num_components <= 1) {
+    //     return std::vector<int>();
+    // }
 
     // Create mapping from blob indices to component groups
     std::vector<int> b2groupid(nchildren(), -1);
@@ -3257,7 +3326,7 @@ void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) 
 
     vertex_descriptor v0 = vertex(pt_idx, *m_graph);
     // making a param object
-    const auto& param = weight_map(get(edge_weight, *m_graph))
+    const auto& param = weight_map(get(boost::edge_weight, *m_graph))
 				   .predecessor_map(&m_parents[0])
 				   .distance_map(&m_distances[0]);
     // const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *m_graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
@@ -3876,6 +3945,62 @@ void Facade::sort_clusters(std::vector<Cluster*>& clusters)
 {
     std::sort(clusters.rbegin(), clusters.rend(), cluster_less);
 }
+
+
+Facade::Cluster::Flash Facade::Cluster::get_flash() const
+{
+    Flash flash;                // starts invalid
+
+    const auto* p = node()->parent;
+    if (!p)  return flash;
+    const auto* g = p->value.facade<Grouping>();
+    if (!g)  return flash;
+
+    const int flash_index = get_scalar("flash", -1);
+
+    //std::cout << "Test3 " << flash_index << std::endl;
+    
+    if (flash_index < 0) {
+        return flash;
+    }
+    if (! g->has_pc("flash")) {
+        return flash;
+    }
+    flash.m_valid = true;
+        
+    // These are kind of inefficient as we get the "flash" PC each time.
+    flash.m_time = g->get_element<double>("flash", "time", flash_index, 0);
+    flash.m_value = g->get_element<double>("flash", "value", flash_index, 0);
+    flash.m_ident = g->get_element<int>("flash", "ident", flash_index, -1);
+    flash.m_type = g->get_element<int>("flash", "type", flash_index, -1);
+
+    // std::cout << "Test3: " << g->has_pc("flash") << " " << g->has_pc("light") << " " << g->has_pc("flashlight") << " " << flash_index << " " << flash.m_time << std::endl;
+
+    if (!(g->has_pc("light") && g->has_pc("flashlight"))) {
+        return flash;           // valid, but no vector info.
+    }
+    
+    // These are spans.  We walk the fl to look up in the l.
+    const auto fl_flash = g->get_pcarray<int>("flash", "flashlight");
+    const auto fl_light = g->get_pcarray<int>("light", "flashlight");
+    const auto l_times = g->get_pcarray<double>("time", "light");
+    const auto l_values = g->get_pcarray<double>("value", "light");
+    const auto l_errors = g->get_pcarray<double>("error", "light");
+
+    // std::cout << "Test3: " << fl_flash.size() << " " << fl_light.size() << std::endl;
+
+    const size_t nfl = fl_light.size();
+    for (size_t ifl = 0; ifl < nfl; ++ifl) {
+        if (fl_flash[ifl] != flash_index) continue;
+        const int light_index = fl_light[ifl];
+        
+        flash.m_times.push_back(l_times[light_index]);
+        flash.m_values.push_back(l_values[light_index]);
+        flash.m_errors.push_back(l_errors[light_index]);
+    }
+    return flash;
+}
+
 
 // Local Variables:
 // mode: c++

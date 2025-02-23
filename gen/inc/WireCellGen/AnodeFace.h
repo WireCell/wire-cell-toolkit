@@ -8,13 +8,17 @@ namespace WireCell {
 
         class AnodeFace : public IAnodeFace {
            public:
-            AnodeFace(int ident, IWirePlane::vector planes, const BoundingBox& sensvol, int which, int aid);
+            AnodeFace(int ident, IWirePlane::vector planes, const BoundingBox& sensvol,
+                      int which, int aid, int dirx);
             virtual ~AnodeFace();
 
-            /// Return the ident number of this face.
+            // See IAnodeFace.h for what these mean
+
             virtual int ident() const { return m_ident; }
 
             virtual int which() const { return m_which; }
+
+            virtual int dirx() const { return m_dirx; }
 
             virtual int anode() const { return m_aid; }
 
@@ -30,11 +34,12 @@ namespace WireCell {
             virtual const RayGrid::Coordinates& raygrid() const { return m_coords; }
 
            private:
-            int m_ident;
+            int m_ident{0};
             IWirePlane::vector m_planes;
             BoundingBox m_bb;
             RayGrid::Coordinates m_coords;
-            int m_which, m_aid;
+            int m_which{0}, m_aid{0};
+            int m_dirx{0};
         };
     }  // namespace Gen
 }  // namespace WireCell

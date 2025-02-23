@@ -5,7 +5,7 @@
 
 using Eigen::seq;
 using Eigen::seqN;
-using Eigen::lastN;
+using Eigen::placeholders::lastN;
 using Eigen::placeholders::all;
 
 using namespace WireCell;

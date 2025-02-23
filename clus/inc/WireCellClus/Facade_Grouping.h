@@ -22,15 +22,26 @@
 namespace WireCell::PointCloud::Facade {
     class Cluster;
 
+    struct GroupingCache {
+
+        mapfp_t<double> proj_centers;
+        mapfp_t<double> pitch_mags;
+
+        // #381 if you give a crap about dead_winds.  
+
+    };
+
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
     // nodes that are related in some way.
-    class Grouping : public NaryTree::FacadeParent<Cluster, points_t> {
+    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>, public Mixin<Grouping, GroupingCache> {
 
         TPCParams m_tp{};  // use default value by default.
         /// TODO: replace TPCParams with this in the future?
         IAnodePlane::pointer m_anode{nullptr};
 
        public:
+
+        Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
         // MUST call this sometimes after construction if non-default value needed.
         // FIXME: TPCParams should be moved out of the facade!
@@ -44,10 +55,17 @@ namespace WireCell::PointCloud::Facade {
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
+        const mapfp_t< std::map<int, std::pair<double, double>> >& all_dead_winds() const {
+            // this is added in order that we may dump it in json_summary() for debugging.
+            return m_dead_winds;
+        }
+
         std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind) const
         {
             // make one if not exist
             return m_dead_winds[face][pind];
+
+            // This is utter garbage.  #381.
         }
         using sv2d_t = Tree::ScopedView<float_t>;
         using kd2d_t = sv2d_t::nfkd_t;
@@ -55,8 +73,12 @@ namespace WireCell::PointCloud::Facade {
 
         const kd2d_t& kd2d(const int face, const int pind) const;
 
-        const mapfp_t<double>& proj_centers() const; // lazy, do not access directly.
-        const mapfp_t<double>& pitch_mags() const;   // lazy, do not access directly.
+        const mapfp_t<double>& proj_centers() const {
+            return cache().proj_centers;
+        }
+        const mapfp_t<double>& pitch_mags() const {
+            return cache().pitch_mags;
+        }
 
         bool is_good_point(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
                            const int allowed_bad = 1) const;
@@ -113,15 +135,22 @@ namespace WireCell::PointCloud::Facade {
             int min_time, int max_time, int min_ch, int max_ch, 
             const int face, const int pind) const;
 
-       private:
-        void fill_proj_centers_pitch_mags() const;
-        mutable mapfp_t<double> m_proj_centers;
-        mutable mapfp_t<double> m_pitch_mags;
+        // We override this from Mixin in order to inject propagation of the
+        // utter garbage handling of dead_winds.  If someone fixes that, this
+        // method may be removed.  #381.
+        virtual void clear_cache() const;
+
+      private:
+
+        // This "cache" is utterly abused.  Someone else fix it.  #381.
         mutable mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
 
        protected:
-        // Receive notification when this facade is created on a node.
+        // Receive notification when this facade is created on a node. #381.
         virtual void on_construct(node_type* node);
+
+        virtual void fill_cache(GroupingCache& cache) const;
+        
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 

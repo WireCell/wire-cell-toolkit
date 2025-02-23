@@ -50,7 +50,6 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 }
 
 
-
 void Grouping::on_construct(node_type* node)
 {
     this->NaryTree::Facade<points_t>::on_construct(node);
@@ -72,6 +71,33 @@ void Grouping::on_construct(node_type* node)
         }
     }
 }
+
+
+void Grouping::fill_cache(GroupingCache& gc) const
+{
+    {
+        // In pre-cached code this was Grouping::fill_proj_centers_pitch_mags() const
+
+        const int ndummy_layers = 2;
+        if (!m_anode) {
+            raise<ValueError>("anode is null");
+        }
+        for (const auto& face : m_anode->faces()) {
+            // std::cout<< "fill_cache: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
+            const auto& coords = face->raygrid();
+            // skip dummy layers so the vector matches 0, 1, 2 plane order
+            for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+                const auto& pitch_dir = coords.pitch_dirs()[layer];
+                const auto& center = coords.centers()[layer];
+                double proj_center = center.dot(pitch_dir);
+                gc.proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
+                gc.pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+            }
+        }
+    }
+}
+
+
 
 void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.face = get(cfg, "face", m_tp.face);
@@ -129,40 +155,6 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
     return sv.kd();
 }
 
-void Grouping::fill_proj_centers_pitch_mags() const
-{
-    const int ndummy_layers = 2;
-    if (!m_anode) {
-        raise<ValueError>("anode is null");
-    }
-    for (const auto& face : m_anode->faces()) {
-        // std::cout<< "fill_proj_centers_pitch_mags: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
-        const auto& coords = face->raygrid();
-        // skip dummy layers so the vector matches 0, 1, 2 plane order
-        for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
-            const auto& pitch_dir = coords.pitch_dirs()[layer];
-            const auto& center = coords.centers()[layer];
-            double proj_center = center.dot(pitch_dir);
-            m_proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
-            m_pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
-        }
-    }
-}
-
-const Facade::mapfp_t<double>& Grouping::proj_centers() const
-{
-    if (!m_proj_centers.empty()) return m_proj_centers;
-    fill_proj_centers_pitch_mags();
-    return m_proj_centers;
-}
-
-const Facade::mapfp_t<double>& Grouping::pitch_mags() const
-{
-    if (!m_pitch_mags.empty()) return m_pitch_mags;
-    fill_proj_centers_pitch_mags();
-    return m_pitch_mags;
-}
-
 
 bool Grouping::is_good_point(const geo_point_t& point, const int face, double radius, int ch_range, int allowed_bad) const {
     const int nplanes = 3;
@@ -204,7 +196,7 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
     double radius, int ch_range) const 
 {
     std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
-    
+    // std::cout << "abc: " << point << " " << radius << " " << ch_range << std::endl;
     // Check each plane (0,1,2)
     for (int pind = 0; pind < 3; ++pind) {
         // Get closest points for this plane
@@ -220,6 +212,7 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
                 num_planes[pind + 3]++;
             }
         }
+        // std::cout << closest_pts.size() << " " << get_closest_dead_chs(point, ch_range, face, pind) << " " << num_planes[pind] << " " << num_planes[pind+3] << std::endl;
     }
     
     return num_planes;
@@ -475,6 +468,18 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
     }
 
     return map_time_ch_charge;
+}
+
+
+
+void Grouping::clear_cache() const
+{
+    this->Mixin<Grouping, GroupingCache>::clear_cache();
+
+
+    // This is utterly broken.  #381.
+    m_dead_winds.clear(); 
+
 }
 
 // Local Variables:

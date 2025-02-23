@@ -1,16 +1,20 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade.h"
 #include <WireCellClus/ClusteringFuncs.h>
-#include "WireCellUtil/NamedFactory.h"
-#include "WireCellUtil/Units.h"
-#include "WireCellUtil/Persist.h"
-#include "WireCellUtil/ExecMon.h"
-#include "WireCellUtil/String.h"
+#include "WireCellClus/Facade_Summary.h"
+
+
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensorSet.h"
 
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Units.h"
+#include "WireCellUtil/Persist.h"
+#include "WireCellUtil/ExecMon.h"
+#include "WireCellUtil/String.h"
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Graph.h"
 
 #include <fstream>
@@ -85,6 +89,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     log->debug("m_bee_ld.algorithm: {}", m_bee_ld.algorithm());
 
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
+
+    m_dump_json = get<bool>(cfg, "dump_json", false);
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -249,6 +255,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     Perf perf{m_perf, log};
 
     const int ident = ints->ident();
+    log->debug("loading tensor set ident={} (last={})", ident, m_last_ident);
     if (m_last_ident < 0) {     // first time.
         if (m_use_config_rse) {
             // Set RSE in the sink
@@ -285,16 +292,35 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     grouping->set_anode(m_anode);
     grouping->set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
     perf("loaded live clusters");
+    {
+        size_t npoints_total = 0;
+        size_t nzero = 0;
+        for (const auto* cluster : grouping->children()) {
+            int n = cluster->npoints();
+            if (n == 0) {
+                ++nzero;
+            }
+            npoints_total += n;
+        }
+        log->debug("loaded live grouping with {} clusters, {} points, and {} clusters with no points",
+                   grouping->nchildren(), npoints_total, nzero);
+        // It is probably an error if nzero is not zero.
+    }
+
 
     // log->debug("Got live pctree with {} children", root_live->nchildren());
     // log->debug(em("got live pctree"));
     log->debug("as_pctree from \"{}\"", inpath + "/dead");
-    auto root_dead = as_pctree(intens, inpath + "/dead");
-    if (!root_dead) {
-        log->error("Failed to get dead point cloud tree from \"{}\"", inpath + "/dead");
-        raise<ValueError>("Failed to get dead point cloud tree from \"%s\"", inpath);
+    const std::string deadinpath = inpath + "/dead";
+    Points::node_ptr root_dead;
+    try {
+        root_dead = as_pctree(intens, deadinpath);
+        perf("loaded dead clusters");
     }
-    perf("loaded dead clusters");
+    catch (WireCell::KeyError& err) {
+        log->warn("No pc-tree at datapath {}, assuming no 'dead' clusters", deadinpath);
+        root_dead = std::make_unique<Points::node_t>();
+    }
 
     fill_bee_points(m_bee_img, *root_live.get());
     perf("loaded dump live clusters to bee");
@@ -308,7 +334,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     // initialize clusters ...
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
+
     Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
+    dead_grouping.set_anode(m_anode);
+    dead_grouping.set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
+    
 
     //perf.dump("original live clusters", live_grouping, false, false);
     //perf.dump("original dead clusters", dead_grouping, false, false);
@@ -335,6 +365,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     perf("dump live clusters to bee");
 
     graph2json(live_grouping, "graph2json.npz");
+    if (m_dump_json) {
+        Persist::dump(String::format("live-summary-%d.json", ident), json_summary(live_grouping), true);
+        Persist::dump(String::format("dead-summary-%d.json", ident), json_summary(dead_grouping), true);
+    }
+
 
     std::string outpath = m_outpath;
     if (outpath.find("%") != std::string::npos) {

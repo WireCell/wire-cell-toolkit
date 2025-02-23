@@ -1,0 +1,69 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+# Run like:
+#
+# ./root/test/uboone-cluster.smake -p --directory out <rule>
+#
+# Rules:
+#
+# dotify_all: make PDFs for WCT flow graphs
+# cluster: run full job
+
+
+import os
+from pathlib import Path
+try:
+    from urllib import request
+except ImportError:
+    from urllib import urlopen
+else:
+    urlopen = request.urlopen
+import ssl
+ssl_context = ssl._create_unverified_context()
+
+
+wctcfg = workflow.basedir + "/uboone-clusters.jsonnet"
+wcpdat = "nuselEval_5384_137_6852.root"
+wcpdat_url = f"https://www.phy.bnl.gov/xqian/talks/wire-cell-porting/{wcpdat}"
+
+# fixme: put this somewhere more central
+def download(url, target=None, force=False):
+    if target is not None:
+        target = Path(target)
+        if target.exists() and not force:
+            return target
+
+    web = urlopen(url, context=ssl_context)
+    if web.getcode() != 200:
+        raise IOError(f'failed to download {url} got error {web}')
+    if target is None:
+        p = Path(urlparse(url).path)
+        target = p.name
+    target = Path(target)
+    target.write_bytes(web.read())
+    return target
+download(wcpdat_url, target=wcpdat)
+
+
+
+rule dump:
+    input:
+        cfg = wctcfg,
+        dat = wcpdat
+    output:
+        log='dump.log',
+        err='dump.err'
+    shell: '''
+    wire-cell -l {output.log} -L debug -A infiles={input.dat} {input.cfg} 2> {output.err}
+    '''
+
+rule dotify:
+    input: wctcfg
+    output:
+        pdf="uboone-clusters.pdf",
+        json="uboone-clusters.json",
+    shell: '''
+    wcsonnet -A infiles=uboone.root {input} > {output.json}
+    wirecell-pgraph dotify {output.json} {output.pdf}
+    '''

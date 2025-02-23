@@ -24,6 +24,247 @@
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
 namespace WireCell::PointCloud::Facade {
+
+    struct DummyCache{};
+
+    /// The Grouping/Cluster/Facade inherit from this to gain additional methods
+    /// that are common to all three facade types.  The mixin itself needs to
+    /// know its facade type and value but specifically does not include anything
+    /// that requires parent or child types or values.
+    ///
+    /// It provides helper functions to deal with local PCs and an optional
+    /// caching mechanism.  See comments on cache() and fill_cache() and
+    /// clear_cache().  Note, using the cache mechanism does not preclude facade
+    /// doing DIY caching.
+    template<typename SelfType, typename CacheType=DummyCache>
+    class Mixin {
+        SelfType& self;
+        std::string scalar_pc_name, ident_array_name;
+        mutable std::unique_ptr<CacheType> m_cache;
+    public:
+        Mixin(SelfType& self, const std::string& scalar_pc_name, const std::string& ident_array_name = "ident")
+            : self(self)
+            , scalar_pc_name(scalar_pc_name)
+            , ident_array_name(ident_array_name) {
+            
+        }
+
+    protected:
+        /// Facade cache management has three simple rules:
+        ///
+        /// Cache rule 1: The SelfType may call this to access a full and const cache.
+        const CacheType& cache() const
+        {
+            if (! m_cache) {
+                m_cache = std::make_unique<CacheType>();
+                fill_cache(* const_cast<CacheType*>(m_cache.get()));
+            }
+            return *m_cache.get();
+        }
+
+        /// Cache rule 2:
+        ///
+        /// The SelfType overrides this method to fill an empty cache.  This is
+        /// the only place where the cache object can be accessed by Self in
+        /// mutable form.
+        virtual void fill_cache(CacheType& cache) const {}
+        
+    public:
+        /// Cache rule 3:
+        ///
+        /// The SelfType may override clear_cache(), for example to clear cached
+        /// data not in the CacheType.  An override must then forward-call the
+        /// Mixin::clear_cache().  The Mixin, the SelfType implementation and/or
+        /// SelfType users may all call this method thought the goal is to make
+        /// clear_cache() called in response to a tree notification.
+        virtual void clear_cache() const
+        {
+            m_cache = nullptr;
+        }
+
+    public:
+
+        /// Clear my node of all children nodes and purge my local PCs.
+        /// Invalidates any cache.
+        void clear()
+        {
+            // node level:
+            self.node()->remove_children();
+            // value level:
+            self.local_pcs().clear();
+            // facade cache level:
+            clear_cache();
+        }
+
+        // Get the map from name to PC for all local PCs.
+        WireCell::PointCloud::Tree::named_pointclouds_t& local_pcs()
+        {
+            return self.value().local_pcs();
+        }
+        const WireCell::PointCloud::Tree::named_pointclouds_t& local_pcs() const
+        {
+            return self.value().local_pcs();
+        }
+
+        // Return an "identifying number" from the "scalar" PC of the node.  As
+        // with all "ident" values in WCT, there is no meaning ascribed to the
+        // actual value (by WCT).  It is meant to refer to some external
+        // identity.  If the scalar PC or the ident array are not found, the
+        // default is returned.
+        //
+        // This is a special case method that merely delegates to get_scalar().
+        int ident(int def = -1) const
+        {
+            return get_scalar<int>(ident_array_name, def);
+        }
+
+        // Set an ident number, delegating to set_scalar().
+        void set_ident(int id)
+        {
+            set_scalar<int>(ident_array_name, id);
+        }
+
+        template <typename T = int>
+        T get_element(const std::string& pcname, const std::string& aname, size_t index, T def = 0) const {
+            const auto& lpcs = local_pcs();
+            auto it = lpcs.find(pcname);
+            if (it == lpcs.end()) {
+                return def;
+            }
+            const auto arr = it->second.get(aname);
+            if (!arr) {
+                return def;
+            }
+            // std::cout << "test1 " << pcname << " " << aname << " " << index << " " << arr->template element<T>(index) << std::endl;
+            return arr->template element<T>(index);
+        }
+
+        // Return a value from the scalar PC
+        template <typename T = int>
+        T get_scalar(const std::string& aname, T def = 0) const {
+            return get_element(scalar_pc_name, aname, 0, def);
+        }
+        
+        // Set a value on the scalar PC
+        template <typename T = int>
+        void set_scalar(const std::string& aname, T val = 0) {
+            auto& lpcs = local_pcs();
+            auto& cs = lpcs[scalar_pc_name]; // create if not existing
+            auto arr = cs.get(aname);
+            if (!arr) {
+                cs.add(aname, PointCloud::Array({(T)val}));
+                return;
+            }
+            arr->template element<T>(0) = (T)val;
+        }
+
+        bool has_pc(const std::string& pcname) const
+        {
+            static PointCloud::Dataset dummy;
+            const auto& lpcs = local_pcs();
+            auto it = lpcs.find(pcname);
+            if (it == lpcs.end()) {
+                return false;
+            }
+            return true;
+        }
+
+        // Const access to a local PC/Dataset.  If pcname is missing return
+        // reference to an empty dataset.
+        const PointCloud::Dataset& get_pc(const std::string& pcname) const
+        {
+            static PointCloud::Dataset dummy;
+            const auto& lpcs = local_pcs();
+            auto it = lpcs.find(pcname);
+            if (it == lpcs.end()) {
+                return dummy;
+            }
+            return it->second;
+        }
+        // Mutable access to a local PC/Dataset.  If pcname is missing, a new
+        // dataset of that name will be created.
+        PointCloud::Dataset& get_pc(const std::string& pcname)
+        {
+            static PointCloud::Dataset dummy;
+            const auto& lpcs = local_pcs();
+            return lpcs[pcname];
+        }
+
+        // Return true if this cluster has a PC array and PC of given names and type.
+        template<typename ElementType=int>
+        bool has_pcarray(const std::string& aname, const std::string& pcname) const {
+            auto& lpc = local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return false;
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return false;
+            }
+            return arr->template is_type<ElementType>();
+        }
+
+        // Return as a span an array named "aname" stored in clusters PC named
+        // "pcname".  Returns default span if PC or array not found or there is
+        // a type mismatch.  Note, span uses array data in place.
+        template<typename ElementType=int>
+        PointCloud::Array::span_t<ElementType>
+        get_pcarray(const std::string& aname, const std::string& pcname) {
+
+            auto& lpc = local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return {};
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return {};
+            }
+            return arr->template elements<ElementType>();
+        }
+        template<typename ElementType=int>
+        const PointCloud::Array::span_t<ElementType>
+        get_pcarray(const std::string& aname, const std::string& pcname) const {
+
+            auto& lpc = local_pcs();
+            auto lit = lpc.find(pcname);
+            if (lit == lpc.end()) {
+                return {};
+            }
+
+            auto arr = lit->second.get(aname);
+            if (!arr) {
+                return {};
+            }
+            return arr->template elements<ElementType>();
+        }
+
+        // Store vector as an array named "aname" into this cluster's PC named "pcname".
+        // Reminder, all arrays in a PC must have same major size.
+        template<typename ElementType=int>
+        void
+        put_pcarray(const std::vector<ElementType>& vec,
+                    const std::string& aname, const std::string& pcname) {
+
+            auto &lpc = local_pcs();
+            auto& pc = lpc[pcname];
+
+            PointCloud::Array::shape_t shape = {vec.size()};
+
+            auto arr = pc.get(aname);
+            if (arr) {
+                arr->template assign(vec.data(), shape, false);
+            }
+            else {
+                pc.add(aname, Array(vec, shape, false));
+            }
+        }
+    };
+
+
     using points_t = Tree::Points;
     using node_t = Tree::Points::node_t;
     using node_ptr = std::unique_ptr<node_t>;
@@ -47,7 +288,14 @@ namespace WireCell::PointCloud::Facade {
     using int_t = int;
 
 
-    using namespace boost;
+    // AVOID DOING THIS in headers!!!  In this case it causes conflict between
+    // boost::units and WireCell::Units in imp files that #include this one.
+    //
+    // If typing the namespace:: is too much, then one can do select "using
+    // namespace::symbol".
+    // 
+    // using namespace boost;
+
     struct VertexProp {
         int index;
         // WCPointCloud<double>::WCPoint wcpoint;
@@ -57,9 +305,9 @@ namespace WireCell::PointCloud::Facade {
     // struct EdgeProp {
     //     float dist;  // edge distance
     // };
-    typedef adjacency_list<setS, vecS, undirectedS, VertexProp, EdgeProp> MCUGraph;
-    typedef graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
-    typedef graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
+    typedef boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, VertexProp, EdgeProp> MCUGraph;
+    typedef boost::graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
+    typedef boost::graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
 
     // FIXME: refactor to vector<pitch>, etc?  or vector<TPCPlane> with ::pitch/::angle?
     struct TPCParams {

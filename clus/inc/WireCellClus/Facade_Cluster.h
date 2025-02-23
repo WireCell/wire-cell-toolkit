@@ -15,6 +15,7 @@
 #include "WireCellIface/IAnodeFace.h"
 
 #include "WireCellClus/Facade_Util.h"
+#include "WireCellClus/Facade_Blob.h"
 
 
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
@@ -23,8 +24,11 @@ namespace WireCell::PointCloud::Facade {
     class Blob;
     class Grouping;
 
+    struct ClusterCache { };
+
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
-    class Cluster : public NaryTree::FacadeParent<Blob, points_t> {
+    class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
+
         // The expected scope.
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
@@ -35,14 +39,15 @@ namespace WireCell::PointCloud::Facade {
         };
 
        public:
-        Cluster() = default;
+        Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
+
+        // Override Mixin
+        virtual void clear_cache() const;
 
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
-
-
 
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
@@ -326,61 +331,48 @@ namespace WireCell::PointCloud::Facade {
         /// @note p_test will be updated
         bool judge_vertex(geo_point_t& p_test, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
-        // Return true if this cluster has a PC array and PC of given names and type.
-        template<typename ElementType=int>
-        bool has_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
-            auto& lpc = node()->value.local_pcs();
-            auto lit = lpc.find(pcname);
-            if (lit == lpc.end()) {
-                return false;
-            }
 
-            auto arr = lit->second.get(aname);
-            if (!arr) {
-                return false;
-            }
-            return arr->is_type<ElementType>();
-        }
+        class Flash {
+            friend class Cluster;
+            bool m_valid{false};
+            double m_time{0}, m_value{0};
+            int m_ident{-1}, m_type{-1};
+            std::vector<double> m_times, m_values, m_errors;
+        public:
 
-        // Return as a span an array named "aname" stored in clusters PC named
-        // "pcname".  Returns default span if PC or array not found or there is
-        // a type mismatch.  Note, span uses array data in place.
-        template<typename ElementType=int>
-        PointCloud::Array::span_t<ElementType>
-        get_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
+            /// A "false" means there was not "flash" PC array and all values
+            /// are invalid.  A "true" does not guarantee all values are valid.
+            explicit operator bool() const { return m_valid;}
 
-            auto& lpc = node()->value.local_pcs();
-            auto lit = lpc.find(pcname);
-            if (lit == lpc.end()) {
-                return {};
-            }
+            /// Any "singular" methods are about the flash itself.
 
-            auto arr = lit->second.get(aname);
-            if (!arr) {
-                return {};
-            }
-            return arr->elements<ElementType>();
-        }
-        // Store vector as an array named "aname" into this cluster's PC named "pcname".
-        // Reminder, all arrays in a PC must have same major size.
-        template<typename ElementType=int>
-        void
-        put_pcarray(const std::vector<ElementType>& vec,
-                    const std::string& aname, const std::string& pcname = "perblob") {
+            /// Get the time of the flash.  
+            double time() const { return m_time; }
 
-            auto &lpc = node()->value.local_pcs();
-            auto& pc = lpc[pcname];
+            /// Get the measurement of the flash
+            double value() const {return m_value; }
 
-            PointCloud::Array::shape_t shape = {vec.size()};
+            /// The ID of the flash
+            int ident() const { return m_ident; }
 
-            auto arr = pc.get(aname);
-            if (arr) {
-                arr->assign(vec.data(), shape, false);
-            }
-            else {
-                pc.add(aname, Array(vec, shape, false));
-            }
-        }
+            /// The type of the flash.
+            int type() const { return m_type; }
+
+            /// Any "plural" methods return per-optical-detector quantities.
+            /// They will be empty() if the "light" and "flashlight" arrays are
+            /// missing.  These vectors have the same size.
+
+            // keep these return-by-value.
+
+            /// Times of individual optical detector readouts.
+            std::vector<double> times() const { return m_times; }
+            /// Measurement values from optical detectors.
+            std::vector<double> values() const { return m_values; }
+            /// Measurement uncertainty from optical detectors.
+            std::vector<double> errors() const { return m_errors; }
+        };
+        // Return a flash.  If there is none, it will hold default values.
+        Flash get_flash() const;
 
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.

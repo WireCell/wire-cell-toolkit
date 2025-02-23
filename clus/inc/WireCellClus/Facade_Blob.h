@@ -23,10 +23,36 @@ namespace WireCell::PointCloud::Facade {
 
     class Cluster;
 
+    struct BlobCache {
+        float_t charge{0};
+        float_t center_x{0};
+        float_t center_y{0};
+        float_t center_z{0};
+        int_t npoints{0};
+
+        int_t slice_index_min{0};  // unit: tick
+        int_t slice_index_max{0};
+
+        int_t u_wire_index_min{0};
+        int_t u_wire_index_max{0};
+        int_t v_wire_index_min{0};
+        int_t v_wire_index_max{0};
+        int_t w_wire_index_min{0};
+        int_t w_wire_index_max{0};
+
+        int_t max_wire_interval{-1}; 
+        int_t min_wire_interval{-1};
+        int_t max_wire_type{-1}; // 0: u, 1: v, 2: w
+        int_t min_wire_type{-1}; // 0: u, 1: v, 2: w
+
+        std::vector<geo_point_t> corners_;
+    };
+
+
     /// Give a node "Blob" semantics
-    class Blob : public NaryTree::Facade<points_t> {
+    class Blob : public NaryTree::Facade<points_t>, public Mixin<Blob, BlobCache> {
        public:
-        Blob() = default;
+        Blob() : Mixin<Blob, BlobCache>(*this, "scalar") {}
         virtual ~Blob() {}
 
         // Return the cluster to which this blob is a child.  May be nullptr.
@@ -37,28 +63,28 @@ namespace WireCell::PointCloud::Facade {
 
         bool overlap_fast(const Blob& b, const int offset) const;
 
-        float_t charge() const { return charge_; }
-        float_t center_x() const { return center_x_; }
-        float_t center_y() const { return center_y_; }
-        float_t center_z() const { return center_z_; }
-        int_t npoints() const { return npoints_; }
+        float_t charge() const { return cache().charge; }
+        float_t center_x() const { return cache().center_x; }
+        float_t center_y() const { return cache().center_y; }
+        float_t center_z() const { return cache().center_z; }
+        int_t npoints() const { return cache().npoints; }
 
         // units are number of ticks
         /// FIXME: change min, max to begin end
-        int_t slice_index_min() const { return slice_index_min_; }
-        int_t slice_index_max() const { return slice_index_max_; }
+        int_t slice_index_min() const { return cache().slice_index_min; }
+        int_t slice_index_max() const { return cache().slice_index_max; }
 
-        int_t u_wire_index_min() const { return u_wire_index_min_; }
-        int_t u_wire_index_max() const { return u_wire_index_max_; }
-        int_t v_wire_index_min() const { return v_wire_index_min_; }
-        int_t v_wire_index_max() const { return v_wire_index_max_; }
-        int_t w_wire_index_min() const { return w_wire_index_min_; }
-        int_t w_wire_index_max() const { return w_wire_index_max_; }
+        int_t u_wire_index_min() const { return cache().u_wire_index_min; }
+        int_t u_wire_index_max() const { return cache().u_wire_index_max; }
+        int_t v_wire_index_min() const { return cache().v_wire_index_min; }
+        int_t v_wire_index_max() const { return cache().v_wire_index_max; }
+        int_t w_wire_index_min() const { return cache().w_wire_index_min; }
+        int_t w_wire_index_max() const { return cache().w_wire_index_max; }
 
-        int_t get_max_wire_interval() const { return max_wire_interval_;}
-        int_t get_min_wire_interval() const { return min_wire_interval_;}
-        int_t get_max_wire_type() const { return max_wire_type_;}
-        int_t get_min_wire_type() const { return min_wire_type_;}
+        int_t get_max_wire_interval() const { return cache().max_wire_interval;}
+        int_t get_min_wire_interval() const { return cache().min_wire_interval;}
+        int_t get_max_wire_type() const { return cache().max_wire_type;}
+        int_t get_min_wire_type() const { return cache().min_wire_type;}
 
         std::vector<geo_point_t> corners() const { return corners_; }
 
@@ -73,32 +99,12 @@ namespace WireCell::PointCloud::Facade {
         bool sanity(Log::logptr_t log = nullptr) const;
 
        private:
-        float_t charge_{0};
-        float_t center_x_{0};
-        float_t center_y_{0};
-        float_t center_z_{0};
-        int_t npoints_{0};
-
-        int_t slice_index_min_{0};  // unit: tick
-        int_t slice_index_max_{0};
-
-        int_t u_wire_index_min_{0};
-        int_t u_wire_index_max_{0};
-        int_t v_wire_index_min_{0};
-        int_t v_wire_index_max_{0};
-        int_t w_wire_index_min_{0};
-        int_t w_wire_index_max_{0};
-
-        int_t max_wire_interval_{-1}; 
-        int_t min_wire_interval_{-1};
-        int_t max_wire_type_{-1}; // 0: u, 1: v, 2: w
-        int_t min_wire_type_{-1}; // 0: u, 1: v, 2: w
+        // moved to cache
 
         std::vector<geo_point_t> corners_;
 
        protected:
-        // Receive notification when this facade is created on a node.
-        virtual void on_construct(node_type* node);
+        virtual void fill_cache(BlobCache& cache) const;
     };
     std::ostream& operator<<(std::ostream& os, const Blob& blob);
 

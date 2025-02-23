@@ -1,0 +1,39 @@
+#+title: Using clangd to develop WCT
+
+Emacs eglot (and others) can talk to ~clangd~ to enrich the editing experience.
+
+* Starting ~clangd~
+
+Most likely your editor handles this.
+
+* Configuring *clangd*
+
+By default, just running ~clangd~ will lead to it reporting many spurious errors.  To reduce these, it must know how to compile the code.  This can be difficult to provide manually.   An easier way exists using the ~bear~ tool:
+
+#+begin_example
+  $ bear -- ./wcb 
+#+end_example
+
+If the resulting ~compile_commands.json~ file looks incomplete, you may need to preface that command with:
+
+#+begin_example
+  $ ./wcb clean
+#+end_example
+
+Note, ~bear~ makes an intemediate file ~compile_commands.events.json~ while running and writes ~compile_commands.json~
+on finishing.
+
+* Issues
+
+** ~backtrace.h~ not found
+
+This header is provided by the compiler (or not).  It is provided by GCC but apparently (?) not clang.  It comes in through ~WireCellUtil/Exceptions.h~ which includes ~boost/stacktrace.hpp~ when ~HAVE_BACKTRACE_LIB~ is defined (in ~build/WireCellUtil/BuildConfig.h~.
+
+Existence of ~backtrace.h~ is auto-detected by ~./wcb configure~ when GCC is used.  To let ~clangd~ cope with its ignrance you can manually edit the (generated!) ~BuildConfig.h~ to undefine the config flag:
+
+#+begin_src c++
+#define HAVE_BACKTRACE_LIB 1
+#undef HAVE_BACKTRACE_LIB
+#+end_src
+
+And then rebuild.  This will mean that exceptions will not report stack trace.

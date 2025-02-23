@@ -29,15 +29,22 @@ namespace WireCell {
        public:
         virtual ~IAnodeFace();
 
-        /// Return the ident number of this face.
+        /// Return an application-specific, externally defined identifier number
+        /// for this face.  WCT should NOT interpret this number.  If you find a
+        /// place where it does, please file a bug.
         virtual int ident() const = 0;
 
-        /// Note, return the "iface" or per-anode index.
-        /// FIXME: remove the following comment sometime
-        /// Original design: is to be 0/1.  Face 0 is toward the positive,
-        /// global X-axis.  IOW, electrons drift toward face 0 in the
-        /// negative-X direction.
+        /// This returns an index of the face in the context of the anode.  The
+        /// order is typically determined by user configuration.  There is NO
+        /// EXPECTATION for this number to relate to face direction.  If you
+        /// find a place where this is not true, please file a bug.  See dirx().
         virtual int which() const = 0;
+
+        /// Return +1 when the face-normal vector points in the positive
+        /// global-X direction and -1 when pointing in the negative global-X
+        /// direction.  Note, in all cases, the face-normal points opposite to
+        /// the drift direction.
+        virtual int dirx() const = 0;
 
         /// Return the anode plane ident number in which this face
         /// resides.
