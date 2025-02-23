@@ -37,6 +37,25 @@ Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
     return ds;
 }
 
+WireCell::PointCloud::Dataset Aux::make2dds (const Dataset& ds3d, const double angle) {
+    Dataset ds;
+    const auto& x = ds3d.get("x")->elements<double>();
+    const auto& y = ds3d.get("y")->elements<double>();
+    const auto& z = ds3d.get("z")->elements<double>();
+    std::vector<double> x2d(x.size());
+    std::vector<double> y2d(y.size());
+    for (size_t ind=0; ind<x.size(); ++ind) {
+        const auto& xx = x[ind];
+        const auto& yy = y[ind];
+        const auto& zz = z[ind];
+        x2d[ind] = xx;
+        y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+    }
+    ds.add("x", Array(x2d));
+    ds.add("y", Array(y2d));
+    return ds;
+}
+
 // Calculate the average position of a point cloud tree.
 Point Aux::calc_blob_center(const Dataset& ds)
 {

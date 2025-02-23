@@ -13,11 +13,15 @@ namespace WireCell::Aux {
     make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
                         const int npoints = 0, const double tick_span = 0.5*units::us);
 
+    PointCloud::Dataset make2dds(const PointCloud::Dataset& ds3d, const double angle);
+
     // Calculate the average position of a point cloud tree.
     WireCell::Point calc_blob_center(const PointCloud::Dataset& ds);
 
     // Calculate a dataset of blob corners
     PointCloud::Dataset make_corner_dataset(const IBlob::pointer iblob);
+
+
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       double time);

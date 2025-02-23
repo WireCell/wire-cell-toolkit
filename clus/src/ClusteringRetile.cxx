@@ -398,6 +398,8 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // std::cout << shadow.children().size() << std::endl;
 
     
+    const auto [angle_u,angle_v,angle_w] = original.wire_angles();
+
     for (auto* orig_cluster : original.children()) {
 
         // find the flash time:
@@ -484,9 +486,9 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                         pcs.emplace("3d", pc3d);
                         /// These seem unused and bring in yet more copy-paste code
-                        // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-                        // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-                        // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+                        pcs.emplace("2dp0", WireCell::Aux::make2dds(pc3d, angle_u));
+                        pcs.emplace("2dp1", WireCell::Aux::make2dds(pc3d, angle_v));
+                        pcs.emplace("2dp2", WireCell::Aux::make2dds(pc3d, angle_w));
                         // std::cout << pcs["3d"].get("x")->size_major() << " " << pcs["3d"].get("y")->size_major() << " " << pcs["3d"].get("z")->size_major() << std::endl;
                         // const auto& arr_x = pcs["3d"].get("x")->elements<Point::coordinate_t>();
                         // std::cout << arr_x.size() << " " << arr_x1.size() << std::endl;
