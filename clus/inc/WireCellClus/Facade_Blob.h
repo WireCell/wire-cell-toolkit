@@ -28,6 +28,7 @@ namespace WireCell::PointCloud::Facade {
         float_t center_x{0};
         float_t center_y{0};
         float_t center_z{0};
+        int_t face{0};
         int_t npoints{0};
 
         int_t slice_index_min{0};  // unit: tick
@@ -68,6 +69,7 @@ namespace WireCell::PointCloud::Facade {
         float_t center_y() const { return cache().center_y; }
         float_t center_z() const { return cache().center_z; }
         int_t npoints() const { return cache().npoints; }
+        int_t face() const {return cache().face;}
 
         // units are number of ticks
         /// FIXME: change min, max to begin end

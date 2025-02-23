@@ -88,6 +88,10 @@ void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
 
     m_time_offset = get(cfg, "time_offset", m_time_offset);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
+
+    m_angle_u = get(cfg, "angle_u", m_angle_u);
+    m_angle_v = get(cfg, "angle_v", m_angle_v);
+    m_angle_w = get(cfg, "angle_w", m_angle_w);
 }
 
 WireCell::Configuration Root::UbooneClusterSource::default_configuration() const
@@ -227,9 +231,9 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
             n3dpoints_total += pc3d.size_major();
             pcs.emplace("3d", pc3d);
             /// These seem unused and bring in horrible code
-            // pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-            // pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-            // pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+            pcs.emplace("2dp0", make2dds(pc3d, m_angle_u));
+            pcs.emplace("2dp1", make2dds(pc3d, m_angle_v));
+            pcs.emplace("2dp2", make2dds(pc3d, m_angle_w));
             const Point center = calc_blob_center(pcs["3d"]);
             auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
             int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];

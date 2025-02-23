@@ -13,6 +13,8 @@ namespace WireCell::Aux {
     make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
                         const int npoints = 0, const double tick_span = 0.5*units::us);
 
+    PointCloud::Dataset make2dds(const PointCloud::Dataset& ds3d, const double angle);
+
     // Calculate the average position of a point cloud tree.
     WireCell::Point calc_blob_center(const PointCloud::Dataset& ds);
 
@@ -20,6 +22,8 @@ namespace WireCell::Aux {
     // if drift is true, the corner x would be drifted x insetead of the wire plane x
     PointCloud::Dataset make_corner_dataset(const IBlob::pointer iblob, const bool drift = false, const double time_offset = 0,
                             const double drift_speed = 1.6 * units::mm / units::us);
+
+
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       double time);

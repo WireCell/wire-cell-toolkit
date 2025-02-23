@@ -10,6 +10,7 @@ Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
     Dataset ds;
     // Warning, these types must match consumers.  In particular, PointTreeBuilding.
     ds.add("charge", Array({(double)iblob->value()}));
+    ds.add("face",Array({(int)iblob->face()->which()}));
     ds.add("center_x", Array({(double)center.x()}));
     ds.add("center_y", Array({(double)center.y()}));
     ds.add("center_z", Array({(double)center.z()}));
@@ -33,6 +34,25 @@ Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
         ds.add(layer_names[strip.layer]+"_wire_index_min", Array({(int)strip.bounds.first}));
         ds.add(layer_names[strip.layer]+"_wire_index_max", Array({(int)strip.bounds.second}));
     }
+    return ds;
+}
+
+WireCell::PointCloud::Dataset Aux::make2dds (const Dataset& ds3d, const double angle) {
+    Dataset ds;
+    const auto& x = ds3d.get("x")->elements<double>();
+    const auto& y = ds3d.get("y")->elements<double>();
+    const auto& z = ds3d.get("z")->elements<double>();
+    std::vector<double> x2d(x.size());
+    std::vector<double> y2d(y.size());
+    for (size_t ind=0; ind<x.size(); ++ind) {
+        const auto& xx = x[ind];
+        const auto& yy = y[ind];
+        const auto& zz = z[ind];
+        x2d[ind] = xx;
+        y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+    }
+    ds.add("x", Array(x2d));
+    ds.add("y", Array(y2d));
     return ds;
 }
 

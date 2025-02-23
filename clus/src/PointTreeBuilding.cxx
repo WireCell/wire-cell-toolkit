@@ -155,24 +155,24 @@ namespace {
     // - make_corner_dataset
 }
 
-static Dataset make2dds (const Dataset& ds3d, const double angle) {
-    Dataset ds;
-    const auto& x = ds3d.get("x")->elements<Facade::float_t>();
-    const auto& y = ds3d.get("y")->elements<Facade::float_t>();
-    const auto& z = ds3d.get("z")->elements<Facade::float_t>();
-    std::vector<Facade::float_t> x2d(x.size());
-    std::vector<Facade::float_t> y2d(y.size());
-    for (size_t ind=0; ind<x.size(); ++ind) {
-        const auto& xx = x[ind];
-        const auto& yy = y[ind];
-        const auto& zz = z[ind];
-        x2d[ind] = xx;
-        y2d[ind] = cos(angle) * zz - sin(angle) * yy;
-    }
-    ds.add("x", Array(x2d));
-    ds.add("y", Array(y2d));
-    return ds;
-}
+// static Dataset make2dds (const Dataset& ds3d, const double angle) {
+//     Dataset ds;
+//     const auto& x = ds3d.get("x")->elements<Facade::float_t>();
+//     const auto& y = ds3d.get("y")->elements<Facade::float_t>();
+//     const auto& z = ds3d.get("z")->elements<Facade::float_t>();
+//     std::vector<Facade::float_t> x2d(x.size());
+//     std::vector<Facade::float_t> y2d(y.size());
+//     for (size_t ind=0; ind<x.size(); ++ind) {
+//         const auto& xx = x[ind];
+//         const auto& yy = y[ind];
+//         const auto& zz = z[ind];
+//         x2d[ind] = xx;
+//         y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+//     }
+//     ds.add("x", Array(x2d));
+//     ds.add("y", Array(y2d));
+//     return ds;
+// }
 
 // Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
 void PointTreeBuilding::sample_live(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {

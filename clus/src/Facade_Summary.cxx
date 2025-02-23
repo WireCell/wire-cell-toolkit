@@ -40,6 +40,7 @@ Configuration PointCloud::Facade::json_summary(const PointCloud::Facade::Blob& b
     Configuration ret;
     ret["type"] = "Blob";
     ret["hash"] = blb.hash();
+    ret["face"] = blb.face();
     ret["npoints"] = blb.npoints();
     ret["charge"] = blb.charge();
     ret["center_x"] = blb.center_x();
