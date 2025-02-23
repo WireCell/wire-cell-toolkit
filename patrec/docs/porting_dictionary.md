@@ -219,10 +219,19 @@ The final portion of porting covers the transformation from clusters of blobs an
 ## WCP Algorithms
 
 - [ ] :question: What is the overall "data flow graph" for these stages. 
+    * Xin: For major components of the Pattern Recognition, the short answer is that it would require everything (3D points, saved in PCT, 2D measurements saved in CTPC, derived data 3D fitted trajectory and dQ/dx). These are needed to do trajectory/dQ/dx fitting, do PID, do energy reconstruction etc. The light information is not needed, but the matched time from flash is needed to position things at correct location. 
+    * Xin: for the later feature extraction, it also need to access the above data to form various calculation. 
+    * Xin: for the trajectory/dQ/dx fitting, the input consists of 2 parts: i) hypotheses, (derived from 3D points and expressed as ProtoSegment, ProtoVertex etc), ii) measurements (2D data).
 - [ ] :question: What input data is required for each stage, what output is produced?  (can input/output be fully modeled as a graph or is there "extra" data that will not fit that model?)
+    * Xin: There are two major outputs: 1. the particle flow (with a tree of particles, made by ProtoSegment, ProtoVertex, and WCShower in WCP), the different stages of the PAttern recognition is essentially figure out some information (e.g. PID, energy), as well as the order of things to form the particle flow tree. 
+    * Xin, 2. in addition to the particle flow, we also extract various features for event selection. These features are based on various input (3D points, 2D measurements ...). These features in WCP were used to train BDTs for event selection.  
 - [ ] :question: Is the data flow graph a linear pipeline or a more general DAG?
-- [ ] :question: Will the PC-tree be required throughout all stages?  
+    * Xin: the WCP flow graph can be viewed as a linear pipeline. 
+- [ ] :question: Will the PC-tree be required throughout all stages?
+    * Xin: likely, since 3D points, which is needed, are stored in PC-tree  
 - [ ] :question: Will the PC-tree be required to be output by the final algorithm that produces the particle flow data structure?
+    * Xin:  I think the 3D points should be stored or associated with the particle flow data structure. For example, if I have a pion in the output, I do want to know which 3D points are associated with this pion. These would be useful in making features for latter usage. 
+    * Xin: for this section, the performance is going to be the key, the computing should be less of a concern. This means that it would be great that the system can be expanded to incorporate more advanced algorithm (e.g. AI/ML).
 
 
 ### [multi dQ/dx fitting](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_multi_dQ_dx_fit.md) (WCP)
