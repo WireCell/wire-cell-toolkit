@@ -1087,7 +1087,7 @@ function download_file () {
         return
     fi
 
-    wget -O "$path" "$url" 1>&2 || return
+    wget --quiet --no-check-certificate -O "$path" "$url" 1>&2 || return
     echo "$path"
 }
 
