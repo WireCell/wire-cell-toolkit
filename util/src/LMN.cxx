@@ -6,7 +6,9 @@
 using Eigen::seq;
 using Eigen::seqN;
 using Eigen::lastN;
-using Eigen::placeholders::all;
+// This is gives deprecated warning.
+// using Eigen::placeholders::all;
+using Eigen::all;
 
 using namespace WireCell;
 using namespace WireCell::Array;
