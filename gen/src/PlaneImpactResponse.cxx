@@ -294,7 +294,10 @@ void Gen::PlaneImpactResponse::build_responses()
         /// tick and also so that the resampling of FR acts as an interpolation.
         /// We must zero-pad resize but should not use that count as it adds no
         /// power.
-        const double norm = (m_tick * extend_size) / wave.size();
+        // const double norm = (m_tick * extend_size) / wave.size();
+        // log->debug("norm={} tick={} extend_size={} wave.size()={}",
+        //            norm, m_tick, extend_size, wave.size());
+        const double norm = rawresp_tick;
 
         // Assure post-downsample size 
         wave.resize( fr_extend_size );

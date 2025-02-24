@@ -266,7 +266,10 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     log->debug(tk(fmt::format("call={} calling model \"{}\" with {} chunks ",
                               m_save_count, m_cfg.forward, m_cfg.nchunks)));
     for (auto chunk : chunks) {
-        std::vector<torch::IValue> itens {chunk};
+        // G.P. If chunking is enabled, then the array is not contiguous in memory.
+        // To work around this, we need to clone the array.
+        std::vector<torch::IValue> itens {(m_cfg.nchunks > 1) ? chunk.clone() : chunk};
+
         auto iitens = Pytorch::to_itensor(itens);
         auto oitens = m_forward->forward(iitens);
         torch::Tensor ochunk = Pytorch::from_itensor({oitens}).front().toTensor().cpu();

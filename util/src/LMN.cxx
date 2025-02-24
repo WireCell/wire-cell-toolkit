@@ -5,6 +5,10 @@
 
 using Eigen::seq;
 using Eigen::seqN;
+// BV's Eigen want this:
+// using Eigen::lastN;
+// using Eigen::all;
+// GPVM Eigen v23_08_01_66e8f wants this:
 using Eigen::placeholders::lastN;
 using Eigen::placeholders::all;
 
