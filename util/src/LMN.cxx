@@ -5,12 +5,29 @@
 
 using Eigen::seq;
 using Eigen::seqN;
-// BV's Eigen want this:
+// // BV's Eigen want this:
 // using Eigen::lastN;
 // using Eigen::all;
-// GPVM Eigen v23_08_01_66e8f wants this:
-using Eigen::placeholders::lastN;
-using Eigen::placeholders::all;
+// // GPVM Eigen v23_08_01_66e8f wants this:
+// // using Eigen::placeholders::lastN;
+// // using Eigen::placeholders::all;
+
+
+// Define a macro to handle the different namespaces
+#ifndef EIGEN_SYMBOLS
+#define EIGEN_SYMBOLS
+
+// First try with placeholders
+#ifdef __EIGEN_PLACEHOLDERS__
+  using Eigen::placeholders::lastN;
+  using Eigen::placeholders::all;
+#else
+  // Then fall back to main namespace
+  using Eigen::lastN;
+  using Eigen::all;
+#endif
+
+#endif // EIGEN_SYMBOLS
 
 using namespace WireCell;
 using namespace WireCell::Array;
