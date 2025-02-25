@@ -34,7 +34,7 @@ namespace WireCell::Clus {
       private:
         // sampling for live/dead
         using node_ptr = WireCell::PointCloud::Tree::Points::node_ptr;
-        node_ptr sample_live(const WireCell::ICluster::pointer cluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const;
+        void sample_live(node_ptr& root, const WireCell::ICluster::pointer icluster) const;
         node_ptr sample_dead(const WireCell::ICluster::pointer cluster, const double tick) const;
         // add CT point cloud to the root/Grouping
         void add_ctpc(node_ptr& root, const WireCell::ICluster::pointer cluster) const;

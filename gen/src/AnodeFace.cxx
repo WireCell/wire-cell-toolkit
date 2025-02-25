@@ -53,18 +53,34 @@ static ray_pair_vector_t get_raypairs(const BoundingBox& bb, const IWirePlane::v
     return raypairs;
 }
 
-AnodeFace::AnodeFace(int ident, IWirePlane::vector planes, const BoundingBox& bb, int which, int aid)
+AnodeFace::AnodeFace(int ident, IWirePlane::vector planes, const BoundingBox& bb, int which, int aid, int dirx)
   : m_ident(ident)
   , m_planes(planes)
   , m_bb(bb)
   , m_coords(get_raypairs(bb, planes))
   , m_which(which)
   , m_aid(aid)
+  , m_dirx(dirx)
 {
 }
 AnodeFace::~AnodeFace()
 {
 }
+
+//// This does not seem to actually work.  Or, the pdsp wire order after
+//// correction is still not following convention.  For now, rely on AnodePlane
+//// to deduce dirx from anode+response x's.
+////
+// int AnodeFace::dirx() const
+// {
+//     if (m_dirx == 0) {          // lazy cache
+//         // The X-coord of the wire plane normal axis vector IS dirx.  This code,
+//         // along with many other parts of WCT, hard-wires the drift direction to
+//         // be parallel/antiparallel to the X axis.
+//         m_dirx = m_planes.front()->pimpos()->axis(0)[0] > 1 ? 1 : -1;
+//     }
+//     return m_dirx;
+// }
 
 IWirePlane::pointer AnodeFace::plane(int ident) const
 {

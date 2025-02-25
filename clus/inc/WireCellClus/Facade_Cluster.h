@@ -15,6 +15,7 @@
 #include "WireCellIface/IAnodeFace.h"
 
 #include "WireCellClus/Facade_Util.h"
+#include "WireCellClus/Facade_Blob.h"
 
 
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
@@ -23,8 +24,11 @@ namespace WireCell::PointCloud::Facade {
     class Blob;
     class Grouping;
 
+    struct ClusterCache { };
+
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
-    class Cluster : public NaryTree::FacadeParent<Blob, points_t> {
+    class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
+
         // The expected scope.
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
@@ -35,13 +39,15 @@ namespace WireCell::PointCloud::Facade {
         };
 
        public:
-        Cluster() = default;
+        Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
+
+        // Override Mixin
+        virtual void clear_cache() const;
 
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
-
 
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
@@ -93,6 +99,11 @@ namespace WireCell::PointCloud::Facade {
 
         // Return charge-weighted average position of points of blobs within distance of point.
         geo_point_t calc_ave_pos(const geo_point_t& origin, const double dis) const;
+        geo_point_t calc_ave_pos(const geo_point_t& origin, int N) const;
+
+
+        // In the public section of the Cluster class:
+        geo_vector_t calc_dir(const geo_point_t& p_test, const geo_point_t& p, double dis) const;
 
         // Return blob containing the returned point that is closest to the given point.
         using point_blob_map_t = std::map<geo_point_t, const Blob*>;
@@ -126,6 +137,8 @@ namespace WireCell::PointCloud::Facade {
         // Note: radius must provide a LINEAR distance measure.
         using const_blob_point_map_t = std::map<const Blob*, geo_point_t>;
         const_blob_point_map_t get_closest_blob(const geo_point_t& point, double radius) const;
+        const_blob_point_map_t get_closest_blob(const geo_point_t& point, int N) const;
+
 
         std::pair<geo_point_t, double> get_closest_point_along_vec(geo_point_t& p_test, geo_point_t dir,
                                                                    double test_dis, double dis_step, double angle_cut,
@@ -177,6 +190,8 @@ namespace WireCell::PointCloud::Facade {
 
         // WCP: get_front_back_wcps
         std::pair<geo_point_t, geo_point_t> get_front_back_points() const;
+
+        std::pair<geo_point_t, geo_point_t> get_main_axis_points() const;
 
         /// TODO: old_wcp and dir are used as local vars inside the function, make the IO more clear?
         geo_point_t get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step = 5*units::cm, const int allowed_nstep = 12) const;
@@ -258,6 +273,8 @@ namespace WireCell::PointCloud::Facade {
         /// @attention some distance-based cuts
         void Connect_graph(const bool use_ctpc) const;
         void Connect_graph() const;
+        void Connect_graph_overclustering_protection(const bool use_ctpc) const;
+        std::vector<int> examine_graph(const bool use_ctpc = true) const;
 
         ///
         void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true) const;
@@ -268,7 +285,13 @@ namespace WireCell::PointCloud::Facade {
 
         ///
         inline const std::list<size_t>& get_path_wcps() const { return m_path_wcps; }
-        
+        inline const std::list<const Blob*>& get_path_blobs() const { return m_path_mcells; }
+        // In class declaration: 
+        std::vector<geo_point_t> indices_to_points(const std::list<size_t>& path_indices) const;
+        void organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
+        void organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
+
+
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;
         const wire_indices_t& wire_indices() const;
@@ -278,6 +301,8 @@ namespace WireCell::PointCloud::Facade {
         geo_point_t get_center() const;
         geo_vector_t get_pca_axis(int axis) const;
         double get_pca_value(int axis) const;
+        // Add this inline member function in the class definition:
+        inline void reset_pca() { m_pca_calculated = false; }
 
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
@@ -286,13 +311,19 @@ namespace WireCell::PointCloud::Facade {
         using BlobSet = std::set<const Blob*, blob_less_functor>;
         using time_blob_map_t = std::map<int, BlobSet>;
         const time_blob_map_t& time_blob_map() const;
+   
+        // PCA helper functions
+        void Calc_PCA(std::vector<geo_point_t>& points) const;
+        // Calculate PCA direction for a set of points around a center point
+        geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const;
 
         /// @brief Determine if a cluster may be separated due to crossing the boundary.
         /// @return connected components array or empty if separation is not warranted.
         std::vector<int>
         examine_x_boundary(const double low_limit = -1*units::cm, const double high_limit = 257*units::cm);
 
-        /// @brief get_mcell_indices in WCP
+        /// @brief get_mcell_indices 
+        /// WCP: get_cell_times_set_map
         /// TODO: currently return copy, return a const reference?
         std::vector<int> get_blob_indices(const Blob*) const;
 
@@ -300,65 +331,51 @@ namespace WireCell::PointCloud::Facade {
         /// @note p_test will be updated
         bool judge_vertex(geo_point_t& p_test, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
-        // Return true if this cluster has a PC array and PC of given names and type.
-        template<typename ElementType=int>
-        bool has_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
-            auto& lpc = node()->value.local_pcs();
-            auto lit = lpc.find(pcname);
-            if (lit == lpc.end()) {
-                return false;
-            }
 
-            auto arr = lit->second.get(aname);
-            if (!arr) {
-                return false;
-            }
-            return arr->is_type<ElementType>();
-        }
+        class Flash {
+            friend class Cluster;
+            bool m_valid{false};
+            double m_time{0}, m_value{0};
+            int m_ident{-1}, m_type{-1};
+            std::vector<double> m_times, m_values, m_errors;
+        public:
 
-        // Return as a span an array named "aname" stored in clusters PC named
-        // "pcname".  Returns default span if PC or array not found or there is
-        // a type mismatch.  Note, span uses array data in place.
-        template<typename ElementType=int>
-        PointCloud::Array::span_t<ElementType>
-        get_pcarray(const std::string& aname, const std::string& pcname = "perblob") {
+            /// A "false" means there was not "flash" PC array and all values
+            /// are invalid.  A "true" does not guarantee all values are valid.
+            explicit operator bool() const { return m_valid;}
 
-            auto& lpc = node()->value.local_pcs();
-            auto lit = lpc.find(pcname);
-            if (lit == lpc.end()) {
-                return {};
-            }
+            /// Any "singular" methods are about the flash itself.
 
-            auto arr = lit->second.get(aname);
-            if (!arr) {
-                return {};
-            }
-            return arr->elements<ElementType>();
-        }
-        // Store vector as an array named "aname" into this cluster's PC named "pcname".
-        // Reminder, all arrays in a PC must have same major size.
-        template<typename ElementType=int>
-        void
-        put_pcarray(const std::vector<ElementType>& vec,
-                    const std::string& aname, const std::string& pcname = "perblob") {
+            /// Get the time of the flash.  
+            double time() const { return m_time; }
 
-            auto &lpc = node()->value.local_pcs();
-            auto& pc = lpc[pcname];
+            /// Get the measurement of the flash
+            double value() const {return m_value; }
 
-            PointCloud::Array::shape_t shape = {vec.size()};
+            /// The ID of the flash
+            int ident() const { return m_ident; }
 
-            auto arr = pc.get(aname);
-            if (arr) {
-                arr->assign(vec.data(), shape, false);
-            }
-            else {
-                pc.add(aname, Array(vec, shape, false));
-            }
-        }
+            /// The type of the flash.
+            int type() const { return m_type; }
+
+            /// Any "plural" methods return per-optical-detector quantities.
+            /// They will be empty() if the "light" and "flashlight" arrays are
+            /// missing.  These vectors have the same size.
+
+            // keep these return-by-value.
+
+            /// Times of individual optical detector readouts.
+            std::vector<double> times() const { return m_times; }
+            /// Measurement values from optical detectors.
+            std::vector<double> values() const { return m_values; }
+            /// Measurement uncertainty from optical detectors.
+            std::vector<double> errors() const { return m_errors; }
+        };
+        // Return a flash.  If there is none, it will hold default values.
+        Flash get_flash() const;
 
        private:
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
-
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
 
         // Add to private members in Facade_Cluster.h:
@@ -372,6 +389,8 @@ namespace WireCell::PointCloud::Facade {
         mutable int m_npoints{0};
 
         void Calc_PCA() const;
+        
+
         mutable bool m_pca_calculated{false};
         // lazy, do not access directly.
         mutable geo_point_t m_center;

@@ -123,6 +123,7 @@ int main(int argc,const char *argv[])
     cfg.env.CXXFLAGS += ['-std='+cfg.options.cxxstd.lower()]
     
     cfg.env.CXXFLAGS += ['-std=c++17']
+    cfg.env.CXXFLAGS += ['-DEIGEN_HAS_CXX11']
 
 
     if cfg.options.with_spdlog_static.lower() in ("yes","on","true"):

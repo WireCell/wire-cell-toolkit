@@ -66,9 +66,13 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
     std::map<const Cluster *, geo_point_t> map_cluster_dir2;
 
     geo_point_t drift_dir(1, 0, 0);
-    geo_point_t U_dir(0, cos(60. / 180. * 3.1415926), sin(60. / 180. * 3.1415926));
-    geo_point_t V_dir(0, cos(60. / 180. * 3.1415926), -sin(60. / 180. * 3.1415926));
-    geo_point_t W_dir(0, 1, 0);
+    const auto [angle_u,angle_v,angle_w] = live_grouping.wire_angles();
+    geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
+    geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
+    geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
+    // geo_point_t U_dir(0, cos(60. / 180. * 3.1415926), sin(60. / 180. * 3.1415926));
+    // geo_point_t V_dir(0, cos(60. / 180. * 3.1415926), -sin(60. / 180. * 3.1415926));
+    // geo_point_t W_dir(0, 1, 0);
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);

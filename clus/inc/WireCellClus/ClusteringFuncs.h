@@ -1,5 +1,6 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade.h"
+#include "WireCellClus/ClusteringRetile.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
@@ -336,6 +337,41 @@ namespace WireCell::PointCloud::Facade {
         double length_cut_{0};
     };
 
+    // this is a function to test the implementation of CT point cloud ...
+    void clustering_ctpointcloud(Grouping& live_grouping);
+    class ClusteringCTPointCloud {
+       public:
+        ClusteringCTPointCloud(const WireCell::Configuration& config)
+        {
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_ctpointcloud(live_clusters);
+        }
+
+       private:
+    };
+
+
+    // this is a function to test the implementation of examine bundles ...
+    void clustering_examine_bundles(Grouping& live_grouping, const bool use_ctpc);
+    class ClusteringExamineBundles {
+       public:
+        ClusteringExamineBundles(const WireCell::Configuration& config)
+        {
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_examine_bundles(live_clusters, use_ctpc_);
+        }
+
+       private:
+        double use_ctpc_{true};
+    };
+
+
     void clustering_examine_x_boundary(Grouping& live_grouping);
     class ClusteringExamineXBoundary {
        public:
@@ -429,6 +465,9 @@ namespace WireCell::PointCloud::Facade {
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
         std::string function_name = config["name"].asString();
 
+        if (function_name == "clustering_retile") {
+            return ClusteringRetile(config);
+        }
         if (function_name == "clustering_live_dead") {
             return ClusteringLiveDead(config);
         }
@@ -467,6 +506,12 @@ namespace WireCell::PointCloud::Facade {
         }
         else if (function_name == "clustering_isolated") {
             return ClusteringIsolated(config);
+        }
+        else if (function_name == "clustering_ctpointcloud") {
+            return ClusteringCTPointCloud(config);
+        }
+        else if (function_name == "clustering_examine_bundles") {
+            return ClusteringExamineBundles(config);
         }
         else {
             throw std::invalid_argument("Unknown function name in configuration");

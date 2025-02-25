@@ -1,6 +1,6 @@
 ## Describe FlashTPCBundle in WCP
 
-For more detailed information, please refer to the [OpFlash documentation](https://github.com/BNLIF/wire-cell-data/blob/master/docs/FlashTPCBundle.md).
+See also the [OpFlash documentation](https://github.com/BNLIF/wire-cell-data/blob/master/docs/FlashTPCBundle.md) for specifics about that data product.  
 
 ## Example prototype jobs or files ...
 
@@ -112,8 +112,97 @@ Opflash are saved in
 
 ## Describe WCT version
 
+### Review uboone blob loading
+
+The `Trun`, `TC` and `TDC` ROOT trees may be loaded into WCT via [`UbooneBlobSource`](../../../root/src/UbooneBlobSource.cxx) to produce an `IBlobSet` of either "live" or "dead" blobs.  Two sources are needed to load both "live" and "dead" blobs simultaneously.
+
+The [`uboone-blobs.smake` Snakemake workflow](../../../root/test/uboone-blobs.smake) runs `wire-cell` on [`uboone-blobs.jsonnet`](../../../root/test/uboone-blobs.jsonnet) in three kinds of modes: "live", "dead" and "clus".  
+
+The "live" and "dead" modes each produce a *WCT cluster file* with a graph like:
+
+```
+UbooneBlobSources -> BlobClustering -> GlobalGeomClustering -> ClusterFileSink
+```
+
+The "live" mode has four sources `live-{uvw,uv,vw,wu}` and "dead" has three sources `dead-{uv,vw,wu}`.  
+
+The "clus" job is like:
+
+```
+ClusterFileSources -> PointTreeBuilding -> MultiAlgBlobClustering -> TensorFileSink
+```
+There are two sources here loading each of "live" and "dead" cluster files.
+
+The output of ["MABC"](../../../clus/src/MultiAlgBlobClustering.cxx) is a point-cloud tree in *WCT tensor data model* representation (`ITensorSet`).
+
+:warning: This workflow uses uboone blobs but ignores uboone cluster info (`cluster_id`).
+
+### Uboone cluster and flash loading
+
+In order to consider `cluster_id` when loading `TC` and `T_Flash` information into WCT requires a complex procedure.  This is in large part due to the fact that WCT clusters are not "identified" per se but rather are emergent from the "connected components" graph operation.  After the operation we may identify a cluster by its ID in the "connected components" array which is effectively arbitrary.  Thus we must form WCT clusters in a context that still retains the association between blobs and their `cluster_id`.  But further, to represent the cluster-flash associations requires point-cloud level data tier.  And this requires blob sampling.  
+
+We will call this new component `UbooneClusterSource` which supplies these operations:
+
+- Job has the usual 4 `UbooneBlobSource`'s to get `IBlobSet`'s spanning uvw/uv/vw/wu view cases.
+  - The `IBLobs` carry the ROOT `TTree::entry` number for their `TC` origin giving "blob order".
+- A `BlobSetMerge` follows to provide 4-to-1 fan-in.
+
+Then comer `UbooneClusterSource`.
+- Each input `IBlobSet` is buffered (reminder: it is per-slice).
+- Produces an output queue of `ITensorSet`.
+- The output queue is expected to hold either zero or one `ITensorSet`.
+- On EOS or change in frame ident, buffered `IBlobs` are converted and flushed to `ITensorSet`.
+  - This is same behavior as `BlobClustering`
+
+The flushing entails:
+
+- Loads `TC` from file to get blob info including `cluster_id`
+- Build CLUSTER ID ORDER as ordered  `cluster_id` set and map to index.
+- Copy-paste parts of `PointTreeBuilding::sample_live()` and use to produce initial pc-tree.
+  - We must define clusters based on `cluster_id` and not "connected components".
+  - Cluster nodes are added to the grouping node in CLUSTER ID ORDER.
+  - Map `cluster_id` to cluster `node_t*`.
+  - Walk blobs, using their `tpc_cluster_id` to find the cluster node to receive them.
+- Load `T_flash` ROOT TTree to produce **light**, **flash** and **flashlight** data as described in the tensor-data-model.
+  - Store each of these three as arrays in a "local" PC on the "grouping" pc-tree node.
+- Load `T_match` to get cluster-flash associations.
+  - Form map from `cluster_id` to INDEX of **flash** array.
+  - Store this index as a scalar `flash` array in a `cluster_scalar` local PC.  
+  - Flash-less clusters get index of -1.
+  - Also store `cluster_id` in this `cluster_scalar` cluster-local PC.
+- Convert pc-tree to `ITensorSet` and output.
+  - Reminder, all local PCs of the same name must be the same "shape".  Blob-nodes have a `scalar` local PC thus the name difference with `cluster_scaler`.
+  
+Overall graph configuration constraints:
+
+- User **must** configure `Uboone*Source` to use the same stream of ROOT files.
+
+
+
 ## Example WCT jobs or files ... 
 
+See [uboone.org](../../../root/docs/uboone.org).  In particular:
+
+```
+wire-cell -l stderr -L debug -A infiles=nuselEval_5384_137_6852.root root/test/uboone-clusters.jsonnet
+```
+
+And see `aux/src/ClusterFlashDump.cxx` as an example of a starting point for a real next-stage.  
+
+Some comments on next stage:
+
+- The `uboone-clusters.jsonnet` graph represents a single face pipeline (that's all of uboone).
+- To do cluster-flash matching on other dets, we must merge across face+APAs.
+  - This merge needs w.rt. optical `light/flash/flashlight` arrays.
+  - On one hand, these are common across all face+APAs in which case we just take one.
+  - OTOH, if they differ they must be appended **and** we must rewrite the `flash` scalar array in the `cluster_scalar` PCs.
+  - So, the merge needs to know what previous people did to prepare the data.
+
+- The `uboone-clusters.jsonnet` ends with `ClusterFlashDump`.
+  - Obviously, replaced this with an `ITensorSet -> ITensorSet` filter is needed for cluster-flash making or other refinement.
+  - This replacement node likely succeed in the graph the "big merge" node described above.
+  - This new node type should probably look similar to `MABC` in that it allows a pc-tree to be passed through a pipeline of functions without requiring I/O through the TDM.
+    - This pipeline could be hoisted up to the flow graph by making a new `IData` that passes a pc-tree w/out requiring a round trip through the TDM.
 
 ## WCP's requirements 
 

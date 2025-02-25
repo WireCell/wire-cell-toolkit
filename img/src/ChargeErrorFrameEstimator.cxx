@@ -147,6 +147,11 @@ ITrace::vector ChargeErrorFrameEstimator::error_traces(const ITrace::vector& int
 	      int roilen = iq - roistart;
 	      if (roilen < m_time_limits.first) roilen = m_time_limits.first;
 	      else if (roilen > m_time_limits.second) roilen = m_time_limits.second;
+          if (errs[roilen] <= 0) {
+            log->warn("Error {} <= 0 for plane {} channel {} roilen {}",
+                      errs[roilen], plane_index, ich->ident(), roilen);
+            /// TODO: what to do here?
+          }
 	      std::generate(error_charge.begin() + roistart, error_charge.begin() + iq,
 			    [=]() mutable { return errs[roilen] * fudge_factor / sqrt(m_rebin); });
 	      inroi = false;
@@ -155,6 +160,11 @@ ITrace::vector ChargeErrorFrameEstimator::error_traces(const ITrace::vector& int
 	      int roilen = iq + 1 - roistart;
 	      if (roilen < m_time_limits.first) roilen = m_time_limits.first;
 	      else if (roilen > m_time_limits.second) roilen = m_time_limits.second;
+          if (errs[roilen] <= 0) {
+            log->warn("Error {} <= 0 for plane {} channel {} roilen {}",
+                      errs[roilen], plane_index, ich->ident(), roilen);
+            /// TODO: what to do here?
+          }
 	      std::generate(error_charge.begin() + roistart, error_charge.begin() + iq + 1,
 			    [=]() mutable { return errs[roilen] * fudge_factor / sqrt(m_rebin); });
 	      inroi = false;

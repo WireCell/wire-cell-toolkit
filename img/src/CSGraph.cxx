@@ -340,7 +340,9 @@ void CS::unpack(const cluster_graph_t& cgraph,
                     continue;
                 }
                 if (!(msum.uncertainty()>0)) {
-                    THROW(ValueError() << errmsg{String::format("uncertainty %d <=0", msum.uncertainty())});
+                    SPDLOG_WARN("msum {} {} ", msum.value(), msum.uncertainty());
+                    continue;
+                    // THROW(ValueError() << errmsg{String::format("uncertainty %d <=0", msum.uncertainty())});
                 }
                 const int ordering = mnode.ident();
                 node_t meas{mvtx, node_t::meas, ordering, msum};

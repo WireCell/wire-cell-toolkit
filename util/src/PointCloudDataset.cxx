@@ -222,7 +222,11 @@ void Dataset::append(const Dataset& tail)
     else {                      // actual append
         auto diff = difference(keys(), tail.keys());
         if (diff.size() > 0) {
-            raise<ValueError>("missing keys in append: %d missing", diff.size());
+            std::stringstream ss;
+            for (auto one : diff) {
+                ss << " " << one;
+            }
+            raise<ValueError>("missing keys in append: %d missing:%s", diff.size(), ss.str());
         }
 
         size_t nmaj = 0;            // check rectangular
@@ -271,7 +275,11 @@ void Dataset::append(const std::map<std::string, Array>& tail)
     else {                      // actual append
         auto diff = difference(keys(), map_keys(tail));
         if (diff.size() > 0) {
-            raise<ValueError>("missing keys in append: %d missing", diff.size());
+            std::stringstream ss;
+            for (auto one : diff) {
+                ss << " " << one;
+            }
+            raise<ValueError>("missing keys in append: %d missing:%s", diff.size(), ss.str());
         }
 
         size_t nmaj = 0;            // check rectangular

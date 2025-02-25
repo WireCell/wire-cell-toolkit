@@ -7,12 +7,14 @@
 
 #include "WireCellUtil/Configuration.h"
 #include "WireCellUtil/GraphTools.h"
+#include "WireCellUtil/Graph.h"
+
 #include "WireCellIface/IFrame.h"
 #include "WireCellIface/ISlice.h"
 #include "WireCellIface/ICluster.h"
 #include "WireCellIface/IAnodePlane.h"
 
-#include "WireCellUtil/Graph.h"
+
 #include <sstream>
 #include <functional>
 #include <unordered_set>

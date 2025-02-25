@@ -1,0 +1,44 @@
+#+title: Uboone Blobs, Clusters and Flashes
+
+* Overview
+
+The WCT ~root/~ package provides support for reading Wire-Cell *prototype* files
+from MicroBooNE in these data tiers:
+
+- blobs :: "live" (~TC~ TTree) or "dead" (~TDC~ TTree) blobs
+- clusters :: live blobs clustered according to ~cluster_id~
+- optical :: flash and their matching to clusters (~T_flash~ and ~T_match~)
+
+* Tests
+
+** Blobs
+
+#+begin_example
+./root/test/uboone-blobs.smake -p --directory junk dotify_all
+evince junk/uboone-blobs-live.pdf 
+./root/test/uboone-blobs.smake -p --directory junk cluster
+#+end_example
+
+** Clusters and flashes
+
+
+
+#+begin_example
+$ ./root/test/uboone-clusters.smake -p -d junk dotify
+$ evince junk/uboone-clusters.pdf
+$ ./root/test/uboone-clusters.smake -p -d junk dump
+#+end_example
+
+
+
+This will download and use the file:
+
+https://www.phy.bnl.gov/xqian/talks/wire-cell-porting/nuselEval_5384_137_6852.root
+
+Some info about the TTrees:
+
+- ~Trun~ :: 1 entry with r/s/e = 5384/137/6852 (as per the file name)
+- ~TC~ :: 1 entry with vectors of size 20383 spanning blobs in the entry.  Max ~cluster_id~ is 109.
+- ~T_flash~ :: 66 entries.  Max ~flash_id~ is 65.  Max ~fired_channels~ is 26.
+- ~T_match~ :: 32 entries.  Max ~cluster_id~ is 109, max ~flash_id~ is 51. 
+  

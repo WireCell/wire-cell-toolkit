@@ -39,6 +39,9 @@ namespace WireCell::NaryTree {
         const node_type* node() const { return m_node; }
         node_type* node() { return m_node; }
 
+        const Value& value() const { return m_node->value; }
+        Value& value() { return m_node->value; }
+
     protected:
 
         node_type* m_node{nullptr};

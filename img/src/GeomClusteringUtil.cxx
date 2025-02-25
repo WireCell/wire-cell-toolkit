@@ -94,7 +94,9 @@ void WireCell::Img::geom_clustering(cluster_indexed_graph_t& grind, IBlobSet::ve
         auto assoc = [&](RayGrid::blobref_t& a, RayGrid::blobref_t& b) {
             int an = a - beg1;
             int bn = b - beg2;
-            grind.edge(iblobs1[an], iblobs2[bn]);
+            // make sure the blobs that are connected have the same face ...
+            if (iblobs1[an]->face() == iblobs2[bn]->face())
+               grind.edge(iblobs1[an], iblobs2[bn]);
         };
         bool verbose = false;
         TolerantVisitor tv{map_gap_tol[rel_diff], verbose};
@@ -294,7 +296,9 @@ void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string pol
                     if (iter2 == groups.end()) return;
                     if (iter1->second != iter2->second) return;
                 }
-                boost::add_edge(bdescs1[an], bdescs2[bn], cg);
+                // make sure the face are the same
+                if (get<cluster_node_t::blob_t>(cg[bdescs1[an]].ptr)->face() == get<cluster_node_t::blob_t>(cg[bdescs2[bn]].ptr)->face())
+                    boost::add_edge(bdescs1[an], bdescs2[bn], cg);
             };
             bool verbose = false;
             TolerantVisitor tv{map_gap_tol[rel_diff], verbose};

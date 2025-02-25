@@ -59,7 +59,7 @@ ray_pair_vector_t RayGrid::symmetric_raypairs(double width, double height, doubl
     return raypairs;
 }
 
-std::vector<measure_t> RayGrid::make_measures(Coordinates& coords, const std::vector<Point>& points)
+std::vector<measure_t> RayGrid::make_measures(const Coordinates& coords, const std::vector<Point>& points)
 {
     int nlayers = coords.nlayers();
     std::vector<measure_t> measures(nlayers);
@@ -98,7 +98,7 @@ std::vector<measure_t> RayGrid::make_measures(Coordinates& coords, const std::ve
     return measures;
 }
 
-activities_t RayGrid::make_activities(Coordinates& coords, std::vector<measure_t>& measures)
+activities_t RayGrid::make_activities(const Coordinates& coords, std::vector<measure_t>& measures)
 {
     int nlayers = coords.nlayers();
     activities_t activities;

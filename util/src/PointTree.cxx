@@ -272,4 +272,3 @@ bool Tree::Points::on_remove(const std::vector<node_type*>& path)
     return true;                // continue ascent
 }
 
-

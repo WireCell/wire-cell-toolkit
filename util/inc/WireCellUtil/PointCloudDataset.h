@@ -50,6 +50,11 @@ namespace WireCell::PointCloud {
         void add(const std::string& name, const Array& arr);
         void add(const std::string& name, Array&& arr);
 
+        // Remove all arrays and become empty. 
+        void clear() { m_store.clear(); }
+
+        // Remove one array if it exists o.w. do nothing.
+        void erase(const std::string& name) { m_store.erase(name); }
 
         /** A selection is an ordered subset of arrays in the dataset.
 

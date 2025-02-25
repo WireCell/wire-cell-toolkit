@@ -102,7 +102,7 @@ namespace WireCell {
 
             /// Number of layers
             int nlayers() const { return m_nlayers; }
-
+ 
             /// Return array of pitch magnitudes for the layers.
             const std::vector<double>& pitch_mags() const { return m_pitch_mag; }
 

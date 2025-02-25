@@ -1,0 +1,56 @@
+digraph wcpdata {
+
+    node[shape=octagon]
+    cluster_vertex_graph[label="Graph:\ncluster-vertex"]
+    cluster_segment_graph[label="Graph:\ncluster-segment"]
+    shower_vertex_segment_graph[label="Graph:\nshower-vertex-segment"]
+    segment_vertex_graph[label="Graph:\nsegement-vertex"]
+
+    node[shape=box]
+    PR3DCluster
+    NeutrinoID
+    WCShower
+    ProtoSegment
+    ProtoVertex
+    Point
+    
+    node[shape=ellipse]
+
+    edge[label="has"]
+    "wire-cell-xxx-main"->NeutrinoID
+
+
+
+    NeutrinoID->cluster_vertex_graph
+    NeutrinoID->cluster_segment_graph
+    NeutrinoID->shower_vertex_segment_graph
+
+    cluster_vertex_graph->PR3DCluster
+    cluster_vertex_graph->ProtoVertex
+
+    cluster_segment_graph->PR3DCluster
+    cluster_segment_graph->ProtoSegment
+
+    shower_vertex_segment_graph->WCShower
+    shower_vertex_segment_graph->ProtoVertex
+    shower_vertex_segment_graph->ProtoSegment
+    
+
+    ProtoSegment->segment_points
+    ProtoVertex->cluster_id
+    ProtoVertex->vertex_point
+
+    WCShower->start_segment
+    WCShower->start_vertex
+
+    WCShower->segment_vertex_graph
+
+    segment_vertex_graph->ProtoSegment
+    segment_vertex_graph->ProtoVertex
+
+    edge[label="is", style=dashed]
+    start_segment->ProtoSegment
+    start_vertex->ProtoVertex
+    vertex_point->Point
+    segment_points->Point
+}

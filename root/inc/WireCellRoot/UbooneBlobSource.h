@@ -26,13 +26,12 @@
 #include "WireCellAux/SimpleSlice.h"
 #include "WireCellAux/Logger.h"
 
+#include "WireCellRoot/UbooneTTrees.h"
+
 #include "TFile.h"
 #include "TTree.h"
 
 namespace WireCell::Root {
-
-    // Internal "bag" to hold various TTree addresses.
-    class UbooneBlobSourceTrees;
 
     class UbooneBlobSource : public Aux::Logger,
                                     public IBlobSetSource,
@@ -114,14 +113,11 @@ namespace WireCell::Root {
         // for logging
         size_t m_calls{0};
 
-        // Our interface to ROOT
-        std::unique_ptr<UbooneBlobSourceTrees> m_data;
+        // Our interface to the ROOT files and trees
+        std::unique_ptr<UbooneTFiles> m_files;
 
         // Mark if we have gone past our EOS.
         bool m_done{false};
-
-        // Try to go to next entry, return false if input is exhausted.
-        bool next();
 
         // Return true if blob index is consistent with one of our configured "views".
         bool in_views(int bind);

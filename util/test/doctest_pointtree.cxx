@@ -1,5 +1,7 @@
+#include "WireCellUtil/Persist.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/PointTesting.h"
+#include "WireCellUtil/PointSummary.h"
 
 #include "WireCellUtil/doctest.h"
 
@@ -256,3 +258,14 @@ TEST_CASE("point tree merge trees")
     CHECK(pc3d.size() == 4);
 }
 
+TEST_CASE("point tree json summary")
+{
+    auto root = make_simple_pctree();
+    auto sum = json_summary(root->value);
+    auto text = Persist::dumps(sum, true);
+    debug("\n{}", text);
+    auto back = Persist::loads(text);
+    CHECK(back["type"] == "Points");
+    CHECK(back["children"].size() == 2);
+
+}
