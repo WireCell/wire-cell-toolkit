@@ -104,6 +104,61 @@ namespace {
         return cidents;
     }
 
+    // bool adjacent(const std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid1,
+    //     const std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid2)
+    // {
+    //     int sum_score = 0;
+
+    //     // Iterate through all planes in cid1
+    //     for (const auto& [plane, channels1] : cid1) {
+    //         // Skip if this plane isn't in cid2
+    //         auto it2 = cid2.find(plane);
+    //         if (it2 == cid2.end()) continue;
+            
+    //         const auto& channels2 = it2->second;
+            
+    //         // Check for overlap and adjacency in a single pass
+    //         bool has_overlap = false;
+    //         bool is_adjacent = false;
+            
+    //         // Iterate through the smaller set for efficiency
+    //         const auto& smaller = (channels1.size() <= channels2.size()) ? channels1 : channels2;
+    //         const auto& larger = (channels1.size() <= channels2.size()) ? channels2 : channels1;
+            
+    //         for (int ch : smaller) {
+    //             // Check for overlap
+    //             if (larger.find(ch) != larger.end()) {
+    //                 has_overlap = true;
+    //                 if (is_adjacent) break; // If we already found adjacency, we can stop
+    //             }
+                
+    //             // Check for adjacency
+    //             if (larger.find(ch + 1) != larger.end() || larger.find(ch - 1) != larger.end()) {
+    //                 is_adjacent = true;
+    //                 if (has_overlap) break; // If we already found overlap, we can stop
+    //             }
+    //         }
+            
+    //         // Apply scoring logic
+    //         int score = 0;
+    //         if (is_adjacent && !has_overlap) {
+    //             score = 1;
+    //         } else if (has_overlap) {
+    //             score = 2;
+    //         }
+            
+    //         // For planes that exist in both maps, a score of 0 means immediate failure
+    //         if (score == 0) return false;
+            
+    //         sum_score += score;
+            
+    //         // Early exit if the sum is already >= 5
+    //         if (sum_score >= 5) return true;
+    //     }
+
+    //     return sum_score >= 5;
+    // }
+
     // bool adjacent(std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int> >& cid1,
     //               std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int> >& cid2)
     // {
