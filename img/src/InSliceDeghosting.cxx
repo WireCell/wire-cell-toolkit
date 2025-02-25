@@ -159,43 +159,6 @@ namespace {
     //     return sum_score >= 5;
     // }
 
-    // bool adjacent(std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int> >& cid1,
-    //               std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int> >& cid2)
-    // {
-    //     std::map<WireCell::WirePlaneLayer_t, std::pair<int, int> > map1_plane_chs, map2_plane_chs;
-    //     std::map<WireCell::WirePlaneLayer_t, int> map_plane_score;
-
-    //     for (auto it = cid1.begin(); it != cid1.end(); it++) {
-    //         map_plane_score[it->first] = 0;
-    //         map1_plane_chs[it->first] = std::make_pair(*it->second.begin(), *it->second.rbegin());
-    //     }
-
-    //     for (auto it = cid2.begin(); it != cid2.end(); it++) {
-    //         map2_plane_chs[it->first] = std::make_pair(*it->second.begin(), *it->second.rbegin());
-    //     }
-
-    //     int sum_score = 0;
-    //     for (auto it = map_plane_score.begin(); it != map_plane_score.end(); it++) {
-    //         if (map1_plane_chs[it->first].first == map2_plane_chs[it->first].second + 1 ||
-    //             map2_plane_chs[it->first].first == map1_plane_chs[it->first].second + 1) {
-    //             map_plane_score[it->first] = 1;
-    //         }
-    //         else if (map1_plane_chs[it->first].first <= map2_plane_chs[it->first].second &&
-    //                  map2_plane_chs[it->first].first <= map1_plane_chs[it->first].second) {
-    //             map_plane_score[it->first] = 2;
-    //         }
-
-    //         if (map_plane_score[it->first] == 0) return false;
-    //         sum_score += map_plane_score[it->first];
-    //     }
-
-    //     if (sum_score >= 5) {
-    //         return true;
-    //     }
-    //     else {
-    //         return false;
-    //     }
-    // }
 
     bool adjacent(std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid1,
         std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid2)
