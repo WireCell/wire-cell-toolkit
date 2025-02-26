@@ -18,7 +18,7 @@ using Eigen::seqN;
 #define EIGEN_SYMBOLS
 
 // First try with placeholders
-#ifdef __EIGEN_PLACEHOLDERS__
+#ifdef EIGEN_VERSION_AT_LEAST(3,4,90)
   using Eigen::placeholders::lastN;
   using Eigen::placeholders::all;
 #else
