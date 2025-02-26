@@ -121,7 +121,7 @@ void Gen::DepoFluxSplat::configure(const WireCell::Configuration& cfg)
     //Check which plane to work on
     m_process_planes = {0,1,2};
 
-    if (cfg.isMember("process_planes")) {
+    if (!cfg["process_planes"].empty()) {
 	m_process_planes.clear();
 	for (auto jplane : cfg["process_planes"]) {
 	    m_process_planes.push_back(jplane.asInt());
