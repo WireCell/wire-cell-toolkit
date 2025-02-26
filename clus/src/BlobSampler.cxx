@@ -311,10 +311,11 @@ struct BlobSampler::Sampler : public Aux::Logger
                 const double pitch = xwp[2];
                 pitch_coord[ipt] = pitch;
                 int wind = pimpos->closest(pitch).first;
-                if (wind < 0) {
+                if (wind < 0 || wind >= (int)iwires.size()) {
                     log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
-                    log->error("Negative wire index: {}, will segfault soon", wind);
-
+                    log->warn("wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
+                    wind = (int)iwires.size() - 1;
+                    if (wind < 0) wind = 0;
                 }
                 wire_index[ipt] = wind;
         
