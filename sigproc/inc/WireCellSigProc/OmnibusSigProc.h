@@ -177,6 +177,9 @@ namespace WireCell {
             // https://github.com/WireCell/wire-cell-toolkit/issues/322
             std::vector<int> m_plane2layer{0,1,2};
 
+            // MP threshold feature_val method, 0: ThreePointCheck, 1: MaxPointCheck
+            int m_MP_feature_val_method{0};
+
 
             // fixme: this is apparently not used:
             // channel offset

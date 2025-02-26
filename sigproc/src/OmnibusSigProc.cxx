@@ -150,6 +150,8 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         }
     }
 
+    m_MP_feature_val_method = get(config, "MP_feature_val_method", m_MP_feature_val_method);
+
     m_charge_ch_offset = get(config, "charge_ch_offset", m_charge_ch_offset);
 
     m_wiener_tag = get(config, "wiener_tag", m_wiener_tag);
@@ -1708,9 +1710,9 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                     // mp3: 3 plane protection based on cleaup ROI
                     // f->which(): per-Anode face index
                     // Default values: wire_resolution = 2, nbounds_layers = 2
-                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
+                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer, m_MP_feature_val_method);
                     // mp2: 2 plane protection based on cleaup ROI
-                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
+                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer, m_MP_feature_val_method);
                 }
                 save_mproi(*itraces, mp3_roi_traces, iplane, roi_refine.get_mp3_rois());
                 save_mproi(*itraces, mp2_roi_traces, iplane, roi_refine.get_mp2_rois());

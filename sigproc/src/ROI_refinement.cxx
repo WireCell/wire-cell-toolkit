@@ -1,5 +1,6 @@
 #include "ROI_refinement.h"
 #include "PeakFinding.h"
+#include "WireCellUtil/Exceptions.h"
 #include <iostream>
 #include <set>
 
@@ -2568,22 +2569,28 @@ void ROI_refinement::refine_data_debug_mode(int plane, ROI_formation &roi_form, 
 }
 
 namespace {
-    WireCell::Waveform::real_t feature_val(const std::vector<WireCell::Waveform::real_t> &vec, int start, int end)
+    // enum FeatureValMethod = {ThreePointCheck=0, MaxPointCheck=1};
+    WireCell::Waveform::real_t feature_val(const std::vector<WireCell::Waveform::real_t> &vec, int start, int end, const int method = 0)
     {
-        LogDebug("feature_val: " << vec.size() << " " << start << " " << end);
+        LogDebug("feature_val: " << vec.size() << " " << start << " " << end << " " << method);
         WireCell::Waveform::real_t ret = -1e9;
         if (vec.size() == 0) return ret;
-        if (start < 0) start = 0;
-        if (end < 0) end = 0;
-        if (start >= (int) vec.size()) start = vec.size() - 1;
-        if (end >= (int) vec.size()) end = vec.size() - 1;
-        // size_t mid = (start + end) / 2;
-        // if (vec[start] > ret) ret = vec[start];
-        // if (vec[mid] > ret) ret = vec[mid];
-        // if (vec[end] > ret) ret = vec[end];
-        // LogDebug("feature_val: " << vec[start] << " " << vec[mid] << " " << vec[end] << " " << ret);
-        ret = *(std::max_element(vec.begin(), vec.end()));
-        LogDebug("feature_val: " << ret);
+        if (method == 0) {
+            if (start < 0) start = 0;
+            if (end < 0) end = 0;
+            if (start >= (int) vec.size()) start = vec.size() - 1;
+            if (end >= (int) vec.size()) end = vec.size() - 1;
+            size_t mid = (start + end) / 2;
+            if (vec[start] > ret) ret = vec[start];
+            if (vec[mid] > ret) ret = vec[mid];
+            if (vec[end] > ret) ret = vec[end];
+            LogDebug("feature_val: " << vec[start] << " " << vec[mid] << " " << vec[end] << " " << ret);
+        } else if (method == 1) {
+            ret = *(std::max_element(vec.begin(), vec.end()));
+            LogDebug("feature_val: " << ret);
+        } else {
+            raise<ValueError>("method %d is not supported", method);
+        }
         return ret;
     }
 }  // namespace
@@ -2593,7 +2600,7 @@ void ROI_refinement::MP3ROI(const int plane, const IAnodePlane::pointer anode, c
                             const std::map<int, int>& map_ch, ROI_formation& roi_form,
                             const double mp_th1, const double mp_th2,
                             const int tick_resolution, const int wire_resolution,
-                            const int nbounds_layers, const std::vector<int> iplane2layer)
+                            const int nbounds_layers, const std::vector<int> iplane2layer, const int featureval_method)
 {
     //log->info("ROI_refinement::MP3ROI:");
     LogDebug("mp_th1: " << mp_th1 << ", mp_th2: " << mp_th2);
@@ -2624,7 +2631,7 @@ void ROI_refinement::MP3ROI(const int plane, const IAnodePlane::pointer anode, c
                     for (int tick = roi->get_start_bin() / tick_resolution; tick <= roi->get_end_bin() / tick_resolution;
                          ++tick) {
                         int content_id = tick * tick_resolution - roi->get_start_bin();
-                        const auto feat_val = feature_val(roi->get_contents(), content_id, content_id+tick_resolution);
+                        const auto feat_val = feature_val(roi->get_contents(), content_id, content_id+tick_resolution, featureval_method);
 
                         //  if (print_chids.find(chid)!=print_chids.end())
                         LogDebug(tick * tick_resolution << ", " << chid << " : {" << roi->get_chid() << ", "
@@ -2750,7 +2757,7 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
                             const std::map<int, int>& map_roichid_anodechid, ROI_formation& roi_form,
                             const double mp_th1, const double mp_th2,
                             const int tick_resolution, const int wire_resolution,
-                            const int nbounds_layers, const std::vector<int> iplane2layer)
+                            const int nbounds_layers, const std::vector<int> iplane2layer, const int featureval_method)
 {
     //log->info("ROI_refinement::MP2ROI:");
     LogDebug("mp_th1: " << mp_th1 << ", mp_th2: " << mp_th2);
@@ -2803,7 +2810,7 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
                     for (int tick = roi->get_start_bin() / tick_resolution; tick <= roi->get_end_bin() / tick_resolution;
                          ++tick) {
                         int content_id = tick * tick_resolution - roi->get_start_bin();
-                        const auto feat_val = feature_val(roi->get_contents(), content_id, content_id+tick_resolution);
+                        const auto feat_val = feature_val(roi->get_contents(), content_id, content_id+tick_resolution, featureval_method);
 
                         if (feat_val < mp_th2) continue;
 
