@@ -136,7 +136,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         }
     }
 
-    if (config.isMember("process_planes")) {
+    if (config["process_planes"].isArray()) {
         m_process_planes.clear();
         for (auto jplane : config["process_planes"]) {
             m_process_planes.push_back(jplane.asInt());
