@@ -5,10 +5,8 @@
 
 using Eigen::seq;
 using Eigen::seqN;
-using Eigen::lastN;
-// This is gives deprecated warning.
-// using Eigen::placeholders::all;
-using Eigen::all;
+using Eigen::placeholders::lastN;
+using Eigen::placeholders::all;
 
 using namespace WireCell;
 using namespace WireCell::Array;
@@ -42,7 +40,7 @@ size_t LMN::rational(double Ts, double Tr, double eps)
         return 0;
     }
 
-    return rNs;    
+    return rNs;
 }
 
 Array::array_xxf LMN::resize(const Array::array_xxf& in, size_t Nr,
@@ -155,7 +153,7 @@ Array::array_xxc LMN::resample(const Array::array_xxc& in, size_t Nr, size_t axi
     return rs;
 }
 
-    
+
 
 std::vector<std::complex<float>>
 LMN::resample(const std::vector<std::complex<float>>& in, size_t Nr)
@@ -178,6 +176,3 @@ LMN::resample(const std::vector<std::complex<float>>& in, size_t Nr)
     // FIXME: deal with Nyquist bin.
     return rs;
 }
-
-    
-
