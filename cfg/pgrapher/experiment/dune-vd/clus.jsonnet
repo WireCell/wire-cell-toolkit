@@ -162,8 +162,8 @@ local clus (
                 {name: "clustering_connect1"},
                 {name: "clustering_deghost"},
                 {name: "clustering_examine_x_boundary"},
-                // {name: "clustering_protect_overclustering"},
-                // {name: "clustering_neutrino"},
+                {name: "clustering_protect_overclustering"},
+                {name: "clustering_neutrino"},
                 {name: "clustering_isolated"},
             ],
         }
