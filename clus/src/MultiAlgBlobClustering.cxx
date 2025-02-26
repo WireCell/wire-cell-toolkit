@@ -158,7 +158,6 @@ static
 void fill_bee_points(WireCell::Bee::Points& bpts, const Points::node_t& root)
 {
     int clid = bpts.back_cluster_id();
-    const double charge = 0;
     for (const auto cnode : root.children()) {  // this is a loop through all clusters ...
         ++clid;
 
@@ -174,7 +173,9 @@ void fill_bee_points(WireCell::Bee::Points& bpts, const Points::node_t& root)
             const size_t size = x.size();
             // fixme: add to Bee::Points a method to append vector-like things...
             for (size_t ind = 0 ; ind<size; ++ind) {
-                bpts.append(Point(x[ind], y[ind], z[ind]), charge, clid);
+                const auto* bnode = sv.node_with_point(ind);
+                const auto* blob = bnode->value.facade<Blob>();
+                bpts.append(Point(x[ind], y[ind], z[ind]), blob->charge()/blob->nbpoints(), clid);
             }
         }
     }
