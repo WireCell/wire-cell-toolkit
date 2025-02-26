@@ -22,15 +22,26 @@
 namespace WireCell::PointCloud::Facade {
     class Cluster;
 
+    struct GroupingCache {
+
+        mapfp_t<double> proj_centers;
+        mapfp_t<double> pitch_mags;
+
+        // #381 if you give a crap about dead_winds.  
+
+    };
+
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
     // nodes that are related in some way.
-    class Grouping : public NaryTree::FacadeParent<Cluster, points_t> {
+    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>, public Mixin<Grouping, GroupingCache> {
 
         TPCParams m_tp{};  // use default value by default.
         /// TODO: replace TPCParams with this in the future?
         IAnodePlane::pointer m_anode{nullptr};
 
        public:
+
+        Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
         // MUST call this sometimes after construction if non-default value needed.
         // FIXME: TPCParams should be moved out of the facade!
@@ -44,10 +55,17 @@ namespace WireCell::PointCloud::Facade {
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
+        const mapfp_t< std::map<int, std::pair<double, double>> >& all_dead_winds() const {
+            // this is added in order that we may dump it in json_summary() for debugging.
+            return m_dead_winds;
+        }
+
         std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind) const
         {
             // make one if not exist
             return m_dead_winds[face][pind];
+
+            // This is utter garbage.  #381.
         }
         using sv2d_t = Tree::ScopedView<float_t>;
         using kd2d_t = sv2d_t::nfkd_t;
@@ -55,11 +73,22 @@ namespace WireCell::PointCloud::Facade {
 
         const kd2d_t& kd2d(const int face, const int pind) const;
 
-        const mapfp_t<double>& proj_centers() const; // lazy, do not access directly.
-        const mapfp_t<double>& pitch_mags() const;   // lazy, do not access directly.
+        const mapfp_t<double>& proj_centers() const {
+            return cache().proj_centers;
+        }
+        const mapfp_t<double>& pitch_mags() const {
+            return cache().pitch_mags;
+        }
 
         bool is_good_point(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
                            const int allowed_bad = 1) const;
+        // In Facade_Grouping.h, inside the Grouping class declaration
+        bool is_good_point_wc(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, 
+                            const int ch_range = 1, const int allowed_bad = 1) const;
+        // In the Grouping class declaration in Facade_Grouping.h
+        std::vector<int> test_good_point(const geo_point_t& point, const int face, 
+                                double radius = 0.6 * units::cm, int ch_range = 1) const;
+
 
         /// @brief
         /// @param point
@@ -74,16 +103,54 @@ namespace WireCell::PointCloud::Facade {
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;
+        // In class Grouping definition
+        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane) const;
 
-       private:
-        void fill_proj_centers_pitch_mags() const;
-        mutable mapfp_t<double> m_proj_centers;
-        mutable mapfp_t<double> m_pitch_mags;
+        /// @brief Get number of points for a given plane
+        /// @param plane The plane index (0=U, 1=V, 2=W)
+        /// @return Number of points in the specified plane
+        size_t get_num_points(const int face, const int pind) const;
+
+        // In Facade_Grouping.h, add to public section:
+        double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0) const;
+        double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0) const;
+
+        /// @brief Get ranges of dead channels that overlap with given time and channel window
+        /// @param min_time Minimum time
+        /// @param max_time Maximum time  
+        /// @param min_ch Minimum channel
+        /// @param max_ch Maximum channel
+        /// @param face Face number
+        /// @param pind Plane index
+        /// @param flag_ignore_time If true, ignore time window check
+        /// @return Vector of pairs representing ranges of dead channels
+        std::vector<std::pair<int, int>> get_overlap_dead_chs(const int min_time, const int max_time, 
+            const int min_ch, const int max_ch, const int face, const int pind, 
+            const bool flag_ignore_time=false) const;
+
+        // In Facade_Grouping.h, inside the Grouping class public section:
+        std::map<int, std::pair<int, int>> get_all_dead_chs(const int face, const int pind, int expand = 12) const;
+        // Get overlapping good channel charges in a time-channel window
+        std::map<std::pair<int,int>, std::pair<double,double>> get_overlap_good_ch_charge(
+            int min_time, int max_time, int min_ch, int max_ch, 
+            const int face, const int pind) const;
+
+        // We override this from Mixin in order to inject propagation of the
+        // utter garbage handling of dead_winds.  If someone fixes that, this
+        // method may be removed.  #381.
+        virtual void clear_cache() const;
+
+      private:
+
+        // This "cache" is utterly abused.  Someone else fix it.  #381.
         mutable mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
 
        protected:
-        // Receive notification when this facade is created on a node.
+        // Receive notification when this facade is created on a node. #381.
         virtual void on_construct(node_type* node);
+
+        virtual void fill_cache(GroupingCache& cache) const;
+        
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 

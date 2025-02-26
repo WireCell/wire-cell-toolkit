@@ -58,8 +58,6 @@ WireCell::Configuration Gen::DepoFluxSplat::default_configuration() const
     cfg["reference_time"] = 0;
     cfg["time_offsets"] = Json::arrayValue;
 
-    cfg["process_planes"] = Json::arrayValue;
-
     cfg["smear_long"] = 0.0;
     cfg["smear_tran"] = 0.0;
 
@@ -121,7 +119,7 @@ void Gen::DepoFluxSplat::configure(const WireCell::Configuration& cfg)
     //Check which plane to work on
     m_process_planes = {0,1,2};
 
-    if (cfg.isMember("process_planes")) {
+    if (cfg["process_planes"].isArray()) {
 	m_process_planes.clear();
 	for (auto jplane : cfg["process_planes"]) {
 	    m_process_planes.push_back(jplane.asInt());

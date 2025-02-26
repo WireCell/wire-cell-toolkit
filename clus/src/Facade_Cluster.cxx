@@ -36,9 +36,6 @@ using spdlog::debug;
 
 
 
-
-
-
 std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluster)
 {
     const auto uvwt_min = cluster.get_uvwt_min();
@@ -57,6 +54,50 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
 Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
 
+
+
+void Cluster::clear_cache() const {
+
+    // For now, this facade does its own cache management but we forward-call
+    // the Mixin just to be proper.  Since our ClusterCache is the null-struct,
+    // this is in truth pointless.  
+    this->Mixin<Cluster,ClusterCache>::clear_cache();
+
+    // The reason to keep fine-grained cache management is not all cluster users
+    // need all cached values and by putting them all in fill_cache() we'd spoil
+    // fine-grained laziness.  The cost we pay is that every single cached data
+    // element is a chance to introduce a cache bug.
+
+    // Reset time-blob mapping
+    m_time_blob_map.clear();
+    
+    // Reset blob-indices mapping
+    m_map_mcell_indices.clear();
+    
+    // Reset hull data
+    m_hull_points.clear();
+    m_hull_calculated = false;
+    
+    // Reset length and point count
+    m_length = 0;
+    m_npoints = 0;
+    
+    // Reset PCA data
+    m_pca_calculated = false;
+    m_center = geo_point_t();
+    for(int i = 0; i < 3; i++) {
+        m_pca_axis[i] = geo_vector_t();
+        m_pca_values[i] = 0;
+    }
+    
+    // Reset graph and path finding data
+    m_graph.reset();
+    m_parents.clear();
+    m_distances.clear();
+    m_source_pt_index = -1;
+    m_path_wcps.clear();
+    m_path_mcells.clear();
+}
 
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {
@@ -100,7 +141,7 @@ std::string Cluster::dump_graph() const{
 
     ss << "Edge Properties:" << std::endl;
     auto erange = boost::edges(g);
-    auto weightMap = get(edge_weight, g);
+    auto weightMap = get(boost::edge_weight, g);
     for (auto eit = erange.first; eit != erange.second; ++eit) {
         auto e = *eit;
         auto src = source(e, g);
@@ -782,6 +823,36 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
     return ret;
 }
 
+std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& point, int N) const 
+{
+    struct Best {
+        size_t point_index;
+        double metric;
+    };
+    std::unordered_map<size_t, Best> best_blob_point;
+
+    const auto& kd = kd3d();
+    auto results = kd.knn(N, point);
+    for (const auto& [point_index, metric] : results) {
+        const size_t major_index = kd.major_index(point_index);
+        auto it = best_blob_point.find(major_index);
+        if (it == best_blob_point.end()) {  // first time seen
+            best_blob_point[major_index] = {point_index, metric};
+            continue;
+        }
+        if (metric < it->second.metric) {
+            it->second.point_index = point_index;
+            it->second.metric = metric;
+        }
+    }
+
+    std::map<const Blob*, geo_point_t> ret;
+    for (const auto& [mi, bb] : best_blob_point) {
+        ret[blob_with_point(bb.point_index)] = point3d(bb.point_index);
+    }
+    return ret;
+}
+
 std::pair<geo_point_t, const Blob*> Cluster::get_closest_point_blob(const geo_point_t& point) const
 {
     auto results = kd_knn(1, point);
@@ -1001,6 +1072,58 @@ geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, const double dis) c
 
     return ret;
 }
+
+geo_point_t Cluster::calc_ave_pos(const geo_point_t& origin, int N) const
+{
+    // average position
+    geo_point_t ret(0, 0, 0);
+    double charge = 0;
+
+    auto blob_pts = get_closest_blob(origin, N);
+    for (auto [blob, _] : blob_pts) {
+        double q = blob->charge(); 
+        if (q == 0) q = 1;  // protection against zero charge
+        ret += blob->center_pos() * q;
+        charge += q;
+    }
+
+    if (charge != 0) {
+        ret = ret / charge;
+    }
+
+    return ret;
+}
+
+geo_vector_t Cluster::calc_dir(const geo_point_t& p_test, const geo_point_t& p, double dis) const
+{
+    // Initialize direction vector
+    geo_vector_t dir(0, 0, 0);
+    
+    // Get nearby blobs using existing interface
+    auto blob_pts = get_closest_blob(p, dis);
+    
+    // Calculate weighted direction
+    for (const auto& [blob, _] : blob_pts) {
+        const geo_point_t point = blob->center_pos();
+        const double q = blob->charge();
+        
+        // Calculate direction vector from p_test to point
+        geo_vector_t dir1(point.x() - p_test.x(),
+                         point.y() - p_test.y(), 
+                         point.z() - p_test.z());
+                         
+        // Add weighted contribution
+        dir += dir1 * q;
+    }
+
+    // Normalize if non-zero
+    if (dir.magnitude() != 0) {
+        dir = dir.norm();
+    }
+    
+    return dir;
+}
+
 
 #include <boost/histogram.hpp>
 #include <boost/histogram/algorithm/sum.hpp>
@@ -1273,6 +1396,40 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_front_back_points() const
     return get_highest_lowest_points(2);
 }
 
+std::pair<geo_point_t, geo_point_t> Cluster::get_main_axis_points() const
+{
+    // Get first point as initial values
+    geo_point_t highest_point = point3d(0);
+    geo_point_t lowest_point = point3d(0);
+
+    // Get main axis and ensure consistent direction (y>0)
+    geo_point_t main_axis = get_pca_axis(0); 
+    if (main_axis.y() < 0) {
+        main_axis = main_axis * -1;
+    }
+
+    // Initialize extreme values using projections of first point
+    double high_value = highest_point.dot(main_axis);
+    double low_value = high_value;
+
+    // Loop through all points to find extremes along main axis
+    for (int i = 1; i < npoints(); i++) {
+        geo_point_t current = point3d(i);
+        double value = current.dot(main_axis);
+        
+        if (value > high_value) {
+            highest_point = current;
+            high_value = value; 
+        }
+        if (value < low_value) {
+            lowest_point = current;
+            low_value = value;
+        }
+    }
+
+    return std::make_pair(highest_point, lowest_point);
+}
+
 std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
 {
     geo_point_t extreme_wcp[6];
@@ -1443,9 +1600,11 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(const bool use_ctpc) const
 {
+    // std::cout << "Create Graph!" << std::endl;
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(nbpoints());
+    // std::cout << "Test:" << "Create Graph!" << std::endl;
     Establish_close_connected_graph();
     if (use_ctpc) Connect_graph(true);
     Connect_graph();
@@ -1614,6 +1773,7 @@ void Cluster::Establish_close_connected_graph() const
     }
 
     LogDebug("in-blob edges: " << num_edges);
+    // std::cout << "Test: in-blob edges: " << num_edges << std::endl;
 
     std::vector<int> time_slices;
     for (auto [time, _] : this->time_blob_map()) {
@@ -1930,6 +2090,8 @@ void Cluster::Establish_close_connected_graph() const
     // end of copying ...
 
     LogDebug("all edges: " << num_edges);
+    // std::cout << "Test: all edges: " << num_edges << std::endl;
+
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) const {
@@ -2159,41 +2321,6 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
 
         // Process MST
         process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
-
-        // {
-        //     std::vector<int> possible_root_vertex;
-        //     std::vector<int> component(num_vertices(temp_graph));
-        //     const int num1 = connected_components(temp_graph, &component[0]);
-
-        
-        // possible_root_vertex.resize(num1);
-        // std::vector<int>::size_type i;
-        // for (i = 0; i != component.size(); ++i) {
-        //     possible_root_vertex.at(component[i]) = i;
-        // }
-
-        // for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-        //     std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
-
-        //     prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-        //                                boost::root_vertex(possible_root_vertex.at(i)));
-
-        //     for (size_t j = 0; j != predecessors.size(); ++j) {
-        //         if (predecessors[j] != j) {
-        //             if (j < predecessors[j]) {
-        //                 index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-        //             }
-        //             else {
-        //                 index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-        //             }
-        //             // std::cout << j << " " << predecessors[j] << " " << std::endl;
-        //         }
-        //         else {
-        //             // std::cout << j << " " << std::endl;
-        //         }
-        //     }
-        // }
-        //}
     }
 
     // MST of the direction ...
@@ -2219,36 +2346,6 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
         }
 
         process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_dir_mst);
-        // {
-        //     std::vector<int> possible_root_vertex;
-        //     std::vector<int> component(num_vertices(temp_graph));
-        //     const int num1 = connected_components(temp_graph, &component[0]);
-        //     possible_root_vertex.resize(num1);
-        //     std::vector<int>::size_type i;
-        //     for (i = 0; i != component.size(); ++i) {
-        //         possible_root_vertex.at(component[i]) = i;
-        //     }
-
-        //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-        //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
-        //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-        //                                    boost::root_vertex(possible_root_vertex.at(i)));
-        //         for (size_t j = 0; j != predecessors.size(); ++j) {
-        //             if (predecessors[j] != j) {
-        //                 if (j < predecessors[j]) {
-        //                     index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-        //                 }
-        //                 else {
-        //                     index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-        //                 }
-        //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
-        //             }
-        //             else {
-        //                 // std::cout << j << " " << std::endl;
-        //             }
-        //         }
-        //     }
-        // }
 
     }
 
@@ -2628,6 +2725,597 @@ void Cluster::Connect_graph() const{
 
 }
 
+
+void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const {
+    // Constants for wire angles
+    const auto& tp = grouping()->get_params();
+    //std::cout << "Test: face " << tp.face << std::endl;
+
+    // const double pi = 3.141592653589793;
+    const geo_vector_t drift_dir(1, 0, 0); 
+    const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles();
+    const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
+    const geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
+    const geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
+
+    // Form connected components
+    std::vector<int> component(num_vertices(*m_graph));
+    const size_t num = connected_components(*m_graph, &component[0]);
+    
+    LogDebug(" npoints " << npoints() << " nconnected " << num);
+    if (num <= 1) return;
+
+    // Create point clouds using connected components
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
+    std::vector<std::vector<size_t>> pt_clouds_global_indices;
+    
+    // Create ordered components  
+    std::vector<ComponentInfo> ordered_components;
+    ordered_components.reserve(component.size());
+    for (size_t i = 0; i < component.size(); ++i) {
+        ordered_components.emplace_back(i);
+    }
+    
+    // Assign vertices to components
+    for (size_t i = 0; i < component.size(); ++i) {
+        ordered_components[component[i]].add_vertex(i);
+    }
+
+    // Sort components by minimum vertex index
+    std::sort(ordered_components.begin(), ordered_components.end(),
+        [](const ComponentInfo& a, const ComponentInfo& b) {
+            return a.min_vertex < b.min_vertex;
+        });
+
+    // Create point clouds for each component
+    for (const auto& comp : ordered_components) {
+        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
+        std::vector<size_t> global_indices;
+        
+        for (size_t vertex_idx : comp.vertex_indices) {
+            pt_cloud->add({points()[0][vertex_idx], points()[1][vertex_idx], points()[2][vertex_idx]});
+            global_indices.push_back(vertex_idx);
+        }
+        pt_clouds.push_back(pt_cloud);
+        pt_clouds_global_indices.push_back(global_indices);
+    }
+
+    // pt_clouds.resize(num);
+    // pt_clouds_global_indices.resize(num);
+
+    // // Initialize all point clouds
+    // for(size_t j = 0; j < num; j++) {
+    //     pt_clouds[j] = std::make_shared<Simple3DPointCloud>();
+    // }
+
+    // // Add points directly using component mapping
+    // for(size_t i = 0; i < component.size(); ++i) {
+    //     pt_clouds[component[i]]->add({points()[0][i], points()[1][i], points()[2][i]});
+    //     pt_clouds_global_indices[component[i]].push_back(i);
+    // }
+
+    // std::cout << "Test: "<< num << std::endl;
+
+    // Initialize distance metrics 
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(num, std::vector<std::tuple<int, int, double>>(num));
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(num, std::vector<std::tuple<int, int, double>>(num));
+
+    // Initialize all distances to inf
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = 0; k != num; k++) {
+            index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+            index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
+        }
+    }
+
+    // Calculate distances between components
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            // Get closest points between components
+            index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
+
+            // Skip small clouds
+            if ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
+                 (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
+                (pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500)) {
+                
+                // Get closest points and calculate directions
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+
+                geo_vector_t dir1 = vhough_transform(p1, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(j), 
+                                                pt_clouds_global_indices.at(j));
+                geo_vector_t dir2 = vhough_transform(p2, 30 * units::cm, HoughParamSpace::theta_phi, pt_clouds.at(k),
+                                                pt_clouds_global_indices.at(k)); 
+                dir1 = dir1 * -1;
+                dir2 = dir2 * -1;
+
+                std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+
+                if (result1.first >= 0) {
+                    index_index_dis_dir1[j][k] = std::make_tuple(std::get<0>(index_index_dis[j][k]), 
+                                                                result1.first, result1.second);
+                }
+
+                std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm); 
+
+                if (result2.first >= 0) {
+                    index_index_dis_dir2[j][k] = std::make_tuple(result2.first,
+                                                                std::get<1>(index_index_dis[j][k]), 
+                                                                result2.second);
+                }
+            }
+            // Now check the path 
+
+            {
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+
+                double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+                double step_dis = 1.0 * units::cm;
+                int num_steps = dis/step_dis + 1;
+
+                
+
+                // Track different types of "bad" points
+                int num_bad[4] = {0,0,0,0};   // more than one of three are bad
+                int num_bad1[4] = {0,0,0,0};  // at least one of three are bad
+                int num_bad2[3] = {0,0,0};    // number of dead channels
+
+                // Check points along path
+                for (int ii = 0; ii != num_steps; ii++) {
+                    geo_point_t test_p(
+                        p1.x() + (p2.x() - p1.x())/num_steps*(ii + 1),
+                        p1.y() + (p2.y() - p1.y())/num_steps*(ii + 1),
+                        p1.z() + (p2.z() - p1.z())/num_steps*(ii + 1)
+                    );
+
+                    // Test point quality using grouping parameters
+                    std::vector<int> scores;
+                    if (use_ctpc) {
+                        scores = grouping()->test_good_point(test_p, tp.face);
+                        
+                        // Check overall quality
+                        if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
+                            num_bad[0]++;
+                        }
+                        if (scores[0]+scores[3]==0) num_bad[1]++;
+                        if (scores[1]+scores[4]==0) num_bad[2]++;
+                        if (scores[2]+scores[5]==0) num_bad[3]++;
+
+                        if (scores[3]!=0) num_bad2[0]++;
+                        if (scores[4]!=0) num_bad2[1]++;
+                        if (scores[5]!=0) num_bad2[2]++;
+                        
+                        if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5]) < 3) {
+                            num_bad1[0]++;
+                        }
+                        if (scores[0]+scores[3]==0) num_bad1[1]++;
+                        if (scores[1]+scores[4]==0) num_bad1[2]++;
+                        if (scores[2]+scores[5]==0) num_bad1[3]++;
+                    }
+                }
+
+                // if (kd_blobs().size()==244){
+                //     std::cout << "Test: Dis: " << p1 << " " << p2 << " " << dis << std::endl;
+                //     std::cout << "Test: num_bad1: " << num_bad1[0] << " " << num_bad1[1] << " " << num_bad1[2] << " " << num_bad1[3] << std::endl;
+                //     std::cout << "Test: num_bad2: " << num_bad2[0] << " " << num_bad2[1] << " " << num_bad2[2] << std::endl;
+                //     std::cout << "Test: num_bad: " << num_bad[0] << " " << num_bad[1] << " " << num_bad[2] << " " << num_bad[3] << std::endl;
+                // }
+                // Calculate angles between directions
+                geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
+                geo_vector_t tempV5;
+
+                double angle1 = tempV1.angle(U_dir); 
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1),
+                        0);
+                angle1 = tempV5.angle(drift_dir);
+
+                double angle2 = tempV1.angle(V_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle2),
+                        0);
+                angle2 = tempV5.angle(drift_dir);
+
+                double angle1p = tempV1.angle(W_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1p),
+                        0); 
+                angle1p = tempV5.angle(drift_dir);
+
+                tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
+                double angle3 = tempV5.angle(drift_dir);
+
+                bool flag_strong_check = true;
+
+                // Define constants for readability
+                constexpr double pi = 3.141592653589793;
+                constexpr double perp_angle_tol = 10.0/180.0*pi;
+                constexpr double wire_angle_tol = 12.5/180.0*pi;
+                constexpr double perp_angle = pi/2.0;
+                constexpr double invalid_dist = 1e9;
+
+                if (fabs(angle3 - perp_angle) < perp_angle_tol) {
+                    geo_vector_t tempV2 = vhough_transform(p1, 15*units::cm);
+                    geo_vector_t tempV3 = vhough_transform(p2, 15*units::cm);
+                    
+                    if (fabs(tempV2.angle(drift_dir) - perp_angle) < perp_angle_tol &&
+                        fabs(tempV3.angle(drift_dir) - perp_angle) < perp_angle_tol) {
+                        flag_strong_check = false;
+                    }
+                }
+                else if (angle1 < wire_angle_tol || angle2 < wire_angle_tol || angle1p < wire_angle_tol) {
+                    flag_strong_check = false;
+                }
+
+                // Helper function to check if ratio exceeds threshold
+                auto exceeds_ratio = [](int val, int steps, double ratio = 0.75) {
+                    return val >= ratio * steps;
+                };
+
+                // Helper function to invalidate distance
+                auto invalidate_distance = [&]() {
+                    index_index_dis[j][k] = std::make_tuple(-1, -1, invalid_dist);
+                };
+
+                if (flag_strong_check) {
+                    if (num_bad1[0] > 7 || (num_bad1[0] > 2 && exceeds_ratio(num_bad1[0], num_steps))) {
+                        invalidate_distance();
+                    }
+                }
+                else {
+                    bool parallel_angles = (angle1 < wire_angle_tol && angle2 < wire_angle_tol) ||
+                                        (angle1p < wire_angle_tol && angle1 < wire_angle_tol) ||
+                                        (angle1p < wire_angle_tol && angle2 < wire_angle_tol);
+
+                    if (parallel_angles) {
+                        if (num_bad[0] > 7 || (num_bad[0] > 2 && exceeds_ratio(num_bad[0], num_steps))) {
+                            invalidate_distance();
+                        }
+                    }
+                    else if (angle1 < wire_angle_tol) {
+                        int sum_bad = num_bad[2] + num_bad[3];
+                        if (sum_bad > 9 || (sum_bad > 2 && exceeds_ratio(sum_bad, num_steps)) || num_bad[3] >= 3) {
+                            invalidate_distance();
+                        }
+                    }
+                    else if (angle2 < wire_angle_tol) {
+                        int sum_bad = num_bad[1] + num_bad[3];
+                        if (sum_bad > 9 || (sum_bad > 2 && exceeds_ratio(sum_bad, num_steps)) || num_bad[3] >= 3) {
+                            invalidate_distance();
+                        }
+                    }
+                    else if (angle1p < wire_angle_tol) {
+                        int sum_bad = num_bad[2] + num_bad[1];
+                        if (sum_bad > 9 || (sum_bad > 2 && exceeds_ratio(sum_bad, num_steps))) {
+                            invalidate_distance();
+                        }
+                    }
+                    else if (num_bad[0] > 7 || (num_bad[0] > 2 && exceeds_ratio(num_bad[0], num_steps))) {
+                        invalidate_distance();
+                    }
+                }
+            }
+
+            // Now check path again ... 
+            if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k])); //point3d(std::get<0>(index_index_dis_dir1[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k])); //point3d(std::get<1>(index_index_dis_dir1[j][k]));
+
+                double dis = sqrt(pow(p1.x() - p2.x(), 2) + 
+                                pow(p1.y() - p2.y(), 2) + 
+                                pow(p1.z() - p2.z(), 2));
+                double step_dis = 1.0 * units::cm;
+                int num_steps = dis/step_dis + 1;
+                int num_bad = 0;
+                int num_bad1 = 0;
+
+                // Check intermediate points along path
+                for (int ii = 0; ii != num_steps; ii++) {
+                    geo_point_t test_p(
+                        p1.x() + (p2.x() - p1.x())/num_steps*(ii + 1),
+                        p1.y() + (p2.y() - p1.y())/num_steps*(ii + 1),
+                        p1.z() + (p2.z() - p1.z())/num_steps*(ii + 1)
+                    );
+
+                    if (use_ctpc) {
+                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        if (!good_point) {
+                            num_bad++;
+                        }
+                        if (!grouping()->is_good_point(test_p, tp.face, 0.6*units::cm, 1, 0)) {
+                            num_bad1++;
+                        }
+                    }
+                }
+                
+                // Calculate angles
+                geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
+                geo_vector_t tempV5;
+                
+                double angle1 = tempV1.angle(U_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
+                        0);
+                angle1 = tempV5.angle(drift_dir);
+                
+                double angle2 = tempV1.angle(V_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
+                        0);
+                angle2 = tempV5.angle(drift_dir);
+                
+                tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
+                double angle3 = tempV5.angle(drift_dir);
+                
+                double angle1p = tempV1.angle(W_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
+                        0);
+                angle1p = tempV5.angle(drift_dir);
+
+                const double pi = 3.141592653589793;
+                if (fabs(angle3 - pi/2) < 10.0/180.0*pi || 
+                    angle1 < 12.5/180.0*pi ||
+                    angle2 < 12.5/180.0*pi || 
+                    angle1p < 7.5/180.0*pi) {
+                    // Parallel or prolonged case
+                    if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75*num_steps)) {
+                        index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+                else {
+                    if (num_bad1 > 7 || (num_bad1 > 2 && num_bad1 >= 0.75*num_steps)) {
+                        index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+            }
+
+            //Now check path again ... 
+            // Now check the path...
+            if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));//point3d(std::get<0>(index_index_dis_dir2[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));//point3d(std::get<1>(index_index_dis_dir2[j][k]));
+
+                double dis = sqrt(pow(p1.x() - p2.x(), 2) + 
+                                pow(p1.y() - p2.y(), 2) + 
+                                pow(p1.z() - p2.z(), 2));
+                double step_dis = 1.0 * units::cm;
+                int num_steps = dis/step_dis + 1;
+                int num_bad = 0;
+                int num_bad1 = 0;
+
+                // Check points along path
+                for (int ii = 0; ii != num_steps; ii++) {
+                    geo_point_t test_p(
+                        p1.x() + (p2.x() - p1.x())/num_steps*(ii + 1),
+                        p1.y() + (p2.y() - p1.y())/num_steps*(ii + 1),
+                        p1.z() + (p2.z() - p1.z())/num_steps*(ii + 1)
+                    );
+
+                    if (use_ctpc) {
+                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        if (!good_point) {
+                            num_bad++;
+                        }
+                        if (!grouping()->is_good_point(test_p, tp.face, 0.6*units::cm, 1, 0)) {
+                            num_bad1++;
+                        }
+                    }
+                }
+
+                // Calculate angles between directions
+                geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
+                geo_vector_t tempV5;
+
+                double angle1 = tempV1.angle(U_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
+                        0);
+                angle1 = tempV5.angle(drift_dir);
+
+                double angle2 = tempV1.angle(V_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
+                        0);
+                angle2 = tempV5.angle(drift_dir);
+
+                tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
+                double angle3 = tempV5.angle(drift_dir);
+
+                double angle1p = tempV1.angle(W_dir);
+                tempV5.set(fabs(p2.x() - p1.x()),
+                        sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
+                        0);
+                angle1p = tempV5.angle(drift_dir);
+
+                const double pi = 3.141592653589793;
+                bool is_parallel = fabs(angle3 - pi/2) < 10.0/180.0*pi || 
+                                angle1 < 12.5/180.0*pi ||
+                                angle2 < 12.5/180.0*pi || 
+                                angle1p < 7.5/180.0*pi;
+
+                if (is_parallel) {
+                    // Parallel or prolonged case
+                    if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75*num_steps)) {
+                        index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+                else {
+                    if (num_bad1 > 7 || (num_bad1 > 2 && num_bad1 >= 0.75*num_steps)) {
+                        index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+            }
+        }
+    }
+
+    // deal with MST of first type
+    {
+        boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
+                              boost::property<boost::edge_weight_t, double>>
+            temp_graph(num);
+        // int temp_count = 0;
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                int index1 = j;
+                int index2 = k;
+                if (std::get<0>(index_index_dis[j][k]) >= 0) {
+                    add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+                    // LogDebug(index1 << " " << index2 << " " << std::get<2>(index_index_dis[j][k]));
+                    // temp_count ++;
+                }
+            }
+        }
+        // std::cout << "Test: Count: " << temp_count << std::endl;
+
+        // Process MST
+        process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
+    }
+
+    // MST of the direction ...
+    {
+        boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
+                              boost::property<boost::edge_weight_t, double>>
+            temp_graph(num);
+
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                int index1 = j;
+                int index2 = k;
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    add_edge(
+                        index1, index2,
+                        std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])),
+                        temp_graph);
+                    // LogDebug(index1 << " " << index2 << " "
+                    //                 << std::min(std::get<2>(index_index_dis_dir1[j][k]),
+                    //                             std::get<2>(index_index_dis_dir2[j][k])));
+                }
+            }
+        }
+
+        process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_dir_mst);
+
+    }
+
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm) {
+                index_index_dis_mst[j][k] = index_index_dis[j][k];
+            }
+
+            // establish the path ...
+            if (std::get<0>(index_index_dis_mst[j][k]) >= 0) {
+                const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
+                const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
+                // auto edge =
+                //     add_edge(gind1, gind2, *m_graph);
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_mst[j][k]));
+                float dis;
+                // if (edge.second) {
+                if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
+                    dis = std::get<2>(index_index_dis_mst[j][k]);
+                }
+                else {
+                    dis = std::get<2>(index_index_dis_mst[j][k]);
+                }
+                // }
+                /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+            }
+
+            if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
+                    //auto edge = add_edge(gind1, gind2, *m_graph);
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir1[j][k]));
+                    float dis;
+                    // if (edge.second) {
+                    if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
+                        dis = std::get<2>(index_index_dis_dir1[j][k]) * 1.1;
+                    }
+                    else {
+                        dis = std::get<2>(index_index_dis_dir1[j][k]);
+                    }
+                    // }
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                }
+                if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
+                    // auto edge = add_edge(gind1, gind2, *m_graph);
+                    // LogDebug(gind1 << " " << gind2 << " " << std::get<2>(index_index_dis_dir2[j][k]));
+                    // if (edge.second) {
+                    float dis;
+                    if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
+                        dis = std::get<2>(index_index_dis_dir2[j][k]) * 1.1;
+                    }
+                    else {
+                        dis = std::get<2>(index_index_dis_dir2[j][k]);
+                    }
+                    // }
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                }
+            }
+
+        }  // k
+    }  // j
+    
+}
+
+
+// In Facade_Cluster.cxx
+std::vector<int> Cluster::examine_graph(const bool use_ctpc) const 
+{
+    // Create new graph
+    if (m_graph != nullptr) {
+        m_graph.reset();
+    }
+    
+    m_graph = std::make_unique<MCUGraph>(npoints());
+    
+    // Establish connections
+    Establish_close_connected_graph();
+    
+    // Connect using overclustering protection (not easy to debug ...)
+    Connect_graph_overclustering_protection(use_ctpc); 
+    
+    // Find connected components
+    std::vector<int> component(num_vertices(*m_graph));
+    // const int num_components =
+    connected_components(*m_graph, &component[0]);
+
+    // std::cout << "Test: num components " << num_components << " " << kd_blobs().size() << std::endl;
+
+    // If only one component, no need for mapping
+    // if (num_components <= 1) {
+    //     return std::vector<int>();
+    // }
+
+    // Create mapping from blob indices to component groups
+    std::vector<int> b2groupid(nchildren(), -1);
+    
+    // For each point in the graph
+    for (size_t i = 0; i < component.size(); ++i) {
+        // Get the blob index for this point
+        const int bind = kd3d().major_index(i);
+        // Map the blob to its component
+        b2groupid.at(bind) = component[i];
+    }
+
+    return b2groupid;
+}
+
 void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
 {
     if (m_graph == nullptr) Create_graph(use_ctpc);
@@ -2638,7 +3326,7 @@ void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) 
 
     vertex_descriptor v0 = vertex(pt_idx, *m_graph);
     // making a param object
-    const auto& param = weight_map(get(edge_weight, *m_graph))
+    const auto& param = weight_map(get(boost::edge_weight, *m_graph))
 				   .predecessor_map(&m_parents[0])
 				   .distance_map(&m_distances[0]);
     // const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *m_graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
@@ -2690,6 +3378,94 @@ void Cluster::cal_shortest_path(const size_t dest_wcp_index) const
     if (src_mcell != m_path_mcells.front())
         m_path_mcells.push_front(src_mcell);
 }
+
+std::vector<geo_point_t> Cluster::indices_to_points(const std::list<size_t>& path_indices) const 
+{
+    std::vector<geo_point_t> points;
+    points.reserve(path_indices.size());
+    for (size_t idx : path_indices) {
+        points.push_back(point3d(idx));
+    }
+    return points;
+}
+
+void Cluster::organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const
+{
+    std::vector<geo_point_t> temp_points = path_points;
+    path_points.clear();
+
+    // First pass: filter based on distance
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (path_points.empty()) {
+            path_points.push_back(temp_points[i]);
+        }
+        else if (i + 1 == temp_points.size()) {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            if (dis > low_dis_limit * 0.75) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+        else {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
+
+            if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.75)) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+    }
+
+    // Second pass: filter based on angle
+    temp_points = path_points;
+    std::vector<double> angles;
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (i == 0 || i + 1 == temp_points.size()) {
+            angles.push_back(M_PI);
+        }
+        else {
+            geo_vector_t v1 = temp_points[i] - temp_points[i - 1];
+            geo_vector_t v2 = temp_points[i] - temp_points[i + 1];
+            angles.push_back(v1.angle(v2));
+        }
+    }
+
+    path_points.clear();
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (angles[i] * 180.0 / M_PI >= 75) {
+            path_points.push_back(temp_points[i]);
+        }
+    }
+}
+
+// this is different from WCP implementation, the path_points is the input ...
+void Cluster::organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const
+{
+    //    std::vector<geo_point_t> temp_points = path_points;
+    path_points.clear();
+    auto indices = get_path_wcps();
+    auto temp_points = indices_to_points(indices);
+
+    for (size_t i = 0; i != temp_points.size(); i++) {
+        if (path_points.empty()) {
+            path_points.push_back(temp_points[i]);
+        }
+        else if (i + 1 == temp_points.size()) {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            if (dis > low_dis_limit * 0.5) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+        else {
+            double dis = (temp_points[i] - path_points.back()).magnitude();
+            double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
+
+            if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.5)) {
+                path_points.push_back(temp_points[i]);
+            }
+        }
+    }
+}
+
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {
@@ -2781,6 +3557,130 @@ void Cluster::Calc_PCA() const
     }
 
     m_pca_calculated = true;
+}
+
+void Cluster::Calc_PCA(std::vector<geo_point_t>& points) const
+{
+    // Reset center
+    m_center.set(0, 0, 0);
+    int nsum = 0;
+
+    // Calculate center
+    for (auto it = children().begin(); it != children().end(); it++) {
+        for (size_t k = 0; k != points.size(); k++) {
+            m_center += points[k];
+            nsum++;
+        }
+    }
+
+    // Reset PCA axes
+    for (int i = 0; i != 3; i++) {
+        m_pca_axis[i].set(0, 0, 0);
+    }
+
+    // Early return if not enough points
+    if (nsum < 3) {
+        return;
+    }
+
+    // Normalize center
+    m_center = m_center / nsum;
+
+    // Calculate covariance matrix using Eigen
+    Eigen::MatrixXd cov_matrix(3, 3);
+
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (auto it = children().begin(); it != children().end(); it++) {
+                for (size_t k = 0; k != points.size(); k++) {
+                    cov_matrix(i, j) += (points[k][i] - m_center[i]) * (points[k][j] - m_center[j]);
+                }
+            }
+        }
+    }
+
+    // Fill symmetric part of matrix
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+
+    // Compute eigenvalues and eigenvectors
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_values = eigenSolver.eigenvalues();
+    auto eigen_vectors = eigenSolver.eigenvectors();
+
+    // Store eigenvalues and eigenvectors in descending order
+    // Note: Eigen returns in ascending order, we want descending
+    for (int i = 0; i != 3; i++) {
+        m_pca_values[2-i] = eigen_values(i);
+        double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + 
+                         eigen_vectors(1, i) * eigen_vectors(1, i) +
+                         eigen_vectors(2, i) * eigen_vectors(2, i));
+        
+        m_pca_axis[2-i].set(eigen_vectors(0, i) / norm,
+                           eigen_vectors(1, i) / norm,
+                           eigen_vectors(2, i) / norm);
+    }
+
+    m_pca_calculated = true;
+}
+
+geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const
+{
+    // Create covariance matrix
+    Eigen::MatrixXd cov_matrix(3, 3);
+
+    // Calculate covariance matrix elements
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (const auto& p : points) {
+                if (i == 0 && j == 0) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.x() - center.x());
+                }
+                else if (i == 0 && j == 1) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.y() - center.y());
+                }
+                else if (i == 0 && j == 2) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.z() - center.z());
+                }
+                else if (i == 1 && j == 1) {
+                    cov_matrix(i, j) += (p.y() - center.y()) * (p.y() - center.y());
+                }
+                else if (i == 1 && j == 2) {
+                    cov_matrix(i, j) += (p.y() - center.y()) * (p.z() - center.z());
+                }
+                else if (i == 2 && j == 2) {
+                    cov_matrix(i, j) += (p.z() - center.z()) * (p.z() - center.z());
+                }
+            }
+        }
+    }
+
+    // std::cout << "Test: " << center << " " << points.at(0) << std::endl;
+    // std::cout << "Test: " << center << " " << points.at(1) << std::endl;
+    // std::cout << "Test: " << center << " " << points.at(2) << std::endl;
+
+    // Fill symmetric parts
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+
+    // Calculate eigenvalues/eigenvectors using Eigen
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_vectors = eigenSolver.eigenvectors();
+
+    // std::cout << "Test: " << eigen_vectors(0,0) << " " << eigen_vectors(1,0) << " " << eigen_vectors(2,0) << std::endl;
+
+    // Get primary direction (first eigenvector)
+    double norm = sqrt(eigen_vectors(0, 2) * eigen_vectors(0, 2) + 
+                      eigen_vectors(1, 2) * eigen_vectors(1, 2) + 
+                      eigen_vectors(2, 2) * eigen_vectors(2, 2));
+
+    return geo_vector_t(eigen_vectors(0, 2) / norm,
+                       eigen_vectors(1, 2) / norm, 
+                       eigen_vectors(2, 2) / norm);
 }
 
 
@@ -3045,6 +3945,62 @@ void Facade::sort_clusters(std::vector<Cluster*>& clusters)
 {
     std::sort(clusters.rbegin(), clusters.rend(), cluster_less);
 }
+
+
+Facade::Cluster::Flash Facade::Cluster::get_flash() const
+{
+    Flash flash;                // starts invalid
+
+    const auto* p = node()->parent;
+    if (!p)  return flash;
+    const auto* g = p->value.facade<Grouping>();
+    if (!g)  return flash;
+
+    const int flash_index = get_scalar("flash", -1);
+
+    //std::cout << "Test3 " << flash_index << std::endl;
+    
+    if (flash_index < 0) {
+        return flash;
+    }
+    if (! g->has_pc("flash")) {
+        return flash;
+    }
+    flash.m_valid = true;
+        
+    // These are kind of inefficient as we get the "flash" PC each time.
+    flash.m_time = g->get_element<double>("flash", "time", flash_index, 0);
+    flash.m_value = g->get_element<double>("flash", "value", flash_index, 0);
+    flash.m_ident = g->get_element<int>("flash", "ident", flash_index, -1);
+    flash.m_type = g->get_element<int>("flash", "type", flash_index, -1);
+
+    // std::cout << "Test3: " << g->has_pc("flash") << " " << g->has_pc("light") << " " << g->has_pc("flashlight") << " " << flash_index << " " << flash.m_time << std::endl;
+
+    if (!(g->has_pc("light") && g->has_pc("flashlight"))) {
+        return flash;           // valid, but no vector info.
+    }
+    
+    // These are spans.  We walk the fl to look up in the l.
+    const auto fl_flash = g->get_pcarray<int>("flash", "flashlight");
+    const auto fl_light = g->get_pcarray<int>("light", "flashlight");
+    const auto l_times = g->get_pcarray<double>("time", "light");
+    const auto l_values = g->get_pcarray<double>("value", "light");
+    const auto l_errors = g->get_pcarray<double>("error", "light");
+
+    // std::cout << "Test3: " << fl_flash.size() << " " << fl_light.size() << std::endl;
+
+    const size_t nfl = fl_light.size();
+    for (size_t ifl = 0; ifl < nfl; ++ifl) {
+        if (fl_flash[ifl] != flash_index) continue;
+        const int light_index = fl_light[ifl];
+        
+        flash.m_times.push_back(l_times[light_index]);
+        flash.m_values.push_back(l_values[light_index]);
+        flash.m_errors.push_back(l_errors[light_index]);
+    }
+    return flash;
+}
+
 
 // Local Variables:
 // mode: c++

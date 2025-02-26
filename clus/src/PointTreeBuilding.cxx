@@ -1,5 +1,6 @@
 #include "WireCellClus/PointTreeBuilding.h"
 #include "WireCellClus/Facade.h"
+#include "WireCellClus/Facade_Util.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
 #include "WireCellUtil/GraphTools.h"
@@ -8,6 +9,7 @@
 #include "WireCellAux/ClusterHelpers.h"
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
+#include "WireCellAux/SamplingHelpers.h"
 
 WIRECELL_FACTORY(PointTreeBuilding, WireCell::Clus::PointTreeBuilding,
                  WireCell::INamed,
@@ -71,6 +73,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("failed to get face %d", m_face);
     }
 
+    // Fixme: this is an utterly broken thing and should be replaced.
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 
     auto samplers = cfg["samplers"];
@@ -146,135 +149,35 @@ namespace {
     }
 #endif
 
-    // Calculate the average position of a point cloud tree.
-    Point calc_blob_center(const Dataset& ds)
-    {
-        const auto& arr_x = ds.get("x")->elements<Point::coordinate_t>();
-        const auto& arr_y = ds.get("y")->elements<Point::coordinate_t>();
-        const auto& arr_z = ds.get("z")->elements<Point::coordinate_t>();
-        const size_t len = arr_x.size();
-        if(len == 0) {
-            raise<ValueError>("empty point cloud");
-        }
-        Point ret(0,0,0);
-        for (size_t ind=0; ind<len; ++ind) {
-            ret += Point(arr_x[ind], arr_y[ind], arr_z[ind]);
-        }
-        ret = ret / len;
-        return ret;
-    }
-    /// TODO: add more info to the dataset
-    Dataset make_scaler_dataset(const IBlob::pointer iblob, const Point& center, const int npoints = 0, const double tick_span = 0.5*units::us)
-    {
-        using float_t = Facade::float_t;
-        using int_t = Facade::int_t;
-        Dataset ds;
-        ds.add("charge", Array({(float_t)iblob->value()}));
-        ds.add("center_x", Array({(float_t)center.x()}));
-        ds.add("center_y", Array({(float_t)center.y()}));
-        ds.add("center_z", Array({(float_t)center.z()}));
-	ds.add("npoints", Array({(int_t)npoints}));
-        const auto& islice = iblob->slice();
-        // fixme: possible risk of roundoff error + truncation makes _min == _max?
-        ds.add("slice_index_min", Array({(int_t)(islice->start()/tick_span)})); // unit: tick
-        ds.add("slice_index_max", Array({(int_t)((islice->start()+islice->span())/tick_span)}));
-        const auto& shape = iblob->shape();
-        const auto& strips = shape.strips();
-        /// ASSUMPTION: is this always true?
-        std::unordered_map<RayGrid::layer_index_t, std::string> layer_names = {
-            {2, "u"},
-            {3, "v"},
-            {4, "w"}
-        };
-        for (const auto& strip : strips) {
-            // std::cout << "layer " << strip.layer << " bounds " << strip.bounds.first << " " << strip.bounds.second << std::endl;
-            if(layer_names.find(strip.layer) == layer_names.end()) {
-                continue;
-            }
-            ds.add(layer_names[strip.layer]+"_wire_index_min", Array({(int_t)strip.bounds.first}));
-            ds.add(layer_names[strip.layer]+"_wire_index_max", Array({(int_t)strip.bounds.second}));
-        }
-        return ds;
-    }
-
-    /// extract corners
-    Dataset make_corner_dataset(const IBlob::pointer iblob)
-    {
-        using float_t = double;
-
-        Dataset ds;
-        const auto& shape = iblob->shape();
-        const auto& crossings = shape.corners();
-        const auto& anodeface = iblob->face();
-        const auto& coords = anodeface->raygrid();
-
-        // ray center
-        Facade::geo_point_t center;
-        for (const auto& crossing : crossings) {
-            const auto& [one, two] = crossing;
-            auto pt = coords.ray_crossing(one, two);
-            center += pt;
-        }
-        center = center / crossings.size();
-
-        std::vector<float_t> corner_x;
-        std::vector<float_t> corner_y;
-        std::vector<float_t> corner_z;
-        
-        for (const auto& crossing : crossings) {
-            const auto& [one, two] = crossing;
-            RayGrid::coordinate_t o1 = one;
-            RayGrid::coordinate_t o2 = two;
-            // {
-            //     auto pt = coords.ray_crossing(one, two);
-            //     auto is_higher = [&](const RayGrid::coordinate_t& c) {
-            //         if (c.layer < 2) {
-            //             return false;
-            //         }
-            //         const double diff = (pt - center).dot(coords.pitch_dirs()[c.layer]);
-            //         return diff > 0;
-            //     };
-            //     if (is_higher(one)) o1.grid += 1;
-            //     if (is_higher(two)) o2.grid += 1;
-            // }
-            auto opt = coords.ray_crossing(o1, o2);
-            corner_x.push_back(opt.x());
-            corner_y.push_back(opt.y());
-            corner_z.push_back(opt.z());
-            // std::cout << "orig: " << one.layer << " " << one.grid << ", " << two.layer << " " << two.grid
-            //           << " new: " << o1.grid << " " << o2.grid << " corner: " << opt.x() << " " << opt.y() << " "
-            //           << opt.z() << std::endl;
-        }
-
-        ds.add("x", Array(corner_x));
-        ds.add("y", Array(corner_y));
-        ds.add("z", Array(corner_z));
-        
-        return ds;
-    }
+    // Moved to aux/SamplingHelpers.
+    // - calc_blob_center
+    // - make_scalar_dataset
+    // - make_corner_dataset
 }
 
-static Dataset make2dds (const Dataset& ds3d, const double angle) {
-    Dataset ds;
-    const auto& x = ds3d.get("x")->elements<Facade::float_t>();
-    const auto& y = ds3d.get("y")->elements<Facade::float_t>();
-    const auto& z = ds3d.get("z")->elements<Facade::float_t>();
-    std::vector<Facade::float_t> x2d(x.size());
-    std::vector<Facade::float_t> y2d(y.size());
-    for (size_t ind=0; ind<x.size(); ++ind) {
-        const auto& xx = x[ind];
-        const auto& yy = y[ind];
-        const auto& zz = z[ind];
-        x2d[ind] = xx;
-        y2d[ind] = cos(angle) * zz - sin(angle) * yy;
-    }
-    ds.add("x", Array(x2d));
-    ds.add("y", Array(y2d));
-    return ds;
-}
+// static Dataset make2dds (const Dataset& ds3d, const double angle) {
+//     Dataset ds;
+//     const auto& x = ds3d.get("x")->elements<Facade::float_t>();
+//     const auto& y = ds3d.get("y")->elements<Facade::float_t>();
+//     const auto& z = ds3d.get("z")->elements<Facade::float_t>();
+//     std::vector<Facade::float_t> x2d(x.size());
+//     std::vector<Facade::float_t> y2d(y.size());
+//     for (size_t ind=0; ind<x.size(); ++ind) {
+//         const auto& xx = x[ind];
+//         const auto& yy = y[ind];
+//         const auto& zz = z[ind];
+//         x2d[ind] = xx;
+//         y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+//     }
+//     ds.add("x", Array(x2d));
+//     ds.add("y", Array(y2d));
+//     return ds;
+// }
 
-Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
-
+// Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
+void PointTreeBuilding::sample_live(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
+    auto grouping = root->value.facade<Facade::Grouping>();
+    const auto& tp = grouping->get_params();
     using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
@@ -282,7 +185,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     auto clusters = blob_clusters(gr);
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
-    Points::node_ptr root = std::make_unique<Points::node_t>();
+    // Points::node_ptr root = std::make_unique<Points::node_t>();
     auto& sampler = m_samplers.at("3d");
     for (auto& [cluster_id, vdescs] : clusters) {
         auto cnode = root->insert();
@@ -295,21 +198,27 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             named_pointclouds_t pcs;
             /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
             auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
+            if (pc3d.get("x")->size_major() == 0) {
+                log->debug("blob {} has no points", iblob->ident());
+                continue;
+            }
             pcs.emplace("3d", pc3d);
-            pcs.emplace("2dp0", make2dds(pc3d, angle_u));
-            pcs.emplace("2dp1", make2dds(pc3d, angle_v));
-            pcs.emplace("2dp2", make2dds(pc3d, angle_w));
+            pcs.emplace("2dp0", make2dds(pc3d, tp.angle_u));
+            pcs.emplace("2dp1", make2dds(pc3d, tp.angle_v));
+            pcs.emplace("2dp2", make2dds(pc3d, tp.angle_w));
+            pcs.emplace("corner", make_corner_dataset(iblob, true, tp.time_offset, tp.drift_speed));
             const Point center = calc_blob_center(pcs["3d"]);
-            auto scaler_ds = make_scaler_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
+            // std::cout << "[delete] center: " << center.x() << " " << center.y() << " " << center.z() << std::endl;
+            auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tp.tick);
             int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
             int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
             int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
             int_t min_wire_type = aux.get("min_wire_type")->elements<int_t>()[0];
-            scaler_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
-            scaler_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
-            scaler_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
-            scaler_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
-            pcs.emplace("scalar", std::move(scaler_ds));
+            scalar_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
+            scalar_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
+            scalar_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
+            scalar_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
+            pcs.emplace("scalar", std::move(scalar_ds));
             cnode->insert(Points(std::move(pcs)));
 
             ++nblobs;
@@ -317,7 +226,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     }
     
     log->debug("sampled {} live blobs to tree with {} children", nblobs, root->nchildren());
-    return root;
+    // return root;
 }
 
 Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointer icluster, const double tick) const {
@@ -342,12 +251,12 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             }
             auto iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
             named_pointclouds_t pcs;
-            auto scaler_ds = make_scaler_dataset(iblob, {0,0,0}, 0, tick);
-            scaler_ds.add("max_wire_interval", Array({(int_t)-1}));
-            scaler_ds.add("min_wire_interval", Array({(int_t)-1}));
-            scaler_ds.add("max_wire_type", Array({(int_t)-1}));
-            scaler_ds.add("min_wire_type", Array({(int_t)-1}));
-            pcs.emplace("scalar", scaler_ds);
+            auto scalar_ds = make_scalar_dataset(iblob, {0,0,0}, 0, tick);
+            scalar_ds.add("max_wire_interval", Array({(int_t)-1}));
+            scalar_ds.add("min_wire_interval", Array({(int_t)-1}));
+            scalar_ds.add("max_wire_type", Array({(int_t)-1}));
+            scalar_ds.add("min_wire_type", Array({(int_t)-1}));
+            pcs.emplace("scalar", scalar_ds);
             pcs.emplace("corner", make_corner_dataset(iblob));
             // for (const auto& [name, pc] : pcs) {
             //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());
@@ -402,6 +311,8 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
                 if(charge.uncertainty() > m_dead_threshold) {
+                    // if (charge.value() >0)
+                    // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
                     continue;
                 } 
                 const auto& cident = ichan->ident();
@@ -413,8 +324,12 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     // const auto& face = wire->planeid().face();
                     const auto& face = m_face;
                     /// FIXME: is this the way to get face?
+
+//                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
+
                     const auto& x = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
-                    const double y = pitch_mags.at(face).at(plane)*wind + proj_centers.at(face).at(plane);
+                    const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
+
                     // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
                     //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
                     //                wind, plane, face, x, y);
@@ -492,13 +407,24 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 // }
                 faces.insert(face);
                 planes.insert(plane);
+
                 auto & dead_winds = grouping->get_dead_winds(face, plane);
+                // fix a bug how do we know the smaller or bigger value of xbeg and xend?
+                // if (dead_winds.find(wind) == dead_winds.end()) {
+                //     dead_winds[wind] = {xbeg, xend};
+                // } else {
+                //     const auto& [xbeg_now, xend_now] = dead_winds[wind];
+                //     dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
+                // }
                 if (dead_winds.find(wind) == dead_winds.end()) {
-                    dead_winds[wind] = {xbeg, xend};
+                    dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
                 } else {
                     const auto& [xbeg_now, xend_now] = dead_winds[wind];
-                    dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
+                    dead_winds[wind] = {std::min(std::min(xbeg,xend)-0.1*units::cm, xbeg_now), std::max(std::max(xbeg,xend) + 0.1*units::cm, xend_now)};
                 }
+                
+
+
                 // if (cident == 903) {
                 //     log->debug("wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
                 // }
@@ -580,11 +506,17 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
 
     const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
-    Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
-                                             tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
+    Points::node_ptr root_live = std::make_unique<Points::node_t>();
     auto grouping = root_live->value.facade<Facade::Grouping>();
     grouping->set_anode(m_anode);
     grouping->set_params(tp_json);
+    // {
+    //     const auto& tp = grouping->get_params();
+    //     std::cout << "[delete] sample_live: tp.time_offset: " << tp.time_offset << " tp.drift_speed: " << tp.drift_speed << std::endl;
+    // }
+    sample_live(root_live, iclus_live);
+    // Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
+    //                                          tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
     /// TODO: remove after debugging

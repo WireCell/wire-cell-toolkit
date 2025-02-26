@@ -56,7 +56,8 @@ namespace WireCell {
                            int plane,
                            const std::vector<float>& perwire_rmses,
                            IFrame::trace_summary_t& threshold,
-                           const std::string& loglabel);
+                           const std::string& loglabel,
+                           const bool save_negative_charge = false);
 
             // save ROI into the out frame (set use_roi_debug_mode=true)
             void save_roi(ITrace::vector& itraces, IFrame::trace_list_t& indices, int plane,
@@ -176,6 +177,9 @@ namespace WireCell {
             // https://github.com/WireCell/wire-cell-toolkit/issues/322
             std::vector<int> m_plane2layer{0,1,2};
 
+            // MP threshold feature_val method, 0: ThreePointCheck, 1: MaxPointCheck
+            int m_MP_feature_val_method{0};
+
 
             // fixme: this is apparently not used:
             // channel offset
@@ -227,7 +231,7 @@ namespace WireCell {
             std::string m_frame_tag{"sigproc"};
 
             bool m_use_roi_debug_mode{false};
-            bool m_save_negtive_charge{false};
+            bool m_save_negative_charge{false};
             bool m_use_roi_refinement{true};
             std::string m_tight_lf_tag{"tight_lf"};
             std::string m_loose_lf_tag{"loose_lf"};

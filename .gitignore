@@ -85,3 +85,6 @@ styles
 AutoDict_*
 spng
 version.txt
+.cache
+.clangd
+junk*

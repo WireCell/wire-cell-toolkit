@@ -183,8 +183,10 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
         }
         const double cathode_x = cathode_xref;
 
-        log->debug("X planes: \"cathode\"@ {}m, \"response\"@{}m, \"anode\"@{}m", cathode_x / units::m,
-                 response_x / units::m, anode_x / units::m);
+        const int dirx = response_x > anode_x ? +1 : -1;
+
+        log->debug("X planes: \"cathode\"@ {}m, \"response\"@{}m, \"anode\"@{}m, dirx={}", cathode_x / units::m,
+                   response_x / units::m, anode_x / units::m, dirx);
 
         IWirePlane::vector planes(nplanes);
         // note, WireSchema requires U/V/W plane ordering in a face.
@@ -311,7 +313,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
         log->debug("face:{} with {} planes and sensvol: {}",
                    ws_face.ident, planes.size(), sensvol.bounds());
 
-        m_faces[iface] = make_shared<AnodeFace>(ws_face.ident, planes, sensvol, iface, m_ident);
+        m_faces[iface] = make_shared<AnodeFace>(ws_face.ident, planes, sensvol, iface, m_ident, dirx);
     }  // face
 
     // remove any duplicate channels

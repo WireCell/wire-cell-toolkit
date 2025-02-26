@@ -9,8 +9,8 @@ local anodes = tools.anodes;
 local clus (
     anode,
     face = 0,
-    drift_speed = 1.56 * wc.mm / wc.us, // 1.56 for sbnd
-    time_offset = -200 * wc.us,
+    drift_speed = 1.6 * wc.mm / wc.us,
+    time_offset = 0 * wc.us,
     bee_dir = "data",
     bee_zip = "mabc.zip",
     initial_index = "0",
@@ -24,15 +24,12 @@ local clus (
     local LsubRunNo = std.parseInt(initial_subRunNo),
     local LeventNo  = std.parseInt(initial_eventNo),
 
-    local drift_sign = if anode.data.ident%2 == 0  then 1 else -1,
-    // local drift_sign = 1,
-
     // Note, the "sampler" must be unique to the "sampling".
     local bs_live = {
         type: "BlobSampler",
         name: "%s-%d"%[anode.name, face],
         data: {
-            drift_speed: drift_speed*drift_sign,
+            drift_speed: drift_speed,
             time_offset: time_offset,
             strategy: [
                 // "center",
@@ -165,8 +162,8 @@ local clus (
                 {name: "clustering_connect1"},
                 {name: "clustering_deghost"},
                 {name: "clustering_examine_x_boundary"},
-                // {name: "clustering_protect_overclustering"},
-                // {name: "clustering_neutrino"},
+                {name: "clustering_protect_overclustering"},
+                {name: "clustering_neutrino"},
                 {name: "clustering_isolated"},
             ],
         }

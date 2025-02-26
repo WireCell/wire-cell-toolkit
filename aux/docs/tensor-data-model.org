@@ -92,6 +92,11 @@ To start with, every tensor has provides an associated *datatype* attribute of v
 - clnodeset :: an array of attributes for set of monotypical ~ICluster~ graph nodes.
 - cledgeset :: an array describing a set of ~ICluster~ graph edges between all nodes of one type to all nodes of another.
 
+- light :: measures of activity from optical detector elements (PMT, SiPM).
+- flashid :: identifying information about flashes
+- flash :: reconstructed summary of activity consistent with light measures.
+- flashlight :: association of flashes to light. 
+
 Where pertinent, the recommended *datapath* root path for the type is given in parenthesis.
 
 The tensor set has a *datatype* of *tensorset* and is merely a generic container of tensors produced in some context (eg an "event").  The *tensorset* may provide an optional attribute *tensors* to reference *datapath* of the tensors.  For persistent serial files, such references are redundant with the file (in-archive) naming convention described below. 
@@ -326,6 +331,39 @@ The *datatype* of *cledgeset* indicates a tensor representing an edge array in /
 The array is of type ~i4~ and is 2D with each row representing one edge.  First column represents edge tail and second column edge head.  Values are row indices into a *clnodeset* array.
 The tensor MD may be empty.
   
+** light
+
+The *datatype* of *light* indicates a *pcdataset* representing a number of measured values from optical detectors such as PMT or SiPM.  Values that are not pertinent may be omitted.  The measures span some period of time (eg, a window around one "event").  The following arrays comprise a *light* dataset:
+
+- ident :: (int) an application-specific integer identifying the optical detector producing the measure.
+
+- time :: (double) the time of the measure
+
+- value :: (double) the value of the measure (eg in count of PE or in units of [charge]).
+
+- error :: (double) uncertainty in the value in same units as val.
+
+** flash
+
+The *datatype* of *flash* indicates a *pcdataset* representing a collection of related *light*.
+
+- time :: (double) the representative central time for the flash
+- tmin :: (double) the start of a finite time duration of the flash.
+- tmax :: (double) the end of a finite time duration of the flash.
+- value :: (double) the intensity of the flash (PEs, charge)
+- error :: (double) the uncertainty or error in the value.
+- ident :: (int) an application-specific identifier of the flash.
+- type :: (int) a number representing a type of flash.
+
+** flashlight
+
+The *datatype* of *flashlight* indicates a *pcdataset* which associates elements of *light* and elements of *flash* by their indices into these respective datasets.
+
+- flash :: (int) index into the flash arrays
+- light :: (int) index into the light arrays
+
+
+
 * Tensor archive files
 
 WCT provides the DFP graph node components ~TensorFileSink~ and ~TensorFileSource~ that persist ~ITensorSet~ through an archive file (Zip or Tar, with optional compression) using WCT iostreams.  The archive file will contain files with names matching these patterns:

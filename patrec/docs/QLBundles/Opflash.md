@@ -6,6 +6,7 @@ For more detailed information, please refer to the [OpFlash documentation](https
 
 A WCP rootfile can be found @ [this link](https://www.phy.bnl.gov/xqian/talks/wire-cell-porting/nuselEval_5384_137_6852.root)
 
+
 Opflash are saved in 
 ```cpp
   TTree *T_flash = (TTree*)file->Get("T_flash");
@@ -35,6 +36,10 @@ Opflash are saved in
 ```
 
 ## Describe WCT version
+
+See "light" and "flash" sections of the [WCT tensor data model document](../../../aux/docs/tensor-data-model.org).
+
+More discussion is found in the [`Bundle`](./Bundle.md) document.
 
 ## Example WCT jobs or files ... 
 
