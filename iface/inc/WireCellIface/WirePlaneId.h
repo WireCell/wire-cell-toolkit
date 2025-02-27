@@ -9,8 +9,15 @@
 
 namespace WireCell {
 
-    /// Enumerate layer IDs.  These are not indices!
-    enum WirePlaneLayer_t { kUnknownLayer = 0, kUlayer = 1, kVlayer = 2, kWlayer = 4 };
+    /// Enumerate layer IDs.  These are not indices but are masks!  A wpid can
+    /// have a "layer" that is multiple layers.  
+    enum WirePlaneLayer_t {
+        kUnknownLayer = 0,
+        kUlayer = 1,
+        kVlayer = 2,
+        kWlayer = 4,
+        kAllLayers=7             // represents anode+face context
+    };
     const WirePlaneLayer_t iplane2layer[3] = {kUlayer, kVlayer, kWlayer};
 
     class WirePlaneId {
@@ -27,7 +34,7 @@ namespace WireCell {
         /// Layer as integer (not index!)
         int ilayer() const;
 
-        /// Layer as index number (0,1 or 2).  -1 if unknown
+        /// Layer as index number (0,1 or 2).  -1 is returned when the layer is not well defined.
         int index() const;
 
         /// per-Anode face index NOT ident!
@@ -36,15 +43,25 @@ namespace WireCell {
         /// APA number
         int apa() const;
 
-        /// return true if valid
-        // operator bool() const;
+        /// Return true if apa, face and layer are all valid numbers.
         bool valid() const;
+
+        /// Return true if the wpid has only legal values for apa, face and
+        /// layer.  Layer must be well defined as a single layer (u,v,w) or as
+        /// "all" layers  which then represents the anode+face context.
+        operator bool() const;
 
         bool operator==(const WirePlaneId& rhs);
 
         bool operator!=(const WirePlaneId& rhs);
 
         bool operator<(const WirePlaneId& rhs);
+
+        /// Return a new wpid on a given layer but same apa/face.
+        WirePlaneId to_layer(WirePlaneLayer_t layer) const;        
+        WirePlaneId to_u() const;
+        WirePlaneId to_v() const;
+        WirePlaneId to_w() const;
 
        private:
         int m_pack;

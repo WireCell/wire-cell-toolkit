@@ -13,9 +13,6 @@ WireCell::WirePlaneId::WirePlaneId(WirePlaneLayer_t layer, int face, int apa)
 WireCell::WirePlaneId::WirePlaneId(int packed)
   : m_pack(packed)
 {
-    // It is very dubious that I allow this constructor.  I do it for
-    // reading WireSchema files where the packing is done by the user.
-    // Very dubious indeed.
 }
 
 int WireCell::WirePlaneId::ident() const { return m_pack; }
@@ -31,7 +28,7 @@ int WireCell::WirePlaneId::index() const
         return 1;
     case kWlayer:
         return 2;
-    case kUnknownLayer:
+    default:
         return -1;
     }
     return -1;
@@ -41,8 +38,36 @@ int WireCell::WirePlaneId::apa() const { return m_pack >> apa_shift; }
 
 bool WireCell::WirePlaneId::valid() const
 {
-    int ind = index();
+    if (apa() < 0) return false;
+    if (face() < 0) return false;
+    const int ind = index();
     return 0 <= ind && ind < 3;
+}
+
+WireCell::WirePlaneId::operator bool() const
+{
+    if (apa() < 0) return false;
+    if (face() < 0) return false;
+    if (layer() == kAllLayers) return true;
+    const int ind = index();
+    return 0 <= ind && ind < 3;
+}
+
+WirePlaneId WirePlaneId::to_layer(WirePlaneLayer_t layer) const
+{
+    return WirePlaneId(layer, face(), apa());
+}
+WirePlaneId WirePlaneId::to_u() const
+{
+    return to_layer(kUlayer);
+}
+WirePlaneId WirePlaneId::to_v() const
+{
+    return to_layer(kVlayer);
+}
+WirePlaneId WirePlaneId::to_w() const
+{
+    return to_layer(kWlayer);
 }
 
 bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) { return m_pack == rhs.m_pack; }
@@ -68,8 +93,17 @@ std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneId&
 {
     o << "[WirePlaneId " << wpid.ident() << " ind:" << wpid.index() << " layer:" << wpid.layer()
       << " apa:" << wpid.apa() << " face:" << wpid.face();
-    if (!wpid.valid()) {
+    if (wpid.valid()) {
+        o << " valid";
+    }
+    else {
         o << " bogus";
+    }
+    if (wpid) {
+        o << " true";
+    }
+    else {
+        o << " false";
     }
     o << "]";
     return o;
@@ -86,6 +120,9 @@ std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneLay
         break;
     case WireCell::kWlayer:
         o << "<W>";
+        break;
+    case WireCell::kAllLayers:
+        o << "<A>";
         break;
     default:
         o << "<?>";

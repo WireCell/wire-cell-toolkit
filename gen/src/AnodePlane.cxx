@@ -233,7 +233,8 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
             const double pitchmax = wire_pitch_dirs.second.dot(wires[nwires - 1]->center() - plane_center);
             const Vector pimpos_origin(response_x, plane_center.y(), plane_center.z());
 
-            log->debug("face:{}, plane:{}, origin:{} mm", iface, iplane, pimpos_origin / units::mm);
+            log->debug("face:{}, plane:{}, origin:{} mm, wpid:{}",
+                       iface, iplane, pimpos_origin / units::mm, wire_plane_id);
 
             Pimpos* pimpos = new Pimpos(nwires, pitchmin, pitchmax, wire_pitch_dirs.first, wire_pitch_dirs.second,
                                         pimpos_origin, nimpacts);

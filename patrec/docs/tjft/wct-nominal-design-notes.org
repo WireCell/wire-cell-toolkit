@@ -1,4 +1,71 @@
-#+title: Requirements and nominal design
+#+title: Requirements and nominal design - work in progress
+
+* Major elements
+
+I am prescriptive here to be brief and expect we will delete/change anything bad.
+
+** Basics
+
+- PC-tree remains the central data structure.
+- We update MABC / clustering function interface to pass ~std::map<std::string,Grouping*>~
+  - Can we understand how to remove the ~cluster_connected_dead~ argument?
+- Add a general interface that allows serialization between Boost Graph and ~std::map<std::string, PointCloud::Dataset>~ ("named datasets").
+  - This will allow aggregate (eg ~struct~) and heterotypic (eg ~std::variant~ or ~boost::any~) graph vertex and edge property types.
+  - It will require instrumenting these types with some simple Boost.Serialization code.
+  - A Boost.Serialization "archive" class is needed to use named datasets as the store.
+  - A convention of a graph having a "name" must be defined such that ~<name>_graph~, ~<name>_nodes~ and ~<name>_edges~ hold the graph, node and edge properties, respectively.
+    - In addition to the ~<name>_edges~ dataset holding per-edge scalar properties, two special arrays called ~tail~ and ~head~ will hold a pair of indices into the ~<name>_nodes~ dataset to represent the edge, itself.
+
+- Top level WCP code like the methods of ~NeutrinoID~ can then become "clustering functions".
+  - Functions need to agree on certain things:
+    - Which PC-tree layer holds any given graph (mostly Grouping vs Cluster).
+    - What are the "names" of the graphs.
+
+** MABC / clustering API clean up      
+
+- Make it a proper Interface API using WCT ~NamedFactory~, etc, facilities.
+- Besides the calling interface, allow for declaring consumer/producer metadata as:
+
+  #+begin_src c++
+    using GroupingMap = std::map<std::string, std::shared_ptr<const Grouping>>;
+    struct IClusteringFunction : public Inteface {
+
+        // The API cleanup and generalization.  Original / most all clustering
+        // "functions" would take a map with a "live" entry, some with a "dead"
+        // entry and some would produce/take a "shadow" entry.
+        GroupingMap operator()(GroupingMap groupings) = 0;
+
+        // Optional idea #1:
+        std::vector<std::string> produces_groupings() const { return {}; }
+        std::vector<std::string> consumes_groupings() const { return {}; }
+
+        // Optional idea #2.
+        std::vector<std::string> produces_graphs() const { return {}; }
+        std::vector<std::string> consumes_graphs() const { return {}; }
+  #+end_src
+  
+Optional ideas 1 and 2 are to give a chance to detect when a user has provided broken configuration.
+
+
+One big question is if we should actually define this interface:
+
+#+begin_src c++
+        GroupingMap operator()(GroupingMap groupings) = 0;
+#+end_src
+
+or this one:
+
+#+begin_src c++
+        void operator()(GroupingMap& groupings) = 0;
+#+end_src
+
+That is, do we want to allow a "feed-forward by default" paradigm or a truly functional form?
+
+
+* 
+
+The rest of this doc can be ignored for now.
+
 
 * Requirements
 
