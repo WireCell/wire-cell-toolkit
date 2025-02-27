@@ -40,6 +40,10 @@ namespace WireCell::GraphTools {
     boost::iterator_range<typename boost::graph_traits<Gr>::vertex_iterator> vertex_range(Gr& g) {
         return mir(boost::vertices(g));
     }
+    template <typename Gr> 
+    boost::iterator_range<typename boost::graph_traits<Gr>::edge_iterator> edge_range(Gr& g) {
+        return mir(boost::edges(g));
+    }
 
     // Return graph as string holding GraphViz dot representation.
     template<typename Gr>
