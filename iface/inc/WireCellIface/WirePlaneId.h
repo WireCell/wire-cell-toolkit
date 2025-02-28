@@ -57,11 +57,24 @@ namespace WireCell {
 
         bool operator<(const WirePlaneId& rhs);
 
-        /// Return a new wpid on a given layer but same apa/face.
+        /// Return a new wpid defined with the given layer value but same apa/face.
         WirePlaneId to_layer(WirePlaneLayer_t layer) const;        
+
+        /// Return a new wpid with a well defined plane but same apa/face.        
         WirePlaneId to_u() const;
         WirePlaneId to_v() const;
         WirePlaneId to_w() const;
+
+        /// Return a new wpid brocaded to apply to all planes but same apa/face.
+        WirePlaneId to_all() const;
+
+        /// Return a standardized name of the form:
+        ///
+        ///     "a{apa()}f{face()}p{layer()}"
+        ///
+        /// Eg, "a2f1pU" is the U-plane of face index 1 on anode ident 2.  Layer
+        /// letter may be "A" for all or "?" for unknown.
+        std::string name() const;
 
        private:
         int m_pack;

@@ -69,6 +69,17 @@ WirePlaneId WirePlaneId::to_w() const
 {
     return to_layer(kWlayer);
 }
+WirePlaneId WirePlaneId::to_all() const
+{
+    return to_layer(kAllLayers);
+}
+std::string WirePlaneId::name() const
+{
+    std::stringstream ss;
+    ss << "a" << apa() << "f" << face() << "p" << layer();
+    return ss.str();
+}
+
 
 bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) { return m_pack == rhs.m_pack; }
 
@@ -91,7 +102,8 @@ bool WireCell::WirePlaneId::operator<(const WirePlaneId& rhs)
 
 std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneId& wpid)
 {
-    o << "[WirePlaneId " << wpid.ident() << " ind:" << wpid.index() << " layer:" << wpid.layer()
+    o << "[WirePlaneId \"" << wpid.name() << "\" ident=" << wpid.ident()
+      << " ind:" << wpid.index() << " layer:" << wpid.layer()
       << " apa:" << wpid.apa() << " face:" << wpid.face();
     if (wpid.valid()) {
         o << " valid";
@@ -113,19 +125,19 @@ std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneLay
 {
     switch (layer) {
     case WireCell::kUlayer:
-        o << "<U>";
+        o << "U";
         break;
     case WireCell::kVlayer:
-        o << "<V>";
+        o << "V";
         break;
     case WireCell::kWlayer:
-        o << "<W>";
+        o << "W";
         break;
     case WireCell::kAllLayers:
-        o << "<A>";
+        o << "A";
         break;
     default:
-        o << "<?>";
+        o << "?";
         break;
     }
     return o;
