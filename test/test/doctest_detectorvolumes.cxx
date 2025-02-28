@@ -7,6 +7,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 #include "WireCellIface/IConfigurable.h"
 
 using namespace WireCell;
@@ -199,6 +200,8 @@ TEST_CASE("test detectorvolumes")
 
     auto dv = Factory::lookup_tn<IDetectorVolumes>("DetectorVolumes");
     REQUIRE(dv);
+    auto fv = Factory::lookup_tn<IFiducial>("DetectorVolumes");
+    REQUIRE(fv);
 
     // $ wirecell-util wires-info pdsp
     // anode:0 face:0 X=[-3594.16,-3584.63]mm Y=[76.10,6066.70]mm Z=[0.00,2306.73]mm
@@ -206,11 +209,14 @@ TEST_CASE("test detectorvolumes")
     //	1: x=-3589.39mm dx=4.7620mm n=1148 pitch=(4.6691 +/- 0.000005 [4.6684<4.6693], p0=4.6691) 
     //	2: x=-3594.16mm dx=0.0000mm n=480 pitch=(4.7920 +/- 0.000000 [4.7920<4.7920], p0=4.7920)
     CHECK(false == dv->contained_by(Point(0,0,0)));
+    CHECK(false == fv->contained(Point(0,0,0)));
     CHECK(false == dv->contained_by(Point(-3400*units::mm, 0, 0)));
+    CHECK(false == fv->contained(Point(-3400*units::mm, 0, 0)));
     auto wpid = dv->contained_by(Point(-3500*units::mm, 100*units::mm, 100*units::mm));
     CHECK(true == wpid);
     CHECK(wpid.apa() == 0);
     CHECK(wpid.face() == 0);
+    CHECK(fv->contained(Point(-3500*units::mm, 100*units::mm, 100*units::mm)));
 
     auto wpid_u = wpid.to_u();
     CHECK(wpid_u.index() == 0);

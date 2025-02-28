@@ -1,4 +1,5 @@
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IConfigurable.h"
 
@@ -17,7 +18,7 @@ WIRECELL_FACTORY(DetectorVolumes, DetectorVolumes,
 
 using namespace WireCell;
 
-class DetectorVolumes : public IDetectorVolumes, public IConfigurable {
+class DetectorVolumes : public IDetectorVolumes, public IFiducial, public IConfigurable {
 
 public:
 
@@ -58,6 +59,13 @@ public:
     }
 
 
+    // IFiducial
+    virtual bool contained(const Point& point) const {
+        return contained_by(point);
+    }
+
+
+    // Rest is IDetectorVolumes
     virtual WirePlaneId contained_by(const Point& point) const {
         // This initial imp is perhaps too slow.  There are two options I can
         // think of immediately:
