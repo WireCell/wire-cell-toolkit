@@ -66,6 +66,11 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         }
     }
 
+    m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
+    if (m_grouping2file_prefix.size()) {
+        m_grouping2file_prefix += String::format("%s-%d-%d-%d.npz", m_grouping2file_prefix.c_str(), m_runNo, m_subRunNo, m_eventNo);
+    }
+
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
@@ -365,7 +370,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     fill_bee_points(m_bee_ld, *root_live.get());
     perf("dump live clusters to bee");
 
-    graph2json(live_grouping, "graph2json.npz");
+    if (m_grouping2file_prefix.size()) {
+        grouping2file(live_grouping, m_grouping2file_prefix);
+    }
+
     if (m_dump_json) {
         Persist::dump(String::format("live-summary-%d.json", ident), json_summary(live_grouping), true);
         Persist::dump(String::format("dead-summary-%d.json", ident), json_summary(dead_grouping), true);

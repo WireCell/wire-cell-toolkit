@@ -137,6 +137,7 @@ local clus (
         data:  {
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
+            // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
             perf: true,
             bee_dir: bee_dir, // "data/0/0", // not used
             bee_zip: "mabc-%s-face%d.zip"%[anode.name, face],

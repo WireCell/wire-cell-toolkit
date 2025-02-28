@@ -75,6 +75,13 @@ namespace WireCell::Clus {
          */
         bool m_perf{false};
 
+        /** Config: "grouping2file_prefix"
+         *
+         * If not empty, dump the final grouping to a file with this prefix + potential RSE info + .npz.
+         */
+
+        std::string m_grouping2file_prefix{};
+
         /** Config: "dump_json"
          *
          * If true, dump to files like {live,dead}-summary-<ident>.json a

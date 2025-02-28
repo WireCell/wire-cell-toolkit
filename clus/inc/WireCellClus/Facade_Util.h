@@ -634,7 +634,7 @@ namespace WireCell::PointCloud::Facade {
         return false;
     }
 
-    void graph2json(const Grouping& grouping, const std::string& filename);
+    void grouping2file(const Grouping& grouping, const std::string& filename);
 
 }  // namespace WireCell::PointCloud::Facade
 

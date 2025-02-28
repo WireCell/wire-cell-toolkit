@@ -625,7 +625,7 @@ static void arr2file(const boost::multi_array<float, 2>& arr, const std::string&
     m_out.flush();
 }
 
-void Facade::graph2json(const Grouping& grouping, const std::string& filename)
+void Facade::grouping2file(const Grouping& grouping, const std::string& filename)
 {
 
     typedef boost::multi_array<float, 2> MultiArray;
