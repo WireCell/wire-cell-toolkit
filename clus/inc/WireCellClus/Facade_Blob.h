@@ -88,7 +88,7 @@ namespace WireCell::PointCloud::Facade {
         int_t get_max_wire_type() const { return cache().max_wire_type;}
         int_t get_min_wire_type() const { return cache().min_wire_type;}
 
-        std::vector<geo_point_t> corners() const { return corners_; }
+        std::vector<geo_point_t> corners() const { return cache().corners_; }
 
         // Return a value representing the content of this blob.
         size_t hash() const;
@@ -102,8 +102,6 @@ namespace WireCell::PointCloud::Facade {
 
        private:
         // moved to cache
-
-        std::vector<geo_point_t> corners_;
 
        protected:
         virtual void fill_cache(BlobCache& cache) const;
