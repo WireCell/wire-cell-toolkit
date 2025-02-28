@@ -170,7 +170,6 @@ std::string json_config = R"(
 ]
 )";
 
-#include <iostream>
 TEST_CASE("test detectorvolumes")
 {
     PluginManager& pm = PluginManager::instance();

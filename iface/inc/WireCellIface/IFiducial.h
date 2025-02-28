@@ -12,9 +12,7 @@ namespace WireCell {
     public:
         virtual ~IFiducial() {}
 
-        /// Return true if the point is inside the region, else false.  The
-        /// region is considered closed.  That is, a point on the region
-        /// boundary is inside.
+        /// Return true if the point is inside the region, else false.
         virtual bool contained(const Point& point) const = 0;
     };
 
