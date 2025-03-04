@@ -27,34 +27,6 @@ WireCell::Configuration SigProc::FilterResponse::default_configuration() const
     return cfg;
 }
 
-// Example: input file
-// {
-//   "nwires": 11,
-//   "nticks": 6000,
-//   "filters": [
-//     {
-//       "plane": 0,
-//       "wire": 0,			
-//       "values": [1, 1, … ,1],
-//     },
-//     …
-//   ]
-// }
-// Example: configuration
-// - sp.jsonnet
-// filter_responses_tn: [wc.tn(flt_resp) for flt_resp in tools.filter_responses],
-// - tools.jsonnet 
-// filter_responses : [{
-//     type : "FilterResponse",
-//     name : "plane%d" %plane,
-//     data : {
-//         filename: params.files.fltresp,
-//     },
-// } for plane in [0,1,2] ],
-// - params.jsonnet
-// files: {
-//   fltresp: "...json.bz2",
-// }
 void SigProc::FilterResponse::configure(const WireCell::Configuration& cfg)
 {
 
@@ -68,7 +40,7 @@ void SigProc::FilterResponse::configure(const WireCell::Configuration& cfg)
     const int nwires = top["nwires"].asInt();
     const int nticks = top["nticks"].asInt();
     if (!m_bins.nbins()) {  // first time
-        m_bins = Binning(nticks, 0, nticks); // bogus for filter
+        m_bins = Binning(nticks, 0, nticks); // tick range for filter
     }
     auto jflts = top["filters"];
     if (jflts.isNull()) {
@@ -81,11 +53,8 @@ void SigProc::FilterResponse::configure(const WireCell::Configuration& cfg)
 
         const int wire = jflt["wire"].asInt();
         Waveform::realseq_t resp(nticks, 0.0);
-        unsigned int i=0;
-        for (auto& v: jflt["values"]){
-            resp.at(i) = v.asFloat();
-            i ++;
-        }
+        std::transform(jflt["values"].begin(), jflt["values"].end(), resp.begin(),
+                       [](const auto& v) { return v.asFloat(); });
         m_cr[wire] = resp;
     }
 }

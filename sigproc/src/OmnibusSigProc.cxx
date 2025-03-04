@@ -1069,9 +1069,10 @@ void OmnibusSigProc::decon_2D_init(int plane)
 
         // additional filters for overall resposne
         if (!m_filter_resps_tn.empty()) {
+            // std::cout << "Adding additional filter for overall resposne: " << m_filter_resps_tn[plane] << std::endl;
             auto fltresp = Factory::find_tn<IChannelResponse>(m_filter_resps_tn[plane]);
-            const Waveform::realseq_t& flt = fltresp->channel_response(i); // wire: i
-            for (int j = 0; j != m_fft_nticks; j++) {
+            const Waveform::realseq_t& flt = fltresp->channel_response(i); // filter at wire: i
+            for (int j = 0; j != std::min<int>(m_fft_nticks, flt.size()); j++) {
                 r_resp(i, j) *= flt.at(j); // filter value at tick: j
             }
         }
