@@ -154,6 +154,13 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
 
     m_charge_ch_offset = get(config, "charge_ch_offset", m_charge_ch_offset);
 
+    if (config.isMember("filter_responses_tn")) {
+        m_filter_resps_tn.clear();
+        for (auto tn: config["filter_responses_tn"]) {
+            m_filter_resps_tn.push_back(tn.asString());
+        }
+    }
+
     m_wiener_tag = get(config, "wiener_tag", m_wiener_tag);
     // m_wiener_threshold_tag = get(config, "wiener_threshold_tag", m_wiener_threshold_tag);
     if (! config["wiener_threshold_tag"].isNull()) {
@@ -1055,8 +1062,18 @@ void OmnibusSigProc::decon_2D_init(int plane)
     // response part ...
     Array::array_xxf r_resp = Array::array_xxf::Zero(m_r_data[plane].rows(), m_fft_nticks);
     for (size_t i = 0; i != overall_resp[plane].size(); i++) {
+
         for (int j = 0; j != m_fft_nticks; j++) {
             r_resp(i, j) = overall_resp[plane].at(i).at(j);
+        }
+
+        // additional filters for overall resposne
+        if (!m_filter_resps_tn.empty()) {
+            auto fltresp = Factory::find_tn<IChannelResponse>(m_filter_resps_tn[plane]);
+            const Waveform::realseq_t& flt = fltresp->channel_response(i); // wire: i
+            for (int j = 0; j != m_fft_nticks; j++) {
+                r_resp(i, j) *= flt.at(j); // filter value at tick: j
+            }
         }
     }
 

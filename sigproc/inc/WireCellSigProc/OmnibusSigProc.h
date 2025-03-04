@@ -222,6 +222,8 @@ namespace WireCell {
 
             // average overall responses
             std::vector<Waveform::realseq_t> overall_resp[3];
+            // filters for overall responses
+            std::vector<std::string> m_filter_resps_tn{};
 
             // tag name for traces
             std::string m_wiener_tag{"wiener"};
