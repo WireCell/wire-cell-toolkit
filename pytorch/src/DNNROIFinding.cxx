@@ -210,7 +210,7 @@ IFrame::trace_summary_t Pytorch::DNNROIFinding::get_summary_e(const IFrame::poin
     return summary_e;
 }
 
-ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr, bool set_negative_to_zero)
+ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr, bool save_negative_charge)
 {
     ITrace::vector traces;
     ITrace::ChargeSequence charge(m_ncols, 0.0);
@@ -218,7 +218,7 @@ ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array
         auto wave = arr.row(irow);
         for (size_t icol=0; icol<m_ncols; ++icol) {
             charge[icol] = wave(icol);
-            if (set_negative_to_zero) {
+            if (!save_negative_charge) { // set negative charge to zero
                 charge[icol] = charge[icol] < 0 ? 0 : charge[icol];
             }
         }
@@ -327,7 +327,7 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
 #endif
 
     // eigen to frame
-    auto traces = eigen_to_traces(sp_charge, !m_cfg.save_negative_charge);
+    auto traces = eigen_to_traces(sp_charge, m_cfg.save_negative_charge);
     Aux::SimpleFrame* sframe = new Aux::SimpleFrame(
         inframe->ident(), inframe->time(),
         traces,

@@ -136,7 +136,7 @@ namespace WireCell {
             IFrame::trace_summary_t get_summary_e(const IFrame::pointer& inframe, const std::string &tag) const;
 
             // Convert dense array to (dense) traces
-            ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr, bool set_negative_to_zero);
+            ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr, bool save_negative_charge);
 
             int m_save_count;  // count frames saved
         };
