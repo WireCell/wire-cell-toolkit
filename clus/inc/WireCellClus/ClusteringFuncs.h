@@ -53,6 +53,27 @@ namespace WireCell::PointCloud::Facade {
 			cluster_set_t& known_clusters, // in/out
                         const std::string& aname="", const std::string& pcname="perblob");
     
+    // only for testing/development
+    void clustering_test(Grouping& live_clusters,
+                              const Grouping& dead_clusters,
+                              cluster_set_t& cluster_connected_dead  // in/out
+    );
+    class ClusteringTest {
+       public:
+        ClusteringTest(const WireCell::Configuration& config)
+        {
+            // FIXME: throw if not found?
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_test(live_clusters, dead_clusters, cluster_connected_dead);
+        }
+
+       private:
+        int dead_live_overlap_offset_{2};
+    };
+    
     // clustering_live_dead.cxx
     // first function ...
     void clustering_live_dead(Grouping& live_clusters,
@@ -465,6 +486,9 @@ namespace WireCell::PointCloud::Facade {
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
         std::string function_name = config["name"].asString();
 
+        if (function_name == "clustering_test") {
+            return ClusteringTest(config);
+        }
         if (function_name == "clustering_retile") {
             return ClusteringRetile(config);
         }
