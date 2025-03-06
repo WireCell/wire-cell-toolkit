@@ -1067,15 +1067,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
             r_resp(i, j) = overall_resp[plane].at(i).at(j);
         }
 
-        // additional filters for overall resposne
-        if (!m_filter_resps_tn.empty()) {
-            // std::cout << "Adding additional filter for overall resposne: " << m_filter_resps_tn[plane] << std::endl;
-            auto fltresp = Factory::find_tn<IChannelResponse>(m_filter_resps_tn[plane]);
-            const Waveform::realseq_t& flt = fltresp->channel_response(i); // filter at wire: i
-            for (int j = 0; j != std::min<int>(m_fft_nticks, flt.size()); j++) {
-                r_resp(i, j) *= flt.at(j); // filter value at tick: j
-            }
-        }
+
     }
 
     // do first round FFT on the resposne on time
@@ -1642,6 +1634,18 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         // load data into EIGEN matrices ...
         load_data(in, iplane);  // load into a large matrix
         // initial decon ...
+                
+        // additional filters for overall resposne
+        if (!m_filter_resps_tn.empty()) {
+            for (size_t i = 0; i != overall_resp[iplane].size(); i++) {
+                auto fltresp = Factory::find_tn<IChannelResponse>(m_filter_resps_tn[iplane]);
+                const Waveform::realseq_t& flt = fltresp->channel_response(i); // filter at wire: i
+                for (int j = 0; j != std::min<int>(m_fft_nticks, flt.size()); j++) {
+                    overall_resp[iplane].at(i).at(j) *= flt.at(j); 
+                }
+            }
+        }
+
         decon_2D_init(iplane);  // decon in large matrix
         check_data(iplane, "after 2D init");
 
@@ -1798,6 +1802,13 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 IFrame::trace_list_t perframe;
                 save_data(*itraces, perframe, iplane, perwire_rmses, thresholds, "wiener", m_save_negative_charge);
                 wiener_traces.insert(wiener_traces.end(), perframe.begin(), perframe.end());
+            }
+
+            if (!m_filter_resps_tn.empty()) {
+                // reload data and field response
+                init_overall_response(in);
+                load_data(in, iplane); 
+                decon_2D_init(iplane);  // decon in large matrix
             }
 
             decon_2D_charge(iplane);
