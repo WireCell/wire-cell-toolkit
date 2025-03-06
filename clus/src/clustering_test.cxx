@@ -30,11 +30,14 @@ void WireCell::PointCloud::Facade::clustering_test(
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    for (auto& cluster : live_clusters) {
-        for (auto& blob : cluster->children()) {
-            SPDLOG_INFO("Blob.wpid() = {}", blob->wpid().ident());
+    for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
+        Cluster* cluster = live_clusters.at(iclus);
+        for (size_t iblob = 0; iblob != cluster->children().size(); iblob++) {
+            const auto* blob = cluster->children().at(iblob);
+            SPDLOG_INFO("CTest Cluster {} Blob {} blob->wpid().name() {}", iclus, iblob, blob->wpid().name());
             break;
         }
+        break;
     }
 }
 #pragma GCC diagnostic pop
