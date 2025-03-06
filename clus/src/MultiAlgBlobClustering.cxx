@@ -79,6 +79,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
 
+    m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
+
     m_face = get<int>(cfg, "face", 0);
 
     m_bee_img.detector(get<std::string>(cfg, "bee_detector", "uboone"));

@@ -69,6 +69,8 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("failed to get anode plane");
     }
 
+    m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
+
     m_face = get<int>(cfg, "face", 0);
     log->debug("using face: {}", m_face);
     if (m_anode->face(m_face) == nullptr) {
@@ -511,6 +513,18 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     grouping->set_params(tp_json);
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
+    
+    /// DEBUGONLY
+    {
+        std::vector<WirePlaneLayer_t> layers = {kUlayer, kVlayer, kWlayer};
+        for (const auto& layer : layers) {
+            WirePlaneId wpid(layer, m_face, m_anode->ident());
+            int face_dirx = m_dv->face_dirx(wpid);
+            Vector wire_direction = m_dv->wire_direction(wpid);
+            Vector pitch_vector = m_dv->pitch_vector(wpid);
+            log->debug("wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
+        }
+    }
     /// TODO: remove after debugging
     // {
     //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
