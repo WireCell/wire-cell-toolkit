@@ -99,6 +99,19 @@ void Cluster::clear_cache() const {
     m_path_mcells.clear();
 }
 
+
+void Cluster::fill_cache(ClusterCache& cache) const
+{
+    for (const Blob* blob : children()) {
+        cache.wpids.push_back(blob->wpid());
+    }
+}
+
+
+std::vector<WireCell::WirePlaneId> Cluster::wpids() const {
+    return cache().wpids;
+}
+
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {
         std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() 

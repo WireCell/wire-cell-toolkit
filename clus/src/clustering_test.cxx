@@ -30,8 +30,17 @@ void WireCell::PointCloud::Facade::clustering_test(
         return cluster1->get_length() > cluster2->get_length();
     });
 
+    for (const auto& wpid : live_grouping.wpids()) {
+        SPDLOG_INFO("CTest live_grouping wpid {}", wpid.name());
+    }
     for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
         Cluster* cluster = live_clusters.at(iclus);
+        const auto& wpids = cluster->wpids();
+        for (size_t i=0; i != wpids.size(); i++) {
+            const auto& wpid = wpids.at(i);
+            SPDLOG_INFO("CTest Cluster {} i {} name {}", iclus, i, wpid.name());
+            break;
+        }
         for (size_t iblob = 0; iblob != cluster->children().size(); iblob++) {
             const auto* blob = cluster->children().at(iblob);
             SPDLOG_INFO("CTest Cluster {} Blob {} blob->wpid().name() {}", iclus, iblob, blob->wpid().name());

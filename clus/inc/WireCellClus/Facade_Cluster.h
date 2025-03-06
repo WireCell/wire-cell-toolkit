@@ -24,7 +24,10 @@ namespace WireCell::PointCloud::Facade {
     class Blob;
     class Grouping;
 
-    struct ClusterCache { };
+    struct ClusterCache {
+        // order is synchronized with children()
+        std::vector<WireCell::WirePlaneId> wpids;
+    };
 
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
     class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
@@ -48,6 +51,9 @@ namespace WireCell::PointCloud::Facade {
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
+
+        // order is synchronized with children()
+        std::vector<WireCell::WirePlaneId> wpids() const;
 
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
@@ -411,6 +417,9 @@ namespace WireCell::PointCloud::Facade {
         std::tuple<int, int, int, int> get_uvwt_range() const;
         std::tuple<int, int, int, int> get_uvwt_min() const;
         std::tuple<int, int, int, int> get_uvwt_max() const;
+
+       protected:
+        virtual void fill_cache(ClusterCache& cache) const;
     };
     std::ostream& operator<<(std::ostream& os, const Cluster& cluster);
 
