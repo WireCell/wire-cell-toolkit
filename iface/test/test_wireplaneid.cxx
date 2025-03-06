@@ -73,8 +73,14 @@ int main()
         std::vector<int> packed = {0, 8, 32, 56, 80, 88};
         for (auto p : packed) {
             WirePlaneId wpid(p);
-            cerr << "wpid=" << wpid.ident() << " packed=" << p << " layer=" << wpid.layer() << " face=" << wpid.face() << " apa=" << wpid.apa() << "\n";
+            cerr << "wpid=" << wpid << endl;
+            cerr << "wpid=" << wpid.ident() << " packed=" << p << " layer=" << wpid.layer() << " face=" << wpid.face() << " apa=" << wpid.apa() << " valid=" << wpid.valid() << "\n";
             Assert(p == wpid.ident());
+        }
+        {
+            WirePlaneId wpid(kAllLayers,0,0);
+            cerr << "wpid=" << wpid << endl;
+            cerr << "packed=" << wpid.ident() << " layer=" << wpid.layer() << " face=" << wpid.face() << " apa=" << wpid.apa() << " valid=" << wpid.valid() << " bool() " << (wpid ? "true" : "false") << "\n";
         }
     }
     return 0;
