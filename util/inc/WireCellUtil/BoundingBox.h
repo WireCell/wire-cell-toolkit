@@ -46,8 +46,6 @@ namespace WireCell {
         // Calculate the minimum distance from a point to the bounding box (0 if inside)
         double distance(const Point& point) const;
 
-        // Calculate the minimum squared distance (faster when you only need comparisons)
-        double distance_squared(const Point& point) const;
 
         // Returns the closest point on the box to the given point
         Point closest_point(const Point& point) const;
