@@ -6,6 +6,7 @@ local g = import "pgraph.jsonnet";
 {
     fanpipe :: g.fan.pipe,
     fansink :: g.fan.sink,
+    fanout :: g.fan.fanout,
 
     // a multi-layer fanout-pipelines-fanin structure
     // nnodes: number of nodes per layer
@@ -86,7 +87,7 @@ local g = import "pgraph.jsonnet";
         ],
         local fin_node = g.intern(
             innodes = fin_layers[fin_nlayers-1],
-            centernodes = if fin_nlayers == 2 then [] else std.flattenArrays([fin_layers[i] for i in std.range(1,fout_nlayers-2)]),
+            centernodes = if fin_nlayers == 2 then [] else std.flattenArrays([fin_layers[i] for i in std.range(1,fin_nlayers-2)]),
             outnodes = fin_layers[0],
             edges = std.flattenArrays(
                 [
@@ -163,5 +164,49 @@ local g = import "pgraph.jsonnet";
             outnodes = [],
             edges = [g.edge(fout_node,pipelines[n],n,0) for n in std.range(0,npipe-1)]
         ),
+    }.ret,
+
+    multifanin :: function( fin, fin_nnodes=[1,8,16], fin_multi=[8,2,7],
+    name='multifanin', outtags=[], tag_rules=null ) {
+        local fin_nlayers = std.length(fin_multi),
+        assert fin_nlayers >= 2 : "fin_nlayers should be >= 2",
+        
+        // similarly build the multi-layer fan in combo node
+        // note the backward layer counting
+        local fin_layer(ilayer,nnodes,nmulti) = {
+            ret : [
+                g.pnode({
+                    type: fin,
+                    name: name+"_fin_%d"%ilayer + "_%d"%inode,
+                    data: {
+                        multiplicity: nmulti,
+                        tags: outtags,
+                        tag_rules: [tag_rules for irule in std.range(0,nmulti-1)],
+                    }}, nin=nmulti, nout=1
+                ) for inode in std.range(0,nnodes-1)],
+        }.ret,
+        local fin_layers = [
+            fin_layer(ilayer,
+            fin_nnodes[ilayer],
+            fin_multi[ilayer])
+            for ilayer in std.range(0,fin_nlayers-1)
+        ],
+        local fin_node = g.intern(
+            innodes = fin_layers[fin_nlayers-1],
+            centernodes = if fin_nlayers == 2 then [] else std.flattenArrays([fin_layers[i] for i in std.range(1,fin_nlayers-2)]),
+            outnodes = fin_layers[0],
+            edges = std.flattenArrays(
+                [
+                    [
+                        g.edge(
+                            fin_layers[ilayer][inode],
+                            fin_layers[ilayer-1][std.floor(inode/fin_multi[ilayer-1])],
+                            0,
+                            inode%fin_multi[ilayer-1])
+                    for inode in std.range(0,fin_nnodes[ilayer]-1)]
+                for ilayer in std.range(1,fin_nlayers-1)])
+        ),
+
+        ret : fin_node,
     }.ret,
 }
