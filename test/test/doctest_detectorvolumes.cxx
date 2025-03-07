@@ -164,7 +164,11 @@ std::string json_config = R"(
         "type": "DetectorVolumes",
         "name": "",
         "data": {
-            "anodes": ["AnodePlane:0","AnodePlane:1","AnodePlane:2","AnodePlane:3","AnodePlane:4","AnodePlane:5"]
+            "anodes": ["AnodePlane:0","AnodePlane:1","AnodePlane:2","AnodePlane:3","AnodePlane:4","AnodePlane:5"],
+            "metadata": {"default":"default", "a0f0p?":"a0f0p?", 
+                        "a0f0pV":"a0f0pV", "a0f0pU":"a0f0pU", "a0f0pW":"a0f0pW",
+                        "a0f0pA":"a0f0pA" }
+
         }
     }
 ]
@@ -228,4 +232,32 @@ TEST_CASE("test detectorvolumes")
     auto pitch = dv->pitch_vector(wpid_u);
     debug("pitch vector: {}", pitch);
     CHECK(pitch.magnitude() > 1*units::mm);
+
+    {                           // test metadata
+        std::vector<WirePlaneId> wpids = {
+            WirePlaneId(WirePlaneLayer_t::kUnknownLayer, 0, 0),
+            WirePlaneId(WirePlaneLayer_t::kUlayer, 0, 0),
+            WirePlaneId(WirePlaneLayer_t::kVlayer, 0, 0),
+            WirePlaneId(WirePlaneLayer_t::kWlayer, 0, 0),
+            WirePlaneId(WirePlaneLayer_t::kAllLayers, 0, 0),
+        };
+
+        for (const auto& wpid : wpids) {
+            auto md = dv->metadata(wpid);
+            std::string have = md.asString();
+            std::string want = wpid.name();
+            debug("metadata: have:{} want:{}", have, want);
+            CHECK(have == want);
+        }
+        {
+            WirePlaneId wpid(kUnknownLayer, 1, 0); // not in configuration
+            auto md = dv->metadata(wpid);
+            std::string have = md.asString();
+            std::string want = "default";
+            debug("metadata: have:{} want:{}", have, want);
+            CHECK(have == want);
+        }
+
+    }
+
 }

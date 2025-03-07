@@ -9,6 +9,7 @@
 
 #include "WireCellUtil/IComponent.h"
 #include "WireCellUtil/Point.h"
+#include "WireCellUtil/Configuration.h"
 #include "WireCellIface/WirePlaneId.h"
 
 
@@ -42,6 +43,10 @@ namespace WireCell {
         /// wpid must be well determined.  If wpid is illegal or unknown, a zero
         /// vector is returned.
         virtual Vector pitch_vector(WirePlaneId wpid) const = 0;
+
+        /// Forward any user-provided, application specific metadata for a
+        /// particular wpid.  
+        virtual Configuration metadata(WirePlaneId wpid) const = 0;
 
     };
 

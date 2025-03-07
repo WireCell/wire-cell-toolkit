@@ -27,7 +27,24 @@ public:
 
     virtual Configuration default_configuration() const {
         Configuration cfg;
+
+        // A list of IAnodePlane "type:name" identifiers to match up to wpids. 
         cfg["anodes"] = Json::arrayValue;
+
+        // Arbitrary, user-provided, application-specific metadata that is
+        // provided site-unseen to the clients of DetectorVolumes.
+        //
+        // The metadata as a whole must be an object with keys formed either to
+        // match WirePlaneId::name() or the literal string "default".
+        //
+        // The attribute values are not determined by DetectorVolumes but by the
+        // consuming application (the components for which the user has
+        // configured to use the DetectorVolumes).
+        //
+        // If an attribute key is not found that matches wpid.name() of the
+        // query then the attribute value "default" is returned.  If both do not
+        // exist then a "null" JSON value is returned.
+        cfg["metadata"] = Json::objectValue;
         return cfg;
     }
 
@@ -56,6 +73,7 @@ public:
                 m_faces[wpid.ident()] = iface;
             }
         }
+        m_md = cfg["metadata"];
     }
 
 
@@ -135,11 +153,24 @@ public:
         return pmag*pdir;
     }
 
+    /// Forward any user-provided, application specific metadata for a
+    /// particular wpid.  
+    virtual Configuration metadata(WirePlaneId wpid) const {
+        const auto key = wpid.name();
+        if (m_md.isNull()) {
+            return Json::nullValue;
+        }
+        if (! m_md.isMember(key)) {
+            return m_md["default"];
+        }
+        return m_md[key];
+    }
+
 private:
 
     // Map wpid with layer=0 to its face.
     std::map<int, IAnodeFace::pointer> m_faces;
 
-
+    Configuration m_md;
 };
 

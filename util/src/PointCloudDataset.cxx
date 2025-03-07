@@ -133,6 +133,19 @@ Dataset::const_selection_t Dataset::selection(const name_list_t& names) const
     return ret;
 }
 
+Dataset Dataset::subset(const name_list_t& names) const
+{
+    Dataset ret;
+    for (const auto& name : names) {
+        auto it = m_store.find(name);
+        if (it == m_store.end()) {
+            return Dataset();
+        }
+        Array arr(*it->second);
+        ret.add(name, std::move(arr));
+    }
+    return ret;
+}
 
 template<typename MapType>
 auto map_keys(const MapType& m)
