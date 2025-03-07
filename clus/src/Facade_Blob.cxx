@@ -61,26 +61,80 @@ void Blob::fill_cache(BlobCache& cache) const
         raise<ValueError>("scalar PC is not scalar but size %d", pc_scalar.size_major());
     }
 
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.charge = pc_scalar.get("charge")->elements<float_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.center_x = pc_scalar.get("center_x")->elements<float_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.center_y = pc_scalar.get("center_y")->elements<float_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.center_z = pc_scalar.get("center_z")->elements<float_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.wpid = WirePlaneId(pc_scalar.get("wpid")->elements<int>()[0]);
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.npoints = pc_scalar.get("npoints")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.slice_index_min = pc_scalar.get("slice_index_min")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.slice_index_max = pc_scalar.get("slice_index_max")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.u_wire_index_min = pc_scalar.get("u_wire_index_min")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.u_wire_index_max = pc_scalar.get("u_wire_index_max")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.v_wire_index_min = pc_scalar.get("v_wire_index_min")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.v_wire_index_max = pc_scalar.get("v_wire_index_max")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.w_wire_index_min = pc_scalar.get("w_wire_index_min")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.w_wire_index_max = pc_scalar.get("w_wire_index_max")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.max_wire_interval = pc_scalar.get("max_wire_interval")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.min_wire_interval = pc_scalar.get("min_wire_interval")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.max_wire_type = pc_scalar.get("max_wire_type")->elements<int_t>()[0];
+    ///
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
+    ///
     cache.min_wire_type = pc_scalar.get("min_wire_type")->elements<int_t>()[0];
     ///
-    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change the above.
+    ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
     ///
 }
 
