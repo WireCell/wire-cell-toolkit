@@ -62,7 +62,7 @@ local clus (
     local detector_volumes = 
     {
         "type": "DetectorVolumes",
-        "name": "",
+        "name": "dv-%s"%[anode.name],
         "data": {
             "anodes": [wc.tn(anode)],
         }
@@ -137,7 +137,7 @@ local clus (
             anode: wc.tn(anode),
             face: face,
             geom_helper: wc.tn(geom_helper),
-            detector_volumes: "DetectorVolumes",
+            detector_volumes: wc.tn(detector_volumes),
         }
     }, nin=2, nout=1, uses=[bs_live, bs_dead, detector_volumes]),
 
@@ -159,11 +159,11 @@ local clus (
             eventNo: LeventNo,
             save_deadarea: true, 
             anode: wc.tn(anode),
-            detector_volumes: "DetectorVolumes",
             face: face,
             geom_helper: wc.tn(geom_helper),
+            detector_volumes: wc.tn(detector_volumes),
             func_cfgs: [
-                {name: "clustering_test", detector_volumes: "DetectorVolumes"},
+                {name: "clustering_test", detector_volumes: wc.tn(detector_volumes)},
                 {name: "clustering_live_dead", dead_live_overlap_offset: 2},
                 {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1},
                 {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false},
