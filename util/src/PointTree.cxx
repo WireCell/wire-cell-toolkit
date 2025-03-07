@@ -127,6 +127,37 @@ const Tree::ScopedBase::pointclouds_t& Tree::ScopedBase::pcs() const
 }
 
 
+Tree::pointcloud_t Tree::ScopedBase::flat_coords() const
+{
+    Tree::pointcloud_t flat;
+
+    const Scope& s = scope();
+    for (auto* node : m_nodes) {
+        const auto& lpc = node->value.local_pc(s.pcname);
+        flat.append(lpc.subset(s.coords));
+    }
+    return flat;
+}
+
+Tree::pointcloud_t Tree::ScopedBase::flat_pc(const std::string& pcname,
+                                             const Dataset::name_list_t& arrnames) const
+{
+    Tree::pointcloud_t flat;
+    
+    // arbitrary PC name
+    for (auto* node : m_nodes) {
+        const auto& lpc = node->value.local_pc(pcname);
+        if (arrnames.empty()) { // user gets all arrays
+            flat.append(lpc);
+        }
+        else {                  // user wants select arrays
+            flat.append(lpc.subset(arrnames));
+        }
+    }
+    return flat;
+}
+
+
 size_t Tree::ScopedBase::npoints() const
 {
     fill_cache();

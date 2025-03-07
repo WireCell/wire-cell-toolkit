@@ -273,6 +273,7 @@ TEST_CASE("point tree json summary")
 TEST_CASE("point tree filtered scoped view")
 {
     auto root = make_simple_pctree();
+    auto nkeys = root->children()[0]->value.local_pc("3d").keys().size();
     auto n1 = root->children()[0]->value.local_pc("3d").size_major();
     auto n2 = root->children()[1]->value.local_pc("3d").size_major();
 
@@ -280,8 +281,8 @@ TEST_CASE("point tree filtered scoped view")
                         Ray(Point(0,0,0), Point(1, -2, -3)))} }));
     auto n3 = n->value.local_pc("3d").size_major();
     debug("add 3rd child with {} 3d points to siblings with {} and {}", n3, n1, n2);
-    REQUIRE(n3 > n1);
-    REQUIRE(n3 > n2);
+    REQUIRE(n3 < n1);
+    REQUIRE(n3 < n2);
 
     Scope every{ "3d", {"x","y","z"} };
     Scope bigger{ "3d", {"x","y","z"}, 0, "bigger" };
@@ -295,10 +296,27 @@ TEST_CASE("point tree filtered scoped view")
     auto& bsv = root->value.scoped_view(bigger, [&](const Points::node_t& node) -> bool {
         return node.value.local_pc("3d").size_major() > n3;
     });
-    REQUIRE(bsv.nodes().size() == 2);
+    CHECK(bsv.nodes().size() == 2);
 
     REQUIRE(root->value.get_scoped(every) == &esv);
     REQUIRE(root->value.get_scoped(bigger) == &bsv);
+
+    {
+        auto xyz = esv.flat_coords();
+        auto all = esv.flat_pc("3d");
+        CHECK(xyz.size_major() == n1+n2+n3);
+        CHECK(all.size_major() == n1+n2+n3);
+        CHECK(xyz.keys().size() == 3); // just x,y,z
+        CHECK(all.keys().size() == nkeys); // more
+    }
+    {
+        auto xyz = bsv.flat_coords();
+        auto all = bsv.flat_pc("3d");
+        CHECK(xyz.size_major() == n1+n2);
+        CHECK(all.size_major() == n1+n2);
+        CHECK(xyz.keys().size() == 3); // just x,y,z
+        CHECK(all.keys().size() == nkeys); // more
+    }
 
 }
        

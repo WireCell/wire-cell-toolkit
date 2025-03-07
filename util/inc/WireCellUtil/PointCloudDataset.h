@@ -73,6 +73,13 @@ namespace WireCell::PointCloud {
         using const_selection_t = std::vector<array_ptr>;
         const_selection_t selection(const name_list_t& names) const;
         
+        /** Return a Dataset with copies of named arrays.
+
+            If any requested name is not provided by this dataset then
+            an empty collection is returned.
+         */
+        Dataset subset(const name_list_t& names) const;
+
         /** Return named array or nullptr if not found.
 
             Even in non-const case, the array pointer is merely lent.

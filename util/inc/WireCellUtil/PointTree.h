@@ -284,6 +284,26 @@ namespace WireCell::PointCloud::Tree {
 
         // Access the scoped point cloud
         const pointclouds_t& pcs() const;
+        
+        /// Return a contiguous, monolithic dataset of the scoped coordinate PC.
+        ///
+        /// This "flat" PC represents a COPY for the per-node local PC
+        /// coordinate arrays.  In particular, no connection with the scoped
+        /// view is retained and the returned dataset will not be mutated if the
+        /// underlying PC tree is later mutated.
+        pointcloud_t flat_coords() const;
+
+        /// Return a contiguous, monolithic dataset built from the PCs of the
+        /// given name local to the scoped nodes.  The arrays in the PC are
+        /// limited to those named in the name list the list is empty in which
+        /// case all arrays in the named local PCs are returned.
+        ///
+        /// This "flat" PC represents a COPY for the per-node local PC arrays.
+        /// In particular, no connection with the scoped view is retained and
+        /// the returned dataset will not be mutated if the underlying PC tree
+        /// is later mutated.
+        pointcloud_t flat_pc(const std::string& pcname,
+                             const Dataset::name_list_t& arrnames = Dataset::name_list_t()) const;
 
         // Total number of points across the scoped point cloud
         size_t npoints() const;
