@@ -26,6 +26,18 @@ namespace WireCell {
         /// defined by "wires").
         virtual WirePlaneId contained_by(const Point& point) const = 0;
 
+        /// Check if a point is inside the overall detector volume, including
+        /// gaps between sensitive volumes. Returns true if the point is within
+        /// the detector's overall bounding volume, false otherwise.
+        /// This check is typically faster than contained_by() as it only needs
+        /// to check against the overall volume boundary.
+        virtual bool is_in_overall_volume(const Point& point) const = 0;
+
+        /// Initialize any spatial data structures needed for efficient spatial queries.
+        /// This should be called after the detector geometry is configured but before 
+        /// queries are made. Returns true if initialization was successful.
+        virtual bool initialize_spatial_queries() = 0;
+
         /// Return the sign (+/-1) of the direction along the global X
         /// coordinate direction in which the sensitive face of the detector
         /// volume is "looking".  Note, this is always opposite of the nominal

@@ -22,7 +22,7 @@ class DetectorVolumes : public IDetectorVolumes, public IFiducial, public IConfi
 
 public:
 
-    DetectorVolumes() {}
+    DetectorVolumes() : m_spatial_initialized(false) {}
     virtual ~DetectorVolumes() {}
 
     virtual Configuration default_configuration() const {
@@ -45,6 +45,13 @@ public:
         // query then the attribute value "default" is returned.  If both do not
         // exist then a "null" JSON value is returned.
         cfg["metadata"] = Json::objectValue;
+
+        // Add grid configuration parameters with defaults
+        cfg["grid_size_x"] = 0.0;  // If 0, will be determined automatically
+        cfg["grid_size_y"] = 0.0;  // If 0, will be determined automatically
+        cfg["grid_size_z"] = 0.0;  // If 0, will be determined automatically
+        cfg["grid_fraction"] = 0.5; // Default fraction of average bounding box size
+
         return cfg;
     }
 
@@ -56,6 +63,18 @@ public:
 
     virtual void configure(const Configuration& cfg) {
         m_faces.clear();
+        m_spatial_initialized = false;
+        
+        // Reset spatial structures
+        m_overall_bb = BoundingBox();
+        m_grid.clear();
+
+        // Store grid configuration parameters
+        m_config_grid_size_x = cfg.get("grid_size_x", 0.0).asDouble();
+        m_config_grid_size_y = cfg.get("grid_size_y", 0.0).asDouble();
+        m_config_grid_size_z = cfg.get("grid_size_z", 0.0).asDouble();
+        m_grid_fraction = cfg.get("grid_fraction", 0.5).asDouble();
+
         for (const auto& janode : cfg["anodes"]) {
             const std::string anode_tn = janode.asString();
             auto anode = Factory::find_tn<IAnodePlane>(anode_tn);
@@ -71,6 +90,16 @@ public:
 
                 // std::cerr << "DetectorVolumes face for: " << wpid << "\n";
                 m_faces[wpid.ident()] = iface;
+
+                // Update overall bounding box with this face's sensitive volume
+                BoundingBox face_bb = iface->sensitive();
+                if (!face_bb.empty()) {
+                    if (m_overall_bb.empty()) {
+                        m_overall_bb = face_bb;
+                    } else {
+                        m_overall_bb = m_overall_bb.unite(face_bb);
+                    }
+                }
             }
         }
         m_md = cfg["metadata"];
@@ -83,28 +112,28 @@ public:
     }
 
 
-    // Rest is IDetectorVolumes
-    virtual WirePlaneId contained_by(const Point& point) const {
-        // This initial imp is perhaps too slow.  There are two options I can
-        // think of immediately:
-        // 
-        // 1) Try to divine a way to represent the BBs on a regular grid of
-        // boxes.  Calculate the 3D grid coordinates of a point directly, eg
-        // i=floor((x-o)/w), etc for j/y and k/z.  Use ijk to look up iface to
-        // do BB.inside() test.
-        //
-        // 2) Perhaps simpler, construct a k-d tree with BB corners.  Query to
-        // find closest corner to point.  Associate corner back to iface and to
-        // BB.inside() test.
+    // // Rest is IDetectorVolumes
+    // virtual WirePlaneId contained_by(const Point& point) const {
+    //     // This initial imp is perhaps too slow.  There are two options I can
+    //     // think of immediately:
+    //     // 
+    //     // 1) Try to divine a way to represent the BBs on a regular grid of
+    //     // boxes.  Calculate the 3D grid coordinates of a point directly, eg
+    //     // i=floor((x-o)/w), etc for j/y and k/z.  Use ijk to look up iface to
+    //     // do BB.inside() test.
+    //     //
+    //     // 2) Perhaps simpler, construct a k-d tree with BB corners.  Query to
+    //     // find closest corner to point.  Associate corner back to iface and to
+    //     // BB.inside() test.
 
-        for (const auto& [wpident, iface] : m_faces) {
-            auto bb = iface->sensitive();
-            if (bb.inside(point)) {
-                return WirePlaneId(wpident);
-            }
-        }
-        return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
-    }
+    //     for (const auto& [wpident, iface] : m_faces) {
+    //         auto bb = iface->sensitive();
+    //         if (bb.inside(point)) {
+    //             return WirePlaneId(wpident);
+    //         }
+    //     }
+    //     return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
+    // }
     
     IAnodeFace::pointer get_face(WirePlaneId wpid) const {
         wpid = wfid(wpid);
@@ -166,11 +195,288 @@ public:
         return m_md[key];
     }
 
+    // Initialize spatial data structures for efficient queries
+    virtual bool initialize_spatial_queries() {
+        if (m_spatial_initialized) return true;
+        if (m_overall_bb.empty() || m_faces.empty()) return false;
+
+        // Calculate grid dimensions based on overall bounding box
+        Point min_point = m_overall_bb.bounds().first;
+        Point max_point = m_overall_bb.bounds().second;
+        
+        // Store origin for grid calculations
+        m_grid_origin = min_point;
+        
+        // Calculate average bounding box size if auto grid sizing is requested
+        if (m_config_grid_size_x <= 0.0 || m_config_grid_size_y <= 0.0 || m_config_grid_size_z <= 0.0) {
+            Vector avg_size(0, 0, 0);
+            int count = 0;
+            for (const auto& [wpident, iface] : m_faces) {
+                BoundingBox face_bb = iface->sensitive();
+                if (!face_bb.empty()) {
+                    Vector size = face_bb.dimensions();
+                    avg_size = avg_size + size;
+                    count++;
+                }
+            }
+            
+            if (count > 0) {
+                avg_size = avg_size * (1.0 / count);
+                // Set grid cell size to a fraction of average bounding box size
+                if (m_config_grid_size_x <= 0.0) {
+                    m_grid_size_x = avg_size.x() * m_grid_fraction;
+                } else {
+                    m_grid_size_x = m_config_grid_size_x;
+                }
+                
+                if (m_config_grid_size_y <= 0.0) {
+                    m_grid_size_y = avg_size.y() * m_grid_fraction;
+                } else {
+                    m_grid_size_y = m_config_grid_size_y;
+                }
+                
+                if (m_config_grid_size_z <= 0.0) {
+                    m_grid_size_z = avg_size.z() * m_grid_fraction;
+                } else {
+                    m_grid_size_z = m_config_grid_size_z;
+                }
+            } else {
+                // Fallback if no valid bounding boxes
+                m_grid_size_x = 1.0;
+                m_grid_size_y = 1.0;
+                m_grid_size_z = 1.0;
+            }
+        } else {
+            // Use configured sizes
+            m_grid_size_x = m_config_grid_size_x;
+            m_grid_size_y = m_config_grid_size_y;
+            m_grid_size_z = m_config_grid_size_z;
+        }
+        
+        // Ensure grid cell sizes are positive
+        m_grid_size_x = std::max(m_grid_size_x, 0.001*units::m);
+        m_grid_size_y = std::max(m_grid_size_y, 0.001*units::m);
+        m_grid_size_z = std::max(m_grid_size_z, 0.001*units::m);
+        
+        // Calculate number of cells in each dimension
+        int nx = std::ceil((max_point.x() - min_point.x()) / m_grid_size_x);
+        int ny = std::ceil((max_point.y() - min_point.y()) / m_grid_size_y);
+        int nz = std::ceil((max_point.z() - min_point.z()) / m_grid_size_z);
+        
+        // Limit grid cell count to reasonable bounds
+        const int min_grid_cells = 5;    // Minimum useful number of cells per dimension
+        const int max_grid_cells = 100;  // Maximum reasonable number of cells per dimension
+        
+        nx = std::max(min_grid_cells, std::min(nx, max_grid_cells));
+        ny = std::max(min_grid_cells, std::min(ny, max_grid_cells));
+        nz = std::max(min_grid_cells, std::min(nz, max_grid_cells));
+        
+        // Recalculate grid cell size based on new cell counts
+        m_grid_size_x = (max_point.x() - min_point.x()) / nx;
+        m_grid_size_y = (max_point.y() - min_point.y()) / ny;
+        m_grid_size_z = (max_point.z() - min_point.z()) / nz;
+        
+        // Ensure at least one cell in each dimension
+        nx = std::max(nx, 1);
+        ny = std::max(ny, 1);
+        nz = std::max(nz, 1);
+        
+        // Resize the grid to hold all cells
+        m_grid.resize(nx);
+        for (auto& grid_x : m_grid) {
+            grid_x.resize(ny);
+            for (auto& grid_y : grid_x) {
+                grid_y.resize(nz);
+            }
+        }
+        
+        // Populate the grid with face IDs
+        for (const auto& [wpident, iface] : m_faces) {
+            BoundingBox face_bb = iface->sensitive();
+            if (face_bb.empty()) continue;
+            
+            // Calculate grid cell indices for this face's bounding box
+            Point bb_min = face_bb.bounds().first;
+            Point bb_max = face_bb.bounds().second;
+            
+            // Add a small epsilon to ensure boundary boxes are included in all relevant cells
+            double epsilon = 1e-6*units::m;  // Small safety margin
+            
+            int min_i = std::max(0, static_cast<int>((bb_min.x() - min_point.x() - epsilon) / m_grid_size_x));
+            int min_j = std::max(0, static_cast<int>((bb_min.y() - min_point.y() - epsilon) / m_grid_size_y));
+            int min_k = std::max(0, static_cast<int>((bb_min.z() - min_point.z() - epsilon) / m_grid_size_z));
+            
+            int max_i = std::min(nx - 1, static_cast<int>((bb_max.x() - min_point.x() + epsilon) / m_grid_size_x));
+            int max_j = std::min(ny - 1, static_cast<int>((bb_max.y() - min_point.y() + epsilon) / m_grid_size_y));
+            int max_k = std::min(nz - 1, static_cast<int>((bb_max.z() - min_point.z() + epsilon) / m_grid_size_z));
+            
+            // Add the face ID to all cells that overlap with its bounding box
+            for (int i = min_i; i <= max_i; ++i) {
+                for (int j = min_j; j <= max_j; ++j) {
+                    for (int k = min_k; k <= max_k; ++k) {
+                        m_grid[i][j][k].push_back(wpident);
+                    }
+                }
+            }
+        }
+        
+        m_spatial_initialized = true;
+        return true;
+    }
+
+    // Optimized implementation using spatial grid
+    virtual WirePlaneId contained_by(const Point& point) const {
+        // Quick check if point is in overall volume first
+        if (!is_in_overall_volume(point)) {
+            return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
+        }
+        
+        // If spatial data structures are initialized, use them for fast lookup
+        if (m_spatial_initialized) {
+            // Calculate grid cell indices for the point
+            int i = static_cast<int>((point.x() - m_grid_origin.x()) / m_grid_size_x);
+            int j = static_cast<int>((point.y() - m_grid_origin.y()) / m_grid_size_y);
+            int k = static_cast<int>((point.z() - m_grid_origin.z()) / m_grid_size_z);
+            
+            // Check if indices are within grid bounds
+            if (i >= 0 && i < static_cast<int>(m_grid.size()) &&
+                j >= 0 && j < static_cast<int>(m_grid[0].size()) &&
+                k >= 0 && k < static_cast<int>(m_grid[0][0].size())) {
+                
+                // Check faces in this grid cell
+                for (int wpident : m_grid[i][j][k]) {
+                    auto it = m_faces.find(wpident);
+                    if (it != m_faces.end()) {
+                        auto bb = it->second->sensitive();
+                        if (bb.inside(point)) {
+                            return WirePlaneId(wpident);
+                        }
+                    }
+                }
+                
+                // Special handling for points near cell boundaries
+                // Check neighboring cells if we're close to an edge
+                double eps = 1e-6*units::m;  // Small distance from boundary to check neighbors
+                std::vector<std::tuple<int,int,int>> neighbors;
+                
+                // Check if we're close to x boundaries
+                double x_frac = fmod((point.x() - m_grid_origin.x()) / m_grid_size_x, 1.0);
+                if (x_frac < eps || x_frac > (1.0 - eps)) {
+                    // Add x-neighbors
+                    if (i > 0) neighbors.push_back({i-1, j, k});
+                    if (i < static_cast<int>(m_grid.size()) - 1) neighbors.push_back({i+1, j, k});
+                }
+                
+                // Check if we're close to y boundaries
+                double y_frac = fmod((point.y() - m_grid_origin.y()) / m_grid_size_y, 1.0);
+                if (y_frac < eps || y_frac > (1.0 - eps)) {
+                    // Add y-neighbors
+                    if (j > 0) neighbors.push_back({i, j-1, k});
+                    if (j < static_cast<int>(m_grid[0].size()) - 1) neighbors.push_back({i, j+1, k});
+                }
+                
+                // Check if we're close to z boundaries
+                double z_frac = fmod((point.z() - m_grid_origin.z()) / m_grid_size_z, 1.0);
+                if (z_frac < eps || z_frac > (1.0 - eps)) {
+                    // Add z-neighbors
+                    if (k > 0) neighbors.push_back({i, j, k-1});
+                    if (k < static_cast<int>(m_grid[0][0].size()) - 1) neighbors.push_back({i, j, k+1});
+                }
+                
+                // Check neighboring cells
+                for (auto [ni, nj, nk] : neighbors) {
+                    for (int wpident : m_grid[ni][nj][nk]) {
+                        auto it = m_faces.find(wpident);
+                        if (it != m_faces.end()) {
+                            auto bb = it->second->sensitive();
+                            if (bb.inside(point)) {
+                                return WirePlaneId(wpident);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // // Point is not in any sensitive volume in the grid
+            // // For safety, check all volumes if we're near the overall boundary
+            // Point center = m_overall_bb.center();
+            // Vector dimensions = m_overall_bb.dimensions();
+            // double boundary_threshold = 0.01;  // 1% from boundary
+            
+            // bool near_boundary = false;
+            // for (int dim = 0; dim < 3; ++dim) {
+            //     double relative_pos = std::abs(point[dim] - center[dim]) / (dimensions[dim] * 0.5);
+            //     if (relative_pos > (1.0 - boundary_threshold)) {
+            //         near_boundary = true;
+            //         break;
+            //     }
+            // }
+            
+            // if (near_boundary) {
+            //     // Fallback to checking all faces for points near the overall boundary
+            //     for (const auto& [wpident, iface] : m_faces) {
+            //         auto bb = iface->sensitive();
+            //         if (bb.inside(point)) {
+            //             return WirePlaneId(wpident);
+            //         }
+            //     }
+            // }
+            
+            // Truly not in any sensitive volume
+            return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
+        }
+        
+        // Fallback to original implementation if spatial structures not initialized
+        for (const auto& [wpident, iface] : m_faces) {
+            auto bb = iface->sensitive();
+            if (bb.inside(point)) {
+                return WirePlaneId(wpident);
+            }
+        }
+        return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
+    }
+
+    // Fast check if point is inside overall detector volume
+    virtual bool is_in_overall_volume(const Point& point) const {
+        // If overall bounding box is not initialized, return false
+        if (m_overall_bb.empty()) {
+            return false;
+        }
+        
+        // Check if point is inside the overall bounding box
+        return m_overall_bb.inside(point);
+    }
+
+
 private:
 
     // Map wpid with layer=0 to its face.
     std::map<int, IAnodeFace::pointer> m_faces;
 
     Configuration m_md;
+    // Overall bounding box containing all sensitive volumes
+    BoundingBox m_overall_bb;
+    
+    // Flag to indicate if spatial data structures are initialized
+    bool m_spatial_initialized;
+    
+    // Grid configuration parameters
+    double m_config_grid_size_x;
+    double m_config_grid_size_y;
+    double m_config_grid_size_z;
+    double m_grid_fraction;
+    
+    // Actual grid cell sizes (may be auto-calculated)
+    double m_grid_size_x;
+    double m_grid_size_y;
+    double m_grid_size_z;
+    
+    // Grid origin point (minimum corner of overall bounding box)
+    Point m_grid_origin;
+    
+    // 3D grid of face IDs for spatial lookups
+    // Format: [x][y][z] -> list of wpidents that overlap this cell
+    std::vector<std::vector<std::vector<std::vector<int>>>> m_grid;
+
 };
 

@@ -221,6 +221,14 @@ TEST_CASE("test detectorvolumes")
     CHECK(wpid.face() == 0);
     CHECK(fv->contained(Point(-3500*units::mm, 100*units::mm, 100*units::mm)));
 
+//	std::cout << "haha " << fv->contained(Point(-3600*units::mm, 100*units::mm, 100*units::mm)) << " " << dv->is_in_overall_volume(Point(-3600*units::mm, 100*units::mm, 100*units::mm)) << std::endl;
+
+   // check the overall contaiment function
+   // Not inside the active fiducial volume
+   CHECK(true == dv->is_in_overall_volume(Point(-3600*units::mm, 100*units::mm, 100*units::mm)));
+   // inside the overall detector volume
+   CHECK(false == fv->contained(Point(-3600*units::mm, 100*units::mm, 100*units::mm)) );	
+
     auto wpid_u = wpid.to_u();
     CHECK(wpid_u.index() == 0);
     CHECK(wpid_u.valid());
