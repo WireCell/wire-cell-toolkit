@@ -26,6 +26,7 @@ std::size_t Tree::Scope::hash() const
     for (const auto& c : coords) {
         boost::hash_combine(h, c);
     }
+    boost::hash_combine(h, name);
     return h;
 }
 
@@ -142,18 +143,19 @@ const Tree::ScopedBase::selections_t& Tree::ScopedBase::selections() const
 //  Points
 //
 
-// Tree::Scoped& Tree::Points::scoped(const Scope& scope)
-// {
-//     auto it = m_scoped.find(scope);
-//     if (it == m_scoped.end()) {
-//         raise<KeyError>("no scope %s", scope);
-//     }
-//     Scoped* sptr = it->second.get();
-//     if (!sptr) {
-//         raise<KeyError>("null scope %s", scope); // should not happen!
-//     }
-//     return *sptr;
-// }
+
+const Tree::pointcloud_t& Tree::Points::local_pc(const std::string& name,
+                                                 const pointcloud_t& defpc) const
+{
+    auto it = m_lpcs.find(name);
+    if (it == m_lpcs.end()) return defpc;
+    return it->second;
+}
+
+Tree::pointcloud_t& Tree::Points::local_pc(const std::string& name)
+{
+    return m_lpcs[name];
+}
 
 const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
 {
@@ -161,19 +163,13 @@ const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
     if (it == m_scoped.end()) {
         return nullptr;
     }
-    return it->second.get();
+    return it->second.scoped.get();
 }
 
 Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) 
 {
     return const_cast<Tree::ScopedBase*>(
         const_cast<const self_t*>(this)->get_scoped(scope));
-
-    // auto it = m_scoped.find(scope);
-    // if (it == m_scoped.end()) {
-    //     return nullptr;
-    // }
-    // return it->second.get();
 }
 
 
@@ -181,20 +177,23 @@ Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope)
 // Called new scoped view is created.
 void WireCell::PointCloud::Tree::Points::init(const WireCell::PointCloud::Tree::Scope& scope) const
 {
-    auto& sv = m_scoped[scope];
+    auto& sci = m_scoped[scope]; // may create
     // Walk the tree in scope, adding in-scope nodes.
-    for (auto& node : m_node->depth(scope.depth)) { // depth part of sceop.
+    for (auto& node : m_node->depth(scope.depth)) { // depth part of scope.
+        bool want_if_in_scope = sci.selector(node);
         auto& value = node.value;
         auto it = value.m_lpcs.find(scope.pcname); // PC name part of scope.
         if (it == value.m_lpcs.end()) {
-            continue;           // it is okay if node lacks PC
+            continue;           // it is okay if node lacks PC, but such a node can not be in a scope
         }
 
         // Check for coordintate arrays on first construction. 
         Dataset& pc = it->second;
         assure_arrays(pc.keys(), scope); // throws if user logic error detected
-        // Tell scoped view about its new node.
-        sv->append(&node);
+        // Tell scoped view about its new node if selector wants it
+        if (want_if_in_scope) {
+            sci.scoped->append(&node);
+        }
     }
 }
 
@@ -245,11 +244,13 @@ bool Tree::Points::on_insert(const std::vector<node_type*>& path)
     auto* node = path.back();
 
     // Give node to any views for which the node is in scope.
-    for (auto& [scope,sv] : m_scoped) {
+    for (auto& [scope,sci] : m_scoped) {
         if (! in_scope(scope, node, path.size())) {
             continue;
         }
-        sv->append(node);
+        if (sci.selector(*node)) {
+            sci.scoped->append(node);
+        }
     }
     return true;
 }

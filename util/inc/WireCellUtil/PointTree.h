@@ -22,22 +22,33 @@
 
 namespace WireCell::PointCloud::Tree {
 
-    /** A point cloud scope describes selection of point cloud data
-     * formed from a subset of tree nodes reached by a depth-first
-     * descent.  
+    /** A "scope" describes selection of point cloud data formed from a subset
+        of tree nodes reached by a depth-first descent.
+     
+        A "scope" is typically used to created a "scoped view".  See
+        Tree::scoped_view().
      */
     struct Scope {
 
-        // The name of the node-local point clouds.
+        /// The name of the node-local point clouds that are in-scope.
         std::string pcname{""};
 
-        // The list of PC attribute array names to interpret as coordinates.
+        /// The list of PC attribute array names to interpret as coordinates.
         using name_list_t = std::vector<std::string>;
         name_list_t coords{};
 
-        // The depth of the descent.
+        /// The depth of the depth-first descent.  0 is unlimited.
         size_t depth{0};
 
+        /**
+           An additional name may be provided to distinguish otherwise identical
+           scopes.  A unique name is typically required when a "filtered scope
+           view" is constructed.  See Tree::scoped_view().
+           them.
+        */
+        std::string name{""};
+
+        /// Return a hash on the attributes.
         std::size_t hash() const;
         bool operator==(const Scope& other) const;
         bool operator!=(const Scope& other) const;
@@ -129,13 +140,54 @@ namespace WireCell::PointCloud::Tree {
         named_pointclouds_t& local_pcs() { return m_lpcs; }
         const named_pointclouds_t& local_pcs() const { return m_lpcs; }
 
-        /// Access a scoped view.  The returned Scoped instance WILL be mutated
-        /// when any new node is inserted into the scope.  The Scoped WILL be
-        /// invalidated if any existing node is removed from the scope.
+        /// Access a mutable local PC by name.  If PC does not exist, create it.
+        pointcloud_t& local_pc(const std::string& name);
+        /// Access a const local PC by name.  If PC does not exist, return defpc.
+        const pointcloud_t& local_pc(const std::string& name, const pointcloud_t& defpc = pointcloud_t()) const;
+
+        /** Create a scoped view.
+
+            Scoped views come in two types:
+
+            - unfiltered :: the scope alone determines the included nodes.
+
+            - filtered :: the scope and a selector function determines the included nodes.
+
+            An unfiltered scoped view is equivalent to a filtered scope view
+            with a selector function that returns only true.  Other selector
+            functions may produce a scoped view that is a subset of the
+            unfiltered scoped view produced from the same scope.
+
+            When producing a scoped view, the user is strongly suggested to set
+            the "scope.name" to a string that is unique among all the otherwise
+            identical scopes.
+
+            The ScopedViews are owned and cached by the PC tree using their
+            scope as the identifying key.
+
+            Existing scoped views are subject to tree mutations involving
+            in-scope nodes being inserted or removed.
+
+            - insertion :: if a newly inserted node is in a scope and if the
+              selector function returns true for that new node then the new node
+              is appended to the scope.  Note, this call of the selector
+              function is isolated and not part of a DFS.
+
+            - removal :: if an existing in-scope node is removed, the scoped
+              view is INVALIDATED.  Any outstanding references to the scope will
+              refer to garbage memory.
+
+            See also get_scoped().
+         */
+        using SelectorFunction = std::function<bool(const Points::node_t& node)>;
         template<typename ElementType=double>
-        const ScopedView<ElementType>& scoped_view(const Scope& scope) const;
+        const ScopedView<ElementType>& scoped_view(
+            const Scope& scope,
+            SelectorFunction selector = [](const Points::node_t&){return true;}) const;
         template<typename ElementType=double>
-        ScopedView<ElementType>& scoped_view(const Scope& scope);
+        ScopedView<ElementType>& scoped_view(
+            const Scope& scope,
+            SelectorFunction selector = [](const Points::node_t&){return true;});
 
         // Receive notification from n-ary tree to update existing
         // NFKDs if node is in any existing scope.
@@ -148,8 +200,8 @@ namespace WireCell::PointCloud::Tree {
         // may be holding.
         virtual bool on_remove(const std::vector<node_type*>& path);
 
-        // Return scoped view without creation, nullptr returned if the scope is
-        // not yet created.
+        // Return scoped view from cache without creation, nullptr returned if
+        // the scope is not yet created or has been invalidated.
         const ScopedBase* get_scoped(const Scope& scope) const;
         ScopedBase* get_scoped(const Scope& scope);
 
@@ -160,20 +212,24 @@ namespace WireCell::PointCloud::Tree {
 
         // mutable cache
         using unique_scoped_t = std::unique_ptr<ScopedBase>;
-        mutable std::unordered_map<Scope, unique_scoped_t> m_scoped;
+        struct ScopedViewCacheItem {
+            unique_scoped_t scoped;
+            SelectorFunction selector;
+        };
+        mutable std::unordered_map<Scope, ScopedViewCacheItem> m_scoped;
 
         void init(const Scope& scope) const;
         
     };                          // Points
 
     template<typename ElementType>
-    const ScopedView<ElementType>& Points::scoped_view(const Scope& scope) const
+    const ScopedView<ElementType>& Points::scoped_view(const Scope& scope, SelectorFunction selector) const
     {
         return const_cast<const ScopedView<ElementType>&>(
-            const_cast<self_t*>(this)->scoped_view(scope));
+            const_cast<self_t*>(this)->scoped_view(scope, selector));
     }
     template<typename ElementType>
-    ScopedView<ElementType>& Points::scoped_view(const Scope& scope) 
+    ScopedView<ElementType>& Points::scoped_view(const Scope& scope, SelectorFunction selector) 
     {
         using SV = ScopedView<ElementType>;
         auto * sbptr = get_scoped(scope);
@@ -185,7 +241,9 @@ namespace WireCell::PointCloud::Tree {
         }
         auto uptr = std::make_unique<SV>(scope);
         auto& sv = *uptr;
-        m_scoped[scope] = std::move(uptr);
+        auto& sci = m_scoped[scope];
+        sci.scoped = std::move(uptr);
+        sci.selector = selector;
         init(scope);
         return sv;
     }

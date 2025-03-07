@@ -269,3 +269,36 @@ TEST_CASE("point tree json summary")
     CHECK(back["children"].size() == 2);
 
 }
+
+TEST_CASE("point tree filtered scoped view")
+{
+    auto root = make_simple_pctree();
+    auto n1 = root->children()[0]->value.local_pc("3d").size_major();
+    auto n2 = root->children()[1]->value.local_pc("3d").size_major();
+
+    auto* n = root->insert(Points({ {"3d", make_janky_track(
+                        Ray(Point(0,0,0), Point(1, -2, -3)))} }));
+    auto n3 = n->value.local_pc("3d").size_major();
+    debug("add 3rd child with {} 3d points to siblings with {} and {}", n3, n1, n2);
+    REQUIRE(n3 > n1);
+    REQUIRE(n3 > n2);
+
+    Scope every{ "3d", {"x","y","z"} };
+    Scope bigger{ "3d", {"x","y","z"}, 0, "bigger" };
+
+    auto& esv = root->value.scoped_view(every);
+    REQUIRE(esv.nodes().size() == 3);
+
+    // We make a *filtered* scoped view by giving a selector function that
+    // returns true only on nodes with "3d" PC of more than two nodes.  This
+    // will select the "janky" track node and exclude the 
+    auto& bsv = root->value.scoped_view(bigger, [&](const Points::node_t& node) -> bool {
+        return node.value.local_pc("3d").size_major() > n3;
+    });
+    REQUIRE(bsv.nodes().size() == 2);
+
+    REQUIRE(root->value.get_scoped(every) == &esv);
+    REQUIRE(root->value.get_scoped(bigger) == &bsv);
+
+}
+       
