@@ -80,6 +80,9 @@ local wcls_output = {
   // for charge reconstruction, the "wiener" is best for S/N
   // separation.  Both are used in downstream WC code.
   sp_signals: wcls.output.signals(name="spsignals", tags=["gauss", "wiener"]),
+  // save "threshold" from normal decon for each channel noise
+  // used in imaging
+  sp_thresholds: wcls.output.thresholds(name="spthresholds", tags=["threshold"]),
 };
 //local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;

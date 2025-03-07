@@ -51,7 +51,7 @@ function(params, tools, override = {}) {
       field_response: wc.tn(tools.field),
       elecresponse: wc.tn(tools.elec_resp),
       ftoffset: 0.0, // default 0.0
-      ctoffset: 1.0*wc.microsecond, // default -8.0
+      ctoffset: 2.0*wc.microsecond, // default -8.0
       per_chan_resp: pc.name,
       fft_flag: 0,  // 1 is faster but higher memory, 0 is slightly slower but lower memory
       postgain: 1.0,  // default 1.2
@@ -64,8 +64,8 @@ function(params, tools, override = {}) {
       lroi_jump_one_bin: 1, // default 0
 
       r_th_factor: 3.0,  // default 3
-      r_fake_signal_low_th: 375,  // default 500
-      r_fake_signal_high_th: 750,  // default 1000
+      r_fake_signal_low_th: 400,  // default 500
+      r_fake_signal_high_th: 800,  // default 1000
       r_fake_signal_low_th_ind_factor: 1.0,  // default 1
       r_fake_signal_high_th_ind_factor: 1.0,  // default 1      
       r_th_peak: 3.0, // default 3.0
@@ -75,7 +75,9 @@ function(params, tools, override = {}) {
 
       // frame tags
       wiener_tag: 'wiener%d' % anode.data.ident,
+      wiener_threshold_tag: 'threshold%d' % anode.data.ident,
       decon_charge_tag: 'decon_charge%d' % anode.data.ident,
+      //gauss_tag: '', // <- commented Ewerton: empty that won't use wiener tag!! need fix? (already talked to Haiwang on Mar 4, 2024)
       gauss_tag: 'gauss%d' % anode.data.ident,
 
       use_roi_debug_mode: false,
