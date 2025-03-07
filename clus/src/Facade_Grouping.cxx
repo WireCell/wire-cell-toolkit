@@ -95,6 +95,14 @@ void Grouping::fill_cache(GroupingCache& gc) const
             }
         }
     }
+
+    {
+        for (size_t iclus = 0; iclus != children().size(); iclus++) {
+            const Cluster* cluster = children().at(iclus);
+            const auto& wpids = cluster->wpids();
+            gc.wpids.insert(wpids.begin(), wpids.end());
+        }
+    }
 }
 
 
@@ -296,7 +304,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     if (m_anode == nullptr) {
         raise<ValueError>("Anode is null");
     }
-    const auto& iface = m_anode->face(face);
+    const auto iface = m_anode->faces()[face];
     if (iface == nullptr) {
         raise<ValueError>("anode %d has no face %d", m_anode->ident(), face);
     }
@@ -326,7 +334,7 @@ std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, 
     if (m_anode == nullptr) {
         raise<ValueError>("Anode is null");
     }
-    const auto& iface = m_anode->face(face);
+    const auto iface = m_anode->faces()[face];
     if (iface == nullptr) {
         raise<ValueError>("anode %d has no face %d", m_anode->ident(), face);
     }
@@ -369,8 +377,8 @@ std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const in
     const auto& params = get_params();
     
     // Convert time to position
-    const double min_xpos = time2drift(m_anode->face(face), params.time_offset, params.drift_speed, min_time);
-    const double max_xpos = time2drift(m_anode->face(face), params.time_offset, params.drift_speed, max_time);
+    const double min_xpos = time2drift(m_anode->faces()[face], params.time_offset, params.drift_speed, min_time);
+    const double max_xpos = time2drift(m_anode->faces()[face], params.time_offset, params.drift_speed, max_time);
 
     std::set<int> dead_chs;
     const auto& dead_winds = get_dead_winds(face, pind);
@@ -424,11 +432,11 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
         int temp_ch = wind;
         
         // Convert position range to time ticks using drift parameters
-        int min_time = std::round(drift2time(m_anode->face(face), 
+        int min_time = std::round(drift2time(m_anode->faces()[face], 
                                            m_tp.time_offset,
                                            m_tp.drift_speed, 
                                            xrange.first)) - expand;
-        int max_time = std::round(drift2time(m_anode->face(face),
+        int max_time = std::round(drift2time(m_anode->faces()[face],
                                            m_tp.time_offset,
                                            m_tp.drift_speed,
                                            xrange.second)) + expand;

@@ -56,22 +56,26 @@ namespace WireCell::PointCloud::Facade {
     // only for testing/development
     void clustering_test(Grouping& live_clusters,
                               const Grouping& dead_clusters,
-                              cluster_set_t& cluster_connected_dead  // in/out
+                              cluster_set_t& cluster_connected_dead,
+                              const IDetectorVolumes::pointer dv
     );
     class ClusteringTest {
        public:
         ClusteringTest(const WireCell::Configuration& config)
         {
-            // FIXME: throw if not found?
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_test(live_clusters, dead_clusters, cluster_connected_dead);
+            clustering_test(live_clusters, dead_clusters, cluster_connected_dead, m_dv);
         }
 
        private:
-        int dead_live_overlap_offset_{2};
+        IDetectorVolumes::pointer m_dv;
     };
     
     // clustering_live_dead.cxx

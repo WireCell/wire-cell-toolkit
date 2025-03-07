@@ -69,6 +69,8 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("failed to get anode plane");
     }
 
+    m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
+
     m_face = get<int>(cfg, "face", 0);
     log->debug("using face: {}", m_face);
     if (m_anode->face(m_face) == nullptr) {
@@ -325,7 +327,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
 
 //                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
 
-                    const auto& x = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
+                    const auto& x = Facade::time2drift(m_anode->faces()[face], tp.time_offset, tp.drift_speed, slice->start());
                     const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
 
                     // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
@@ -397,8 +399,8 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 // log->debug("dead chan {} charge {} wind {} plane {} face {}", ichan->ident(), charge, wind, plane, wire->planeid().face());
                 const auto& face = m_face;
                 /// FIXME: is this the way to get face?
-                const auto& xbeg = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
-                const auto& xend = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start() + slice->span());
+                const auto& xbeg = Facade::time2drift(m_anode->faces()[face], tp.time_offset, tp.drift_speed, slice->start());
+                const auto& xend = Facade::time2drift(m_anode->faces()[face], tp.time_offset, tp.drift_speed, slice->start() + slice->span());
                 // if (true) {
                 //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                 //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
@@ -511,6 +513,18 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     grouping->set_params(tp_json);
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
+    
+    /// DEBUGONLY
+    {
+        std::vector<WirePlaneLayer_t> layers = {kUlayer, kVlayer, kWlayer};
+        for (const auto& layer : layers) {
+            WirePlaneId wpid(layer, m_face, m_anode->ident());
+            int face_dirx = m_dv->face_dirx(wpid);
+            Vector wire_direction = m_dv->wire_direction(wpid);
+            Vector pitch_vector = m_dv->pitch_vector(wpid);
+            log->debug("wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
+        }
+    }
     /// TODO: remove after debugging
     // {
     //     for (const auto& [name, pc] : root_live->value.local_pcs()) {

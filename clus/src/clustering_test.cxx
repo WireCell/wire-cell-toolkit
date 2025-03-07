@@ -15,7 +15,9 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_test(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
-    cluster_set_t& cluster_connected_dead            // in/out
+    cluster_set_t& cluster_connected_dead,
+    const IDetectorVolumes::pointer dv
+
 )
 {
     using spdlog::debug;
@@ -30,8 +32,18 @@ void WireCell::PointCloud::Facade::clustering_test(
         return cluster1->get_length() > cluster2->get_length();
     });
 
+    /// TEST: wpid
+    for (const auto& wpid : live_grouping.wpids()) {
+        SPDLOG_INFO("CTest live_grouping wpid {}", wpid.name());
+    }
     for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
         Cluster* cluster = live_clusters.at(iclus);
+        const auto& wpids = cluster->wpids();
+        for (size_t i=0; i != wpids.size(); i++) {
+            const auto& wpid = wpids.at(i);
+            SPDLOG_INFO("CTest Cluster {} i {} name {}", iclus, i, wpid.name());
+            break;
+        }
         for (size_t iblob = 0; iblob != cluster->children().size(); iblob++) {
             const auto* blob = cluster->children().at(iblob);
             SPDLOG_INFO("CTest Cluster {} Blob {} blob->wpid().name() {}", iclus, iblob, blob->wpid().name());
@@ -39,5 +51,20 @@ void WireCell::PointCloud::Facade::clustering_test(
         }
         break;
     }
+
+    /// TEST: IDetectorVolumes
+    {
+        std::vector<WirePlaneLayer_t> layers = {kUlayer, kVlayer, kWlayer};
+        for (const auto& layer : layers) {
+            int face_index = 0;
+            int anode_ident = 0;
+            WirePlaneId wpid(layer, face_index, anode_ident);
+            int face_dirx = dv->face_dirx(wpid);
+            Vector wire_direction = dv->wire_direction(wpid);
+            Vector pitch_vector = dv->pitch_vector(wpid);
+            SPDLOG_INFO("wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
+        }
+    }
+
 }
 #pragma GCC diagnostic pop

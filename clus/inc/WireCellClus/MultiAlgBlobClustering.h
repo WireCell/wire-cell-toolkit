@@ -5,6 +5,7 @@
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/ITerminal.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellUtil/Bee.h"
@@ -95,6 +96,8 @@ namespace WireCell::Clus {
 
         // the anode to be processed
         IAnodePlane::pointer m_anode;
+
+        IDetectorVolumes::pointer m_dv;
 
         // the face to be processed
         int m_face{0};
