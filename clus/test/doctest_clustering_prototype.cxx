@@ -64,6 +64,7 @@ Points::node_ptr make_simple_pctree()
             {"center_x", Array({(fa_float_t)0.5})},
             {"center_y", Array({(fa_float_t)0.})},
             {"center_z", Array({(fa_float_t)0.})},
+            {"wpid", Array({(fa_int_t)WirePlaneId(WirePlaneLayer_t::kAllLayers).ident()})},
             {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
@@ -93,6 +94,7 @@ Points::node_ptr make_simple_pctree()
             {"center_x", Array({(fa_float_t)1.5})},
             {"center_y", Array({(fa_float_t)0.})},
             {"center_z", Array({(fa_float_t)0.})},
+            {"wpid", Array({(fa_int_t)WirePlaneId(WirePlaneLayer_t::kAllLayers).ident()})},
             {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
@@ -218,6 +220,11 @@ TEST_CASE("clustering prototype facade")
     // (0.5 * 1 + 1.5 * 2) / 3 = 1.1666666666666665
     debug("blob 0: q={}, r={}", blobs[0]->charge(), blobs[0]->center_x());
     debug("blob 1: q={}, r={}", blobs[1]->charge(), blobs[1]->center_x());
+    REQUIRE(blobs[0]->center_x() == 0.5);
+    REQUIRE(blobs[1]->center_x() == 1.5);
+    REQUIRE(blobs[0]->charge() == 1);
+    REQUIRE(blobs[1]->charge() == 2);
+
     double expect = 0;
     expect += blobs[0]->charge() * blobs[0]->center_x();
     expect += blobs[1]->charge() * blobs[1]->center_x();
