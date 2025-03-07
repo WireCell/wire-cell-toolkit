@@ -1062,12 +1062,9 @@ void OmnibusSigProc::decon_2D_init(int plane)
     // response part ...
     Array::array_xxf r_resp = Array::array_xxf::Zero(m_r_data[plane].rows(), m_fft_nticks);
     for (size_t i = 0; i != overall_resp[plane].size(); i++) {
-
         for (int j = 0; j != m_fft_nticks; j++) {
             r_resp(i, j) = overall_resp[plane].at(i).at(j);
         }
-
-
     }
 
     // do first round FFT on the resposne on time
