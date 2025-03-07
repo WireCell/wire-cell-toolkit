@@ -49,6 +49,7 @@ function(params, tools) {
         data: {
             anodes_tn: [wc.tn(anode) for anode in tools.anodes],
         },
+        uses: [anode for anode in tools.anodes],
     },
 
     local add_noise = function(model, name="") g.pnode({

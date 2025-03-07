@@ -103,6 +103,7 @@ local img = {
             data: {
                 tick_span: span,
                 wiener_tag: "wiener%d" % anode.data.ident,
+                summary_tag: "wiener%d" % anode.data.ident,
                 charge_tag: "gauss%d" % anode.data.ident,
                 error_tag: "gauss_error%d" % anode.data.ident,
                 anode: wc.tn(anode),
@@ -179,7 +180,7 @@ local img = {
         local tilings = [$.tiling(anode, name+"_%d"%n)
             for n in iota],
         local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
-        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling"),
+        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling_%s"%name),
     }.ret,
 
     local clustering_policy = "uboone", // uboone, simple
@@ -295,7 +296,7 @@ local img = {
 };
 
 function() {
-    local imgpipe (anode, multi_slicing) =
+    local imgpipe (anode, multi_slicing, add_dump = true) =
     if multi_slicing == "single"
     then g.pipeline([
             // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
@@ -304,34 +305,43 @@ function() {
             img.tiling(anode, anode.name),
             img.solving(anode, anode.name),
             // img.clustering(anode, anode.name),
-            img.dump(anode, anode.name, params.lar.drift_speed),])
+            ] + if add_dump then [
+            img.dump(anode, anode.name, params.lar.drift_speed),] else [])
     else if multi_slicing == "active"
     then g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
             img.solving(anode, anode.name+"-ms-active"),
             // img.clustering(anode, anode.name+"-ms-active"),
-            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed)])
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else [])
     else if multi_slicing == "masked"
     then g.pipeline([
             img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500),
             img.clustering(anode, anode.name+"-ms-masked"),
-            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed)])
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
+        local st = if multi_slicing == "multi-2view"
+        then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4)
+        else g.pipeline([
+            img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
+            img.tiling(anode, anode.name),]),
         local active_fork = g.pipeline([
-            img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
+            st,
             img.solving(anode, anode.name+"-ms-active"),
-            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),
-        ]),
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
         local masked_fork = g.pipeline([
             img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592)
             img.clustering(anode, anode.name+"-ms-masked"),
-            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),
-        ]),
-        ret: g.fan.fanout("FrameFanout",[active_fork,masked_fork], "fan_active_masked"),
+            ] + if add_dump then [
+            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else []),
+        ret: g.fan.fanout("FrameFanout",[active_fork,masked_fork], "fan_active_masked-%s"%anode.name),
     }.ret,
 
-    per_anode(anode) :: g.pipeline([
+
+    per_anode(anode, multi_slicing = "single", add_dump = true) :: g.pipeline([
         img.pre_proc(anode, anode.name),
-        imgpipe(anode, "single"),
+        imgpipe(anode, multi_slicing, add_dump),
         ], "per_anode"),
 }
