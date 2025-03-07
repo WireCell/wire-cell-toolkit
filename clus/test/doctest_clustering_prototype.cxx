@@ -230,7 +230,8 @@ TEST_CASE("clustering prototype facade")
     expect += blobs[1]->charge() * blobs[1]->center_x();
     expect /= blobs[0]->charge() + blobs[1]->charge();
     debug("expect average pos {}", expect);
-    auto ave_pos = pcc.calc_ave_pos({1,0,0}, 1);
+    // there is now another calc_ave_pos(const geo_point_t& origin, int N) const;
+    auto ave_pos = pcc.calc_ave_pos({1,0,0}, 1.0);
     debug("ave_pos: {} | expecting (1.1666666666666665 0 0)", ave_pos);
     auto l1 = fabs(ave_pos[0] - 1.1666666666666665) + fabs(ave_pos[1]) + fabs(ave_pos[2]);
     CHECK(l1 < 1e-3);

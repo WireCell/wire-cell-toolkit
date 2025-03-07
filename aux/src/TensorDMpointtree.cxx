@@ -124,6 +124,10 @@ std::unique_ptr<WireCell::PointCloud::Tree::Points::node_t>
 WireCell::Aux::TensorDM::as_pctree(const ITensor::vector& tens,
                                    const std::string& datapath)
 {
+    /// TODO: FIXME: this works, but need to understand why
+    if (tens.size() <= 2) {
+        return std::make_unique<WireCell::PointCloud::Tree::Points::node_t>();
+    }
     TensorIndex ti(tens);
     return as_pctree(ti, datapath);
 }
@@ -161,7 +165,10 @@ WireCell::Aux::TensorDM::as_pctree(const TensorIndex& ti,
 
     // Loop cross product of (PC name,node)
     for (const auto& [pcname, pcds] : pointclouds) {
-
+        if (!lpcmaps_ds.get(pcname)) {
+            /// TODO: @BV what does this mean?
+            continue;
+        }
         // Get local PC map vector as a span on DS array.
         auto lpcmap = lpcmaps_ds.get(pcname)->elements<lpcmaps_index_type>();
 
