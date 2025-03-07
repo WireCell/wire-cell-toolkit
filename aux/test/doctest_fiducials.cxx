@@ -10,8 +10,8 @@ using namespace WireCell;
 using spdlog::debug;
 
 TEST_CASE("aux boxfiducial") {
-    // PluginManager& pm = PluginManager::instance();
-    // pm.add("WireCellAux");
+    PluginManager& pm = PluginManager::instance();
+    pm.add("WireCellAux");
 
     {
         auto icfg = Factory::lookup<IConfigurable>("BoxFiducial");
