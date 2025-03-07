@@ -154,6 +154,13 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
 
     m_charge_ch_offset = get(config, "charge_ch_offset", m_charge_ch_offset);
 
+    if (config.isMember("filter_responses_tn")) {
+        m_filter_resps_tn.clear();
+        for (auto tn: config["filter_responses_tn"]) {
+            m_filter_resps_tn.push_back(tn.asString());
+        }
+    }
+
     m_wiener_tag = get(config, "wiener_tag", m_wiener_tag);
     // m_wiener_threshold_tag = get(config, "wiener_threshold_tag", m_wiener_threshold_tag);
     if (! config["wiener_threshold_tag"].isNull()) {
@@ -1624,6 +1631,18 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         // load data into EIGEN matrices ...
         load_data(in, iplane);  // load into a large matrix
         // initial decon ...
+                
+        // additional filters for overall resposne
+        if (!m_filter_resps_tn.empty()) {
+            for (size_t i = 0; i != overall_resp[iplane].size(); i++) {
+                auto fltresp = Factory::find_tn<IChannelResponse>(m_filter_resps_tn[iplane]);
+                const Waveform::realseq_t& flt = fltresp->channel_response(i); // filter at wire: i
+                for (int j = 0; j != std::min<int>(m_fft_nticks, flt.size()); j++) {
+                    overall_resp[iplane].at(i).at(j) *= flt.at(j); 
+                }
+            }
+        }
+
         decon_2D_init(iplane);  // decon in large matrix
         check_data(iplane, "after 2D init");
 
@@ -1780,6 +1799,13 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 IFrame::trace_list_t perframe;
                 save_data(*itraces, perframe, iplane, perwire_rmses, thresholds, "wiener", m_save_negative_charge);
                 wiener_traces.insert(wiener_traces.end(), perframe.begin(), perframe.end());
+            }
+
+            if (!m_filter_resps_tn.empty()) {
+                // reload data and field response
+                init_overall_response(in);
+                load_data(in, iplane); 
+                decon_2D_init(iplane);  // decon in large matrix
             }
 
             decon_2D_charge(iplane);
