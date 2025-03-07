@@ -327,7 +327,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
 
 //                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
 
-                    const auto& x = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
+                    const auto& x = Facade::time2drift(m_anode->faces()[face], tp.time_offset, tp.drift_speed, slice->start());
                     const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
 
                     // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
@@ -399,8 +399,8 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 // log->debug("dead chan {} charge {} wind {} plane {} face {}", ichan->ident(), charge, wind, plane, wire->planeid().face());
                 const auto& face = m_face;
                 /// FIXME: is this the way to get face?
-                const auto& xbeg = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
-                const auto& xend = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start() + slice->span());
+                const auto& xbeg = Facade::time2drift(m_anode->faces()[face], tp.time_offset, tp.drift_speed, slice->start());
+                const auto& xend = Facade::time2drift(m_anode->faces()[face], tp.time_offset, tp.drift_speed, slice->start() + slice->span());
                 // if (true) {
                 //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                 //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
