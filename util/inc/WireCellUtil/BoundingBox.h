@@ -30,6 +30,39 @@ namespace WireCell {
             }
         }
 
+        // Create a union of this bounding box with another one
+        BoundingBox unite(const BoundingBox& other) const;
+
+        // Create an intersection of this bounding box with another one
+        BoundingBox intersect(const BoundingBox& other) const;
+
+        // Create a bounding box that contains all provided bounding boxes
+        static BoundingBox combine(const std::vector<BoundingBox>& boxes);
+
+        // Check if this bounding box overlaps with another one
+        bool overlaps(const BoundingBox& other) const;
+
+                
+        // Calculate the minimum distance from a point to the bounding box (0 if inside)
+        double distance(const Point& point) const;
+
+        // Calculate the minimum squared distance (faster when you only need comparisons)
+        double distance_squared(const Point& point) const;
+
+        // Returns the closest point on the box to the given point
+        Point closest_point(const Point& point) const;
+       
+        // Get the volume of the box (0 if any dimension is 0)
+        double volume() const;
+
+        // Get the center point of the box
+        Point center() const;
+
+        // Get the dimensions of the box as a vector (width, height, depth)
+        Vector dimensions() const;
+
+
+
         /// Return true if point is inside bounding box
         bool inside(const Point& point) const;
 
