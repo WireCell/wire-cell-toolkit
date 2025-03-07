@@ -55,14 +55,15 @@ void WireCell::PointCloud::Facade::clustering_test(
     /// TEST: IDetectorVolumes
     {
         std::vector<WirePlaneLayer_t> layers = {kUlayer, kVlayer, kWlayer};
-        for (const auto& layer : layers) {
-            int face_index = 0;
-            int anode_ident = 0;
-            WirePlaneId wpid(layer, face_index, anode_ident);
-            int face_dirx = dv->face_dirx(wpid);
-            Vector wire_direction = dv->wire_direction(wpid);
-            Vector pitch_vector = dv->pitch_vector(wpid);
-            SPDLOG_INFO("wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
+        for (const auto& gwpid : live_grouping.wpids()) {
+            for (const auto& layer : layers) {
+                WirePlaneId wpid(layer, gwpid.face(), gwpid.apa());
+                int face_dirx = dv->face_dirx(wpid);
+                Vector wire_direction = dv->wire_direction(wpid);
+                double angle = std::atan2(wire_direction.z(), wire_direction.y());
+                Vector pitch_vector = dv->pitch_vector(wpid);
+                SPDLOG_INFO("CTest wpid.name {} face_dirx {} wire_direction {} angle rad:{}  deg:{} pitch_vector {}", wpid.name(), face_dirx, wire_direction, angle, angle*180/3.1415926, pitch_vector);
+            }
         }
     }
 
