@@ -131,6 +131,7 @@ namespace WireCell::PointCloud::Facade {
     // second function ...
     void clustering_extend(Grouping& live_clusters,
                            cluster_set_t& cluster_connected_dead,            // in/out
+                           const IDetectorVolumes::pointer dv,      // detector volumes
                            const int flag,                                                //
                            const double length_cut = 150*units::cm,                       //
                            const int num_try = 0,                                         //
@@ -141,6 +142,12 @@ namespace WireCell::PointCloud::Facade {
        public:
         ClusteringExtend(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             flag_ = get(config, "flag", 0);
             length_cut_ = get(config, "length_cut", 150*units::cm);
@@ -151,7 +158,7 @@ namespace WireCell::PointCloud::Facade {
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_extend(live_clusters, cluster_connected_dead, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
+            clustering_extend(live_clusters, cluster_connected_dead, m_dv, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
         }
 
        private:
@@ -160,11 +167,18 @@ namespace WireCell::PointCloud::Facade {
         int num_try_{0};
         double length_2_cut_{3*units::cm};
         int num_dead_try_{3};
+        IDetectorVolumes::pointer m_dv;
     };
     class ClusteringExtendLoop {
        public:
         ClusteringExtendLoop(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             num_try_ = get(config, "num_try", 0);
         }
@@ -176,23 +190,24 @@ namespace WireCell::PointCloud::Facade {
             if (live_clusters.nchildren() > 1100) num_try = 1;
             for (int i = 0; i != num_try; i++) {
                 // deal with prolong case
-                clustering_extend(live_clusters, cluster_connected_dead, 1, 150*units::cm, 0);
+                clustering_extend(live_clusters, cluster_connected_dead, m_dv, 1, 150*units::cm, 0);
                 // deal with parallel case
-                clustering_extend(live_clusters, cluster_connected_dead, 2, 30*units::cm, 0);
+                clustering_extend(live_clusters, cluster_connected_dead, m_dv, 2, 30*units::cm, 0);
                 // extension regular case
-                clustering_extend(live_clusters, cluster_connected_dead, 3, 15*units::cm, 0);
+                clustering_extend(live_clusters, cluster_connected_dead, m_dv, 3, 15*units::cm, 0);
                 // extension ones connected to dead region ...
                 if (i == 0) {
-                    clustering_extend(live_clusters, cluster_connected_dead, 4, 60 * units::cm, i);
+                    clustering_extend(live_clusters, cluster_connected_dead, m_dv, 4, 60 * units::cm, i);
                 }
                 else {
-                    clustering_extend(live_clusters, cluster_connected_dead, 4, 35 * units::cm, i);
+                    clustering_extend(live_clusters, cluster_connected_dead, m_dv, 4, 35 * units::cm, i);
                 }
             }
         }
 
        private:
         int num_try_{0};
+        IDetectorVolumes::pointer m_dv;
     };
 
     bool Clustering_4th_prol(const Cluster& cluster1,
@@ -212,11 +227,12 @@ namespace WireCell::PointCloud::Facade {
     bool Clustering_4th_reg(const Cluster& cluster1,
 			    const Cluster& cluster2,
 			    double length_1, double length_2,
-			    geo_point_t p1, double length_cut);
+			    geo_point_t p1, double length_cut, geo_point_t drift_dir, double angle_u, double angle_v, double angle_w);
 
     bool Clustering_4th_dead(const Cluster& cluster1,
 			     const Cluster& cluster2,
-			     double length_1, double length_2, double length_cut, int num_dead_try=3);
+			     double length_1, double length_2, double length_cut, int num_dead_try, 
+                 geo_point_t drift_dir, double angle_u, double angle_v, double angle_w);
       
 
     // clustering_regular.cxx
