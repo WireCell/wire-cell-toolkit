@@ -22,8 +22,40 @@ using namespace WireCell::PointCloud::Tree;
  * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
  * @return large cluster -> {small cluster, distance} 
 */
-void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
+void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv)
 {
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = live_grouping.wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    }
+
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function  (sort from small to large clusters ... )
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
@@ -33,7 +65,11 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     const auto &mp = live_grouping.get_params();
     // this is for 4 time slices
     double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
-    geo_point_t drift_dir(1, 0, 0);
+
+    // geo_point_t drift_dir(1, 0, 0);
+    // Get drift direction from the first element of wpid_params, 
+    // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
+    geo_point_t drift_dir = std::get<0>(wpid_params.begin()->second);
 
     // std::cout << mp.nticks_live_slice << std::endl;
 

@@ -536,19 +536,25 @@ namespace WireCell::PointCloud::Facade {
         IDetectorVolumes::pointer m_dv;
     };
 
-    void clustering_isolated(Grouping& live_grouping);
+    void clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv);
     class ClusteringIsolated {
        public:
         ClusteringIsolated(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            return clustering_isolated(live_clusters);
+            return clustering_isolated(live_clusters, m_dv);
         }
 
        private:
+          IDetectorVolumes::pointer m_dv;
     };
 
 
