@@ -509,11 +509,17 @@ namespace WireCell::PointCloud::Facade {
            
     };
 
-    void clustering_neutrino(Grouping &live_grouping, int num_try);
+    void clustering_neutrino(Grouping &live_grouping, int num_try, const IDetectorVolumes::pointer dv);
     class ClusteringNeutrino {
        public:
         ClusteringNeutrino(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             num_try_ = get(config, "num_try", 1);
         }
@@ -521,12 +527,13 @@ namespace WireCell::PointCloud::Facade {
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
             for (int i = 0; i != num_try_; i++) {
-                clustering_neutrino(live_clusters, i);
+                clustering_neutrino(live_clusters, i, m_dv);
             }
         }
 
        private:
         int num_try_{1};
+        IDetectorVolumes::pointer m_dv;
     };
 
     void clustering_isolated(Grouping& live_grouping);

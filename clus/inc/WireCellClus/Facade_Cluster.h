@@ -13,6 +13,7 @@
 #include "WireCellUtil/Graph.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IDetectorVolumes.h"
 
 #include "WireCellClus/Facade_Util.h"
 #include "WireCellClus/Facade_Blob.h"
@@ -335,7 +336,7 @@ namespace WireCell::PointCloud::Facade {
 
         /// @brief to assess whether a given point (p_test) in a cluster is a vertex, or endpoint, based on asymmetry and occupancy criteria.
         /// @note p_test will be updated
-        bool judge_vertex(geo_point_t& p_test, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
+        bool judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer dv, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
 
         class Flash {

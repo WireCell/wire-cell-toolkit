@@ -378,7 +378,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
     // }
 }
 
-/// @brief PCA based
+/// @brief PCA based, drift_dir +x, -x the same ...
 bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length)
 {
     // get the main axis

@@ -3811,7 +3811,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
     return b2groupid;
 }
 
-bool Cluster::judge_vertex(geo_point_t& p_test, const double asy_cut, const double occupied_cut)
+bool Cluster::judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer dv, const double asy_cut, const double occupied_cut)
 {
     p_test = calc_ave_pos(p_test, 3 * units::cm);
 
@@ -3828,13 +3828,31 @@ bool Cluster::judge_vertex(geo_point_t& p_test, const double asy_cut, const doub
         return true;
     }
     else {
-        // TPCParams& mp = Singleton<TPCParams>::Instance();
-        // double angle_u = mp.get_angle_u();
-        // double angle_v = mp.get_angle_v();
-        // double angle_w = mp.get_angle_w();
-        const auto& mp = grouping()->get_params();
-        // ToyPointCloud temp_point_cloud(angle_u, angle_v, angle_w);
-        auto temp_point_cloud = std::make_shared<Multi2DPointCloud>(mp.angle_u, mp.angle_v, mp.angle_w);
+   
+        // const auto& mp = grouping()->get_params();
+        // it might be better to directly use the closest point to find the wire plane id ...
+        auto wpid = dv->contained_by(p_test);
+        // what if the point is not found ... 
+        if (wpid.apa()==-1){
+            auto idx = get_closest_point_index(p_test); 
+            // Given the idx, one can directly find the wpid actually ... 
+            wpid = dv->contained_by(point3d(idx)); 
+        }
+         
+         // Create wpids for all three planes with the same APA and face
+         WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
+         WirePlaneId wpid_v(kVlayer, wpid.face(), wpid.apa());
+         WirePlaneId wpid_w(kWlayer, wpid.face(), wpid.apa());
+         // Get wire directions for all planes
+         Vector wire_dir_u = dv->wire_direction(wpid_u);
+         Vector wire_dir_v = dv->wire_direction(wpid_v);
+         Vector wire_dir_w = dv->wire_direction(wpid_w);
+         // Calculate angles
+         double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+         double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        auto temp_point_cloud = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
         dir = dir.norm();
         // PointVector pts;
         std::vector<geo_point_t> pts;
