@@ -24,38 +24,8 @@ void WireCell::PointCloud::Facade::clustering_extend(
   if (live_grouping.wpids().size() != 1) {
     throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
   }
-  geo_point_t drift_dir(1, 0, 0);  // initialize drift direction
-  //const auto [angle_u,angle_v,angle_w] = live_grouping.wire_angles();
-  double angle_u = 0, angle_v = 0, angle_w = 0;  // initialize angles
- 
-  // Loop through all wpids from the grouping
-  for (const auto& gwpid : live_grouping.wpids()) {        
-      // Create wpids for all three planes (U, V, W) with the same APA and face
-      // Get drift direction for this plane
-      int face_dirx = dv->face_dirx(gwpid);
-      drift_dir.x(face_dirx); // Update drift direction based on face orientation
-      
-      // Get wire directions and angles for all three planes
-      WirePlaneId wpid_u(kUlayer, gwpid.face(), gwpid.apa());
-      WirePlaneId wpid_v(kVlayer, gwpid.face(), gwpid.apa());
-      WirePlaneId wpid_w(kWlayer, gwpid.face(), gwpid.apa());
-      
-      Vector wire_dir_u = dv->wire_direction(wpid_u);
-      Vector wire_dir_v = dv->wire_direction(wpid_v);
-      Vector wire_dir_w = dv->wire_direction(wpid_w);
-      
-      angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
-      angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
-      angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
-      
-      // std::cout << "Face: " << drift_dir.x << " (1)" << std::endl; 
-      // std::cout << "Calculated angles - U: " << angle_u  
-      //           << " (1.0472 for drift_x==1), V: " << angle_v 
-      //           << "(-1.0472 for drift_x==-1), W: " << angle_w << std::endl;
-      
-      // Only need to do this once since we're just getting the angles
-      break;
-  }
+  auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+
 
   // pronlonged case for U 3 and V 4 ...
   geo_point_t U_dir(0,cos(angle_u),sin(angle_u));

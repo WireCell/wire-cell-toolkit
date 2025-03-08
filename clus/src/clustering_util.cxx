@@ -5,6 +5,44 @@
 using namespace WireCell::PointCloud::Facade;
 
 
+// Add this to your clustering_util.cxx file
+
+std::tuple<geo_point_t, double, double, double> 
+WireCell::PointCloud::Facade::extract_geometry_params(
+    const Grouping& grouping,
+    const IDetectorVolumes::pointer dv)
+{
+    geo_point_t drift_dir(1, 0, 0);  // initialize drift direction
+    double angle_u = 0, angle_v = 0, angle_w = 0;  // initialize angles
+
+    // Find the first valid WirePlaneId in the grouping
+    for (const auto& gwpid : grouping.wpids()) {
+        // Update drift direction based on face orientation
+        int face_dirx = dv->face_dirx(gwpid);
+        drift_dir.x(face_dirx);
+        
+        // Create wpids for all three planes with the same APA and face
+        WirePlaneId wpid_u(kUlayer, gwpid.face(), gwpid.apa());
+        WirePlaneId wpid_v(kVlayer, gwpid.face(), gwpid.apa());
+        WirePlaneId wpid_w(kWlayer, gwpid.face(), gwpid.apa());
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+        
+        // Calculate angles
+        angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+        
+        // Only need to process the first valid WirePlaneId
+        break;
+    }
+    
+    return std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+}
+
 void WireCell::PointCloud::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,

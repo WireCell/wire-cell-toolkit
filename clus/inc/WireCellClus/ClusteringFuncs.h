@@ -53,6 +53,18 @@ namespace WireCell::PointCloud::Facade {
 			cluster_set_t& known_clusters, // in/out
                         const std::string& aname="", const std::string& pcname="perblob");
     
+    /**
+     * Extract geometry information from a grouping
+     * @param grouping The input Grouping object
+     * @param dv Detector geometry provider
+     * @return Tuple of (drift_direction, angle_u, angle_v, angle_w)
+     */
+    std::tuple<geo_point_t, double, double, double> extract_geometry_params(
+        const Grouping& grouping,
+        const IDetectorVolumes::pointer dv);
+
+
+
     // only for testing/development
     void clustering_test(Grouping& live_clusters,
                               const Grouping& dead_clusters,
@@ -280,29 +292,38 @@ namespace WireCell::PointCloud::Facade {
     // clustering_parallel_prolong.cxx:
     void clustering_parallel_prolong(Grouping& live_clusters,
                                      cluster_set_t& cluster_connected_dead, // in/out
+                                     const IDetectorVolumes::pointer dv,      // detector volumes
                                      const double length_cut = 35*units::cm
     );
     class ClusteringParallelProlong {
        public:
         ClusteringParallelProlong(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             length_cut_ = get(config, "length_cut", 35*units::cm);
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_parallel_prolong(live_clusters, cluster_connected_dead, length_cut_);
+            clustering_parallel_prolong(live_clusters, cluster_connected_dead, m_dv, length_cut_);
         }
 
        private:
         double length_cut_{35*units::cm};
+        IDetectorVolumes::pointer m_dv;
     };
 
     bool Clustering_2nd_round(const Cluster& cluster1,
 			      const Cluster& cluster2,
 			      double length_1,
 			      double length_2,
+                  geo_point_t drift_dir, double angle_u, double angle_v, double angle_w,
 			      double length_cut = 35*units::cm);
     
     // clustering_close.cxx

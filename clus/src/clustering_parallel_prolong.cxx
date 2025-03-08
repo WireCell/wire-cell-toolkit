@@ -12,9 +12,17 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
+	const IDetectorVolumes::pointer dv,                // detector volumes
     const double length_cut                    //
 )
 {
+	// Check that live_grouping has exactly one wpid
+	if (live_grouping.wpids().size() != 1 ) {
+		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+	}
+	// Example usage in clustering_parallel_prolong()
+	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+
   // prepare graph ...
   typedef cluster_connectivity_graph_t Graph;
   Graph g;
@@ -36,7 +44,7 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     auto cluster_1 = live_clusters.at(i);
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
-      if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), length_cut)){
+      if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), drift_dir, angle_u, angle_v, angle_w, length_cut)){
 
 		// // debug ...
         // std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
@@ -60,9 +68,10 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
     const Cluster& cluster2,
     double length_1,
     double length_2,
+	geo_point_t drift_dir, double angle_u, double angle_v, double angle_w,
     double length_cut)
 {
-  const auto [angle_u,angle_v,angle_w] = cluster1.grouping()->wire_angles();
+//   const auto [angle_u,angle_v,angle_w] = cluster1.grouping()->wire_angles();
 
   if (length_1 < 10*units::cm && length_2 < 10*units::cm) return false;
 
@@ -96,7 +105,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
     // bool flag_para_U = false;
     // bool flag_para_V = false;
 
-    geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+    // geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
     
     // pronlonged case for U 3 and V 4 ...
     geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
