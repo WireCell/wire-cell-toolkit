@@ -16,11 +16,54 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
     cluster_set_t& cluster_connected_dead,            // in/out
-    const int dead_live_overlap_offset                             // specific params
+    const int dead_live_overlap_offset,                             // specific params
+    const IDetectorVolumes::pointer dv                // detector volumes
 )
 {
     using spdlog::debug;
-  
+
+    // check if the grouping's wpid ... 
+    //std::cout << "Live: " << live_grouping.wpids().size() << " " << dead_grouping.wpids().size() << std::endl;
+    
+    // Check that live_grouping has exactly one wpid
+    if (live_grouping.wpids().size() != 1 || dead_grouping.wpids().size() != 1) {
+        throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+    }
+    
+    geo_point_t drift_dir(1, 0, 0);  // initialize drift direction
+    // auto [angle_u, angle_v, angle_w] = live_grouping.wire_angles(); // not using this any more ...
+    double angle_u = 0, angle_v = 0, angle_w = 0;  // initialize angles
+
+    // Loop through all wpids from the grouping
+    for (const auto& gwpid : live_grouping.wpids()) {        
+        // Create wpids for all three planes (U, V, W) with the same APA and face
+        // Get drift direction for this plane
+        int face_dirx = dv->face_dirx(gwpid);
+        drift_dir.x(face_dirx); // Update drift direction based on face orientation
+        
+        // Get wire directions and angles for all three planes
+        WirePlaneId wpid_u(kUlayer, gwpid.face(), gwpid.apa());
+        WirePlaneId wpid_v(kVlayer, gwpid.face(), gwpid.apa());
+        WirePlaneId wpid_w(kWlayer, gwpid.face(), gwpid.apa());
+        
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+        
+        angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+        
+        // std::cout << "Face: " << drift_dir.x << " (1)" << std::endl; 
+        // std::cout << "Calculated angles - U: " << angle_u  
+        //           << " (1.0472 for drift_x==1), V: " << angle_v 
+        //           << "(-1.0472 for drift_x==-1), W: " << angle_w << std::endl;
+        
+        // Only need to do this once since we're just getting the angles
+        break;
+    }
+
+
     // form map from dead to set of live clusters ...
     std::map<const Cluster*, std::vector<const Cluster*>> dead_live_cluster_mapping;
     std::vector<const Cluster*> dead_cluster_order;
@@ -31,18 +74,6 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
         return cluster1->get_length() > cluster2->get_length();
     });
     // sort_clusters(live_clusters);
-
-    // debug block, free to remove it
-    // {
-    //     std::set<Cluster*> seen;
-    //     for (size_t ind=0; ind<live_clusters.size(); ++ind) {
-    //         Cluster* cl = live_clusters[ind];
-    //         if (seen.find(cl) == seen.end()) {
-    //             seen.insert(cl);
-    //             continue;
-    //         }
-    //     }
-    // }
 
     auto dead_clusters = dead_grouping.children(); // copy
     sort_clusters(dead_clusters);
@@ -225,12 +256,11 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
 
                             double angle1, angle2, angle3;
                             if (!flag_merge) {
-                                geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+                               
                                 angle1 = dir1.angle(drift_dir);
                                 angle2 = dir2.angle(drift_dir);
                                 angle3 = dir3.angle(drift_dir);
 
-                                const auto [angle_u, angle_v, angle_w] = cluster_1->grouping()->wire_angles();
                                 if (fabs(angle1 - 3.1415926 / 2.) < 5 / 180. * 3.1415926 &&
                                     fabs(angle2 - 3.1415926 / 2.) < 5 / 180. * 3.1415926 &&
                                     fabs(angle3 - 3.1415926 / 2.) < 5 / 180. * 3.1415926) {

@@ -83,23 +83,30 @@ namespace WireCell::PointCloud::Facade {
     void clustering_live_dead(Grouping& live_clusters,
                               const Grouping& dead_clusters,
                               cluster_set_t& cluster_connected_dead,  // in/out
-                              const int dead_live_overlap_offset      // specific params
+                              const int dead_live_overlap_offset,      // specific params
+                              const IDetectorVolumes::pointer dv      // detector volumes
     );
     class ClusteringLiveDead {
        public:
         ClusteringLiveDead(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
             // FIXME: throw if not found?
             dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_);
+            clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_, m_dv);
         }
 
        private:
         int dead_live_overlap_offset_{2};
+        IDetectorVolumes::pointer m_dv;
     };
 
 
