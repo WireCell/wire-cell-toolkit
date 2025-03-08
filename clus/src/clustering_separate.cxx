@@ -15,8 +15,17 @@ using namespace WireCell::PointCloud::Tree;
 
 
 void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
+                                     const IDetectorVolumes::pointer dv,                // detector volumes
                                    const bool use_ctpc)
 {
+    // Check that live_grouping has exactly one wpid
+	if (live_grouping.wpids().size() != 1 ) {
+		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+	}
+	// Example usage in clustering_parallel_prolong()
+	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+
+
     std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
     std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
     std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
@@ -29,7 +38,6 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    geo_point_t drift_dir(1, 0, 0);
     geo_point_t beam_dir(0, 0, 1);
     geo_point_t vertical_dir(0, 1, 0);
 
@@ -163,7 +171,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
-                                   dead_v_index, dead_w_index, cluster->get_length());
+                                   dead_v_index, dead_w_index, cluster->get_length(), vertical_dir, beam_dir,drift_dir, angle_u, angle_v, angle_w);
                     
                     //std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                     Cluster *cluster1 = sep_clusters.at(0);
@@ -193,7 +201,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                                    length_1)) {
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points,
-                                               dead_u_index, dead_v_index, dead_w_index, length_1);
+                                               dead_u_index, dead_v_index, dead_w_index, length_1, vertical_dir, beam_dir,drift_dir, angle_u, angle_v, angle_w);
 
                                 //std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
@@ -222,7 +230,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
                                             std::vector<Cluster *> sep_clusters = Separate_1(
                                                 use_ctpc, cluster4, boundary_points, independent_points,
-                                                dead_u_index, dead_v_index, dead_w_index, length_1);
+                                                dead_u_index, dead_v_index, dead_w_index, length_1, vertical_dir, beam_dir,drift_dir, angle_u, angle_v, angle_w);
 
                                             //		  std::cerr << em("sep sep3") << std::endl;
 
@@ -267,7 +275,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points,
-                                        dead_u_index, dead_v_index, dead_w_index, length_1);
+                                        dead_u_index, dead_v_index, dead_w_index, length_1, vertical_dir, beam_dir,drift_dir, angle_u, angle_v, angle_w);
                                     //std::cout << "Separate Separate_1 2 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                                     //	      std::cerr << em("sep sep4") << std::endl;
 
@@ -316,7 +324,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, dead_u_index,
-                                   dead_v_index, dead_w_index, cluster->get_length());
+                                   dead_v_index, dead_w_index, cluster->get_length(), vertical_dir, beam_dir,drift_dir, angle_u, angle_v, angle_w);
                     // std::cout << "Stripping Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                     Cluster *cluster1 = sep_clusters.at(0);
@@ -924,13 +932,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
                                                      std::map<int, std::pair<double, double>> &dead_u_index,
                                                      std::map<int, std::pair<double, double>> &dead_v_index,
                                                      std::map<int, std::pair<double, double>> &dead_w_index,
-                                                     double length)
+                                                     double length, geo_point_t dir_cosmic, geo_point_t dir_beam,
+                                                     geo_point_t drift_dir, double angle_u, double angle_v, double angle_w)
 {
-    /// FIXME:REMOVE THIS AFTER DEBUGGING
-    // bool flag_debug_porting = false;
-    // if (cluster->nchildren() == 612) {
-    //     flag_debug_porting = true;
-    // }
     // std::cout << "Separate_1 with use_ctpc: start " << std::endl;
 
     // translate all the points at the beginning
@@ -946,21 +950,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     auto* grouping = cluster->grouping();
 
     const auto& tp = grouping->get_params();
-    // TPCParams &mp = Singleton<TPCParams>::Instance();
-    // double pitch_u = mp.get_pitch_u();
-    // double pitch_v = mp.get_pitch_v();
-    // double pitch_w = mp.get_pitch_w();
-    // double angle_u = mp.get_angle_u();
-    // double angle_v = mp.get_angle_v();
-    // double angle_w = mp.get_angle_w();
-    // double time_slice_width = mp.get_ts_width();
 
-    geo_point_t dir_drift(1, 0, 0);
-    geo_point_t dir_cosmic(0, 1, 0);
-    geo_point_t dir_beam(0, 0, 1);
-
-    // ToyPointCloud *temp_cloud = new ToyPointCloud(angle_u, angle_v, angle_w);
-    auto temp_cloud = std::make_shared<Multi2DPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
+    auto temp_cloud = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
 
     // ToyPointCloud *cloud = cluster->get_point_cloud();
 
@@ -993,7 +984,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
     geo_point_t start_wcpoint;
     geo_point_t end_wcpoint;
-    geo_point_t drift_dir(1, 0, 0);
+    // geo_point_t drift_dir(1, 0, 0);
     geo_point_t dir;
 
     double min_dis = 1e9;
@@ -1093,7 +1084,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
         geo_point_t start_point(start_wcpoint.x(), start_wcpoint.y(), start_wcpoint.z());
         {
-            geo_point_t drift_dir(1, 0, 0);
+            // geo_point_t drift_dir(1, 0, 0);
             dir = cluster->vhough_transform(start_point, 100 * units::cm);
             geo_point_t dir1 = cluster->vhough_transform(start_point, 30 * units::cm);
             if (dir.angle(dir1) > 20 * 3.1415926 / 180.) {
@@ -1138,7 +1129,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         start_wcpoint = independent_points.at(max_index);
         geo_point_t start_point(start_wcpoint.x(), start_wcpoint.y(), start_wcpoint.z());
         {
-            geo_point_t drift_dir(1, 0, 0);
+            // geo_point_t drift_dir(1, 0, 0);
             dir = cluster->vhough_transform(start_point, 100 * units::cm);
             geo_point_t dir1 = cluster->vhough_transform(start_point, 30 * units::cm);
             if (dir.angle(dir1) > 20 * 3.1415926 / 180.) {

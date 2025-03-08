@@ -360,22 +360,30 @@ namespace WireCell::PointCloud::Facade {
     //                          std::map<int, std::pair<double, double>>& dead_w_index);
 
     void clustering_separate(Grouping& live_grouping,
+                            const IDetectorVolumes::pointer dv,      // detector volumes
                              const bool use_ctpc);
     class ClusteringSeparate {
        public:
         ClusteringSeparate(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             use_ctpc_ = get(config, "use_ctpc", true);
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_separate(live_clusters, use_ctpc_);
+            clustering_separate(live_clusters, m_dv, use_ctpc_);
         }
 
        private:
         double use_ctpc_{true};
+        IDetectorVolumes::pointer m_dv;
     };
 
     void clustering_connect1(Grouping& live_grouping);
@@ -535,7 +543,8 @@ namespace WireCell::PointCloud::Facade {
                                                          std::map<int, std::pair<double, double>> &dead_u_index,
                                                          std::map<int, std::pair<double, double>> &dead_v_index,
                                                          std::map<int, std::pair<double, double>> &dead_w_index,
-                                                         double length);
+                                                         double length, geo_point_t dir_cosmic, geo_point_t dir_beam,
+                                                         geo_point_t drift_dir, double angle_u, double angle_v, double angle_w);
 
     std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
 
