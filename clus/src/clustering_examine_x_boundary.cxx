@@ -8,9 +8,14 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
-    Grouping& live_grouping
+    Grouping& live_grouping, const IDetectorVolumes::pointer dv
     )
 {
+    // Check that live_grouping has exactly one wpid
+	if (live_grouping.wpids().size() != 1 ) {
+		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+	}
+
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
     // std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {

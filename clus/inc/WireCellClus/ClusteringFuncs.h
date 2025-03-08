@@ -472,19 +472,25 @@ namespace WireCell::PointCloud::Facade {
     };
 
 
-    void clustering_examine_x_boundary(Grouping& live_grouping);
+    void clustering_examine_x_boundary(Grouping& live_grouping, const IDetectorVolumes::pointer dv);
     class ClusteringExamineXBoundary {
        public:
         ClusteringExamineXBoundary(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_examine_x_boundary(live_clusters);
+            clustering_examine_x_boundary(live_clusters, m_dv);
         }
 
        private:
+        IDetectorVolumes::pointer m_dv;
     };
 
     void clustering_protect_overclustering(Grouping& live_grouping);
@@ -500,6 +506,7 @@ namespace WireCell::PointCloud::Facade {
         }
 
        private:
+           
     };
 
     void clustering_neutrino(Grouping &live_grouping, int num_try);
