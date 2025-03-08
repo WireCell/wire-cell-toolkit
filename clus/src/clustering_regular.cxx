@@ -12,10 +12,50 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_regular(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,            // in/out
+    const IDetectorVolumes::pointer dv,                // detector volumes
     const double length_cut,                                       //
     bool flag_enable_extend                                        //
 )
 {
+  // Check that live_grouping has exactly one wpid
+  if (live_grouping.wpids().size() != 1 ) {
+      throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+  }
+  
+  geo_point_t drift_dir(1, 0, 0);  // initialize drift direction
+  // auto [angle_u, angle_v, angle_w] = live_grouping.wire_angles(); // not using this any more ...
+  double angle_u = 0, angle_v = 0, angle_w = 0;  // initialize angles
+
+  // Loop through all wpids from the grouping
+  for (const auto& gwpid : live_grouping.wpids()) {        
+      // Create wpids for all three planes (U, V, W) with the same APA and face
+      // Get drift direction for this plane
+      int face_dirx = dv->face_dirx(gwpid);
+      drift_dir.x(face_dirx); // Update drift direction based on face orientation
+      
+      // Get wire directions and angles for all three planes
+      WirePlaneId wpid_u(kUlayer, gwpid.face(), gwpid.apa());
+      WirePlaneId wpid_v(kVlayer, gwpid.face(), gwpid.apa());
+      WirePlaneId wpid_w(kWlayer, gwpid.face(), gwpid.apa());
+      
+      Vector wire_dir_u = dv->wire_direction(wpid_u);
+      Vector wire_dir_v = dv->wire_direction(wpid_v);
+      Vector wire_dir_w = dv->wire_direction(wpid_w);
+      
+      angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+      angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+      angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+      
+      // std::cout << "Face: " << drift_dir.x << " (1)" << std::endl; 
+      // std::cout << "Calculated angles - U: " << angle_u  
+      //           << " (1.0472 for drift_x==1), V: " << angle_v 
+      //           << "(-1.0472 for drift_x==-1), W: " << angle_w << std::endl;
+      
+      // Only need to do this once since we're just getting the angles
+      break;
+  }
+
+
   double internal_length_cut = 10 *units::cm;
   if (flag_enable_extend) {
     internal_length_cut = 15 *units::cm;
@@ -45,7 +85,7 @@ void WireCell::PointCloud::Facade::clustering_regular(
       auto cluster_2 = live_clusters.at(j);
       if (cluster_2->get_length() < internal_length_cut) continue;
 
-      if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), length_cut, flag_enable_extend)){
+      if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), drift_dir, angle_u, angle_v, angle_w, length_cut, flag_enable_extend)){
 
         // debug ...
         //std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
@@ -66,10 +106,11 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     const Cluster& cluster2,
     double length_1,
     double length_2,
+    geo_point_t drift_dir, double angle_u, double angle_v, double angle_w,
     double length_cut,
     bool flag_enable_extend)
 {
-  const auto [angle_u,angle_v,angle_w] = cluster1.grouping()->wire_angles();
+  // const auto [angle_u,angle_v,angle_w] = cluster1.grouping()->wire_angles();
 
   geo_point_t p1;
   geo_point_t p2;
@@ -106,7 +147,7 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     bool flag_force_extend = false;
 
 
-    geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+    // geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
     
     // pronlonged case for U 3 and V 4 ...
     geo_point_t U_dir(0,cos(angle_u),sin(angle_u));

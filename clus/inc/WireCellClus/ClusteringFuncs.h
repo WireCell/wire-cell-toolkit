@@ -239,6 +239,7 @@ namespace WireCell::PointCloud::Facade {
     // third function 
     void clustering_regular(Grouping& live_clusters,
                             cluster_set_t& cluster_connected_dead,            // in/out
+                            const IDetectorVolumes::pointer dv,      // detector volumes
                             const double length_cut = 45*units::cm,                                       //
                             bool flag_enable_extend = true                                       //
     );
@@ -246,6 +247,12 @@ namespace WireCell::PointCloud::Facade {
        public:
         ClusteringRegular(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             length_cut_ = get(config, "length_cut", 45*units::cm);
             flag_enable_extend_ = get(config, "flag_enable_extend", true);
@@ -253,18 +260,20 @@ namespace WireCell::PointCloud::Facade {
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_regular(live_clusters, cluster_connected_dead, length_cut_, flag_enable_extend_);
+            clustering_regular(live_clusters, cluster_connected_dead, m_dv, length_cut_, flag_enable_extend_);
         }
 
        private:
         double length_cut_{45*units::cm};
         bool flag_enable_extend_{true};
+        IDetectorVolumes::pointer m_dv;
     };
 
     bool Clustering_1st_round(const Cluster& cluster1,
 			      const Cluster& cluster2,
 			      double length_1,
 			      double length_2,
+                  geo_point_t drift_dir, double angle_u, double angle_v, double angle_w,
 			      double length_cut = 45*units::cm,
 			      bool flag_enable_extend = true);
 
