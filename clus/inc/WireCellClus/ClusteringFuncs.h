@@ -408,12 +408,19 @@ namespace WireCell::PointCloud::Facade {
     };
 
     void clustering_deghost(Grouping& live_grouping,
+                             const IDetectorVolumes::pointer dv,      // detector volumes
                             const bool use_ctpc,
                             double length_cut = 0);
     class ClusteringDeGhost {
        public:
         ClusteringDeGhost(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
             // FIXME: throw if not found?
             use_ctpc_ = get(config, "use_ctpc", true);
             length_cut_ = get(config, "length_cut", 0);
@@ -421,12 +428,13 @@ namespace WireCell::PointCloud::Facade {
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_deghost(live_clusters, use_ctpc_, length_cut_);
+            clustering_deghost(live_clusters, m_dv, use_ctpc_, length_cut_);
         }
 
        private:
         double use_ctpc_{true};
         double length_cut_{0};
+        IDetectorVolumes::pointer m_dv;
     };
 
     // this is a function to test the implementation of CT point cloud ...

@@ -19,9 +19,45 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 
-void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
+void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, IDetectorVolumes::pointer dv,
                                   const bool use_ctpc, double length_cut)
 {
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = live_grouping.wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    }
+
+    if (apas.size()!=1) throw std::runtime_error("live_grouping must have exactly one APA");
+
+
+
     std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(0, 0);
     std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(0, 1);
     std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(0, 2);
@@ -40,6 +76,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping,
     // One for the points ... point --> index --> cluster (vector) ...
     // The other for the skeleton of each track ...  point --> index --> cluster (vector)
     // Both cloud needs to be dynamic, keep adding things into it as we improve the knowledge
+    // XQ: need a new dynamic point cloud that can handle different faces of APA ...
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
     auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
 
