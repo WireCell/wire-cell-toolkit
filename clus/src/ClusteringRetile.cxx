@@ -49,16 +49,25 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
     if (coords.nlayers() != 5) {
         raise<ValueError>("unexpected number of ray grid layers: %d", coords.nlayers());
     }
-
-    // Add time cut configuration
-    m_cut_time_low = get(cfg, "cut_time_low", -1e9);
-    m_cut_time_high = get(cfg, "cut_time_high", 1e9);
-
     // Get wire info for each plane
     m_plane_infos.clear();
     m_plane_infos.push_back(Aux::get_wire_plane_info(m_face, kUlayer));
     m_plane_infos.push_back(Aux::get_wire_plane_info(m_face, kVlayer));
     m_plane_infos.push_back(Aux::get_wire_plane_info(m_face, kWlayer));
+
+
+    
+    // Add time cut configuration
+    m_cut_time_low = get(cfg, "cut_time_low", -1e9);
+    m_cut_time_high = get(cfg, "cut_time_high", 1e9);
+
+    // Get the detector volumes pointer
+    m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
+    if (m_dv == nullptr) {
+        raise<ValueError>("failed to get IDetectorVolumes %s", cfg["detector_volumes"].asString());
+    }
+
+    
 }
 
 
@@ -386,7 +395,36 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // smash whatever is in the 2nd grouping to fill with "shadow" clusters.  In
     // other cluster functions this second grouping is interpreted as holding
     // "dead" clusters.
+    // Check that live_grouping has exactly one wpid
+    if (original.wpids().size() != 1 ) {
+        throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+    }
+    // Example usage in clustering_parallel_prolong()
+    double angle_u = 0, angle_v = 0, angle_w = 0;  // initialize angles
 
+    // Find the first valid WirePlaneId in the grouping
+    for (const auto& gwpid : original.wpids()) {
+        // Update drift direction based on face orientation
+        // int face_dirx = m_dv->face_dirx(gwpid);
+        
+        // Create wpids for all three planes with the same APA and face
+        WirePlaneId wpid_u(kUlayer, gwpid.face(), gwpid.apa());
+        WirePlaneId wpid_v(kVlayer, gwpid.face(), gwpid.apa());
+        WirePlaneId wpid_w(kWlayer, gwpid.face(), gwpid.apa());
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = m_dv->wire_direction(wpid_u);
+        Vector wire_dir_v = m_dv->wire_direction(wpid_v);
+        Vector wire_dir_w = m_dv->wire_direction(wpid_w);
+        
+        // Calculate angles
+        angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+        
+        // Only need to process the first valid WirePlaneId
+        break;
+    }
 
     // reset the shadown clusters' content ... 
     // std::cout << shadow.children().size() << std::endl;
@@ -396,9 +434,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     }
     shadow.clear_cache();
     // std::cout << shadow.children().size() << std::endl;
-
-    
-    const auto [angle_u,angle_v,angle_w] = original.wire_angles();
+    // const auto [angle_u,angle_v,angle_w] = original.wire_angles();
 
     for (auto* orig_cluster : original.children()) {
 

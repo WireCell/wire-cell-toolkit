@@ -34,6 +34,8 @@
 #include "WireCellIface/IBlob.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IDetectorVolumes.h"
+
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellUtil/RayHelpers.h"
@@ -106,6 +108,8 @@ namespace WireCell::PointCloud::Facade {
         double m_cut_time_high;
 
         std::vector<Aux::WirePlaneInfo> m_plane_infos;
+        
+        IDetectorVolumes::pointer m_dv;
 
         /** Configuration "anode" (required)
 
