@@ -20,10 +20,17 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
-void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
+void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, const IDetectorVolumes::pointer dv)
 {
-    const auto &tp = live_grouping.get_params();
-    auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
+    // Check that live_grouping has exactly one wpid
+	if (live_grouping.wpids().size() != 1 ) {
+		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+	}
+	// Example usage in clustering_parallel_prolong()
+	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+
+    // const auto &tp = live_grouping.get_params();
+    auto global_point_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
     for (const Cluster *cluster : live_grouping.children()) {
         global_point_cloud->add_points(cluster, 0);
     }
@@ -39,9 +46,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    // double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
 
-    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
 
     double extending_dis = 50 * units::cm;
     double angle = 7.5;
@@ -65,8 +71,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping)
     std::map<const Cluster *, geo_point_t> map_cluster_dir1;
     std::map<const Cluster *, geo_point_t> map_cluster_dir2;
 
-    geo_point_t drift_dir(1, 0, 0);
-    const auto [angle_u,angle_v,angle_w] = live_grouping.wire_angles();
     geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
     geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
     geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
