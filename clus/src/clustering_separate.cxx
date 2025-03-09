@@ -984,7 +984,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
     geo_point_t start_wcpoint;
     geo_point_t end_wcpoint;
-    // geo_point_t drift_dir(1, 0, 0);
+    // geo_point_t drift_dir_abs(1, 0, 0);
     geo_point_t dir;
 
     double min_dis = 1e9;

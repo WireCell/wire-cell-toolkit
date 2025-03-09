@@ -116,7 +116,7 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     bool flag_force_extend = false;
 
 
-    // geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+    geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
     
     // pronlonged case for U 3 and V 4 ...
     geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
@@ -176,27 +176,27 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
       
       double angle6 = tempV3.angle(U_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle6),0);
-      angle6 = tempV5.angle(drift_dir);
+      angle6 = tempV5.angle(drift_dir_abs);
       
       double angle7 = tempV3.angle(V_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle7),0);
-      angle7 = tempV5.angle(drift_dir);
+      angle7 = tempV5.angle(drift_dir_abs);
       
       double angle8 = tempV3.angle(W_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle8),0);
-      angle8 = tempV5.angle(drift_dir);
+      angle8 = tempV5.angle(drift_dir_abs);
       
       double angle6_1 = tempV4.angle(U_dir);
       tempV5.set(fabs(cluster2_ave_pos.x()-cluster1_ave_pos.x()),sqrt(pow(cluster2_ave_pos.y()-cluster1_ave_pos.y(),2)+pow(cluster2_ave_pos.z()-cluster1_ave_pos.z(),2))*sin(angle6_1),0);
-      angle6_1 = tempV5.angle(drift_dir);
+      angle6_1 = tempV5.angle(drift_dir_abs);
       
       double angle7_1 = tempV4.angle(V_dir);
       tempV5.set(fabs(cluster2_ave_pos.x()-cluster1_ave_pos.x()),sqrt(pow(cluster2_ave_pos.y()-cluster1_ave_pos.y(),2)+pow(cluster2_ave_pos.z()-cluster1_ave_pos.z(),2))*sin(angle7_1),0);
-      angle7_1 = tempV5.angle(drift_dir);
+      angle7_1 = tempV5.angle(drift_dir_abs);
       
       double angle8_1 = tempV4.angle(W_dir);
       tempV5.set(fabs(cluster2_ave_pos.x()-cluster1_ave_pos.x()),sqrt(pow(cluster2_ave_pos.y()-cluster1_ave_pos.y(),2)+pow(cluster2_ave_pos.z()-cluster1_ave_pos.z(),2))*sin(angle8_1),0);
-      angle8_1 = tempV5.angle(drift_dir);
+      angle8_1 = tempV5.angle(drift_dir_abs);
       
       if (angle6<15/180.*3.1415926  ||
 	  angle6_1<15/180.*3.1415926 )

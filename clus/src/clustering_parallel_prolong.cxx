@@ -105,7 +105,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
     // bool flag_para_U = false;
     // bool flag_para_V = false;
 
-    // geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+    geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
     
     // pronlonged case for U 3 and V 4 ...
     geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
@@ -223,15 +223,15 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
       geo_point_t tempV5;
       double angle1 = tempV1.angle(U_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle1),0);
-      angle1 = tempV5.angle(drift_dir);
+      angle1 = tempV5.angle(drift_dir_abs);
       
       double angle2 = tempV1.angle(V_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle2),0);
-      angle2 = tempV5.angle(drift_dir);
+      angle2 = tempV5.angle(drift_dir_abs);
 
       double angle1p = tempV1.angle(W_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle1p),0);
-      angle1p = tempV5.angle(drift_dir);
+      angle1p = tempV5.angle(drift_dir_abs);
 
       if (angle1<7.5/180.*3.1415926  ||
 	  angle2<7.5/180.*3.1415926  ||

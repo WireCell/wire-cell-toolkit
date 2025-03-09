@@ -28,6 +28,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 	}
 	// Example usage in clustering_parallel_prolong()
 	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+    geo_point_t drift_dir_abs(1,0,0);
 
     // const auto &tp = live_grouping.get_params();
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
@@ -148,7 +149,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             geo_point_t tempV5;
             double angle1 = tempV1.angle(U_dir);
             tempV5.set(fabs(dir1.x()), sqrt(pow(dir1.y(), 2) + pow(dir1.z(), 2)) * sin(angle1), 0);
-            angle1 = tempV5.angle(drift_dir);
+            angle1 = tempV5.angle(drift_dir_abs);
 
             if (angle1 < 7.5 / 180. * 3.1415926) {
                 flag_prol_1 = true;
@@ -156,7 +157,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             else {
                 angle1 = tempV1.angle(V_dir);
                 tempV5.set(fabs(dir1.x()), sqrt(pow(dir1.y(), 2) + pow(dir1.z(), 2)) * sin(angle1), 0);
-                angle1 = tempV5.angle(drift_dir);
+                angle1 = tempV5.angle(drift_dir_abs);
 
                 if (angle1 < 7.5 / 180. * 3.1415926) {
                     flag_prol_1 = true;
@@ -164,7 +165,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                 else {
                     angle1 = tempV1.angle(W_dir);
                     tempV5.set(fabs(dir1.x()), sqrt(pow(dir1.y(), 2) + pow(dir1.z(), 2)) * sin(angle1), 0);
-                    angle1 = tempV5.angle(drift_dir);
+                    angle1 = tempV5.angle(drift_dir_abs);
 
                     if (angle1 < 7.5 / 180. * 3.1415926) {
                         flag_prol_1 = true;
@@ -181,21 +182,21 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             geo_point_t tempV6;
             double angle2 = tempV2.angle(U_dir);
             tempV6.set(fabs(dir2.x()), sqrt(pow(dir2.y(), 2) + pow(dir2.z(), 2)) * sin(angle2), 0);
-            angle2 = tempV6.angle(drift_dir);
+            angle2 = tempV6.angle(drift_dir_abs);
             if (angle2 < 7.5 / 180. * 3.1415926) {
                 flag_prol_2 = true;
             }
             else {
                 angle2 = tempV2.angle(V_dir);
                 tempV6.set(fabs(dir2.x()), sqrt(pow(dir2.y(), 2) + pow(dir2.z(), 2)) * sin(angle2), 0);
-                angle2 = tempV6.angle(drift_dir);
+                angle2 = tempV6.angle(drift_dir_abs);
                 if (angle2 < 7.5 / 180. * 3.1415926) {
                     flag_prol_2 = true;
                 }
                 else {
                     angle2 = tempV2.angle(W_dir);
                     tempV6.set(fabs(dir2.x()), sqrt(pow(dir2.y(), 2) + pow(dir2.z(), 2)) * sin(angle2), 0);
-                    angle2 = tempV6.angle(drift_dir);
+                    angle2 = tempV6.angle(drift_dir_abs);
                     if (angle2 < 7.5 / 180. * 3.1415926) {
                         flag_prol_2 = true;
                     }

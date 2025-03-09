@@ -25,7 +25,7 @@ void WireCell::PointCloud::Facade::clustering_extend(
     throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
   }
   auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
-
+  geo_point_t drift_dir_abs(1,0,0);
 
   // pronlonged case for U 3 and V 4 ...
   geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
@@ -74,15 +74,15 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	tempV1.set(0,dir_earlp.y(),dir_earlp.z());
 	double angle1 = tempV1.angle(U_dir);
 	tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle1),0);
-	angle1 = tempV5.angle(drift_dir);
+	angle1 = tempV5.angle(drift_dir_abs);
 
 	double angle2 = tempV1.angle(V_dir);
 	tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle2),0);
-	angle2 = tempV5.angle(drift_dir);
+	angle2 = tempV5.angle(drift_dir_abs);
 
 	double angle3 = tempV1.angle(W_dir);
 	tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle3),0);
-	angle3 = tempV5.angle(drift_dir);
+	angle3 = tempV5.angle(drift_dir_abs);
 
 
 	// find latest point
@@ -90,15 +90,15 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	tempV1.set(0,dir_latep.y(),dir_latep.z());
 	double angle4 = tempV1.angle(U_dir);
 	tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle4),0);
-	angle4 = tempV5.angle(drift_dir);
+	angle4 = tempV5.angle(drift_dir_abs);
 
 	double angle5 = tempV1.angle(V_dir);
 	tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle5),0);
-	angle5 = tempV5.angle(drift_dir);
+	angle5 = tempV5.angle(drift_dir_abs);
 
 	double angle6 = tempV1.angle(W_dir);
 	tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle6),0);
-	angle6 = tempV5.angle(drift_dir);
+	angle6 = tempV5.angle(drift_dir_abs);
 
 	if (angle1 <5./180.*3.1415926 || angle2 < 5./180.*3.1415926 || angle3 < 5./180.*3.1415926){
 	  // flag_prol = true;
@@ -352,7 +352,7 @@ bool WireCell::PointCloud::Facade::Clustering_4th_reg(
   double dis = diff.magnitude();
 
 
-  // geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+  geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
   // const auto [angle_u,angle_v,angle_w] = cluster_1.grouping()->wire_angles();
 
 
@@ -445,11 +445,11 @@ bool WireCell::PointCloud::Facade::Clustering_4th_reg(
       geo_point_t tempV5;
       double angle2 = tempV1.angle(U_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle2),0);
-      angle2 = tempV5.angle(drift_dir)/3.1415926*180.;
+      angle2 = tempV5.angle(drift_dir_abs)/3.1415926*180.;
       
       double angle3 = tempV1.angle(V_dir);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle3),0);
-      angle3 = tempV5.angle(drift_dir)/3.1415926*180.;
+      angle3 = tempV5.angle(drift_dir_abs)/3.1415926*180.;
       if (angle2<7.5 || angle3 < 7.5)
   	flag_prol = true;
 
