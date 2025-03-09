@@ -7,7 +7,7 @@
 //   -A infiles=nuselEval_5384_137_6852.root \
 //      clus/test/uboone-mabc.jsonnet
 //
-// The "kind" can be "live" or "both" (live and dead - the default).
+// The "kind" can be "live" or "both" (live and dead).
 
 
 local wc = import "wirecell.jsonnet";
@@ -59,6 +59,14 @@ local ub = {
                 "center",
             ],
             extra: [".*"] // want all the extra
+        }
+    },
+
+    detector_volumes : {
+        "type": "DetectorVolumes",
+        "name": "",
+        "data": {
+            "anodes": [wc.tn(a) for a in tools.anodes],
         }
     },
     
@@ -233,8 +241,9 @@ local ub = {
             anode: wc.tn(anode),
             face: 0,
             geom_helper: wc.tn(geom_helper),
+            detector_volumes: "DetectorVolumes",
         }
-    }, nin=2, nout=1, uses=[$.bs_live, $.bs_dead, geom_helper]),
+    }, nin=2, nout=1, uses=[$.bs_live, $.bs_dead, $.detector_volumes]),
 
     point_tree_source(livefn, deadfn) ::
         local livesrc = $.ClusterFileSource(livefn);
@@ -275,7 +284,6 @@ local ub = {
             outpath: pointtree_datapath,
             perf: true,
             bee_zip: beezip,
-            dump_json: false,   // true to produce summary of groupings in JSON for debugging.
             initial_index: 0,
             use_config_rse: true,  // Enable use of configured RSE
             runNo: 1,
@@ -283,11 +291,12 @@ local ub = {
             eventNo: 1,
             save_deadarea: true, 
             anode: wc.tn(anode),
+            detector_volumes: "DetectorVolumes",
             face: 0,            // FIXME: take an IAnodeFace!
             geom_helper: wc.tn(geom_helper),
             func_cfgs: [
-                 // {name: "clustering_test", detector_volumes: "DetectorVolumes"},
-                // {name: "clustering_ctpointcloud", detector_volumes: "DetectorVolumes"},
+                //{name: "clustering_test", detector_volumes: "DetectorVolumes"},
+                // {name: "clustering_ctpointcloud, "detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: "DetectorVolumes"},
@@ -306,7 +315,7 @@ local ub = {
                 {name: "clustering_retile", sampler: wc.tn(live_sampler), anode: wc.tn(anode), cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: "DetectorVolumes"},
             ],
         }
-    }, nin=1, nout=1, uses=[geom_helper, live_sampler, anode]),
+    }, nin=1, nout=1, uses=[geom_helper, live_sampler, anode, $.detector_volumes]),
 
     TensorFileSink(fname) :: pg.pnode({
         type: "TensorFileSink",
@@ -384,5 +393,5 @@ local graphs = {
 local extra_plugins = ["WireCellAux", "WireCellRoot", "WireCellClus"];
 
 // kind can be "live", "dead" or "both".
-function(infiles="uboone.root", beezip="bee.zip", kind="both", datapath=pointtree_datapath)
+function(infiles="uboone.root", beezip="bee.zip", kind="live", datapath=pointtree_datapath)
     ub.main(graphs[kind](infiles, beezip, datapath), "Pgrapher", extra_plugins)
