@@ -124,6 +124,22 @@ local clus (
         }
     },
 
+    local cluster_scope_filter_live = g.pnode({
+        type: "ClusterScopeFilter",
+        name: "csf-live-%s-%d"%[anode.name, face],
+        data: {
+            face_index: face,
+        }
+    }, nin=1, nout=1, uses=[]),
+
+    local cluster_scope_filter_dead = g.pnode({
+        type: "ClusterScopeFilter",
+        name: "csf-dead-%s-%d"%[anode.name, face],
+        data: {
+            face_index: face,
+        }
+    }, nin=1, nout=1, uses=[]),
+
     local ptb = g.pnode({
         type: "PointTreeBuilding",
         name: "%s-%d"%[anode.name, face],
@@ -140,6 +156,17 @@ local clus (
             detector_volumes: wc.tn(detector_volumes),
         }
     }, nin=2, nout=1, uses=[bs_live, bs_dead, detector_volumes]),
+
+    // local cluster2pct = g.intern(
+    //     innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
+    //     centernodes = [],
+    //     outnodes = [ptb],
+    //     edges = [
+    //         g.edge(cluster_scope_filter_live, ptb, 0, 0),
+    //         g.edge(cluster_scope_filter_dead, ptb, 0, 1)
+    //     ]
+    // ),
+    local cluster2pct = ptb,
 
     local mabc = g.pnode({
         type: "MultiAlgBlobClustering",
@@ -164,20 +191,20 @@ local clus (
             detector_volumes: wc.tn(detector_volumes),
             func_cfgs: [
                 {name: "clustering_test", detector_volumes: wc.tn(detector_volumes)},
-                {name: "clustering_live_dead", dead_live_overlap_offset: 2},
-                {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1},
-                {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false},
-                {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true},
-                {name: "clustering_parallel_prolong", length_cut: 35*wc.cm},
-                {name: "clustering_close", length_cut: 1.2*wc.cm},
-                {name: "clustering_extend_loop", num_try: 3},
-                {name: "clustering_separate", use_ctpc: true},
-                {name: "clustering_connect1"},
-                {name: "clustering_deghost"},
-                {name: "clustering_examine_x_boundary"},
-                {name: "clustering_protect_overclustering"},
-                {name: "clustering_neutrino"},
-                {name: "clustering_isolated"},
+                // {name: "clustering_live_dead", dead_live_overlap_offset: 2},
+                // {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1},
+                // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false},
+                // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true},
+                // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm},
+                // {name: "clustering_close", length_cut: 1.2*wc.cm},
+                // {name: "clustering_extend_loop", num_try: 3},
+                // {name: "clustering_separate", use_ctpc: true},
+                // {name: "clustering_connect1"},
+                // {name: "clustering_deghost"},
+                // {name: "clustering_examine_x_boundary"},
+                // {name: "clustering_protect_overclustering"},
+                // {name: "clustering_neutrino"},
+                // {name: "clustering_isolated"},
             ],
         }
     }, nin=1, nout=1, uses=[geom_helper]),
@@ -194,9 +221,9 @@ local clus (
 
     clus_pipe(dump=true) ::
     if dump then
-        g.pipeline([ptb, mabc, sink], "clus_pipe-%s-%d"%[anode.name, face])
+        g.pipeline([cluster2pct, mabc, sink], "clus_pipe-%s-%d"%[anode.name, face])
     else
-        g.pipeline([ptb, mabc], "clus_pipe-%s-%d"%[anode.name, face]),
+        g.pipeline([cluster2pct, mabc], "clus_pipe-%s-%d"%[anode.name, face]),
 };
 
 function () {
