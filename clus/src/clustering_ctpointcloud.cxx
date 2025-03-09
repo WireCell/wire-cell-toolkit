@@ -11,7 +11,7 @@ using namespace WireCell::PointCloud::Tree;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_grouping){
+void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_grouping, IDetectorVolumes::pointer dv){
 
     // test a few different functions and then print out ...
     std::cout << "Test CTPointCloud" << std::endl;
@@ -558,7 +558,7 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
             live_cluster->organize_path_points(points6,0.6*units::cm);
             std::cout << "Test: " << points6.size() << " " << points6.at(0) << " " << points6.at(points6.size()-1) << std::endl;
 
-            live_cluster->examine_graph(true);
+            live_cluster->examine_graph(dv, true);
         }
     }
 }

@@ -438,37 +438,49 @@ namespace WireCell::PointCloud::Facade {
     };
 
     // this is a function to test the implementation of CT point cloud ...
-    void clustering_ctpointcloud(Grouping& live_grouping);
+    void clustering_ctpointcloud(Grouping& live_grouping, const IDetectorVolumes::pointer dv);
     class ClusteringCTPointCloud {
        public:
         ClusteringCTPointCloud(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_ctpointcloud(live_clusters);
+            clustering_ctpointcloud(live_clusters, m_dv);
         }
 
        private:
+           IDetectorVolumes::pointer m_dv;
     };
 
 
     // this is a function to test the implementation of examine bundles ...
-    void clustering_examine_bundles(Grouping& live_grouping, const bool use_ctpc);
+    void clustering_examine_bundles(Grouping& live_grouping, const IDetectorVolumes::pointer dv, const bool use_ctpc);
     class ClusteringExamineBundles {
        public:
         ClusteringExamineBundles(const WireCell::Configuration& config)
         {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_examine_bundles(live_clusters, use_ctpc_);
+            clustering_examine_bundles(live_clusters, m_dv, use_ctpc_);
         }
 
        private:
         double use_ctpc_{true};
+        IDetectorVolumes::pointer m_dv;
     };
 
 

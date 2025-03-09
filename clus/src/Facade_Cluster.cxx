@@ -184,7 +184,7 @@ geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, 
     geo_point_t orig_dir = dir;
     orig_dir = orig_dir.norm();
     int counter = 0;
-    geo_point_t drift_dir(1, 0, 0);
+    geo_point_t drift_dir_abs(1, 0, 0);
 
     double old_dis = 15 * units::cm;
 
@@ -210,10 +210,10 @@ geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, 
 
         bool flag_para = false;
 
-        double angle_1 = fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) * 180. / 3.1415926;
-        double angle_2 = fabs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-        double angle_3 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-        double angle_4 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        double angle_1 = fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) * 180. / 3.1415926;
+        double angle_2 = fabs(dir.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        double angle_3 = fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        double angle_4 = fabs(dir3.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
         if (angle_1 < 5 && angle_2 < 5 || angle_3 < 2.5 && angle_4 < 2.5) flag_para = true;
 
@@ -305,10 +305,10 @@ geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, 
                 dir3.set(old_wcp.x() - orig_point.x(), old_wcp.y() - orig_point.y(), old_wcp.z() - orig_point.z());
 
                 flag_para = false;
-                double angle_1 = fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) * 180. / 3.1415926;
-                double angle_2 = fabs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-                double angle_3 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-                double angle_4 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+                double angle_1 = fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) * 180. / 3.1415926;
+                double angle_2 = fabs(dir.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
+                double angle_3 = fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
+                double angle_4 = fabs(dir3.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
                 if (angle_1 < 7.5 && angle_2 < 7.5 || angle_3 < 5 && angle_4 < 5 && (angle_1 < 12.5 && angle_2 < 12.5))
                     flag_para = true;
@@ -2739,19 +2739,54 @@ void Cluster::Connect_graph() const{
 }
 
 
-void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const {
+void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::pointer dv, const bool use_ctpc) const {
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = grouping()->wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    }
+
     // Constants for wire angles
     const auto& tp = grouping()->get_params();
     //std::cout << "Test: face " << tp.face << std::endl;
 
     // const double pi = 3.141592653589793;
     // this drift direction is only used to calculate isochronous case, so this is OK ...
-    const geo_vector_t drift_dir(1, 0, 0); 
-    
+    const geo_vector_t drift_dir_abs(1, 0, 0); 
+
+
+    // need to understand the points before implementing the angles ...
     const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles();
     const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
     const geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
     const geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
+
 
     // Form connected components
     std::vector<int> component(num_vertices(*m_graph));
@@ -2931,22 +2966,22 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1),
                         0);
-                angle1 = tempV5.angle(drift_dir);
+                angle1 = tempV5.angle(drift_dir_abs);
 
                 double angle2 = tempV1.angle(V_dir);
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle2),
                         0);
-                angle2 = tempV5.angle(drift_dir);
+                angle2 = tempV5.angle(drift_dir_abs);
 
                 double angle1p = tempV1.angle(W_dir);
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1p),
                         0); 
-                angle1p = tempV5.angle(drift_dir);
+                angle1p = tempV5.angle(drift_dir_abs);
 
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
-                double angle3 = tempV5.angle(drift_dir);
+                double angle3 = tempV5.angle(drift_dir_abs);
 
                 bool flag_strong_check = true;
 
@@ -2961,8 +2996,8 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                     geo_vector_t tempV2 = vhough_transform(p1, 15*units::cm);
                     geo_vector_t tempV3 = vhough_transform(p2, 15*units::cm);
                     
-                    if (fabs(tempV2.angle(drift_dir) - perp_angle) < perp_angle_tol &&
-                        fabs(tempV3.angle(drift_dir) - perp_angle) < perp_angle_tol) {
+                    if (fabs(tempV2.angle(drift_dir_abs) - perp_angle) < perp_angle_tol &&
+                        fabs(tempV3.angle(drift_dir_abs) - perp_angle) < perp_angle_tol) {
                         flag_strong_check = false;
                     }
                 }
@@ -3060,22 +3095,22 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
-                angle1 = tempV5.angle(drift_dir);
+                angle1 = tempV5.angle(drift_dir_abs);
                 
                 double angle2 = tempV1.angle(V_dir);
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
-                angle2 = tempV5.angle(drift_dir);
+                angle2 = tempV5.angle(drift_dir_abs);
                 
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
-                double angle3 = tempV5.angle(drift_dir);
+                double angle3 = tempV5.angle(drift_dir_abs);
                 
                 double angle1p = tempV1.angle(W_dir);
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
-                angle1p = tempV5.angle(drift_dir);
+                angle1p = tempV5.angle(drift_dir_abs);
 
                 const double pi = 3.141592653589793;
                 if (fabs(angle3 - pi/2) < 10.0/180.0*pi || 
@@ -3136,22 +3171,22 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
-                angle1 = tempV5.angle(drift_dir);
+                angle1 = tempV5.angle(drift_dir_abs);
 
                 double angle2 = tempV1.angle(V_dir);
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
-                angle2 = tempV5.angle(drift_dir);
+                angle2 = tempV5.angle(drift_dir_abs);
 
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
-                double angle3 = tempV5.angle(drift_dir);
+                double angle3 = tempV5.angle(drift_dir_abs);
 
                 double angle1p = tempV1.angle(W_dir);
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
-                angle1p = tempV5.angle(drift_dir);
+                angle1p = tempV5.angle(drift_dir_abs);
 
                 const double pi = 3.141592653589793;
                 bool is_parallel = fabs(angle3 - pi/2) < 10.0/180.0*pi || 
@@ -3290,7 +3325,7 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
 
 
 // In Facade_Cluster.cxx
-std::vector<int> Cluster::examine_graph(const bool use_ctpc) const 
+std::vector<int> Cluster::examine_graph(const IDetectorVolumes::pointer dv, const bool use_ctpc) const 
 {
     // Create new graph
     if (m_graph != nullptr) {
@@ -3303,7 +3338,7 @@ std::vector<int> Cluster::examine_graph(const bool use_ctpc) const
     Establish_close_connected_graph();
     
     // Connect using overclustering protection (not easy to debug ...)
-    Connect_graph_overclustering_protection(use_ctpc); 
+    Connect_graph_overclustering_protection(dv, use_ctpc); 
     
     // Find connected components
     std::vector<int> component(num_vertices(*m_graph));

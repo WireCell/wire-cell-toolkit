@@ -280,8 +280,8 @@ namespace WireCell::PointCloud::Facade {
         /// @attention some distance-based cuts
         void Connect_graph(const bool use_ctpc) const;
         void Connect_graph() const;
-        void Connect_graph_overclustering_protection(const bool use_ctpc) const;
-        std::vector<int> examine_graph(const bool use_ctpc = true) const;
+        void Connect_graph_overclustering_protection(const IDetectorVolumes::pointer dv, const bool use_ctpc) const;
+        std::vector<int> examine_graph(const IDetectorVolumes::pointer dv, const bool use_ctpc = true) const;
 
         ///
         void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true) const;

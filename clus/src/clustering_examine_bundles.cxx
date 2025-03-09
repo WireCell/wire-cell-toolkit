@@ -18,7 +18,7 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
-void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping,
+void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping, const IDetectorVolumes::pointer dv ,
     const bool use_ctpc)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
@@ -63,7 +63,7 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
         // currently reset the cc component (todo: find the main component)
 
         // do the examine graph
-        auto b2groupid = live_clusters.at(i)->examine_graph(true);
+        auto b2groupid = live_clusters.at(i)->examine_graph(dv, true);
         
         bool flag_largest = false;
         // Compare old and new cluster groupings
