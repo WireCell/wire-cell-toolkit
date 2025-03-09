@@ -2744,6 +2744,9 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
     const auto& wpids = grouping()->wpids();
     // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::map<WirePlaneId, geo_point_t> wpid_U_dir;
+    std::map<WirePlaneId, geo_point_t> wpid_V_dir;
+    std::map<WirePlaneId, geo_point_t> wpid_W_dir;
     std::set<int> apas;
     for (const auto& wpid : wpids) {
         int apa = wpid.apa();
@@ -2770,6 +2773,9 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
         wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+        wpid_U_dir[wpid] = geo_point_t(0, cos(angle_u), sin(angle_u));
+        wpid_V_dir[wpid] = geo_point_t(0, cos(angle_v), sin(angle_v));
+        wpid_W_dir[wpid] = geo_point_t(0, cos(angle_w), sin(angle_w));
     }
 
     // Constants for wire angles
@@ -2779,7 +2785,6 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
     // const double pi = 3.141592653589793;
     // this drift direction is only used to calculate isochronous case, so this is OK ...
     const geo_vector_t drift_dir_abs(1, 0, 0); 
-
 
     // need to understand the points before implementing the angles ...
     const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles();

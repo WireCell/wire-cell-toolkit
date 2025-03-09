@@ -287,7 +287,7 @@ local ub = {
             geom_helper: wc.tn(geom_helper),
             func_cfgs: [
                  // {name: "clustering_test", detector_volumes: "DetectorVolumes"},
-                // {name: "clustering_ctpointcloud"},
+                // {name: "clustering_ctpointcloud", detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: "DetectorVolumes"},
@@ -302,7 +302,7 @@ local ub = {
             //               {name: "clustering_protect_overclustering"},
             //               {name: "clustering_neutrino", detector_volumes: "DetectorVolumes"},
             //               {name: "clustering_isolated", detector_volumes: "DetectorVolumes"},
-                {name: "clustering_examine_bundles"},
+                {name: "clustering_examine_bundles", detector_volumes: "DetectorVolumes"},
                 {name: "clustering_retile", sampler: wc.tn(live_sampler), anode: wc.tn(anode), cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: "DetectorVolumes"},
             ],
         }
