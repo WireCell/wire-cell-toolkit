@@ -175,6 +175,12 @@ const Tree::ScopedBase::selections_t& Tree::ScopedBase::selections() const
 //
 
 
+bool Tree::Points::has_pc(const std::string& name) const
+{
+    auto it = m_lpcs.find(name);
+    return it != m_lpcs.end();
+}
+
 const Tree::pointcloud_t& Tree::Points::local_pc(const std::string& name,
                                                  const pointcloud_t& defpc) const
 {
