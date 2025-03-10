@@ -13,6 +13,7 @@ WIRECELL_FACTORY(PointTreeMerging, WireCell::Clus::PointTreeMerging,
 
 using namespace WireCell;
 using namespace WireCell::Clus;
+using namespace WireCell::PointCloud::Tree;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 
@@ -50,6 +51,29 @@ void Clus::PointTreeMerging::finalize()
 {
 }
 
+static void merge_pct(Points::node_t* tgt, Points::node_t* src)
+{
+    if (!src) {
+        return;
+    }
+
+    // merge local pcs for root node
+    auto tgt_pc = tgt->value.local_pcs();
+    for (const auto& src_pc : src->value.local_pcs()) {
+        auto name = src_pc.first;
+        if (tgt_pc.find(name) == tgt_pc.end()) {
+            tgt_pc.emplace(name, src_pc.second);
+        } else {
+            auto& tgt_pcds = tgt_pc[name];
+            tgt_pcds.append(src_pc.second);
+        }
+    }
+
+    // merge children
+    bool notify_value = true;
+    tgt->take_children(*src, notify_value);
+}
+
 bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointer& outts)
 {
     outts = nullptr;
@@ -76,20 +100,33 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
 
     const int ident = invec[0]->ident();
 
-
-
-
+    // input preparation
     std::string inpath = m_inpath;
     if (inpath.find("%") != std::string::npos) {
         inpath = String::format(inpath, ident);
     }
     auto root_live = as_pctree(*invec[0]->tensors(), inpath + "/live");
     if (!root_live) {
-        log->error("Failed to get point cloud tree from \"{}\"", inpath);
+        log->error("Failed to get point cloud tree from \"{}\"", inpath + "/live");
         return false;
     }
     auto root_dead = as_pctree(*invec[0]->tensors(), inpath + "/dead");
+    if (!root_dead) {
+        log->error("Failed to get point cloud tree from \"{}\"", inpath + "/dead");
+        return false;
+    }
 
+    // merge
+    for (size_t i = 1; i < invec.size(); ++i) {
+        if (!invec[i]) {
+            raise<ValueError>("missing input tensor %d", i);
+        }
+        merge_pct(root_live.get(), as_pctree(*invec[i]->tensors(), inpath + "/live").get());
+        merge_pct(root_dead.get(), as_pctree(*invec[i]->tensors(), inpath + "/dead").get());
+    }
+
+
+    // output
     std::string outpath = m_outpath;
     if (outpath.find("%") != std::string::npos) {
         outpath = String::format(outpath, ident);
