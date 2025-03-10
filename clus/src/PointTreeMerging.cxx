@@ -133,11 +133,11 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
     }
     auto outtens = as_tensors(*root_live.get(), outpath + "/live");
     auto outtens_dead = as_tensors(*root_dead.get(), outpath + "/dead");
+    outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
     for(const auto& ten : outtens) {
-        log->debug("tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
+        log->debug("outtens {} {}", ten->metadata()["datapath"].asString(), ten->size());
         break;
     }
-    outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
     outts = as_tensorset(outtens, ident);
 
     root_live = nullptr;

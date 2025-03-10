@@ -6,23 +6,107 @@ local f = import 'pgrapher/common/funcs.jsonnet';
 // local tools = tools_maker(params({}));
 // local anodes = tools.anodes;
 
-local clus (
-    anode,
-    face = 0,
-    drift_speed = 1.6 * wc.mm / wc.us,
-    time_offset = 0 * wc.us,
-    bee_dir = "data",
-    bee_zip = "mabc.zip",
-    initial_index = "0",
-    initial_runNo = "1",
-    initial_subRunNo = "1",
-    initial_eventNo = "1") =
-{
-    local index = std.parseInt(initial_index),
 
-    local LrunNo = std.parseInt(initial_runNo),
-    local LsubRunNo = std.parseInt(initial_subRunNo),
-    local LeventNo  = std.parseInt(initial_eventNo),
+local time_offset = 0 * wc.us;
+local drift_speed = 1.6 * wc.mm / wc.us;
+local bee_dir = "data";
+local bee_zip = "mabc.zip";
+
+local initial_index = "0";
+local initial_runNo = "1";
+local initial_subRunNo = "1";
+local initial_eventNo = "1";
+local index = std.parseInt(initial_index);
+local LrunNo = std.parseInt(initial_runNo);
+local LsubRunNo = std.parseInt(initial_subRunNo);
+local LeventNo  = std.parseInt(initial_eventNo);
+    
+local geom_helper = {
+    type: "SimpleClusGeomHelper",
+    name: "uboone",
+    data: {
+        a0f0: {
+            face: 0,
+            pitch_u: 3 * wc.mm,
+            pitch_v: 3 * wc.mm,
+            pitch_w: 3 * wc.mm,
+            angle_u: 1.0472,    // 60 degrees
+            angle_v: -1.0472,   // -60 degrees
+            angle_w: 0,         // 0 degrees
+            drift_speed: drift_speed*1,
+            tick: 0.5 * wc.us,  // 0.5 mm per tick
+            tick_drift: self.drift_speed * self.tick,
+            time_offset: time_offset,
+            nticks_live_slice: 4,
+            FV_xmin: 1 * wc.cm,
+            FV_xmax: 255 * wc.cm,
+            FV_ymin: -99.5 * wc.cm,
+            FV_ymax: 101.5 * wc.cm,
+            FV_zmin: 15 * wc.cm,
+            FV_zmax: 1022 * wc.cm,
+            FV_xmin_margin: 2 * wc.cm,
+            FV_xmax_margin: 2 * wc.cm,
+            FV_ymin_margin: 2.5 * wc.cm,
+            FV_ymax_margin: 2.5 * wc.cm,
+            FV_zmin_margin: 3 * wc.cm,
+            FV_zmax_margin: 3 * wc.cm
+        },
+        a1f0: self.a0f0 {},
+        a2f0: self.a0f0 {},
+        a3f0: self.a0f0 {},
+        a4f0: self.a0f0 {},
+        a5f0: self.a0f0 {},
+        a6f0: self.a0f0 {},
+        a7f0: self.a0f0 {},
+        a8f0: self.a0f0 {},
+        a9f0: self.a0f0 {},
+        a10f0: self.a0f0 {},
+        a11f0: self.a0f0 {},
+        a12f0: self.a0f0 {},
+        a13f0: self.a0f0 {},
+        a14f0: self.a0f0 {},
+        a15f0: self.a0f0 {},
+        a16f0: self.a0f0 {},
+        a17f0: self.a0f0 {},
+        a18f0: self.a0f0 {},
+        a19f0: self.a0f0 {},
+        a20f0: self.a0f0 {},
+        a21f0: self.a0f0 {},
+        a22f0: self.a0f0 {},
+        a23f0: self.a0f0 {},
+        a0f1: self.a0f0 {face: 1},
+        a1f1: self.a0f0 {face: 1},
+        a2f1: self.a0f0 {face: 1},
+        a3f1: self.a0f0 {face: 1},
+        a4f1: self.a0f0 {face: 1},
+        a5f1: self.a0f0 {face: 1},
+        a6f1: self.a0f0 {face: 1},
+        a7f1: self.a0f0 {face: 1},
+        a8f1: self.a0f0 {face: 1},
+        a9f1: self.a0f0 {face: 1},
+        a10f1: self.a0f0 {face: 1},
+        a11f1: self.a0f0 {face: 1},
+        a12f1: self.a0f0 {face: 1},
+        a13f1: self.a0f0 {face: 1},
+        a14f1: self.a0f0 {face: 1},
+        a15f1: self.a0f0 {face: 1},
+        a16f1: self.a0f0 {face: 1},
+        a17f1: self.a0f0 {face: 1},
+        a18f1: self.a0f0 {face: 1},
+        a19f1: self.a0f0 {face: 1},
+        a20f1: self.a0f0 {face: 1},
+        a21f1: self.a0f0 {face: 1},
+        a22f1: self.a0f0 {face: 1},
+        a23f1: self.a0f0 {face: 1},
+    }
+};
+
+local clus_per_face (
+    anode,
+    face,
+    dump = true,
+    ) =
+{
 
     // Note, the "sampler" must be unique to the "sampling".
     local bs_live = {
@@ -62,65 +146,9 @@ local clus (
     local detector_volumes = 
     {
         "type": "DetectorVolumes",
-        "name": "dv-%s"%[anode.name],
+        "name": "dv-%s-%d"%[anode.name, face],
         "data": {
             "anodes": [wc.tn(anode)],
-        }
-    },
-    
-    local geom_helper = {
-        type: "SimpleClusGeomHelper",
-        name: "uboone",
-        data: {
-            a0f0: {
-                face: 0,
-                pitch_u: 3 * wc.mm,
-                pitch_v: 3 * wc.mm,
-                pitch_w: 3 * wc.mm,
-                angle_u: 1.0472,    // 60 degrees
-                angle_v: -1.0472,   // -60 degrees
-                angle_w: 0,         // 0 degrees
-                drift_speed: drift_speed*1,
-                tick: 0.5 * wc.us,  // 0.5 mm per tick
-                tick_drift: self.drift_speed * self.tick,
-                time_offset: time_offset,
-                nticks_live_slice: 4,
-                FV_xmin: 1 * wc.cm,
-                FV_xmax: 255 * wc.cm,
-                FV_ymin: -99.5 * wc.cm,
-                FV_ymax: 101.5 * wc.cm,
-                FV_zmin: 15 * wc.cm,
-                FV_zmax: 1022 * wc.cm,
-                FV_xmin_margin: 2 * wc.cm,
-                FV_xmax_margin: 2 * wc.cm,
-                FV_ymin_margin: 2.5 * wc.cm,
-                FV_ymax_margin: 2.5 * wc.cm,
-                FV_zmin_margin: 3 * wc.cm,
-                FV_zmax_margin: 3 * wc.cm
-            },
-            a1f0: self.a0f0 {},
-            a2f0: self.a0f0 {},
-            a3f0: self.a0f0 {},
-            a4f0: self.a0f0 {},
-            a5f0: self.a0f0 {},
-            a6f0: self.a0f0 {},
-            a7f0: self.a0f0 {},
-            a8f0: self.a0f0 {},
-            a9f0: self.a0f0 {},
-            a10f0: self.a0f0 {},
-            a11f0: self.a0f0 {},
-            a12f0: self.a0f0 {},
-            a13f0: self.a0f0 {},
-            a14f0: self.a0f0 {},
-            a15f0: self.a0f0 {},
-            a16f0: self.a0f0 {},
-            a17f0: self.a0f0 {},
-            a18f0: self.a0f0 {},
-            a19f0: self.a0f0 {},
-            a20f0: self.a0f0 {},
-            a21f0: self.a0f0 {},
-            a22f0: self.a0f0 {},
-            a23f0: self.a0f0 {},
         }
     },
 
@@ -209,19 +237,9 @@ local clus (
         }
     }, nin=1, nout=1, uses=[geom_helper]),
 
-    local pcmerging = g.pnode({
-        type: "PointTreeMerging",
-        name: "%s-%d"%[anode.name, face],
-        data:  {
-            multiplicity: 1,
-            inpath: "pointtrees/%d",
-            outpath: "pointtrees/%d",
-        }
-    }, nin=1, nout=1),
-
     local sink = g.pnode({
         type: "TensorFileSink",
-        name: "%s-%d"%[anode.name, face],
+        name: "clus_per_face-%s-%d"%[anode.name, face],
         data: {
             outname: "clus-%s-face%d.tar.gz"%[anode.name, face],
             prefix: "clustering_", // json, numpy, dummy
@@ -229,13 +247,128 @@ local clus (
         }
     }, nin=1, nout=0),
 
-    clus_pipe(dump=true) ::
-    if dump then
-        g.pipeline([cluster2pct, pcmerging, mabc, sink], "clus_pipe-%s-%d"%[anode.name, face])
-    else
-        g.pipeline([cluster2pct, mabc], "clus_pipe-%s-%d"%[anode.name, face]),
-};
+    local end = if dump
+    then g.pipeline([mabc, sink])
+    else g.pipeline([mabc]),
+
+    ret :: g.pipeline([cluster2pct, end], "clus_per_face-%s-%d"%[anode.name, face])
+}.ret;
+
+local clus_per_apa (
+    anode,
+    dump = true,
+    ) =
+{
+    local cfout_live = g.pnode({
+        type:'ClusterFanout',
+        name: 'clus_per_apa-cfout_live-%s'%anode.name,
+        data: {
+            multiplicity: 2
+        }}, nin=1, nout=2),
+    
+    local cfout_dead = g.pnode({
+        type:'ClusterFanout',
+        name: 'clus_per_apa-cfout_dead-%s'%anode.name,
+        data: {
+            multiplicity: 2
+        }}, nin=1, nout=2),
+
+    local per_face_pipes = [
+        clus_per_face(anode, face=0, dump=false),
+        clus_per_face(anode, face=1, dump=false),
+    ],
+
+    local pcmerging = g.pnode({
+        type: "PointTreeMerging",
+        name: "%s"%[anode.name],
+        data:  {
+            multiplicity: 2,
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+        }
+    }, nin=2, nout=1),
+
+    local detector_volumes = 
+    {
+        "type": "DetectorVolumes",
+        "name": "dv-%s"%[anode.name],
+        "data": {
+            "anodes": [wc.tn(anode)],
+        }
+    },
+
+    local mabc = g.pnode({
+        type: "MultiAlgBlobClustering",
+        name: "clus_per_apa-%s"%[anode.name],
+        data:  {
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+            // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
+            perf: true,
+            bee_dir: bee_dir, // "data/0/0", // not used
+            bee_zip: "mabc-%s.zip"%[anode.name],
+            bee_detector: "sbnd",
+            initial_index: index,   // New RSE configuration
+            use_config_rse: true,  // Enable use of configured RSE
+            runNo: LrunNo,
+            subRunNo: LsubRunNo,
+            eventNo: LeventNo,
+            save_deadarea: true, 
+            anode: wc.tn(anode),
+            // face: face,
+            geom_helper: wc.tn(geom_helper),
+            detector_volumes: wc.tn(detector_volumes),
+            func_cfgs: [
+                {name: "clustering_test", detector_volumes: wc.tn(detector_volumes)},
+                // {name: "clustering_live_dead", dead_live_overlap_offset: 2},
+                // {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1},
+                // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false},
+                // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true},
+                // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm},
+                // {name: "clustering_close", length_cut: 1.2*wc.cm},
+                // {name: "clustering_extend_loop", num_try: 3},
+                // {name: "clustering_separate", use_ctpc: true},
+                // {name: "clustering_connect1"},
+                // {name: "clustering_deghost"},
+                // {name: "clustering_examine_x_boundary"},
+                // {name: "clustering_protect_overclustering"},
+                // {name: "clustering_neutrino"},
+                // {name: "clustering_isolated"},
+            ],
+        }
+    }, nin=1, nout=1, uses=[geom_helper, detector_volumes]),
+
+    local sink = g.pnode({
+        type: "TensorFileSink",
+        name: "clus_per_apa-%s"%[anode.name],
+        data: {
+            outname: "trash-%s.tar.gz"%[anode.name],
+            prefix: "clustering_", // json, numpy, dummy
+            dump_mode: true,
+        }
+    }, nin=1, nout=0),
+
+    local end = if dump
+    then g.pipeline([mabc, sink])
+    else g.pipeline([mabc]),
+
+    ret :: g.intern(
+        innodes = [cfout_live, cfout_dead],
+        centernodes = per_face_pipes + [pcmerging],
+        outnodes = [end],
+        edges = [
+            g.edge(cfout_live, per_face_pipes[0], 0, 0),
+            g.edge(cfout_dead, per_face_pipes[0], 0, 1),
+            g.edge(cfout_live, per_face_pipes[1], 1, 0),
+            g.edge(cfout_dead, per_face_pipes[1], 1, 1),
+            g.edge(per_face_pipes[0], pcmerging, 0, 0),
+            g.edge(per_face_pipes[1], pcmerging, 0, 1),
+            g.edge(pcmerging, end, 0, 0),
+        ]
+    ),
+}.ret;
 
 function () {
-    per_volume(anode, face=0, dump=true) :: clus(anode, face=face).clus_pipe(dump),
+    per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump),
+    per_apa(anode, dump=true) :: clus_per_apa(anode),
 }
