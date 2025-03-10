@@ -209,6 +209,16 @@ local clus (
         }
     }, nin=1, nout=1, uses=[geom_helper]),
 
+    local pcmerging = g.pnode({
+        type: "PointTreeMerging",
+        name: "%s-%d"%[anode.name, face],
+        data:  {
+            multiplicity: 1,
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+        }
+    }, nin=1, nout=1),
+
     local sink = g.pnode({
         type: "TensorFileSink",
         name: "%s-%d"%[anode.name, face],
@@ -221,7 +231,7 @@ local clus (
 
     clus_pipe(dump=true) ::
     if dump then
-        g.pipeline([cluster2pct, mabc, sink], "clus_pipe-%s-%d"%[anode.name, face])
+        g.pipeline([cluster2pct, pcmerging, mabc, sink], "clus_pipe-%s-%d"%[anode.name, face])
     else
         g.pipeline([cluster2pct, mabc], "clus_pipe-%s-%d"%[anode.name, face]),
 };
