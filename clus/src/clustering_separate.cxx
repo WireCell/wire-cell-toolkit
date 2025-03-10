@@ -949,7 +949,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     // }
     auto* grouping = cluster->grouping();
 
-    const auto& tp = grouping->get_params();
+    // const auto& tp = grouping->get_params();
 
     auto temp_cloud = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
 

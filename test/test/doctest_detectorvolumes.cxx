@@ -10,6 +10,8 @@
 #include "WireCellIface/IFiducial.h"
 #include "WireCellIface/IConfigurable.h"
 
+#include <chrono>
+
 using namespace WireCell;
 using spdlog::debug;
 
@@ -174,7 +176,7 @@ std::string json_config = R"(
 ]
 )";
 
-TEST_CASE("test detectorvolumes")
+TEST_CASE("detectorvolumes")
 {
     PluginManager& pm = PluginManager::instance();
     // fixme, we need to move anodeplane, etc into aux
@@ -223,11 +225,37 @@ TEST_CASE("test detectorvolumes")
 
 //	std::cout << "haha " << fv->contained(Point(-3600*units::mm, 100*units::mm, 100*units::mm)) << " " << dv->is_in_overall_volume(Point(-3600*units::mm, 100*units::mm, 100*units::mm)) << std::endl;
 
-   // check the overall contaiment function
-   // Not inside the active fiducial volume
-   CHECK(true == dv->is_in_overall_volume(Point(-3600*units::mm, 100*units::mm, 100*units::mm)));
    // inside the overall detector volume
    CHECK(false == fv->contained(Point(-3600*units::mm, 100*units::mm, 100*units::mm)) );	
+
+    {
+        const size_t ncalls = 100000;
+
+        Point outside(-3400*units::mm, 0, 0);
+        auto t0 = std::chrono::steady_clock::now();
+        for (size_t count = 0; count < ncalls; ++count) {
+            fv->contained(outside);
+        }
+        auto t1 = std::chrono::steady_clock::now();
+
+        Point inside(-3500*units::mm, 100*units::mm, 100*units::mm);
+        for (size_t count = 0; count < ncalls; ++count) {
+            fv->contained(inside);
+        }
+        auto t2 = std::chrono::steady_clock::now();
+
+        std::chrono::duration<double> dt1 = t1-t0;
+        std::chrono::duration<double> dt2 = t2-t1;
+
+        debug("n={}: out={}s {}Hz, in={}s {}Hz",
+              ncalls,
+              dt1.count(), ncalls/dt1.count(),
+              dt2.count(), ncalls/dt2.count());
+
+        // Original implementation with no compiler optimization:
+        // n=100000: out=0.110162781s  907747.5994365102Hz, in=0.1092375s    915436.548804211Hz
+        // n=100000: out=0.005630255s 17761184.884165995Hz, in=0.020494938s 4879253.599108228Hz
+    }
 
     auto wpid_u = wpid.to_u();
     CHECK(wpid_u.index() == 0);
@@ -266,6 +294,50 @@ TEST_CASE("test detectorvolumes")
             CHECK(have == want);
         }
 
+    }
+
+}
+
+TEST_CASE("envfiducial") {
+    PluginManager& pm = PluginManager::instance();
+    pm.add("WireCellSigProc");
+    pm.add("WireCellGen");
+    pm.add("WireCellAux");
+    
+    // This test "cheats a little by reusing the same config as for testing
+    // DetectorVolumes but change the type EnvFiducial.  The extra "metadata"
+    // attribute that DetectorVolumes accepts is not honored and ignored by
+    // EnvFiducial.
+    auto cfg = Persist::loads(json_config);
+    cfg[cfg.size()-1]["type"] = "EnvFiducial";
+
+    for (const auto& c : cfg) {
+        auto type = get<std::string>(c, "type");
+        auto name = get<std::string>(c, "name");
+        auto iface = Factory::lookup<Interface>(type, name);
+    }
+    for (auto c : cfg) {
+        auto type = get<std::string>(c, "type");
+        auto name = get<std::string>(c, "name");
+        auto cfgobj = Factory::find_maybe<IConfigurable>(type, name);
+        if (!cfgobj) {
+            continue;
+        }
+        Configuration cfg = cfgobj->default_configuration();
+        cfg = update(cfg, c["data"]);
+        cfgobj->configure(cfg);  // throws
+    }
+
+    auto fv = Factory::lookup_tn<IFiducial>("EnvFiducial");
+    REQUIRE(fv);
+
+    // EnvFiducial bounds: [(-4689.2 76.1 3.3497) --> (4689.2 6060 6944.58)]
+    {
+        CHECK(! fv->contained(Point(0,0,0)));
+        CHECK(! fv->contained(Point(10,10,10)));
+        CHECK(  fv->contained(Point(0, 100, 10)));
+        CHECK(! fv->contained(Point(-5000, 100, 10)));
+        CHECK(! fv->contained(Point( 5000, 100, 10)));
     }
 
 }

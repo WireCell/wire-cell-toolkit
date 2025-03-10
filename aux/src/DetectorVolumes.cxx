@@ -22,7 +22,7 @@ class DetectorVolumes : public IDetectorVolumes, public IFiducial, public IConfi
 
 public:
 
-    DetectorVolumes() : m_spatial_initialized(false) {}
+    DetectorVolumes()  {}
     virtual ~DetectorVolumes() {}
 
     virtual Configuration default_configuration() const {
@@ -63,7 +63,6 @@ public:
 
     virtual void configure(const Configuration& cfg) {
         m_faces.clear();
-        m_spatial_initialized = false;
         
         // Reset spatial structures
         m_overall_bb = BoundingBox();
@@ -93,15 +92,11 @@ public:
 
                 // Update overall bounding box with this face's sensitive volume
                 BoundingBox face_bb = iface->sensitive();
-                if (!face_bb.empty()) {
-                    if (m_overall_bb.empty()) {
-                        m_overall_bb = face_bb;
-                    } else {
-                        m_overall_bb = m_overall_bb.unite(face_bb);
-                    }
-                }
+                m_overall_bb(face_bb.bounds());
             }
         }
+        initialize_spatial_queries();
+
         m_md = cfg["metadata"];
     }
 
@@ -197,8 +192,6 @@ public:
 
     // Initialize spatial data structures for efficient queries
     virtual bool initialize_spatial_queries() {
-        if (m_spatial_initialized) return true;
-        if (m_overall_bb.empty() || m_faces.empty()) return false;
 
         // Calculate grid dimensions based on overall bounding box
         Point min_point = m_overall_bb.bounds().first;
@@ -320,31 +313,69 @@ public:
             }
         }
         
-        m_spatial_initialized = true;
         return true;
     }
 
     // Optimized implementation using spatial grid
     virtual WirePlaneId contained_by(const Point& point) const {
         // Quick check if point is in overall volume first
-        if (!is_in_overall_volume(point)) {
+        if (!m_overall_bb.inside(point)) {
             return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
         }
         
-        // If spatial data structures are initialized, use them for fast lookup
-        if (m_spatial_initialized) {
-            // Calculate grid cell indices for the point
-            int i = static_cast<int>((point.x() - m_grid_origin.x()) / m_grid_size_x);
-            int j = static_cast<int>((point.y() - m_grid_origin.y()) / m_grid_size_y);
-            int k = static_cast<int>((point.z() - m_grid_origin.z()) / m_grid_size_z);
+        // Calculate grid cell indices for the point
+        int i = static_cast<int>((point.x() - m_grid_origin.x()) / m_grid_size_x);
+        int j = static_cast<int>((point.y() - m_grid_origin.y()) / m_grid_size_y);
+        int k = static_cast<int>((point.z() - m_grid_origin.z()) / m_grid_size_z);
             
-            // Check if indices are within grid bounds
-            if (i >= 0 && i < static_cast<int>(m_grid.size()) &&
-                j >= 0 && j < static_cast<int>(m_grid[0].size()) &&
-                k >= 0 && k < static_cast<int>(m_grid[0][0].size())) {
+        // Check if indices are within grid bounds
+        if (i >= 0 && i < static_cast<int>(m_grid.size()) &&
+            j >= 0 && j < static_cast<int>(m_grid[0].size()) &&
+            k >= 0 && k < static_cast<int>(m_grid[0][0].size())) {
                 
-                // Check faces in this grid cell
-                for (int wpident : m_grid[i][j][k]) {
+            // Check faces in this grid cell
+            for (int wpident : m_grid[i][j][k]) {
+                auto it = m_faces.find(wpident);
+                if (it != m_faces.end()) {
+                    auto bb = it->second->sensitive();
+                    if (bb.inside(point)) {
+                        return WirePlaneId(wpident);
+                    }
+                }
+            }
+                
+            // Special handling for points near cell boundaries
+            // Check neighboring cells if we're close to an edge
+            double eps = 1e-6*units::m;  // Small distance from boundary to check neighbors
+            std::vector<std::tuple<int,int,int>> neighbors;
+                
+            // Check if we're close to x boundaries
+            double x_frac = fmod((point.x() - m_grid_origin.x()) / m_grid_size_x, 1.0);
+            if (x_frac < eps || x_frac > (1.0 - eps)) {
+                // Add x-neighbors
+                if (i > 0) neighbors.push_back({i-1, j, k});
+                if (i < static_cast<int>(m_grid.size()) - 1) neighbors.push_back({i+1, j, k});
+            }
+                
+            // Check if we're close to y boundaries
+            double y_frac = fmod((point.y() - m_grid_origin.y()) / m_grid_size_y, 1.0);
+            if (y_frac < eps || y_frac > (1.0 - eps)) {
+                // Add y-neighbors
+                if (j > 0) neighbors.push_back({i, j-1, k});
+                if (j < static_cast<int>(m_grid[0].size()) - 1) neighbors.push_back({i, j+1, k});
+            }
+                
+            // Check if we're close to z boundaries
+            double z_frac = fmod((point.z() - m_grid_origin.z()) / m_grid_size_z, 1.0);
+            if (z_frac < eps || z_frac > (1.0 - eps)) {
+                // Add z-neighbors
+                if (k > 0) neighbors.push_back({i, j, k-1});
+                if (k < static_cast<int>(m_grid[0][0].size()) - 1) neighbors.push_back({i, j, k+1});
+            }
+                
+            // Check neighboring cells
+            for (auto [ni, nj, nk] : neighbors) {
+                for (int wpident : m_grid[ni][nj][nk]) {
                     auto it = m_faces.find(wpident);
                     if (it != m_faces.end()) {
                         auto bb = it->second->sensitive();
@@ -353,99 +384,12 @@ public:
                         }
                     }
                 }
-                
-                // Special handling for points near cell boundaries
-                // Check neighboring cells if we're close to an edge
-                double eps = 1e-6*units::m;  // Small distance from boundary to check neighbors
-                std::vector<std::tuple<int,int,int>> neighbors;
-                
-                // Check if we're close to x boundaries
-                double x_frac = fmod((point.x() - m_grid_origin.x()) / m_grid_size_x, 1.0);
-                if (x_frac < eps || x_frac > (1.0 - eps)) {
-                    // Add x-neighbors
-                    if (i > 0) neighbors.push_back({i-1, j, k});
-                    if (i < static_cast<int>(m_grid.size()) - 1) neighbors.push_back({i+1, j, k});
-                }
-                
-                // Check if we're close to y boundaries
-                double y_frac = fmod((point.y() - m_grid_origin.y()) / m_grid_size_y, 1.0);
-                if (y_frac < eps || y_frac > (1.0 - eps)) {
-                    // Add y-neighbors
-                    if (j > 0) neighbors.push_back({i, j-1, k});
-                    if (j < static_cast<int>(m_grid[0].size()) - 1) neighbors.push_back({i, j+1, k});
-                }
-                
-                // Check if we're close to z boundaries
-                double z_frac = fmod((point.z() - m_grid_origin.z()) / m_grid_size_z, 1.0);
-                if (z_frac < eps || z_frac > (1.0 - eps)) {
-                    // Add z-neighbors
-                    if (k > 0) neighbors.push_back({i, j, k-1});
-                    if (k < static_cast<int>(m_grid[0][0].size()) - 1) neighbors.push_back({i, j, k+1});
-                }
-                
-                // Check neighboring cells
-                for (auto [ni, nj, nk] : neighbors) {
-                    for (int wpident : m_grid[ni][nj][nk]) {
-                        auto it = m_faces.find(wpident);
-                        if (it != m_faces.end()) {
-                            auto bb = it->second->sensitive();
-                            if (bb.inside(point)) {
-                                return WirePlaneId(wpident);
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // // Point is not in any sensitive volume in the grid
-            // // For safety, check all volumes if we're near the overall boundary
-            // Point center = m_overall_bb.center();
-            // Vector dimensions = m_overall_bb.dimensions();
-            // double boundary_threshold = 0.01;  // 1% from boundary
-            
-            // bool near_boundary = false;
-            // for (int dim = 0; dim < 3; ++dim) {
-            //     double relative_pos = std::abs(point[dim] - center[dim]) / (dimensions[dim] * 0.5);
-            //     if (relative_pos > (1.0 - boundary_threshold)) {
-            //         near_boundary = true;
-            //         break;
-            //     }
-            // }
-            
-            // if (near_boundary) {
-            //     // Fallback to checking all faces for points near the overall boundary
-            //     for (const auto& [wpident, iface] : m_faces) {
-            //         auto bb = iface->sensitive();
-            //         if (bb.inside(point)) {
-            //             return WirePlaneId(wpident);
-            //         }
-            //     }
-            // }
-            
-            // Truly not in any sensitive volume
-            return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
-        }
-        
-        // Fallback to original implementation if spatial structures not initialized
-        for (const auto& [wpident, iface] : m_faces) {
-            auto bb = iface->sensitive();
-            if (bb.inside(point)) {
-                return WirePlaneId(wpident);
             }
         }
+            
         return WirePlaneId(WirePlaneLayer_t::kUnknownLayer, -1, -1);
     }
 
-    // Fast check if point is inside overall detector volume
-    virtual bool is_in_overall_volume(const Point& point) const {
-        // If overall bounding box is not initialized, return false
-        if (m_overall_bb.empty()) {
-            return false;
-        }
-        
-        // Check if point is inside the overall bounding box
-        return m_overall_bb.inside(point);
-    }
 
 
 private:
@@ -456,9 +400,6 @@ private:
     Configuration m_md;
     // Overall bounding box containing all sensitive volumes
     BoundingBox m_overall_bb;
-    
-    // Flag to indicate if spatial data structures are initialized
-    bool m_spatial_initialized;
     
     // Grid configuration parameters
     double m_config_grid_size_x;
