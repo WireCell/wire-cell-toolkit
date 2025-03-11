@@ -241,7 +241,7 @@ local clus_per_face (
         type: "TensorFileSink",
         name: "clus_per_face-%s-%d"%[anode.name, face],
         data: {
-            outname: "clus-%s-face%d.tar.gz"%[anode.name, face],
+            outname: "trash-%s-face%d.tar.gz"%[anode.name, face],
             prefix: "clustering_", // json, numpy, dummy
             dump_mode: true,
         }
@@ -368,7 +368,80 @@ local clus_per_apa (
     ),
 }.ret;
 
+local clus_all_apa (
+    anodes,
+    dump = true,
+    ) = {
+    local nanodes = std.length(anodes),
+    local pcmerging = g.pnode({
+        type: "PointTreeMerging",
+        name: "clus_all_apa",
+        data:  {
+            multiplicity: nanodes,
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+        }
+    }, nin=nanodes, nout=1),
+    local detector_volumes = 
+    {
+        "type": "DetectorVolumes",
+        "name": "clus_all_apa",
+        "data": {
+            "anodes": [wc.tn(anode) for anode in anodes],
+        }
+    },
+    local mabc = g.pnode({
+        type: "MultiAlgBlobClustering",
+        name: "clus_all_apa",
+        data:  {
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+            // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
+            perf: true,
+            bee_dir: bee_dir, // "data/0/0", // not used
+            bee_zip: "mabc-all-apa.zip",
+            bee_detector: "sbnd",
+            initial_index: index,   // New RSE configuration
+            use_config_rse: true,  // Enable use of configured RSE
+            runNo: LrunNo,
+            subRunNo: LsubRunNo,
+            eventNo: LeventNo,
+            save_deadarea: true, 
+            anode: wc.tn(anodes[0]),
+            // face: face,
+            geom_helper: wc.tn(geom_helper),
+            detector_volumes: wc.tn(detector_volumes),
+            func_cfgs: [
+                {name: "clustering_test", detector_volumes: wc.tn(detector_volumes)},
+            ],
+        },
+    }, nin=1, nout=1, uses=[geom_helper, detector_volumes]),
+
+    local sink = g.pnode({
+        type: "TensorFileSink",
+        name: "clus_all_apa",
+        data: {
+            outname: "trash-all-apa.tar.gz",
+            prefix: "clustering_", // json, numpy, dummy
+            dump_mode: true,
+        }
+    }, nin=1, nout=0),
+    local end = if dump
+    then g.pipeline([mabc, sink])
+    else g.pipeline([mabc]),
+    ret :: g.intern(
+        innodes = [pcmerging],
+        centernodes = [],
+        outnodes = [end],
+        edges = [
+            g.edge(pcmerging, end, 0, 0),
+        ]
+    ),
+}.ret;
+
+
 function () {
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump),
-    per_apa(anode, dump=true) :: clus_per_apa(anode),
+    per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump),
+    all_apa(anodes, dump=true) :: clus_all_apa(anodes, dump=dump),
 }
