@@ -145,6 +145,8 @@ namespace WireCell::PointCloud::Tree {
         /// Access a const local PC by name.  If PC does not exist, return defpc.
         const pointcloud_t& local_pc(const std::string& name, const pointcloud_t& defpc = pointcloud_t()) const;
 
+        bool has_pc(const std::string& name) const;
+
         /** Create a scoped view.
 
             Scoped views come in two types:
