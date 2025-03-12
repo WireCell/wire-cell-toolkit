@@ -286,3 +286,17 @@ WireCell::Point WireCell::BoundingBox::closest_point(const Point& point) const
     return closest;
 }
 
+std::vector<double> WireCell::BoundingBox::axis_distances(const Point& point, int axis) const
+{
+    const int axis1 = (axis+1)%3;
+    const int axis2 = (axis+2)%3;
+    const auto vmin = m_bounds.first;
+    const auto vmax = m_bounds.second;
+
+    std::vector<double> adists;
+
+    if (point[axis1] < vmin[axis1] || point[axis1] > vmax[axis1]) return adists;
+    if (point[axis2] < vmin[axis2] || point[axis2] > vmax[axis2]) return adists;
+
+    return {vmin[axis] - point[axis], vmax[axis] - point[axis]};
+}

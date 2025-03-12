@@ -116,3 +116,25 @@ TEST_CASE("point3d rays")
     debug("r1={} r2={} rp={}", r1, r2, c12);
 }
 
+TEST_CASE("bounding box")
+{
+    BoundingBox bb(Ray(Point(-1,-1,-1), Point(1,1,1)));
+
+    for (int axis=0; axis<3; ++axis) {
+        Point inside;
+        auto ad = bb.axis_distances(inside, axis);
+        REQUIRE(ad.size() == 2);
+        CHECK(ad[0] == -1);
+        CHECK(ad[1] == +1);
+
+        const int axis1 = (axis+1)%3;
+        const int axis2 = (axis+2)%3;
+        
+        
+        Point outside1, outside2;
+        outside1[axis1] = 2;
+        outside2[axis2] = 2;
+        CHECK(bb.axis_distances(outside1, axis).empty());
+        CHECK(bb.axis_distances(outside2, axis).empty());
+    }
+}

@@ -10,6 +10,7 @@
 #include "WireCellUtil/IComponent.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/BoundingBox.h"
 #include "WireCellIface/WirePlaneId.h"
 
 
@@ -43,6 +44,18 @@ namespace WireCell {
         /// wpid must be well determined.  If wpid is illegal or unknown, a zero
         /// vector is returned.
         virtual Vector pitch_vector(WirePlaneId wpid) const = 0;
+
+        /// Return the largest possible bounding box that is fully inside the
+        /// detector volume.
+        virtual BoundingBox inner_bounds(WirePlaneId wpid) const = 0;
+
+        /// Return the smallest possible bounding box that contains the detector
+        /// volume.  For detector volumes that are themselves boxed shaped, this
+        /// bounding box should be identical to the one from inner_bounds().
+        /// Implementations need only implement this method for non-box shaped
+        /// detector volumes.
+        virtual BoundingBox outer_bounds(WirePlaneId wpid) const { return inner_bounds(wpid); }
+        
 
         /// Forward any user-provided, application specific metadata for a
         /// particular wpid.  

@@ -177,6 +177,11 @@ public:
         return pmag*pdir;
     }
 
+    virtual BoundingBox inner_bounds(WirePlaneId wpid) const {
+        auto iface = get_face(wpid);
+        return iface->sensitive();
+    }
+
     /// Forward any user-provided, application specific metadata for a
     /// particular wpid.  
     virtual Configuration metadata(WirePlaneId wpid) const {

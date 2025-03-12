@@ -46,6 +46,21 @@ namespace WireCell {
         // Calculate the minimum distance from a point to the bounding box (0 if inside)
         double distance(const Point& point) const;
 
+        /// Return distances FROM a point TO walls ALONG an axis.
+        ///
+        /// When the direction along the axis from the point intercepts the
+        /// bounding box, two numbers are returned.  Otherwise the vector is
+        /// empty.
+        ///
+        /// The first number gives the distance to the wall with the smaller
+        /// axis coordinate.
+        ///
+        /// Distances are SIGNED.  A point inside the BB will have the first
+        /// number negative, second positive.  Two positives means the point is
+        /// outside the BB and at a lower coordinate.  The BB is "in front" of
+        /// the point, along the axis.  Two negatives means the point is outside
+        /// of the BB and the BB is "behind" the point.
+        std::vector<double> axis_distances(const Point& point, int axis) const;
 
         // Returns the closest point on the box to the given point
         Point closest_point(const Point& point) const;
