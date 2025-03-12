@@ -50,6 +50,9 @@ namespace WireCell {
     /// memory is constrained and double precision is not required.
     typedef D3Vector<float> PointF;
 
+    /** NOTE: BoundingBox class provides a replacement for some of these
+     * methods. */
+
     /** Return true if point is contained in a rectangular solid
      * described by the ray bounds running between diagonally opposed
      * corners.*/
@@ -88,6 +91,14 @@ namespace WireCell {
     /** Return the ray representing the intersection of two BoundingBox. */
     Ray box_intersect(const Ray& r1, const Ray& r2);
 
+    /** Return true if the line segment crosses the plane.  The plane is defined
+     * by a point and a normal vector. */
+    bool plane_split(const Point& point, const Vector& normal, const Ray& segment);
+
+    /** Return the point of intersection for a line drawn through the segment and a plane. */ 
+    Point plane_intersection(const Point& point, const Vector& normal, const Ray& segment);
+
+    /// What follows is to support use of Point/Ray with Configuration objects and iostreams.
     template <>
     inline  // fixme: ignores default
         WireCell::Point

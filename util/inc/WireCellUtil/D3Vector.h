@@ -136,7 +136,9 @@ namespace WireCell {
         }
 
         /// Return the magnitude of this vector.
-        T magnitude() const { return std::sqrt(x() * x() + y() * y() + z() * z()); }
+        T magnitude() const { return std::sqrt(magnitude2()); }
+        /// Return the magnitude-squared of this vector.
+        T magnitude2() const { return x() * x() + y() * y() + z() * z(); }
 
         /// Return a normalized vector in the direction of this vector.
         D3Vector norm() const

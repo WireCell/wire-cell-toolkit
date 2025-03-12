@@ -286,6 +286,8 @@ WireCell::Point WireCell::BoundingBox::closest_point(const Point& point) const
     return closest;
 }
 
+
+
 std::vector<double> WireCell::BoundingBox::axis_distances(const Point& point, int axis) const
 {
     const int axis1 = (axis+1)%3;
@@ -300,3 +302,73 @@ std::vector<double> WireCell::BoundingBox::axis_distances(const Point& point, in
 
     return {vmin[axis] - point[axis], vmax[axis] - point[axis]};
 }
+
+WireCell::Ray WireCell::BoundingBox::intersect(const WireCell::Ray& line) const
+{
+
+    std::vector<Vector> intersections;
+    const double sign[] = {-1, +1};
+    const std::vector<Point> bounds = {m_bounds.first, m_bounds.second};
+
+    // Iterate over each axis and box face
+    for (int axis = 0; axis < 3; ++axis) {
+        for (int face = 0; face < 2; ++face) {
+            Vector normal;
+            normal[axis] = sign[face];
+            const Point& point = bounds[face];
+            
+            if (WireCell::plane_split(point, normal, line)) {
+                intersections.push_back(WireCell::plane_intersection(point, normal, line));
+            }
+        }
+    }
+
+    // If there are no intersection points, return an empty Ray
+    if (intersections.empty()) {
+        return Ray();
+    }
+    if (intersections.size() == 1) {
+        // special case, clip one corner
+        return Ray(intersections[0], intersections[0]);
+    }
+
+    // Locations w.r.t ray start along line.
+    const auto dir = ray_unit(line);
+    const double p2 = dir.dot(line.second - line.first);
+    const double i0 = dir.dot(intersections[0] - line.first);
+    const double i1 = dir.dot(intersections[1] - line.first);
+
+    // There is probably a more clever way to do this.
+    if (p2 > 0) {
+        if (i0 < i1) {
+            return Ray(intersections[0], intersections[1]);
+        }
+        return Ray(intersections[1], intersections[0]);
+    }
+    if (i0 < i1) {
+        return Ray(intersections[1], intersections[0]);
+    }
+    return Ray(intersections[0], intersections[1]);
+}
+
+WireCell::Ray WireCell::BoundingBox::crop(const WireCell::Ray& segment) const
+{
+    const bool inside1 = inside(segment.first);
+    const bool inside2 = inside(segment.second);
+
+    if (inside1 && inside2) {
+        return segment;
+    }
+
+    Ray ret = intersect(segment);
+
+    if (inside1) {
+        ret.first = segment.first;
+    }
+    if (inside2) {
+        ret.second = segment.second;
+    }
+
+    return ret;
+}
+
