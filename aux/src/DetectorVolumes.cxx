@@ -179,7 +179,10 @@ public:
 
     virtual BoundingBox inner_bounds(WirePlaneId wpid) const {
         auto iface = get_face(wpid);
-        return iface->sensitive();
+        if (iface) {
+            return iface->sensitive();
+        }
+        return BoundingBox();
     }
 
     /// Forward any user-provided, application specific metadata for a

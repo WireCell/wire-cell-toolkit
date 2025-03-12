@@ -47,6 +47,9 @@ namespace WireCell {
 
         /// Return the largest possible bounding box that is fully inside the
         /// detector volume.
+        ///
+        /// If the wpid is not known, the returned BoundingBox::empty() will
+        /// return true.
         virtual BoundingBox inner_bounds(WirePlaneId wpid) const = 0;
 
         /// Return the smallest possible bounding box that contains the detector
@@ -54,6 +57,9 @@ namespace WireCell {
         /// bounding box should be identical to the one from inner_bounds().
         /// Implementations need only implement this method for non-box shaped
         /// detector volumes.
+        ///
+        /// If the wpid is not known, the returned BoundingBox::empty() will
+        /// return true.
         virtual BoundingBox outer_bounds(WirePlaneId wpid) const { return inner_bounds(wpid); }
         
 
