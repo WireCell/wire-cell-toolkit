@@ -289,7 +289,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
     const auto& intens = *ints->tensors();
-    auto root_live = std::move(as_pctree(intens, inpath + "/live"));
+    auto root_live = as_pctree(intens, inpath + "/live");
     if (!root_live) {
         log->error("Failed to get dead point cloud tree from \"{}\"", inpath);
         raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inpath);

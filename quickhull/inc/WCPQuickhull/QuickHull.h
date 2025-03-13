@@ -12,8 +12,8 @@
 #include <array>
 #include <limits>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#pragma GCC system_header
+
 #include "Vector3.h"
 #include "Plane.h"
 #include "Pool.h"
@@ -206,4 +206,3 @@ namespace quickhull {
 
 
 #endif /* QUICKHULL_HPP_ */
-#pragma GCC diagnostic pop
