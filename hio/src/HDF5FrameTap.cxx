@@ -85,10 +85,16 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
     if (fn.empty()) {
         THROW(ValueError() << errmsg{"Must provide output filename to HDF5FrameTap"});
     }
-
+    
+    // turn off HDF5-DIAG message globally, if desired.
+    // H5Eset_auto2(H5E_DEFAULT, NULL, NULL);
     m_hfile = H5Fcreate(fn.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (m_hfile == H5I_INVALID_HID) {
-        raise<IOError>("Failed to create file %s", fn);
+        log->debug("File {} exists, opening it instead", fn);
+        m_hfile = H5Fopen(fn.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+    }
+    if (m_hfile == H5I_INVALID_HID) {
+        WireCell::raise<WireCell::IOError>("Failed to create file %s", fn);
     }
     log->debug("created file {}", fn);
 
