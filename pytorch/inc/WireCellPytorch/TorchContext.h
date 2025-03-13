@@ -4,7 +4,7 @@
 
 #include "WireCellIface/ISemaphore.h"
 
-#include <torch/script.h>
+#include "WireCellPytorch/Torch.h"
 
 namespace WireCell::Pytorch {
 

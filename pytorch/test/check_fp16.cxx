@@ -1,4 +1,4 @@
-#include <torch/script.h>  // One-stop header.
+#include "WireCellPytorch/Torch.h"  // One-stop header.
 #include <chrono>
 
 /**

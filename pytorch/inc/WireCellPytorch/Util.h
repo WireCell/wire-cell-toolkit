@@ -6,7 +6,7 @@
 
 #include "WireCellIface/ITensorSet.h"
 
-#include <torch/script.h>  // One-stop header.
+#include "WireCellPytorch/Torch.h"  // One-stop header.
 
 #include <string>
 

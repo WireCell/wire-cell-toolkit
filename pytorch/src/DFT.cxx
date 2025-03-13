@@ -1,7 +1,7 @@
 #include "WireCellPytorch/DFT.h"
 #include "WireCellUtil/NamedFactory.h"
 
-#include <torch/script.h>
+#include "WireCellPytorch/Torch.h"
 #include <torch/csrc/api/include/torch/fft.h>
 
 

@@ -10,7 +10,7 @@
 #include "zio/domo/client.hpp"
 #include "zio/tens.hpp"
 
-#include <torch/script.h>  // One-stop header.
+#include "WireCellPytorch/Torch.h"  // One-stop header.
 
 #include <iostream>
 #include <memory>
