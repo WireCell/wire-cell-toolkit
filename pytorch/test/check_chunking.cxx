@@ -63,7 +63,7 @@ int main(int argc, const char* argv[])
         auto output = torch::cat(outputs, 2);
         std::cout << "output size: " << output.sizes() << std::endl;
         std::cout << "output: \n" << output << std::endl;
-        Eigen::Map<Eigen::ArrayXXf> out_e(output[0][0].data<float>(), output.size(3), output.size(2));
+        Eigen::Map<Eigen::ArrayXXf> out_e(output[0][0].data_ptr<float>(), output.size(3), output.size(2));
         std::cout << "out_e: \n" << out_e << std::endl;
     }
     return 0;
