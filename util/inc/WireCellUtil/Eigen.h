@@ -29,10 +29,9 @@
 #pragma GCC diagnostic ignored "-Wignored-attributes"
 #endif
 #include <Eigen/Sparse>
+#include <Eigen/Eigenvalues> 
 #if HAS_WARNING("-Wignored-attributes")
 #pragma GCC diagnostic pop
 #endif
-
-#include <Eigen/Eigenvalues> 
 
 #endif

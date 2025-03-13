@@ -11,6 +11,9 @@
 #include <vector>
 #include <array>
 #include <limits>
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include "Vector3.h"
 #include "Plane.h"
 #include "Pool.h"
@@ -18,8 +21,6 @@
 #include "ConvexHull.h"
 #include "HalfEdgeMesh.h"
 #include "MathUtils.h"
-
-
 /*
  * Implementation of the 3D QuickHull algorithm by Antti Kuukka
  *
@@ -205,3 +206,4 @@ namespace quickhull {
 
 
 #endif /* QUICKHULL_HPP_ */
+#pragma GCC diagnostic pop

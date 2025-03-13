@@ -37,7 +37,7 @@ void SigProc::FilterResponse::configure(const WireCell::Configuration& cfg)
     m_planeid = get(cfg, "planeid", m_planeid);
 
     auto top = Persist::load(m_filename);
-    const int nwires = top["nwires"].asInt();
+    // const int nwires = top["nwires"].asInt();
     const int nticks = top["nticks"].asInt();
     if (!m_bins.nbins()) {  // first time
         m_bins = Binning(nticks, 0, nticks); // tick range for filter

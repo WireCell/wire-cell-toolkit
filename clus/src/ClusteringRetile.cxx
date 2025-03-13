@@ -429,7 +429,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 std::map<int, Cluster*> map_id_cluster = splits;
                 map_id_cluster[-1] = orig_cluster;
 
-                Cluster *shadow_orig_cluster;
+                Cluster *shadow_orig_cluster = nullptr;
                 std::map<int, Cluster*> shadow_splits;
 
                 for (auto& [id, cluster] : map_id_cluster) {
