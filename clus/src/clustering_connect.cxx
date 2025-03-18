@@ -30,7 +30,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     geo_point_t drift_dir_abs(1,0,0);
 
-    // const auto &tp = live_grouping.get_params();
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
     for (const Cluster *cluster : live_grouping.children()) {
         global_point_cloud->add_points(cluster, 0);
