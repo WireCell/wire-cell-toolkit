@@ -187,8 +187,9 @@ public:
 
     /// Forward any user-provided, application specific metadata for a
     /// particular wpid.  
+    /// TODO: use wpid.ident() = 0 for overall metadata?
     virtual Configuration metadata(WirePlaneId wpid) const {
-        const auto key = wpid.name();
+        const auto key = wpid.ident() == 0? "overall" : wpid.name();
         if (m_md.isNull()) {
             return Json::nullValue;
         }
