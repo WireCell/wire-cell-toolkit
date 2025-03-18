@@ -26,14 +26,13 @@ void print_dds(const DisjointDataset& dds) {
     for (size_t idx=0; idx<dds.size(); ++idx) {
         const Dataset& ds = dds[idx];
         std::stringstream ss;
-        ss << "ds: " << idx << std::endl;
-        // const size_t len = ds.size_major();
+        ss << "ds: " << idx << " size_major " << ds.size_major() << std::endl;
         for (const auto& key : ds.keys()) {
-            auto arr = ds.get(key)->elements<fa_float_t>();
             ss << key << ": ";
-            for(auto elem : arr) {
-                ss << elem << " ";
-            }
+            // auto arr = ds.get(key)->elements<double>();
+            // for(auto elem : arr) {
+            //     ss << elem << " ";
+            // }
             ss << std::endl;
         }
         debug(ss.str());
@@ -581,3 +580,40 @@ TEST_CASE("clustering prototype corrected coordinates")
     
 }
 
+
+TEST_CASE("haiwang")
+{
+    Points::node_t root_node;
+    root_node.insert(make_simple_pctree()); // cluster 1
+    // root_node.insert(make_simple_pctree()); // cluster 2
+
+    Scope all_blobs_scope{"3d",{"x","y","z"}};
+    auto& all_sv = root_node.value.scoped_view(all_blobs_scope);
+    debug("all_sv has {} nodes", all_sv.nodes().size());
+    print_dds(all_sv.pcs());
+
+    auto& all_sv_filter = root_node.value.scoped_view(all_blobs_scope,
+        [&](const Points::node_t& node) {
+            debug("filtering node");
+            const auto& lpcs = node.value.local_pcs();
+            debug("filtering node with {} local pcs", lpcs.size());
+            const auto& it = lpcs.find("3d");
+            if (it == lpcs.end()) {
+                return false;
+            }
+            const auto& pc = it->second;
+            const auto& x = pc.get("x");
+            const auto xv = x->elements<double>();
+            for (auto val : xv) {
+                debug("filtering x={}", val);
+                if (val < 0.1) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        true
+    );
+    debug("all_sv_filter has {} nodes", all_sv_filter.nodes().size());
+    print_dds(all_sv_filter.pcs());
+}

@@ -185,11 +185,11 @@ namespace WireCell::PointCloud::Tree {
         template<typename ElementType=double>
         const ScopedView<ElementType>& scoped_view(
             const Scope& scope,
-            SelectorFunction selector = [](const Points::node_t&){return true;}) const;
+            SelectorFunction selector = [](const Points::node_t&){return true;}, const bool rebuild = false) const;
         template<typename ElementType=double>
         ScopedView<ElementType>& scoped_view(
             const Scope& scope,
-            SelectorFunction selector = [](const Points::node_t&){return true;});
+            SelectorFunction selector = [](const Points::node_t&){return true;}, const bool rebuild = false);
 
         // Receive notification from n-ary tree to update existing
         // NFKDs if node is in any existing scope.
@@ -225,17 +225,17 @@ namespace WireCell::PointCloud::Tree {
     };                          // Points
 
     template<typename ElementType>
-    const ScopedView<ElementType>& Points::scoped_view(const Scope& scope, SelectorFunction selector) const
+    const ScopedView<ElementType>& Points::scoped_view(const Scope& scope, SelectorFunction selector, const bool rebuild) const
     {
         return const_cast<const ScopedView<ElementType>&>(
-            const_cast<self_t*>(this)->scoped_view(scope, selector));
+            const_cast<self_t*>(this)->scoped_view(scope, selector, rebuild));
     }
     template<typename ElementType>
-    ScopedView<ElementType>& Points::scoped_view(const Scope& scope, SelectorFunction selector) 
+    ScopedView<ElementType>& Points::scoped_view(const Scope& scope, SelectorFunction selector, const bool rebuild) 
     {
         using SV = ScopedView<ElementType>;
         auto * sbptr = get_scoped(scope);
-        if (sbptr) {
+        if (sbptr && !rebuild) {
             auto * svptr = dynamic_cast<SV*>(sbptr);
             if (svptr) {
                 return *svptr;
