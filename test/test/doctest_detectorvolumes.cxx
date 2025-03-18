@@ -167,9 +167,9 @@ std::string json_config = R"(
         "name": "",
         "data": {
             "anodes": ["AnodePlane:0","AnodePlane:1","AnodePlane:2","AnodePlane:3","AnodePlane:4","AnodePlane:5"],
-            "metadata": {"default":"default", "a0f0p?":"a0f0p?", 
+            "metadata": {"default":"default", 
                         "a0f0pV":"a0f0pV", "a0f0pU":"a0f0pU", "a0f0pW":"a0f0pW",
-                        "a0f0pA":"a0f0pA" }
+                        "a0f0pA":"a0f0pA", "overall":"overall"}
 
         }
     }
@@ -271,7 +271,6 @@ TEST_CASE("detectorvolumes")
 
     {                           // test metadata
         std::vector<WirePlaneId> wpids = {
-            WirePlaneId(WirePlaneLayer_t::kUnknownLayer, 0, 0),
             WirePlaneId(WirePlaneLayer_t::kUlayer, 0, 0),
             WirePlaneId(WirePlaneLayer_t::kVlayer, 0, 0),
             WirePlaneId(WirePlaneLayer_t::kWlayer, 0, 0),
@@ -290,6 +289,14 @@ TEST_CASE("detectorvolumes")
             auto md = dv->metadata(wpid);
             std::string have = md.asString();
             std::string want = "default";
+            debug("metadata: have:{} want:{}", have, want);
+            CHECK(have == want);
+        }
+        {
+            WirePlaneId wpid(0); // overall
+            auto md = dv->metadata(wpid);
+            std::string have = md.asString();
+            std::string want = "overall";
             debug("metadata: have:{} want:{}", have, want);
             CHECK(have == want);
         }
