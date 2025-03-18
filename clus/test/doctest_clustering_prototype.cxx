@@ -20,22 +20,26 @@ using spdlog::warn;
 
 using node_ptr = std::unique_ptr<Points::node_t>;
 
+void print_ds(const Dataset& ds) {
+    std::stringstream ss;
+    ss << " size_major " << ds.size_major() << std::endl;
+    for (const auto& key : ds.keys()) {
+        ss << key << ": ";
+        // auto arr = ds.get(key)->elements<double>();
+        // for(auto elem : arr) {
+        //     ss << elem << " ";
+        // }
+        ss << std::endl;
+    }
+    debug(ss.str());
+}
+
 // No more explicit DisjointDataset.  It is a PointCloud::Tree::scoped_pointcloud_t.
 template <typename DisjointDataset>
 void print_dds(const DisjointDataset& dds) {
     for (size_t idx=0; idx<dds.size(); ++idx) {
         const Dataset& ds = dds[idx];
-        std::stringstream ss;
-        ss << "ds: " << idx << " size_major " << ds.size_major() << std::endl;
-        for (const auto& key : ds.keys()) {
-            ss << key << ": ";
-            // auto arr = ds.get(key)->elements<double>();
-            // for(auto elem : arr) {
-            //     ss << elem << " ";
-            // }
-            ss << std::endl;
-        }
-        debug(ss.str());
+        print_ds(ds);
     }
 }
 
@@ -587,12 +591,13 @@ TEST_CASE("haiwang")
     root_node.insert(make_simple_pctree()); // cluster 1
     // root_node.insert(make_simple_pctree()); // cluster 2
 
-    Scope all_blobs_scope{"3d",{"x","y","z"}};
-    auto& all_sv = root_node.value.scoped_view(all_blobs_scope);
+    Scope all_scope{"3d",{"x","y","z"}};
+    auto& all_sv = root_node.value.scoped_view(all_scope);
     debug("all_sv has {} nodes", all_sv.nodes().size());
     print_dds(all_sv.pcs());
 
-    auto& all_sv_filter = root_node.value.scoped_view(all_blobs_scope,
+    Scope smallx_scope{"3d",{"x","y","z"}, 0, "smallx"};
+    auto& smallx_sv = root_node.value.scoped_view(smallx_scope,
         [&](const Points::node_t& node) {
             debug("filtering node");
             const auto& lpcs = node.value.local_pcs();
@@ -604,16 +609,41 @@ TEST_CASE("haiwang")
             const auto& pc = it->second;
             const auto& x = pc.get("x");
             const auto xv = x->elements<double>();
-            for (auto val : xv) {
-                debug("filtering x={}", val);
-                if (val < 0.1) {
+            const auto& wpid = pc.get("wpid");
+            const auto wpidv = wpid->elements<int>();
+            // for (auto val : xv) {
+            //     debug("filtering x={}", val);
+            //     if (val < 1.) {
+            //         return true;
+            //     }
+            // }
+            for (auto val : wpidv) {
+                debug("filtering wpid={}", val);
+                if (val < 11) {
+                    debug("passing wpid={}", val);
                     return true;
                 }
             }
             return false;
-        },
-        true
+        }
     );
-    debug("all_sv_filter has {} nodes", all_sv_filter.nodes().size());
-    print_dds(all_sv_filter.pcs());
+    debug("smallx_sv has {} nodes", smallx_sv.nodes().size());
+    debug("print_dds(smallx_sv.pcs());");
+    print_dds(smallx_sv.pcs());
+    auto smallx_fp = smallx_sv.flat_pc("3d");
+    debug("print_ds(smallx_fp);");
+    print_ds(smallx_fp);
+    auto smallx_fc = smallx_sv.flat_coords();
+    debug("print_ds(smallx_fc);");
+    print_ds(smallx_fc);
+
+    {
+        WireCell::WirePlaneId wpid{-1};
+        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid? true : false, wpid.valid());
+    }
+
+    {
+        WireCell::WirePlaneId wpid{0};
+        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid? true : false, wpid.valid());
+    }
 }
