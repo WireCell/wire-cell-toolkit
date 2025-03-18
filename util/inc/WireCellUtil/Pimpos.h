@@ -129,8 +129,12 @@ namespace WireCell {
         /// index.
         int reflect(int wireind, int impind) const;
 
+        /// return pitch
+        double pitch() const { return m_pitch; }
+
        private:
         int m_nimpbins_per_wire;
+        double m_pitch;
         Point m_origin;
         Vector m_axis[3];
         Binning m_regionbins, m_impactbins;
