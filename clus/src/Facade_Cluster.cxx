@@ -632,16 +632,8 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
 
 const Cluster::sv3d_t& Cluster::sv3d() const { return m_node->value.scoped_view(scope); }
 
-const Cluster::kd3d_t& Cluster::kd3d() const
-{
-    const auto& sv = m_node->value.scoped_view(scope);
-    return sv.kd();
-}
-const Cluster::kd3d_t& Cluster::kd() const
-{
-    const auto& sv = m_node->value.scoped_view(scope);
-    return sv.kd();
-}
+const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
+const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
 geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
 
