@@ -68,17 +68,23 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    const auto &tp = live_grouping.get_params();
+    //const auto &tp = live_grouping.get_params();
     // this is for 4 time slices
-    // double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
-
     // Create two point clouds ...
     // One for the points ... point --> index --> cluster (vector) ...
     // The other for the skeleton of each track ...  point --> index --> cluster (vector)
     // Both cloud needs to be dynamic, keep adding things into it as we improve the knowledge
     // XQ: need a new dynamic point cloud that can handle different faces of APA ...
-    auto global_point_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
-    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(tp.angle_u, tp.angle_v, tp.angle_w);
+    // Get the first wpid and extract angles from wpid_params
+    auto& params = wpid_params.begin()->second;
+    double angle_u = std::get<1>(params);
+    double angle_v = std::get<2>(params);
+    double angle_w = std::get<3>(params);
+
+    // std::cout << "Test: " << angle_u << " " << angle_v << " " << angle_w << std::endl;
+    
+    auto global_point_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
 
     std::vector<Cluster *> to_be_removed_clusters;
     // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
