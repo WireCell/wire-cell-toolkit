@@ -68,9 +68,9 @@ void WireCell::PointCloud::Facade::clustering_test(
         // metadata
         {
             WirePlaneId all(0);
-            SPDLOG_INFO("FV_ymin {}", dv->metadata(all)["FV_ymin"].asDouble());
+            SPDLOG_INFO("FV_xmax {}", dv->metadata(all)["FV_xmax"].asDouble());
             WirePlaneId a0f0pA(kAllLayers, 0, 0);
-            SPDLOG_INFO("tick {}", dv->metadata(a0f0pA)["tick"].asDouble());
+            SPDLOG_INFO("FV_xmax {}", dv->metadata(a0f0pA)["FV_xmax"].asDouble());
             Json::FastWriter fastWriter;
             SPDLOG_DEBUG("metadata(a0f0pA): {}", fastWriter.write(dv->metadata(a0f0pA)));
         }
