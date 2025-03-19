@@ -98,6 +98,9 @@ public:
         initialize_spatial_queries();
 
         m_md = cfg["metadata"];
+
+        Json::FastWriter fastWriter;
+        SPDLOG_TRACE("metadata: {}", fastWriter.write(m_md));
     }
 
 

@@ -65,6 +65,15 @@ void WireCell::PointCloud::Facade::clustering_test(
                 SPDLOG_INFO("CTest wpid.name {} face_dirx {} wire_direction {} angle rad:{}  deg:{} pitch_vector {}", wpid.name(), face_dirx, wire_direction, angle, angle*180/3.1415926, pitch_vector);
             }
         }
+        // metadata
+        {
+            WirePlaneId all(0);
+            SPDLOG_INFO("FV_ymin {}", dv->metadata(all)["FV_ymin"].asDouble());
+            WirePlaneId a0f0pA(kAllLayers, 0, 0);
+            SPDLOG_INFO("tick {}", dv->metadata(a0f0pA)["tick"].asDouble());
+            Json::FastWriter fastWriter;
+            SPDLOG_DEBUG("metadata(a0f0pA): {}", fastWriter.write(dv->metadata(a0f0pA)));
+        }
     }
 
 }
