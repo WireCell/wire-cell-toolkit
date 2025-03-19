@@ -37,9 +37,9 @@ namespace WireCell::PointCloud::Facade {
         const Tree::Scope scope = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
         Tree::Scope scope2ds[3] = {
-            {"2dp0", {"x", "y"}},
-            {"2dp1", {"x", "y"}},
-            {"2dp2", {"x", "y"}}
+            {"3d", {"2dp0_x", "2dp0_y"}},
+            {"3d", {"2dp1_x", "2dp1_y"}},
+            {"3d", {"2dp2_x", "2dp2_y"}}
         };
 
        public:

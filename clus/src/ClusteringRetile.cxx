@@ -520,11 +520,20 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                         // std::cout << pc3d.size() << " " << aux.size() << " " <<  pc3d.get("x")->size_major() << " " << pc3d.get("y")->size_major() << " " << pc3d.get("z")->size_major() << std::endl;
                         // const auto& arr_x1 = pc3d.get("x")->elements<Point::coordinate_t>();
 
-                        pcs.emplace("3d", pc3d);
                         /// These seem unused and bring in yet more copy-paste code
-                        pcs.emplace("2dp0", WireCell::Aux::make2dds(pc3d, angle_u));
-                        pcs.emplace("2dp1", WireCell::Aux::make2dds(pc3d, angle_v));
-                        pcs.emplace("2dp2", WireCell::Aux::make2dds(pc3d, angle_w));
+                        // pcs.emplace("2dp0", WireCell::Aux::make2dds(pc3d, angle_u));
+                        // pcs.emplace("2dp1", WireCell::Aux::make2dds(pc3d, angle_v));
+                        // pcs.emplace("2dp2", WireCell::Aux::make2dds(pc3d, angle_w));
+                        auto pc2dp0 = WireCell::Aux::make2dds(pc3d, angle_u);
+                        auto pc2dp1 = WireCell::Aux::make2dds(pc3d, angle_v);
+                        auto pc2dp2 = WireCell::Aux::make2dds(pc3d, angle_w);
+                        pc3d.add("2dp0_x", *pc2dp0.get("x"));
+                        pc3d.add("2dp0_y", *pc2dp0.get("y"));
+                        pc3d.add("2dp1_x", *pc2dp1.get("x"));
+                        pc3d.add("2dp1_y", *pc2dp1.get("y"));
+                        pc3d.add("2dp2_x", *pc2dp2.get("x"));
+                        pc3d.add("2dp2_y", *pc2dp2.get("y"));
+                        pcs.emplace("3d", pc3d);
                         // std::cout << pcs["3d"].get("x")->size_major() << " " << pcs["3d"].get("y")->size_major() << " " << pcs["3d"].get("z")->size_major() << std::endl;
                         // const auto& arr_x = pcs["3d"].get("x")->elements<Point::coordinate_t>();
                         // std::cout << arr_x.size() << " " << arr_x1.size() << std::endl;

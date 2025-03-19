@@ -229,11 +229,16 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         if (trees.is_live()) {
             auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
             n3dpoints_total += pc3d.size_major();
+            auto pc2dp0 = make2dds(pc3d, m_angle_u);
+            auto pc2dp1 = make2dds(pc3d, m_angle_v);
+            auto pc2dp2 = make2dds(pc3d, m_angle_w);
+            pc3d.add("2dp0_x", *pc2dp0.get("x"));
+            pc3d.add("2dp0_y", *pc2dp0.get("y"));
+            pc3d.add("2dp1_x", *pc2dp1.get("x"));
+            pc3d.add("2dp1_y", *pc2dp1.get("y"));
+            pc3d.add("2dp2_x", *pc2dp2.get("x"));
+            pc3d.add("2dp2_y", *pc2dp2.get("y"));
             pcs.emplace("3d", pc3d);
-            /// These seem unused and bring in horrible code
-            pcs.emplace("2dp0", make2dds(pc3d, m_angle_u));
-            pcs.emplace("2dp1", make2dds(pc3d, m_angle_v));
-            pcs.emplace("2dp2", make2dds(pc3d, m_angle_w));
             const Point center = calc_blob_center(pcs["3d"]);
             auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
             int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];

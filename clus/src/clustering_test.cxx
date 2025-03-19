@@ -72,7 +72,20 @@ void WireCell::PointCloud::Facade::clustering_test(
             WirePlaneId a0f0pA(kAllLayers, 0, 0);
             SPDLOG_INFO("FV_xmax {}", dv->metadata(a0f0pA)["FV_xmax"].asDouble());
             Json::FastWriter fastWriter;
-            SPDLOG_DEBUG("metadata(a0f0pA): {}", fastWriter.write(dv->metadata(a0f0pA)));
+            SPDLOG_INFO("metadata(a0f0pA): {}", fastWriter.write(dv->metadata(a0f0pA)));
+        }
+    }
+
+    /// TEST: points, wpid, merge 3d/2d
+    {
+        for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
+            Cluster* cluster = live_clusters.at(iclus);
+            auto& kd3d = cluster->kd3d();
+            SPDLOG_INFO("CTest Cluster {} kd3d.ndim() {} kd3d.npoints() {}", iclus, kd3d.ndim(), kd3d.npoints());
+            auto& kd2dp0 = cluster->kd2d(0);
+            SPDLOG_INFO("CTest Cluster {} kd2dp0.ndim() {} kd2dp0.npoints() {}", iclus, kd2dp0.ndim(), kd2dp0.npoints());
+            break;
+            // const Scope scope3d = {"3d", {"x", "y", "z"}};
         }
     }
 
