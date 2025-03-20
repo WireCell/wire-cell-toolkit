@@ -80,36 +80,46 @@ void WireCell::PointCloud::Facade::clustering_test(
     {
         for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
             Cluster* cluster = live_clusters.at(iclus);
-            auto& kd3d = cluster->kd3d();
-            SPDLOG_INFO("CTest Cluster {} kd3d.ndim() {} kd3d.npoints() {}", iclus, kd3d.ndim(), kd3d.npoints());
-            auto& kd2dp0 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 0));
-            SPDLOG_INFO("CTest Cluster {} kd2dp0.ndim() {} kd2dp0.npoints() {}", iclus, kd2dp0.ndim(), kd2dp0.npoints());
-            auto& kd2dp0_a0f1 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 1));
-            SPDLOG_INFO("CTest Cluster {} kd2dp0_a0f1.ndim() {} kd2dp0_a0f1.npoints() {}", iclus, kd2dp0_a0f1.ndim(), kd2dp0_a0f1.npoints());
 
+            // TEST: kd2d with wpid
+            {
+                // expecting:
+                // kd3d.ndim() 3 kd3d.npoints() 4248 (non-zero)
+                // kd2dp0.ndim() 2 kd2dp0.npoints() 4248 (same as 3D)
+                // kd2dp0_a0f1.ndim() 2 kd2dp0_a0f1.npoints() 0 (if we do not have a0f1)
+                auto& kd3d = cluster->kd3d();
+                SPDLOG_INFO("CTest Cluster {} kd3d.ndim() {} kd3d.npoints() {}", iclus, kd3d.ndim(), kd3d.npoints());
+                auto& kd2dp0 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 0));
+                SPDLOG_INFO("CTest Cluster {} kd2dp0.ndim() {} kd2dp0.npoints() {}", iclus, kd2dp0.ndim(), kd2dp0.npoints());
+                auto& kd2dp0_a0f1 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 1));
+                SPDLOG_INFO("CTest Cluster {} kd2dp0_a0f1.ndim() {} kd2dp0_a0f1.npoints() {}", iclus, kd2dp0_a0f1.ndim(), kd2dp0_a0f1.npoints());
+            }
+
+            // TEST: flat_pc and points_property
             {
                 auto& sv3d = cluster->sv3d();
                 const auto fpc = sv3d.flat_pc("3d", {"uwire_index"});
                 SPDLOG_INFO("CTest Cluster {} sv3d.keys().size() {} sv3d.size_major() {}",
                             iclus, fpc.keys().size(), fpc.size_major());
-                const auto& uwire_index = fpc.get("uwire_index")->elements<int>();
-                SPDLOG_INFO("CTest Cluster {} two calls uwire_index[0] {}", iclus, uwire_index[0]);
+                const auto& uwire_index_fpc = fpc.get("uwire_index")->elements<int>();
+                SPDLOG_INFO("CTest Cluster {} flat_pc uwire_index[0] {}", iclus, uwire_index_fpc[0]);
+                const auto uwire_index_pp = cluster->points_property<int>("uwire_index");
+                SPDLOG_INFO("CTest Cluster {} points_property uwire_index[0] {}", iclus, uwire_index_pp[0]);
             }
 
+            // TEST: points_property
             {
-                const auto uwire_index = cluster->points_property<int>("uwire_index");
-                SPDLOG_INFO("CTest Cluster {} one call uwire_index[0] {}", iclus, uwire_index[0]);
+                const auto x = cluster->points_property<double>("x");
+                const auto y = cluster->points_property<double>("y");
+                const auto z = cluster->points_property<double>("z");
+                const auto wpid_ident = cluster->points_property<int>("wpid");
+                for (size_t ipt=0; ipt!=x.size(); ipt++) {
+                    WirePlaneId wpid(wpid_ident[ipt]);
+                    SPDLOG_INFO("CTest Cluster {} wpid {} x {} y {} z {}", iclus, wpid.name(), x[ipt], y[ipt], z[ipt]);
+                    break; // only one point
+                }
             }
 
-            const auto x = cluster->points_property<double>("x");
-            const auto y = cluster->points_property<double>("y");
-            const auto z = cluster->points_property<double>("z");
-            const auto wpid_ident = cluster->points_property<int>("wpid");
-            for (size_t ipt=0; ipt!=x.size(); ipt++) {
-                WirePlaneId wpid(wpid_ident[ipt]);
-                SPDLOG_INFO("CTest Cluster {} wpid {} x {} y {} z {}", iclus, wpid.name(), x[ipt], y[ipt], z[ipt]);
-                break; // only one point
-            }
             break; // only one cluster
         }
     }
