@@ -14,6 +14,7 @@
 #include <string>
 #include <sstream>
 #include <fstream>
+#include <shared_mutex>
 
 // see #239 for why this is here.
 extern "C" {
@@ -153,6 +154,7 @@ std::string WireCell::Persist::resolve(const std::string& filename)
     return "";
 }
 
+static std::shared_mutex json_cache_mutex;
 static std::map<std::string, Json::Value> json_cache;
 
 Json::Value WireCell::Persist::load(const std::string& filename,
@@ -173,10 +175,13 @@ Json::Value WireCell::Persist::load(const std::string& filename,
     }
 
     // check cache for non jsonnet files
-    if (json_cache.count(filename)) {
-      return json_cache.at(filename);
+    {
+      // acquire read-lock
+      std::shared_lock<std::shared_mutex> r_lock(json_cache_mutex);
+      if (json_cache.count(filename)) {
+        return json_cache.at(filename);
+      }
     }
-
     // use jsoncpp file interface
     std::fstream fp(fname.c_str(), std::ios::binary | std::ios::in);
     boost::iostreams::filtering_stream<boost::iostreams::input> infilt;
@@ -191,7 +196,11 @@ Json::Value WireCell::Persist::load(const std::string& filename,
     // return update(jroot, extvar); fixme
 
     // save to cache
-    json_cache[filename] = jroot;
+    {
+      // acquire write lock
+      std::unique_lock<std::shared_mutex> w_lock(json_cache_mutex);
+      json_cache[filename] = jroot;
+    }
 
     return jroot;
 }
