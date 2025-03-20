@@ -82,11 +82,13 @@ void WireCell::PointCloud::Facade::clustering_test(
             Cluster* cluster = live_clusters.at(iclus);
             auto& kd3d = cluster->kd3d();
             SPDLOG_INFO("CTest Cluster {} kd3d.ndim() {} kd3d.npoints() {}", iclus, kd3d.ndim(), kd3d.npoints());
-            auto& kd2dp0 = cluster->kd2d(0);
+            auto& kd2dp0 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 0));
             SPDLOG_INFO("CTest Cluster {} kd2dp0.ndim() {} kd2dp0.npoints() {}", iclus, kd2dp0.ndim(), kd2dp0.npoints());
-            auto& sv3d = cluster->sv3d();
+            auto& kd2dp0_a0f1 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 1));
+            SPDLOG_INFO("CTest Cluster {} kd2dp0_a0f1.ndim() {} kd2dp0_a0f1.npoints() {}", iclus, kd2dp0_a0f1.ndim(), kd2dp0_a0f1.npoints());
 
             {
+                auto& sv3d = cluster->sv3d();
                 const auto fpc = sv3d.flat_pc("3d", {"uwire_index"});
                 SPDLOG_INFO("CTest Cluster {} sv3d.keys().size() {} sv3d.size_major() {}",
                             iclus, fpc.keys().size(), fpc.size_major());

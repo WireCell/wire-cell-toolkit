@@ -523,24 +523,45 @@ bool Cluster::construct_skeleton(const bool use_ctpc)
     return true;
 }
 
-const Cluster::sv2d_t& Cluster::sv2d(const size_t plane) const {
-    return m_node->value.scoped_view(scope2ds[plane]);
-    }
-
-const Cluster::kd2d_t& Cluster::kd2d(const size_t plane) const
+const Cluster::sv2d_t& Cluster::sv2d(const size_t plane, const WirePlaneId wpid) const
 {
-    const auto& sv = sv2d(plane);
+    if (wpid.layer()!=kAllLayers) {
+        raise<RuntimeError>("Cluster::sv2d() wpid.layer() {} != kAllLayers");
+    }
+    const Tree::Scope scope = {"3d", {scope2ds_prefix[plane]+"_x", scope2ds_prefix[plane]+"_y"}, 0, wpid.name()};
+    return m_node->value.scoped_view(scope,
+        [&](const Points::node_t& node) {
+            const auto& lpcs = node.value.local_pcs();
+            const auto& it = lpcs.find("scalar");
+            if (it == lpcs.end()) {
+                return false;
+            }
+            const auto& pc = it->second;
+            const auto& wpida = pc.get("wpid");
+            const auto wpidv = wpida->elements<int>();
+            if (wpidv[0] == wpid.ident()) {
+                return true;
+            }
+            // std::cerr << "Cluster::sv2d() wpid mismatch: " << wpidv[0] << " != " << wpid.ident() << std::endl;
+            return false;
+        }
+    );
+}
+
+const Cluster::kd2d_t& Cluster::kd2d(const size_t plane, const WirePlaneId wpid) const
+{
+    const auto& sv = sv2d(plane, wpid);
     return sv.kd();
 }
 
-std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane) const {
+std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane, const WirePlaneId wpid) const {
 
     const auto& tp = grouping()->get_params();
     double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
     double x = p.x();
     double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
     std::vector<float_t> query_pt = {x, y};
-    const auto& skd = kd2d(plane);
+    const auto& skd = kd2d(plane, wpid);
     auto ret_matches = skd.radius(search_radius * search_radius, query_pt);
 
     std::vector<size_t> ret_index(ret_matches.size());
@@ -630,7 +651,7 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
     return std::make_pair(min_point, min_dis1);
 }
 
-const Cluster::sv3d_t& Cluster::sv3d() const { return m_node->value.scoped_view(scope); }
+const Cluster::sv3d_t& Cluster::sv3d() const { return m_node->value.scoped_view(scope_3d_raw); }
 
 const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
@@ -694,7 +715,7 @@ std::pair<int, int> Cluster::ndipole(const geo_point_t& point, const geo_point_t
 
 // std::pair<int, int> Cluster::nprojection(const geo_point_t& point, const geo_point_t& dir, double dis) const
 // {
-//     const auto& sv = m_node->value.scoped_view(scope);       // get the kdtree
+//     const auto& sv = m_node->value.scoped_view(scope_3d_raw);       // get the kdtree
 //     const auto& skd = sv.kd();
 //     const auto& points = skd.points();
 
@@ -1477,9 +1498,9 @@ std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
 bool Cluster::sanity(Log::logptr_t log) const
 {
     {
-        const auto* svptr = m_node->value.get_scoped(scope);
+        const auto* svptr = m_node->value.get_scoped(scope_3d_raw);
         if (!svptr) {
-            if (log) log->debug("cluster sanity: note, not yet a scoped view {}", scope);
+            if (log) log->debug("cluster sanity: note, not yet a scoped view {}", scope_3d_raw);
         }
     }
     if (!nchildren()) {
@@ -1487,7 +1508,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         return false;
     }
 
-    const auto& sv = m_node->value.scoped_view(scope);
+    const auto& sv = m_node->value.scoped_view(scope_3d_raw);
     const auto& snodes = sv.nodes();
     if (snodes.empty()) {
         if (log) log->debug("cluster sanity: no scoped nodes");

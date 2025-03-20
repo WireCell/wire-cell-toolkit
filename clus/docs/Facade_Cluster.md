@@ -61,7 +61,7 @@ mutable std::list<const Blob*> m_path_mcells;
 
 ### Key Scopes
 ```cpp
-const Tree::Scope scope = {"3d", {"x", "y", "z"}};
+const Tree::Scope scope_3d_raw = {"3d", {"x", "y", "z"}};
 const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
 Tree::Scope scope2ds[3] = {
     {"2dp0", {"x", "y"}},

@@ -33,14 +33,15 @@ namespace WireCell::PointCloud::Facade {
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
     class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
 
-        // The expected scope.
-        const Tree::Scope scope = {"3d", {"x", "y", "z"}};
+        // default scope for all points with raw x,y,z as coordinates
+        const Tree::Scope scope_3d_raw = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
-        Tree::Scope scope2ds[3] = {
-            {"3d", {"2dp0_x", "2dp0_y"}},
-            {"3d", {"2dp1_x", "2dp1_y"}},
-            {"3d", {"2dp2_x", "2dp2_y"}}
-        };
+        // Tree::Scope scope2ds[3] = {
+        //     {"3d", {"2dp0_x", "2dp0_y"}},
+        //     {"3d", {"2dp1_x", "2dp1_y"}},
+        //     {"3d", {"2dp2_x", "2dp2_y"}}
+        // };
+        std::string scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
 
        public:
         Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
@@ -56,15 +57,18 @@ namespace WireCell::PointCloud::Facade {
         // order is synchronized with children()
         std::vector<WireCell::WirePlaneId> wpids() const;
 
-        // point info accessor via ScopedView::flat_pc
+        // expose general scove_view for the cluster
         template <typename T>
         const Tree::ScopedView<T>& sv(const Tree::Scope& sc) const
         {
             return m_node->value.scoped_view<T>(sc);
         }
+
+        /// @brief use flat_pc to replace sv().kd().points()
+        /// TODO: currently not cached, can cache it if needed
         template <typename T>
         const std::vector<T> points_property(const std::string& key) const
-        {   const auto fpc = sv<T>(scope).flat_pc("3d", {key});
+        {   const auto fpc = sv<T>(scope_3d_raw).flat_pc("3d", {key});
             const auto arr = fpc.get(key);
             if (!arr) {
                 raise<RuntimeError>("Cluster::points_property: no such array: %s", key);
@@ -236,12 +240,14 @@ namespace WireCell::PointCloud::Facade {
 
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv2d_t = Tree::ScopedView<double>;
-        const sv2d_t& sv2d(const size_t plane) const;
+        /// @param plane 0, 1, 2
+        /// @param wpid currently provides the apa and face
+        const sv2d_t& sv2d(const size_t plane, const WirePlaneId wpid) const;
         using kd2d_t = sv2d_t::nfkd_t;
-        const kd2d_t& kd2d(const size_t plane) const;
+        const kd2d_t& kd2d(const size_t plane, const WirePlaneId wpid) const;
 
         /// 
-        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane) const;
+        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane, const WirePlaneId wpid = WirePlaneId(kAllLayers, 0, 0)) const;
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 

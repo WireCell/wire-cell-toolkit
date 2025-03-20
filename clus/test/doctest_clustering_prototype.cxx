@@ -156,7 +156,7 @@ TEST_CASE("clustering prototype point tree")
     }
 
     // name, coords, [depth]
-    Scope scope{ "3d", {"x","y","z"}};
+    Scope scope_3d_raw{ "3d", {"x","y","z"}};
     auto const& s3d = rval.scoped_view({ "3d", {"x","y","z"}});
 
     auto const& pc3d = s3d.pcs();
@@ -191,7 +191,7 @@ TEST_CASE("clustering prototype point tree")
         debug("knn point {} at distance {} from query is in local point cloud {} at local point {}",
               index, metric, node_index, pin_index);
         const Dataset& pc = pc3d[node_index];
-        for (const auto& name : scope.coords) {
+        for (const auto& name : scope_3d_raw.coords) {
             debug("\t{} = {}", name, pc.get(name)->element<fa_float_t>(pin_index));
         }
     }
