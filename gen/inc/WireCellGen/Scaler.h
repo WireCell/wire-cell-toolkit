@@ -42,6 +42,8 @@ namespace WireCell {
       //Json::arrayValue map;
       Json::Value jmap;
 
+      std::vector<std::vector<double>> yzmap;
+
 
     };  // Scaler
 

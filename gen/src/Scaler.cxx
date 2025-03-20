@@ -76,6 +76,17 @@ void Gen::Scaler::configure(const WireCell::Configuration& cfg)
 
   jmap = WireCell::Persist::load(filename);
 
+  yzmap.resize(180);
+  for(int binz = 0; binz < 180; binz++){
+    yzmap[binz].resize(31);
+    for(int biny = 0; biny < 31; biny++){
+      yzmap[binz][biny] = jmap[anode_name][std::to_string(plane)][binz][biny].asDouble();
+    }
+  }
+
+  jmap.clear();
+
+
 }
 
 void Gen::Scaler::reset() { }
@@ -126,8 +137,7 @@ bool Gen::Scaler::operator()(const input_pointer& depo, output_queue& outq)
     depo_bin_z = 180;
   }
 
-  //  double scale = (jmap[anode_name][std::to_string(plane)][depo_bin_y][depo_bin_z].asDouble());
-  double scale = (jmap[anode_name][std::to_string(plane)][depo_bin_z][depo_bin_y].asDouble());
+  double scale = yzmap[depo_bin_z][depo_bin_y];
 
   auto newdepo = make_shared<Aux::SimpleDepo>(depo->time(), depo->pos(), Qi*scale, depo, depo->extent_long(), depo->extent_tran());
 
