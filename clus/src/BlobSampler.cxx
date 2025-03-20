@@ -269,7 +269,7 @@ struct BlobSampler::Sampler : public Aux::Logger
         }
 
         // Per point arrays
-
+        WirePlaneId wpid_blob{0}; // 0 is invalid, assign when we get it. duplicate over all pts later.
         const auto& activity = islice->activity();
         auto iface = iblob->face();
         for (const auto& iplane : iface->planes()) {
@@ -319,6 +319,8 @@ struct BlobSampler::Sampler : public Aux::Logger
                 wire_index[ipt] = wind;
         
                 IWire::pointer iwire = iwires[wire_index[ipt]];
+                const auto& wpid_wire = iwire->planeid();
+                wpid_blob = WireCell::WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                 channel_ident[ipt] = iwire->channel();
                 channel_attach[ipt] = p_chi2i[channel_ident[ipt]];
                 auto ich = channels[channel_attach[ipt]];
@@ -340,6 +342,11 @@ struct BlobSampler::Sampler : public Aux::Logger
             nv("charge_unc", charge_unc);
 
         } // over planes
+
+        {
+            npts_dup nd{*this, ds, npts};
+            nd("wpid", wpid_blob.ident());
+        }        
 
         return ds;
     }
