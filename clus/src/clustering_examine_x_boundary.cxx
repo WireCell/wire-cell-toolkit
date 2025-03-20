@@ -22,9 +22,18 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
     //     return cluster1->get_length() > cluster2->get_length();
     // });
 
-    const auto &tp = live_grouping.get_params();
+    // const auto &tp = live_grouping.get_params();
     // this is for 4 time slices
     // double time_slice_width = tp.nticks_live_slice * tp.tick_drift;
+
+
+    // std::cout << "Test: " << tp.FV_xmin << " " << tp.FV_xmax << " " << tp.FV_xmin_margin << " " << tp.FV_xmax_margin << std::endl;
+    // std::cout << "Test: " << dv->metadata(*live_grouping.wpids().begin())["FV_xmin"].asDouble() << " " << dv->metadata(*live_grouping.wpids().begin())["FV_xmax"].asDouble() << " " << dv->metadata(*live_grouping.wpids().begin())["FV_xmin_margin"].asDouble() << " " << dv->metadata(*live_grouping.wpids().begin())["FV_xmax_margin"].asDouble() << std::endl;
+
+    double FV_xmin = dv->metadata(*live_grouping.wpids().begin())["FV_xmin"].asDouble() ;
+    double FV_xmax = dv->metadata(*live_grouping.wpids().begin())["FV_xmax"].asDouble() ;
+    double FV_xmin_margin = dv->metadata(*live_grouping.wpids().begin())["FV_xmin_margin"].asDouble() ;
+    double FV_xmax_margin = dv->metadata(*live_grouping.wpids().begin())["FV_xmax_margin"].asDouble() ;
 
     // std::vector<PR3DCluster *> new_clusters;
     // std::vector<PR3DCluster *> del_clusters;
@@ -35,7 +44,7 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
         if (cluster->get_length() > 5 * units::cm && cluster->get_length() < 150 * units::cm) {
             // cluster->Create_point_cloud();
             // std::cout << "Cluster " << i << " old pointer " << cluster << " nchildren " << cluster->nchildren() << std::endl;
-            auto b2groupid = cluster->examine_x_boundary(tp.FV_xmin - tp.FV_xmin_margin, tp.FV_xmax + tp.FV_xmax_margin);
+            auto b2groupid = cluster->examine_x_boundary(FV_xmin - FV_xmin_margin, FV_xmax + FV_xmax_margin);
             if (b2groupid.empty()) {
                 continue;
             }
