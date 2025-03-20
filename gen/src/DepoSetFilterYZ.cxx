@@ -73,6 +73,16 @@ void DepoSetFilterYZ::configure(const WireCell::Configuration& cfg)
   anode_name = get<std::string>(cfg, "anode");
   jmap = WireCell::Persist::load(filename);
 
+  yzmap.resize(nbinsz);
+  for(int binz = 0; binz < nbinsz; binz++){
+    yzmap[binz].resize(nbinsy);
+    for(int biny = 0; biny < nbinsy; biny++){
+      yzmap[binz][biny] = jmap[anode_name][std::to_string(plane)][binz][biny].asInt();
+    }
+  }
+
+  jmap.clear();
+
 }
 
 bool DepoSetFilterYZ::operator()(const input_pointer& in, output_pointer& out)
@@ -119,7 +129,7 @@ bool DepoSetFilterYZ::operator()(const input_pointer& in, output_pointer& out)
     if(depo_bin_z > nbinsz)
       depo_bin_z = nbinsz;
 
-    if (jmap[anode_name][std::to_string(plane)][depo_bin_z][depo_bin_y].asInt() == resp+1) {pass_resp = true;}
+    if (yzmap[depo_bin_z][depo_bin_y] == resp+1) {pass_resp = true;}
 
     if (pass_resp && pass_anod) {
       //log->debug(" Passed! Resp {} at Y : {} and Z : {} on Plane {} and Anode {} ", resp+1, depo_y, depo_z, plane, anode_name);

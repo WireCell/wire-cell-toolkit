@@ -42,6 +42,8 @@ namespace WireCell::Gen {
     //Json::Value map = Json::arrayValue;
     //Json::arrayValue map;
     Json::Value jmap;
+    
+    std::vector<std::vector<int>> yzmap;
 
 
   };
