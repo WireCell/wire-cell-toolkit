@@ -65,7 +65,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     std::map<WirePlaneId, double> map_FV_xmin_margin;
     std::map<WirePlaneId, double> map_FV_xmax_margin;
     for (const auto& wpid : wpids) {
-        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(*live_grouping.wpids().begin())["tick_drift"].asDouble() ;
+        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
         map_FV_xmin[wpid] = dv->metadata(wpid)["FV_xmin"].asDouble() ;
         map_FV_xmax[wpid] = dv->metadata(wpid)["FV_xmax"].asDouble() ;
         map_FV_xmin_margin[wpid] = dv->metadata(wpid)["FV_xmin_margin"].asDouble() ;

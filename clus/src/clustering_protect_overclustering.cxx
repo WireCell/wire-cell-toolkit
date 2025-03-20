@@ -25,6 +25,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
     std::map<WirePlaneId, double> map_wpid_nticks_live;
     for (const auto& wpid : wpids) {
         map_wpid_nticks_live[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble();  
+        // std::cout << "Test: " << map_wpid_nticks_live[wpid] << std::endl;
     }
 
 
