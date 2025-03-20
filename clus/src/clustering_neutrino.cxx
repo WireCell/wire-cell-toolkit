@@ -53,9 +53,37 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    const auto &mp = live_grouping.get_params();
+
+    // const auto &mp = live_grouping.get_params();
     // this is for 4 time slices
-    double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+    // double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+
+    // get wpids ...
+    std::map<WirePlaneId, double> map_wpid_time_slice_width;
+    std::map<WirePlaneId, double> map_FV_xmin;
+    std::map<WirePlaneId, double> map_FV_xmax;
+    std::map<WirePlaneId, double> map_FV_xmin_margin;
+    std::map<WirePlaneId, double> map_FV_xmax_margin;
+    for (const auto& wpid : wpids) {
+        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(*live_grouping.wpids().begin())["tick_drift"].asDouble() ;
+        map_FV_xmin[wpid] = dv->metadata(wpid)["FV_xmin"].asDouble() ;
+        map_FV_xmax[wpid] = dv->metadata(wpid)["FV_xmax"].asDouble() ;
+        map_FV_xmin_margin[wpid] = dv->metadata(wpid)["FV_xmin_margin"].asDouble() ;
+        map_FV_xmax_margin[wpid] = dv->metadata(wpid)["FV_xmax_margin"].asDouble() ;
+    }
+    WirePlaneId wpid_all(0);
+    double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
+    double det_FV_xmax = dv->metadata(wpid_all)["FV_xmax"].asDouble();
+    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
+    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
+    double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
+    double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
+    double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
+    double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
+
+
+
+
 
     // Get drift direction from the first element of wpid_params, 
     // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
@@ -79,7 +107,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         // el_wcps.first.x()/units::cm << " " << el_wcps.second.x()/units::cm << std::endl;
 
         // if (el_wcps.first.x() < -1 * units::cm || el_wcps.second.x() > 257 * units::cm ||
-        if (el_wcps.first.x() < mp.FV_xmin - mp.FV_xmin_margin || el_wcps.second.x() > mp.FV_xmax + mp.FV_xmax_margin || cluster->get_length() < 6.0 * units::cm)
+        if (el_wcps.first.x() < map_FV_xmin.begin()->second - map_FV_xmin_margin.begin()->second || el_wcps.second.x() > map_FV_xmax.begin()->second + map_FV_xmax_margin.begin()->second || cluster->get_length() < 6.0 * units::cm)
             continue;
 
         bool flag_fy = false;
@@ -90,17 +118,17 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         bool flag_bz = false;
 
         std::vector<geo_point_t> saved_wcps;
-        if (hl_wcps.first.y() > mp.FV_ymax) {
+        if (hl_wcps.first.y() > det_FV_ymax) {
             saved_wcps.push_back(hl_wcps.first);
             flag_fy = true;
         }
 
-        if (hl_wcps.second.y() < mp.FV_ymin) {
+        if (hl_wcps.second.y() < det_FV_ymin) {
             saved_wcps.push_back(hl_wcps.second);
             flag_by = true;
         }
 
-        if (fb_wcps.first.z() > mp.FV_zmax) {
+        if (fb_wcps.first.z() > det_FV_zmax) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - fb_wcps.first.x(), 2) +
@@ -117,7 +145,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (fb_wcps.second.z() < mp.FV_zmin) {
+        if (fb_wcps.second.z() < det_FV_zmin) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - fb_wcps.second.x(), 2) +
@@ -134,7 +162,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (el_wcps.first.x() < mp.FV_xmin) {
+        if (el_wcps.first.x() < det_FV_xmin) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - el_wcps.first.x(), 2) +
@@ -151,7 +179,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (el_wcps.second.x() > mp.FV_xmax) {
+        if (el_wcps.second.x() > det_FV_xmax) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - el_wcps.second.x(), 2) +
@@ -681,7 +709,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                                 flag_merge = false;
                             }
                         }
-                        else if (JudgeSeparateDec_1(cluster2, drift_dir, cluster2->get_length(), time_slice_width)) {
+                        else if (JudgeSeparateDec_1(cluster2, drift_dir, cluster2->get_length(), map_wpid_time_slice_width.begin()->second)) {
                             if (dis2 < 5 * units::cm) {
                                 flag_merge = cluster2->judge_vertex(test_pt1,dv, 2. / 3.);
                             }
