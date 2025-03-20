@@ -153,6 +153,8 @@ std::string WireCell::Persist::resolve(const std::string& filename)
     return "";
 }
 
+static std::map<std::string, Json::Value> json_cache;
+
 Json::Value WireCell::Persist::load(const std::string& filename,
                                     const externalvars_t& extvar,
                                     const externalvars_t& extcode)
@@ -170,6 +172,11 @@ Json::Value WireCell::Persist::load(const std::string& filename,
         return parser.load(fname);
     }
 
+    // check cache for non jsonnet files
+    if (json_cache.count(filename)) {
+      return json_cache.at(filename);
+    }
+
     // use jsoncpp file interface
     std::fstream fp(fname.c_str(), std::ios::binary | std::ios::in);
     boost::iostreams::filtering_stream<boost::iostreams::input> infilt;
@@ -182,6 +189,10 @@ Json::Value WireCell::Persist::load(const std::string& filename,
     Json::Value jroot;
     infilt >> jroot;
     // return update(jroot, extvar); fixme
+
+    // save to cache
+    json_cache[filename] = jroot;
+
     return jroot;
 }
 
