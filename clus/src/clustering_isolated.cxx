@@ -70,8 +70,8 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     std::map<WirePlaneId, double> map_wpid_nticks_live_slice;
     std::map<WirePlaneId, double> map_wpid_time_slice_width;
     for (const auto& wpid : wpids) {
-        map_wpid_nticks_live_slice[wpid] = dv->metadata(*live_grouping.wpids().begin())["nticks_live_slice"].asDouble() ;
-        map_wpid_time_slice_width[wpid] = dv->metadata(*live_grouping.wpids().begin())["nticks_live_slice"].asDouble()  * dv->metadata(*live_grouping.wpids().begin())["tick_drift"].asDouble() ;
+        map_wpid_nticks_live_slice[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble() ;
+        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
         // std::cout << "Test: " << wpid << " " << map_wpid_nticks_live_slice[wpid] << " " << map_wpid_time_slice_width[wpid] << " " << mp.nticks_live_slice << " " << time_slice_width << std::endl;
     }
 

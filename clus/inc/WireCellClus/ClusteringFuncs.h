@@ -505,20 +505,25 @@ namespace WireCell::PointCloud::Facade {
         IDetectorVolumes::pointer m_dv;
     };
 
-    void clustering_protect_overclustering(Grouping& live_grouping);
+    void clustering_protect_overclustering(Grouping& live_grouping, const IDetectorVolumes::pointer dv);
     class ClusteringProtectOverClustering {
        public:
         ClusteringProtectOverClustering(const WireCell::Configuration& config)
         {
+             // Get the detector volumes pointer
+             m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+             if (m_dv == nullptr) {
+                 raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+             }
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_protect_overclustering(live_clusters);
+            clustering_protect_overclustering(live_clusters, m_dv);
         }
 
        private:
-           
+       IDetectorVolumes::pointer m_dv;
     };
 
     void clustering_neutrino(Grouping &live_grouping, int num_try, const IDetectorVolumes::pointer dv);
@@ -575,7 +580,7 @@ namespace WireCell::PointCloud::Facade {
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
-    bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
+    bool JudgeSeparateDec_2(const Cluster* cluster, const IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length);
     

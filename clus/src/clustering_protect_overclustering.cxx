@@ -15,11 +15,19 @@ using namespace WireCell::PointCloud::Tree;
 
 
 static
-std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
+std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolumes::pointer dv)
 {
     // can follow ToyClustering_separate to add clusters ...
     auto* grouping = cluster->grouping();
-    const auto &tp = grouping->get_params();
+    // const auto &tp = grouping->get_params();
+
+    auto wpids = cluster->wpids();
+    std::map<WirePlaneId, double> map_wpid_nticks_live;
+    for (const auto& wpid : wpids) {
+        map_wpid_nticks_live[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble();  
+        // std::cout << "Test: " << map_wpid_nticks_live[wpid] << std::endl;
+    }
+
 
     // copy the create_graph from the PR3D Cluster ...
 
@@ -238,13 +246,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
         // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
         std::vector<std::set<const Blob*, blob_less_functor>> vec_mcells_set;
         if (i + 1 < time_slices.size()) {
-            if (time_slices.at(i + 1) - time_slices.at(i) == 1*tp.nticks_live_slice) {
+            if (time_slices.at(i + 1) - time_slices.at(i) == 1*map_wpid_nticks_live.begin()->second) {
                 vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
                 if (i + 2 < time_slices.size())
-                    if (time_slices.at(i + 2) - time_slices.at(i) == 2*tp.nticks_live_slice)
+                    if (time_slices.at(i + 2) - time_slices.at(i) == 2*map_wpid_nticks_live.begin()->second)
                         vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 2)));
             }
-            else if (time_slices.at(i + 1) - time_slices.at(i) == 2*tp.nticks_live_slice) {
+            else if (time_slices.at(i + 1) - time_slices.at(i) == 2*map_wpid_nticks_live.begin()->second) {
                 vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
             }
         }
@@ -749,7 +757,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                         if (true) {
                             /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, tp.face);
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -776,7 +784,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
                             /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, tp.face);
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -803,7 +811,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
                             /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, tp.face);
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -1036,7 +1044,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
     return {};
 }
 
-void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& live_grouping)
+void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& live_grouping, IDetectorVolumes::pointer dv)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
@@ -1046,6 +1054,6 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
-        Separate_overclustering(cluster);
+        Separate_overclustering(cluster, dv);
     }
 }

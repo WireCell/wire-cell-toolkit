@@ -38,14 +38,51 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    geo_point_t beam_dir(0, 0, 1);
-    geo_point_t vertical_dir(0, 1, 0);
+
+
+    //set them 
+
 
     //  ExecMon em("sep starting");
 
-    const auto &mp = live_grouping.get_params();
+    // const auto &mp = live_grouping.get_params();
     // this is for 4 time slices
-    double live_time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+    // double live_time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+
+    auto wpids = live_grouping.wpids();
+    std::map<WirePlaneId, double> map_wpid_time_slice_width;
+    for (const auto& wpid : wpids) {
+        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
+    }
+    WirePlaneId wpid_all(0);
+    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
+    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
+
+    geo_point_t beam_dir(0, 0, 1);
+    geo_point_t vertical_dir(0, 1, 0);
+    
+    // Get vertical_dir from metadata
+    Json::Value vertical_dir_json = dv->metadata(wpid_all)["vertical_dir"];
+    Json::Value beam_dir_json = dv->metadata(wpid_all)["beam_dir"];
+
+    if (!vertical_dir_json.isNull() && vertical_dir_json.isArray() && vertical_dir_json.size() >= 3) {
+        vertical_dir = geo_point_t(
+            vertical_dir_json[0].asDouble(),
+            vertical_dir_json[1].asDouble(),
+            vertical_dir_json[2].asDouble()
+        );
+    } 
+    if (!beam_dir_json.isNull() && beam_dir_json.isArray() && beam_dir_json.size() >= 3) {
+        beam_dir = geo_point_t(
+            beam_dir_json[0].asDouble(),
+            beam_dir_json[1].asDouble(),
+            beam_dir_json[2].asDouble()
+        );
+    } 
+
+    // std::cout << "Test: " << vertical_dir << " " << beam_dir << std::endl;
+
+
 
     std::vector<Cluster *> new_clusters;
     std::vector<Cluster *> del_clusters;
@@ -75,7 +112,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             std::vector<geo_point_t> independent_points;
 
             bool flag_proceed =
-                JudgeSeparateDec_2(cluster, drift_dir, boundary_points, independent_points, cluster->get_length());
+                JudgeSeparateDec_2(cluster, dv, drift_dir, boundary_points, independent_points, cluster->get_length());
             // if (flag_debug_porting) {
             //     std::cout
             //     << " flag_proceed " << flag_proceed
@@ -88,11 +125,11 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
 
             if (!flag_proceed && cluster->get_length() > 100 * units::cm &&
-                JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width) &&
+                JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), map_wpid_time_slice_width.begin()->second) &&
                 independent_points.size() > 0) {
                 bool flag_top = false;
                 for (size_t j = 0; j != independent_points.size(); j++) {
-                    if (independent_points.at(j).y() > mp.FV_ymax) {
+                    if (independent_points.at(j).y() > det_FV_ymax) {
                         flag_top = true;
                         break;
                     }
@@ -164,7 +201,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             // }
 
             if (flag_proceed) {
-                if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), live_time_slice_width)) {
+                if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), map_wpid_time_slice_width.begin()->second)) {
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
                     // const size_t orig_nchildren = cluster->nchildren();
@@ -196,8 +233,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             boundary_points.clear();
                             independent_points.clear();
 
-                            if (JudgeSeparateDec_1(cluster2, drift_dir, length_1, live_time_slice_width) &&
-                                JudgeSeparateDec_2(cluster2, drift_dir, boundary_points, independent_points,
+                            if (JudgeSeparateDec_1(cluster2, drift_dir, length_1, map_wpid_time_slice_width.begin()->second) &&
+                                JudgeSeparateDec_2(cluster2, dv, drift_dir, boundary_points, independent_points,
                                                    length_1)) {
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points,
@@ -223,8 +260,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                     if (length_1 > 100 * units::cm) {
                                         boundary_points.clear();
                                         independent_points.clear();
-                                        if (JudgeSeparateDec_1(cluster4, drift_dir, length_1, live_time_slice_width) &&
-                                            JudgeSeparateDec_2(cluster4, drift_dir, boundary_points, independent_points,
+                                        if (JudgeSeparateDec_1(cluster4, drift_dir, length_1, map_wpid_time_slice_width.begin()->second) &&
+                                            JudgeSeparateDec_2(cluster4, dv, drift_dir, boundary_points, independent_points,
                                                                length_1)) {
                                             //	std::cout << "Separate 3rd level" << std::endl;
 
@@ -267,8 +304,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             if (length_1 > 60 * units::cm) {
                                 boundary_points.clear();
                                 independent_points.clear();
-                                JudgeSeparateDec_1(final_sep_cluster, drift_dir, length_1, live_time_slice_width);
-                                JudgeSeparateDec_2(final_sep_cluster, drift_dir, boundary_points, independent_points,
+                                JudgeSeparateDec_1(final_sep_cluster, drift_dir, length_1, map_wpid_time_slice_width.begin()->second);
+                                JudgeSeparateDec_2(final_sep_cluster, dv, drift_dir, boundary_points, independent_points,
                                                    length_1);
                                 if (independent_points.size() > 0) {
                                     // std::cout << "Separate final one" << std::endl;
@@ -408,11 +445,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, co
     return false;
 }
 
-bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
+bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, const IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length)
 {
-    const auto &mp = cluster->grouping()->get_params();
+    // const auto &mp = cluster->grouping()->get_params();
+
+    auto wpids = cluster->wpids();
+    std::map<WirePlaneId, double> map_FV_xmin;
+    std::map<WirePlaneId, double> map_FV_xmax;
+    std::map<WirePlaneId, double> map_FV_xmin_margin;
+    std::map<WirePlaneId, double> map_FV_xmax_margin;
+    for (const auto& wpid : wpids) {
+        map_FV_xmin[wpid] = dv->metadata(wpid)["FV_xmin"].asDouble() ;
+        map_FV_xmax[wpid] = dv->metadata(wpid)["FV_xmax"].asDouble() ;
+        map_FV_xmin_margin[wpid] = dv->metadata(wpid)["FV_xmin_margin"].asDouble() ;
+        map_FV_xmax_margin[wpid] = dv->metadata(wpid)["FV_xmax_margin"].asDouble() ;
+    }
+    WirePlaneId wpid_all(0);
+    double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
+    double det_FV_xmax = dv->metadata(wpid_all)["FV_xmax"].asDouble();
+    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
+    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
+    double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
+    double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
+    double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
+    double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
+    double det_FV_ymin_margin = dv->metadata(wpid_all)["FV_ymin_margin"].asDouble();
+    double det_FV_ymax_margin = dv->metadata(wpid_all)["FV_ymax_margin"].asDouble();
+    double det_FV_zmin_margin = dv->metadata(wpid_all)["FV_zmin_margin"].asDouble();
+    double det_FV_zmax_margin = dv->metadata(wpid_all)["FV_zmax_margin"].asDouble();
 
     boundary_points = cluster->get_hull();
     std::vector<geo_point_t> hy_points;
@@ -448,11 +510,11 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
 
     bool flag_outx = false;
     /// FIXME: hard-coded fiducial volume boundaries, needs to be passed in
-    if (hx_points.at(0).x() > mp.FV_xmax + mp.FV_xmax_margin || lx_points.at(0).x() < mp.FV_xmin - mp.FV_xmin_margin) flag_outx = true;
+    if (hx_points.at(0).x() > det_FV_xmax + det_FV_xmax_margin || lx_points.at(0).x() < det_FV_xmin - det_FV_xmin_margin) flag_outx = true;
 
-    if (hy_points.at(0).y() > mp.FV_ymax) {
+    if (hy_points.at(0).y() > det_FV_ymax) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).y() > mp.FV_ymax) {
+            if (boundary_points.at(j).y() > det_FV_ymax) {
                 bool flag_save = true;
                 for (size_t k = 0; k != hy_points.size(); k++) {
                     double dis = sqrt(pow(hy_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -468,9 +530,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         }
     }
 
-    if (ly_points.at(0).y() < mp.FV_ymin) {
+    if (ly_points.at(0).y() < det_FV_ymin) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).y() < mp.FV_ymin) {
+            if (boundary_points.at(j).y() < det_FV_ymin) {
                 bool flag_save = true;
                 for (size_t k = 0; k != ly_points.size(); k++) {
                     double dis = sqrt(pow(ly_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -485,9 +547,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
             }
         }
     }
-    if (hz_points.at(0).z() > mp.FV_zmax) {
+    if (hz_points.at(0).z() > det_FV_zmax) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).z() > mp.FV_zmax) {
+            if (boundary_points.at(j).z() > det_FV_zmax) {
                 bool flag_save = true;
                 for (size_t k = 0; k != hz_points.size(); k++) {
                     double dis = sqrt(pow(hz_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -502,9 +564,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
             }
         }
     }
-    if (lz_points.at(0).z() < mp.FV_zmin) {
+    if (lz_points.at(0).z() < det_FV_zmin) {
         for (size_t j = 0; j != boundary_points.size(); j++) {
-            if (boundary_points.at(j).z() < mp.FV_zmin) {
+            if (boundary_points.at(j).z() < det_FV_zmin) {
                 bool flag_save = true;
                 for (size_t k = 0; k != lz_points.size(); k++) {
                     double dis = sqrt(pow(lz_points.at(k).x() - boundary_points.at(j).x(), 2) +
@@ -524,9 +586,9 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
     int num_outx_points = 0;
 
     for (size_t j = 0; j != hy_points.size(); j++) {
-        if (hy_points.at(j).x() >= mp.FV_xmin && hy_points.at(j).x() <= mp.FV_xmax &&
-            hy_points.at(j).y() >= mp.FV_ymin && hy_points.at(j).y() <= mp.FV_ymax &&
-            hy_points.at(j).z() >= mp.FV_zmin && hy_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
+        if (hy_points.at(j).x() >= det_FV_xmin && hy_points.at(j).x() <= det_FV_xmax &&
+            hy_points.at(j).y() >= det_FV_ymin && hy_points.at(j).y() <= det_FV_ymax &&
+            hy_points.at(j).z() >= det_FV_zmin && hy_points.at(j).z() <= det_FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -538,36 +600,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         }
         if (flag_save) {
             independent_points.push_back(hy_points.at(j));
-            if (hy_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
+            if (hy_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (hy_points.at(j).y() < mp.FV_ymin) {
+            else if (hy_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (hy_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
+            else if (hy_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (hy_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
+            else if (hy_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (hy_points.at(j).x() > mp.FV_xmax) {
+            else if (hy_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (hy_points.at(j).x() < mp.FV_xmin) {
+            else if (hy_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (hy_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || hy_points.at(j).y() < mp.FV_ymin ||
-                hy_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || hy_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
-                hy_points.at(j).x() < mp.FV_xmin || hy_points.at(j).x() > mp.FV_xmax)
+            if (hy_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin || hy_points.at(j).y() < det_FV_ymin ||
+                hy_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || hy_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
+                hy_points.at(j).x() < det_FV_xmin || hy_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (hy_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || hy_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
+            if (hy_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hy_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != ly_points.size(); j++) {
-        if (ly_points.at(j).x() >= mp.FV_xmin && ly_points.at(j).x() <= mp.FV_xmax &&
-            ly_points.at(j).y() >= mp.FV_ymin && ly_points.at(j).y() <= mp.FV_ymax &&
-            ly_points.at(j).z() >= mp.FV_zmin && ly_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
+        if (ly_points.at(j).x() >= det_FV_xmin && ly_points.at(j).x() <= det_FV_xmax &&
+            ly_points.at(j).y() >= det_FV_ymin && ly_points.at(j).y() <= det_FV_ymax &&
+            ly_points.at(j).z() >= det_FV_zmin && ly_points.at(j).z() <= det_FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -580,36 +642,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(ly_points.at(j));
 
-            if (ly_points.at(j).y() < mp.FV_ymin) {
+            if (ly_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (ly_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
+            else if (ly_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (ly_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
+            else if (ly_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (ly_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
+            else if (ly_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (ly_points.at(j).x() > mp.FV_xmax) {
+            else if (ly_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (ly_points.at(j).x() < mp.FV_xmin) {
+            else if (ly_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (ly_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || ly_points.at(j).y() < mp.FV_ymin ||
-                ly_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || ly_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
-                ly_points.at(j).x() < mp.FV_xmin || ly_points.at(j).x() > mp.FV_xmax)
+            if (ly_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin || ly_points.at(j).y() < det_FV_ymin ||
+                ly_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || ly_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
+                ly_points.at(j).x() < det_FV_xmin || ly_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (ly_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || ly_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
+            if (ly_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || ly_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != hz_points.size(); j++) {
-        if (hz_points.at(j).x() >= mp.FV_xmin && hz_points.at(j).x() <= mp.FV_xmax &&
-            hz_points.at(j).y() >= mp.FV_ymin && hz_points.at(j).y() <= mp.FV_ymax &&
-            hz_points.at(j).z() >= mp.FV_zmin && hz_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
+        if (hz_points.at(j).x() >= det_FV_xmin && hz_points.at(j).x() <= det_FV_xmax &&
+            hz_points.at(j).y() >= det_FV_ymin && hz_points.at(j).y() <= det_FV_ymax &&
+            hz_points.at(j).z() >= det_FV_zmin && hz_points.at(j).z() <= det_FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -622,36 +684,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(hz_points.at(j));
 
-            if (hz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
+            if (hz_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (hz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
+            else if (hz_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (hz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
+            else if (hz_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (hz_points.at(j).y() < mp.FV_ymin) {
+            else if (hz_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (hz_points.at(j).x() > mp.FV_xmax) {
+            else if (hz_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (hz_points.at(j).x() < mp.FV_xmin) {
+            else if (hz_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (hz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || hz_points.at(j).y() < mp.FV_ymin ||
-                hz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || hz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
-                hz_points.at(j).x() < mp.FV_xmin || hz_points.at(j).x() > mp.FV_xmax)
+            if (hz_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin || hz_points.at(j).y() < det_FV_ymin ||
+                hz_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || hz_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
+                hz_points.at(j).x() < det_FV_xmin || hz_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (hz_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || hz_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
+            if (hz_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hz_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != lz_points.size(); j++) {
-        if (lz_points.at(j).x() >= mp.FV_xmin && lz_points.at(j).x() <= mp.FV_xmax &&
-            lz_points.at(j).y() >= mp.FV_ymin && lz_points.at(j).y() <= mp.FV_ymax &&
-            lz_points.at(j).z() >= mp.FV_zmin && lz_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
+        if (lz_points.at(j).x() >= det_FV_xmin && lz_points.at(j).x() <= det_FV_xmax &&
+            lz_points.at(j).y() >= det_FV_ymin && lz_points.at(j).y() <= det_FV_ymax &&
+            lz_points.at(j).z() >= det_FV_zmin && lz_points.at(j).z() <= det_FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -664,36 +726,36 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(lz_points.at(j));
 
-            if (lz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
+            if (lz_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
-            else if (lz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
+            else if (lz_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
+            else if (lz_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lz_points.at(j).y() < mp.FV_ymin) {
+            else if (lz_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lz_points.at(j).x() > mp.FV_xmax) {
+            else if (lz_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lz_points.at(j).x() < mp.FV_xmin) {
+            else if (lz_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
 
-            if (lz_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || lz_points.at(j).y() < mp.FV_ymin ||
-                lz_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || lz_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
-                lz_points.at(j).x() < mp.FV_xmin || lz_points.at(j).x() > mp.FV_xmax)
+            if (lz_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin || lz_points.at(j).y() < det_FV_ymin ||
+                lz_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || lz_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
+                lz_points.at(j).x() < det_FV_xmin || lz_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (lz_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || lz_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) num_outx_points++;
+            if (lz_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || lz_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != hx_points.size(); j++) {
-        if (hx_points.at(j).x() >= mp.FV_xmin && hx_points.at(j).x() <= mp.FV_xmax &&
-            hx_points.at(j).y() >= mp.FV_ymin && hx_points.at(j).y() <= mp.FV_ymax &&
-            hx_points.at(j).z() >= mp.FV_zmin && hx_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
+        if (hx_points.at(j).x() >= det_FV_xmin && hx_points.at(j).x() <= det_FV_xmax &&
+            hx_points.at(j).y() >= det_FV_ymin && hx_points.at(j).y() <= det_FV_ymax &&
+            hx_points.at(j).z() >= det_FV_zmin && hx_points.at(j).z() <= det_FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -706,38 +768,38 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(hx_points.at(j));
 
-            if (hx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || hx_points.at(j).y() < mp.FV_ymin ||
-                hx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || hx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
-                hx_points.at(j).x() < mp.FV_xmin || hx_points.at(j).x() > mp.FV_xmax)
+            if (hx_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin || hx_points.at(j).y() < det_FV_ymin ||
+                hx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || hx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
+                hx_points.at(j).x() < det_FV_xmin || hx_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (hx_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || hx_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) {
+            if (hx_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hx_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) {
                 num_outx_points++;
             }
 
-            if (lx_points.at(j).x() > mp.FV_xmax) {
+            if (lx_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lx_points.at(j).x() < mp.FV_xmin) {
+            else if (lx_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
-            else if (lx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
+            else if (lx_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lx_points.at(j).y() < mp.FV_ymin) {
+            else if (lx_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
+            else if (lx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
+            else if (lx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
         }
     }
     for (size_t j = 0; j != lx_points.size(); j++) {
-        if (lx_points.at(j).x() >= mp.FV_xmin && lx_points.at(j).x() <= mp.FV_xmax &&
-            lx_points.at(j).y() >= mp.FV_ymin && lx_points.at(j).y() <= mp.FV_ymax &&
-            lx_points.at(j).z() >= mp.FV_zmin && lx_points.at(j).z() <= mp.FV_zmax && (!flag_outx))
+        if (lx_points.at(j).x() >= det_FV_xmin && lx_points.at(j).x() <= det_FV_xmax &&
+            lx_points.at(j).y() >= det_FV_ymin && lx_points.at(j).y() <= det_FV_ymax &&
+            lx_points.at(j).z() >= det_FV_zmin && lx_points.at(j).z() <= det_FV_zmax && (!flag_outx))
             continue;
 
         bool flag_save = true;
@@ -750,30 +812,30 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
         if (flag_save) {
             independent_points.push_back(lx_points.at(j));
 
-            if (lx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin || lx_points.at(j).y() < mp.FV_ymin ||
-                lx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin || lx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin ||
-                lx_points.at(j).x() < mp.FV_xmin || lx_points.at(j).x() > mp.FV_xmax)
+            if (lx_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin || lx_points.at(j).y() < det_FV_ymin ||
+                lx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || lx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
+                lx_points.at(j).x() < det_FV_xmin || lx_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (lx_points.at(j).x() < mp.FV_xmin - mp.FV_xmin_margin || lx_points.at(j).x() > mp.FV_xmax - mp.FV_xmax_margin) {
+            if (lx_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || lx_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) {
                 num_outx_points++;
             }
 
-            if (lx_points.at(j).x() < mp.FV_xmin) {
+            if (lx_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
-            else if (lx_points.at(j).x() > mp.FV_xmax) {
+            else if (lx_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lx_points.at(j).y() > mp.FV_ymax + mp.FV_ymax_margin) {
+            else if (lx_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lx_points.at(j).y() < mp.FV_ymin) {
+            else if (lx_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lx_points.at(j).z() > mp.FV_zmax + mp.FV_zmax_margin) {
+            else if (lx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lx_points.at(j).z() < mp.FV_zmin - mp.FV_zmin_margin) {
+            else if (lx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
         }
@@ -948,9 +1010,6 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     //     boundary_points[idx] = point3d(boundary_points_idxs.at(idx));
     // }
     auto* grouping = cluster->grouping();
-
-    // const auto& tp = grouping->get_params();
-
     auto temp_cloud = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
 
     // ToyPointCloud *cloud = cluster->get_point_cloud();
