@@ -76,7 +76,7 @@ void WireCell::PointCloud::Facade::clustering_test(
         }
     }
 
-    /// TEST: points, wpid, merge 3d/2d
+    /// TEST: points: wpid, merge 3d/2d
     {
         for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
             Cluster* cluster = live_clusters.at(iclus);
@@ -84,8 +84,31 @@ void WireCell::PointCloud::Facade::clustering_test(
             SPDLOG_INFO("CTest Cluster {} kd3d.ndim() {} kd3d.npoints() {}", iclus, kd3d.ndim(), kd3d.npoints());
             auto& kd2dp0 = cluster->kd2d(0);
             SPDLOG_INFO("CTest Cluster {} kd2dp0.ndim() {} kd2dp0.npoints() {}", iclus, kd2dp0.ndim(), kd2dp0.npoints());
-            break;
-            // const Scope scope3d = {"3d", {"x", "y", "z"}};
+            auto& sv3d = cluster->sv3d();
+
+            {
+                const auto fpc = sv3d.flat_pc("3d", {"uwire_index"});
+                SPDLOG_INFO("CTest Cluster {} sv3d.keys().size() {} sv3d.size_major() {}",
+                            iclus, fpc.keys().size(), fpc.size_major());
+                const auto& uwire_index = fpc.get("uwire_index")->elements<int>();
+                SPDLOG_INFO("CTest Cluster {} two calls uwire_index[0] {}", iclus, uwire_index[0]);
+            }
+
+            {
+                const auto uwire_index = cluster->points_property<int>("uwire_index");
+                SPDLOG_INFO("CTest Cluster {} one call uwire_index[0] {}", iclus, uwire_index[0]);
+            }
+
+            const auto x = cluster->points_property<double>("x");
+            const auto y = cluster->points_property<double>("y");
+            const auto z = cluster->points_property<double>("z");
+            const auto wpid_ident = cluster->points_property<int>("wpid");
+            for (size_t ipt=0; ipt!=x.size(); ipt++) {
+                WirePlaneId wpid(wpid_ident[ipt]);
+                SPDLOG_INFO("CTest Cluster {} wpid {} x {} y {} z {}", iclus, wpid.name(), x[ipt], y[ipt], z[ipt]);
+                break; // only one point
+            }
+            break; // only one cluster
         }
     }
 

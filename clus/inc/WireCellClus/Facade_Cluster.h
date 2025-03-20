@@ -56,6 +56,20 @@ namespace WireCell::PointCloud::Facade {
         // order is synchronized with children()
         std::vector<WireCell::WirePlaneId> wpids() const;
 
+        // point info accessor via ScopedView::flat_pc
+        template <typename T>
+        const Tree::ScopedView<T>& sv(const Tree::Scope& sc) const
+        {
+            return m_node->value.scoped_view<T>(sc);
+        }
+        template <typename T>
+        const std::vector<T> points_property(const std::string& key) const
+        {   const auto fpc = sv<T>(scope).flat_pc("3d", {key});
+            const auto span = fpc.get(key)->template elements<T>();
+            // span does not own the data, so copy it.
+            return std::vector<T>(span.begin(), span.end());
+        }
+
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
         const sv3d_t& sv3d() const;
