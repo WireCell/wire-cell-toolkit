@@ -62,16 +62,25 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
         return cluster1->get_length() > cluster2->get_length();
     });
     
-    const auto &mp = live_grouping.get_params();
+    // const auto &mp = live_grouping.get_params();
     // this is for 4 time slices
-    double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+    // double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+
+    // get wpids ...
+    std::map<WirePlaneId, double> map_wpid_nticks_live_slice;
+    std::map<WirePlaneId, double> map_wpid_time_slice_width;
+    for (const auto& wpid : wpids) {
+        map_wpid_nticks_live_slice[wpid] = dv->metadata(*live_grouping.wpids().begin())["nticks_live_slice"].asDouble() ;
+        map_wpid_time_slice_width[wpid] = dv->metadata(*live_grouping.wpids().begin())["nticks_live_slice"].asDouble()  * dv->metadata(*live_grouping.wpids().begin())["tick_drift"].asDouble() ;
+        // std::cout << "Test: " << wpid << " " << map_wpid_nticks_live_slice[wpid] << " " << map_wpid_time_slice_width[wpid] << " " << mp.nticks_live_slice << " " << time_slice_width << std::endl;
+    }
+
 
     // geo_point_t drift_dir(1, 0, 0);
     // Get drift direction from the first element of wpid_params, 
     // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
     geo_point_t drift_dir = std::get<0>(wpid_params.begin()->second);
 
-    // std::cout << mp.nticks_live_slice << std::endl;
 
     int range_cut = 150;
     int length_cut = 20 * units::cm;
@@ -82,7 +91,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
         std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-        ranges.at(3) /= mp.nticks_live_slice;
+        ranges.at(3) /= map_wpid_nticks_live_slice.begin()->second; //mp.nticks_live_slice;
         int max = 0;
         for (int j = 0; j != 4; j++) {
             if (ranges.at(j) > max) max = ranges.at(j);
@@ -93,8 +102,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
         }
         else {
             if (live_clusters.at(i)->get_length() < 60 * units::cm) {
-                if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir, live_clusters.at(i)->get_length(),
-                                       time_slice_width)) {
+                if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir, live_clusters.at(i)->get_length(), map_wpid_time_slice_width.begin()->second)) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
                     const auto b2id = Separate_2(live_clusters.at(i), 2.5 * units::cm);
                     std::set<int> ids;
@@ -110,11 +118,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
                         // std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
                         std::tuple<int, int, int, int> ranges_tuple = get_uvwt_range(live_clusters.at(i), b2id, id);
                         std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-                        ranges.at(3) /= mp.nticks_live_slice;
-                        // double length_1 = sqrt(2. / 3. *
-                        //                            (pow(mp.pitch_u * ranges.at(0), 2) + pow(mp.pitch_v * ranges.at(1), 2) +
-                        //                             pow(mp.pitch_w * ranges.at(2), 2)) +
-                        //                        pow(time_slice_width * ranges.at(3), 2));
+                        ranges.at(3) /= map_wpid_nticks_live_slice.begin()->second;  // mp.nticks_live_slice;
                         double length_1 = get_length(live_clusters.at(i), b2id, id);
                         for (int j = 0; j != 4; j++) {
                             if (ranges.at(j) > max) {
