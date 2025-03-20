@@ -65,7 +65,15 @@ namespace WireCell::PointCloud::Facade {
         template <typename T>
         const std::vector<T> points_property(const std::string& key) const
         {   const auto fpc = sv<T>(scope).flat_pc("3d", {key});
-            const auto span = fpc.get(key)->template elements<T>();
+            const auto arr = fpc.get(key);
+            if (!arr) {
+                raise<RuntimeError>("Cluster::points_property: no such array: %s", key);
+            }
+            if (arr->element_size() != sizeof(T)) {
+                raise<RuntimeError>("Cluster::points_property: array %s has element size %d but expected %d",
+                                    key, arr->element_size(), sizeof(T));
+            }
+            const auto span = arr->template elements<T>();
             // span does not own the data, so copy it.
             return std::vector<T>(span.begin(), span.end());
         }
