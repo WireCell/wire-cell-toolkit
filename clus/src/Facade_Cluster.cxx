@@ -1350,12 +1350,14 @@ double Cluster::get_length() const
     if (m_length == 0) {  // invalidates when a new node is set
         const auto& tp = grouping()->get_params();
 
+        // std::cout << "Test: " << grouping()->get_anode()->face(0)->plane(0)->pimpos()->pitch() << " " << grouping()->get_anode()->face(0)->plane(1)->pimpos()->pitch() << " " << grouping()->get_anode()->face(0)->plane(2)->pimpos()->pitch() << " " << tp.pitch_u << " " << tp.pitch_v << " " << tp.pitch_w << std::endl;
+
         auto map_wpid_uvwt = get_uvwt_range();
         for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
             const auto [u, v, w, t] = uvwt;
-            const double pu = u * tp.pitch_u;
-            const double pv = v * tp.pitch_v;
-            const double pw = w * tp.pitch_w;
+            const double pu = u * grouping()->get_anode()->face(wpid.face())->plane(0)->pimpos()->pitch() ;
+            const double pv = v * grouping()->get_anode()->face(wpid.face())->plane(1)->pimpos()->pitch();
+            const double pw = w * grouping()->get_anode()->face(wpid.face())->plane(2)->pimpos()->pitch();
             const double pt = t * tp.tick_drift;
             m_length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
         }
@@ -1408,9 +1410,9 @@ double Facade::get_length(const Cluster* cluster, const std::vector<int>& b2id, 
     double length = 0;
     for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
         const auto [u, v, w, t] = uvwt;
-        const double pu = u * tp.pitch_u;
-        const double pv = v * tp.pitch_v;
-        const double pw = w * tp.pitch_w;
+        const double pu = u * cluster->grouping()->get_anode()->face(wpid.face())->plane(0)->pimpos()->pitch();
+        const double pv = v * cluster->grouping()->get_anode()->face(wpid.face())->plane(1)->pimpos()->pitch();
+        const double pw = w * cluster->grouping()->get_anode()->face(wpid.face())->plane(2)->pimpos()->pitch();
         const double pt = t * tp.tick_drift;
         length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
     }

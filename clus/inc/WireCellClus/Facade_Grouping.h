@@ -54,6 +54,7 @@ namespace WireCell::PointCloud::Facade {
         std::tuple<double, double, double> wire_angles() const { return {m_tp.angle_u, m_tp.angle_v, m_tp.angle_w}; }
 
         void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
+        const IAnodePlane::pointer get_anode() const { return m_anode; }
 
         // Return a value representing the content of this grouping.
         size_t hash() const;
