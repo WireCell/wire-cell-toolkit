@@ -1312,27 +1312,37 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_max() const
 // FIXME: Is this actually correct?  It does not return "ranges" but rather the
 // number of unique wires/ticks in the cluster.  A sparse but large cluster will
 // be "smaller" than a small but dense cluster.
-std::tuple<int, int, int, int> Cluster::get_uvwt_range() const
+std::map<WirePlaneId, std::tuple<int, int, int, int> > Cluster::get_uvwt_range() const
 {
-    std::set<int> u_set;
-    std::set<int> v_set;
-    std::set<int> w_set;
-    std::set<int> t_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_u_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_v_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_w_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_t_set;
     for (const auto* blob : children()) {
         for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
-            u_set.insert(i);
+            map_wpid_u_set[blob->wpid()].insert(i);
         }
         for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
-            v_set.insert(i);
+            map_wpid_v_set[blob->wpid()].insert(i);
         }
         for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
-            w_set.insert(i);
+            map_wpid_w_set[blob->wpid()].insert(i);
         }
         for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
-            t_set.insert(i);
+            map_wpid_t_set[blob->wpid()].insert(i);
         }
     }
-    return {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
+    std::map<WirePlaneId, std::tuple<int, int, int, int> > ret;
+    for (auto it = map_wpid_u_set.begin(); it != map_wpid_u_set.end(); ++it) {
+        const WirePlaneId wpid = it->first;
+        const auto& u_set = it->second;
+        const auto& v_set = map_wpid_v_set[wpid];
+        const auto& w_set = map_wpid_w_set[wpid];
+        const auto& t_set = map_wpid_t_set[wpid];
+        ret[wpid] = {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
+    }
+    return ret;
+    // return {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
 }
 
 double Cluster::get_length() const
@@ -1340,50 +1350,71 @@ double Cluster::get_length() const
     if (m_length == 0) {  // invalidates when a new node is set
         const auto& tp = grouping()->get_params();
 
-        const auto [u, v, w, t] = get_uvwt_range();
-        const double pu = u * tp.pitch_u;
-        const double pv = v * tp.pitch_v;
-        const double pw = w * tp.pitch_w;
-        const double pt = t * tp.tick_drift;
-        m_length = std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
+        auto map_wpid_uvwt = get_uvwt_range();
+        for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
+            const auto [u, v, w, t] = uvwt;
+            const double pu = u * tp.pitch_u;
+            const double pv = v * tp.pitch_v;
+            const double pw = w * tp.pitch_w;
+            const double pt = t * tp.tick_drift;
+            m_length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
+        }
     }
     return m_length;
 }
 
-std::tuple<int, int, int, int> Facade::get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id)
+std::map<WirePlaneId, std::tuple<int, int, int, int> > Facade::get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id)
 {
-    std::set<int> u_set;
-    std::set<int> v_set;
-    std::set<int> w_set;
-    std::set<int> t_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_u_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_v_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_w_set;
+    std::map<WirePlaneId, std::set<int> > map_wpid_t_set;
+
     for (size_t i = 0; i != b2id.size(); i++) {
         if (b2id.at(i) != id) continue;
         const auto* blob = cluster->children().at(i);
         for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
-            u_set.insert(i);
+            map_wpid_u_set[blob->wpid()].insert(i);
         }
         for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
-            v_set.insert(i);
+            map_wpid_v_set[blob->wpid()].insert(i);
         }
         for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
-            w_set.insert(i);
+            map_wpid_w_set[blob->wpid()].insert(i);
         }
         for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
-            t_set.insert(i);
+            map_wpid_t_set[blob->wpid()].insert(i);
         }
     }
-    return {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
+
+    std::map<WirePlaneId, std::tuple<int, int, int, int> > ret;
+    for (auto it = map_wpid_u_set.begin(); it != map_wpid_u_set.end(); ++it) {
+        const WirePlaneId wpid = it->first;
+        const auto& u_set = it->second;
+        const auto& v_set = map_wpid_v_set[wpid];
+        const auto& w_set = map_wpid_w_set[wpid];
+        const auto& t_set = map_wpid_t_set[wpid];
+        ret[wpid] = {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
+    }
+    return ret;
+
+    // return {u_set.size(), v_set.size(), w_set.size(), t_set.size()};
 }
 
 double Facade::get_length(const Cluster* cluster, const std::vector<int>& b2id, const int id)
 {
-    const auto [u, v, w, t] = Facade::get_uvwt_range(cluster, b2id, id);
     const auto& tp = cluster->grouping()->get_params();
-    const double pu = u * tp.pitch_u;
-    const double pv = v * tp.pitch_v;
-    const double pw = w * tp.pitch_w;
-    const double pt = t * tp.tick_drift;
-    return std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
+    auto map_wpid_uvwt = Facade::get_uvwt_range(cluster, b2id, id);
+    double length = 0;
+    for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
+        const auto [u, v, w, t] = uvwt;
+        const double pu = u * tp.pitch_u;
+        const double pv = v * tp.pitch_v;
+        const double pw = w * tp.pitch_w;
+        const double pt = t * tp.tick_drift;
+        length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
+    }
+    return length;
 }
 
 
@@ -3884,7 +3915,6 @@ bool Cluster::judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer 
     }
     else {
    
-        // const auto& mp = grouping()->get_params();
         // it might be better to directly use the closest point to find the wire plane id ...
         auto wpid = dv->contained_by(p_test);
         // what if the point is not found ... 

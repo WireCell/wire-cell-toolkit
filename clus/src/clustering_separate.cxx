@@ -1540,11 +1540,6 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
                 // ToyPointCloud *temp_cloud1 = other_clusters.at(i)->get_point_cloud();
                 std::tuple<int, int, double> temp_dis = other_clusters.at(i)->get_closest_points(*clusters_step0[0]);
                 if (std::get<2>(temp_dis) < 0.5 * units::cm) {
-                    // std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
-                    // double length_1 = sqrt(2. / 3. *
-                    //                            (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-                    //                             pow(pitch_w * range_v1.at(2), 2)) +
-                    //                        pow(time_slice_width * range_v1.at(3), 2));
                     double length_1 = other_clusters.at(i)->get_length();
                     geo_point_t p1(end_wcpoint.x(), end_wcpoint.y(), end_wcpoint.z());
                     double close_dis = other_clusters.at(i)->get_closest_dis(p1);
@@ -1578,11 +1573,6 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         for (size_t i = 0; i != other_clusters.size(); i++) {
             // How to write???
             bool flag_save = false;
-            // std::vector<int> range_v1 = other_clusters.at(i)->get_uvwt_range();
-            // double length_1 = sqrt(2. / 3. *
-            //                            (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-            //                             pow(pitch_w * range_v1.at(2), 2)) +
-            //                        pow(time_slice_width * range_v1.at(3), 2));
             double length_1 = other_clusters.at(i)->get_length();
             // other_clusters.at(i)->Create_point_cloud();
             // other_clusters.at(i)->Calc_PCA();

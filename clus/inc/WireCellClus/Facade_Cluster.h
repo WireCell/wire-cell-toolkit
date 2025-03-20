@@ -443,7 +443,7 @@ namespace WireCell::PointCloud::Facade {
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.
-        std::tuple<int, int, int, int> get_uvwt_range() const;
+        std::map<WirePlaneId, std::tuple<int, int, int, int> > get_uvwt_range() const;
         std::tuple<int, int, int, int> get_uvwt_min() const;
         std::tuple<int, int, int, int> get_uvwt_max() const;
 
@@ -460,7 +460,7 @@ namespace WireCell::PointCloud::Facade {
     void sort_clusters(std::vector<const Cluster*>& clusters);
     void sort_clusters(std::vector<Cluster*>& clusters);
 
-    std::tuple<int, int, int, int> get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id);
+    std::map<WirePlaneId, std::tuple<int, int, int, int> > get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id);
     double get_length(const Cluster* cluster, const std::vector<int>& b2id, const int id);
 
     struct cluster_less_functor {

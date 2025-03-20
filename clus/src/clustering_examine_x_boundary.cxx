@@ -63,22 +63,5 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
         }
     }
 
-    // for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
-    //     PR3DCluster *ncluster = (*it);
-    //     // ncluster->Create_point_cloud();
-    //     std::vector<int> range_v1 = ncluster->get_uvwt_range();
-    //     double length_1 = sqrt(2. / 3. *
-    //                                (pow(pitch_u * range_v1.at(0), 2) + pow(pitch_v * range_v1.at(1), 2) +
-    //                                 pow(pitch_w * range_v1.at(2), 2)) +
-    //                            pow(time_slice_width * range_v1.at(3), 2));
-    //     cluster_length_map[ncluster] = length_1;
-    //     live_clusters.push_back(ncluster);
-    // }
-
-    // for (auto it = del_clusters.begin(); it != del_clusters.end(); it++) {
-    //     PR3DCluster *ocluster = (*it);
-    //     cluster_length_map.erase(ocluster);
-    //     live_clusters.erase(find(live_clusters.begin(), live_clusters.end(), ocluster));
-    //     delete ocluster;
-    // }
+    
 }

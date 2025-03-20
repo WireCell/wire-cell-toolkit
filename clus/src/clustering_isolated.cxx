@@ -89,9 +89,19 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     std::vector<Cluster*> small_clusters;
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
-        std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
-        std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-        ranges.at(3) /= map_wpid_nticks_live_slice.begin()->second; //mp.nticks_live_slice;
+        auto map_wpid_uvwt_range = live_clusters.at(i)->get_uvwt_range();
+        std::vector<int> ranges(4, 0);  // Initialize a vector with 4 zeros
+          
+        for (auto [wpid, uvwt_range] : map_wpid_uvwt_range) {
+            ranges.at(0) += std::get<0>(uvwt_range);
+            ranges.at(1) += std::get<1>(uvwt_range);
+            ranges.at(2) += std::get<2>(uvwt_range);
+            ranges.at(3) += std::get<3>(uvwt_range)/map_wpid_nticks_live_slice[wpid];
+        }
+        // std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
+        // std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
+        // ranges.at(3) /= map_wpid_nticks_live_slice.begin()->second; //mp.nticks_live_slice;
+
         int max = 0;
         for (int j = 0; j != 4; j++) {
             if (ranges.at(j) > max) max = ranges.at(j);
@@ -114,11 +124,16 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
                     double max_length = 0;
                     // for (auto it = sep_clusters.begin(); it != sep_clusters.end(); it++) {
                     for (const auto id : ids) {    
-                        // std::tuple<int, int, int, int> ranges = (*it)->get_uvwt_range();
-                        // std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
-                        std::tuple<int, int, int, int> ranges_tuple = get_uvwt_range(live_clusters.at(i), b2id, id);
-                        std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-                        ranges.at(3) /= map_wpid_nticks_live_slice.begin()->second;  // mp.nticks_live_slice;
+                        auto map_wpid_uvwt_range = get_uvwt_range(live_clusters.at(i), b2id, id);
+
+                        std::vector<int> ranges(4, 0);  // Initialize a vector with 4 zeros
+                        for (auto [wpid, uvwt_range] : map_wpid_uvwt_range) {
+                            ranges.at(0) += std::get<0>(uvwt_range);
+                            ranges.at(1) += std::get<1>(uvwt_range);
+                            ranges.at(2) += std::get<2>(uvwt_range);
+                            ranges.at(3) += std::get<3>(uvwt_range)/map_wpid_nticks_live_slice[wpid];
+                        }
+
                         double length_1 = get_length(live_clusters.at(i), b2id, id);
                         for (int j = 0; j != 4; j++) {
                             if (ranges.at(j) > max) {
