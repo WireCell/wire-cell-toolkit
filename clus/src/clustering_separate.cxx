@@ -38,8 +38,10 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    geo_point_t beam_dir(0, 0, 1);
-    geo_point_t vertical_dir(0, 1, 0);
+
+
+    //set them 
+
 
     //  ExecMon em("sep starting");
 
@@ -56,6 +58,29 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
     double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
     double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
 
+    geo_point_t beam_dir(0, 0, 1);
+    geo_point_t vertical_dir(0, 1, 0);
+    
+    // Get vertical_dir from metadata
+    Json::Value vertical_dir_json = dv->metadata(wpid_all)["vertical_dir"];
+    Json::Value beam_dir_json = dv->metadata(wpid_all)["beam_dir"];
+
+    if (!vertical_dir_json.isNull() && vertical_dir_json.isArray() && vertical_dir_json.size() >= 3) {
+        vertical_dir = geo_point_t(
+            vertical_dir_json[0].asDouble(),
+            vertical_dir_json[1].asDouble(),
+            vertical_dir_json[2].asDouble()
+        );
+    } 
+    if (!beam_dir_json.isNull() && beam_dir_json.isArray() && beam_dir_json.size() >= 3) {
+        beam_dir = geo_point_t(
+            beam_dir_json[0].asDouble(),
+            beam_dir_json[1].asDouble(),
+            beam_dir_json[2].asDouble()
+        );
+    } 
+
+    // std::cout << "Test: " << vertical_dir << " " << beam_dir << std::endl;
 
 
 

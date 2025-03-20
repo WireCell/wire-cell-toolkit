@@ -91,6 +91,23 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
     geo_point_t vertical_dir(0, 1, 0);
     geo_point_t beam_dir(0, 0, 1);
+    // Get vertical_dir from metadata
+    Json::Value vertical_dir_json = dv->metadata(wpid_all)["vertical_dir"];
+    Json::Value beam_dir_json = dv->metadata(wpid_all)["beam_dir"];
+    if (!vertical_dir_json.isNull() && vertical_dir_json.isArray() && vertical_dir_json.size() >= 3) {
+        vertical_dir = geo_point_t(
+            vertical_dir_json[0].asDouble(),
+            vertical_dir_json[1].asDouble(),
+            vertical_dir_json[2].asDouble()
+        );
+    } 
+    if (!beam_dir_json.isNull() && beam_dir_json.isArray() && beam_dir_json.size() >= 3) {
+        beam_dir = geo_point_t(
+            beam_dir_json[0].asDouble(),
+            beam_dir_json[1].asDouble(),
+            beam_dir_json[2].asDouble()
+        );
+    } 
 
     // find all the clusters that are inside the box ...
     std::vector<Cluster *> contained_clusters;
