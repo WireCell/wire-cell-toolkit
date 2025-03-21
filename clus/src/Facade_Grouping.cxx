@@ -168,9 +168,11 @@ size_t Grouping::hash() const
     return h;
 }
 
-const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
+const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind, const int apa) const
 {
-    const auto sname = String::format("ctpc_f%dp%d", face, pind);
+    std::vector<std::string> plane_names = {"U", "V", "W"};
+    const auto sname = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
+    // const auto sname = String::format("ctpc_f%dp%d", face, pind);
     Tree::Scope scope = {sname, {"x", "y"}, 1};
     const auto& sv = m_node->value.scoped_view(scope);
     // std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
@@ -258,7 +260,7 @@ double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const doubl
     return charge;
 }
 
-double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double radius, const int face, const int pind) const {
+double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double radius, const int face, const int pind, const int apa) const {
     double sum_charge = 0;
     double ncount = 0;
 
@@ -266,7 +268,9 @@ double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double r
     auto nearby_points = get_closest_points(point, radius, face, pind);
 
     // Access the charge information from ctpc dataset
-    const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
+    std::vector<std::string> plane_names = {"U", "V", "W"};
+    const std::string ds_name = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
+    // const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
     const auto& local_pcs = m_node->value.local_pcs();
     
     if (local_pcs.find(ds_name) == local_pcs.end()) {
@@ -376,8 +380,10 @@ std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, 
 }
 
 
-size_t Grouping::get_num_points(const int face, const int pind) const {
-    const auto sname = String::format("ctpc_f%dp%d", face, pind);
+size_t Grouping::get_num_points(const int face, const int pind, const int apa) const {
+    std::vector<std::string> plane_names = {"U", "V", "W"};
+    const auto sname = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
+    // const auto sname = String::format("ctpc_f%dp%d", face, pind);
     Tree::Scope scope = {sname, {"x", "y"}, 1};
     const auto& sv = m_node->value.scoped_view(scope);
     return sv.npoints();
@@ -464,12 +470,14 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
 
 std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_overlap_good_ch_charge(
     int min_time, int max_time, int min_ch, int max_ch, 
-    const int face, const int pind) const 
+    const int face, const int pind, const int apa) const 
 {
     std::map<std::pair<int,int>, std::pair<double,double>> map_time_ch_charge;
     
     // Get the point cloud for this face/plane
-    const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
+    std::vector<std::string> plane_names = {"U", "V", "W"};
+    const std::string ds_name = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
+    // const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
     if (m_node->value.local_pcs().find(ds_name) == m_node->value.local_pcs().end()) {
         return map_time_ch_charge; // Return empty if dataset not found
     }

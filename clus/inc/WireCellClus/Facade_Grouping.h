@@ -87,7 +87,7 @@ namespace WireCell::PointCloud::Facade {
         using kd2d_t = sv2d_t::nfkd_t;
         using kd_results_t = kd2d_t::results_type;
 
-        const kd2d_t& kd2d(const int face, const int pind) const;
+        const kd2d_t& kd2d(const int face, const int pind, const int apa = 0) const;
 
         const mapfp_t<double>& proj_centers() const {
             return cache().proj_centers;
@@ -125,11 +125,11 @@ namespace WireCell::PointCloud::Facade {
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
         /// @return Number of points in the specified plane
-        size_t get_num_points(const int face, const int pind) const;
+        size_t get_num_points(const int face, const int pind, const int apa = 0) const;
 
         // In Facade_Grouping.h, add to public section:
         double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0) const;
-        double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0) const;
+        double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0, const int apa = 0) const;
 
         /// @brief Get ranges of dead channels that overlap with given time and channel window
         /// @param min_time Minimum time
@@ -149,7 +149,7 @@ namespace WireCell::PointCloud::Facade {
         // Get overlapping good channel charges in a time-channel window
         std::map<std::pair<int,int>, std::pair<double,double>> get_overlap_good_ch_charge(
             int min_time, int max_time, int min_ch, int max_ch, 
-            const int face, const int pind) const;
+            const int face, const int pind, const int apa = 0) const;
 
         // We override this from Mixin in order to inject propagation of the
         // utter garbage handling of dead_winds.  If someone fixes that, this
