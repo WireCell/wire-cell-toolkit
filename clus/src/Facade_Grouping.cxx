@@ -120,8 +120,8 @@ void Grouping::fill_cache(GroupingCache& gc) const
                 const auto& pitch_dir = coords.pitch_dirs()[layer];
                 const auto& center = coords.centers()[layer];
                 double proj_center = center.dot(pitch_dir);
-                gc.proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
-                gc.pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+                gc.proj_centers[face->ident()][layer - ndummy_layers] = proj_center;
+                gc.pitch_mags[face->ident()][layer - ndummy_layers] = coords.pitch_mags()[layer];
             }
         }
     }
