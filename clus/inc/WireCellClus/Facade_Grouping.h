@@ -58,7 +58,7 @@ namespace WireCell::PointCloud::Facade {
 
         /// TODO: remove this in the future
         // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
-        const IAnodePlane::pointer get_anode() const { return m_anode; }
+        // const IAnodePlane::pointer get_anode() const { return m_anode; }
 
         void set_anodes(const std::vector<IAnodePlane::pointer>& anodes);
         const IAnodePlane::pointer get_anode(const int ident) const;
