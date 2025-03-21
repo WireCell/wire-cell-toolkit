@@ -77,17 +77,20 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_perf = get(cfg, "perf", m_perf);
 
-    m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
+    for (const auto& aname : cfg["anodes"]) {
+        auto anode = Factory::find_tn<IAnodePlane>(aname.asString());
+        m_anodes.push_back(anode);
+    }
 
     m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
 
     m_face = get<int>(cfg, "face", 0);
 
     m_bee_img.detector(get<std::string>(cfg, "bee_detector", "uboone"));
-    m_bee_img.algorithm(String::format("%s-%d-%d", m_bee_img.algorithm().c_str(), m_anode->ident(), m_face));
+    m_bee_img.algorithm(String::format("%s-%d-%d", m_bee_img.algorithm().c_str(), m_anodes.front()->ident(), m_face));
     log->debug("m_bee_img.algorithm: {}", m_bee_img.algorithm());
     m_bee_ld.detector(get<std::string>(cfg, "bee_detector", "uboone"));
-    m_bee_ld.algorithm(String::format("%s-%d-%d", m_bee_ld.algorithm().c_str(), m_anode->ident(), m_face));
+    m_bee_ld.algorithm(String::format("%s-%d-%d", m_bee_ld.algorithm().c_str(), m_anodes.front()->ident(), m_face));
     log->debug("m_bee_ld.algorithm: {}", m_bee_ld.algorithm());
 
     m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
@@ -291,8 +294,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inpath);
     }
     auto grouping = root_live->value.facade<Grouping>();
-    grouping->set_anodes({m_anode});
-    grouping->set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
+    grouping->set_anodes(m_anodes);
+    grouping->set_detector_volumes(m_dv);
+    grouping->set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
     perf("loaded live clusters");
     {
         size_t npoints_total = 0;
@@ -338,8 +342,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
 
     Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
-    dead_grouping.set_anodes({m_anode});
-    dead_grouping.set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
+    dead_grouping.set_anodes(m_anodes);
+    dead_grouping.set_detector_volumes(m_dv);
+    dead_grouping.set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
     
 
     //perf.dump("original live clusters", live_grouping, false, false);

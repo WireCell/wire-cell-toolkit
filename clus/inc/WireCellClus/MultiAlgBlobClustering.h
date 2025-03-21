@@ -95,7 +95,7 @@ namespace WireCell::Clus {
         Configuration m_func_cfgs;
 
         // the anode to be processed
-        IAnodePlane::pointer m_anode;
+        std::vector<IAnodePlane::pointer> m_anodes;
 
         IDetectorVolumes::pointer m_dv;
 
