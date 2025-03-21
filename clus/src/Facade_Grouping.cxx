@@ -109,21 +109,34 @@ void Grouping::fill_cache(GroupingCache& gc) const
         // In pre-cached code this was Grouping::fill_proj_centers_pitch_mags() const
 
         const int ndummy_layers = 2;
-        if (!m_anode) {
+        if (m_anodes.size()==0) {
             raise<ValueError>("anode is null");
         }
-        for (const auto& face : m_anode->faces()) {
-            // std::cout<< "fill_cache: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
-            const auto& coords = face->raygrid();
-            // skip dummy layers so the vector matches 0, 1, 2 plane order
-            for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
-                const auto& pitch_dir = coords.pitch_dirs()[layer];
-                const auto& center = coords.centers()[layer];
-                double proj_center = center.dot(pitch_dir);
-                gc.proj_centers[face->ident()][layer - ndummy_layers] = proj_center;
-                gc.pitch_mags[face->ident()][layer - ndummy_layers] = coords.pitch_mags()[layer];
+        for (const auto [ident, anode] : m_anodes) {
+            for (const auto& face : anode->faces()) {
+                const auto& coords = face->raygrid();
+                // skip dummy layers so the vector matches 0, 1, 2 plane order
+                for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+                    const auto& pitch_dir = coords.pitch_dirs()[layer];
+                    const auto& center = coords.centers()[layer];
+                    double proj_center = center.dot(pitch_dir);
+                    gc.proj_centers[anode->ident()][face->ident()][layer - ndummy_layers] = proj_center;
+                    gc.pitch_mags[anode->ident()][face->ident()][layer - ndummy_layers] = coords.pitch_mags()[layer];
+                }
             }
         }
+        // for (const auto& face : m_anode->faces()) {
+        //     // std::cout<< "fill_cache: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
+        //     const auto& coords = face->raygrid();
+        //     // skip dummy layers so the vector matches 0, 1, 2 plane order
+        //     for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
+        //         const auto& pitch_dir = coords.pitch_dirs()[layer];
+        //         const auto& center = coords.centers()[layer];
+        //         double proj_center = center.dot(pitch_dir);
+        //         gc.proj_centers[face->ident()][layer - ndummy_layers] = proj_center;
+        //         gc.pitch_mags[face->ident()][layer - ndummy_layers] = coords.pitch_mags()[layer];
+        //     }
+        // }
     }
 
     {
@@ -349,7 +362,7 @@ bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range
     return false;
 }
 
-std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const {
+std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind, int apa) const {
     if (m_anode == nullptr) {
         raise<ValueError>("Anode is null");
     }
@@ -361,8 +374,8 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     const auto [angle_u,angle_v,angle_w] = wire_angles();
     std::vector<double> angles = {angle_u, angle_v, angle_w};
     const double angle = angles[pind];
-    const double pitch = pitch_mags().at(face).at(pind);
-    const double center = proj_centers().at(face).at(pind);
+    const double pitch = pitch_mags().at(apa).at(face).at(pind);
+    const double center = proj_centers().at(apa).at(face).at(pind);
 
     // std::cout << "Test: " << pitch/units::cm << " " << center/units::cm << std::endl;
 
@@ -378,7 +391,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     return {tind, wind};
 }
 
-std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane) const 
+std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane, int apa) const 
 {
     if (m_anode == nullptr) {
         raise<ValueError>("Anode is null");
@@ -398,8 +411,8 @@ std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, 
     // Get y position based on channel and plane
     double y;
     if (plane >= 0 && plane < nplanes) {
-        const double pitch = pitch_mags.at(face).at(plane);
-        const double center = proj_centers.at(face).at(plane);
+        const double pitch = pitch_mags.at(apa).at(face).at(plane);
+        const double center = proj_centers.at(apa).at(face).at(plane);
         y = pitch * (channel+0.5) + center;
     }
     else {

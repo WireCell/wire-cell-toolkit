@@ -25,8 +25,8 @@ namespace WireCell::PointCloud::Facade {
 
     struct GroupingCache {
 
-        mapfp_t<double> proj_centers;
-        mapfp_t<double> pitch_mags;
+        std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>> proj_centers;
+        std::unordered_map<int, std::unordered_map<int, std::unordered_map<int,double >>> pitch_mags;
 
         // what wpids the grouping has.
         std::set<WireCell::WirePlaneId> wpids;
@@ -90,10 +90,10 @@ namespace WireCell::PointCloud::Facade {
 
         const kd2d_t& kd2d(const int face, const int pind, const int apa = 0) const;
 
-        const mapfp_t<double>& proj_centers() const {
+        const std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>>& proj_centers() const {
             return cache().proj_centers;
         }
-        const mapfp_t<double>& pitch_mags() const {
+        const std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>>& pitch_mags() const {
             return cache().pitch_mags;
         }
 
@@ -119,9 +119,9 @@ namespace WireCell::PointCloud::Facade {
         bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int face, int pind) const;
 
         /// @brief convert_3Dpoint_time_ch
-        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;
+        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind, int apa = 0) const;
         // In class Grouping definition
-        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane) const;
+        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane, int apa = 0) const;
 
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
