@@ -183,7 +183,7 @@ void Grouping::set_anodes(const std::vector<IAnodePlane::pointer>& anodes) {
         m_anodes[anode->ident()] = anode;
     }
     /// TODO: remove this in the future
-    m_anode = anodes.front();
+    // m_anode = anodes.front();
 }
 
 const IAnodePlane::pointer Grouping::get_anode(const int ident) const {
@@ -363,12 +363,12 @@ bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range
 }
 
 std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind, int apa) const {
-    if (m_anode == nullptr) {
+    if (m_anodes.size()==0) {
         raise<ValueError>("Anode is null");
     }
-    const auto iface = m_anode->faces()[face];
+    const auto iface = m_anodes.at(apa)->faces()[face];
     if (iface == nullptr) {
-        raise<ValueError>("anode %d has no face %d", m_anode->ident(), face);
+        raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
     }
 
     const auto [angle_u,angle_v,angle_w] = wire_angles();
@@ -393,12 +393,12 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
 
 std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane, int apa) const 
 {
-    if (m_anode == nullptr) {
+    if (m_anodes.size() == 0) {
         raise<ValueError>("Anode is null");
     }
-    const auto iface = m_anode->faces()[face];
+    const auto iface = m_anodes.at(apa)->faces()[face];
     if (iface == nullptr) {
-        raise<ValueError>("anode %d has no face %d", m_anode->ident(), face);
+        raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
     }
     const int nplanes = 3;
     const auto params = get_params();
@@ -433,16 +433,16 @@ size_t Grouping::get_num_points(const int face, const int pind, const int apa) c
 }
 
 std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const int min_time, const int max_time,
-    const int min_ch, const int max_ch, const int face, const int pind, const bool flag_ignore_time) const 
+    const int min_ch, const int max_ch, const int face, const int pind, const bool flag_ignore_time, const int apa) const 
 {
-    if (!m_anode) {
+    if (m_anodes.size() == 0) {
         raise<ValueError>("anode is null");
     }
     const auto& params = get_params();
     
     // Convert time to position
-    const double min_xpos = time2drift(m_anode->faces()[face], params.time_offset, params.drift_speed, min_time);
-    const double max_xpos = time2drift(m_anode->faces()[face], params.time_offset, params.drift_speed, max_time);
+    const double min_xpos = time2drift(m_anodes.at(apa)->faces()[face], params.time_offset, params.drift_speed, min_time);
+    const double max_xpos = time2drift(m_anodes.at(apa)->faces()[face], params.time_offset, params.drift_speed, max_time);
 
     std::set<int> dead_chs;
     const auto& dead_winds = get_dead_winds(face, pind);
@@ -485,7 +485,7 @@ std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const in
     return dead_ch_range;
 }
 
-std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int face, const int pind, int expand) const
+std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int face, const int pind, int expand, const int apa) const
 {
     std::map<int, std::pair<int, int>> results;
     
@@ -496,11 +496,11 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
         int temp_ch = wind;
         
         // Convert position range to time ticks using drift parameters
-        int min_time = std::round(drift2time(m_anode->faces()[face], 
+        int min_time = std::round(drift2time(m_anodes.at(apa)->faces()[face], 
                                            m_tp.time_offset,
                                            m_tp.drift_speed, 
                                            xrange.first)) - expand;
-        int max_time = std::round(drift2time(m_anode->faces()[face],
+        int max_time = std::round(drift2time(m_anodes.at(apa)->faces()[face],
                                            m_tp.time_offset,
                                            m_tp.drift_speed,
                                            xrange.second)) + expand;
