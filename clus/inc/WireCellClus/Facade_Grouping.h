@@ -13,6 +13,7 @@
 #include "WireCellUtil/Graph.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IDetectorVolumes.h"
 
 #include "WireCellClus/Facade_Util.h"
 
@@ -38,23 +39,32 @@ namespace WireCell::PointCloud::Facade {
     // nodes that are related in some way.
     class Grouping : public NaryTree::FacadeParent<Cluster, points_t>, public Mixin<Grouping, GroupingCache> {
 
-        TPCParams m_tp{};  // use default value by default.
-        /// TODO: replace TPCParams with this in the future?
+        std::map<int, IAnodePlane::pointer> m_anodes;
+        IDetectorVolumes::pointer m_dv{nullptr};
+
+        /// TODO: remove these in the future
         IAnodePlane::pointer m_anode{nullptr};
+        TPCParams m_tp{};  // use default value by default.
 
        public:
 
         Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
-        // MUST call this sometimes after construction if non-default value needed.
-        // FIXME: TPCParams should be moved out of the facade!
+        // TODO: remove this in the future
         void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);
         const TPCParams& get_params() const { return m_tp; }
         std::tuple<double, double, double> wire_angles() const { return {m_tp.angle_u, m_tp.angle_v, m_tp.angle_w}; }
 
-        void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
+        /// TODO: remove this in the future
+        // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
         const IAnodePlane::pointer get_anode() const { return m_anode; }
+
+        void set_anodes(const std::vector<IAnodePlane::pointer>& anodes);
+        const IAnodePlane::pointer get_anode(const int ident) const;
+
+        void set_detector_volumes(const IDetectorVolumes::pointer dv) { m_dv = dv; }
+        const IDetectorVolumes::pointer get_detector_volumes() const { return m_dv; }
 
         // Return a value representing the content of this grouping.
         size_t hash() const;

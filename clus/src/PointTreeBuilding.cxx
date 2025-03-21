@@ -496,7 +496,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
                                              tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
     auto grouping = root_live->value.facade<Facade::Grouping>();
-    grouping->set_anode(m_anode);
+    grouping->set_anodes({m_anode});
     grouping->set_params(tp_json);
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);

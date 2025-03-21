@@ -135,6 +135,21 @@ void Grouping::set_params(const WireCell::Configuration& cfg) {
     m_tp.FV_zmax_margin = get(cfg, "FV_zmax_margin", m_tp.FV_zmax_margin);
 }
 
+void Grouping::set_anodes(const std::vector<IAnodePlane::pointer>& anodes) {
+    for (auto anode : anodes) {
+        m_anodes[anode->ident()] = anode;
+    }
+    /// TODO: remove this in the future
+    m_anode = anodes.front();
+}
+
+const IAnodePlane::pointer Grouping::get_anode(const int ident) const {
+    if (m_anodes.find(ident) == m_anodes.end()) {
+        raise<ValueError>("anode %d not found", ident);
+    }
+    return m_anodes.at(ident);
+}
+
 size_t Grouping::hash() const
 {
     std::size_t h = 0;

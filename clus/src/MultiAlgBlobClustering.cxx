@@ -291,7 +291,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inpath);
     }
     auto grouping = root_live->value.facade<Grouping>();
-    grouping->set_anode(m_anode);
+    grouping->set_anodes({m_anode});
     grouping->set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
     perf("loaded live clusters");
     {
@@ -338,7 +338,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
 
     Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
-    dead_grouping.set_anode(m_anode);
+    dead_grouping.set_anodes({m_anode});
     dead_grouping.set_params(m_geomhelper->get_params(m_anode->ident(), m_face));
     
 
