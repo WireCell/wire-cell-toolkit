@@ -71,15 +71,16 @@ namespace WireCell::PointCloud::Facade {
 
         std::set<WireCell::WirePlaneId> wpids() const { return cache().wpids; }
 
-        const mapfp_t< std::map<int, std::pair<double, double>> >& all_dead_winds() const {
+        const std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > >& all_dead_winds() const {
             // this is added in order that we may dump it in json_summary() for debugging.
             return m_dead_winds;
         }
 
-        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind) const
+        // FIXME: need to remove apa=0
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind, const int apa=0) const
         {
             // make one if not exist
-            return m_dead_winds[face][pind];
+            return m_dead_winds[apa][face][pind];
 
             // This is utter garbage.  #381.
         }
@@ -159,7 +160,7 @@ namespace WireCell::PointCloud::Facade {
       private:
 
         // This "cache" is utterly abused.  Someone else fix it.  #381.
-        mutable mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
+        mutable std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > > m_dead_winds;
 
        protected:
         // Receive notification when this facade is created on a node. #381.

@@ -50,26 +50,56 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 }
 
 
+
+static std::tuple<int, int, int> parse_dead_winds(const std::string& ds_name) {
+    int apa, face;
+    char plane;
+    // Use sscanf to extract the numbers and the plane letter.
+    // The format string must match the structure of ds_name.
+    if (std::sscanf(ds_name.c_str(), "dead_winds_a%df%dp%c", &apa, &face, &plane) != 3) {
+        throw std::runtime_error("Failed to parse string: " + ds_name);
+    }
+    // Convert the plane letter to an index.
+    int plane_index = -1;
+    switch (plane) {
+        case 'U': plane_index = 0; break;
+        case 'V': plane_index = 1; break;
+        case 'W': plane_index = 2; break;
+        default: 
+            throw std::runtime_error("Unexpected plane letter in: " + ds_name);
+    }
+    return std::make_tuple(apa, face, plane_index);
+}
+
 void Grouping::on_construct(node_type* node)
 {
     this->NaryTree::Facade<points_t>::on_construct(node);
     const auto& lpcs = m_node->value.local_pcs();
-    /// FIXME: use fixed numbers?
-    std::set<int> faces = {0, 1};
-    std::set<int> planes = {0, 1, 2};
-    for (const int face : faces) {
-        for (const int plane : planes) {
-            const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
-            if (lpcs.find(ds_name) == lpcs.end()) continue;
-            const auto& pc_dead_winds = lpcs.at(ds_name);
+    for (const auto& [name, pc_dead_winds] : lpcs) {
+        if (name.find("dead_winds") != std::string::npos) {
             const auto& xbeg = pc_dead_winds.get("xbeg")->elements<float_t>();
             const auto& xend = pc_dead_winds.get("xend")->elements<float_t>();
             const auto& wind = pc_dead_winds.get("wind")->elements<int_t>();
+            auto [apa, face, plane] = parse_dead_winds(name);
             for (size_t i = 0; i < xbeg.size(); ++i) {
-                m_dead_winds[face][plane][wind[i]] = {xbeg[i], xend[i]};
+                m_dead_winds[apa][face][plane][wind[i]] = {xbeg[i], xend[i]};
             }
         }
     }
+
+    // for (const int face : faces) {
+    //     for (const int plane : planes) {
+    //         const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
+    //         if (lpcs.find(ds_name) == lpcs.end()) continue;
+    //         const auto& pc_dead_winds = lpcs.at(ds_name);
+    //         const auto& xbeg = pc_dead_winds.get("xbeg")->elements<float_t>();
+    //         const auto& xend = pc_dead_winds.get("xend")->elements<float_t>();
+    //         const auto& wind = pc_dead_winds.get("wind")->elements<int_t>();
+    //         for (size_t i = 0; i < xbeg.size(); ++i) {
+    //             m_dead_winds[face][plane][wind[i]] = {xbeg[i], xend[i]};
+    //         }
+    //     }
+    // }
 }
 
 

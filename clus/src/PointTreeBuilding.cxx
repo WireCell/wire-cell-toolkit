@@ -435,13 +435,16 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
             }
         }
     }
+    int anode_ident = m_anode->ident();
+    std::vector<std::string> plane_names = {"U", "V", "W"};
     for (const auto& face : faces) {
         for (const auto& plane : planes) {
             Dataset ds;
             ds.add("xbeg", Array(xbegs[face][plane]));
             ds.add("xend", Array(xends[face][plane]));
             ds.add("wind", Array(winds[face][plane]));
-            const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
+            const std::string ds_name = String::format("dead_winds_a%df%dp%d",anode_ident, face, plane_names[plane]);
+            // const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root->value.local_pcs().emplace(ds_name, ds);
             // log->debug("added point cloud {} with {} points", ds_name, xbeg.size());

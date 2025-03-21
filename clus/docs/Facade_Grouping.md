@@ -19,7 +19,7 @@ The Facade::Grouping class is part of the WireCell::PointCloud::Facade namespace
 - `IAnodePlane::pointer m_anode`: Pointer to anode plane interface
 - `mapfp_t<double> m_proj_centers`: Cached projected centers for each face/plane
 - `mapfp_t<double> m_pitch_mags`: Cached pitch magnitudes for each face/plane
-- `mapfp_t<std::map<int, std::pair<double, double>>> m_dead_winds`: Maps dead wire regions
+- `std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > > m_dead_winds`: Maps dead wire regions
 
 ### 2. Point Cloud Data Structure
 The class manages 2D point cloud data through:
