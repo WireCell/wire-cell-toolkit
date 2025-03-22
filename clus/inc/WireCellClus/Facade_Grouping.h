@@ -90,7 +90,7 @@ namespace WireCell::PointCloud::Facade {
         }
 
         // FIXME: need to remove apa=0
-        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind, const int apa=0) const
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const
         {
             // make one if not exist
             return m_dead_winds[apa][face][pind];
@@ -101,7 +101,7 @@ namespace WireCell::PointCloud::Facade {
         using kd2d_t = sv2d_t::nfkd_t;
         using kd_results_t = kd2d_t::results_type;
 
-        const kd2d_t& kd2d(const int face, const int pind, const int apa = 0) const;
+        const kd2d_t& kd2d(const int apa, const int face, const int pind) const;
 
         const std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>>& proj_centers() const {
             return cache().proj_centers;
@@ -110,13 +110,13 @@ namespace WireCell::PointCloud::Facade {
             return cache().pitch_mags;
         }
 
-        bool is_good_point(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
+        bool is_good_point(const geo_point_t& point, const int apa, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
                            const int allowed_bad = 1) const;
         // In Facade_Grouping.h, inside the Grouping class declaration
-        bool is_good_point_wc(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, 
+        bool is_good_point_wc(const geo_point_t& point, const int apa, const int face, const double radius = 0.6 * units::cm, 
                             const int ch_range = 1, const int allowed_bad = 1) const;
         // In the Grouping class declaration in Facade_Grouping.h
-        std::vector<int> test_good_point(const geo_point_t& point, const int face, 
+        std::vector<int> test_good_point(const geo_point_t& point, const int apa, const int face, 
                                 double radius = 0.6 * units::cm, int ch_range = 1) const;
 
 
@@ -126,15 +126,15 @@ namespace WireCell::PointCloud::Facade {
         /// @param face
         /// @param pind plane index
         /// @return
-        kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int face, int pind) const;
+        kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
 
         /// @brief true if the point is within the dead region, [wind+ch_range, wind-ch_range] and [xmin, xmax]
-        bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int face, int pind) const;
+        bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa , const int face, int pind) const;
 
         /// @brief convert_3Dpoint_time_ch
-        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind, int apa = 0) const;
+        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;
         // In class Grouping definition
-        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane, int apa = 0) const;
+        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int apa, const int face, const int plane) const;
 
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
@@ -142,7 +142,7 @@ namespace WireCell::PointCloud::Facade {
         size_t get_num_points(const int face, const int pind, const int apa = 0) const;
 
         // In Facade_Grouping.h, add to public section:
-        double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0) const;
+        double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int apa = 0) const;
         double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0, const int apa = 0) const;
 
         /// @brief Get ranges of dead channels that overlap with given time and channel window

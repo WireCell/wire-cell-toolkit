@@ -70,7 +70,7 @@ namespace WireCell::PointCloud::Facade {
 
 
         // Step 2. Modify activity to suit.
-        void hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
+        void hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa_ident) const;
 
         // Step 3. Form IBlobs from activities.
         std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;

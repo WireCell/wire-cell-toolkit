@@ -138,7 +138,7 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
 
 
 // Step 2. Modify activity to suit.
-void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures) const
+void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa_ident) const
 {
     const double low_dis_limit = 0.3 * units::cm;
     // Get path points
@@ -176,9 +176,9 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
     // Flag points that have sufficient activity around them
     std::vector<bool> path_pts_flag(path_pts.size(), false);
     for (size_t i = 0; i < path_pts.size(); i++) {
-        auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 0);
-        auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
-        auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
+        auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], apa_ident, m_face->which(), 0);
+        auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], apa_ident, m_face->which(), 1);
+        auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], apa_ident, m_face->which(), 2);
         //std::cout << time_tick_u <<  " " << u_wire << " " << v_wire << " " << w_wire << std::endl;
 
         int aligned_tick = std::round(time_tick_u *1.0/ tick_span) * tick_span;
@@ -225,9 +225,9 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
             if (path_pts_flag[i-1] && path_pts_flag[i] && path_pts_flag[i+1]) continue;
         }
 
-        auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 0);
-        auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 1);
-        auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], m_face->which(), 2);
+        auto [time_tick_u, u_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], apa_ident, m_face->which(), 0);
+        auto [time_tick_v, v_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], apa_ident, m_face->which(), 1);
+        auto [time_tick_w, w_wire] = cluster.grouping()->convert_3Dpoint_time_ch(path_pts[i], apa_ident, m_face->which(), 2);
 
         int aligned_tick = std::round(time_tick_u *1.0/ tick_span) * tick_span;
 
@@ -402,6 +402,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // Example usage in clustering_parallel_prolong()
     double angle_u = 0, angle_v = 0, angle_w = 0;  // initialize angles
 
+    int apa_ident = 0;
     // Find the first valid WirePlaneId in the grouping
     for (const auto& gwpid : original.wpids()) {
         // Update drift direction based on face orientation
@@ -422,6 +423,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
         angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
         angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
         
+        apa_ident = gwpid.apa();
         // Only need to process the first valid WirePlaneId
         break;
     }
@@ -492,7 +494,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     get_activity(*cluster, map_slices_measures);
 
                     // Step 2.
-                    hack_activity(*cluster, map_slices_measures); // may need more args
+                    hack_activity(*cluster, map_slices_measures, apa_ident); // may need more args
 
                     // Step 3.  Must make IBlobs for this is what the sampler takes.
                     auto shad_iblobs = make_iblobs(map_slices_measures); // may need more args

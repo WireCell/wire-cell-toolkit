@@ -183,40 +183,10 @@ void Grouping::fill_dv_cache(GroupingCache& gc) const
 
 
 
-// void Grouping::set_params(const WireCell::Configuration& cfg) {
-//     m_tp.face = get(cfg, "face", m_tp.face);
-//     m_tp.pitch_u = get(cfg, "pitch_u", m_tp.pitch_u);
-//     m_tp.pitch_v = get(cfg, "pitch_v", m_tp.pitch_v);
-//     m_tp.pitch_w = get(cfg, "pitch_w", m_tp.pitch_w);
-//     m_tp.angle_u = get(cfg, "angle_u", m_tp.angle_u);
-//     m_tp.angle_v = get(cfg, "angle_v", m_tp.angle_v);
-//     m_tp.angle_w = get(cfg, "angle_w", m_tp.angle_w);
-//     m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
-//     m_tp.tick = get(cfg, "tick", m_tp.tick);
-//     m_tp.tick_drift = get(cfg, "tick_drift", m_tp.tick_drift);
-//     m_tp.time_offset = get(cfg, "time_offset", m_tp.time_offset);
-//     m_tp.nticks_live_slice = get(cfg, "nticks_live_slice", m_tp.nticks_live_slice);
-
-//     m_tp.FV_xmin = get(cfg, "FV_xmin", m_tp.FV_xmin);
-//     m_tp.FV_xmax = get(cfg, "FV_xmax", m_tp.FV_xmax);
-//     m_tp.FV_ymin = get(cfg, "FV_ymin", m_tp.FV_ymin);
-//     m_tp.FV_ymax = get(cfg, "FV_ymax", m_tp.FV_ymax);
-//     m_tp.FV_zmin = get(cfg, "FV_zmin", m_tp.FV_zmin);
-//     m_tp.FV_zmax = get(cfg, "FV_zmax", m_tp.FV_zmax);
-//     m_tp.FV_xmin_margin = get(cfg, "FV_xmin_margin", m_tp.FV_xmin_margin);
-//     m_tp.FV_xmax_margin = get(cfg, "FV_xmax_margin", m_tp.FV_xmax_margin);
-//     m_tp.FV_ymin_margin = get(cfg, "FV_ymin_margin", m_tp.FV_ymin_margin);
-//     m_tp.FV_ymax_margin = get(cfg, "FV_ymax_margin", m_tp.FV_ymax_margin);
-//     m_tp.FV_zmin_margin = get(cfg, "FV_zmin_margin", m_tp.FV_zmin_margin);
-//     m_tp.FV_zmax_margin = get(cfg, "FV_zmax_margin", m_tp.FV_zmax_margin);
-// }
-
 void Grouping::set_anodes(const std::vector<IAnodePlane::pointer>& anodes) {
     for (auto anode : anodes) {
         m_anodes[anode->ident()] = anode;
     }
-    /// TODO: remove this in the future
-    // m_anode = anodes.front();
 }
 
 const IAnodePlane::pointer Grouping::get_anode(const int ident) const {
@@ -229,13 +199,6 @@ const IAnodePlane::pointer Grouping::get_anode(const int ident) const {
 size_t Grouping::hash() const
 {
     std::size_t h = 0;
-    // boost::hash_combine(h, m_tp.pitch_u);
-    // boost::hash_combine(h, m_tp.pitch_v);
-    // boost::hash_combine(h, m_tp.pitch_w);
-    // boost::hash_combine(h, m_tp.angle_u);
-    // boost::hash_combine(h, m_tp.angle_v);
-    // boost::hash_combine(h, m_tp.angle_w);
-    // boost::hash_combine(h, m_tp.tick_drift);
     for (auto wpid : cache().wpids) {
         boost::hash_combine(h, wpid.ident());
     }
@@ -247,7 +210,7 @@ size_t Grouping::hash() const
     return h;
 }
 
-const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind, const int apa) const
+const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int pind) const
 {
     std::vector<std::string> plane_names = {"U", "V", "W"};
     const auto sname = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
@@ -259,13 +222,13 @@ const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind, const int
 }
 
 
-bool Grouping::is_good_point(const geo_point_t& point, const int face, double radius, int ch_range, int allowed_bad) const {
+bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const {
     const int nplanes = 3;
     int matched_planes = 0;
     for (int pind = 0; pind < nplanes; ++pind) {
-        if (get_closest_points(point, radius, face, pind).size() > 0) {
+        if (get_closest_points(point, radius, apa, face, pind).size() > 0) {
             matched_planes++;
-        } else if (get_closest_dead_chs(point, ch_range, face, pind)) {
+        } else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes++;
         }
     }
@@ -276,7 +239,7 @@ bool Grouping::is_good_point(const geo_point_t& point, const int face, double ra
     return false;
 }
 
-bool Grouping::is_good_point_wc(const geo_point_t& point, const int face, double radius, int ch_range, int allowed_bad) const 
+bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const 
 {
     const int nplanes = 3;
     int matched_planes = 0;
@@ -284,10 +247,10 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int face, double
     // Loop through U,V,W planes
     for (int pind = 0; pind < nplanes; pind++) {
         int weight = (pind == 2) ? 2 : 1; // W plane counts double
-        if (get_closest_points(point, radius, face, pind).size() > 0) {
+        if (get_closest_points(point, radius, apa, face, pind).size() > 0) {
             matched_planes += weight;
         }
-        else if (get_closest_dead_chs(point, ch_range, face, pind)) {
+        else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes += weight;
         }
     }
@@ -295,7 +258,7 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int face, double
     return matched_planes >= 4 - allowed_bad;
 }
 
-std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int face, 
+std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int apa, const int face, 
     double radius, int ch_range) const 
 {
     std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
@@ -303,7 +266,7 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
     // Check each plane (0,1,2)
     for (int pind = 0; pind < 3; ++pind) {
         // Get closest points for this plane
-        const auto closest_pts = get_closest_points(point, radius, face, pind);
+        const auto closest_pts = get_closest_points(point, radius, apa, face, pind);
         
         if (closest_pts.size() > 0) {
             // Has hits in this plane
@@ -311,7 +274,7 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
         }
         else {
             // No hits, check if it's in dead region
-            if (get_closest_dead_chs(point, ch_range, face, pind)) {
+            if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
                 num_planes[pind + 3]++;
             }
         }
@@ -321,13 +284,13 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int f
     return num_planes;
 }
 
-double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const double radius, const int face) const {
+double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const double radius, const int face, const int apa) const {
     double charge = 0;
     int ncount = 0;
     const int nplanes = 3;
     // Check all three planes
     for (int pind = 0; pind < nplanes; ++pind) {
-        if (!get_closest_dead_chs(point, 1, face, pind)) {
+        if (!get_closest_dead_chs(point, 1, apa, face, pind)) {
             charge += get_ave_charge(point, radius, face, pind);
             ncount++;
         }
@@ -344,7 +307,7 @@ double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double r
     double ncount = 0;
 
     // Get closest points within radius
-    auto nearby_points = get_closest_points(point, radius, face, pind);
+    auto nearby_points = get_closest_points(point, radius, apa, face, pind);
 
     // Access the charge information from ctpc dataset
     std::vector<std::string> plane_names = {"U", "V", "W"};
@@ -373,20 +336,20 @@ double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double r
 
 
 
-Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int face,
+Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, const double radius, const int apa, const int face,
                                                     int pind) const
 {
     double x = point[0];
     const auto [angle_u,angle_v,angle_w] = wire_angles();
     std::vector<double> angles = {angle_u, angle_v, angle_w};
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
-    const auto& skd = kd2d(face, pind);
+    const auto& skd = kd2d(apa, face, pind);
     return skd.radius<std::vector<double>>(radius * radius, {x, y});
 }
 
-bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int face, int pind) const {
-    const auto [tind, wind] = convert_3Dpoint_time_ch(point, face, pind);
-    const auto& ch2xrange = get_dead_winds(face, pind);
+bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {
+    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, pind);
+    const auto& ch2xrange = get_dead_winds(apa, face, pind);
     for (int ch = wind - ch_range; ch <= wind + ch_range; ++ch) {
         if (ch2xrange.find(ch) ==  ch2xrange.end()) continue;
         const auto [xmin, xmax] = ch2xrange.at(ch);
@@ -398,7 +361,7 @@ bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range
     return false;
 }
 
-std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind, int apa) const {
+std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const {
     if (m_anodes.size()==0) {
         raise<ValueError>("Anode is null");
     }
@@ -430,7 +393,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     return {tind, wind};
 }
 
-std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane, int apa) const 
+std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int apa, const int face, const int plane) const 
 {
     if (m_anodes.size() == 0) {
         raise<ValueError>("Anode is null");
@@ -491,7 +454,7 @@ std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const in
     const double max_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, max_time);
 
     std::set<int> dead_chs;
-    const auto& dead_winds = get_dead_winds(face, pind);
+    const auto& dead_winds = get_dead_winds(apa, face, pind);
 
     // Find overlapping dead channels
     for (const auto& [wind, xrange] : dead_winds) {
@@ -535,7 +498,7 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
 {
     std::map<int, std::pair<int, int>> results;
     
-    const auto& dead_winds = get_dead_winds(face, pind);
+    const auto& dead_winds = get_dead_winds(apa, face, pind);
     
     double time_offset = cache().map_time_offset.at(apa).at(face);
     double drift_speed = cache().map_drift_speed.at(apa).at(face);

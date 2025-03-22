@@ -757,7 +757,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                         if (true) {
                             /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).face());
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).apa(), wpids.at(0).face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -784,7 +784,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
                             /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).face());
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).apa(), wpids.at(0).face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -811,7 +811,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
                             /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).face());
+                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).apa(), wpids.at(0).face());
                             if (!good_point) num_bad++;
                         }
                     }

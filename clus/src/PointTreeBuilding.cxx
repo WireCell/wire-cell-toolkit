@@ -391,14 +391,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 faces.insert(face);
                 planes.insert(plane);
 
-                auto & dead_winds = grouping->get_dead_winds(face, plane);
-                // fix a bug how do we know the smaller or bigger value of xbeg and xend?
-                // if (dead_winds.find(wind) == dead_winds.end()) {
-                //     dead_winds[wind] = {xbeg, xend};
-                // } else {
-                //     const auto& [xbeg_now, xend_now] = dead_winds[wind];
-                //     dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
-                // }
+                auto & dead_winds = grouping->get_dead_winds(m_anode->ident(), face, plane);
                 if (dead_winds.find(wind) == dead_winds.end()) {
                     dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
                 } else {
@@ -421,14 +414,14 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     //         log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
     //     }
     // }
-    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
-               grouping->get_dead_winds(0, 2).size());
+    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(m_anode->ident(), 0, 0).size(), grouping->get_dead_winds(m_anode->ident(), 0, 1).size(),
+               grouping->get_dead_winds(m_anode->ident(), 0, 2).size());
 
     Facade::mapfp_t<std::vector<float_t>> xbegs, xends;
     Facade::mapfp_t<std::vector<int_t>> winds;
     for (const auto& face : faces) {
         for (const auto& plane : planes) {
-            for (const auto& [wind, xbeg_xend] : grouping->get_dead_winds(face, plane)) {
+            for (const auto& [wind, xbeg_xend] : grouping->get_dead_winds(m_anode->ident(), face, plane)) {
                 xbegs[face][plane].push_back(xbeg_xend.first);
                 xends[face][plane].push_back(xbeg_xend.second);
                 winds[face][plane].push_back(wind);
