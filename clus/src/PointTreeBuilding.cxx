@@ -306,7 +306,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     const auto& wind = wire->index();
                     const auto& wpid_wire = wire->planeid();
                     const auto& plane = wpid_wire.index();
-                    const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.apa(), wpid_wire.face());
+                    const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                     const auto& face = wpid_wire.face();
                     const auto& x = Facade::time2drift(m_anode->faces()[face], m_dv->metadata(wpid_all)["time_offset"].asDouble(), m_dv->metadata(wpid_all)["drift_speed"].asDouble(), slice->start());
                     const double y = pitch_mags.at(m_anode->ident()).at(face).at(plane)* (wind +0.5) + proj_centers.at(m_anode->ident()).at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
@@ -380,7 +380,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 const auto& wind = wire->index();
                 const auto& wpid_wire = wire->planeid();
                 const auto& plane = wpid_wire.index();
-                const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.apa(), wpid_wire.face());
+                const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                 const auto& face = wpid_wire.face();
                 const auto& xbeg = Facade::time2drift(m_anode->faces()[face], m_dv->metadata(wpid_all)["time_offset"].asDouble(), m_dv->metadata(wpid_all)["drift_speed"].asDouble(), slice->start());
                 const auto& xend = Facade::time2drift(m_anode->faces()[face], m_dv->metadata(wpid_all)["time_offset"].asDouble(), m_dv->metadata(wpid_all)["drift_speed"].asDouble(), slice->start() + slice->span());

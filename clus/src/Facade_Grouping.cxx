@@ -125,18 +125,6 @@ void Grouping::fill_cache(GroupingCache& gc) const
                 }
             }
         }
-        // for (const auto& face : m_anode->faces()) {
-        //     // std::cout<< "fill_cache: anode ident" << m_anode->ident() << " face ident " << face->ident() << " face which " << face->which() << std::endl;
-        //     const auto& coords = face->raygrid();
-        //     // skip dummy layers so the vector matches 0, 1, 2 plane order
-        //     for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
-        //         const auto& pitch_dir = coords.pitch_dirs()[layer];
-        //         const auto& center = coords.centers()[layer];
-        //         double proj_center = center.dot(pitch_dir);
-        //         gc.proj_centers[face->ident()][layer - ndummy_layers] = proj_center;
-        //         gc.pitch_mags[face->ident()][layer - ndummy_layers] = coords.pitch_mags()[layer];
-        //     }
-        // }
     }
 
     {
@@ -146,7 +134,48 @@ void Grouping::fill_cache(GroupingCache& gc) const
             gc.wpids.insert(wpids.begin(), wpids.end());
         }
     }
+
+    // fill cache related to the detector volume
+    fill_dv_cache(gc);
 }
+
+void Grouping::fill_dv_cache(GroupingCache& gc) const
+{
+    if (m_dv != nullptr) {
+        for (auto wpid : gc.wpids) {
+            int face = wpid.face();
+            int apa = wpid.apa();
+            int plane = wpid.index();
+            // std::cout << "Test: " << apa << " " << face << " " << plane << " " << kAllLayers << " " << m_dv << std::endl;
+            WirePlaneId wpid_all(kAllLayers, face, apa);
+            gc.map_time_offset[apa][face] = m_dv->metadata(wpid_all)["time_offset"].asDouble();
+            gc.map_drift_speed[apa][face] = m_dv->metadata(wpid_all)["drift_speed"].asDouble();
+            gc.map_tick[apa][face] = m_dv->metadata(wpid_all)["tick"].asDouble();
+
+            // Create wpids for all three planes with the same APA and face
+            WirePlaneId wpid_u(kUlayer, face, apa);
+            WirePlaneId wpid_v(kVlayer, face, apa);
+            WirePlaneId wpid_w(kWlayer, face, apa);
+            
+            // Get wire directions for all planes
+            Vector wire_dir_u = m_dv->wire_direction(wpid_u);
+            Vector wire_dir_v = m_dv->wire_direction(wpid_v);
+            Vector wire_dir_w = m_dv->wire_direction(wpid_w);
+            
+            // Calculate angles
+            gc.map_wire_angles[apa][face][0] = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+            gc.map_wire_angles[apa][face][1] = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+            gc.map_wire_angles[apa][face][2] = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+            // std::cout << "Test: " << gc.map_time_offset[apa][face]["time_offset"] << " " << gc.map_drift_speed[apa][face]["drift_speed"] << " " << gc.map_tick[apa][face]["tick"] << std::endl;
+        }
+        // double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble(); 
+        // std::map<int, std::map<int, std::map<string, double> > > map_time_offset;
+        // std::map<int, std::map<int, std::map<string, double> > > map_drift_speed;
+        // std::map<int, std::map<int, std::map<string, double> > > map_tick;
+    }
+}
+
 
 
 
@@ -196,13 +225,16 @@ const IAnodePlane::pointer Grouping::get_anode(const int ident) const {
 size_t Grouping::hash() const
 {
     std::size_t h = 0;
-    boost::hash_combine(h, m_tp.pitch_u);
-    boost::hash_combine(h, m_tp.pitch_v);
-    boost::hash_combine(h, m_tp.pitch_w);
-    boost::hash_combine(h, m_tp.angle_u);
-    boost::hash_combine(h, m_tp.angle_v);
-    boost::hash_combine(h, m_tp.angle_w);
-    boost::hash_combine(h, m_tp.tick_drift);
+    // boost::hash_combine(h, m_tp.pitch_u);
+    // boost::hash_combine(h, m_tp.pitch_v);
+    // boost::hash_combine(h, m_tp.pitch_w);
+    // boost::hash_combine(h, m_tp.angle_u);
+    // boost::hash_combine(h, m_tp.angle_v);
+    // boost::hash_combine(h, m_tp.angle_w);
+    // boost::hash_combine(h, m_tp.tick_drift);
+    for (auto wpid : cache().wpids) {
+        boost::hash_combine(h, wpid.ident());
+    }
     auto clusters = children();  // copy vector
     sort_clusters(clusters);
     for (const Cluster* cluster : clusters) {
@@ -381,12 +413,15 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
 
     const int wind = point2wind(point, angle, pitch, center);
 
-    const auto params = get_params();
+    // const auto params = get_params();
+    double time_offset = cache().map_time_offset.at(apa).at(face);
+    double drift_speed = cache().map_drift_speed.at(apa).at(face);
+    double tick = cache().map_tick.at(apa).at(face);
 
     //std::cout << "Test: " << params.time_offset/units::us << " " << params.drift_speed/(units::mm/units::us) << " " << point[0] << std::endl;
 
-    const double time = drift2time(iface, params.time_offset, params.drift_speed, point[0]);
-    const int tind = std::round(time / params.tick);
+    const double time = drift2time(iface, time_offset, drift_speed, point[0]);
+    const int tind = std::round(time / tick);
 
     return {tind, wind};
 }
@@ -401,12 +436,16 @@ std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, 
         raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
     }
     const int nplanes = 3;
-    const auto params = get_params();
+    // const auto params = get_params();
     const auto& pitch_mags = this->pitch_mags();
     const auto& proj_centers = this->proj_centers();
     
+    double time_offset = cache().map_time_offset.at(apa).at(face);
+    double drift_speed = cache().map_drift_speed.at(apa).at(face);
+    double tick = cache().map_tick.at(apa).at(face);
+
     // Convert time to x position
-    const double x = time2drift(iface, params.time_offset, params.drift_speed, timeslice * params.tick);
+    const double x = time2drift(iface, time_offset, drift_speed, timeslice * tick);
     
     // Get y position based on channel and plane
     double y;
@@ -438,11 +477,14 @@ std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const in
     if (m_anodes.size() == 0) {
         raise<ValueError>("anode is null");
     }
-    const auto& params = get_params();
+    // const auto& params = get_params();
+    double time_offset = cache().map_time_offset.at(apa).at(face);
+    double drift_speed = cache().map_drift_speed.at(apa).at(face);
+    // double tick = cache().map_tick.at(apa).at(face);
     
     // Convert time to position
-    const double min_xpos = time2drift(m_anodes.at(apa)->faces()[face], params.time_offset, params.drift_speed, min_time);
-    const double max_xpos = time2drift(m_anodes.at(apa)->faces()[face], params.time_offset, params.drift_speed, max_time);
+    const double min_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, min_time);
+    const double max_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, max_time);
 
     std::set<int> dead_chs;
     const auto& dead_winds = get_dead_winds(face, pind);
@@ -490,6 +532,9 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
     std::map<int, std::pair<int, int>> results;
     
     const auto& dead_winds = get_dead_winds(face, pind);
+    
+    double time_offset = cache().map_time_offset.at(apa).at(face);
+    double drift_speed = cache().map_drift_speed.at(apa).at(face);
 
     // Add entries for this face/plane's dead channels
     for (const auto& [wind, xrange] : dead_winds) {
@@ -497,12 +542,12 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
         
         // Convert position range to time ticks using drift parameters
         int min_time = std::round(drift2time(m_anodes.at(apa)->faces()[face], 
-                                           m_tp.time_offset,
-                                           m_tp.drift_speed, 
+                                           time_offset,
+                                           drift_speed, 
                                            xrange.first)) - expand;
         int max_time = std::round(drift2time(m_anodes.at(apa)->faces()[face],
-                                           m_tp.time_offset,
-                                           m_tp.drift_speed,
+                                           time_offset,
+                                           drift_speed,
                                            xrange.second)) + expand;
         
         results[temp_ch] = std::make_pair(std::min(min_time, max_time), std::max(min_time, max_time));

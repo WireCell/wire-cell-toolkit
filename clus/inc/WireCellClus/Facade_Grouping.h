@@ -33,6 +33,11 @@ namespace WireCell::PointCloud::Facade {
 
         // #381 if you give a crap about dead_winds.  
 
+        // detector volume
+        std::map<int, std::map<int, double> > map_time_offset;
+        std::map<int, std::map<int, double> > map_drift_speed;
+        std::map<int, std::map<int, double> > map_tick;
+        std::map<int, std::map<int, std::map<int, double> > > map_wire_angles;
     };
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
@@ -54,7 +59,8 @@ namespace WireCell::PointCloud::Facade {
         void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);
         const TPCParams& get_params() const { return m_tp; }
-        std::tuple<double, double, double> wire_angles() const { return {m_tp.angle_u, m_tp.angle_v, m_tp.angle_w}; }
+
+        std::tuple<double, double, double> wire_angles(const int apa = 0, const int face = 0) const { return {cache().map_wire_angles.at(apa).at(face).at(0), cache().map_wire_angles.at(apa).at(face).at(1), cache().map_wire_angles.at(apa).at(face).at(2)}; }
 
         /// TODO: remove this in the future
         // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
@@ -167,6 +173,8 @@ namespace WireCell::PointCloud::Facade {
         virtual void on_construct(node_type* node);
 
         virtual void fill_cache(GroupingCache& cache) const;
+
+        virtual void fill_dv_cache(GroupingCache& cache) const;
         
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
