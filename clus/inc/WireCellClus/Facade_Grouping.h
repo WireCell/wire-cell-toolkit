@@ -39,6 +39,7 @@ namespace WireCell::PointCloud::Facade {
         std::map<int, std::map<int, double> > map_tick;
         std::map<int, std::map<int, std::map<int, double> > > map_wire_angles;
         std::map<int, std::map<int, int> > map_drift_dir;
+        std::map<int, std::map<int, int> > map_nticks_per_slice;
     };
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
@@ -50,29 +51,30 @@ namespace WireCell::PointCloud::Facade {
 
         /// TODO: remove these in the future
         // IAnodePlane::pointer m_anode{nullptr};
-        TPCParams m_tp{};  // use default value by default.
+        // TPCParams m_tp{};  // use default value by default.
 
        public:
 
         Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
         // TODO: remove this in the future
-        void set_params(const TPCParams& tp) { m_tp = tp; }
+        // void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);
-        const TPCParams& get_params() const { return m_tp; }
+        // const TPCParams& get_params() const { return m_tp; }
 
         std::tuple<double, double, double> wire_angles(const int apa = 0, const int face = 0) const { return {cache().map_wire_angles.at(apa).at(face).at(0), cache().map_wire_angles.at(apa).at(face).at(1), cache().map_wire_angles.at(apa).at(face).at(2)}; }
         std::map<int, std::map<int, double> > get_tick() const { return cache().map_tick;}
         std::map<int, std::map<int, double> > get_time_offset() const { return cache().map_time_offset;}
         std::map<int, std::map<int, double> > get_drift_speed() const { return cache().map_drift_speed;}
         std::map<int, std::map<int, int> > get_drift_dir() const { return cache().map_drift_dir;}
+        std::map<int, std::map<int, int> > get_nticks_per_slice() const { return cache().map_nticks_per_slice;}
 
         /// TODO: remove this in the future
         // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
         // const IAnodePlane::pointer get_anode() const { return m_anode; }
 
         void set_anodes(const std::vector<IAnodePlane::pointer>& anodes);
-        const IAnodePlane::pointer get_anode(const int ident) const;
+        const IAnodePlane::pointer get_anode(const int ident) const;  // also apa
 
         void set_detector_volumes(const IDetectorVolumes::pointer dv) { m_dv = dv; }
         const IDetectorVolumes::pointer get_detector_volumes() const { return m_dv; }

@@ -169,6 +169,8 @@ void Grouping::fill_dv_cache(GroupingCache& gc) const
 
             gc.map_drift_dir[apa][face] = m_dv->face_dirx(wpid);
 
+            gc.map_nticks_per_slice[apa][face] = m_dv->metadata(wpid_all)["nticks_live_slice"].asInt();
+
             // std::cout << "Test: " << gc.map_time_offset[apa][face] << " " << gc.map_drift_speed[apa][face] << " " << gc.map_tick[apa][face] << " " << gc.map_drift_dir[apa][face]  << std::endl;
         }
         // double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble(); 
@@ -181,33 +183,33 @@ void Grouping::fill_dv_cache(GroupingCache& gc) const
 
 
 
-void Grouping::set_params(const WireCell::Configuration& cfg) {
-    m_tp.face = get(cfg, "face", m_tp.face);
-    m_tp.pitch_u = get(cfg, "pitch_u", m_tp.pitch_u);
-    m_tp.pitch_v = get(cfg, "pitch_v", m_tp.pitch_v);
-    m_tp.pitch_w = get(cfg, "pitch_w", m_tp.pitch_w);
-    m_tp.angle_u = get(cfg, "angle_u", m_tp.angle_u);
-    m_tp.angle_v = get(cfg, "angle_v", m_tp.angle_v);
-    m_tp.angle_w = get(cfg, "angle_w", m_tp.angle_w);
-    m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
-    m_tp.tick = get(cfg, "tick", m_tp.tick);
-    m_tp.tick_drift = get(cfg, "tick_drift", m_tp.tick_drift);
-    m_tp.time_offset = get(cfg, "time_offset", m_tp.time_offset);
-    m_tp.nticks_live_slice = get(cfg, "nticks_live_slice", m_tp.nticks_live_slice);
+// void Grouping::set_params(const WireCell::Configuration& cfg) {
+//     m_tp.face = get(cfg, "face", m_tp.face);
+//     m_tp.pitch_u = get(cfg, "pitch_u", m_tp.pitch_u);
+//     m_tp.pitch_v = get(cfg, "pitch_v", m_tp.pitch_v);
+//     m_tp.pitch_w = get(cfg, "pitch_w", m_tp.pitch_w);
+//     m_tp.angle_u = get(cfg, "angle_u", m_tp.angle_u);
+//     m_tp.angle_v = get(cfg, "angle_v", m_tp.angle_v);
+//     m_tp.angle_w = get(cfg, "angle_w", m_tp.angle_w);
+//     m_tp.drift_speed = get(cfg, "drift_speed", m_tp.drift_speed);
+//     m_tp.tick = get(cfg, "tick", m_tp.tick);
+//     m_tp.tick_drift = get(cfg, "tick_drift", m_tp.tick_drift);
+//     m_tp.time_offset = get(cfg, "time_offset", m_tp.time_offset);
+//     m_tp.nticks_live_slice = get(cfg, "nticks_live_slice", m_tp.nticks_live_slice);
 
-    m_tp.FV_xmin = get(cfg, "FV_xmin", m_tp.FV_xmin);
-    m_tp.FV_xmax = get(cfg, "FV_xmax", m_tp.FV_xmax);
-    m_tp.FV_ymin = get(cfg, "FV_ymin", m_tp.FV_ymin);
-    m_tp.FV_ymax = get(cfg, "FV_ymax", m_tp.FV_ymax);
-    m_tp.FV_zmin = get(cfg, "FV_zmin", m_tp.FV_zmin);
-    m_tp.FV_zmax = get(cfg, "FV_zmax", m_tp.FV_zmax);
-    m_tp.FV_xmin_margin = get(cfg, "FV_xmin_margin", m_tp.FV_xmin_margin);
-    m_tp.FV_xmax_margin = get(cfg, "FV_xmax_margin", m_tp.FV_xmax_margin);
-    m_tp.FV_ymin_margin = get(cfg, "FV_ymin_margin", m_tp.FV_ymin_margin);
-    m_tp.FV_ymax_margin = get(cfg, "FV_ymax_margin", m_tp.FV_ymax_margin);
-    m_tp.FV_zmin_margin = get(cfg, "FV_zmin_margin", m_tp.FV_zmin_margin);
-    m_tp.FV_zmax_margin = get(cfg, "FV_zmax_margin", m_tp.FV_zmax_margin);
-}
+//     m_tp.FV_xmin = get(cfg, "FV_xmin", m_tp.FV_xmin);
+//     m_tp.FV_xmax = get(cfg, "FV_xmax", m_tp.FV_xmax);
+//     m_tp.FV_ymin = get(cfg, "FV_ymin", m_tp.FV_ymin);
+//     m_tp.FV_ymax = get(cfg, "FV_ymax", m_tp.FV_ymax);
+//     m_tp.FV_zmin = get(cfg, "FV_zmin", m_tp.FV_zmin);
+//     m_tp.FV_zmax = get(cfg, "FV_zmax", m_tp.FV_zmax);
+//     m_tp.FV_xmin_margin = get(cfg, "FV_xmin_margin", m_tp.FV_xmin_margin);
+//     m_tp.FV_xmax_margin = get(cfg, "FV_xmax_margin", m_tp.FV_xmax_margin);
+//     m_tp.FV_ymin_margin = get(cfg, "FV_ymin_margin", m_tp.FV_ymin_margin);
+//     m_tp.FV_ymax_margin = get(cfg, "FV_ymax_margin", m_tp.FV_ymax_margin);
+//     m_tp.FV_zmin_margin = get(cfg, "FV_zmin_margin", m_tp.FV_zmin_margin);
+//     m_tp.FV_zmax_margin = get(cfg, "FV_zmax_margin", m_tp.FV_zmax_margin);
+// }
 
 void Grouping::set_anodes(const std::vector<IAnodePlane::pointer>& anodes) {
     for (auto anode : anodes) {

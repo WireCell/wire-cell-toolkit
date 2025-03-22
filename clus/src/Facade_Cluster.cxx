@@ -1852,8 +1852,12 @@ void Cluster::Establish_close_connected_graph() const
     for (auto [time, _] : this->time_blob_map()) {
         time_slices.push_back(time);
     }
-    const int nticks_per_slice = grouping()->get_params().nticks_live_slice;
-    // std::cout << "time_slices size: " << time_slices.size() << std::endl;
+
+    // const int nticks_per_slice = grouping()->get_params().nticks_live_slice;
+    // need to udpate to Multi-Face alg. ...
+    const int nticks_per_slice = grouping()->get_nticks_per_slice().at(0).at(0);
+    
+    // std::cout << "Test: " << nticks_per_slice << std::endl;
 
     std::vector<std::pair<const Blob*, const Blob*>> connected_mcells;
 
@@ -2168,7 +2172,8 @@ void Cluster::Establish_close_connected_graph() const
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) const {
-    const auto& tp = grouping()->get_params();
+    // const auto& tp = grouping()->get_params();
+    int hard_code_face = 0;
     // now form the connected components
     std::vector<int> component(num_vertices(*m_graph));
     const size_t num = connected_components(*m_graph, &component[0]);
@@ -2309,7 +2314,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        const bool good_point = grouping()->is_good_point(test_p, hard_code_face);
                         if (!good_point) num_bad++;
                     }
                 }
@@ -2336,7 +2341,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        const bool good_point = grouping()->is_good_point(test_p, hard_code_face);
                         if (!good_point) num_bad++;
                     }
                 }
@@ -2363,7 +2368,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        const bool good_point = grouping()->is_good_point(test_p, hard_code_face);
                         if (!good_point) num_bad++;
                     }
                 }
@@ -2839,7 +2844,8 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
     }
 
     // Constants for wire angles
-    const auto& tp = grouping()->get_params();
+    // const auto& tp = grouping()->get_params();
+    int hard_code_face = 0;
     //std::cout << "Test: face " << tp.face << std::endl;
 
     // const double pi = 3.141592653589793;
@@ -2994,7 +3000,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     // Test point quality using grouping parameters
                     std::vector<int> scores;
                     if (use_ctpc) {
-                        scores = grouping()->test_good_point(test_p, tp.face);
+                        scores = grouping()->test_good_point(test_p, hard_code_face);
                         
                         // Check overall quality
                         if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
@@ -3142,11 +3148,11 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
                     if (use_ctpc) {
                         /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        const bool good_point = grouping()->is_good_point(test_p, hard_code_face);
                         if (!good_point) {
                             num_bad++;
                         }
-                        if (!grouping()->is_good_point(test_p, tp.face, 0.6*units::cm, 1, 0)) {
+                        if (!grouping()->is_good_point(test_p, hard_code_face, 0.6*units::cm, 1, 0)) {
                             num_bad1++;
                         }
                     }
@@ -3218,11 +3224,11 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
                     if (use_ctpc) {
                         /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, tp.face);
+                        const bool good_point = grouping()->is_good_point(test_p, hard_code_face);
                         if (!good_point) {
                             num_bad++;
                         }
-                        if (!grouping()->is_good_point(test_p, tp.face, 0.6*units::cm, 1, 0)) {
+                        if (!grouping()->is_good_point(test_p, hard_code_face, 0.6*units::cm, 1, 0)) {
                             num_bad1++;
                         }
                     }

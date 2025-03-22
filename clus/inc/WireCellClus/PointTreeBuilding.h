@@ -64,7 +64,7 @@ namespace WireCell::Clus {
         int m_face{0};
 
         // the geometry helper
-        IClusGeomHelper::pointer m_geomhelper;
+        // IClusGeomHelper::pointer m_geomhelper;
         
         /** Configuration: "samplers"
 

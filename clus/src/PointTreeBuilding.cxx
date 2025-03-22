@@ -78,7 +78,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
     }
 
     // Fixme: this is an utterly broken thing and should be replaced.
-    m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
+    // m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 
     auto samplers = cfg["samplers"];
     if (samplers.isNull()) {
@@ -491,7 +491,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         datapath = String::format(datapath, ident);
     }
 
-    const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
+    // const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
 
     // // Create wpids for all three planes with this APA and face
     WirePlaneId wpid_u(kUlayer, m_face, m_anode->ident());
@@ -516,7 +516,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     Points::node_ptr root_live = sample_live(iclus_live, tick, angle_u, angle_v, angle_w);
     auto grouping = root_live->value.facade<Facade::Grouping>();
     grouping->set_anodes({m_anode});
-    grouping->set_params(tp_json);
+    // grouping->set_params(tp_json);
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
     

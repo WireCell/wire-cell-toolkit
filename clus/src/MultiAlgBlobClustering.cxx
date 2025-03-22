@@ -93,7 +93,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_bee_ld.algorithm(String::format("%s-%d-%d", m_bee_ld.algorithm().c_str(), m_anodes.front()->ident(), m_face));
     log->debug("m_bee_ld.algorithm: {}", m_bee_ld.algorithm());
 
-    m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
+    // m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 
     m_dump_json = get<bool>(cfg, "dump_json", false);
 }
@@ -296,7 +296,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     auto grouping = root_live->value.facade<Grouping>();
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
-    grouping->set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
+    // grouping->set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
     perf("loaded live clusters");
     {
         size_t npoints_total = 0;
@@ -344,7 +344,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
     dead_grouping.set_anodes(m_anodes);
     dead_grouping.set_detector_volumes(m_dv);
-    dead_grouping.set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
+    // dead_grouping.set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
     
 
     //perf.dump("original live clusters", live_grouping, false, false);
