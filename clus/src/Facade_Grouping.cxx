@@ -284,14 +284,14 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int a
     return num_planes;
 }
 
-double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const double radius, const int face, const int apa) const {
+double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const int apa, const int face,  const double radius) const {
     double charge = 0;
     int ncount = 0;
     const int nplanes = 3;
     // Check all three planes
     for (int pind = 0; pind < nplanes; ++pind) {
         if (!get_closest_dead_chs(point, 1, apa, face, pind)) {
-            charge += get_ave_charge(point, radius, face, pind);
+            charge += get_ave_charge(point, apa, face, pind, radius);
             ncount++;
         }
     }
@@ -302,7 +302,7 @@ double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const doubl
     return charge;
 }
 
-double Facade::Grouping::get_ave_charge(const geo_point_t& point, const double radius, const int face, const int pind, const int apa) const {
+double Facade::Grouping::get_ave_charge(const geo_point_t& point, const int apa, const int face, const int pind, const double radius) const {
     double sum_charge = 0;
     double ncount = 0;
 
@@ -340,7 +340,7 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
                                                     int pind) const
 {
     double x = point[0];
-    const auto [angle_u,angle_v,angle_w] = wire_angles();
+    const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
     std::vector<double> angles = {angle_u, angle_v, angle_w};
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     const auto& skd = kd2d(apa, face, pind);
@@ -370,7 +370,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
         raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
     }
 
-    const auto [angle_u,angle_v,angle_w] = wire_angles();
+    const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
     std::vector<double> angles = {angle_u, angle_v, angle_w};
     const double angle = angles[pind];
     const double pitch = pitch_mags().at(apa).at(face).at(pind);
@@ -429,7 +429,7 @@ std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, 
 }
 
 
-size_t Grouping::get_num_points(const int face, const int pind, const int apa) const {
+size_t Grouping::get_num_points(const int apa, const int face, const int pind) const {
     std::vector<std::string> plane_names = {"U", "V", "W"};
     const auto sname = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
     // const auto sname = String::format("ctpc_f%dp%d", face, pind);
@@ -439,7 +439,7 @@ size_t Grouping::get_num_points(const int face, const int pind, const int apa) c
 }
 
 std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const int min_time, const int max_time,
-    const int min_ch, const int max_ch, const int face, const int pind, const bool flag_ignore_time, const int apa) const 
+    const int min_ch, const int max_ch, const int apa, const int face, const int pind, const bool flag_ignore_time) const 
 {
     if (m_anodes.size() == 0) {
         raise<ValueError>("anode is null");
@@ -494,7 +494,7 @@ std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const in
     return dead_ch_range;
 }
 
-std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int face, const int pind, int expand, const int apa) const
+std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int apa, const int face, const int pind, int expand) const
 {
     std::map<int, std::pair<int, int>> results;
     
@@ -524,8 +524,8 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
 }
 
 std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_overlap_good_ch_charge(
-    int min_time, int max_time, int min_ch, int max_ch, 
-    const int face, const int pind, const int apa) const 
+    int min_time, int max_time, int min_ch, int max_ch, const int apa, 
+    const int face, const int pind) const 
 {
     std::map<std::pair<int,int>, std::pair<double,double>> map_time_ch_charge;
     

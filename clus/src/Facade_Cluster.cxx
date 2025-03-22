@@ -2855,7 +2855,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
     const geo_vector_t drift_dir_abs(1, 0, 0); 
 
     // need to understand the points before implementing the angles ...
-    const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles();
+    const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles(hard_code_apa, hard_code_face);
     const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
     const geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
     const geo_point_t W_dir(0,cos(angle_w),sin(angle_w));

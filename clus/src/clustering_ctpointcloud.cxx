@@ -110,12 +110,12 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
     auto time_ch_w = live_grouping.convert_3Dpoint_time_ch(p,0, 0,2);
     std::cout << "Test convert_3Dpoint_time_ch: " << int(std::get<0>(time_ch_u)/4) << " " << std::get<1>(time_ch_u) <<  " " << std::get<1>(time_ch_v)+2400 << " " << std::get<1>(time_ch_w)+4800 << std::endl;
 
-    std::cout << "Test Number of Points: " << live_grouping.get_num_points(0,0) << " " << live_grouping.get_num_points(0,1) << " " << live_grouping.get_num_points(0,2) << std::endl;
+    std::cout << "Test Number of Points: " << live_grouping.get_num_points(0, 0,0) << " " << live_grouping.get_num_points(0, 0,1) << " " << live_grouping.get_num_points(0, 0,2) << std::endl;
 
     auto num_planes = live_grouping.test_good_point(p,0, 0,0.6*units::cm, 1);
     std::cout << "Test test_good_point: " << num_planes[0] << " " << num_planes[1] << " " << num_planes[2] << " " << num_planes[3] << " " << num_planes[4] << " " << num_planes[5] << std::endl;
 
-    std::cout << "Test Ave Charge: " << live_grouping.get_ave_3d_charge(p,1*units::cm,0) << " " << live_grouping.get_ave_charge(p,1*units::cm,0,0) << " " << live_grouping.get_ave_charge(p,1*units::cm,0,1) << " " << live_grouping.get_ave_charge(p,1*units::cm,0,2) << " " << std::endl; 
+    std::cout << "Test Ave Charge: " << live_grouping.get_ave_3d_charge(p,0,0,1*units::cm) << " " << live_grouping.get_ave_charge(p,0,0,0,1*units::cm) << " " << live_grouping.get_ave_charge(p,0,0,1,1*units::cm) << " " << live_grouping.get_ave_charge(p,0,0,2,1*units::cm) << " " << std::endl; 
 
     auto point_u = live_grouping.convert_time_ch_2Dpoint(10*4, 10, 0, 0, 0);
     auto point_v = live_grouping.convert_time_ch_2Dpoint(10*4, 10, 0, 0, 1);
@@ -123,16 +123,16 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
 
     std::cout << "Test 2D Conversion " << point_u.first << " " << point_u.second << " " << point_v.first << " " << point_v.second << " "  << point_w.first << " " << point_w.second << std::endl;
 
-    auto dead_chs_u = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0);
-    auto dead_chs_v = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,1);
-    auto dead_chs_w = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,4800,0,2);
+    auto dead_chs_u = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0,0);
+    auto dead_chs_v = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0,1);
+    auto dead_chs_w = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,4800,0,0,2);
     std::cout << "Test Overlap dead chs: " << dead_chs_u.size() << " " << dead_chs_v.size() << " " << dead_chs_w.size() << std::endl;
 
-    std::cout << "Test all dead chs: " << live_grouping.get_all_dead_chs(0,0).size() + live_grouping.get_all_dead_chs(0,1).size() + live_grouping.get_all_dead_chs(0,2).size() << std::endl;
+    std::cout << "Test all dead chs: " << live_grouping.get_all_dead_chs(0,0,0).size() + live_grouping.get_all_dead_chs(0,0,1).size() + live_grouping.get_all_dead_chs(0,0,2).size() << std::endl;
 
-    auto good_chs_u = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,2400,0,0);
-    auto good_chs_v = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,2400,0,1);
-    auto good_chs_w = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,4800,0,2);
+    auto good_chs_u = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,2400,0,0,0);
+    auto good_chs_v = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,2400,0,0,1);
+    auto good_chs_w = live_grouping.get_overlap_good_ch_charge(10*4,1000*4,0,4800,0,0,2);
 
     std::cout << "Test all good chs: " << good_chs_u.size() << " " << good_chs_v.size() << " " << good_chs_w.size() << std::endl;
 

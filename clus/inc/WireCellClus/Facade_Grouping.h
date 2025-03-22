@@ -62,7 +62,7 @@ namespace WireCell::PointCloud::Facade {
         void set_params(const WireCell::Configuration& cfg);
         // const TPCParams& get_params() const { return m_tp; }
 
-        std::tuple<double, double, double> wire_angles(const int apa = 0, const int face = 0) const { return {cache().map_wire_angles.at(apa).at(face).at(0), cache().map_wire_angles.at(apa).at(face).at(1), cache().map_wire_angles.at(apa).at(face).at(2)}; }
+        std::tuple<double, double, double> wire_angles(const int apa, const int face) const { return {cache().map_wire_angles.at(apa).at(face).at(0), cache().map_wire_angles.at(apa).at(face).at(1), cache().map_wire_angles.at(apa).at(face).at(2)}; }
         std::map<int, std::map<int, double> > get_tick() const { return cache().map_tick;}
         std::map<int, std::map<int, double> > get_time_offset() const { return cache().map_time_offset;}
         std::map<int, std::map<int, double> > get_drift_speed() const { return cache().map_drift_speed;}
@@ -139,11 +139,11 @@ namespace WireCell::PointCloud::Facade {
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
         /// @return Number of points in the specified plane
-        size_t get_num_points(const int face, const int pind, const int apa = 0) const;
+        size_t get_num_points(const int apa, const int face, const int pind) const;
 
         // In Facade_Grouping.h, add to public section:
-        double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int apa = 0) const;
-        double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0, const int apa = 0) const;
+        double get_ave_3d_charge(const geo_point_t& point, const int apa, const int face, const double radius = 0.3 * units::cm) const;
+        double get_ave_charge(const geo_point_t& point, const int apa, const int face, const int pind,  const double radius = 0.3 * units::cm) const;
 
         /// @brief Get ranges of dead channels that overlap with given time and channel window
         /// @param min_time Minimum time
@@ -155,15 +155,15 @@ namespace WireCell::PointCloud::Facade {
         /// @param flag_ignore_time If true, ignore time window check
         /// @return Vector of pairs representing ranges of dead channels
         std::vector<std::pair<int, int>> get_overlap_dead_chs(const int min_time, const int max_time, 
-            const int min_ch, const int max_ch, const int face, const int pind, 
-            const bool flag_ignore_time=false, const int apa = 0) const;
+            const int min_ch, const int max_ch, const int apa, const int face, const int pind, 
+            const bool flag_ignore_time=false) const;
 
         // In Facade_Grouping.h, inside the Grouping class public section:
-        std::map<int, std::pair<int, int>> get_all_dead_chs(const int face, const int pind, int expand = 12, const int apa = 0) const;
+        std::map<int, std::pair<int, int>> get_all_dead_chs(const int apa, const int face, const int pind, int expand = 12) const;
         // Get overlapping good channel charges in a time-channel window
         std::map<std::pair<int,int>, std::pair<double,double>> get_overlap_good_ch_charge(
-            int min_time, int max_time, int min_ch, int max_ch, 
-            const int face, const int pind, const int apa = 0) const;
+            int min_time, int max_time, int min_ch, int max_ch, const int apa, 
+            const int face, const int pind) const;
 
         // We override this from Mixin in order to inject propagation of the
         // utter garbage handling of dead_winds.  If someone fixes that, this
