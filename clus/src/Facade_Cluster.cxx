@@ -556,8 +556,13 @@ const Cluster::kd2d_t& Cluster::kd2d(const size_t plane, const WirePlaneId wpid)
 
 std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane, const WirePlaneId wpid) const {
 
-    const auto& tp = grouping()->get_params();
-    double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
+    // const auto& tp = grouping()->get_params();
+    // double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
+    auto angles = grouping()->wire_angles(wpid.apa(), wpid.face());
+    double angle_uvw[3];
+    angle_uvw[0] = std::get<0>(angles);
+    angle_uvw[1] = std::get<1>(angles);
+    angle_uvw[2] = std::get<2>(angles);
     double x = p.x();
     double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
     std::vector<float_t> query_pt = {x, y};
@@ -1348,17 +1353,23 @@ std::map<WirePlaneId, std::tuple<int, int, int, int> > Cluster::get_uvwt_range()
 double Cluster::get_length() const
 {
     if (m_length == 0) {  // invalidates when a new node is set
-        const auto& tp = grouping()->get_params();
+        // const auto& tp = grouping()->get_params();
 
         // std::cout << "Test: " << grouping()->get_anode()->face(0)->plane(0)->pimpos()->pitch() << " " << grouping()->get_anode()->face(0)->plane(1)->pimpos()->pitch() << " " << grouping()->get_anode()->face(0)->plane(2)->pimpos()->pitch() << " " << tp.pitch_u << " " << tp.pitch_v << " " << tp.pitch_w << std::endl;
 
         auto map_wpid_uvwt = get_uvwt_range();
         for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
+
+            const double tick = grouping()->get_tick().at(wpid.apa()).at(wpid.face());
+            const double drift_speed = grouping()->get_drift_speed().at(wpid.apa()).at(wpid.face());
+
+            // std::cout << "Test: " << wpid.apa() << " " << wpid.face() << " " << tp.tick_drift << " " << tick * drift_speed << std::endl;
+
             const auto [u, v, w, t] = uvwt;
             const double pu = u * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(0)->pimpos()->pitch() ;
             const double pv = v * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(1)->pimpos()->pitch();
             const double pw = w * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(2)->pimpos()->pitch();
-            const double pt = t * tp.tick_drift;
+            const double pt = t * tick * drift_speed;
             m_length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
         }
     }
@@ -1405,15 +1416,18 @@ std::map<WirePlaneId, std::tuple<int, int, int, int> > Facade::get_uvwt_range(co
 
 double Facade::get_length(const Cluster* cluster, const std::vector<int>& b2id, const int id)
 {
-    const auto& tp = cluster->grouping()->get_params();
+    // const auto& tp = cluster->grouping()->get_params();
     auto map_wpid_uvwt = Facade::get_uvwt_range(cluster, b2id, id);
     double length = 0;
     for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
+        const double tick = cluster->grouping()->get_tick().at(wpid.apa()).at(wpid.face());
+        const double drift_speed = cluster->grouping()->get_drift_speed().at(wpid.apa()).at(wpid.face());
+
         const auto [u, v, w, t] = uvwt;
         const double pu = u * cluster->grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(0)->pimpos()->pitch();
         const double pv = v * cluster->grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(1)->pimpos()->pitch();
         const double pw = w * cluster->grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(2)->pimpos()->pitch();
-        const double pt = t * tp.tick_drift;
+        const double pt = t * tick * drift_speed;
         length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
     }
     return length;

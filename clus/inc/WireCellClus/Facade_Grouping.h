@@ -38,6 +38,7 @@ namespace WireCell::PointCloud::Facade {
         std::map<int, std::map<int, double> > map_drift_speed;
         std::map<int, std::map<int, double> > map_tick;
         std::map<int, std::map<int, std::map<int, double> > > map_wire_angles;
+        std::map<int, std::map<int, int> > map_drift_dir;
     };
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
@@ -61,6 +62,10 @@ namespace WireCell::PointCloud::Facade {
         const TPCParams& get_params() const { return m_tp; }
 
         std::tuple<double, double, double> wire_angles(const int apa = 0, const int face = 0) const { return {cache().map_wire_angles.at(apa).at(face).at(0), cache().map_wire_angles.at(apa).at(face).at(1), cache().map_wire_angles.at(apa).at(face).at(2)}; }
+        std::map<int, std::map<int, double> > get_tick() const { return cache().map_tick;}
+        std::map<int, std::map<int, double> > get_time_offset() const { return cache().map_time_offset;}
+        std::map<int, std::map<int, double> > get_drift_speed() const { return cache().map_drift_speed;}
+        std::map<int, std::map<int, int> > get_drift_dir() const { return cache().map_drift_dir;}
 
         /// TODO: remove this in the future
         // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }

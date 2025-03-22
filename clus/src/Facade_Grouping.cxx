@@ -167,7 +167,9 @@ void Grouping::fill_dv_cache(GroupingCache& gc) const
             gc.map_wire_angles[apa][face][1] = std::atan2(wire_dir_v.z(), wire_dir_v.y());
             gc.map_wire_angles[apa][face][2] = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
-            // std::cout << "Test: " << gc.map_time_offset[apa][face]["time_offset"] << " " << gc.map_drift_speed[apa][face]["drift_speed"] << " " << gc.map_tick[apa][face]["tick"] << std::endl;
+            gc.map_drift_dir[apa][face] = m_dv->face_dirx(wpid);
+
+            // std::cout << "Test: " << gc.map_time_offset[apa][face] << " " << gc.map_drift_speed[apa][face] << " " << gc.map_tick[apa][face] << " " << gc.map_drift_dir[apa][face]  << std::endl;
         }
         // double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble(); 
         // std::map<int, std::map<int, std::map<string, double> > > map_time_offset;
