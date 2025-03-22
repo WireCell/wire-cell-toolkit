@@ -42,10 +42,18 @@ namespace WireCell::Clus {
         // wind -> xbeg, xend
         void add_dead_winds(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
 
+        double get_time_offset(const WirePlaneId& wpid) const;
+        double get_drift_speed(const WirePlaneId& wpid) const;
+        double get_tick(const WirePlaneId& wpid) const;
+
         size_t m_multiplicity {2};
         std::vector<std::string> m_tags;
         size_t m_count{0};
 
+        // cache ...
+        mutable std::map<WirePlaneId, double> cache_map_tick;
+        mutable std::map<WirePlaneId, double> cache_map_drift_speed;
+        mutable std::map<WirePlaneId, double> cache_map_time_offset;
 
         // double m_tick {0.5*units::us};
         // double m_drift_speed {1.101*units::millimeter/units::us};

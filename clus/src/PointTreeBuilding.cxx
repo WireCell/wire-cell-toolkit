@@ -100,6 +100,25 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
 
 }
 
+double PointTreeBuilding::get_time_offset(const WirePlaneId& wpid) const{
+    if (cache_map_time_offset.find(wpid) == cache_map_time_offset.end()) {
+        cache_map_time_offset[wpid] = m_dv->metadata(wpid)["time_offset"].asDouble();
+    }
+    return cache_map_time_offset[wpid];
+}
+double PointTreeBuilding::get_drift_speed(const WirePlaneId& wpid) const{
+    if (cache_map_drift_speed.find(wpid) == cache_map_drift_speed.end()) {
+        cache_map_drift_speed[wpid] = m_dv->metadata(wpid)["drift_speed"].asDouble();
+    }
+    return cache_map_drift_speed[wpid];
+}
+double PointTreeBuilding::get_tick(const WirePlaneId& wpid) const{
+    if (cache_map_tick.find(wpid) == cache_map_tick.end()) {
+        cache_map_tick[wpid] = m_dv->metadata(wpid)["tick"].asDouble();
+    }
+    return cache_map_tick[wpid];
+}
+
 
 WireCell::Configuration PointTreeBuilding::default_configuration() const
 {
@@ -308,13 +327,13 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     const auto& plane = wpid_wire.index();
                     const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                     const auto& face = wpid_wire.face();
-                    const auto& x = Facade::time2drift(m_anode->faces()[face], m_dv->metadata(wpid_all)["time_offset"].asDouble(), m_dv->metadata(wpid_all)["drift_speed"].asDouble(), slice->start());
+                    const auto& x = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start());
                     const double y = pitch_mags.at(m_anode->ident()).at(face).at(plane)* (wind +0.5) + proj_centers.at(m_anode->ident()).at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
                     // if (nslices < 2) {
                     //     log->debug("dv: time_offset {} drift_speed {} tick {}",
-                    //     m_dv->metadata(wpid_all)["time_offset"].asDouble(),
-                    //     m_dv->metadata(wpid_all)["drift_speed"].asDouble(),
-                    //     m_dv->metadata(wpid_all)["tick"].asDouble());
+                    //     get_time_offset(wpid_all),
+                    //     get_drift_speed(wpid_all),
+                    //     get_tick(wpid_all));
                     // }
                     ds_x[face][plane].push_back(x);
                     ds_y[face][plane].push_back(y);
@@ -322,7 +341,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     ds_charge_err[face][plane].push_back(charge.uncertainty());
                     ds_cident[face][plane].push_back(cident);
                     ds_wind[face][plane].push_back(wind);
-                    const auto& slice_index = slice->start()/m_dv->metadata(wpid_all)["tick"].asDouble();
+                    const auto& slice_index = slice->start()/get_tick(wpid_all);
                     ds_slice_index[face][plane].push_back(slice_index);
                 }
             }
@@ -382,8 +401,8 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 const auto& plane = wpid_wire.index();
                 const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                 const auto& face = wpid_wire.face();
-                const auto& xbeg = Facade::time2drift(m_anode->faces()[face], m_dv->metadata(wpid_all)["time_offset"].asDouble(), m_dv->metadata(wpid_all)["drift_speed"].asDouble(), slice->start());
-                const auto& xend = Facade::time2drift(m_anode->faces()[face], m_dv->metadata(wpid_all)["time_offset"].asDouble(), m_dv->metadata(wpid_all)["drift_speed"].asDouble(), slice->start() + slice->span());
+                const auto& xbeg = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start());
+                const auto& xend = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start() + slice->span());
                 // if (true) {
                 //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                 //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
@@ -502,7 +521,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
     WirePlaneId wpid_all(kAllLayers, m_face, m_anode->ident());
-    double tick = m_dv->metadata(wpid_all)["tick"].asDouble();
+    double tick = get_tick(wpid_all);
 
     // std::cout <<"Test: " << tp_json["angle_u"].asDouble() << " " <<  tp_json["angle_v"].asDouble() << " " << tp_json["angle_w"].asDouble() << " " << angle_u << " " << angle_v << " " << angle_w << " " << tp_json["tick"].asDouble() << " " << tick << std::endl;
 
