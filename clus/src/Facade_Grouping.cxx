@@ -452,6 +452,11 @@ std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const in
     // Convert time to position
     const double min_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, min_time);
     const double max_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, max_time);
+    
+    // Ensure min_xpos is actually less than max_xpos
+    if (min_xpos > max_xpos) {
+        std::swap(min_xpos, max_xpos);
+    }
 
     std::set<int> dead_chs;
     const auto& dead_winds = get_dead_winds(apa, face, pind);
