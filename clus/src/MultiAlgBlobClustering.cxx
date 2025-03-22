@@ -354,12 +354,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     int hack_apa = 0;
 
-    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(hack_apa, 0, 0);
-    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(hack_apa, 0, 1);
-    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(hack_apa, 0, 2);
-    log->debug("dead_u_index size {}", dead_u_index.size());
-    log->debug("dead_v_index size {}", dead_v_index.size());
-    log->debug("dead_w_index size {}", dead_w_index.size());
+    // std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(hack_apa, 0, 0);
+    // std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(hack_apa, 0, 1);
+    // std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(hack_apa, 0, 2);
+    // log->debug("dead_u_index size {}", dead_u_index.size());
+    // log->debug("dead_v_index size {}", dead_v_index.size());
+    // log->debug("dead_w_index size {}", dead_w_index.size());
 
     for (const auto& func_cfg : m_func_cfgs) {
         // std::cout << "func_cfg: " << func_cfg << std::endl;
