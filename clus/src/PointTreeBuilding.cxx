@@ -492,8 +492,28 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
 
     const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
-    Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
-                                             tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
+
+    // // Create wpids for all three planes with this APA and face
+    WirePlaneId wpid_u(kUlayer, m_face, m_anode->ident());
+    WirePlaneId wpid_v(kVlayer, m_face, m_anode->ident());
+    WirePlaneId wpid_w(kWlayer, m_face, m_anode->ident());
+
+    // Get wire directions for all planes
+    Vector wire_dir_u = m_dv->wire_direction(wpid_u);
+    Vector wire_dir_v = m_dv->wire_direction(wpid_v);
+    Vector wire_dir_w = m_dv->wire_direction(wpid_w);
+
+    // Calculate angles
+    double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+    double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+    double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+    WirePlaneId wpid_all(kAllLayers, m_face, m_anode->ident());
+    double tick = m_dv->metadata(wpid_all)["tick"].asDouble();
+
+    // std::cout <<"Test: " << tp_json["angle_u"].asDouble() << " " <<  tp_json["angle_v"].asDouble() << " " << tp_json["angle_w"].asDouble() << " " << angle_u << " " << angle_v << " " << angle_w << " " << tp_json["tick"].asDouble() << " " << tick << std::endl;
+
+    Points::node_ptr root_live = sample_live(iclus_live, tick, angle_u, angle_v, angle_w);
     auto grouping = root_live->value.facade<Facade::Grouping>();
     grouping->set_anodes({m_anode});
     grouping->set_params(tp_json);
@@ -585,7 +605,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         if(ident != iclus_dead->ident()) {
             raise<ValueError>("ident mismatch between live and dead clusters");
         }
-        Points::node_ptr root_dead = sample_dead(iclus_dead, tp_json["tick"].asDouble());
+        Points::node_ptr root_dead = sample_dead(iclus_dead, tick);
         /// DEBUGONLY:
         // {
         //     Facade::Grouping& dead_grouping = *root_dead->value.facade<Facade::Grouping>();
