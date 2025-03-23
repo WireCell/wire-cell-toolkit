@@ -366,62 +366,117 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     geo_point_t start_p = point3d(start_idx);
     geo_point_t end_p = point3d(end_idx);
 
+    WirePlaneId start_wpid = wire_plane_id(start_idx);
+    WirePlaneId end_wpid = wire_plane_id(end_idx);
+
     double low_x = start_p.x() - 1 * units::cm;
     if (end_p.x() - 1 * units::cm < low_x) low_x = end_p.x() - 1 * units::cm;
     double high_x = start_p.x() + 1 * units::cm;
     if (end_p.x() + 1 * units::cm > high_x) high_x = end_p.x() + 1 * units::cm;
 
-    // assumes u, v, w, need to expand to includ wpid ???
-    size_t low_idxes[3] = {start_idx, start_idx, start_idx};
-    size_t high_idxes[3] = {end_idx, end_idx, end_idx};
 
+    // Create map to track lowest wire indices for each wire plane ID
+    std::map<WirePlaneId, std::array<size_t, 3>> map_wpid_low_indices;
+    std::map<WirePlaneId, std::array<size_t, 3>> map_wpid_high_indices;
+
+    // Initialize all elements in the arrays
+    map_wpid_low_indices[start_wpid] = {start_idx, start_idx, start_idx};
+    map_wpid_high_indices[start_wpid] = {start_idx, start_idx, start_idx};
+    if (end_wpid != start_wpid){
+        map_wpid_low_indices[end_wpid] = {end_idx,end_idx,end_idx};
+        map_wpid_high_indices[end_wpid] = {end_idx,end_idx,end_idx};
+    }
+    // assumes u, v, w, need to expand to includ wpid ???
     for (int pt_idx = 0; pt_idx != npoints(); pt_idx++) {
         geo_point_t current = point3d(pt_idx);
+        WirePlaneId wpid = wire_plane_id(pt_idx);
+
         if (current.x() > high_x || current.x() < low_x) continue;
-        for (size_t pind = 0; pind != 3; ++pind) {
-            if (winds[pind][pt_idx] < winds[pind][low_idxes[pind]]) {
-                low_idxes[pind] = pt_idx;
+
+        if (map_wpid_low_indices.find(wpid) == map_wpid_low_indices.end()) {
+            for (size_t pind = 0; pind != 3; ++pind) {
+                map_wpid_low_indices[wpid][pind] = pt_idx;
             }
-            if (winds[pind][pt_idx] > winds[pind][high_idxes[pind]]) {
-                high_idxes[pind] = pt_idx;
+        }else {
+            for (size_t pind = 0; pind != 3; ++pind) {
+                if (winds[pind][pt_idx] < winds[pind][map_wpid_low_indices[wpid][pind]]) {
+                    map_wpid_low_indices[wpid][pind] = pt_idx;
+                }
             }
         }
+        if(map_wpid_high_indices.find(wpid) == map_wpid_high_indices.end()) {
+            for (size_t pind = 0; pind != 3; ++pind) {
+                map_wpid_high_indices[wpid][pind] = pt_idx;
+            }
+        }else {
+            for (size_t pind = 0; pind != 3; ++pind) {
+                if (winds[pind][pt_idx] > winds[pind][map_wpid_high_indices[wpid][pind]]) {
+                    map_wpid_high_indices[wpid][pind] = pt_idx;
+                }
+            }
+        }  
     }
+
+    bool flags[3] = {true, true, true};
+    {
+        // Calculate the size of the range for each wire plane across all WPIDs
+        int index_diff_sum[3] = {0, 0, 0};
+        // Find minimum and maximum indices for each plane across all WPIDs
+        for (auto it = map_wpid_low_indices.begin(); it != map_wpid_low_indices.end(); ++it) {
+            const WirePlaneId& wpid = it->first;
+            const auto& low_indices = it->second;
+            const auto& high_indices = map_wpid_high_indices[wpid];
+            
+            for (size_t pind = 0; pind < 3; ++pind) {
+                index_diff_sum[pind] += winds[pind][high_indices[pind]] - winds[pind][low_indices[pind]];
+            }
+        }
+
+        // Create pairs of (index_difference, plane_index) for sorting
+        std::vector<std::pair<int, int>> plane_diffs;
+        for (int i = 0; i < 3; ++i) {
+            plane_diffs.push_back({index_diff_sum[i], i});
+        }
+        // Sort by index difference (ascending)
+        std::sort(plane_diffs.begin(), plane_diffs.end());
+        // Set flag to false for the plane with smallest difference
+        // (keeping the two planes with largest differences)
+        flags[plane_diffs[0].second] = false;
+    }
+    
 
     std::vector<size_t> indices, temp_indices;
     std::set<size_t> indices_set;
     geo_point_t test_p;
 
-    int hack_apa = 0;
-    int hack_face = 0;
-
-    bool flags[3] = {true, true, true};
-
-    /// HAIWANG: keeping the WCP original ordering
-    if (winds[0][high_idxes[0]] - winds[0][low_idxes[0]] < winds[1][high_idxes[1]] - winds[1][low_idxes[1]]) {
-        if (winds[0][high_idxes[0]] - winds[0][low_idxes[0]] < winds[2][high_idxes[2]] - winds[2][low_idxes[2]]) {
-            flags[0] = false;
-        }
-        else {
-            flags[2] = false;
-        }
-    }
-    else {
-        if (winds[1][high_idxes[1]] - winds[1][low_idxes[1]] < winds[2][high_idxes[2]] - winds[2][low_idxes[2]]) {
-            flags[1] = false;
-        }
-        else {
-            flags[2] = false;
-        }
-    }
-
     for (size_t pind = 0; pind != 3; ++pind) {
-        if (flags[pind]) {
-            geo_point_t low_p = point3d(low_idxes[pind]);
-            geo_point_t high_p = point3d(high_idxes[pind]);
-            std::vector<geo_point_t> test_points = {low_p, high_p, start_p, end_p};
-            for (const auto& test_point : test_points) {
-                temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, hack_apa, hack_face, pind);
+        for (auto it = map_wpid_low_indices.begin(); it != map_wpid_low_indices.end(); ++it) {
+            const WirePlaneId& wpid = it->first;
+            const auto& low_idxes = it->second;
+            const auto& high_idxes = map_wpid_high_indices[wpid];
+            if (flags[pind]) {
+                geo_point_t low_p = point3d(low_idxes[pind]);
+                geo_point_t high_p = point3d(high_idxes[pind]);
+                std::vector<geo_point_t> test_points = {low_p, high_p};
+                for (const auto& test_point : test_points) {
+                    temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, wpid.apa(), wpid.face(), pind);
+                    std::copy(temp_indices.begin(), temp_indices.end(), inserter(indices_set, indices_set.begin()));
+                }
+            }
+        }
+        {
+            auto wpid = start_wpid;
+            if (flags[pind]) {
+                auto test_point = start_p;                
+                temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, wpid.apa(), wpid.face(), pind);
+                std::copy(temp_indices.begin(), temp_indices.end(), inserter(indices_set, indices_set.begin()));
+            }
+        }
+        {
+            auto wpid = end_wpid;
+            if (flags[pind]) {
+                auto test_point = end_p;
+                temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, wpid.apa(), wpid.face(), pind);
                 std::copy(temp_indices.begin(), temp_indices.end(), inserter(indices_set, indices_set.begin()));
             }
         }
@@ -437,9 +492,12 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     for (size_t i = 0; i != indices.size(); i++) {
         //  std::cout << indices.at(i) << std::endl;
         for (size_t j = i + 1; j != indices.size(); j++) {
-            double value = pow(winds[0][indices.at(i)] - winds[0][indices.at(j)], 2) +
-                           pow(winds[1][indices.at(i)] - winds[1][indices.at(j)], 2) +
-                           pow(winds[2][indices.at(i)] - winds[2][indices.at(j)], 2);
+            // double value = pow(winds[0][indices.at(i)] - winds[0][indices.at(j)], 2) +
+            //                pow(winds[1][indices.at(i)] - winds[1][indices.at(j)], 2) +
+            //                pow(winds[2][indices.at(i)] - winds[2][indices.at(j)], 2);
+            double value = pow(point3d(indices.at(i)).x() - point3d(indices.at(j)).x(), 2) +
+                           pow(point3d(indices.at(i)).y() - point3d(indices.at(j)).y(), 2) +
+                           pow(point3d(indices.at(i)).z() - point3d(indices.at(j)).z(), 2);
 
             if (value > sum_value) {
                 // old_dis = dis;
