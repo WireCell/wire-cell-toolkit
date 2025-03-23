@@ -126,6 +126,9 @@ namespace WireCell::PointCloud::Facade {
         // alias for point3d to match the Simple3DPointCloud interface
         geo_point_t point(size_t point_index) const;
 
+        // return WirePlaneId for an index ...
+        WirePlaneId wire_plane_id(size_t point_index) const;
+
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.
         using points_type = kd3d_t::points_type;
         const points_type& points() const;

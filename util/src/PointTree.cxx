@@ -102,6 +102,7 @@ void Tree::ScopedBase::fill_cache() const
 
 void Tree::ScopedBase::fill_cache()
 {
+    // is this reliable???
     if (m_node_count == m_nodes.size()) return;
 
     m_node_count = 0;
@@ -200,6 +201,11 @@ const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
     if (it == m_scoped.end()) {
         return nullptr;
     }
+    auto& sci = m_scoped[scope];
+    if (!sci.indices_valid) {
+        rebuild_indices(scope);
+        sci.indices_valid = true;
+    }
     return it->second.scoped.get();
 }
 
@@ -209,12 +215,46 @@ Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope)
         const_cast<const self_t*>(this)->get_scoped(scope));
 }
 
+void WireCell::PointCloud::Tree::Points::rebuild_indices(const WireCell::PointCloud::Tree::Scope& scope) const
+{
+    auto& sci = m_scoped[scope];
+    auto* svptr = dynamic_cast<ScopedView<double>*>(sci.scoped.get());
+    if (!svptr) {
+        return;
+    }
 
+    // Clear the index mappings
+    svptr->clear_index_mappings();
+
+    // For each node in the scope, add its points to the mapping
+    size_t global_index = 0;
+    for (auto& node : m_node->depth(scope.depth)) {
+        bool want_if_in_scope = sci.selector(node);
+        auto& value = node.value;
+        auto it = value.m_lpcs.find(scope.pcname);
+        if (it == value.m_lpcs.end()) {
+            continue;
+        }
+
+        if (want_if_in_scope) {
+            // For each point in this node, add its global index to the mapping
+            for (size_t i = 0; i < it->second.size_major(); ++i) {
+                svptr->append(global_index + i);
+            }
+        }
+        global_index += it->second.size_major();
+    }
+    sci.indices_valid = true;
+}
 
 // Called new scoped view is created.
 void WireCell::PointCloud::Tree::Points::init(const WireCell::PointCloud::Tree::Scope& scope) const
 {
     auto& sci = m_scoped[scope]; // may create
+    auto* svptr = dynamic_cast<ScopedView<double>*>(sci.scoped.get());
+
+    size_t global_index = 0;
+
     // Walk the tree in scope, adding in-scope nodes.
     for (auto& node : m_node->depth(scope.depth)) { // depth part of scope.
         bool want_if_in_scope = sci.selector(node);
@@ -230,8 +270,19 @@ void WireCell::PointCloud::Tree::Points::init(const WireCell::PointCloud::Tree::
         // Tell scoped view about its new node if selector wants it
         if (want_if_in_scope) {
             sci.scoped->append(&node);
+
+            // If we have the ScopedView with index mapping, add point indices
+            if (svptr) {
+                // For each point in this node, add its global index to the mapping
+                for (size_t i = 0; i < pc.size_major(); ++i) {
+                    svptr->append(global_index + i);
+                }
+            }
         }
+        global_index += pc.size_major();
     }
+
+    sci.indices_valid = true;
 }
 
 
@@ -282,6 +333,8 @@ bool Tree::Points::on_insert(const std::vector<node_type*>& path)
 
     // Give node to any views for which the node is in scope.
     for (auto& [scope,sci] : m_scoped) {
+        // invalid indices ...
+        sci.indices_valid = false;
         if (! in_scope(scope, node, path.size())) {
             continue;
         }
@@ -298,7 +351,9 @@ bool Tree::Points::on_remove(const std::vector<node_type*>& path)
     auto* leaf = path.front();
     size_t psize = path.size();
     std::vector<Tree::Scope> dead;
-    for (auto const& [scope, _] : m_scoped) {
+    for (auto& [scope, sci] : m_scoped) {
+        // invalid indices ...
+        sci.indices_valid = false;
         if (in_scope(scope, leaf, psize)) {
             dead.push_back(scope);
         }

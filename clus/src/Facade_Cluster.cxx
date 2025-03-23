@@ -371,7 +371,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     double high_x = start_p.x() + 1 * units::cm;
     if (end_p.x() + 1 * units::cm > high_x) high_x = end_p.x() + 1 * units::cm;
 
-    // assumes u, v, w
+    // assumes u, v, w, need to expand to includ wpid ???
     size_t low_idxes[3] = {start_idx, start_idx, start_idx};
     size_t high_idxes[3] = {end_idx, end_idx, end_idx};
 
@@ -662,6 +662,10 @@ const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
 geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
+WirePlaneId Cluster::wire_plane_id(size_t point_index) const {  
+    const auto wpid_ident = points_property<int>("wpid");
+    return WirePlaneId(wpid_ident[point_index]);
+}
 
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
 int Cluster::npoints() const

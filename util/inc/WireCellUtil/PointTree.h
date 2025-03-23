@@ -217,10 +217,14 @@ namespace WireCell::PointCloud::Tree {
         struct ScopedViewCacheItem {
             unique_scoped_t scoped;
             SelectorFunction selector;
+
+            // cache of indices ...
+            bool indices_valid{false};  // Flag to track if indices need rebuilding
         };
         mutable std::unordered_map<Scope, ScopedViewCacheItem> m_scoped;
 
         void init(const Scope& scope) const;
+        void rebuild_indices(const Scope& scope) const;
         
     };                          // Points
 
@@ -238,6 +242,11 @@ namespace WireCell::PointCloud::Tree {
         if (sbptr) {
             auto * svptr = dynamic_cast<SV*>(sbptr);
             if (svptr) {
+                auto& sci = m_scoped[scope];
+                if (!sci.indices_valid) {
+                    rebuild_indices(scope);
+                    sci.indices_valid = true;
+                }
                 return *svptr;
             }
         }
@@ -246,6 +255,8 @@ namespace WireCell::PointCloud::Tree {
         auto& sci = m_scoped[scope];
         sci.scoped = std::move(uptr);
         sci.selector = selector;
+        sci.indices_valid = false; // Start with invalid indices
+
         init(scope);
         return sv;
     }
@@ -390,11 +401,45 @@ namespace WireCell::PointCloud::Tree {
             return const_cast<node_t*>( const_cast<const ScopedView<ElementType>*>(this)->node_with_point(point_index));
         }
 
+        // New methods for index mapping
+        void clear_index_mappings() {
+            m_global_to_local.clear();
+            m_local_to_global.clear(); 
+        }
+
+        // Add a global index to the mapping - maintains both maps
+        void append(size_t global_index) {
+            size_t local_index = m_local_to_global.size();
+            m_local_to_global.push_back(global_index);
+            m_global_to_local[global_index] = local_index;
+        }
+
+        int global_to_local(size_t global_idx) const {
+            auto it = m_global_to_local.find(global_idx);
+            if (it != m_global_to_local.end()) {
+                return it->second;
+            }
+            return -1;
+        }
+
+        int local_to_global(size_t local_idx) const {
+            if (local_idx < m_local_to_global.size()) {
+                return m_local_to_global[local_idx];
+            }
+            return -1;
+        }
+
+
+
       private:
 
         // This is actually mutable do to lazy behavior but the mutability is
         // assured via const_cast's in the methods..
         std::unique_ptr<nfkd_t> m_nfkd{nullptr};
+
+        // New member variables for indices ...
+        std::unordered_map<int, int> m_global_to_local;
+        std::vector<int> m_local_to_global;
     };
 
 }
