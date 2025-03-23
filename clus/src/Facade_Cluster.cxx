@@ -97,6 +97,9 @@ void Cluster::clear_cache() const {
     m_source_pt_index = -1;
     m_path_wcps.clear();
     m_path_mcells.clear();
+
+    // Clear the new cached wpid data
+    m_cached_wpid.clear();
 }
 
 
@@ -386,10 +389,17 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
         map_wpid_low_indices[end_wpid] = {end_idx,end_idx,end_idx};
         map_wpid_high_indices[end_wpid] = {end_idx,end_idx,end_idx};
     }
+
+    
+
     // assumes u, v, w, need to expand to includ wpid ???
     for (int pt_idx = 0; pt_idx != npoints(); pt_idx++) {
         geo_point_t current = point3d(pt_idx);
         WirePlaneId wpid = wire_plane_id(pt_idx);
+        // WirePlaneId wpid = start_wpid;
+
+        if (pt_idx % 1000 == 0)
+        // std::cout << "Test: " << pt_idx << " " << wpid << npoints() << std::endl;
 
         if (current.x() > high_x || current.x() < low_x) continue;
 
@@ -525,6 +535,8 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
             }
         }
     }
+
+
 }
 
 bool Cluster::construct_skeleton(const bool use_ctpc)
@@ -738,9 +750,12 @@ const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
 geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
+
 WirePlaneId Cluster::wire_plane_id(size_t point_index) const {  
-    const auto wpid_ident = points_property<int>("wpid");
-    return WirePlaneId(wpid_ident[point_index]);
+    if (m_cached_wpid.empty()) {
+        m_cached_wpid = points_property<int>("wpid");
+    }
+    return WirePlaneId(m_cached_wpid[point_index]);
 }
 
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }

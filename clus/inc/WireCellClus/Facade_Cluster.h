@@ -444,6 +444,8 @@ namespace WireCell::PointCloud::Facade {
         mutable std::list<size_t> m_path_wcps;
         mutable std::list<const Blob*> m_path_mcells;
 
+        mutable std::vector<int> m_cached_wpid;
+
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.
         std::map<WirePlaneId, std::tuple<int, int, int, int> > get_uvwt_range() const;
