@@ -89,9 +89,9 @@ void WireCell::PointCloud::Facade::clustering_test(
                 // kd2dp0_a0f1.ndim() 2 kd2dp0_a0f1.npoints() 0 (if we do not have a0f1)
                 auto& kd3d = cluster->kd3d();
                 SPDLOG_INFO("CTest Cluster {} kd3d.ndim() {} kd3d.npoints() {}", iclus, kd3d.ndim(), kd3d.npoints());
-                auto& kd2dp0 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 0));
+                auto& kd2dp0 = cluster->kd2d(0, 0, 0);
                 SPDLOG_INFO("CTest Cluster {} kd2dp0.ndim() {} kd2dp0.npoints() {}", iclus, kd2dp0.ndim(), kd2dp0.npoints());
-                auto& kd2dp0_a0f1 = cluster->kd2d(0, WirePlaneId(kAllLayers, 0, 1));
+                auto& kd2dp0_a0f1 = cluster->kd2d(0, 0 , 0);
                 SPDLOG_INFO("CTest Cluster {} kd2dp0_a0f1.ndim() {} kd2dp0_a0f1.npoints() {}", iclus, kd2dp0_a0f1.ndim(), kd2dp0_a0f1.npoints());
             }
 

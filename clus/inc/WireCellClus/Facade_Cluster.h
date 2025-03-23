@@ -245,12 +245,12 @@ namespace WireCell::PointCloud::Facade {
         using sv2d_t = Tree::ScopedView<double>;
         /// @param plane 0, 1, 2
         /// @param wpid currently provides the apa and face
-        const sv2d_t& sv2d(const size_t plane, const WirePlaneId wpid) const;
+        const sv2d_t& sv2d(const int apa, const int face, const size_t plane) const;
         using kd2d_t = sv2d_t::nfkd_t;
-        const kd2d_t& kd2d(const size_t plane, const WirePlaneId wpid) const;
+        const kd2d_t& kd2d(const int apa, const int face, const size_t plane) const;
 
         /// 
-        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane, const WirePlaneId wpid = WirePlaneId(kAllLayers, 0, 0)) const;
+        std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int apa, const int face, const int plane) const;
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 

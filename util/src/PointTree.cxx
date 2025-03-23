@@ -229,13 +229,13 @@ void WireCell::PointCloud::Tree::Points::rebuild_indices(const WireCell::PointCl
     // For each node in the scope, add its points to the mapping
     size_t global_index = 0;
     for (auto& node : m_node->depth(scope.depth)) {
-        bool want_if_in_scope = sci.selector(node);
         auto& value = node.value;
         auto it = value.m_lpcs.find(scope.pcname);
         if (it == value.m_lpcs.end()) {
             continue;
         }
 
+        bool want_if_in_scope = sci.nodes_in_scope.find(&node) != sci.nodes_in_scope.end();
         if (want_if_in_scope) {
             // For each point in this node, add its global index to the mapping
             for (size_t i = 0; i < it->second.size_major(); ++i) {
@@ -257,19 +257,20 @@ void WireCell::PointCloud::Tree::Points::init(const WireCell::PointCloud::Tree::
 
     // Walk the tree in scope, adding in-scope nodes.
     for (auto& node : m_node->depth(scope.depth)) { // depth part of scope.
-        bool want_if_in_scope = sci.selector(node);
         auto& value = node.value;
         auto it = value.m_lpcs.find(scope.pcname); // PC name part of scope.
         if (it == value.m_lpcs.end()) {
             continue;           // it is okay if node lacks PC, but such a node can not be in a scope
         }
-
         // Check for coordintate arrays on first construction. 
         Dataset& pc = it->second;
         assure_arrays(pc.keys(), scope); // throws if user logic error detected
+        
+        bool want_if_in_scope = sci.selector(node);
         // Tell scoped view about its new node if selector wants it
         if (want_if_in_scope) {
             sci.scoped->append(&node);
+            sci.nodes_in_scope.insert(&node);  // Store node for quick lookup
 
             // If we have the ScopedView with index mapping, add point indices
             if (svptr) {
@@ -340,6 +341,7 @@ bool Tree::Points::on_insert(const std::vector<node_type*>& path)
         }
         if (sci.selector(*node)) {
             sci.scoped->append(node);
+            sci.nodes_in_scope.insert(node);  // Store node for quick lookup
         }
     }
     return true;

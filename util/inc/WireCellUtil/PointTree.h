@@ -220,6 +220,8 @@ namespace WireCell::PointCloud::Tree {
 
             // cache of indices ...
             bool indices_valid{false};  // Flag to track if indices need rebuilding
+            // nodes in scope ...
+            std::unordered_set<node_t*> nodes_in_scope;
         };
         mutable std::unordered_map<Scope, ScopedViewCacheItem> m_scoped;
 

@@ -1012,6 +1012,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     auto* grouping = cluster->grouping();
     auto temp_cloud = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
 
+    int hack_apa = 0;
+    int hack_face = 0;
+
     // ToyPointCloud *cloud = cluster->get_point_cloud();
 
     geo_point_t cluster_center = cluster->get_center();
@@ -1388,7 +1391,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
     // special treatment of first and last point
     {
-        std::vector<size_t> indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, 0);
+        std::vector<size_t> indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, hack_apa, hack_face, 0);
         // if (flag_debug_porting) {
         //     std::cout << *cluster << std::endl;
         //     std::cout << "pts.front()" << pts.front() << " indices.size() " << indices.size() << std::endl;
@@ -1401,23 +1404,23 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         for (size_t k = 0; k != indices.size(); k++) {
             flag_u_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, 1);
+        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, hack_apa, hack_face, 1);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_v_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, 2);
+        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, hack_apa, hack_face, 2);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_w_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, 0);
+        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, hack_apa, hack_face, 0);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_u_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, 1);
+        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, hack_apa, hack_face, 1);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_v_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, 2);
+        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, hack_apa, hack_face, 2);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_w_pts.at(indices.at(k)) = true;
         }

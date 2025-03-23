@@ -392,6 +392,9 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     std::set<size_t> indices_set;
     geo_point_t test_p;
 
+    int hack_apa = 0;
+    int hack_face = 0;
+
     bool flags[3] = {true, true, true};
 
     /// HAIWANG: keeping the WCP original ordering
@@ -418,7 +421,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
             geo_point_t high_p = point3d(high_idxes[pind]);
             std::vector<geo_point_t> test_points = {low_p, high_p, start_p, end_p};
             for (const auto& test_point : test_points) {
-                temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, pind);
+                temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, hack_apa, hack_face, pind);
                 std::copy(temp_indices.begin(), temp_indices.end(), inserter(indices_set, indices_set.begin()));
             }
         }
@@ -523,11 +526,12 @@ bool Cluster::construct_skeleton(const bool use_ctpc)
     return true;
 }
 
-const Cluster::sv2d_t& Cluster::sv2d(const size_t plane, const WirePlaneId wpid) const
+const Cluster::sv2d_t& Cluster::sv2d(const int apa, const int face, const size_t plane) const
 {
-    if (wpid.layer()!=kAllLayers) {
-        raise<RuntimeError>("Cluster::sv2d() wpid.layer() {} != kAllLayers");
-    }
+    // if (wpid.layer()!=kAllLayers) {
+    //     raise<RuntimeError>("Cluster::sv2d() wpid.layer() {} != kAllLayers");
+    // }
+    const WirePlaneId wpid(kAllLayers, face, apa);
     const Tree::Scope scope = {"3d", {scope2ds_prefix[plane]+"_x", scope2ds_prefix[plane]+"_y"}, 0, wpid.name()};
     return m_node->value.scoped_view(scope,
         [&](const Points::node_t& node) {
@@ -548,17 +552,17 @@ const Cluster::sv2d_t& Cluster::sv2d(const size_t plane, const WirePlaneId wpid)
     );
 }
 
-const Cluster::kd2d_t& Cluster::kd2d(const size_t plane, const WirePlaneId wpid) const
+const Cluster::kd2d_t& Cluster::kd2d(const int apa, const int face, const size_t plane) const
 {
-    const auto& sv = sv2d(plane, wpid);
+    const auto& sv = sv2d(apa, face, plane);
     return sv.kd();
 }
 
-std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int plane, const WirePlaneId wpid) const {
+std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int apa, const int face, const int plane) const {
 
     // const auto& tp = grouping()->get_params();
     // double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
-    auto angles = grouping()->wire_angles(wpid.apa(), wpid.face());
+    auto angles = grouping()->wire_angles(apa,face);
     double angle_uvw[3];
     angle_uvw[0] = std::get<0>(angles);
     angle_uvw[1] = std::get<1>(angles);
@@ -566,13 +570,27 @@ std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const do
     double x = p.x();
     double y = cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y();
     std::vector<float_t> query_pt = {x, y};
-    const auto& skd = kd2d(plane, wpid);
+    const auto& skd = kd2d(apa, face, plane);
     auto ret_matches = skd.radius(search_radius * search_radius, query_pt);
 
+    // local indices ...
     std::vector<size_t> ret_index(ret_matches.size());
+    // 2d scoped view ...
+    const auto& sv2 = sv2d(apa, face, plane);
+    // 3d scoped view
+    const auto& sv3 = sv3d();
+
+    // use 2D local idx --> global-->idx --> 3D local index
     for (size_t i = 0; i != ret_matches.size(); i++)
     {
-        ret_index.at(i) = ret_matches.at(i).first;
+        int global_index = sv2.local_to_global(ret_matches.at(i).first);
+        ret_index.at(i) = sv3.global_to_local(global_index);
+        if (global_index == -1 || ret_index.at(i) == -1) {
+            throw std::runtime_error("Failed to convert from local to global index");
+        }
+        
+        // std::cout << "Test: " << ret_index.at(i) << " " << global_index << " " << ret_index.at(i) << std::endl;
+        // ret_index.at(i) = ret_matches.at(i).first;
     }
 
     return ret_index;
