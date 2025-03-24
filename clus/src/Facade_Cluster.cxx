@@ -171,7 +171,8 @@ const Cluster::time_blob_map_t& Cluster::time_blob_map() const
 {
     if (m_time_blob_map.empty()) {
         for (const Blob* blob : children()) {
-            m_time_blob_map[blob->slice_index_min()].insert(blob);
+            auto wpid = blob->wpid();
+            m_time_blob_map[wpid.apa()][wpid.face()][blob->slice_index_min()].insert(blob);
         }
     }
     return m_time_blob_map;
@@ -668,50 +669,40 @@ std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const do
 
 std::vector<const Blob*> Cluster::is_connected(const Cluster& c, const int offset) const
 {
+    auto& time_blob_map1 = c.time_blob_map();
+    auto& time_blob_map2 = time_blob_map();
     std::vector<const Blob*> ret;
-    for (const auto& [bad_start, badblobs] : c.time_blob_map()) {
-        for (const auto* badblob : badblobs) {
-            auto bad_end = badblob->slice_index_max();  // not inclusive
-            for (const auto& [good_start, goodblobs] : time_blob_map()) {
-                for (const auto* goodblob : goodblobs) {
-                    if (goodblob->wpid() != badblob->wpid()) {
-                        continue;
-                    }
-                    auto good_end = goodblob->slice_index_max();  // not inclusive
-                    if (good_end <= bad_start || good_start >= bad_end) {  
-                        continue;
-                    }
-                    if (goodblob->overlap_fast(*badblob, offset)) {
-                        ret.push_back(goodblob);
+
+    for (auto it = time_blob_map1.begin(); it != time_blob_map1.end(); it++){
+        int apa = it->first;
+        if (time_blob_map2.find(apa) == time_blob_map2.end()) continue; // if the second one does not contain it ...
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++){
+            int face = it1->first; // face
+            if (time_blob_map2.at(apa).find(face) == time_blob_map2.at(apa).end()) continue;
+
+            for (const auto& [bad_start, badblobs] : time_blob_map1.at(apa).at(face)) {
+                for (const auto* badblob : badblobs) {
+                    auto bad_end = badblob->slice_index_max();  // not inclusive
+                    for (const auto& [good_start, goodblobs] : time_blob_map2.at(apa).at(face)) {
+                        for (const auto* goodblob : goodblobs) {
+                            auto good_end = goodblob->slice_index_max();  // not inclusive
+                            if (good_end <= bad_start || good_start >= bad_end) {  
+                                continue;
+                            }
+                            if (goodblob->overlap_fast(*badblob, offset)) {
+                                ret.push_back(goodblob);
+                            }
+                        }
+        
                     }
                 }
-
             }
         }
     }
+    
     return ret;
 }
 
-// const Blob* Cluster::get_first_blob() const
-// {
-//     if (time_blob_map().empty()) {
-//         raise<ValueError>("empty cluster has no first blob");
-//     }
-//     return *(time_blob_map().begin()->second.begin());
-// }
-
-// const Blob* Cluster::get_last_blob() const
-// {
-//     if (time_blob_map().empty()) {
-//         raise<ValueError>("empty cluster has no last blob");
-//     }
-//     return *(time_blob_map().rbegin()->second.rbegin());
-// }
-
-// size_t Cluster::get_num_time_slices() const
-// {
-//     return time_blob_map().size();
-// }
 
 std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t& p_test1, geo_point_t dir,
                                                                     double test_dis, double dis_step, double angle_cut,
@@ -1946,10 +1937,21 @@ void Cluster::Establish_close_connected_graph() const
     LogDebug("in-blob edges: " << num_edges);
     // std::cout << "Test: in-blob edges: " << num_edges << std::endl;
 
-    std::vector<int> time_slices;
-    for (auto [time, _] : this->time_blob_map()) {
-        time_slices.push_back(time);
+
+    // create graph for points between connected mcells, need to separate apa, face, and then ...
+    std::map<int, std::map<int, std::vector<int> > > af_time_slices; // apa,face --> time slices 
+    for (auto it = this->time_blob_map().begin(); it != this->time_blob_map().end(); it++) {
+        int apa = it->first;
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
+            int face = it1->first;
+            std::vector<int> time_slices_vec;
+            for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
+                time_slices_vec.push_back(it2->first);
+            }
+            af_time_slices[apa][face] = time_slices_vec;
+        }
     }
+    
 
     // const int nticks_per_slice = grouping()->get_params().nticks_live_slice;
     // need to udpate to Multi-Face alg. ...
@@ -1959,56 +1961,63 @@ void Cluster::Establish_close_connected_graph() const
 
     std::vector<std::pair<const Blob*, const Blob*>> connected_mcells;
 
-    for (size_t i = 0; i != time_slices.size(); i++) {
-        const auto& mcells_set = this->time_blob_map().at(time_slices.at(i));
+    for (auto it = af_time_slices.begin(); it != af_time_slices.end(); it++) {
+        int apa = it->first;
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
+            int face = it1->first;
+            std::vector<int>& time_slices = it1->second;
+            for (size_t i = 0; i != time_slices.size(); i++) {
+                const auto& mcells_set = this->time_blob_map().at(apa).at(face).at(time_slices.at(i));
 
-        // create graph for points in mcell inside the same time slice
-        if (mcells_set.size() >= 2) {
-            for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); it2++) {
-                auto mcell1 = *it2;
-                auto it2p = it2;
-                if (it2p != mcells_set.end()) {
-                    it2p++;
-                    for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
-                        auto mcell2 = *(it3);
-                        if (mcell1->overlap_fast(*mcell2, 2))
-                            connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                // create graph for points in mcell inside the same time slice
+                if (mcells_set.size() >= 2) {
+                    for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); it2++) {
+                        auto mcell1 = *it2;
+                        auto it2p = it2;
+                        if (it2p != mcells_set.end()) {
+                            it2p++;
+                            for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
+                                auto mcell2 = *(it3);
+                                if (mcell1->overlap_fast(*mcell2, 2))
+                                    connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                            }
+                        }
                     }
                 }
-            }
-        }
-        // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
-        std::vector<BlobSet> vec_mcells_set;
-        if (i + 1 < time_slices.size()) {
-            if (time_slices.at(i + 1) - time_slices.at(i) == 1*nticks_per_slice) {
-                vec_mcells_set.push_back(this->time_blob_map().at(time_slices.at(i + 1)));
-                if (i + 2 < time_slices.size())
-                    if (time_slices.at(i + 2) - time_slices.at(i) == 2*nticks_per_slice)
-                        vec_mcells_set.push_back(this->time_blob_map().at(time_slices.at(i + 2)));
-            }
-            else if (time_slices.at(i + 1) - time_slices.at(i) == 2*nticks_per_slice) {
-                vec_mcells_set.push_back(this->time_blob_map().at(time_slices.at(i + 1)));
-            }
-        }
-        //    bool flag = false;
-        for (size_t j = 0; j != vec_mcells_set.size(); j++) {
-            //      if (flag) break;
-            auto& next_mcells_set = vec_mcells_set.at(j);
-            for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
-                auto mcell1 = (*it1);
-                for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
-                    auto mcell2 = (*it2);
-                    if (mcell1->overlap_fast(*mcell2, 2)) {
-                        //	    flag = true; // correct???
-                        connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
+                std::vector<BlobSet> vec_mcells_set;
+                if (i + 1 < time_slices.size()) {
+                    if (time_slices.at(i + 1) - time_slices.at(i) == 1*nticks_per_slice) {
+                        vec_mcells_set.push_back(this->time_blob_map().at(apa).at(face).at(time_slices.at(i + 1)));
+                        if (i + 2 < time_slices.size())
+                            if (time_slices.at(i + 2) - time_slices.at(i) == 2*nticks_per_slice)
+                                vec_mcells_set.push_back(this->time_blob_map().at(apa).at(face).at(time_slices.at(i + 2)));
+                    }
+                    else if (time_slices.at(i + 1) - time_slices.at(i) == 2*nticks_per_slice) {
+                        vec_mcells_set.push_back(this->time_blob_map().at(apa).at(face).at(time_slices.at(i + 1)));
                     }
                 }
+                //    bool flag = false;
+                for (size_t j = 0; j != vec_mcells_set.size(); j++) {
+                    //      if (flag) break;
+                    auto& next_mcells_set = vec_mcells_set.at(j);
+                    for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
+                        auto mcell1 = (*it1);
+                        for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
+                            auto mcell2 = (*it2);
+                            if (mcell1->overlap_fast(*mcell2, 2)) {
+                                //	    flag = true; // correct???
+                                connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                            }
+                        }
+                    }
+                }
+                // std::cout << "yuhw: itime_slices " << i
+                // << " time_slices.at(i) " << time_slices.at(i)
+                // << " vec_mcells_set  " << vec_mcells_set.size()
+                // << " connected_mcells " << connected_mcells.size() << std::endl;
             }
         }
-        // std::cout << "yuhw: itime_slices " << i
-        // << " time_slices.at(i) " << time_slices.at(i)
-        // << " vec_mcells_set  " << vec_mcells_set.size()
-        // << " connected_mcells " << connected_mcells.size() << std::endl;
     }
     // std::cout << "connected_mcells size: " << connected_mcells.size() << std::endl;
 

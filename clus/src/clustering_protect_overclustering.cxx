@@ -42,7 +42,11 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
 
     // plane -> point -> wire index
     const auto& winds = cluster->wire_indices();
-    const Cluster::time_blob_map_t &time_cells_set_map = cluster->time_blob_map();
+
+
+    int hack_apa = 0;
+    int hack_face = 0;
+    const auto &time_cells_set_map = cluster->time_blob_map().at(hack_apa).at(hack_face);
 
     // WCP::WCPointCloud<double> &cloud = point_cloud->get_cloud();
     // WCP::WC2DPointCloud<double> &cloud_u = point_cloud->get_cloud_u();

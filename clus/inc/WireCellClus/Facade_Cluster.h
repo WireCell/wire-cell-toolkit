@@ -347,7 +347,7 @@ namespace WireCell::PointCloud::Facade {
         // https://github.com/HaiwangYu/learn-cpp/blob/main/test-multimap.cxx
         // WCP: get_time_cells_set_map
         using BlobSet = std::set<const Blob*, blob_less_functor>;
-        using time_blob_map_t = std::map<int, BlobSet>;
+        using time_blob_map_t = std::map<int, std::map<int, std::map<int, BlobSet> > >; // apa, face, time, blobset
         const time_blob_map_t& time_blob_map() const;
    
         // PCA helper functions

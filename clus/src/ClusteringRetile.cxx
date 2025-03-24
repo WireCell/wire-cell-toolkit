@@ -326,12 +326,15 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
 std::set<const WireCell::PointCloud::Facade::Blob*> 
 WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span) const
 {
+    int hack_apa = 0 ;
+    int hack_face = 0;
+
     // Implementation here
     // Get time-organized map of original blobs
-    const auto& orig_time_blob_map = cluster.time_blob_map();
+    const auto& orig_time_blob_map = cluster.time_blob_map().at(hack_apa).at(hack_face);
     
     // Get time-organized map of newly created blobs
-    const auto& new_time_blob_map = shad_cluster.time_blob_map();
+    const auto& new_time_blob_map = shad_cluster.time_blob_map().at(hack_apa).at(hack_face);
     
     // Track blobs that need to be removed
     std::set<const Blob*> blobs_to_remove;

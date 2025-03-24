@@ -1682,7 +1682,18 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 /// blob -> cluster_id
 std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, const double dis_cut, const size_t ticks_per_slice)
 {
-    const auto& time_cells_set_map = cluster->time_blob_map();
+    int hack_apa = 0;
+    int hack_face = 0;
+
+    if (cluster->nchildren() == 0) {
+        return std::vector<int>();
+    }
+
+    // std::cout << "Test: cluster has " << cluster->nchildren() << " blobs" << std::endl;
+    auto& time_cells_set_map = cluster->time_blob_map().at(hack_apa).at(hack_face);
+    // Safe access to nested maps
+    
+
     // std::cout << "Separate_2 nchildren: " << cluster->nchildren() << std::endl;
     std::vector<Blob*>& mcells = cluster->children();
 
