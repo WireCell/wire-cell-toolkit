@@ -426,7 +426,8 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, co
     double angle1 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
     /// CHECKME: is "time_slice_length" drift_speed * tick?
-    double temp_angle1 = asin(cluster->get_num_time_slices() * time_slice_length / length) / 3.1415926 * 180.;
+    auto points = cluster->get_earliest_latest_points();
+    double temp_angle1 = asin(fabs(points.first.x() - points.second.x()) / length) / 3.1415926 * 180.;
 
     double angle2 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
     double ratio1 = cluster->get_pca_value(1) / cluster->get_pca_value(0);

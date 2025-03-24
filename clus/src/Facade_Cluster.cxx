@@ -674,6 +674,9 @@ std::vector<const Blob*> Cluster::is_connected(const Cluster& c, const int offse
             auto bad_end = badblob->slice_index_max();  // not inclusive
             for (const auto& [good_start, goodblobs] : time_blob_map()) {
                 for (const auto* goodblob : goodblobs) {
+                    if (goodblob->wpid() != badblob->wpid()) {
+                        continue;
+                    }
                     auto good_end = goodblob->slice_index_max();  // not inclusive
                     if (good_end <= bad_start || good_start >= bad_end) {  
                         continue;
@@ -689,26 +692,26 @@ std::vector<const Blob*> Cluster::is_connected(const Cluster& c, const int offse
     return ret;
 }
 
-const Blob* Cluster::get_first_blob() const
-{
-    if (time_blob_map().empty()) {
-        raise<ValueError>("empty cluster has no first blob");
-    }
-    return *(time_blob_map().begin()->second.begin());
-}
+// const Blob* Cluster::get_first_blob() const
+// {
+//     if (time_blob_map().empty()) {
+//         raise<ValueError>("empty cluster has no first blob");
+//     }
+//     return *(time_blob_map().begin()->second.begin());
+// }
 
-const Blob* Cluster::get_last_blob() const
-{
-    if (time_blob_map().empty()) {
-        raise<ValueError>("empty cluster has no last blob");
-    }
-    return *(time_blob_map().rbegin()->second.rbegin());
-}
+// const Blob* Cluster::get_last_blob() const
+// {
+//     if (time_blob_map().empty()) {
+//         raise<ValueError>("empty cluster has no last blob");
+//     }
+//     return *(time_blob_map().rbegin()->second.rbegin());
+// }
 
-size_t Cluster::get_num_time_slices() const
-{
-    return time_blob_map().size();
-}
+// size_t Cluster::get_num_time_slices() const
+// {
+//     return time_blob_map().size();
+// }
 
 std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t& p_test1, geo_point_t dir,
                                                                     double test_dis, double dis_step, double angle_cut,
@@ -3928,6 +3931,7 @@ double Cluster::get_pca_value(int axis) const {
 
 // std::unordered_map<int, Cluster*> 
 std::vector<int> Cluster::examine_x_boundary(const double low_limit, const double high_limit)
+// designed to run for single face ... limits are for per face only ...
 {
     double num_points[3] = {0, 0, 0};
     double x_max = -1e9;

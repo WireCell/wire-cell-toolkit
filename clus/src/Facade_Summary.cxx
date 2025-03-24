@@ -27,7 +27,7 @@ Configuration PointCloud::Facade::json_summary(const PointCloud::Facade::Cluster
     ret["type"] = "Cluster";
     ret["hash"] = cls.hash();
     ret["length"] = cls.get_length();
-    ret["num_slices"] = cls.get_num_time_slices();
+    // ret["num_slices"] = cls.get_num_time_slices();
     ret["value"] = WireCell::PointCloud::json_summary(cls.value(), false);
     for (const auto* cf : cls.children()) {
         ret["clusters"].append(json_summary(*cf));
