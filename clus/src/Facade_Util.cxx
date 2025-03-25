@@ -608,6 +608,39 @@ WirePlaneId Facade::get_wireplaneid(const geo_point_t& point, const WirePlaneId&
     return wpid;
 }
 
+WirePlaneId Facade::get_wireplaneid(const geo_point_t& p1, const WirePlaneId& wpid1, const geo_point_t& p2, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv){
+    if (wpid1 == wpid2) return wpid1;
+    // if the wpid1 != wpid2, find out the line p1-p2 intersects with wpid1, and wpid2, return the wpid for the longer one
+
+     // Convert geo_point_t to WireCell::Point if needed
+    // Assuming geo_point_t is compatible with or can be converted to WireCell::Point
+    WireCell::Point point1 = p1;
+    WireCell::Point point2 = p2;
+    
+    // Create ray from p1 to p2
+    WireCell::Ray ray(point1, point2);
+    
+    // Get bounding boxes for each wpid
+    WireCell::BoundingBox bb1 = dv->inner_bounds(wpid1);
+    WireCell::BoundingBox bb2 = dv->inner_bounds(wpid2);
+    
+    // Find intersections of ray with each bounding box
+    WireCell::Ray intersect1 = bb1.crop(ray);
+    WireCell::Ray intersect2 = bb2.crop(ray);
+    
+    // Calculate lengths of intersection segments
+    double length1 = WireCell::ray_length(intersect1);
+    double length2 = WireCell::ray_length(intersect2);
+    
+    // Return wpid corresponding to longer intersection
+    if (length1 >= length2) {
+        return wpid1;
+    } else {
+        return wpid2;
+    }
+}
+
+
 
 // Local Variables:
 // mode: c++

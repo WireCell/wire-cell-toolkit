@@ -2416,7 +2416,6 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
@@ -2445,11 +2444,9 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                    // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
@@ -2481,7 +2478,6 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
@@ -2852,6 +2848,7 @@ void Cluster::Connect_graph() const{
 void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::pointer dv, const bool use_ctpc) const {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = grouping()->wpids();
+
     // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
     std::map<WirePlaneId, geo_point_t> wpid_U_dir;
@@ -2890,8 +2887,8 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
     // Constants for wire angles
     // const auto& tp = grouping()->get_params();
-    int hard_code_apa = 0;
-    int hard_code_face = 0;
+    // int hard_code_apa = 0;
+    // int hard_code_face = 0;
     //std::cout << "Test: face " << tp.face << std::endl;
 
     // const double pi = 3.141592653589793;
@@ -2899,10 +2896,10 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
     const geo_vector_t drift_dir_abs(1, 0, 0); 
 
     // need to understand the points before implementing the angles ...
-    const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles(hard_code_apa, hard_code_face);
-    const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    const geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    const geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
+    // const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles(hard_code_apa, hard_code_face);
+    // const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
+    // const geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
+    // const geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
 
 
     // Form connected components
@@ -3022,7 +3019,9 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
             {
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                auto wpid_p1 = wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis[j][k])));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+                auto wpid_p2 = wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis[j][k])));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                 double step_dis = 1.0 * units::cm;
@@ -3046,26 +3045,29 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     // Test point quality using grouping parameters
                     std::vector<int> scores;
                     if (use_ctpc) {
-                        scores = grouping()->test_good_point(test_p, hard_code_apa, hard_code_face);
-                        
-                        // Check overall quality
-                        if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
-                            num_bad[0]++;
-                        }
-                        if (scores[0]+scores[3]==0) num_bad[1]++;
-                        if (scores[1]+scores[4]==0) num_bad[2]++;
-                        if (scores[2]+scores[5]==0) num_bad[3]++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            scores = grouping()->test_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            
+                            // Check overall quality
+                            if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
+                                num_bad[0]++;
+                            }
+                            if (scores[0]+scores[3]==0) num_bad[1]++;
+                            if (scores[1]+scores[4]==0) num_bad[2]++;
+                            if (scores[2]+scores[5]==0) num_bad[3]++;
 
-                        if (scores[3]!=0) num_bad2[0]++;
-                        if (scores[4]!=0) num_bad2[1]++;
-                        if (scores[5]!=0) num_bad2[2]++;
-                        
-                        if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5]) < 3) {
-                            num_bad1[0]++;
+                            if (scores[3]!=0) num_bad2[0]++;
+                            if (scores[4]!=0) num_bad2[1]++;
+                            if (scores[5]!=0) num_bad2[2]++;
+                            
+                            if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5]) < 3) {
+                                num_bad1[0]++;
+                            }
+                            if (scores[0]+scores[3]==0) num_bad1[1]++;
+                            if (scores[1]+scores[4]==0) num_bad1[2]++;
+                            if (scores[2]+scores[5]==0) num_bad1[3]++;
                         }
-                        if (scores[0]+scores[3]==0) num_bad1[1]++;
-                        if (scores[1]+scores[4]==0) num_bad1[2]++;
-                        if (scores[2]+scores[5]==0) num_bad1[3]++;
                     }
                 }
 
@@ -3075,23 +3077,26 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                 //     std::cout << "Test: num_bad2: " << num_bad2[0] << " " << num_bad2[1] << " " << num_bad2[2] << std::endl;
                 //     std::cout << "Test: num_bad: " << num_bad[0] << " " << num_bad[1] << " " << num_bad[2] << " " << num_bad[3] << std::endl;
                 // }
+
+                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, grouping()->get_detector_volumes());
+
                 // Calculate angles between directions
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
 
-                double angle1 = tempV1.angle(U_dir); 
+                double angle1 = tempV1.angle(wpid_U_dir.at(test_wpid)); 
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir_abs);
 
-                double angle2 = tempV1.angle(V_dir);
+                double angle2 = tempV1.angle(wpid_V_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle2),
                         0);
                 angle2 = tempV5.angle(drift_dir_abs);
 
-                double angle1p = tempV1.angle(W_dir);
+                double angle1p = tempV1.angle(wpid_W_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1p),
                         0); 
@@ -3173,8 +3178,10 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
             // Now check path again ... 
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
-                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k])); //point3d(std::get<0>(index_index_dis_dir1[j][k]));
-                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k])); //point3d(std::get<1>(index_index_dis_dir1[j][k]));
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k])); 
+                auto wpid_p1 = wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k])));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k])); 
+                auto wpid_p2 = wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k])));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + 
                                 pow(p1.y() - p2.y(), 2) + 
@@ -3193,28 +3200,32 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     );
 
                     if (use_ctpc) {
-                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, hard_code_apa, hard_code_face);
-                        if (!good_point) {
-                            num_bad++;
-                        }
-                        if (!grouping()->is_good_point(test_p, hard_code_apa, hard_code_face, 0.6*units::cm, 1, 0)) {
-                            num_bad1++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) {
+                                num_bad++;
+                            }
+                            if (!grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
+                                num_bad1++;
+                            }
                         }
                     }
                 }
                 
+                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, grouping()->get_detector_volumes());
+
                 // Calculate angles
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
                 
-                double angle1 = tempV1.angle(U_dir);
+                double angle1 = tempV1.angle(wpid_U_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir_abs);
                 
-                double angle2 = tempV1.angle(V_dir);
+                double angle2 = tempV1.angle(wpid_V_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
@@ -3223,7 +3234,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
                 double angle3 = tempV5.angle(drift_dir_abs);
                 
-                double angle1p = tempV1.angle(W_dir);
+                double angle1p = tempV1.angle(wpid_W_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
@@ -3249,8 +3260,10 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
             //Now check path again ... 
             // Now check the path...
             if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
-                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));//point3d(std::get<0>(index_index_dis_dir2[j][k]));
-                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));//point3d(std::get<1>(index_index_dis_dir2[j][k]));
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));
+                auto wpid_p1 = wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k])));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));
+                auto wpid_p2 = wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k])));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + 
                                 pow(p1.y() - p2.y(), 2) + 
@@ -3269,28 +3282,32 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     );
 
                     if (use_ctpc) {
-                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, hard_code_apa, hard_code_face);
-                        if (!good_point) {
-                            num_bad++;
-                        }
-                        if (!grouping()->is_good_point(test_p, hard_code_apa, hard_code_face, 0.6*units::cm, 1, 0)) {
-                            num_bad1++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) {
+                                num_bad++;
+                            }
+                            if (!grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
+                                num_bad1++;
+                            }
                         }
                     }
                 }
+
+                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, grouping()->get_detector_volumes());
 
                 // Calculate angles between directions
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
 
-                double angle1 = tempV1.angle(U_dir);
+                double angle1 = tempV1.angle(wpid_U_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir_abs);
 
-                double angle2 = tempV1.angle(V_dir);
+                double angle2 = tempV1.angle(wpid_V_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
@@ -3299,7 +3316,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
                 double angle3 = tempV5.angle(drift_dir_abs);
 
-                double angle1p = tempV1.angle(W_dir);
+                double angle1p = tempV1.angle(wpid_W_dir.at(test_wpid));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);

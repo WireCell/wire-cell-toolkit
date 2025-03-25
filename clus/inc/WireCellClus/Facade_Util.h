@@ -513,6 +513,7 @@ namespace WireCell::PointCloud::Facade {
     int point2wind(const geo_point_t& point, const double angle, const double pitch, const double center);
 
     WirePlaneId get_wireplaneid(const geo_point_t& point, const WirePlaneId& wpid1, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv);
+    WirePlaneId get_wireplaneid(const geo_point_t& p1, const WirePlaneId& wpid1, const geo_point_t& p2, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv);
 
     // fixme: why do we inline these?
     inline double cal_proj_angle_diff(const geo_vector_t& dir1, const geo_vector_t& dir2, double plane_angle)
