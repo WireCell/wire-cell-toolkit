@@ -53,7 +53,8 @@ namespace WireCell::PointCloud::Facade {
     class ClusteringRetile {
     public:
         ClusteringRetile(const WireCell::Configuration& config);
-        
+        // This class only handles Single APA/Face!
+
         // fixme: we can not satisfy this type by including CluteringFuncs.h
         // because that header must include this one.  A refactoring would ease
         // this problem.

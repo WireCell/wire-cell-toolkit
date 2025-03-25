@@ -10,6 +10,9 @@ using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+// This function can handle multiple APA/Faces
 void WireCell::PointCloud::Facade::clustering_close(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out

@@ -11,7 +11,7 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
-
+// This function only handles Single APA/Face!
 void WireCell::PointCloud::Facade::clustering_live_dead(
     Grouping& live_grouping,
     const Grouping& dead_grouping,

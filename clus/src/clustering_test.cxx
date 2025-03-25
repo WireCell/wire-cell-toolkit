@@ -11,7 +11,7 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
-
+// This is a test function, not used in clustering
 void WireCell::PointCloud::Facade::clustering_test(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
