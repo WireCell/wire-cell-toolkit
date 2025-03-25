@@ -20,6 +20,7 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
+// This is for only one APA/face
 void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, const IDetectorVolumes::pointer dv)
 {
     // Check that live_grouping has exactly one wpid
@@ -34,10 +35,13 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     for (const Cluster *cluster : live_grouping.children()) {
         global_point_cloud->add_points(cluster, 0);
     }
-    int hack_apa = 0;
-    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(hack_apa, 0, 0);
-    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(hack_apa, 0, 1);
-    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(hack_apa, 0, 2);
+
+    int apa = (*live_grouping.wpids().begin()).apa();
+    int face = (*live_grouping.wpids().begin()).face();
+
+    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(apa, face, 0);
+    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(apa, face, 1);
+    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(apa, face, 2);
 
     LogDebug("global_point_cloud.get_num_points() " << global_point_cloud->get_num_points());
     LogDebug("dead_u_index.size() " << dead_u_index.size() << " dead_v_index.size() " << dead_v_index.size() << " dead_w_index.size() " << dead_w_index.size());
@@ -106,7 +110,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         bool flag_prol_2 = false;
 
         if (main_dir.magnitude() > 10 * units::cm &&
-            fabs(main_dir.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
+            fabs(main_dir.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
             dir1 = main_dir;
             dir1 = dir1* -1;
             dir2 = main_dir;
@@ -114,14 +118,14 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         else if (cluster->get_length() > 25 * units::cm) {
             dir1 = cluster->vhough_transform(extreme_points.first, 80 * units::cm);
             if (dir1.magnitude() != 0) dir1 = dir1.norm();
-            if (fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
+            if (fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
                 dir1.set(dir1.x(), (extreme_points.second.y() - extreme_points.first.y()) / main_dir.magnitude(),
                             (extreme_points.second.z() - extreme_points.first.z()) / main_dir.magnitude());
                 dir1 = dir1 * -1;
             }
             dir2 = cluster->vhough_transform(extreme_points.second, 80 * units::cm);
             if (dir2.magnitude() != 0) dir2 = dir2.norm();
-            if (fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
+            if (fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
                 dir2.set(dir2.x(), (extreme_points.second.y() - extreme_points.first.y()) / main_dir.magnitude(),
                             (extreme_points.second.z() - extreme_points.first.z()) / main_dir.magnitude());
             }
@@ -141,7 +145,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         map_cluster_dir1[cluster] = dir1;
         map_cluster_dir2[cluster] = dir2;
 
-        if (fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) < 7.5 * 3.1415926 / 180.) {
+        if (fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 7.5 * 3.1415926 / 180.) {
             flag_para_1 = true;
         }
         else {
@@ -174,7 +178,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             }
         }
 
-        if (fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) < 7.5 * 3.1415926 / 180.) {
+        if (fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 7.5 * 3.1415926 / 180.) {
             flag_para_2 = true;
         }
         else {
@@ -224,13 +228,13 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             flag_add_dir2 = false;
         }
 
-        if (fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
+        if (fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
             flag_para_1 = true;
         }
         else {
             flag_para_1 = false;
         }
-        if (fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
+        if (fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
             flag_para_2 = true;
         }
         else {
@@ -274,8 +278,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         }
         else {
             if (cluster->get_length() < 100 * units::cm ||
-                fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
-                    fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
+                fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
+                    fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
                     cluster->get_length() < 200 * units::cm) {
                 // WCP::WCPointCloud<double> &cloud = cluster->get_point_cloud()->get_cloud();
                 LogDebug("#b " << cluster->nchildren() << " gsc " << global_skeleton_cloud->get_num_points());
@@ -626,8 +630,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                                             max_cluster->get_pca_axis(0).z());
 
                             double angle_diff = p1_dir.angle(p2_dir) / 3.1415926 * 180.;
-                            double angle1_drift = p1_dir.angle(drift_dir) / 3.1415926 * 180.;
-                            double angle2_drift = p2_dir.angle(drift_dir) / 3.1415926 * 180.;
+                            double angle1_drift = p1_dir.angle(drift_dir_abs) / 3.1415926 * 180.;
+                            double angle2_drift = p2_dir.angle(drift_dir_abs) / 3.1415926 * 180.;
                             Ray l1(p1_c, p1_c+p1_dir);
                             Ray l2(p2_c, p2_c+p2_dir);
                             // double dis = l1.closest_dis(l2);
@@ -665,8 +669,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                                 flag_merge = true;
                             }
 
-                            if ((fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
-                                 fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) &&
+                            if ((fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
+                                 fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) &&
                                 (max_value[0] + max_value[1] + max_value[2]) >
                                     0.7 * (num_total_points + num_total_points + num_total_points)) {
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
