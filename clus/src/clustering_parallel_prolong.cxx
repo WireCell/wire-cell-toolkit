@@ -9,6 +9,8 @@ using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+// Expand this function to handle multiple APA/Faces ...
 void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
@@ -16,12 +18,47 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     const double length_cut                    //
 )
 {
-	// Check that live_grouping has exactly one wpid
-	if (live_grouping.wpids().size() != 1 ) {
-		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+
+	// Get all the wire plane IDs from the grouping
+	const auto& wpids = live_grouping.wpids();
+
+	// Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+	std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
+	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
+	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
+	std::set<int> apas;
+	for (const auto& wpid : wpids) {
+		int apa = wpid.apa();
+		int face = wpid.face();
+		apas.insert(apa);
+  
+		// Create wpids for all three planes with this APA and face
+		WirePlaneId wpid_u(kUlayer, face, apa);
+		WirePlaneId wpid_v(kVlayer, face, apa);
+		WirePlaneId wpid_w(kWlayer, face, apa);
+	 
+		// Get drift direction based on face orientation
+		int face_dirx = dv->face_dirx(wpid_u);
+		geo_point_t drift_dir(face_dirx, 0, 0);
+		
+		// Get wire directions for all planes
+		Vector wire_dir_u = dv->wire_direction(wpid_u);
+		Vector wire_dir_v = dv->wire_direction(wpid_v);
+		Vector wire_dir_w = dv->wire_direction(wpid_w);
+  
+		// Calculate angles
+		double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+		double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+		double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+  
+		wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+		wpid_U_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_u), sin(angle_u)), angle_u);
+		wpid_V_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_v), sin(angle_v)), angle_v);
+		wpid_W_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_w), sin(angle_w)), angle_w);
 	}
-	// Example usage in clustering_parallel_prolong()
-	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+  
+
 
   // prepare graph ...
   typedef cluster_connectivity_graph_t Graph;
@@ -44,7 +81,7 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     auto cluster_1 = live_clusters.at(i);
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
-      if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), drift_dir, angle_u, angle_v, angle_w, length_cut)){
+      if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut)){
 
 		// // debug ...
         // std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
@@ -68,7 +105,8 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
     const Cluster& cluster2,
     double length_1,
     double length_2,
-	geo_point_t drift_dir, double angle_u, double angle_v, double angle_w,
+	const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,
+	const IDetectorVolumes::pointer dv,
     double length_cut)
 {
 //   const auto [angle_u,angle_v,angle_w] = cluster1.grouping()->wire_angles();
@@ -87,6 +125,11 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
                                                                  length_1, length_2,
                                                                  length_cut, p1, p2);
 
+	auto wpid_p1 = cluster1.wpid(p1);
+	auto wpid_p2 = cluster2.wpid(p2);
+	auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
+  
+  
 //    if (flag_print) {
 //     std::cout << length_1/units::cm << " " << length_2/units::cm << " " << cluster1.npoints() << 
 //     " " << cluster2.npoints() << " " << p1 << " " << p2 << " " << dis/units::cm << std::endl;
@@ -99,7 +142,10 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 
   if ((dis < length_cut || (dis < 80*units::cm && length_1 +length_2 > 50*units::cm && length_1>15*units::cm && length_2 > 15*units::cm))){
     geo_point_t cluster1_ave_pos = cluster1.calc_ave_pos(p1,10*units::cm);
+	auto wpid_ave_p1 = cluster1.wpid(cluster1_ave_pos);
     geo_point_t cluster2_ave_pos = cluster2.calc_ave_pos(p2,10*units::cm);
+	auto wpid_ave_p2 = cluster2.wpid(cluster2_ave_pos);
+    auto wpid_ave_ps = get_wireplaneid(cluster1_ave_pos, wpid_ave_p1, cluster2_ave_pos, wpid_ave_p2, dv);
 
     bool flag_para = false;
     // bool flag_para_U = false;
@@ -107,19 +153,14 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 
     geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
     
-    // pronlonged case for U 3 and V 4 ...
-    geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
-
     
     // deal the parallel case ...
     if (length_1 > 10*units::cm && length_2 >10*units::cm){
       geo_point_t tempV1(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
       geo_point_t tempV2(cluster2_ave_pos.x() - cluster1_ave_pos.x(), cluster2_ave_pos.y() - cluster1_ave_pos.y(), cluster2_ave_pos.z() - cluster1_ave_pos.z());
       
-      double angle1 = tempV1.angle(drift_dir);
-      double angle4 = tempV2.angle(drift_dir);
+      double angle1 = tempV1.angle(drift_dir_abs);
+      double angle4 = tempV2.angle(drift_dir_abs);
 
       // looks like a parallel case
       if ( (fabs(angle1-3.1415926/2.)<10/180.*3.1415926 && dis > 10*units::cm ||
@@ -130,8 +171,8 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	geo_point_t dir1 = cluster1.vhough_transform(p1,60*units::cm); // cluster 1 direction based on hough
 	geo_point_t dir2 = cluster2.vhough_transform(p2,60*units::cm); // cluster 2 direction based on hough
 	
-	double angle5 = dir1.angle(drift_dir);
-	double angle6 = dir2.angle(drift_dir);
+	double angle5 = dir1.angle(drift_dir_abs);
+	double angle6 = dir2.angle(drift_dir_abs);
 	
 	if (fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<20/180.*3.1415926 ||
 	    fabs(angle5-3.1415926/2.)<20/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.1415926){
@@ -140,8 +181,8 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	  
 	  if (dis >= 3*length_1 && dis >= 3*length_2 && flag_para) return false;
 	  
-	  double angle2 = tempV1.angle(U_dir);
-	  double angle3 = tempV1.angle(V_dir);
+	  double angle2 = tempV1.angle(wpid_U_dir.at(wpid_ps).first);
+	  double angle3 = tempV1.angle(wpid_V_dir.at(wpid_ps).first);
 
 	  // look at parallel U
 	  if ((fabs(angle2-3.1415926/2.)<7.5/180.*3.1415926 || (fabs(angle2-3.1415926/2.)<15/180.*3.1415926)&&dis <6*units::cm) && (dis<length_cut || (length_1 + length_2 > 100*units::cm)) && length_1 >15*units::cm && length_2 > 15*units::cm){
@@ -159,7 +200,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	    }else if (fabs(angle2-3.1415926/2.)<2.5/180.*3.1415926 && fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592 ){
 	      // parallel case, but exclude both very long tracks
 	      if (length_1 < 60*units::cm || length_2 < 60*units::cm){
-		if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,15,angle_u,angle_v,angle_w) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,15,angle_u,angle_v,angle_w)) 
+		if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,15, wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) &&     WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 		  return true;
 	      }else if (dis <5*units::cm){
 		return true;
@@ -169,7 +210,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	      	double angle9 = dir2.angle(tempV1)/3.1415926*180.; // dir2 = -p2
 	      	if (angle7 < 30 && angle8 < 30 && angle9 < 30)
 	      	  return true;
-		if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,angle_u,angle_v,angle_w) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,angle_u,angle_v,angle_w)) 
+		if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 		  return true; 
 	      }
 	      
@@ -182,7 +223,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 		   fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592 &&
 		   angle7 < 45 && angle8 < 45 && angle9 < 45) && dis < 20*units::cm)
 		return true;
-	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,angle_u,angle_v,angle_w) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,angle_u,angle_v,angle_w)) 
+	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 		return true; 
 	    }
 	  }
@@ -199,7 +240,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	    }else if (dis < 15*units::cm && fabs(angle3-3.1415926/2.)<2.5/180.*3.1415926 && (length_1 < 60*units::cm || length_2 < 60*units::cm) ){
 	      return true;
 	    }else if (fabs(angle3-3.1415926/2.)<2.5/180.*3.1415926 && fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592){
-	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,15,angle_u,angle_v,angle_w) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,15,angle_u,angle_v,angle_w)) 
+	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 		return true;
 	    }else{
 	      double angle7 = (3.1415926-dir1.angle(dir2))/3.1415926*180.;
@@ -209,7 +250,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 		  fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592 &&
 		  angle7 < 60 && angle8 < 60 && angle9 < 60)
 		return true;
-	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,angle_u,angle_v,angle_w) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,angle_u,angle_v,angle_w))
+	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second))
 	      	  return true;
 	    }
 	  }
@@ -221,15 +262,15 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
     {
       geo_point_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
       geo_point_t tempV5;
-      double angle1 = tempV1.angle(U_dir);
+      double angle1 = tempV1.angle(wpid_U_dir.at(wpid_ps).first);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle1),0);
       angle1 = tempV5.angle(drift_dir_abs);
       
-      double angle2 = tempV1.angle(V_dir);
+      double angle2 = tempV1.angle(wpid_V_dir.at(wpid_ps).first);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle2),0);
       angle2 = tempV5.angle(drift_dir_abs);
 
-      double angle1p = tempV1.angle(W_dir);
+      double angle1p = tempV1.angle(wpid_W_dir.at(wpid_ps).first);
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle1p),0);
       angle1p = tempV5.angle(drift_dir_abs);
 
