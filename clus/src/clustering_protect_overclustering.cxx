@@ -48,15 +48,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
     int hack_face = 0;
     const auto &time_cells_set_map = cluster->time_blob_map().at(hack_apa).at(hack_face);
 
-    // WCP::WCPointCloud<double> &cloud = point_cloud->get_cloud();
-    // WCP::WC2DPointCloud<double> &cloud_u = point_cloud->get_cloud_u();
-    // WCP::WC2DPointCloud<double> &cloud_v = point_cloud->get_cloud_v();
-    // WCP::WC2DPointCloud<double> &cloud_w = point_cloud->get_cloud_w();
-
-    // blob -> wind -> points
-    // std::map<Blob *, std::map<int, std::set<int>>> map_mcell_uindex_wcps;
-    // std::map<Blob *, std::map<int, std::set<int>>> map_mcell_vindex_wcps;
-    // std::map<Blob *, std::map<int, std::set<int>>> map_mcell_windex_wcps;
+    
     std::map<const Blob *, std::map<int, std::set<int>>> map_mcell_wind_wcps[3];
 
     for (auto it = mcells.begin(); it != mcells.end(); it++) {
@@ -69,14 +61,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
         for (const int point_index : wcps) {
             auto v = vertex(point_index, *graph);  // retrieve vertex descriptor
             (*graph)[v].index = point_index;
-            // if (map_windex_wcps.find(wcp.index_w) == map_windex_wcps.end()) {
-            //     std::set<int> wcps;
-            //     wcps.insert(wcp.index);
-            //     map_windex_wcps[wcp.index_w] = wcps;
-            // }
-            // else {
-            //     map_windex_wcps[wcp.index_w].insert(wcp.index);
-            // }
+            
             for (size_t plane_ind=0; plane_ind!=3; ++plane_ind) {
                 const int wind = winds[plane_ind][point_index];
                 if (map_wind_wcps[plane_ind].find(wind) == map_wind_wcps[plane_ind].end()) {
@@ -108,24 +93,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
         int min_wire_interval = mcell->get_min_wire_interval();
         std::map<int, std::set<int>> *map_max_index_wcps;
         std::map<int, std::set<int>> *map_min_index_wcps;
-        // if (mcell->get_max_wire_type() == WirePlaneType_t(0)) {
-        //     map_max_index_wcps = &map_mcell_uindex_wcps[mcell];
-        // }
-        // else if (mcell->get_max_wire_type() == WirePlaneType_t(1)) {
-        //     map_max_index_wcps = &map_mcell_wind_wcps[plane_ind][mcell];
-        // }
-        // else {
-        //     map_max_index_wcps = &map_mcell_windex_wcps[mcell];
-        // }
-        // if (mcell->get_min_wire_type() == WirePlaneType_t(0)) {
-        //     map_min_index_wcps = &map_mcell_uindex_wcps[mcell];
-        // }
-        // else if (mcell->get_min_wire_type() == WirePlaneType_t(1)) {
-        //     map_min_index_wcps = &map_mcell_vindex_wcps[mcell];
-        // }
-        // else {
-        //     map_min_index_wcps = &map_mcell_windex_wcps[mcell];
-        // }
+       
         const int max_wire_type = mcell->get_max_wire_type();
         const int min_wire_type = mcell->get_min_wire_type();
         map_max_index_wcps = &map_mcell_wind_wcps[max_wire_type][mcell];
@@ -136,24 +104,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
             // int index1 = wcp1.index;
             int index_max_wire = winds[max_wire_type][index1];
             int index_min_wire = winds[min_wire_type][index1];
-            // if (mcell->get_max_wire_type() == WirePlaneType_t(0)) {
-            //     index_max_wire = wcp1.index_u;
-            // }
-            // else if (mcell->get_max_wire_type() == WirePlaneType_t(1)) {
-            //     index_max_wire = wcp1.index_v;
-            // }
-            // else {
-            //     index_max_wire = wcp1.index_w;
-            // }
-            // if (mcell->get_min_wire_type() == WirePlaneType_t(0)) {
-            //     index_min_wire = wcp1.index_u;
-            // }
-            // else if (mcell->get_min_wire_type() == WirePlaneType_t(1)) {
-            //     index_min_wire = wcp1.index_v;
-            // }
-            // else {
-            //     index_min_wire = wcp1.index_w;
-            // }
+            
 
             std::vector<std::set<int> *> max_wcps_set;
             std::vector<std::set<int> *> min_wcps_set;
@@ -181,9 +132,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 wcps_set2.insert((*it3)->begin(), (*it3)->end());
             }
 
-            // std::cout << max_wcps_set.size() << " " << min_wcps_set.size() << std::endl;
-            // for (auto it2 = max_wcps_set.begin(); it2!=max_wcps_set.end(); it2++){
-            //	for (auto it3 = min_wcps_set.begin(); it3!=min_wcps_set.end(); it3++){
+         
             {
                 std::set<int> common_set;
                 set_intersection(wcps_set1.begin(), wcps_set1.end(), wcps_set2.begin(), wcps_set2.end(),
@@ -194,21 +143,11 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 for (const int index2 : common_set) {
                     // WCPointCloud<double>::WCPoint &wcp2 = cloud.pts[*it4];
                     if (index2 != index1) {
-                        // int index2 = wcp2.index;
-                        // std::cout << index1 << " " << index2 << std::endl;
-                        // add edge ...
-                        //auto edge = add_edge(index1, index2, *graph);
+                       
                         const geo_point_t wcp1 = cluster->point3d(index1);
                         const geo_point_t wcp2 = cluster->point3d(index2);
                         double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
-                        // if (edge.second) {
-                            
-                        //     (*graph)[edge.first].dist = dis;
-                        //     num_edges++;
-                        //     // std::cout << wcp1.x << " " << wcp1.y << " " << wcp1.z << " " << wcp1.index_u << " " <<
-                        //     // wcp1.index_v << " " << wcp1.index_w << " " << wcp2.index_u << " " << wcp2.index_v << " "
-                        //     // << wcp2.index_w << std::endl;
-                        // }
+                       
                         auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
                         if (edge.second) {
                             num_edges++;
@@ -295,24 +234,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
         std::map<int, std::set<int>> *map_max_index_wcps;
         std::map<int, std::set<int>> *map_min_index_wcps;
 
-        // if (mcell1->get_max_wire_type() == WirePlaneType_t(0)) {
-        //     map_max_index_wcps = &map_mcell_uindex_wcps[mcell2];
-        // }
-        // else if (mcell1->get_max_wire_type() == WirePlaneType_t(1)) {
-        //     map_max_index_wcps = &map_mcell_vindex_wcps[mcell2];
-        // }
-        // else {
-        //     map_max_index_wcps = &map_mcell_windex_wcps[mcell2];
-        // }
-        // if (mcell1->get_min_wire_type() == WirePlaneType_t(0)) {
-        //     map_min_index_wcps = &map_mcell_uindex_wcps[mcell2];
-        // }
-        // else if (mcell1->get_min_wire_type() == WirePlaneType_t(1)) {
-        //     map_min_index_wcps = &map_mcell_vindex_wcps[mcell2];
-        // }
-        // else {
-        //     map_min_index_wcps = &map_mcell_windex_wcps[mcell2];
-        // }
+      
         map_max_index_wcps = &map_mcell_wind_wcps[mcell1->get_max_wire_type()][mcell2];
         map_min_index_wcps = &map_mcell_wind_wcps[mcell1->get_min_wire_type()][mcell2];
 
@@ -321,24 +243,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
             // int index1 = wcp1.index;
             int index_max_wire = winds[mcell1->get_max_wire_type()][index1];
             int index_min_wire = winds[mcell1->get_min_wire_type()][index1];
-            // if (mcell1->get_max_wire_type() == WirePlaneType_t(0)) {
-            //     index_max_wire = wcp1.index_u;
-            // }
-            // else if (mcell1->get_max_wire_type() == WirePlaneType_t(1)) {
-            //     index_max_wire = wcp1.index_v;
-            // }
-            // else {
-            //     index_max_wire = wcp1.index_w;
-            // }
-            // if (mcell1->get_min_wire_type() == WirePlaneType_t(0)) {
-            //     index_min_wire = wcp1.index_u;
-            // }
-            // else if (mcell1->get_min_wire_type() == WirePlaneType_t(1)) {
-            //     index_min_wire = wcp1.index_v;
-            // }
-            // else {
-            //     index_min_wire = wcp1.index_w;
-            // }
+         
             std::vector<std::set<int> *> max_wcps_set;
             std::vector<std::set<int> *> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
@@ -364,19 +269,12 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 wcps_set2.insert((*it3)->begin(), (*it3)->end());
             }
 
-            //   for (auto it2 = max_wcps_set.begin(); it2!=max_wcps_set.end(); it2++){
-            //	for (auto it3 = min_wcps_set.begin(); it3!=min_wcps_set.end(); it3++){
+
             {
                 std::set<int> common_set;
                 set_intersection(wcps_set1.begin(), wcps_set1.end(), wcps_set2.begin(), wcps_set2.end(),
                                  std::inserter(common_set, common_set.begin()));
 
-                //	std::cout << "S1: " << common_set.size() << std::endl;
-                //	  std::cout << common_set.size() << std::endl;
-
-                //	std::map<int,std::pair<int,double> > closest_index;
-
-                // for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
                 for (const int index2 : common_set) {
                     // WCPointCloud<double>::WCPoint &wcp2 = cloud.pts[*it4];
                     if (index2 != index1) {
@@ -401,57 +299,19 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                                 }
                                 closest_index[key].erase(it5,closest_index[key].end());
                             }
-                            //if (dis < closest_index[key].second || (std::abs(dis - closest_index[key].second) < 1e-10 && pind2 < closest_index[key].first)) closest_index[key] = std::make_pair(pind2, dis);
                         }
-
-                        // if (closest_index.find(std::make_pair(index1, time2)) ==
-                        //     closest_index.end()) {
-                        //     closest_index[std::make_pair(index1, time2)] =
-                        //         std::make_pair(index2, dis);
-                        // }
-                        // else {
-                        //     if (dis < closest_index[std::make_pair(index1, time2)].second)
-                        //         closest_index[std::make_pair(index1, time2)] =
-                        //             std::make_pair(index2, dis);
-                        // }
+                        
                     }
                 }
 
-                //	std::cout << closest_index.size() << std::endl;
-                // for (auto it4 = closest_index.begin(); it4!=closest_index.end(); it4++){
-                //   int index2 = it4->second.first;
-                //   double dis = it4->second.second;
-                //   auto edge = add_edge(index1,index2,*graph);
-                //   if (edge.second){
-                //     (*graph)[edge.first].dist = dis;
-                //     num_edges ++;
-                //   }
-                // }
+        
             }
-            //}
         }
 
         // test 1 against 2 ...
         max_wire_interval = mcell2->get_max_wire_interval();
         min_wire_interval = mcell2->get_min_wire_interval();
-        // if (mcell2->get_max_wire_type() == WirePlaneType_t(0)) {
-        //     map_max_index_wcps = &map_mcell_uindex_wcps[mcell1];
-        // }
-        // else if (mcell2->get_max_wire_type() == WirePlaneType_t(1)) {
-        //     map_max_index_wcps = &map_mcell_vindex_wcps[mcell1];
-        // }
-        // else {
-        //     map_max_index_wcps = &map_mcell_windex_wcps[mcell1];
-        // }
-        // if (mcell2->get_min_wire_type() == WirePlaneType_t(0)) {
-        //     map_min_index_wcps = &map_mcell_uindex_wcps[mcell1];
-        // }
-        // else if (mcell2->get_min_wire_type() == WirePlaneType_t(1)) {
-        //     map_min_index_wcps = &map_mcell_vindex_wcps[mcell1];
-        // }
-        // else {
-        //     map_min_index_wcps = &map_mcell_windex_wcps[mcell1];
-        // }
+        
         map_max_index_wcps = &map_mcell_wind_wcps[mcell2->get_max_wire_type()][mcell1];
         map_min_index_wcps = &map_mcell_wind_wcps[mcell2->get_min_wire_type()][mcell1];
 
@@ -461,24 +321,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
             // int index1 = wcp1.index;
             int index_max_wire = winds[mcell2->get_max_wire_type()][index1];
             int index_min_wire = winds[mcell2->get_min_wire_type()][index1];
-            // if (mcell2->get_max_wire_type() == WirePlaneType_t(0)) {
-            //     index_max_wire = wcp1.index_u;
-            // }
-            // else if (mcell2->get_max_wire_type() == WirePlaneType_t(1)) {
-            //     index_max_wire = wcp1.index_v;
-            // }
-            // else {
-            //     index_max_wire = wcp1.index_w;
-            // }
-            // if (mcell2->get_min_wire_type() == WirePlaneType_t(0)) {
-            //     index_min_wire = wcp1.index_u;
-            // }
-            // else if (mcell2->get_min_wire_type() == WirePlaneType_t(1)) {
-            //     index_min_wire = wcp1.index_v;
-            // }
-            // else {
-            //     index_min_wire = wcp1.index_w;
-            // }
+            
             std::vector<std::set<int> *> max_wcps_set;
             std::vector<std::set<int> *> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
@@ -543,44 +386,9 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             }
                             //if (dis < closest_index[key].second || (std::abs(dis - closest_index[key].second) < 1e-10 && pind2 < closest_index[key].first)) closest_index[key] = std::make_pair(pind2, dis);
                         }
-
-                        // if (closest_index.find(std::make_pair(index1, time2)) ==
-                        //     closest_index.end()) {
-                        //     closest_index[std::make_pair(index1, time2)] =
-                        //         std::make_pair(index2, dis);
-                        // }
-                        // else {
-                        //     if (dis < closest_index[std::make_pair(index1, time2)].second)
-                        //         closest_index[std::make_pair(index1, time2)] =
-                        //             std::make_pair(index2, dis);
-                        // }
                     }
                 }
-
-                // std::cout << closest_index.size() << std::endl;
-                //  for (auto it4 = closest_index.begin(); it4!=closest_index.end(); it4++){
-                //    int index2 = it4->second.first;
-                //    double dis = it4->second.second;
-                //    auto edge = add_edge(index1,index2,*graph);
-                //    if (edge.second){
-                //      (*graph)[edge.first].dist = dis;
-                //      num_edges ++;
-                //    }
-                //  }
-
-                // for (auto it4 = common_set.begin(); it4!=common_set.end(); it4++){
-                //   WCPointCloud<double>::WCPoint& wcp2 = cloud.pts[*it4];
-                //   if (wcp2.index != wcp1.index){
-                //     int index2 = wcp2.index;
-                //     auto edge = add_edge(index1,index2,*graph);
-                //     if (edge.second){
-                //       (*graph)[edge.first].dist =
-                //       sqrt(pow(wcp1.x-wcp2.x,2)+pow(wcp1.y-wcp2.y,2)+pow(wcp1.z-wcp2.z,2)); num_edges ++;
-                //     }
-                //   }
-                // }
             }
-            //      }
         }
     }
 
@@ -600,17 +408,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 break;
         }
 
-        // int index2 = it4->second.first;
-        // double dis = it4->second.second;
-        // // auto edge = add_edge(index1, index2, *graph);
-        // // if (edge.second) {
-        // //     (*graph)[edge.first].dist = dis;
-        // //     num_edges++;
-        // // }
-        // auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
-        // if (edge.second) {
-        //     num_edges++;
-        // }
+    
     }
     // end of copying ...
 
@@ -658,27 +456,6 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
         pt_clouds_global_indices.push_back(global_indices);
     }
 
-        // for (int j = 0; j != num; j++) {
-        //     pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
-        // }
-
-        // // std::vector<int>::size_type i;
-        // // for (i = 0; i != component.size(); ++i) {
-        // //     pt_clouds.at(component[i])->AddPoint(cloud.pts[i], cloud_u.pts[i], cloud_v.pts[i], cloud_w.pts[i]);
-        // //     //   std::cout << "Vertex " << i << " " << cloud.pts[i].x << " " << cloud.pts[i].y << " " << cloud.pts[i].z
-        // //     //   << " " << cloud.pts[i].index_u << " " << cloud.pts[i].index_v << " " << cloud.pts[i].index_w << " " <<
-        // //     //   cloud.pts[i].mcell << " " << cloud.pts[i].mcell->GetTimeSlice()  << " is in component " << component[i]
-        // //     //   << std::endl;
-        // // }
-        // // for (int j = 0; j != num; j++) {
-        // //     pt_clouds.at(j)->build_kdtree_index();
-        // // }
-        // std::vector<int>::size_type i;
-        // for (i = 0; i != component.size(); ++i) {
-        //     geo_point_t pt = cluster->point3d(i);
-        //     pt_clouds.at(component[i])->add({pt.x(), pt.y(), pt.z()});
-        //     pt_clouds_global_indices.at(component[i]).push_back(i);
-        // }
 
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
             num, std::vector<std::tuple<int, int, double>>(num));
@@ -846,39 +623,6 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
              // Process MST
             process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
 
-            // {
-            //     std::vector<int> possible_root_vertex;
-            //     std::vector<int> component(num_vertices(temp_graph));
-            //     const int num1 = connected_components(temp_graph, &component[0]);
-            //     possible_root_vertex.resize(num1);
-            //     std::vector<int>::size_type i;
-            //     for (i = 0; i != component.size(); ++i) {
-            //         possible_root_vertex.at(component[i]) = i;
-            //     }
-
-            //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-            //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(
-            //             num_vertices(temp_graph));
-
-            //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-            //                                    boost::root_vertex(possible_root_vertex.at(i)));
-
-            //         for (size_t j = 0; j != predecessors.size(); ++j) {
-            //             if (predecessors[j] != j) {
-            //                 if (j < predecessors[j]) {
-            //                     index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-            //                 }
-            //                 else {
-            //                     index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-            //                 }
-            //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
-            //             }
-            //             else {
-            //                 // std::cout << j << " " << std::endl;
-            //             }
-            //         }
-            //     }
-            // }
         }
 
         // deal with MST for directionality
@@ -901,37 +645,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
             }
 
             process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_dir_mst);
-            // {
-            //     std::vector<int> possible_root_vertex;
-            //     std::vector<int> component(num_vertices(temp_graph));
-            //     const int num1 = connected_components(temp_graph, &component[0]);
-            //     possible_root_vertex.resize(num1);
-            //     std::vector<int>::size_type i;
-            //     for (i = 0; i != component.size(); ++i) {
-            //         possible_root_vertex.at(component[i]) = i;
-            //     }
-
-            //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-            //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(
-            //             num_vertices(temp_graph));
-            //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-            //                                    boost::root_vertex(possible_root_vertex.at(i)));
-            //         for (size_t j = 0; j != predecessors.size(); ++j) {
-            //             if (predecessors[j] != j) {
-            //                 if (j < predecessors[j]) {
-            //                     index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-            //                 }
-            //                 else {
-            //                     index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-            //                 }
-            //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
-            //             }
-            //             else {
-            //                 // std::cout << j << " " << std::endl;
-            //             }
-            //         }
-            //     }
-            // }
+           
         }
 
         for (int j = 0; j != num; j++) {
@@ -1006,27 +720,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
 
             if (num1 > 1) {
 
-                // std::cout << "Check1: " << cluster->nchildren() << " " << num << " " << num1 << std::endl;
-
-                // form new clusters ...
-                // WCP logic ...
-                // std::vector<std::set<const Blob*>> vec_mcells_set;
-                // for (int ii = 0; ii != num1; ii++) {
-                //     std::set<const Blob*> mcells_set;
-                //     vec_mcells_set.push_back(mcells_set);
-                // }
-                // std::vector<int>::size_type i;
-                // for (i = 0; i != component1.size(); ++i) {
-                //     vec_mcells_set.at(component1[i]).insert(cloud.pts[i].mcell);
-                // }
-                // for (int ii = 0; ii != num1; ii++) {
-                //     Cluster *cluster1 = new Cluster(1);
-                //     for (auto it = vec_mcells_set.at(ii).begin(); it != vec_mcells_set.at(ii).end(); it++) {
-                //         Blob *mcell = (*it);
-                //         cluster1->AddCell(mcell, mcell->GetTimeSlice());
-                //     }
-                //     new_clusters.push_back(cluster1);
-                // }
+                
                 std::vector<int> b2groupid(cluster->nchildren(), -1);
                 std::vector<int>::size_type i;
                 for (i = 0; i != component1.size(); ++i) {
@@ -1037,24 +731,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
             }
         }
 
-        // for (int i = 0; i != num; i++) {
-        //     delete pt_clouds.at(i);
-        // }
-
-    // }  // if (num > 1)
-
-    // delete graph;
-    // return new_clusters;
+       
     return {};
 }
 
 void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& live_grouping, IDetectorVolumes::pointer dv)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // sort the clusters by length using a lambda function
-    // std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-    //     return cluster1->get_length() > cluster2->get_length();
-    // });
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
