@@ -326,15 +326,31 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
 std::set<const WireCell::PointCloud::Facade::Blob*> 
 WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span) const
 {
-    int hack_apa = 0 ;
-    int hack_face = 0;
+    const auto& wpids = cluster.grouping()->wpids();
+    const auto& shad_wpids = shad_cluster.grouping()->wpids();
+    if (wpids.size() != 1 || shad_wpids.size() != 1) {
+        throw std::runtime_error("Live or Dead grouping must have exactly one wpid: wpids.size()=" + 
+                     std::to_string(wpids.size()) + ", shad_wpids.size()=" + 
+                     std::to_string(shad_wpids.size()));
+    }
+    
+    // Since wpids is a set, we need to get the first element using an iterator
+    WirePlaneId wpid = *wpids.begin();
+    WirePlaneId shad_wpid = *shad_wpids.begin();
+    
+    if (wpid != shad_wpid) {
+        throw std::runtime_error("Live and Dead grouping must have the same wpid");
+    }
+
+    int apa = wpid.apa();
+    int face = wpid.face();
 
     // Implementation here
     // Get time-organized map of original blobs
-    const auto& orig_time_blob_map = cluster.time_blob_map().at(hack_apa).at(hack_face);
+    const auto& orig_time_blob_map = cluster.time_blob_map().at(apa).at(face);
     
     // Get time-organized map of newly created blobs
-    const auto& new_time_blob_map = shad_cluster.time_blob_map().at(hack_apa).at(hack_face);
+    const auto& new_time_blob_map = shad_cluster.time_blob_map().at(apa).at(face);
     
     // Track blobs that need to be removed
     std::set<const Blob*> blobs_to_remove;
