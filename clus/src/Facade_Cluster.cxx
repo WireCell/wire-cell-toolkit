@@ -2887,19 +2887,12 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
     // Constants for wire angles
     // const auto& tp = grouping()->get_params();
-    // int hard_code_apa = 0;
-    // int hard_code_face = 0;
+
     //std::cout << "Test: face " << tp.face << std::endl;
 
     // const double pi = 3.141592653589793;
     // this drift direction is only used to calculate isochronous case, so this is OK ...
     const geo_vector_t drift_dir_abs(1, 0, 0); 
-
-    // need to understand the points before implementing the angles ...
-    // const auto [angle_u,angle_v,angle_w] = grouping()->wire_angles(hard_code_apa, hard_code_face);
-    // const geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    // const geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    // const geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
 
 
     // Form connected components
