@@ -110,10 +110,21 @@ void Cluster::fill_cache(ClusterCache& cache) const
     }
 }
 
-
+// blob wpids ...
 std::vector<WireCell::WirePlaneId> Cluster::wpids() const {
     return cache().wpids;
 }
+
+WirePlaneId Cluster::wpid(const geo_point_t& point) const{
+    // find the closest point_index to this point
+    auto point_index = get_closest_point_index(point);
+
+    // std::cout << "point_index " << point_index << " " << points()[0].size() << " " << wpids().size() << std::endl;
+
+    // return the wpid for this point_index
+    return wire_plane_id(point_index);
+}
+
 
 void Cluster::print_blobs_info() const{
     for (const Blob* blob : children()) {

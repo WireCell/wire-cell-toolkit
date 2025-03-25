@@ -285,7 +285,9 @@ namespace WireCell::PointCloud::Facade {
 			      const Cluster& cluster2,
 			      double length_1,
 			      double length_2,
-                  geo_point_t drift_dir, double angle_u, double angle_v, double angle_w,
+                  const std::map<WirePlaneId, geo_point_t>& wpid_U_dir, const std::map<WirePlaneId, geo_point_t>& wpid_V_dir, const std::map<WirePlaneId, geo_point_t>& wpid_W_dir,
+                  const IDetectorVolumes::pointer dv,
+                //   double angle_u, double angle_v, double angle_w,
 			      double length_cut = 45*units::cm,
 			      bool flag_enable_extend = true);
 

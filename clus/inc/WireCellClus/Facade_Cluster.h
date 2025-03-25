@@ -57,6 +57,9 @@ namespace WireCell::PointCloud::Facade {
         // order is synchronized with children()
         std::vector<WireCell::WirePlaneId> wpids() const;
 
+        // return the wpid given a point ...
+        WirePlaneId wpid(const geo_point_t& point) const;
+
         // expose general scove_view for the cluster
         template <typename T>
         const Tree::ScopedView<T>& sv(const Tree::Scope& sc) const
