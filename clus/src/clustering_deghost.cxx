@@ -83,8 +83,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
 
     // std::cout << "Test: " << angle_u << " " << angle_v << " " << angle_w << std::endl;
     
-    auto global_point_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
-    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
+    auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
 
     std::vector<Cluster *> to_be_removed_clusters;
     // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;

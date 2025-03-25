@@ -30,7 +30,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     geo_point_t drift_dir_abs(1,0,0);
 
-    auto global_point_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
+    auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     for (const Cluster *cluster : live_grouping.children()) {
         global_point_cloud->add_points(cluster, 0);
     }
@@ -48,7 +48,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     });
 
 
-    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(angle_u, angle_v, angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
 
     double extending_dis = 50 * units::cm;
     double angle = 7.5;

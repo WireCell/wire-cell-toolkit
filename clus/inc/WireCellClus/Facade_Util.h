@@ -544,9 +544,9 @@ namespace WireCell::PointCloud::Facade {
     std::ostream& operator<<(std::ostream& os, const Multi2DPointCloud& s3dpc);
 
 
-    class DynamicPointCloud {
+    class DynamicPointCloudLegacy {
        public:
-        DynamicPointCloud(double angle_u, double angle_v, double angle_w);
+        DynamicPointCloudLegacy(double angle_u, double angle_v, double angle_w);
         using points3d_type = Simple3DPointCloud::points_type;
         using points2d_type = Multi2DPointCloud::points_type;
         using point_type = std::vector<double>;

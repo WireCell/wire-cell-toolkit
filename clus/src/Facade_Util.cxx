@@ -291,12 +291,12 @@ std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dp
     return os;
 }
 
-Facade::DynamicPointCloud::DynamicPointCloud(const double angle_u, const double angle_v, const double angle_w)
+Facade::DynamicPointCloudLegacy::DynamicPointCloudLegacy(const double angle_u, const double angle_v, const double angle_w)
   : m_pc2d(angle_u, angle_v, angle_w)
 {
 }
 
-void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const int flag, const double step)
+void Facade::DynamicPointCloudLegacy::add_points(const Cluster* cluster, const int flag, const double step)
 {
     // size_t current_size = get_num_points();
     const auto& winds = cluster->wire_indices();
@@ -422,7 +422,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const int fla
     LogDebug("add_points: " << m_pc3d.get_num_points() << " " << m_pc2d.get_num_points() << " " << m_clusters.size() << " " << m_blobs.size() << " " << m_winds[0].size());
 }
 
-void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const geo_point_t& p_test,
+void Facade::DynamicPointCloudLegacy::add_points(const Cluster* cluster, const geo_point_t& p_test,
                                                               const geo_point_t& dir_unmorm, const double range,
                                                               const double step, const double angle)
 {
@@ -449,7 +449,7 @@ void Facade::DynamicPointCloud::add_points(const Cluster* cluster, const geo_poi
     }
 }
 
-std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointCloud::get_2d_points_info(
+std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointCloudLegacy::get_2d_points_info(
     const geo_point_t& p, const double radius, const int plane)
 {
     std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index_radius(p, radius, plane);
@@ -464,7 +464,7 @@ std::vector<std::tuple<double, const Cluster*, size_t>> Facade::DynamicPointClou
 }
 
 
-std::tuple<double, const Cluster*, size_t> Facade::DynamicPointCloud::get_closest_2d_point_info(
+std::tuple<double, const Cluster*, size_t> Facade::DynamicPointCloudLegacy::get_closest_2d_point_info(
     const geo_point_t& p, const int plane)
 {
     std::vector<std::pair<size_t, double>> results = m_pc2d.get_closest_2d_index_knn(p, 1, plane);
@@ -504,7 +504,7 @@ static double phi_angle(const Vector& dir)
     return atan2(Y.dot(dir), X.dot(dir));
 }
 
-std::pair<double, double> Facade::DynamicPointCloud::hough_transform(const geo_point_t& origin, const double dis) const
+std::pair<double, double> Facade::DynamicPointCloudLegacy::hough_transform(const geo_point_t& origin, const double dis) const
 {
     std::vector<geo_point_t> pts;
     std::vector<const Blob*> blobs;
@@ -563,7 +563,7 @@ std::pair<double, double> Facade::DynamicPointCloud::hough_transform(const geo_p
 }
 
 
-geo_point_t Facade::DynamicPointCloud::vhough_transform(const geo_point_t& origin, const double dis) const
+geo_point_t Facade::DynamicPointCloudLegacy::vhough_transform(const geo_point_t& origin, const double dis) const
 {
     // TODO: only support theta_phi
     const auto [th, phi] = hough_transform(origin, dis);
