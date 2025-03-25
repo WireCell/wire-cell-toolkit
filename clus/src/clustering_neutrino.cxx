@@ -87,7 +87,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
     // Get drift direction from the first element of wpid_params, 
     // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
-    geo_point_t drift_dir = std::get<0>(wpid_params.begin()->second);
+    geo_point_t drift_dir_abs(1,0,0);
 
     geo_point_t vertical_dir(0, 1, 0);
     geo_point_t beam_dir(0, 0, 1);
@@ -675,8 +675,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         cluster2->get_length() > 15 * units::cm ||
                     cluster1->get_length() > 45 * units::cm && dis1 < 16 * units::cm &&
                         fabs(test_pt.x() - test_pt1.x()) < 3.2 * units::cm &&
-                        (fabs(drift_dir.angle(cluster_dir1_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5 ||
-                         fabs(drift_dir.angle(cluster_dir2_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5)) {
+                        (fabs(drift_dir_abs.angle(cluster_dir1_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5 ||
+                         fabs(drift_dir_abs.angle(cluster_dir2_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5)) {
                     // std::cout << test_pt1.x()/units::cm << " " << test_pt1.y()/units::cm << " " <<
                     // test_pt1.z()/units::cm
                     // << std::endl;
@@ -726,7 +726,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                                 flag_merge = false;
                             }
                         }
-                        else if (JudgeSeparateDec_1(cluster2, drift_dir, cluster2->get_length(), map_wpid_time_slice_width.begin()->second)) {
+                        else if (JudgeSeparateDec_1(cluster2, drift_dir_abs, cluster2->get_length(), map_wpid_time_slice_width.begin()->second)) {
                             if (dis2 < 5 * units::cm) {
                                 flag_merge = cluster2->judge_vertex(test_pt1,dv, 2. / 3.);
                             }
