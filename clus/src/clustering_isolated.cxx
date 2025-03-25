@@ -79,7 +79,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     // geo_point_t drift_dir(1, 0, 0);
     // Get drift direction from the first element of wpid_params, 
     // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
-    geo_point_t drift_dir = std::get<0>(wpid_params.begin()->second);
+    geo_point_t drift_dir_abs(1,0,0);
 
 
     int range_cut = 150;
@@ -112,7 +112,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
         }
         else {
             if (live_clusters.at(i)->get_length() < 60 * units::cm) {
-                if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir, live_clusters.at(i)->get_length(), map_wpid_time_slice_width.begin()->second)) {
+                if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir_abs, live_clusters.at(i)->get_length(), map_wpid_time_slice_width.begin()->second)) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
                     const auto b2id = Separate_2(live_clusters.at(i), 2.5 * units::cm);
                     std::set<int> ids;

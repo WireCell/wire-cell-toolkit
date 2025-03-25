@@ -416,20 +416,20 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 }
 
 /// @brief PCA based, drift_dir +x, -x the same ...
-bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length)
+bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length, const double time_slice_length)
 {
     // get the main axis
     geo_point_t dir1(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
     geo_point_t dir2(cluster->get_pca_axis(1).x(), cluster->get_pca_axis(1).y(), cluster->get_pca_axis(1).z());
     geo_point_t dir3(cluster->get_pca_axis(2).x(), cluster->get_pca_axis(2).y(), cluster->get_pca_axis(2).z());
 
-    double angle1 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+    double angle1 = fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
     /// CHECKME: is "time_slice_length" drift_speed * tick?
     auto points = cluster->get_earliest_latest_points();
     double temp_angle1 = asin(fabs(points.first.x() - points.second.x()) / length) / 3.1415926 * 180.;
 
-    double angle2 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+    double angle2 = fabs(dir3.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
     double ratio1 = cluster->get_pca_value(1) / cluster->get_pca_value(0);
     double ratio2 = cluster->get_pca_value(2) / cluster->get_pca_value(0);
 
