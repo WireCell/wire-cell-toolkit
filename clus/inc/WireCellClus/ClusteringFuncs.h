@@ -239,12 +239,13 @@ namespace WireCell::PointCloud::Facade {
     bool Clustering_4th_reg(const Cluster& cluster1,
 			    const Cluster& cluster2,
 			    double length_1, double length_2,
-			    geo_point_t p1, double length_cut, geo_point_t drift_dir, double angle_u, double angle_v, double angle_w);
+			    geo_point_t p1, double length_cut,  
+                const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv);
 
     bool Clustering_4th_dead(const Cluster& cluster1,
 			     const Cluster& cluster2,
 			     double length_1, double length_2, double length_cut, int num_dead_try, 
-                 geo_point_t drift_dir, double angle_u, double angle_v, double angle_w);
+                 const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv);
       
 
     // clustering_regular.cxx
