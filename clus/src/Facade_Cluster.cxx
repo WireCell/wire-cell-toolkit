@@ -2279,9 +2279,7 @@ void Cluster::Establish_close_connected_graph() const
 }
 
 void Cluster::Connect_graph(const bool use_ctpc) const {
-    // const auto& tp = grouping()->get_params();
-    int hard_code_face = 0;
-    int hard_code_apa = 0;
+
     // now form the connected components
     std::vector<int> component(num_vertices(*m_graph));
     const size_t num = connected_components(*m_graph, &component[0]);
@@ -2308,16 +2306,8 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
     if (num <= 1) return;
 
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
-    std::vector<std::vector<size_t>> pt_clouds_global_indices;
-    // use this to link the global index to the local index
-    // std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
-    // for (size_t i = 0; i != num; i++) {
-    //     pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
-    // }
-    // for (size_t i = 0; i != component.size(); ++i) {
-    //     pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});
-    //     pt_clouds_global_indices.at(component[i]).push_back(i);
-    // }
+    std::vector<std::vector<size_t>> pt_clouds_global_indices; // can use to access wpid ...
+
     for (const auto& comp : ordered_components) {
         auto pt_cloud = std::make_shared<Simple3DPointCloud>();
         std::vector<size_t> global_indices;
@@ -2408,7 +2398,10 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
             // Now check the path ...
             {
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                auto wpid_p1 = wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis[j][k])));
+
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+                auto wpid_p2 = wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis[j][k])));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                 double step_dis = 1.0 * units::cm;
@@ -2419,11 +2412,14 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                    // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
+
                     if (use_ctpc) {
-                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, hard_code_apa, hard_code_face);
-                        if (!good_point) num_bad++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) num_bad++;
+                        }
                     }
                 }
 
@@ -2435,7 +2431,10 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
             // Now check the path ...
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k]));
+                auto wpid_p1 = wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k])));
+
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k]));
+                auto wpid_p2 = wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k])));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                 double step_dis = 1.0 * units::cm;
@@ -2448,9 +2447,12 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
-                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, hard_code_apa, hard_code_face);
-                        if (!good_point) num_bad++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) num_bad++;
+                        }
                     }
                 }
 
@@ -2462,7 +2464,9 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
             // Now check the path ...
             if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));
+                auto wpid_p1 = wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k])));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));
+                auto wpid_p2 = wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k])));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                 double step_dis = 1.0 * units::cm;
@@ -2475,9 +2479,12 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
-                        /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
-                        const bool good_point = grouping()->is_good_point(test_p, hard_code_apa, hard_code_face);
-                        if (!good_point) num_bad++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            /// FIXME: assumes clusters are bounded to 1 face! Need to fix this.
+                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) num_bad++;
+                        }
                     }
                 }
 
@@ -2629,14 +2636,6 @@ void Cluster::Connect_graph() const{
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
     std::vector<std::vector<size_t>> pt_clouds_global_indices;
     // use this to link the global index to the local index
-    // std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
-    // for (size_t i = 0; i != num; i++) {
-    //     pt_clouds.push_back(std::make_shared<Simple3DPointCloud>());
-    // }
-    // for (size_t i = 0; i != component.size(); ++i) {
-    //     pt_clouds.at(component[i])->add({points()[0][i], points()[1][i], points()[2][i]});
-    //     pt_clouds_global_indices.at(component[i]).push_back(i);
-    // }
     // Create point clouds using ordered components
     for (const auto& comp : ordered_components) {
         auto pt_cloud = std::make_shared<Simple3DPointCloud>();
@@ -2708,39 +2707,6 @@ void Cluster::Connect_graph() const{
 
     process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
 
-    // {
-    //     std::vector<int> possible_root_vertex;
-    //     std::vector<int> component(num_vertices(temp_graph));
-    //     const int num1 = connected_components(temp_graph, &component[0]);
-    //     possible_root_vertex.resize(num1);
-    //     std::vector<int>::size_type i;
-    //     for (i = 0; i != component.size(); ++i) {
-    //         possible_root_vertex.at(component[i]) = i;
-    //     }
-
-    //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-    //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
-
-    //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-    //                                     boost::root_vertex(possible_root_vertex.at(i)));
-
-    //         for (size_t j = 0; j != predecessors.size(); ++j) {
-    //             if (predecessors[j] != j) {
-    //                 if (j < predecessors[j]) {
-    //                     index_index_dis_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-    //                 }
-    //                 else {
-    //                     index_index_dis_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-    //                 }
-    //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
-    //             }
-    //             else {
-    //                 // std::cout << j << " " << std::endl;
-    //             }
-    //         }
-    //     }
-    // }
-
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
             if (std::get<2>(index_index_dis[j][k])<3*units::cm){
@@ -2800,36 +2766,7 @@ void Cluster::Connect_graph() const{
         }
 
         process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_dir_mst);
-        // {
-        //     std::vector<int> possible_root_vertex;
-        //     std::vector<int> component(num_vertices(temp_graph));
-        //     const int num1 = connected_components(temp_graph, &component[0]);
-        //     possible_root_vertex.resize(num1);
-        //     std::vector<int>::size_type i;
-        //     for (i = 0; i != component.size(); ++i) {
-        //         possible_root_vertex.at(component[i]) = i;
-        //     }
-
-        //     for (size_t i = 0; i != possible_root_vertex.size(); i++) {
-        //         std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
-        //         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
-        //                                    boost::root_vertex(possible_root_vertex.at(i)));
-        //         for (size_t j = 0; j != predecessors.size(); ++j) {
-        //             if (predecessors[j] != j) {
-        //                 if (j < predecessors[j]) {
-        //                     index_index_dis_dir_mst[j][predecessors[j]] = index_index_dis[j][predecessors[j]];
-        //                 }
-        //                 else {
-        //                     index_index_dis_dir_mst[predecessors[j]][j] = index_index_dis[predecessors[j]][j];
-        //                 }
-        //                 // std::cout << j << " " << predecessors[j] << " " << std::endl;
-        //             }
-        //             else {
-        //                 // std::cout << j << " " << std::endl;
-        //             }
-        //         }
-        //     }
-        // }
+    
     }
 
     // now complete graph according to the direction
