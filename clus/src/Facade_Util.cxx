@@ -599,6 +599,16 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
     return std::round(wind);
 }
 
+
+WirePlaneId Facade::get_wireplaneid(const geo_point_t& point, const WirePlaneId& wpid1, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv){
+    if (wpid1 == wpid2) return wpid1;
+
+    auto wpid = dv->contained_by(point);
+
+    return wpid;
+}
+
+
 // Local Variables:
 // mode: c++
 // c-basic-offset: 4

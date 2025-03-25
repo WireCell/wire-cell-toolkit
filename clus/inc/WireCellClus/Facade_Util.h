@@ -14,6 +14,8 @@
 // #include "WireCellUtil/D2Vector.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IDetectorVolumes.h"
+
 
 
 #include "WCPQuickhull/QuickHull.h"
@@ -373,92 +375,7 @@ namespace WireCell::PointCloud::Facade {
         }
         
         return std::make_tuple(p1_save, p2_save, min_dis);
-
-        // int p1_index = 0;
-        // int p2_index = 0;
-        // geo_point_t p1 = one.point(p1_index);
-        // geo_point_t p2 = two.point(p2_index);
-        // int p1_save = 0;
-        // int p2_save = 0;
-        // double min_dis = 1e9;
-
-        // int prev_index1 = -1;
-        // int prev_index2 = -1;
-        // while (p1_index != prev_index1 || p2_index != prev_index2) {
-        //     prev_index1 = p1_index;
-        //     prev_index2 = p2_index;
-        //     std::tie(p2_index, p2) = two.get_closest_wcpoint(p1);
-        //     std::tie(p1_index, p1) = one.get_closest_wcpoint(p2);
-        // }
-        // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-        // double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-        // if (dis < min_dis) {
-        //     min_dis = dis;
-        //     p1_save = p1_index;
-        //     p2_save = p2_index;
-        // }
-
-        // prev_index1 = -1;
-        // prev_index2 = -1;
-        // p1_index = one.points()[0].size() - 1;
-        // p2_index = 0;
-        // p1 = one.point(p1_index);
-        // p2 = two.point(p2_index);
-        // while (p1_index != prev_index1 || p2_index != prev_index2) {
-        //     prev_index1 = p1_index;
-        //     prev_index2 = p2_index;
-        //     std::tie(p2_index, p2) = two.get_closest_wcpoint(p1);
-        //     std::tie(p1_index, p1) = one.get_closest_wcpoint(p2);
-        // }
-        // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-        // dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-        // if (dis < min_dis) {
-        //     min_dis = dis;
-        //     p1_save = p1_index;
-        //     p2_save = p2_index;
-        // }
-
-        // prev_index1 = -1;
-        // prev_index2 = -1;
-        // p1_index = 0;
-        // p2_index = two.points()[0].size() - 1;
-        // p1 = one.point(p1_index);
-        // p2 = two.point(p2_index);
-        // while (p1_index != prev_index1 || p2_index != prev_index2) {
-        //     prev_index1 = p1_index;
-        //     prev_index2 = p2_index;
-        //     std::tie(p2_index, p2) = two.get_closest_wcpoint(p1);
-        //     std::tie(p1_index, p1) = one.get_closest_wcpoint(p2);
-        // }
-        // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-        // dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-        // if (dis < min_dis) {
-        //     min_dis = dis;
-        //     p1_save = p1_index;
-        //     p2_save = p2_index;
-        // }
-
-        // prev_index1 = -1;
-        // prev_index2 = -1;
-        // p1_index = one.points()[0].size() - 1;
-        // p2_index = two.points()[0].size() - 1;
-        // p1 = one.point(p1_index);
-        // p2 = two.point(p2_index);
-        // while (p1_index != prev_index1 || p2_index != prev_index2) {
-        //     prev_index1 = p1_index;
-        //     prev_index2 = p2_index;
-        //     std::tie(p2_index, p2) = two.get_closest_wcpoint(p1);
-        //     std::tie(p1_index, p1) = one.get_closest_wcpoint(p2);
-        // }
-        // // std::cout << "get_closest_points: " << p1_index << " " << p2_index << std::endl;
-        // dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-        // if (dis < min_dis) {
-        //     min_dis = dis;
-        //     p1_save = p1_index;
-        //     p2_save = p2_index;
-        // }
-
-        // return std::make_tuple(p1_save, p2_save, min_dis);
+   
     }
 
     class Simple3DPointCloud {
@@ -595,6 +512,8 @@ namespace WireCell::PointCloud::Facade {
                       const double drift);
     int point2wind(const geo_point_t& point, const double angle, const double pitch, const double center);
 
+    WirePlaneId get_wireplaneid(const geo_point_t& point, const WirePlaneId& wpid1, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv);
+
     // fixme: why do we inline these?
     inline double cal_proj_angle_diff(const geo_vector_t& dir1, const geo_vector_t& dir2, double plane_angle)
     {
@@ -632,6 +551,8 @@ namespace WireCell::PointCloud::Facade {
         if (num >= num_cut) return true;
         return false;
     }
+
+
 
 }  // namespace WireCell::PointCloud::Facade
 
