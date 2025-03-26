@@ -100,7 +100,6 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
         }
         // std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
         // std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-        // ranges.at(3) /= map_wpid_nticks_live_slice.begin()->second; //mp.nticks_live_slice;
 
         int max = 0;
         for (int j = 0; j != 4; j++) {

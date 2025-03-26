@@ -76,7 +76,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     // Both cloud needs to be dynamic, keep adding things into it as we improve the knowledge
     // XQ: need a new dynamic point cloud that can handle different faces of APA ...
     // Get the first wpid and extract angles from wpid_params
-    auto& params = wpid_params.begin()->second;
+    auto& params = wpid_params.begin()->second; // hack ...
     double angle_u = std::get<1>(params);
     double angle_v = std::get<2>(params);
     double angle_w = std::get<3>(params);
