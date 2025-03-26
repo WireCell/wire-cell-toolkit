@@ -18,7 +18,7 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
-
+// This can handle entire APA (including all faces) data
 void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, IDetectorVolumes::pointer dv,
                                   const bool use_ctpc, double length_cut)
 {
@@ -27,6 +27,11 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
     std::set<int> apas;
+
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_u_index; 
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index; 
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index; 
+
     for (const auto& wpid : wpids) {
         int apa = wpid.apa();
         int face = wpid.face();
@@ -52,15 +57,15 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
         wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+
+
+        af_dead_u_index[apa][face] = live_grouping.get_dead_winds(apa, face, 0);
+        af_dead_v_index[apa][face] = live_grouping.get_dead_winds(apa, face, 1);
+        af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
     }
 
     if (apas.size()!=1) throw std::runtime_error("live_grouping must have exactly one APA");
-
-    int hack_apa = 0;
-
-    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(hack_apa, 0, 0);
-    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(hack_apa, 0, 1);
-    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(hack_apa, 0, 2);
+  
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
@@ -79,12 +84,10 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     auto& params = wpid_params.begin()->second; // hack ...
     double angle_u = std::get<1>(params);
     double angle_v = std::get<2>(params);
-    double angle_w = std::get<3>(params);
-
-    // std::cout << "Test: " << angle_u << " " << angle_v << " " << angle_w << std::endl;
-    
+    double angle_w = std::get<3>(params);    
     auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    // replace with the new DynamicPointCloud class
 
     std::vector<Cluster *> to_be_removed_clusters;
     // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
@@ -130,7 +133,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 for (size_t j = 0; j != num_total_points; j++) {
                     // geo_point_t test_point(cluster->point3d(j).x(), cloud.pts.at(j).y, cloud.pts.at(j).z);
                     geo_point_t test_point = cluster->point3d(j);
-
+                    auto test_wpid = cluster->wire_plane_id(j);
                     bool flag_dead = false;
 
                     #ifdef __DEBUG__
@@ -140,7 +143,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     #endif
 
                     
-
+                    auto& dead_u_index = af_dead_u_index.at(test_wpid.apa()).at(test_wpid.face());
                     if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
                         if (cluster->point3d(j).x() >= dead_u_index[winds[0][j]].first &&
                             cluster->point3d(j).x() <= dead_u_index[winds[0][j]].second) {
@@ -187,6 +190,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     }
 
                     flag_dead = false;
+                    auto& dead_v_index = af_dead_v_index.at(test_wpid.apa()).at(test_wpid.face());
 
                     if (dead_v_index.find(winds[1][j]) != dead_v_index.end()) {
                         #ifdef __DEBUG__
@@ -254,6 +258,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     }
 
                     flag_dead = false;
+                    auto& dead_w_index = af_dead_w_index.at(test_wpid.apa()).at(test_wpid.face());
 
                     if (dead_w_index.find(winds[2][j]) != dead_w_index.end()) {
                         if (cluster->point3d(j).x() >= dead_w_index[winds[2][j]].first &&
