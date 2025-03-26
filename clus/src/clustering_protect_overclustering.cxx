@@ -19,19 +19,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
 {
     // can follow ToyClustering_separate to add clusters ...
     auto* grouping = cluster->grouping();
-    // const auto &tp = grouping->get_params();
 
     auto wpids = cluster->wpids();
     std::map<WirePlaneId, double> map_wpid_nticks_live;
     for (const auto& wpid : wpids) {
         map_wpid_nticks_live[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble();  
-        // std::cout << "Test: " << map_wpid_nticks_live[wpid] << std::endl;
     }
 
-
-    // copy the create_graph from the PR3D Cluster ...
-
-    // PR3DClusterSelection new_clusters;
 
     // cluster->Create_point_cloud();
     const int N = cluster->npoints();
@@ -42,12 +36,6 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
 
     // plane -> point -> wire index
     const auto& winds = cluster->wire_indices();
-
-
-    int hack_apa = 0;
-    int hack_face = 0;
-    const auto &time_cells_set_map = cluster->time_blob_map().at(hack_apa).at(hack_face);
-
     
     std::map<const Blob *, std::map<int, std::set<int>>> map_mcell_wind_wcps[3];
 
@@ -161,55 +149,77 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
 
     //  std::cout << "Xin: " << num_edges << " " << N << std::endl;
 
-    std::vector<int> time_slices;
-    for (auto it1 = time_cells_set_map.begin(); it1 != time_cells_set_map.end(); it1++) {
-        time_slices.push_back((*it1).first);
+    const auto &time_cells_set_map = cluster->time_blob_map();
+
+    // std::vector<int> time_slices;
+    // for (auto it1 = time_cells_set_map.begin(); it1 != time_cells_set_map.end(); it1++) {
+        // time_slices.push_back((*it1).first);
+    // }
+
+    std::map<int, std::map<int, std::vector<int> > > af_time_slices; // apa,face --> time slices 
+    for (auto it = cluster->time_blob_map().begin(); it != cluster->time_blob_map().end(); it++) {
+        int apa = it->first;
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
+            int face = it1->first;
+            std::vector<int> time_slices_vec;
+            for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
+                time_slices_vec.push_back(it2->first);
+            }
+            af_time_slices[apa][face] = time_slices_vec;
+        }
     }
 
+
     std::vector<std::pair<const Blob *, const Blob *>> connected_mcells;
+    for (auto it = af_time_slices.begin(); it != af_time_slices.end(); it++) {
+        int apa = it->first;
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
+            int face = it1->first;
+            std::vector<int>& time_slices = it1->second;
+            for (size_t i = 0; i != time_slices.size(); i++) {
+                const std::set<const Blob*, blob_less_functor> &mcells_set = time_cells_set_map.at(apa).at(face).at(time_slices.at(i));
 
-    for (size_t i = 0; i != time_slices.size(); i++) {
-        const std::set<const Blob*, blob_less_functor> &mcells_set = time_cells_set_map.at(time_slices.at(i));
-
-        // create graph for points in mcell inside the same time slice
-        if (mcells_set.size() >= 2) {
-            for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); it2++) {
-                const Blob *mcell1 = *it2;
-                auto it2p = it2;
-                if (it2p != mcells_set.end()) {
-                    it2p++;
-                    for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
-                        const Blob *mcell2 = *(it3);
-                        // std::cout << mcell1 << " " << mcell2 << " " << mcell1->Overlap_fast(mcell2,2) << std::endl;
-                        if (mcell1->overlap_fast(*mcell2, 2)) connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                // create graph for points in mcell inside the same time slice
+                if (mcells_set.size() >= 2) {
+                    for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); it2++) {
+                        const Blob *mcell1 = *it2;
+                        auto it2p = it2;
+                        if (it2p != mcells_set.end()) {
+                            it2p++;
+                            for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
+                                const Blob *mcell2 = *(it3);
+                                // std::cout << mcell1 << " " << mcell2 << " " << mcell1->Overlap_fast(mcell2,2) << std::endl;
+                                if (mcell1->overlap_fast(*mcell2, 2)) connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                            }
+                        }
                     }
                 }
-            }
-        }
-        // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
-        std::vector<std::set<const Blob*, blob_less_functor>> vec_mcells_set;
-        if (i + 1 < time_slices.size()) {
-            if (time_slices.at(i + 1) - time_slices.at(i) == 1*map_wpid_nticks_live.begin()->second) {
-                vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
-                if (i + 2 < time_slices.size())
-                    if (time_slices.at(i + 2) - time_slices.at(i) == 2*map_wpid_nticks_live.begin()->second)
-                        vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 2)));
-            }
-            else if (time_slices.at(i + 1) - time_slices.at(i) == 2*map_wpid_nticks_live.begin()->second) {
-                vec_mcells_set.push_back(time_cells_set_map.at(time_slices.at(i + 1)));
-            }
-        }
-        //    bool flag = false;
-        for (size_t j = 0; j != vec_mcells_set.size(); j++) {
-            //      if (flag) break;
-            std::set<const Blob*, blob_less_functor> &next_mcells_set = vec_mcells_set.at(j);
-            for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
-                const Blob *mcell1 = (*it1);
-                for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
-                    const Blob *mcell2 = (*it2);
-                    if (mcell1->overlap_fast(*mcell2, 2)) {
-                        //	    flag = true; // correct???
-                        connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
+                std::vector<std::set<const Blob*, blob_less_functor>> vec_mcells_set;
+                if (i + 1 < time_slices.size()) {
+                    if (time_slices.at(i + 1) - time_slices.at(i) == 1*grouping->get_nticks_per_slice().at(apa).at(face)) {
+                        vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 1)));
+                        if (i + 2 < time_slices.size())
+                            if (time_slices.at(i + 2) - time_slices.at(i) == 2*grouping->get_nticks_per_slice().at(apa).at(face))
+                                vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 2)));
+                    }
+                    else if (time_slices.at(i + 1) - time_slices.at(i) == 2*grouping->get_nticks_per_slice().at(apa).at(face)) {
+                        vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 1)));
+                    }
+                }
+                //    bool flag = false;
+                for (size_t j = 0; j != vec_mcells_set.size(); j++) {
+                    //      if (flag) break;
+                    std::set<const Blob*, blob_less_functor> &next_mcells_set = vec_mcells_set.at(j);
+                    for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
+                        const Blob *mcell1 = (*it1);
+                        for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
+                            const Blob *mcell2 = (*it2);
+                            if (mcell1->overlap_fast(*mcell2, 2)) {
+                                //	    flag = true; // correct???
+                                connected_mcells.push_back(std::make_pair(mcell1, mcell2));
+                            }
+                        }
                     }
                 }
             }
@@ -525,7 +535,9 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 // Now check the path ...
                 {
                     geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                    auto wpid_p1 = cluster->wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis[j][k])));
                     geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+                    auto wpid_p2 = cluster->wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis[j][k])));
                     double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
 
                     double step_dis = 1.0 * units::cm;
@@ -537,9 +549,11 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                         if (true) {
-                            /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).apa(), wpids.at(0).face());
-                            if (!good_point) num_bad++;
+                            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                            if (test_wpid.apa()!=-1){
+                                const bool good_point = cluster->grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                                if (!good_point) num_bad++;
+                            }
                         }
                     }
 
@@ -551,7 +565,9 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 // Now check the path ...
                 if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
                     geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k]));
+                    auto wpid_p1 = cluster->wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k])));
                     geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k]));
+                    auto wpid_p2 = cluster->wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k])));
 
                     double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                     double step_dis = 1.0 * units::cm;
@@ -564,9 +580,11 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
-                            /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).apa(), wpids.at(0).face());
-                            if (!good_point) num_bad++;
+                            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                            if (test_wpid.apa()!=-1){
+                                const bool good_point = cluster->grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                                if (!good_point) num_bad++;
+                            }
                         }
                     }
 
@@ -578,7 +596,9 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                 // Now check the path ...
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));
+                    auto wpid_p1 = cluster->wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k])));
                     geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));
+                    auto wpid_p2 = cluster->wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k])));
 
                     double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
                     double step_dis = 1.0 * units::cm;
@@ -591,9 +611,11 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                         // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                         if (true) {
-                            /// FIXME: how to add face information?
-                            const bool good_point = cluster->grouping()->is_good_point(test_p, wpids.at(0).apa(), wpids.at(0).face());
-                            if (!good_point) num_bad++;
+                            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                            if (test_wpid.apa()!=-1){
+                                const bool good_point = cluster->grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                                if (!good_point) num_bad++;
+                            }
                         }
                     }
 

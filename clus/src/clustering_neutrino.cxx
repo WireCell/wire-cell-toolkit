@@ -726,7 +726,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                                 flag_merge = false;
                             }
                         }
-                        else if (JudgeSeparateDec_1(cluster2, drift_dir_abs, cluster2->get_length(), map_wpid_time_slice_width.begin()->second)) {
+                        else if (JudgeSeparateDec_1(cluster2, drift_dir_abs, cluster2->get_length())) {
                             if (dis2 < 5 * units::cm) {
                                 flag_merge = cluster2->judge_vertex(test_pt1,dv, 2. / 3.);
                             }

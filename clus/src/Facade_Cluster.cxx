@@ -1965,9 +1965,8 @@ void Cluster::Establish_close_connected_graph() const
     
 
     // const int nticks_per_slice = grouping()->get_params().nticks_live_slice;
-    // need to udpate to Multi-Face alg. ...
-    const int nticks_per_slice = grouping()->get_nticks_per_slice().at(0).at(0);
-    
+    // const int nticks_per_slice = grouping()->get_nticks_per_slice().at(0).at(0);
+
     // std::cout << "Test: " << nticks_per_slice << std::endl;
 
     std::vector<std::pair<const Blob*, const Blob*>> connected_mcells;
@@ -1998,13 +1997,13 @@ void Cluster::Establish_close_connected_graph() const
                 // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
                 std::vector<BlobSet> vec_mcells_set;
                 if (i + 1 < time_slices.size()) {
-                    if (time_slices.at(i + 1) - time_slices.at(i) == 1*nticks_per_slice) {
+                    if (time_slices.at(i + 1) - time_slices.at(i) == 1*grouping()->get_nticks_per_slice().at(apa).at(face)) {
                         vec_mcells_set.push_back(this->time_blob_map().at(apa).at(face).at(time_slices.at(i + 1)));
                         if (i + 2 < time_slices.size())
-                            if (time_slices.at(i + 2) - time_slices.at(i) == 2*nticks_per_slice)
+                            if (time_slices.at(i + 2) - time_slices.at(i) == 2*grouping()->get_nticks_per_slice().at(apa).at(face))
                                 vec_mcells_set.push_back(this->time_blob_map().at(apa).at(face).at(time_slices.at(i + 2)));
                     }
-                    else if (time_slices.at(i + 1) - time_slices.at(i) == 2*nticks_per_slice) {
+                    else if (time_slices.at(i + 1) - time_slices.at(i) == 2*grouping()->get_nticks_per_slice().at(apa).at(face)) {
                         vec_mcells_set.push_back(this->time_blob_map().at(apa).at(face).at(time_slices.at(i + 1)));
                     }
                 }

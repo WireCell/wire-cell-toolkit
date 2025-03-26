@@ -125,7 +125,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
 
             if (!flag_proceed && cluster->get_length() > 100 * units::cm &&
-                JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), map_wpid_time_slice_width.begin()->second) &&
+                JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length()) &&
                 independent_points.size() > 0) {
                 bool flag_top = false;
                 for (size_t j = 0; j != independent_points.size(); j++) {
@@ -201,7 +201,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             // }
 
             if (flag_proceed) {
-                if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length(), map_wpid_time_slice_width.begin()->second)) {
+                if (JudgeSeparateDec_1(cluster, drift_dir, cluster->get_length())) {
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
                     // const size_t orig_nchildren = cluster->nchildren();
@@ -233,7 +233,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             boundary_points.clear();
                             independent_points.clear();
 
-                            if (JudgeSeparateDec_1(cluster2, drift_dir, length_1, map_wpid_time_slice_width.begin()->second) &&
+                            if (JudgeSeparateDec_1(cluster2, drift_dir, length_1) &&
                                 JudgeSeparateDec_2(cluster2, dv, drift_dir, boundary_points, independent_points,
                                                    length_1)) {
                                 std::vector<Cluster *> sep_clusters =
@@ -260,7 +260,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                     if (length_1 > 100 * units::cm) {
                                         boundary_points.clear();
                                         independent_points.clear();
-                                        if (JudgeSeparateDec_1(cluster4, drift_dir, length_1, map_wpid_time_slice_width.begin()->second) &&
+                                        if (JudgeSeparateDec_1(cluster4, drift_dir, length_1) &&
                                             JudgeSeparateDec_2(cluster4, dv, drift_dir, boundary_points, independent_points,
                                                                length_1)) {
                                             //	std::cout << "Separate 3rd level" << std::endl;
@@ -304,7 +304,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             if (length_1 > 60 * units::cm) {
                                 boundary_points.clear();
                                 independent_points.clear();
-                                JudgeSeparateDec_1(final_sep_cluster, drift_dir, length_1, map_wpid_time_slice_width.begin()->second);
+                                JudgeSeparateDec_1(final_sep_cluster, drift_dir, length_1);
                                 JudgeSeparateDec_2(final_sep_cluster, dv, drift_dir, boundary_points, independent_points,
                                                    length_1);
                                 if (independent_points.size() > 0) {
@@ -416,7 +416,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 }
 
 /// @brief PCA based, drift_dir +x, -x the same ...
-bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length, const double time_slice_length)
+bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length)
 {
     // get the main axis
     geo_point_t dir1(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
