@@ -111,7 +111,7 @@ void Cluster::fill_cache(ClusterCache& cache) const
 }
 
 // blob wpids ...
-std::vector<WireCell::WirePlaneId> Cluster::wpids() const {
+std::vector<WireCell::WirePlaneId> Cluster::wpids_blob() const {
     return cache().wpids;
 }
 
@@ -772,14 +772,15 @@ int Cluster::npoints() const
     }
     return m_npoints;
 }
-size_t Cluster::nbpoints() const
-{
-    size_t ret = 0;
-    for (const auto* blob : children()) {
-        ret += blob->nbpoints();
-    }
-    return ret;
-}
+
+// size_t Cluster::nbpoints() const
+// {
+//     size_t ret = 0;
+//     for (const auto* blob : children()) {
+//         ret += blob->nbpoints();
+//     }
+//     return ret;
+// }
 
 const Cluster::wire_indices_t& Cluster::wire_indices() const
 {
@@ -893,6 +894,12 @@ std::vector<const Blob*> Cluster::kd_blobs() const
         ret.push_back(node->value.facade<Blob>());
     }
     return ret;
+}
+
+size_t Cluster::nkd_blobs() const
+{
+    const auto& skd = kd3d();
+    return skd.nblocks();
 }
 
 Blob* Cluster::blob_with_point(size_t point_index)
@@ -1776,7 +1783,7 @@ void Cluster::Create_graph(const bool use_ctpc) const
     // std::cout << "Create Graph!" << std::endl;
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
-    m_graph = std::make_unique<MCUGraph>(nbpoints());
+    m_graph = std::make_unique<MCUGraph>(npoints());
     // std::cout << "Test:" << "Create Graph!" << std::endl;
     Establish_close_connected_graph();
     if (use_ctpc) Connect_graph(true);

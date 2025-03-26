@@ -354,7 +354,7 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
 {
     // const auto &mp = cluster->grouping()->get_params();
 
-    auto wpids = cluster->wpids();
+    auto wpids = cluster->grouping()->wpids();
     std::map<WirePlaneId, double> map_FV_xmin;
     std::map<WirePlaneId, double> map_FV_xmax;
     std::map<WirePlaneId, double> map_FV_xmin_margin;

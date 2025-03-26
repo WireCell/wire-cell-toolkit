@@ -38,7 +38,7 @@ void WireCell::PointCloud::Facade::clustering_test(
     }
     for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
         Cluster* cluster = live_clusters.at(iclus);
-        const auto& wpids = cluster->wpids();
+        const auto& wpids = cluster->wpids_blob();
         for (size_t i=0; i != wpids.size(); i++) {
             const auto& wpid = wpids.at(i);
             SPDLOG_INFO("CTest Cluster {} i {} name {}", iclus, i, wpid.name());
