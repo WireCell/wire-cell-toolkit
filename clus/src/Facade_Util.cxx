@@ -302,18 +302,6 @@ void Facade::DynamicPointCloudLegacy::add_points(const Cluster* cluster, const i
     const auto& winds = cluster->wire_indices();
 
     if (flag == 0) {
-        // add actual points in
-        // WCP::WCPointCloud<double>& pcloud = cluster->get_point_cloud()->get_cloud();
-        // WCP::WC2DPointCloud<double>& pcloud_u = cluster->get_point_cloud()->get_cloud_u();
-        // WCP::WC2DPointCloud<double>& pcloud_v = cluster->get_point_cloud()->get_cloud_v();
-        // WCP::WC2DPointCloud<double>& pcloud_w = cluster->get_point_cloud()->get_cloud_w();
-
-        // cloud.pts.resize(current_size + pcloud.pts.size());
-        // cloud_u.pts.resize(current_size + pcloud.pts.size());
-        // cloud_v.pts.resize(current_size + pcloud.pts.size());
-        // cloud_w.pts.resize(current_size + pcloud.pts.size());
-        // vec_index_cluster.resize(current_size + pcloud.pts.size());
-
         for (int i = 0; i != cluster->npoints(); i++) {
             // vec_index_cluster.at(current_size + i) = cluster;
             m_clusters.push_back(cluster);
@@ -323,31 +311,7 @@ void Facade::DynamicPointCloudLegacy::add_points(const Cluster* cluster, const i
                 m_winds[plane].push_back(winds[plane][i]);
             }
             m_blobs.push_back(cluster->blob_with_point(i));
-
-            // cloud.pts[current_size + i].x = pcloud.pts.at(i).x;
-            // cloud.pts[current_size + i].y = pcloud.pts.at(i).y;
-            // cloud.pts[current_size + i].z = pcloud.pts.at(i).z;
-            // cloud.pts[current_size + i].index_u = pcloud.pts.at(i).index_u;
-            // cloud.pts[current_size + i].index_v = pcloud.pts.at(i).index_v;
-            // cloud.pts[current_size + i].index_w = pcloud.pts.at(i).index_w;
-            // cloud.pts[current_size + i].mcell = pcloud.pts.at(i).mcell;
-            // cloud.pts[current_size + i].index = current_size + i;
-            // cloud_u.pts[current_size + i].x = pcloud_u.pts.at(i).x;
-            // cloud_u.pts[current_size + i].y = pcloud_u.pts.at(i).y;
-            // cloud_u.pts[current_size + i].index = current_size + i;
-            // cloud_v.pts[current_size + i].x = pcloud_v.pts.at(i).x;
-            // cloud_v.pts[current_size + i].y = pcloud_v.pts.at(i).y;
-            // cloud_v.pts[current_size + i].index = current_size + i;
-            // cloud_w.pts[current_size + i].x = pcloud_w.pts.at(i).x;
-            // cloud_w.pts[current_size + i].y = pcloud_w.pts.at(i).y;
-            // cloud_w.pts[current_size + i].index = current_size + i;
         }
-        // if (pcloud.pts.size() > 0) {
-        //     index->addPoints(current_size, current_size + pcloud.pts.size() - 1);
-        //     index_u->addPoints(current_size, current_size + pcloud.pts.size() - 1);
-        //     index_v->addPoints(current_size, current_size + pcloud.pts.size() - 1);
-        //     index_w->addPoints(current_size, current_size + pcloud.pts.size() - 1);
-        // }
     }
     else {
         // add skeleton points in
@@ -375,13 +339,6 @@ void Facade::DynamicPointCloudLegacy::add_points(const Cluster* cluster, const i
             }
             prev_wcp = test_point;
         }
-
-        // cloud.pts.resize(current_size + pts.size());
-        // cloud_u.pts.resize(current_size + pts.size());
-        // cloud_v.pts.resize(current_size + pts.size());
-        // cloud_w.pts.resize(current_size + pts.size());
-        // vec_index_cluster.resize(current_size + pts.size());
-        // int i = 0;
         for (auto it = pts.begin(); it != pts.end(); it++) {
             m_clusters.push_back(cluster);
             m_blobs.push_back(nullptr);
@@ -390,34 +347,7 @@ void Facade::DynamicPointCloudLegacy::add_points(const Cluster* cluster, const i
             for (size_t plane = 0; plane < 3; ++plane) {
                 m_winds[plane].push_back(2.4 * units::cm);
             }
-
-            // vec_index_cluster.at(current_size + i) = cluster;
-            // cloud.pts[current_size + i].x = (*it).x;
-            // cloud.pts[current_size + i].y = (*it).y;
-            // cloud.pts[current_size + i].z = (*it).z;
-            // cloud.pts[current_size + i].index_u = 2.4 * units::cm;
-            // cloud.pts[current_size + i].index_v = 2.4 * units::cm;
-            // cloud.pts[current_size + i].index_w = 2.4 * units::cm;
-            // cloud.pts[current_size + i].mcell = 0;
-            // cloud.pts[current_size + i].index = current_size + i;
-            // cloud_u.pts[current_size + i].x = (*it).x;
-            // cloud_u.pts[current_size + i].y = cos(angle_u) * (*it).z - sin(angle_u) * (*it).y;
-            // cloud_u.pts[current_size + i].index = current_size + i;
-            // cloud_v.pts[current_size + i].x = (*it).x;
-            // cloud_v.pts[current_size + i].y = cos(angle_v) * (*it).z - sin(angle_v) * (*it).y;
-            // cloud_v.pts[current_size + i].index = current_size + i;
-            // cloud_w.pts[current_size + i].x = (*it).x;
-            // cloud_w.pts[current_size + i].y = cos(angle_w) * (*it).z - sin(angle_w) * (*it).y;
-            // cloud_w.pts[current_size + i].index = current_size + i;
-
-            // i++;
         }
-        // if (pts.size() > 0) {
-        //     index->addPoints(current_size, current_size + pts.size() - 1);
-        //     index_u->addPoints(current_size, current_size + pts.size() - 1);
-        //     index_v->addPoints(current_size, current_size + pts.size() - 1);
-        //     index_w->addPoints(current_size, current_size + pts.size() - 1);
-        // }
     }
     LogDebug("add_points: " << m_pc3d.get_num_points() << " " << m_pc2d.get_num_points() << " " << m_clusters.size() << " " << m_blobs.size() << " " << m_winds[0].size());
 }
