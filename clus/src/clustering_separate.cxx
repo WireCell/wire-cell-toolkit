@@ -1523,7 +1523,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
     
 
     // std::cout << "Separate_2 nchildren: " << cluster->nchildren() << std::endl;
-    std::vector<Blob*>& mcells = cluster->children();
+    const auto& mcells = cluster->children();
 
     // create graph for points between connected mcells, need to separate apa, face, and then ...
     std::map<int, std::map<int, std::vector<int> > > af_time_slices; // apa,face --> time slices 

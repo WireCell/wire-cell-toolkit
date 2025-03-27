@@ -190,7 +190,7 @@ void fill_bee_patches(WireCell::Bee::Patches& bee, const Points::node_t& root)
 {
     int first_slice = -1;
     for (const auto cnode : root.children()) {
-        for (const auto bnode : cnode->children()) {
+        for (const auto bnode : cnode->children()) {  // blobs ...
             const auto& lpcs = bnode->value.local_pcs();
 
             const auto& pc_scalar = lpcs.at("scalar");
