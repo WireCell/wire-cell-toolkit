@@ -36,11 +36,6 @@ namespace WireCell::PointCloud::Facade {
         // default scope for all points with raw x,y,z as coordinates
         const Tree::Scope scope_3d_raw = {"3d", {"x", "y", "z"}};
         const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
-        // Tree::Scope scope2ds[3] = {
-        //     {"3d", {"2dp0_x", "2dp0_y"}},
-        //     {"3d", {"2dp1_x", "2dp1_y"}},
-        //     {"3d", {"2dp2_x", "2dp2_y"}}
-        // };
         std::string scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
 
        public:
@@ -55,7 +50,7 @@ namespace WireCell::PointCloud::Facade {
         const Grouping* grouping() const;
 
         // order is synchronized with children()
-        std::vector<WireCell::WirePlaneId> wpids() const;
+        std::vector<WireCell::WirePlaneId> wpids_blob() const;
 
         // return the wpid given a point ...
         WirePlaneId wpid(const geo_point_t& point) const;
@@ -114,6 +109,8 @@ namespace WireCell::PointCloud::Facade {
         // order and different that sort_blobs() order.
         std::vector<Blob*> kd_blobs();
         std::vector<const Blob*> kd_blobs() const;
+        // Return the number of blobs from the k-d tree
+        size_t nkd_blobs() const;
 
         // Return the blob with the point at the given k-d tree point index.
         Blob* blob_with_point(size_t point_index);
@@ -188,7 +185,7 @@ namespace WireCell::PointCloud::Facade {
 
         // Number of points according to sum of Blob::nbpoints()
         // WCP: int get_num_points()
-        size_t nbpoints() const;
+        // size_t nbpoints() const;
 
         // Return the number of points within radius of the point.  Note, radius
         // is a LINEAR distance through the L2 metric is used internally.

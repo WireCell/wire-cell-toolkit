@@ -594,13 +594,9 @@ namespace WireCell::PointCloud::Facade {
     std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
                                                          std::vector<geo_point_t> &boundary_points,
                                                          std::vector<geo_point_t> &independent_points,
-                                                         std::map<int, std::pair<double, double>> &dead_u_index,
-                                                         std::map<int, std::pair<double, double>> &dead_v_index,
-                                                         std::map<int, std::pair<double, double>> &dead_w_index,
-                                                         double length, geo_point_t dir_cosmic, geo_point_t dir_beam,
-                                                         geo_point_t drift_dir, double angle_u, double angle_v, double angle_w);
+                                                         double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv);
 
-    std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
+    std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm);
 
 
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {

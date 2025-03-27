@@ -653,7 +653,7 @@ double WireCell::PointCloud::Facade::Find_Closest_Points(
       std::swap(length_1, length_2);
   }
 
-  if (!cluster1->nchildren() || !cluster2->nchildren()) {
+  if (!cluster1->nkd_blobs() || !cluster2->nkd_blobs()) {
       raise<ValueError>("Find_Closest_Points: given empty cluster");
   }
 

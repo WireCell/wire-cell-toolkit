@@ -130,7 +130,7 @@ void Grouping::fill_cache(GroupingCache& gc) const
     {
         for (size_t iclus = 0; iclus != children().size(); iclus++) {
             const Cluster* cluster = children().at(iclus);
-            const auto& wpids = cluster->wpids();
+            const auto& wpids = cluster->wpids_blob();
             gc.wpids.insert(wpids.begin(), wpids.end());
         }
     }
