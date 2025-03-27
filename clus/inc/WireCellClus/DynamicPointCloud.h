@@ -31,8 +31,8 @@ namespace WireCell::PointCloud::Facade {
             // this could be a duplicated from Blob
             // if wpid then x/y_2d length must be 3
             int wpid;
-            Cluster *cluster;
-            Blob *blob;
+            const Cluster *cluster;
+            const Blob *blob;
             std::vector<double> x_2d;
             std::vector<double> y_2d;
             std::vector<int> wind;      // length 3 or 0
@@ -82,15 +82,13 @@ namespace WireCell::PointCloud::Facade {
         std::unordered_map<int, std::unordered_map<size_t, size_t>> m_kd2d_index_g2l;
     };
 
-    // std::vector<DynamicPointCloud::DPCPoint>
-    // make_points_cluster(const Cluster *cluster,
-    //                     const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
-    //                     const double step = 0.6 * units::cm);  // flag 1 points, flag 2 scheleton
+    std::vector<DynamicPointCloud::DPCPoint>
+    make_points_cluster(const Cluster *cluster,
+                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
 
     // std::vector<DynamicPointCloud::DPCPoint> make_points_cluster_skeleton(
-    //     const Cluster *cluster,
-    //     const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
-    //     const double step = 0.6 * units::cm);  // flag 1 points, flag 2 scheleton
+    //     const Cluster *cluster, const double step = 0.6 * units::cm,
+    //     const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
 
     // /// @brief add points from p_test along dir with range and step
     // /// @attention: the index_uvw is hacked to store the distance cut

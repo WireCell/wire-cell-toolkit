@@ -228,3 +228,52 @@ geo_point_t DynamicPointCloud::vhough_transform(const geo_point_t &origin, const
     const auto [th, phi] = hough_transform(origin, dis);
     return {sin(th) * cos(phi), sin(th) * sin(phi), cos(th)};
 }
+
+std::vector<DynamicPointCloud::DPCPoint>
+    make_points_cluster(const Cluster *cluster,
+                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params) {
+    std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+    
+    if (!cluster) {
+        SPDLOG_WARN("make_points_cluster: null cluster return empty points");
+        return dpc_points;
+    }
+    // use this so we can add a scope in the future
+    const auto& points_3d = cluster->points();
+    const auto& winds = cluster->wire_indices();
+    const auto& wpids = cluster->points_property<int>("wpid");
+
+    dpc_points.resize(cluster->npoints());
+    for (size_t ipt=0; ipt<cluster->npoints(); ++ipt) {
+        const auto x = points_3d[0][ipt];
+        const auto y = points_3d[1][ipt];
+        const auto z = points_3d[2][ipt];
+        const auto& wpid = WirePlaneId(wpids[ipt]);
+        if (wpid_params.find(wpid) == wpid_params.end()) {
+            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
+        }
+        const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid);
+        const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+        
+        DynamicPointCloud::DPCPoint point;
+        point.x = x;
+        point.y = y;
+        point.z = z;
+        point.wpid = wpid;
+        point.cluster = cluster;
+        point.blob = cluster->blob_with_point(ipt);
+        point.x_2d.resize(3);
+        point.y_2d.resize(3);
+        point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
+        point.dist_cut = {-1e12, -1e12, -1e12};
+        
+        for (size_t pindex = 0; pindex < 3; ++pindex) {
+            point.x_2d[pindex] = x;
+            point.y_2d[pindex] = cos(angle_uvw[pindex]) * z - sin(angle_uvw[pindex]) * y;
+        }
+        
+        dpc_points[ipt] = std::move(point);
+    }
+
+    return dpc_points;
+}
