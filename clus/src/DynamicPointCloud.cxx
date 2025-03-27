@@ -359,3 +359,56 @@ make_points_cluster_skeleton(const Cluster *cluster,
     }
     return dpc_points;
 }
+
+std::vector<DynamicPointCloud::DPCPoint> make_points_linear_extrapolation(
+    const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
+    const double step, const double angle, const IDetectorVolumes::pointer dv,
+    const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
+{
+    std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+
+    if (!cluster) {
+        SPDLOG_WARN("make_points_linear_extrapolation: null cluster return empty points");
+        return dpc_points;
+    }
+
+    const auto &points_3d = cluster->points();
+    const auto &winds = cluster->wire_indices();
+    const auto &wpids = cluster->points_property<int>("wpid");
+
+    geo_point_t dir = dir_unmorm.norm();
+
+    int num_points = int(range / (step)) + 1;
+    double dis_seg = range / num_points;
+
+    dpc_points.resize(num_points);
+    for (int k = 0; k != num_points; k++) {
+        double dis_cut =
+            std::min(std::max(2.4 * units::cm, k * dis_seg * sin(angle / 180. * 3.1415926)), 13 * units::cm);
+        DynamicPointCloud::DPCPoint point;
+        point.cluster = cluster;
+        point.blob = nullptr;
+        point.x = p_test.x() + k * dir.x() * dis_seg;
+        point.y = p_test.y() + k * dir.y() * dis_seg;
+        point.z = p_test.z() + k * dir.z() * dis_seg;
+        point.x_2d.resize(3);
+        point.y_2d.resize(3);
+        point.wind = {-1e12, -1e12, -1e12};
+        point.dist_cut = {int(dis_cut), int(dis_cut), int(dis_cut)};
+
+        /// HACKING: need to figure out how to assign wpid
+        const auto &wpid_HACKING = WirePlaneId(kAllLayers, 0, 0);
+        if (wpid_params.find(wpid_HACKING) == wpid_params.end()) {
+            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_HACKING.name());
+        }
+        const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_HACKING);
+        const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+        for (size_t pindex = 0; pindex < 3; ++pindex) {
+            point.x_2d[pindex] = point.x;
+            point.y_2d[pindex] = cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y;
+        }
+        dpc_points[k] = std::move(point);
+    }
+
+    return dpc_points;
+}

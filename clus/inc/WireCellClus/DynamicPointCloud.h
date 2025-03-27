@@ -93,10 +93,10 @@ namespace WireCell::PointCloud::Facade {
 
     /// @brief add points from p_test along dir with range and step
     /// @attention: the index_uvw is hacked to store the distance cut
-    // std::vector<DynamicPointCloud::DPCPoint> make_points_linear_extrapolation(
-    //     const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
-    //     const double step, const double angle, const IDetectorVolumes::pointer dv,
-    //     const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
+    std::vector<DynamicPointCloud::DPCPoint> make_points_linear_extrapolation(
+        const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
+        const double step, const double angle, const IDetectorVolumes::pointer dv,
+        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
 
 }  // namespace WireCell::PointCloud::Facade
 
