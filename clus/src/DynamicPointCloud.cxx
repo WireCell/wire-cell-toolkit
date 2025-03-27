@@ -67,10 +67,11 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
         const auto &pt = m_points.at(ipt);
         kd3d.append({{pt.x}, {pt.y}, {pt.z}});
         WirePlaneId wpid_volume(pt.wpid);
-        if (!wpid_volume or wpid_volume.layer() != kAllLayers) {
-            SPDLOG_TRACE("DynamicPointCloud: !wpid {} skipping 2D KD", wpid_volume.name());
-            continue;
-        }
+        /// FIXME: skip this checking for now
+        // if (!wpid_volume or wpid_volume.layer() != kAllLayers) {
+        //     SPDLOG_DEBUG("DynamicPointCloud: !wpid {} skipping 2D KD", wpid_volume.name());
+        //     continue;
+        // }
         if (pt.x_2d.size() != 3 or pt.y_2d.size() != 3) {
             raise<RuntimeError>("DynamicPointCloud: unexpected 2D projection size x_2d %d y_2d %d", pt.x_2d.size(),
                                 pt.y_2d.size());
@@ -83,25 +84,28 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
             m_kd2d_index_g2l[wpid_plane][ipt] = kd2d.npoints() - 1;
         }
     }
+    // SPDLOG_DEBUG(
+    //     "DynamicPointCloud: added {} points m_kd2d.size() {} m_kd2d_index_l2g.size() {} m_kd2d_index_g2l.size() {}",
+    //     m_points.size(), m_kd2d.size(), m_kd2d_index_l2g.size(), m_kd2d_index_g2l.size());
 }
 
 std::vector<std::tuple<double, const Cluster *, size_t>>
 DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius, const int plane, const int face,
                                       const int apa) const
 {
-    WirePlaneId wpid(iplane2layer[plane], face, apa);
-    auto iter = m_kd2d.find(wpid);
-    if (iter == m_kd2d.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing 2D KD for wpid %s", wpid.name());
-    }
-    auto &kd2d = *iter->second;
+    // WirePlaneId wpid(iplane2layer[plane], face, apa);
+    // auto iter = m_kd2d.find(wpid);
+    // if (iter == m_kd2d.end()) {
+    //     raise<RuntimeError>("DynamicPointCloud: missing 2D KD for wpid %s", wpid.name());
+    // }
+    auto &kd2d = this->kd2d(plane, face, apa);
     auto &l2g = this->kd2d_l2g(plane, face, apa);
     auto &g2l = this->kd2d_g2l(plane, face, apa);
-
-    if (m_wpid_params.find(wpid) == m_wpid_params.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid.name());
+    WirePlaneId wpid_volume(kAllLayers, face, apa);
+    if (m_wpid_params.find(wpid_volume) == m_wpid_params.end()) {
+        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid_volume.name());
     }
-    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(wpid);
+    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(wpid_volume);
     double angle_uvw[3] = {angle_u, angle_v, angle_w};
 
     // Prepare query point
@@ -123,19 +127,14 @@ DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius,
 std::tuple<double, const Cluster *, size_t>
 DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int plane, const int face, const int apa) const
 {
-    WirePlaneId wpid(iplane2layer[plane], face, apa);
-    auto iter = m_kd2d.find(wpid);
-    if (iter == m_kd2d.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing 2D KD for wpid %s", wpid.name());
-    }
-    auto &kd2d = *iter->second;
+    auto &kd2d = this->kd2d(plane, face, apa);
     auto &l2g = this->kd2d_l2g(plane, face, apa);
     auto &g2l = this->kd2d_g2l(plane, face, apa);
-
-    if (m_wpid_params.find(wpid) == m_wpid_params.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid.name());
+    WirePlaneId wpid_volume(kAllLayers, face, apa);
+    if (m_wpid_params.find(wpid_volume) == m_wpid_params.end()) {
+        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid_volume.name());
     }
-    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(wpid);
+    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(wpid_volume);
     double angle_uvw[3] = {angle_u, angle_v, angle_w};
 
     // Prepare query point
@@ -236,9 +235,8 @@ geo_point_t DynamicPointCloud::vhough_transform(const geo_point_t &origin, const
     return {sin(th) * cos(phi), sin(th) * sin(phi), cos(th)};
 }
 
-std::vector<DynamicPointCloud::DPCPoint>
-make_points_cluster(const Cluster *cluster,
-                    const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
+std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster(
+    const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
 {
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
 
@@ -253,9 +251,7 @@ make_points_cluster(const Cluster *cluster,
 
     dpc_points.resize(cluster->npoints());
     for (size_t ipt = 0; ipt < cluster->npoints(); ++ipt) {
-        const auto x = points_3d[0][ipt];
-        const auto y = points_3d[1][ipt];
-        const auto z = points_3d[2][ipt];
+        geo_point_t pt = cluster->point3d(ipt);
         const auto &wpid = WirePlaneId(wpids[ipt]);
         if (wpid_params.find(wpid) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
@@ -264,9 +260,9 @@ make_points_cluster(const Cluster *cluster,
         const double angle_uvw[3] = {angle_u, angle_v, angle_w};
 
         DynamicPointCloud::DPCPoint point;
-        point.x = x;
-        point.y = y;
-        point.z = z;
+        point.x = pt.x();
+        point.y = pt.y();
+        point.z = pt.z();
         point.wpid = wpid;
         point.cluster = cluster;
         point.blob = cluster->blob_with_point(ipt);
@@ -276,8 +272,8 @@ make_points_cluster(const Cluster *cluster,
         point.dist_cut = {-1e12, -1e12, -1e12};
 
         for (size_t pindex = 0; pindex < 3; ++pindex) {
-            point.x_2d[pindex] = x;
-            point.y_2d[pindex] = cos(angle_uvw[pindex]) * z - sin(angle_uvw[pindex]) * y;
+            point.x_2d[pindex] = point.x;
+            point.y_2d[pindex] = cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y;
         }
 
         dpc_points[ipt] = std::move(point);

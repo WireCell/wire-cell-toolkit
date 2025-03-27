@@ -20,6 +20,7 @@ namespace WireCell::PointCloud::Facade {
     using geo_vector_t = WireCell::Vector;
     using geo_point2d_t = D3Vector<double>;
     using geo_vector2d_t = D3Vector<double>;
+    // using wpid_params_t = std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>;
 
     class Cluster;
     class Blob;
@@ -40,7 +41,7 @@ namespace WireCell::PointCloud::Facade {
         };
         using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
 
-        DynamicPointCloud(const std::map<int, std::tuple<geo_point_t, double, double, double>> &wpid_params)
+        DynamicPointCloud(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
           : m_wpid_params(wpid_params)
         {
         }
@@ -74,7 +75,7 @@ namespace WireCell::PointCloud::Facade {
         // for 3D only consider all apa for now
         mutable std::unique_ptr<nfkd_t> m_kd3d{nullptr};
 
-        std::map<int, std::tuple<geo_point_t, double, double, double>> m_wpid_params;
+        std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> m_wpid_params;
 
         // for 2D, wpid to kd
         mutable std::map<int, std::unique_ptr<nfkd_t>> m_kd2d;
