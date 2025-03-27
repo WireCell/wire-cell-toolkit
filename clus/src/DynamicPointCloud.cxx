@@ -1,6 +1,6 @@
 #include "WireCellClus/DynamicPointCloud.h"
-#include "WireCellClus/Facade_Util.h"
 #include "WireCellClus/Facade.h"
+#include "WireCellClus/Facade_Util.h"
 #include "WireCellUtil/Logging.h"
 
 #include <boost/histogram.hpp>
@@ -16,14 +16,16 @@ using spdlog::debug;
 #define LogDebug(x)
 #endif
 
-DynamicPointCloud::nfkd_t& DynamicPointCloud::kd3d() const {
+DynamicPointCloud::nfkd_t &DynamicPointCloud::kd3d() const
+{
     if (!m_kd3d) {
         m_kd3d = std::make_unique<nfkd_t>(3);
     }
     return *m_kd3d;
 }
 
-DynamicPointCloud::nfkd_t& DynamicPointCloud::kd2d(const int plane, const int face, const int apa) const {
+DynamicPointCloud::nfkd_t &DynamicPointCloud::kd2d(const int plane, const int face, const int apa) const
+{
     WirePlaneId wpid(iplane2layer[plane], face, apa);
     auto iter = m_kd2d.find(wpid);
     if (iter == m_kd2d.end()) {
@@ -32,7 +34,9 @@ DynamicPointCloud::nfkd_t& DynamicPointCloud::kd2d(const int plane, const int fa
     return *m_kd2d[wpid];
 }
 
-const std::unordered_map<size_t, size_t>& DynamicPointCloud::kd2d_l2g(const int plane, const int face, const int apa) const {
+const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_l2g(const int plane, const int face,
+                                                                      const int apa) const
+{
     WirePlaneId wpid(iplane2layer[plane], face, apa);
     auto iter = m_kd2d_index_l2g.find(wpid);
     if (iter == m_kd2d_index_l2g.end()) {
@@ -41,7 +45,9 @@ const std::unordered_map<size_t, size_t>& DynamicPointCloud::kd2d_l2g(const int 
     return iter->second;
 }
 
-const std::unordered_map<size_t, size_t>& DynamicPointCloud::kd2d_g2l(const int plane, const int face, const int apa) const {
+const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_g2l(const int plane, const int face,
+                                                                      const int apa) const
+{
     WirePlaneId wpid(iplane2layer[plane], face, apa);
     auto iter = m_kd2d_index_g2l.find(wpid);
     if (iter == m_kd2d_index_g2l.end()) {
@@ -50,8 +56,8 @@ const std::unordered_map<size_t, size_t>& DynamicPointCloud::kd2d_g2l(const int 
     return iter->second;
 }
 
-
-void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
+void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
+{
     // move data to self
     m_points = std::move(points);
 
@@ -66,7 +72,8 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
             continue;
         }
         if (pt.x_2d.size() != 3 or pt.y_2d.size() != 3) {
-            raise<RuntimeError>("DynamicPointCloud: unexpected 2D projection size x_2d %d y_2d %d", pt.x_2d.size(), pt.y_2d.size());
+            raise<RuntimeError>("DynamicPointCloud: unexpected 2D projection size x_2d %d y_2d %d", pt.x_2d.size(),
+                                pt.y_2d.size());
         }
         for (size_t pindex = 0; pindex < 3; ++pindex) {
             auto &kd2d = this->kd2d(pindex, wpid_volume.face(), wpid_volume.apa());
@@ -78,8 +85,10 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     }
 }
 
-std::vector<std::tuple<double, const Cluster *, size_t>> 
-DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius, const int plane, const int face, const int apa) const {
+std::vector<std::tuple<double, const Cluster *, size_t>>
+DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius, const int plane, const int face,
+                                      const int apa) const
+{
     WirePlaneId wpid(iplane2layer[plane], face, apa);
     auto iter = m_kd2d.find(wpid);
     if (iter == m_kd2d.end()) {
@@ -97,22 +106,23 @@ DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius,
 
     // Prepare query point
     std::vector<double> query = {p.x(), cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y()};
-    
+
     // Perform radius search
     auto results = kd2d.radius(radius * radius, query);
-    
+
     std::vector<std::tuple<double, const Cluster *, size_t>> return_results;
-    for (const auto& [local_idx, dist_squared] : results) {
+    for (const auto &[local_idx, dist_squared] : results) {
         size_t global_idx = l2g.at(local_idx);
-        const auto& pt = m_points[global_idx];
+        const auto &pt = m_points[global_idx];
         return_results.push_back(std::make_tuple(sqrt(dist_squared), pt.cluster, global_idx));
     }
-    
+
     return return_results;
 }
 
-std::tuple<double, const Cluster *, size_t> 
-DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int plane, const int face, const int apa) const {
+std::tuple<double, const Cluster *, size_t>
+DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int plane, const int face, const int apa) const
+{
     WirePlaneId wpid(iplane2layer[plane], face, apa);
     auto iter = m_kd2d.find(wpid);
     if (iter == m_kd2d.end()) {
@@ -130,13 +140,13 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
 
     // Prepare query point
     std::vector<double> query = {p.x(), cos(angle_uvw[plane]) * p.z() - sin(angle_uvw[plane]) * p.y()};
-    
+
     // Perform radius search
     auto results = kd2d.knn(1, query);
-    
+
     if (results.size() == 1) {
         size_t global_idx = l2g.at(results[0].first);
-        const auto& pt = m_points[global_idx];
+        const auto &pt = m_points[global_idx];
         return std::make_tuple(sqrt(results[0].second), pt.cluster, global_idx);
     }
     else {
@@ -146,69 +156,66 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
 
 std::pair<double, double> DynamicPointCloud::hough_transform(const geo_point_t &origin, const double dis) const
 {
-    
+
     auto &kd3d = this->kd3d();
-    
+
     // Find points within radius
     std::vector<size_t> point_indices;
-    std::vector<const Blob*> blobs;
+    std::vector<const Blob *> blobs;
     std::vector<geo_point_t> pts;
-    
+
     // Create query point
     std::vector<double> query = {origin.x(), origin.y(), origin.z()};
-    
+
     // Perform radius search
     auto results = kd3d.radius(dis * dis, query);
-    
-    for (const auto& [idx, _] : results) {
-        const auto& pt = m_points[idx];
+
+    for (const auto &[idx, _] : results) {
+        const auto &pt = m_points[idx];
         pts.push_back({pt.x, pt.y, pt.z});
         blobs.push_back(pt.blob);
     }
-    
+
     namespace bh = boost::histogram;
     namespace bha = boost::histogram::algorithm;
-    
+
     constexpr double pi = 3.141592653589793;
-    
+
     // Parameter axis 1 is theta angle
     const int nbins1 = 180;
-    auto theta_param = [](const Vector& dir) {
+    auto theta_param = [](const Vector &dir) {
         const Vector Z(0, 0, 1);
         return acos(Z.dot(dir));
     };
     double min1 = 0, max1 = pi;
-    
+
     // Parameter axis 2 is phi angle
     const int nbins2 = 360;
     const double min2 = -pi;
     const double max2 = +pi;
-    auto phi_param = [](const Vector& dir) {
+    auto phi_param = [](const Vector &dir) {
         const Vector X(1, 0, 0);
         const Vector Y(0, 1, 0);
         return atan2(Y.dot(dir), X.dot(dir));
     };
-    
-    auto hist = bh::make_histogram(
-        bh::axis::regular<>(nbins1, min1, max1), 
-        bh::axis::regular<>(nbins2, min2, max2)
-    );
-    
+
+    auto hist = bh::make_histogram(bh::axis::regular<>(nbins1, min1, max1), bh::axis::regular<>(nbins2, min2, max2));
+
     for (size_t ind = 0; ind < blobs.size(); ++ind) {
-        const auto* blob = blobs[ind];
+        const auto *blob = blobs[ind];
         auto charge = blob ? blob->charge() : 1.0;
-        
+
         if (charge <= 0) continue;
-        
+
         const auto npoints = blob ? blob->npoints() : 1;
-        const auto& pt = pts[ind];
-        
+        const auto &pt = pts[ind];
+
         const Vector dir = (pt - origin).norm();
         const double r = (pt - origin).magnitude();
-        
+
         const double p1 = theta_param(dir);
         const double p2 = phi_param(dir);
-        
+
         if (r < 10 * units::cm) {
             hist(p1, p2, bh::weight(charge / npoints));
         }
@@ -216,10 +223,10 @@ std::pair<double, double> DynamicPointCloud::hough_transform(const geo_point_t &
             hist(p1, p2, bh::weight(charge / npoints * pow(10 * units::cm / r, 2)));
         }
     }
-    
+
     auto indexed = bh::indexed(hist);
     auto it = std::max_element(indexed.begin(), indexed.end());
-    const auto& cell = *it;
+    const auto &cell = *it;
     return {cell.bin(0).center(), cell.bin(1).center()};
 }
 
@@ -230,31 +237,32 @@ geo_point_t DynamicPointCloud::vhough_transform(const geo_point_t &origin, const
 }
 
 std::vector<DynamicPointCloud::DPCPoint>
-    make_points_cluster(const Cluster *cluster,
-                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params) {
+make_points_cluster(const Cluster *cluster,
+                    const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
+{
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
-    
+
     if (!cluster) {
         SPDLOG_WARN("make_points_cluster: null cluster return empty points");
         return dpc_points;
     }
     // use this so we can add a scope in the future
-    const auto& points_3d = cluster->points();
-    const auto& winds = cluster->wire_indices();
-    const auto& wpids = cluster->points_property<int>("wpid");
+    const auto &points_3d = cluster->points();
+    const auto &winds = cluster->wire_indices();
+    const auto &wpids = cluster->points_property<int>("wpid");
 
     dpc_points.resize(cluster->npoints());
-    for (size_t ipt=0; ipt<cluster->npoints(); ++ipt) {
+    for (size_t ipt = 0; ipt < cluster->npoints(); ++ipt) {
         const auto x = points_3d[0][ipt];
         const auto y = points_3d[1][ipt];
         const auto z = points_3d[2][ipt];
-        const auto& wpid = WirePlaneId(wpids[ipt]);
+        const auto &wpid = WirePlaneId(wpids[ipt]);
         if (wpid_params.find(wpid) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
         }
         const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid);
         const double angle_uvw[3] = {angle_u, angle_v, angle_w};
-        
+
         DynamicPointCloud::DPCPoint point;
         point.x = x;
         point.y = y;
@@ -266,14 +274,88 @@ std::vector<DynamicPointCloud::DPCPoint>
         point.y_2d.resize(3);
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
         point.dist_cut = {-1e12, -1e12, -1e12};
-        
+
         for (size_t pindex = 0; pindex < 3; ++pindex) {
             point.x_2d[pindex] = x;
             point.y_2d[pindex] = cos(angle_uvw[pindex]) * z - sin(angle_uvw[pindex]) * y;
         }
-        
+
         dpc_points[ipt] = std::move(point);
     }
 
+    return dpc_points;
+}
+
+std::vector<DynamicPointCloud::DPCPoint>
+make_points_cluster_skeleton(const Cluster *cluster,
+                             const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
+                             const double step)
+{
+    std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+
+    if (!cluster) {
+        SPDLOG_WARN("make_points_cluster_skeleton: null cluster return empty points");
+        return dpc_points;
+    }
+
+    const auto &points_3d = cluster->points();
+    const auto &winds = cluster->wire_indices();
+    const auto &wpids = cluster->points_property<int>("wpid");
+
+    // point_index of the skeleton points
+    const std::list<size_t> &path_wcps = cluster->get_path_wcps();
+    geo_point_t prev_wcp = cluster->point3d(path_wcps.front());
+    for (auto it = path_wcps.begin(); it != path_wcps.end(); it++) {
+        geo_point_t test_point = cluster->point3d(*it);
+        double dis = (test_point - prev_wcp).magnitude();
+        const auto &wpid_test_point = WirePlaneId(wpids[*it]);
+
+        if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
+            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
+        }
+        const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
+        const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+
+        if (dis <= step) {
+            DynamicPointCloud::DPCPoint point;
+            point.wpid = WirePlaneId(wpid_test_point);
+            point.cluster = cluster;
+            point.blob = nullptr;
+            point.x_2d.resize(3);
+            point.y_2d.resize(3);
+            point.wind = {-1e12, -1e12, -1e12};
+            point.dist_cut = {2.4 * units::cm, 2.4 * units::cm, 2.4 * units::cm};
+            point.x = test_point.x();
+            point.y = test_point.y();
+            point.z = test_point.z();
+            for (size_t pindex = 0; pindex < 3; ++pindex) {
+                point.x_2d[pindex] = test_point.x();
+                point.y_2d[pindex] = cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y();
+            }
+            dpc_points.push_back(std::move(point));
+        }
+        else {
+            int num_points = int(dis / (2.4 * units::cm)) + 1;
+            for (int k = 0; k != num_points; k++) {
+                DynamicPointCloud::DPCPoint point;
+                point.x = prev_wcp.x() + (k + 1.) / num_points * (test_point.x() - prev_wcp.x());
+                point.y = prev_wcp.y() + (k + 1.) / num_points * (test_point.y() - prev_wcp.y());
+                point.z = prev_wcp.z() + (k + 1.) / num_points * (test_point.z() - prev_wcp.z());
+                /// HACKING: currently need to test point wpid, need to revisit
+                point.wpid = WirePlaneId(wpid_test_point);
+                point.cluster = cluster;
+                point.blob = nullptr;
+                point.x_2d.resize(3);
+                point.y_2d.resize(3);
+                point.wind = {-1e12, -1e12, -1e12};
+                point.dist_cut = {2.4 * units::cm, 2.4 * units::cm, 2.4 * units::cm};
+                for (size_t pindex = 0; pindex < 3; ++pindex) {
+                    point.x_2d[pindex] = point.x;
+                    point.y_2d[pindex] = cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y;
+                }
+                dpc_points.push_back(std::move(point));
+            }
+        }
+    }
     return dpc_points;
 }
