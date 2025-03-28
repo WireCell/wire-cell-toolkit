@@ -27,18 +27,19 @@ DynamicPointCloud::nfkd_t &DynamicPointCloud::kd3d() const
 DynamicPointCloud::nfkd_t &DynamicPointCloud::kd2d(const int plane, const int face, const int apa) const
 {
     WirePlaneId wpid(iplane2layer[plane], face, apa);
-    auto iter = m_kd2d.find(wpid);
+    // SPDLOG_DEBUG("DynamicPointCloud: kd2d {} {} {} wpid {}", plane, face, apa, wpid.name());
+    auto iter = m_kd2d.find(wpid.ident());
     if (iter == m_kd2d.end()) {
-        m_kd2d[wpid] = std::make_unique<nfkd_t>(2);
+        m_kd2d[wpid.ident()] = std::make_unique<nfkd_t>(2);
     }
-    return *m_kd2d[wpid];
+    return *m_kd2d[wpid.ident()];
 }
 
 const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_l2g(const int plane, const int face,
                                                                       const int apa) const
 {
     WirePlaneId wpid(iplane2layer[plane], face, apa);
-    auto iter = m_kd2d_index_l2g.find(wpid);
+    auto iter = m_kd2d_index_l2g.find(wpid.ident());
     if (iter == m_kd2d_index_l2g.end()) {
         raise<RuntimeError>("DynamicPointCloud: missing 2D index l2g for wpid %s", wpid.name());
     }
@@ -49,7 +50,7 @@ const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_g2l(const int 
                                                                       const int apa) const
 {
     WirePlaneId wpid(iplane2layer[plane], face, apa);
-    auto iter = m_kd2d_index_g2l.find(wpid);
+    auto iter = m_kd2d_index_g2l.find(wpid.ident());
     if (iter == m_kd2d_index_g2l.end()) {
         raise<RuntimeError>("DynamicPointCloud: missing 2D index g2l for wpid %s", wpid.name());
     }
@@ -58,8 +59,11 @@ const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_g2l(const int 
 
 void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
 {
-    // move data to self
-    m_points = std::move(points);
+    // append points to existing collection
+    size_t original_size = m_points.size();
+    m_points.insert(m_points.end(), 
+                   std::make_move_iterator(points.begin()),
+                   std::make_move_iterator(points.end()));
 
     // process KD trees
     auto &kd3d = this->kd3d();
@@ -80,13 +84,15 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
             auto &kd2d = this->kd2d(pindex, wpid_volume.face(), wpid_volume.apa());
             kd2d.append({{pt.x_2d[pindex]}, {pt.y_2d[pindex]}});
             WirePlaneId wpid_plane(iplane2layer[pindex], wpid_volume.face(), wpid_volume.apa());
-            m_kd2d_index_l2g[wpid_plane][kd2d.npoints() - 1] = ipt;
-            m_kd2d_index_g2l[wpid_plane][ipt] = kd2d.npoints() - 1;
+            m_kd2d_index_l2g[wpid_plane.ident()][kd2d.npoints() - 1] = ipt;
+            m_kd2d_index_g2l[wpid_plane.ident()][ipt] = kd2d.npoints() - 1;
         }
     }
     // SPDLOG_DEBUG(
     //     "DynamicPointCloud: added {} points m_kd2d.size() {} m_kd2d_index_l2g.size() {} m_kd2d_index_g2l.size() {}",
     //     m_points.size(), m_kd2d.size(), m_kd2d_index_l2g.size(), m_kd2d_index_g2l.size());
+    // SPDLOG_DEBUG("DynamicPointCloud: added {} points, kd3d.npoints() {}, kd2d(0,0,0).npoints() {}", m_points.size(),
+    //              this->kd3d().npoints(), this->kd2d(0, 0, 0).npoints());
 }
 
 std::vector<std::tuple<double, const Cluster *, size_t>>

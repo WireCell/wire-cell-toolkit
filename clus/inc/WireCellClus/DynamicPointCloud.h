@@ -48,6 +48,7 @@ namespace WireCell::PointCloud::Facade {
         ~DynamicPointCloud() = default;
 
         void add_points(const std::vector<DPCPoint> &points);
+        const std::vector<DPCPoint>& get_points() const { return m_points; }
 
         DynamicPointCloud::nfkd_t &kd3d() const;
         DynamicPointCloud::nfkd_t &kd2d(const int plane, const int face, const int apa) const;
