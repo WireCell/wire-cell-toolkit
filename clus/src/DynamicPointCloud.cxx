@@ -59,15 +59,18 @@ const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_g2l(const int 
 
 void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
 {
-    // append points to existing collection
+    // Preallocate memory
     size_t original_size = m_points.size();
+    m_points.reserve(original_size + points.size());
+    
+    // Move the points instead of copying
     m_points.insert(m_points.end(), 
                    std::make_move_iterator(points.begin()),
                    std::make_move_iterator(points.end()));
 
     // process KD trees
     auto &kd3d = this->kd3d();
-    for (size_t ipt = 0; ipt < m_points.size(); ++ipt) {
+    for (size_t ipt = original_size; ipt < m_points.size(); ++ipt) {
         const auto &pt = m_points.at(ipt);
         kd3d.append({{pt.x}, {pt.y}, {pt.z}});
         WirePlaneId wpid_volume(pt.wpid);

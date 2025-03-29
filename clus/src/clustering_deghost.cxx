@@ -85,7 +85,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     double angle_u = std::get<1>(params);
     double angle_v = std::get<2>(params);
     double angle_w = std::get<3>(params);    
-    auto global_point_cloud_legacy = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    // auto global_point_cloud_legacy = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
     auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     // replace with the new DynamicPointCloud class
@@ -105,7 +105,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         if (i == 0) {
             // fill anyway ...
             // live_clusters.at(i)->Create_point_cloud();
-            global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
+            // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
             global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
@@ -156,19 +156,19 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     
 
                     if (!flag_dead) {
-                        std::tuple<double, const Cluster *, size_t> results_legacy =
-                            global_point_cloud_legacy->get_closest_2d_point_info(test_point, 0); // HACKING face and apa to be 0
+                        // std::tuple<double, const Cluster *, size_t> results_legacy =
+                        //     global_point_cloud_legacy->get_closest_2d_point_info(test_point, 0); // HACKING face and apa to be 0
                         std::tuple<double, const Cluster *, size_t> results =
                             global_point_cloud->get_closest_2d_point_info(test_point, 0, 0, 0); // HACKING face and apa to be 0
 
                         if (cluster->nchildren()==801 && j==0) {
                             std::cout
                             << " global_point_cloud.get_points().size() " << global_point_cloud->get_points().size()
-                            << " global_point_cloud_legacy.get_num_points() " << global_point_cloud_legacy->get_num_points()
+                            // << " global_point_cloud_legacy.get_num_points() " << global_point_cloud_legacy->get_num_points()
                             << std::endl;
                             std::cout  << j << " AU " << test_point
                             << " results " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << " "  << std::get<2>(results)
-                            << " results_legacy " << std::get<0>(results_legacy) << " " << std::get<1>(results_legacy)->get_length()/units::cm << " " << std::get<2>(results_legacy)
+                            // << " results_legacy " << std::get<0>(results_legacy) << " " << std::get<1>(results_legacy)->get_length()/units::cm << " " << std::get<2>(results_legacy)
                             << std::endl;
                         }
 
@@ -639,7 +639,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
 
                 if (flag_save) {
                     // live_clusters.at(i)->Create_point_cloud();
-                    global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
+                    // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                     global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
                         live_clusters.at(i)->construct_skeleton(use_ctpc);
@@ -649,7 +649,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
             }
             else {
                 // live_clusters.at(i)->Create_point_cloud();
-                global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
+                // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                 global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
                     live_clusters.at(i)->construct_skeleton(use_ctpc);
