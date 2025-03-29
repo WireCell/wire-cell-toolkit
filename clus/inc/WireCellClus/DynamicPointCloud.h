@@ -34,8 +34,8 @@ namespace WireCell::PointCloud::Facade {
             int wpid;
             const Cluster *cluster;
             const Blob *blob;
-            std::vector<double> x_2d;
-            std::vector<double> y_2d;
+            std::vector<std::vector<double>> x_2d;
+            std::vector<std::vector<double>> y_2d;
             std::vector<int> wind;      // length 3 or 0
             std::vector<int> dist_cut;  // length 3 or 0
         };
@@ -86,11 +86,11 @@ namespace WireCell::PointCloud::Facade {
 
     std::vector<DynamicPointCloud::DPCPoint>
     make_points_cluster(const Cluster *cluster,
-                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
+                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false);
 
     std::vector<DynamicPointCloud::DPCPoint> make_points_cluster_skeleton(
         const Cluster *cluster, const IDetectorVolumes::pointer dv,
-        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
+        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false,
         const double step = 0.6 * units::cm);
 
     /// @brief add points from p_test along dir with range and step

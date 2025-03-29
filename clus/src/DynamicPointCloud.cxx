@@ -132,9 +132,13 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
             }
             
             // Add 2D point to plane data
-            planes_pts[key][0].push_back(pt.x_2d[pindex]);
-            planes_pts[key][1].push_back(pt.y_2d[pindex]);
-            planes_global_indices[key].push_back(global_idx);
+            for (size_t j = 0; j < pt.x_2d[pindex].size(); ++j) {
+                planes_pts[key][0].push_back(pt.x_2d[pindex][j]);
+                planes_pts[key][1].push_back(pt.y_2d[pindex][j]);
+                planes_global_indices[key].push_back(global_idx);
+            }
+            // planes_pts[key][0].push_back(pt.x_2d[pindex]);
+            // planes_pts[key][1].push_back(pt.y_2d[pindex]);
         }
     }
     
@@ -370,7 +374,7 @@ geo_point_t DynamicPointCloud::vhough_transform(const geo_point_t &origin, const
 
 
 std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster(
-    const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
+    const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap)
 {
     if (!cluster) {
         SPDLOG_WARN("make_points_cluster: null cluster return empty points");
@@ -413,12 +417,13 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
         point.blob = cluster->blob_with_point(ipt);
         
         // Pre-allocate vectors with correct size
-        point.x_2d = {point.x, point.x, point.x};
-        point.y_2d = {
-            cos(angle_uvw[0]) * point.z - sin(angle_uvw[0]) * point.y,
-            cos(angle_uvw[1]) * point.z - sin(angle_uvw[1]) * point.y,
-            cos(angle_uvw[2]) * point.z - sin(angle_uvw[2]) * point.y
-        };
+        point.x_2d.resize(3);
+        point.y_2d.resize(3);
+        
+        for (size_t pindex = 0; pindex < 3; ++pindex) {
+            point.x_2d[pindex].push_back(point.x);
+            point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
+        }
         
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
         point.dist_cut = {-1e12, -1e12, -1e12};
@@ -433,7 +438,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
 
 std::vector<DynamicPointCloud::DPCPoint>
 PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const IDetectorVolumes::pointer dv,
-                             const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
+                             const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap,
                              const double step)
 {
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
@@ -494,8 +499,8 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
             point.z = test_point.z();
             
             for (size_t pindex = 0; pindex < 3; ++pindex) {
-                point.x_2d[pindex] = test_point.x();
-                point.y_2d[pindex] = cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y();
+                point.x_2d[pindex].push_back(test_point.x());
+                point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y());
             }
             
             dpc_points.push_back(std::move(point));
@@ -542,14 +547,15 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                     }
                     
                     for (size_t pindex = 0; pindex < 3; ++pindex) {
-                        point.x_2d[pindex] = point.x;
-                        point.y_2d[pindex] = cos(temp_angle_uvw[pindex]) * point.z - 
-                                            sin(temp_angle_uvw[pindex]) * point.y;
+                        point.x_2d[pindex].push_back(point.x);
+                        point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
+                                            sin(temp_angle_uvw[pindex]) * point.y);
                     }
-                } else {
-                    point.x_2d = {-1e12, -1e12, -1e12};
-                    point.y_2d = {-1e12, -1e12, -1e12};
                 }
+                // } else {
+                //     // point.x_2d = {-1e12, -1e12, -1e12};
+                //     // point.y_2d = {-1e12, -1e12, -1e12};
+                // }
                 
                 dpc_points.push_back(std::move(point));
             }
@@ -631,14 +637,15 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         point.wpid = WirePlaneId(wpid);
         
         // Initialize arrays
-        point.x_2d = {x, x, x};
+        point.x_2d.resize(3); 
         point.y_2d.resize(3);
         point.wind = {-1e12, -1e12, -1e12};
         point.dist_cut = {dis_cut_int, dis_cut_int, dis_cut_int};
         
         // Calculate 2D projections
         for (size_t pindex = 0; pindex < 3; ++pindex) {
-            point.y_2d[pindex] = cos_angle_uvw[pindex] * z - sin_angle_uvw[pindex] * y;
+            point.x_2d[pindex].push_back(x);
+            point.y_2d[pindex].push_back(cos_angle_uvw[pindex] * z - sin_angle_uvw[pindex] * y);
         }
     }
 
