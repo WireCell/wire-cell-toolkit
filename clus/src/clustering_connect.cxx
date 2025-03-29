@@ -43,6 +43,48 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(apa, face, 1);
     std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(apa, face, 2);
 
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = live_grouping.wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_u_index; 
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index; 
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index; 
+
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+
+
+        af_dead_u_index[apa][face] = live_grouping.get_dead_winds(apa, face, 0);
+        af_dead_v_index[apa][face] = live_grouping.get_dead_winds(apa, face, 1);
+        af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
+    }
+
     LogDebug("global_point_cloud.get_num_points() " << global_point_cloud->get_num_points());
     LogDebug("dead_u_index.size() " << dead_u_index.size() << " dead_v_index.size() " << dead_v_index.size() << " dead_w_index.size() " << dead_w_index.size());
     // sort the clusters length ...
@@ -52,7 +94,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     });
 
 
-    auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    // auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
 
     double extending_dis = 50 * units::cm;
     double angle = 7.5;
@@ -247,33 +290,33 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
         if (i == 0) {
             if (flag_para_1 || flag_prol_1) {
-                global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm,
-                                                angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
                 dir1 *= -1;
-                global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm,
-                                                angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
             }
             else {
-                global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm,
-                                                angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
                 dir1 *= -1;
-                global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm,
-                                                angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
             }
 
             if (flag_para_2 || flag_prol_2) {
-                global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0,
-                                                1.2 * units::cm, angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
                 dir2 *= -1;
-                global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0,
-                                                1.2 * units::cm, angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
             }
             else {
-                global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm,
-                                                angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
                 dir2 *= -1;
-                global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm,
-                                                angle);
+                // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
             }
         }
         else {
@@ -282,7 +325,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                     fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
                     cluster->get_length() < 200 * units::cm) {
                 // WCP::WCPointCloud<double> &cloud = cluster->get_point_cloud()->get_cloud();
-                LogDebug("#b " << cluster->nkd_blobs() << " gsc " << global_skeleton_cloud->get_num_points());
+                // LogDebug("#b " << cluster->nkd_blobs() << " gsc " << global_skeleton_cloud->get_num_points());
                 int num_total_points = cluster->npoints();
                 const auto& winds = cluster->wire_indices();
                 int num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
@@ -299,16 +342,30 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                     }
 
                     if (!flag_dead) {
+                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
+                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, 0, 0); // HACKING
                         LogDebug("#b " << cluster->nkd_blobs() << " test_point " << test_point << " loose_dis_cut " << loose_dis_cut << " results.size() " << results.size());
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
                             for (size_t k = 0; k != results.size(); k++) {
                                 // LogDebug("#b " << cluster->nkd_blobs() << " results.at(k) " << std::get<0>(results.at(k)) << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))));
+                                // if (cluster->children().size() == 215 && k == 0) {
+                                if (k == 0) {
+                                    std::cout
+                                    << " cluster->children().size() " << cluster->children().size()
+                                    << " k " << k
+                                    // <<" global_skeleton_cloud->get_num_points() " << global_skeleton_cloud->get_num_points()
+                                    <<" global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
+                                    <<" results.at(k) " << std::get<0>(results.at(k))
+                                    // << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))) << std::endl;
+                                    << " " << global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0] << std::endl;
+                                }
                                 if (std::get<0>(results.at(k)) <
-                                    global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k)))) {
+                                    // global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k)))) {
+                                    global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0]) {
                                     flag_unique = false;
                                     temp_clusters.insert(std::get<1>(results.at(k)));
                                 }
@@ -325,8 +382,10 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         if (flag_unique) num_unique[0]++;
                     }
                     else {
+                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
+                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, 0, 0); // HACKING
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -357,14 +416,17 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                     }
 
                     if (!flag_dead) {
+                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
+                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, 0, 0); // HACKING
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
                             for (size_t k = 0; k != results.size(); k++) {
                                 if (std::get<0>(results.at(k)) <
-                                    global_skeleton_cloud->dist_cut(1,std::get<2>(results.at(k)))) {
+                                    // global_skeleton_cloud->dist_cut(1,std::get<2>(results.at(k)))) {
+                                    global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[1]) {
                                     flag_unique = false;
                                     temp_clusters.insert(std::get<1>(results.at(k)));
                                 }
@@ -381,8 +443,10 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         if (flag_unique) num_unique[1]++;
                     }
                     else {
+                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
+                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, 0, 0); // HACKING
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -413,14 +477,17 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                     }
 
                     if (!flag_dead) {
+                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
+                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, 0, 0); // HACKING
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
                             for (size_t k = 0; k != results.size(); k++) {
                                 if (std::get<0>(results.at(k)) <
-                                    global_skeleton_cloud->dist_cut(2,std::get<2>(results.at(k)))) {
+                                    // global_skeleton_cloud->dist_cut(2,std::get<2>(results.at(k)))) {
+                                    global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[2]) {
                                     flag_unique = false;
                                     temp_clusters.insert(std::get<1>(results.at(k)));
                                 }
@@ -437,8 +504,10 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         if (flag_unique) num_unique[2]++;
                     }
                     else {
+                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
+                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, 0, 0); // HACKING
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -693,35 +762,36 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             if (flag_add_dir1) {
                 // add extension points in ...
                 if (flag_para_1 || flag_prol_1) {
-                    global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3,
-                                                    1.2 * units::cm, angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
                     dir1 *= -1;
-                    global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3,
-                                                    1.2 * units::cm, angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
                 }
                 else {
-                    global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm,
-                                                    angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
                     dir1 *= -1;
-                    global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm,
-                                                    angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                    
                 }
             }
 
             if (flag_add_dir2) {
                 if (flag_para_2 || flag_prol_2) {
-                    global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0,
-                                                    1.2 * units::cm, angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
                     dir2 *= -1;
-                    global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0,
-                                                    1.2 * units::cm, angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
                 }
                 else {
-                    global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis,
-                                                    1.2 * units::cm, angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
                     dir2 *= -1;
-                    global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis,
-                                                    1.2 * units::cm, angle);
+                    // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
                 }
             }
         }  // not the first cluster ...
