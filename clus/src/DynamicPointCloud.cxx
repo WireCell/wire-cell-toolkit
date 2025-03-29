@@ -40,6 +40,17 @@ const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_l2g(const int 
 {
     WirePlaneId wpid(iplane2layer[plane], face, apa);
     auto iter = m_kd2d_index_l2g.find(wpid.ident());
+
+    // Debug logging for the requested wpid information
+    // std::cout << "DynamicPointCloud: kd2d_l2g requested for wpid " << wpid.name() 
+    //           << " (ident: " << wpid.ident() << ", face: " << wpid.face() 
+    //           << ", apa: " << wpid.apa() << ")" << std::endl;
+    // for (auto it = m_kd2d_index_l2g.begin(); it != m_kd2d_index_l2g.end(); ++it) {
+    //     std::cout << "DynamicPointCloud: kd2d_l2g available wpid " << WirePlaneId(it->first).name()
+    //           << " (ident: " << it->first << ", face: " << WirePlaneId(it->first).face()
+    //           << ", apa: " << WirePlaneId(it->first).apa() << ")" << std::endl;
+    // }
+
     if (iter == m_kd2d_index_l2g.end()) {
         raise<RuntimeError>("DynamicPointCloud: missing 2D index l2g for wpid %s", wpid.name());
     }
@@ -83,13 +94,18 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points)
             raise<RuntimeError>("DynamicPointCloud: unexpected 2D projection size x_2d %d y_2d %d", pt.x_2d.size(),
                                 pt.y_2d.size());
         }
-        for (size_t pindex = 0; pindex < 3; ++pindex) {
-            auto &kd2d = this->kd2d(pindex, wpid_volume.face(), wpid_volume.apa());
-            kd2d.append({{pt.x_2d[pindex]}, {pt.y_2d[pindex]}});
-            WirePlaneId wpid_plane(iplane2layer[pindex], wpid_volume.face(), wpid_volume.apa());
-            m_kd2d_index_l2g[wpid_plane.ident()][kd2d.npoints() - 1] = ipt;
-            m_kd2d_index_g2l[wpid_plane.ident()][ipt] = kd2d.npoints() - 1;
+
+        // if the wpid is not valid, skip the 2D kd ...
+        if (wpid_volume.face() !=-1 && wpid_volume.apa() !=-1){
+            for (size_t pindex = 0; pindex < 3; ++pindex) {
+                auto &kd2d = this->kd2d(pindex, wpid_volume.face(), wpid_volume.apa());
+                kd2d.append({{pt.x_2d[pindex]}, {pt.y_2d[pindex]}});
+                WirePlaneId wpid_plane(iplane2layer[pindex], wpid_volume.face(), wpid_volume.apa());
+                m_kd2d_index_l2g[wpid_plane.ident()][kd2d.npoints() - 1] = ipt;
+                m_kd2d_index_g2l[wpid_plane.ident()][ipt] = kd2d.npoints() - 1;
+            }
         }
+
     }
     // SPDLOG_DEBUG(
     //     "DynamicPointCloud: added {} points m_kd2d.size() {} m_kd2d_index_l2g.size() {} m_kd2d_index_g2l.size() {}",
@@ -256,23 +272,26 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
     // use this so we can add a scope in the future
     const auto &points_3d = cluster->points();
     const auto &winds = cluster->wire_indices();
-    const auto &wpids = cluster->points_property<int>("wpid");
+    // const auto &wpids = cluster->points_property<int>("wpid");
 
     dpc_points.resize(cluster->npoints());
     for (size_t ipt = 0; ipt < cluster->npoints(); ++ipt) {
         geo_point_t pt = cluster->point3d(ipt);
-        const auto &wpid = WirePlaneId(wpids[ipt]);
+        // const auto &wpid = WirePlaneId(wpids[ipt]);
+        const auto wpid = cluster->wire_plane_id(ipt);
         if (wpid_params.find(wpid) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
         }
         const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid);
         const double angle_uvw[3] = {angle_u, angle_v, angle_w};
 
+        // std::cout << "Test1: " << wpid.apa() << " " << wpid.face() << " " << wpid.layer() << std::endl;
+
         DynamicPointCloud::DPCPoint point;
         point.x = pt.x();
         point.y = pt.y();
         point.z = pt.z();
-        point.wpid = wpid;
+        point.wpid = WirePlaneId(wpid);
         point.cluster = cluster;
         point.blob = cluster->blob_with_point(ipt);
         point.x_2d.resize(3);
@@ -305,25 +324,31 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
 
     const auto &points_3d = cluster->points();
     const auto &winds = cluster->wire_indices();
-    const auto &wpids = cluster->points_property<int>("wpid");
+    // const auto &wpids = cluster->points_property<int>("wpid");
 
     // point_index of the skeleton points
     const std::list<size_t> &path_wcps = cluster->get_path_wcps();
     geo_point_t prev_wcp = cluster->point3d(path_wcps.front());
+    auto prev_wpid = cluster->wire_plane_id(path_wcps.front());
+
     for (auto it = path_wcps.begin(); it != path_wcps.end(); it++) {
         geo_point_t test_point = cluster->point3d(*it);
         double dis = (test_point - prev_wcp).magnitude();
-        const auto &wpid_test_point = WirePlaneId(wpids[*it]);
+        // const auto &wpid_test_point = WirePlaneId(wpids[*it]);
+        const auto wpid_test_point = cluster->wire_plane_id(*it);
 
         if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
         }
-        const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
-        const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+        
+        // std::cout << "Test2: " << wpid_test_point.apa() << " " << wpid_test_point.face() << " " << wpid_test_point.layer() << std::endl;
 
         if (dis <= step) {
             DynamicPointCloud::DPCPoint point;
             point.wpid = WirePlaneId(wpid_test_point);
+            const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
+            const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+
             point.cluster = cluster;
             point.blob = nullptr;
             point.x_2d.resize(3);
@@ -346,26 +371,38 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 point.x = prev_wcp.x() + (k + 1.) / num_points * (test_point.x() - prev_wcp.x());
                 point.y = prev_wcp.y() + (k + 1.) / num_points * (test_point.y() - prev_wcp.y());
                 point.z = prev_wcp.z() + (k + 1.) / num_points * (test_point.z() - prev_wcp.z());
-                /// HACKING: currently need to test point wpid, need to revisit
-                point.wpid = WirePlaneId(wpid_test_point);
+                geo_point_t temp_point(point.x, point.y, point.z);
+                auto temp_wpid = get_wireplaneid(temp_point, prev_wpid, wpid_test_point, cluster->grouping()->get_detector_volumes());
+                point.wpid = WirePlaneId(temp_wpid);
                 point.cluster = cluster;
                 point.blob = nullptr;
-                point.x_2d.resize(3);
-                point.y_2d.resize(3);
                 point.wind = {-1e12, -1e12, -1e12};
                 point.dist_cut = {2.4 * units::cm, 2.4 * units::cm, 2.4 * units::cm};
-                for (size_t pindex = 0; pindex < 3; ++pindex) {
-                    point.x_2d[pindex] = point.x;
-                    point.y_2d[pindex] = cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y;
+                point.x_2d.resize(3);
+                point.y_2d.resize(3);
+                if (temp_wpid.apa()!=-1){  
+                    const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(temp_wpid);
+                    const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+                    for (size_t pindex = 0; pindex < 3; ++pindex) {
+                        point.x_2d[pindex] = point.x;
+                        point.y_2d[pindex] = cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y;
+                    }
+                }else{
+                    point.x_2d = {-1e12, -1e12, -1e12};
+                    point.y_2d = {-1e12, -1e12, -1e12};
                 }
                 dpc_points.push_back(std::move(point));
             }
         }
+
         prev_wcp = test_point;
+        prev_wpid = wpid_test_point;
     }
     return dpc_points;
 }
 
+
+// use only one wpid from the grouping ...
 std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_extrapolation(
     const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
     const double step, const double angle, const IDetectorVolumes::pointer dv,
@@ -378,9 +415,10 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         return dpc_points;
     }
 
-    const auto &points_3d = cluster->points();
-    const auto &winds = cluster->wire_indices();
-    const auto &wpids = cluster->points_property<int>("wpid");
+    // const auto &points_3d = cluster->points();
+    // const auto &winds = cluster->wire_indices();
+    const auto wpid = *(cluster->grouping()->wpids().begin()); 
+    // const auto &wpids = cluster->points_property<int>("wpid");
 
     geo_point_t dir = dir_unmorm.norm();
 
@@ -402,17 +440,18 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         point.wind = {-1e12, -1e12, -1e12};
         point.dist_cut = {int(dis_cut), int(dis_cut), int(dis_cut)};
 
-        /// HACKING: need to figure out how to assign wpid
-        const auto &wpid_HACKING = WirePlaneId(kAllLayers, 0, 0);
-        if (wpid_params.find(wpid_HACKING) == wpid_params.end()) {
-            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_HACKING.name());
+        if (wpid_params.find(wpid) == wpid_params.end()) {
+            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
         }
-        const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_HACKING);
+        point.wpid = WirePlaneId(wpid);
+
+        const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid);
         const double angle_uvw[3] = {angle_u, angle_v, angle_w};
         for (size_t pindex = 0; pindex < 3; ++pindex) {
             point.x_2d[pindex] = point.x;
             point.y_2d[pindex] = cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y;
         }
+
         dpc_points[k] = std::move(point);
     }
 
