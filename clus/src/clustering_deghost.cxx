@@ -183,7 +183,13 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                         else {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0);
 
-                            // if (cluster->nchildren()==801 && j==0)  std::cout  << j << " BU " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+                            if (cluster->nchildren()==801 && j==0) {
+                                std::cout
+                                << " global_skeleton_cloud.get_num_points() " << global_skeleton_cloud->get_num_points()
+                                << std::endl;
+                                std::cout  << j << " BU " << test_point
+                                << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+                            }
 
                             if (std::get<0>(results) <= dis_cut * 2.0) {
                                 if (map_cluster_num[0].find(std::get<1>(results)) == map_cluster_num[0].end()) {
