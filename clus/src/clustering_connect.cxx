@@ -31,11 +31,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     geo_point_t drift_dir_abs(1,0,0);
 
-    auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
-    for (const Cluster *cluster : live_grouping.children()) {
-        global_point_cloud->add_points(cluster, 0);
-    }
-
     int apa = (*live_grouping.wpids().begin()).apa();
     int face = (*live_grouping.wpids().begin()).face();
 
@@ -85,6 +80,13 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
     }
 
+
+    // auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
+    for (const Cluster *cluster : live_grouping.children()) {
+        // global_point_cloud->add_points(cluster, 0);
+        global_point_cloud->add_points(make_points_cluster(cluster, wpid_params));
+    }
     LogDebug("global_point_cloud.get_num_points() " << global_point_cloud->get_num_points());
     LogDebug("dead_u_index.size() " << dead_u_index.size() << " dead_v_index.size() " << dead_v_index.size() << " dead_w_index.size() " << dead_w_index.size());
     // sort the clusters length ...
@@ -353,16 +355,16 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                             for (size_t k = 0; k != results.size(); k++) {
                                 // LogDebug("#b " << cluster->nkd_blobs() << " results.at(k) " << std::get<0>(results.at(k)) << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))));
                                 // if (cluster->children().size() == 215 && k == 0) {
-                                if (k == 0) {
-                                    std::cout
-                                    << " cluster->children().size() " << cluster->children().size()
-                                    << " k " << k
-                                    // <<" global_skeleton_cloud->get_num_points() " << global_skeleton_cloud->get_num_points()
-                                    <<" global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
-                                    <<" results.at(k) " << std::get<0>(results.at(k))
-                                    // << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))) << std::endl;
-                                    << " " << global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0] << std::endl;
-                                }
+                                // if (k == 0) {
+                                //     std::cout
+                                //     << " cluster->children().size() " << cluster->children().size()
+                                //     << " k " << k
+                                //     // <<" global_skeleton_cloud->get_num_points() " << global_skeleton_cloud->get_num_points()
+                                //     <<" global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
+                                //     <<" results.at(k) " << std::get<0>(results.at(k))
+                                //     // << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))) << std::endl;
+                                //     << " " << global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0] << std::endl;
+                                // }
                                 if (std::get<0>(results.at(k)) <
                                     // global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k)))) {
                                     global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0]) {

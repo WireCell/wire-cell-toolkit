@@ -124,5 +124,79 @@ void WireCell::PointCloud::Facade::clustering_test(
         }
     }
 
+    /// TEST: DynamicPointCloud
+    {
+        // Get all the wire plane IDs from the grouping
+        const auto& wpids = live_grouping.wpids();
+        // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+        std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+        std::set<int> apas;
+    
+        std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_u_index; 
+        std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index; 
+        std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index; 
+    
+        for (const auto& wpid : wpids) {
+            int apa = wpid.apa();
+            int face = wpid.face();
+            apas.insert(apa);
+    
+            // Create wpids for all three planes with this APA and face
+            WirePlaneId wpid_u(kUlayer, face, apa);
+            WirePlaneId wpid_v(kVlayer, face, apa);
+            WirePlaneId wpid_w(kWlayer, face, apa);
+         
+            // Get drift direction based on face orientation
+            int face_dirx = dv->face_dirx(wpid_u);
+            geo_point_t drift_dir(face_dirx, 0, 0);
+            
+            // Get wire directions for all planes
+            Vector wire_dir_u = dv->wire_direction(wpid_u);
+            Vector wire_dir_v = dv->wire_direction(wpid_v);
+            Vector wire_dir_w = dv->wire_direction(wpid_w);
+    
+            // Calculate angles
+            double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+            double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+            double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+    
+            wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    
+    
+            af_dead_u_index[apa][face] = live_grouping.get_dead_winds(apa, face, 0);
+            af_dead_v_index[apa][face] = live_grouping.get_dead_winds(apa, face, 1);
+            af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
+        }
+
+        auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+        auto dpc = std::make_shared<DynamicPointCloud>(wpid_params);
+        auto dpcl = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+        double extending_dis = 50 * units::cm;
+        double angle = 7.5;
+        double loose_dis_cut = 7.5 * units::cm;
+        geo_point_t dir1(1, 0, 0);
+        for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
+            Cluster* cluster = live_clusters.at(iclus);
+            const auto test_point = cluster->point3d(0);
+            std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
+            dpcl->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
+            dpc->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
+            const auto results_legacy = dpcl->get_2d_points_info(test_point, loose_dis_cut, 0);
+            const auto results = dpc->get_2d_points_info(test_point, loose_dis_cut, 0, 0, 0);
+            SPDLOG_INFO("CTest Cluster {} results_legacy.size() {} results.size() {}", iclus, results_legacy.size(), results.size());
+        }
+        for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
+            Cluster* cluster = live_clusters.at(iclus);
+            std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
+            dpcl->add_points(cluster,0);
+            dpc->add_points(make_points_cluster(cluster, wpid_params));
+            SPDLOG_INFO("CTest dpcl->get_num_points() {} dpc->get_points().size() {}",
+                        dpcl->get_num_points(), dpc->get_points().size());
+            const auto dir_hough = dpc->vhough_transform(extreme_points.first, extending_dis);
+            SPDLOG_INFO("CTest Cluster {} dir_hough {} ", iclus, dir_hough);
+            // const auto dir_hough_legacy = dpcl->vhough_transform(extreme_points.first, extending_dis);
+        }
+    }
+
 }
 #pragma GCC diagnostic pop
