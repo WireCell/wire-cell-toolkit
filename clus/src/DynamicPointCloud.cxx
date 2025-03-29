@@ -292,7 +292,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
 }
 
 std::vector<DynamicPointCloud::DPCPoint>
-make_points_cluster_skeleton(const Cluster *cluster,
+PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const IDetectorVolumes::pointer dv,
                              const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
                              const double step)
 {
@@ -340,7 +340,7 @@ make_points_cluster_skeleton(const Cluster *cluster,
             dpc_points.push_back(std::move(point));
         }
         else {
-            int num_points = int(dis / (2.4 * units::cm)) + 1;
+            int num_points = int(dis / step) + 1;
             for (int k = 0; k != num_points; k++) {
                 DynamicPointCloud::DPCPoint point;
                 point.x = prev_wcp.x() + (k + 1.) / num_points * (test_point.x() - prev_wcp.x());
@@ -361,11 +361,12 @@ make_points_cluster_skeleton(const Cluster *cluster,
                 dpc_points.push_back(std::move(point));
             }
         }
+        prev_wcp = test_point;
     }
     return dpc_points;
 }
 
-std::vector<DynamicPointCloud::DPCPoint> make_points_linear_extrapolation(
+std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_extrapolation(
     const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
     const double step, const double angle, const IDetectorVolumes::pointer dv,
     const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)

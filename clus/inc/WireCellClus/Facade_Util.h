@@ -477,7 +477,7 @@ namespace WireCell::PointCloud::Facade {
         inline int dist_cut(const size_t plane, const size_t ind) const { return m_winds[plane].at(ind); }
 
         /// @brief flag 0 points, flag 1 skeleton
-        void add_points(const Cluster* cluster, const int flag=0, const double step = 0.6*units::cm); // flag 1 points, flag 2 scheleton
+        void add_points(const Cluster* cluster, const int flag=0, const double step = 0.6*units::cm); // flag 0 points, flag 1 scheleton
 
         /// @brief add points from p_test along dir with range and step
         /// @attention: the index_uvw is hacked to store the distance cut

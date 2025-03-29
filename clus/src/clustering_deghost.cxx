@@ -87,7 +87,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     double angle_w = std::get<3>(params);    
     // auto global_point_cloud_legacy = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
-    auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    // auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
     // replace with the new DynamicPointCloud class
 
     std::vector<Cluster *> to_be_removed_clusters;
@@ -110,10 +111,12 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
                 live_clusters.at(i)->construct_skeleton(use_ctpc);
-                global_skeleton_cloud->add_points(live_clusters.at(i), 1);
+                // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
+                global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params));
             }
             else {
-                global_skeleton_cloud->add_points(live_clusters.at(i), 0);
+                // global_skeleton_cloud->add_points(live_clusters.at(i), 0);
+                global_skeleton_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
             }
         }
         else {
@@ -181,11 +184,13 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                             }
                         }
                         else {
-                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0);
+                            // results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0);
+                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0, 0, 0); // HACKING face and apa to be 0
 
                             if (cluster->nchildren()==801 && j==0) {
                                 std::cout
-                                << " global_skeleton_cloud.get_num_points() " << global_skeleton_cloud->get_num_points()
+                                // << " global_skeleton_cloud.get_num_points() " << global_skeleton_cloud->get_num_points()
+                                << " global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
                                 << std::endl;
                                 std::cout  << j << " BU " << test_point
                                 << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
@@ -255,7 +260,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                             }
                         }
                         else {
-                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1);
+                            // results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1);
+                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1, 0, 0); // HACKING
 
                             // if (cluster->nchildren()==801 && j==0)  std::cout  << j << " BV " << test_point << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
 
@@ -301,7 +307,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                             }
                         }
                         else {
-                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2);
+                            // results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2);
+                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2, 0, 0); // HACKING
 
                             // if (cluster->nchildren()==801 && j==0)  std::cout  << j << " BW " << test_point <<  " " <<std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
 
@@ -649,7 +656,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
                         live_clusters.at(i)->construct_skeleton(use_ctpc);
-                        global_skeleton_cloud->add_points(live_clusters.at(i), 1);
+                        // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
+                        global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params));
                     }
                 }
             }
@@ -659,7 +667,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
                     live_clusters.at(i)->construct_skeleton(use_ctpc);
-                    global_skeleton_cloud->add_points(live_clusters.at(i), 1);
+                    // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
+                    global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params));
                 }
             }
         }
