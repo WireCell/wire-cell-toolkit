@@ -73,18 +73,6 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    //const auto &tp = live_grouping.get_params();
-    // this is for 4 time slices
-    // Create two point clouds ...
-    // One for the points ... point --> index --> cluster (vector) ...
-    // The other for the skeleton of each track ...  point --> index --> cluster (vector)
-    // Both cloud needs to be dynamic, keep adding things into it as we improve the knowledge
-    // XQ: need a new dynamic point cloud that can handle different faces of APA ...
-    // Get the first wpid and extract angles from wpid_params
-    auto& params = wpid_params.begin()->second; // hack ...
-    double angle_u = std::get<1>(params);
-    double angle_v = std::get<2>(params);
-    double angle_w = std::get<3>(params);    
     // auto global_point_cloud_legacy = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
     // auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
@@ -164,16 +152,16 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                         std::tuple<double, const Cluster *, size_t> results =
                             global_point_cloud->get_closest_2d_point_info(test_point, 0, 0, 0); // HACKING face and apa to be 0
 
-                        if (cluster->nchildren()==801 && j==0) {
-                            std::cout
-                            << " global_point_cloud.get_points().size() " << global_point_cloud->get_points().size()
-                            // << " global_point_cloud_legacy.get_num_points() " << global_point_cloud_legacy->get_num_points()
-                            << std::endl;
-                            std::cout  << j << " AU " << test_point
-                            << " results " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << " "  << std::get<2>(results)
-                            // << " results_legacy " << std::get<0>(results_legacy) << " " << std::get<1>(results_legacy)->get_length()/units::cm << " " << std::get<2>(results_legacy)
-                            << std::endl;
-                        }
+                        // if (cluster->nchildren()==801 && j==0) {
+                        //     std::cout
+                        //     << " global_point_cloud.get_points().size() " << global_point_cloud->get_points().size()
+                        //     // << " global_point_cloud_legacy.get_num_points() " << global_point_cloud_legacy->get_num_points()
+                        //     << std::endl;
+                        //     std::cout  << j << " AU " << test_point
+                        //     << " results " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << " "  << std::get<2>(results)
+                        //     // << " results_legacy " << std::get<0>(results_legacy) << " " << std::get<1>(results_legacy)->get_length()/units::cm << " " << std::get<2>(results_legacy)
+                        //     << std::endl;
+                        // }
 
                         if (std::get<0>(results) <= dis_cut / 3.) {
                             if (map_cluster_num[0].find(std::get<1>(results)) == map_cluster_num[0].end()) {
@@ -187,14 +175,14 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                             // results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0);
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0, 0, 0); // HACKING face and apa to be 0
 
-                            if (cluster->nchildren()==801 && j==0) {
-                                std::cout
-                                // << " global_skeleton_cloud.get_num_points() " << global_skeleton_cloud->get_num_points()
-                                << " global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
-                                << std::endl;
-                                std::cout  << j << " BU " << test_point
-                                << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
-                            }
+                            // if (cluster->nchildren()==801 && j==0) {
+                            //     std::cout
+                            //     // << " global_skeleton_cloud.get_num_points() " << global_skeleton_cloud->get_num_points()
+                            //     << " global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
+                            //     << std::endl;
+                            //     std::cout  << j << " BU " << test_point
+                            //     << " " << std::get<0>(results) << " " << std::get<1>(results)->get_length()/units::cm << std::endl;
+                            // }
 
                             if (std::get<0>(results) <= dis_cut * 2.0) {
                                 if (map_cluster_num[0].find(std::get<1>(results)) == map_cluster_num[0].end()) {
