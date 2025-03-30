@@ -95,16 +95,16 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
             // fill anyway ...
             // live_clusters.at(i)->Create_point_cloud();
             // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
-            global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
+            global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
                 live_clusters.at(i)->construct_skeleton(use_ctpc);
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
-                global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
             }
             else {
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 0);
-                global_skeleton_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
+                global_skeleton_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             }
         }
         else {
@@ -641,22 +641,22 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 if (flag_save) {
                     // live_clusters.at(i)->Create_point_cloud();
                     // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
-                    global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
+                    global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
                         live_clusters.at(i)->construct_skeleton(use_ctpc);
                         // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
-                        global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params));
+                        global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params,true ));
                     }
                 }
             }
             else {
                 // live_clusters.at(i)->Create_point_cloud();
                 // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
-                global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params));
+                global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
                     live_clusters.at(i)->construct_skeleton(use_ctpc);
                     // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
-                    global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
                 }
             }
         }
