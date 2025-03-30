@@ -120,26 +120,24 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
         
         // Process 2D points for each plane
         for (size_t pindex = 0; pindex < 3; ++pindex) {
-            WirePlaneId wpid_plane(iplane2layer[pindex], wpid_volume.face(), wpid_volume.apa());
-            int key = wpid_plane.ident();
-            
-            // Initialize plane data structures if not exists
-            if (planes_pts.find(key) == planes_pts.end()) {
-                planes_pts[key] = NFKDVec::Tree<double>::points_type(2);
-                planes_pts[key][0].reserve(points.size());
-                planes_pts[key][1].reserve(points.size());
-                planes_global_indices[key].reserve(points.size());
-            }
-            
             // Add 2D point to plane data
             for (size_t j = 0; j < pt.x_2d[pindex].size(); ++j) {
+                WirePlaneId wpid_2d(pt.wpid_2d.at(j));
+                WirePlaneId wpid_plane(iplane2layer[pindex], wpid_2d.face(), wpid_2d.apa());
+                int key = wpid_plane.ident();
+                // Initialize plane data structures if not exists
+                if (planes_pts.find(key) == planes_pts.end()) {
+                    planes_pts[key] = NFKDVec::Tree<double>::points_type(2);
+                    planes_pts[key][0].reserve(points.size());
+                    planes_pts[key][1].reserve(points.size());
+                    planes_global_indices[key].reserve(points.size());
+                }
                 planes_pts[key][0].push_back(pt.x_2d[pindex][j]);
                 planes_pts[key][1].push_back(pt.y_2d[pindex][j]);
                 planes_global_indices[key].push_back(global_idx);
             }
-            // planes_pts[key][0].push_back(pt.x_2d[pindex]);
-            // planes_pts[key][1].push_back(pt.y_2d[pindex]);
         }
+
     }
     
     // Batch append 3D points
@@ -424,6 +422,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
             point.x_2d[pindex].push_back(point.x);
             point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
         }
+        point.wpid_2d.push_back(WirePlaneId(wpid));
         
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
         point.dist_cut = {-1e12, -1e12, -1e12};
@@ -502,6 +501,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 point.x_2d[pindex].push_back(test_point.x());
                 point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y());
             }
+            point.wpid_2d.push_back(WirePlaneId(wpid_test_point));
             
             dpc_points.push_back(std::move(point));
         }
@@ -551,6 +551,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                         point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
                                             sin(temp_angle_uvw[pindex]) * point.y);
                     }
+                    point.wpid_2d.push_back(WirePlaneId(temp_wpid));
                 }
                 // } else {
                 //     // point.x_2d = {-1e12, -1e12, -1e12};
@@ -647,6 +648,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
             point.x_2d[pindex].push_back(x);
             point.y_2d[pindex].push_back(cos_angle_uvw[pindex] * z - sin_angle_uvw[pindex] * y);
         }
+        point.wpid_2d.push_back(WirePlaneId(wpid));
     }
 
     return dpc_points;

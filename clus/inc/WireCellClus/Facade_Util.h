@@ -511,6 +511,7 @@ namespace WireCell::PointCloud::Facade {
     double drift2time(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double drift);
     int point2wind(const geo_point_t& point, const double angle, const double pitch, const double center);
+    double wind2point2dproj(const int wind, const double angle, const double pitch, const double center);
 
     WirePlaneId get_wireplaneid(const geo_point_t& point, const WirePlaneId& wpid1, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv);
     WirePlaneId get_wireplaneid(const geo_point_t& p1, const WirePlaneId& wpid1, const geo_point_t& p2, const WirePlaneId& wpid2, IDetectorVolumes::pointer dv);

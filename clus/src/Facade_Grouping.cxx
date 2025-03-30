@@ -1,6 +1,7 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellAux/PlaneTools.h"
 #include <boost/container_hash/hash.hpp>
 
 using namespace WireCell;
@@ -137,6 +138,29 @@ void Grouping::fill_cache(GroupingCache& gc) const
 
     // fill cache related to the detector volume
     fill_dv_cache(gc);
+
+    // fill plane_channels ...
+    fill_plane_channels_cache(gc);
+}
+
+void Grouping::fill_plane_channels_cache(GroupingCache& gc) const
+{
+    for (auto wpid : gc.wpids) {
+        int face = wpid.face();
+        int apa = wpid.apa();
+
+        // Create wpids for all three planes with the same APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+        auto& anode = get_anode(apa);
+
+        gc.map_plane_channels[apa][face][kUlayer] = Aux::plane_channels(anode, wpid_u.index());
+        gc.map_plane_channels[apa][face][kVlayer] = Aux::plane_channels(anode, wpid_v.index());
+        gc.map_plane_channels[apa][face][kWlayer] = Aux::plane_channels(anode, wpid_w.index());
+
+        // std::cout << "Test: " << apa << " " << face << " " << wpid_u.index() << " " << gc.map_plane_channels[apa][face][kUlayer].size() << " " << wpid_v.index() << " " << gc.map_plane_channels[apa][face][kVlayer].size() <<  " " << wpid_w.index() << " " << gc.map_plane_channels[apa][face][kWlayer].size() << " " << wpid_u.layer() << " " << wpid_v.layer() << " " << wpid_w.layer() << std::endl;
+    }
 }
 
 void Grouping::fill_dv_cache(GroupingCache& gc) const

@@ -519,7 +519,6 @@ double Facade::drift2time(const IAnodeFace::pointer anodeface, const double time
     double xorig = anodeface->planes()[2]->wires().front()->center().x();
     return (drift - xorig) / (xsign * drift_speed) - time_offset;
 }
-
 int Facade::point2wind(const geo_point_t& point, const double angle, const double pitch, const double center)
 {
     // double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
@@ -527,6 +526,12 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     double wind = (y - center) / pitch - 0.5; // subtract 0.5 to match WCP (wire center vs. edge difference ...) ...
     return std::round(wind);
+}
+
+double Facade::wind2point2dproj(const int wind, const double angle, const double pitch, const double center)
+{
+    // Reverse the calculation in point2wind:
+    return (wind + 0.5) * pitch + center;
 }
 
 

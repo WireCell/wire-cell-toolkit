@@ -36,6 +36,7 @@ namespace WireCell::PointCloud::Facade {
             const Blob *blob;
             std::vector<std::vector<double>> x_2d;
             std::vector<std::vector<double>> y_2d;
+            std::vector<int> wpid_2d;
             std::vector<int> wind;      // length 3 or 0
             std::vector<int> dist_cut;  // length 3 or 0
         };
@@ -99,6 +100,8 @@ namespace WireCell::PointCloud::Facade {
         const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
         const double step, const double angle, const IDetectorVolumes::pointer dv,
         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
+
+    // void fill_wrap_points(const Cluster *cluster, const geo_point_t &point, std::vector<double>& p_x, std::vector<double>& p_y);
 
 }  // namespace WireCell::PointCloud::Facade
 
