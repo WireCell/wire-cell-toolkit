@@ -419,7 +419,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
         point.y_2d.resize(3);
         
         if (flag_wrap){
-            fill_wrap_points(cluster, pt, point.x_2d, point.y_2d, point.wpid_2d);
+            fill_wrap_points(cluster, pt, WirePlaneId(wpid), point.x_2d, point.y_2d, point.wpid_2d);
         }else{
             for (size_t pindex = 0; pindex < 3; ++pindex) {
                 point.x_2d[pindex].push_back(point.x);
@@ -502,7 +502,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
             point.z = test_point.z();
 
             if (flag_wrap){
-                fill_wrap_points(cluster, test_point, point.x_2d, point.y_2d, point.wpid_2d);
+                fill_wrap_points(cluster, test_point, WirePlaneId(wpid_test_point), point.x_2d, point.y_2d, point.wpid_2d);
             }else{
                 for (size_t pindex = 0; pindex < 3; ++pindex) {
                     point.x_2d[pindex].push_back(test_point.x());
@@ -555,7 +555,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                     }
                     
                     if (flag_wrap){
-                        fill_wrap_points(cluster, temp_point, point.x_2d, point.y_2d, point.wpid_2d);
+                        fill_wrap_points(cluster, temp_point, temp_wpid,  point.x_2d, point.y_2d, point.wpid_2d);
                     }else{
                         for (size_t pindex = 0; pindex < 3; ++pindex) {
                             point.x_2d[pindex].push_back(point.x);
@@ -667,6 +667,60 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
 }
 
 
-void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid){
+void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, int wpid_point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid){
+    auto wpid = WirePlaneId(wpid_point);
+    int apa = wpid.apa();
+    int face = wpid.face();
+    auto grouping = cluster->grouping();
+    std::map<int, std::vector<double>> map_angles; // face -->angles 
+    const auto wire_angles = grouping->wire_angles(apa, face);
+    auto& angles = map_angles[face];
+    angles.push_back(std::get<0>(wire_angles));
+    angles.push_back(std::get<1>(wire_angles));
+    angles.push_back(std::get<2>(wire_angles));
 
+    // find the drift time ...
+    const auto map_time_offset = grouping->get_time_offset().at(apa);
+    const auto map_drift_speed = grouping->get_drift_speed().at(apa);
+    double time_offset = map_time_offset.at(face);
+    double drift_speed = map_drift_speed.at(face);
+
+    // std::cout << "Test: " << map_time_offset.size() <<  " " << map_time_offset.begin()->first << " " <<  std::endl;
+
+    auto anode = grouping->get_anode(apa);
+    const auto iface = anode->faces()[face];
+    const double time = drift2time(iface, time_offset, drift_speed, point.x());
+
+    const auto map_pitch_mags = grouping->pitch_mags().at(apa);
+    const auto map_proj_centers = grouping->proj_centers().at(apa);
+
+    for (size_t pind = 0; pind < 3; ++pind) {
+        // find the wire index ...
+        const double angle = map_angles.at(face)[pind];
+        const double pitch = map_pitch_mags.at(face).at(pind);
+        const double center = map_proj_centers.at(face).at(pind);
+        const int wind = point2wind(point, angle, pitch, center);
+        // get channel ...
+        auto channel = grouping->get_plane_channel_wind(apa, face, iplane2layer[pind], wind);
+
+        // get all wires
+        auto wires = anode->wires(channel->ident());
+        for (const auto &wire : wires) {
+            auto wire_wpid = wire->planeid();
+            // std::cout << "Test: " << map_time_offset.size() <<  " " << map_time_offset.begin()->first << " " << wire_wpid.face() << std::endl;
+            p_x[pind].push_back(time2drift(anode->faces()[wire_wpid.face()], map_time_offset.at(wire_wpid.face()), map_drift_speed.at(wire_wpid.face()), time));
+            if (map_angles.find(wire_wpid.face()) == map_angles.end()) {
+                const auto wire_angles1 = grouping->wire_angles(apa, face);
+                auto& angles = map_angles[face];
+                angles.push_back(std::get<0>(wire_angles1));
+                angles.push_back(std::get<1>(wire_angles1));
+                angles.push_back(std::get<2>(wire_angles1));
+            }
+            p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
+            if (pind==0){ // fill in the wpid
+                p_wpid.push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()));
+            }
+        }
+    }
+    
 }

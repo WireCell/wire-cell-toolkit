@@ -70,6 +70,7 @@ namespace WireCell::PointCloud::Facade {
         std::map<int, std::map<int, int> > get_drift_dir() const { return cache().map_drift_dir;}
         std::map<int, std::map<int, int> > get_nticks_per_slice() const { return cache().map_nticks_per_slice;}
         IChannel::vector get_plane_channels(const int apa, const int face, const WirePlaneLayer_t layer) const{return cache().map_plane_channels.at(apa).at(face).at(layer);}
+        std::shared_ptr<const WireCell::IChannel> get_plane_channel_wind(const int apa, const int face, const WirePlaneLayer_t layer, const int wind) const{ return cache().map_plane_channels.at(apa).at(face).at(layer).at(wind);}
 
         /// TODO: remove this in the future
         // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
