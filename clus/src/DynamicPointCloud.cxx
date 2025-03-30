@@ -710,8 +710,8 @@ void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_poin
             // std::cout << "Test: " << map_time_offset.size() <<  " " << map_time_offset.begin()->first << " " << wire_wpid.face() << std::endl;
             p_x[pind].push_back(time2drift(anode->faces()[wire_wpid.face()], map_time_offset.at(wire_wpid.face()), map_drift_speed.at(wire_wpid.face()), time));
             if (map_angles.find(wire_wpid.face()) == map_angles.end()) {
-                const auto wire_angles1 = grouping->wire_angles(apa, face);
-                auto& angles = map_angles[face];
+                const auto wire_angles1 = grouping->wire_angles(apa, wire_wpid.face());
+                auto& angles = map_angles[wire_wpid.face()];
                 angles.push_back(std::get<0>(wire_angles1));
                 angles.push_back(std::get<1>(wire_angles1));
                 angles.push_back(std::get<2>(wire_angles1));
