@@ -57,7 +57,7 @@ const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_l2g(const int 
     return iter->second;
 }
 
-const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_g2l(const int plane, const int face,
+const std::unordered_map<size_t, std::vector<size_t> > &DynamicPointCloud::kd2d_g2l(const int plane, const int face,
                                                                       const int apa) const
 {
     WirePlaneId wpid(iplane2layer[plane], face, apa);
@@ -169,7 +169,7 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
             size_t local_idx = start_idx + i;
             size_t global_idx = indices[i];
             m_kd2d_index_l2g[key][local_idx] = global_idx;
-            m_kd2d_index_g2l[key][global_idx] = local_idx;
+            m_kd2d_index_g2l[key][global_idx].push_back(local_idx); // save things to a vector
         }
     }
 }
@@ -418,11 +418,15 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
         point.x_2d.resize(3);
         point.y_2d.resize(3);
         
-        for (size_t pindex = 0; pindex < 3; ++pindex) {
-            point.x_2d[pindex].push_back(point.x);
-            point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
+        if (flag_wrap){
+            fill_wrap_points(cluster, pt, point.x_2d, point.y_2d, point.wpid_2d);
+        }else{
+            for (size_t pindex = 0; pindex < 3; ++pindex) {
+                point.x_2d[pindex].push_back(point.x);
+                point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
+            }
+            point.wpid_2d.push_back(WirePlaneId(wpid));
         }
-        point.wpid_2d.push_back(WirePlaneId(wpid));
         
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
         point.dist_cut = {-1e12, -1e12, -1e12};
@@ -496,12 +500,16 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
             point.x = test_point.x();
             point.y = test_point.y();
             point.z = test_point.z();
-            
-            for (size_t pindex = 0; pindex < 3; ++pindex) {
-                point.x_2d[pindex].push_back(test_point.x());
-                point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y());
+
+            if (flag_wrap){
+                fill_wrap_points(cluster, test_point, point.x_2d, point.y_2d, point.wpid_2d);
+            }else{
+                for (size_t pindex = 0; pindex < 3; ++pindex) {
+                    point.x_2d[pindex].push_back(test_point.x());
+                    point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y());
+                }
+                point.wpid_2d.push_back(WirePlaneId(wpid_test_point));
             }
-            point.wpid_2d.push_back(WirePlaneId(wpid_test_point));
             
             dpc_points.push_back(std::move(point));
         }
@@ -546,12 +554,16 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                         temp_angle_uvw = cache_it->second;
                     }
                     
-                    for (size_t pindex = 0; pindex < 3; ++pindex) {
-                        point.x_2d[pindex].push_back(point.x);
-                        point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
-                                            sin(temp_angle_uvw[pindex]) * point.y);
+                    if (flag_wrap){
+                        fill_wrap_points(cluster, temp_point, point.x_2d, point.y_2d, point.wpid_2d);
+                    }else{
+                        for (size_t pindex = 0; pindex < 3; ++pindex) {
+                            point.x_2d[pindex].push_back(point.x);
+                            point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
+                                                sin(temp_angle_uvw[pindex]) * point.y);
+                        }
+                        point.wpid_2d.push_back(WirePlaneId(temp_wpid));
                     }
-                    point.wpid_2d.push_back(WirePlaneId(temp_wpid));
                 }
                 // } else {
                 //     // point.x_2d = {-1e12, -1e12, -1e12};
@@ -652,4 +664,9 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
     }
 
     return dpc_points;
+}
+
+
+void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid){
+
 }

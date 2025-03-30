@@ -54,7 +54,7 @@ namespace WireCell::PointCloud::Facade {
         DynamicPointCloud::nfkd_t &kd3d() const;
         DynamicPointCloud::nfkd_t &kd2d(const int plane, const int face, const int apa) const;
         const std::unordered_map<size_t, size_t> &kd2d_l2g(const int plane, const int face, const int apa) const;
-        const std::unordered_map<size_t, size_t> &kd2d_g2l(const int plane, const int face, const int apa) const;
+        const std::unordered_map<size_t, std::vector<size_t>> &kd2d_g2l(const int plane, const int face, const int apa) const;
 
         /// @brief: kd2d().radius(radius)
         /// @return: [dist, Cluster, global point_index]
@@ -82,7 +82,7 @@ namespace WireCell::PointCloud::Facade {
         // for 2D, wpid to kd
         mutable std::map<int, std::unique_ptr<nfkd_t>> m_kd2d;
         std::unordered_map<int, std::unordered_map<size_t, size_t>> m_kd2d_index_l2g;
-        std::unordered_map<int, std::unordered_map<size_t, size_t>> m_kd2d_index_g2l;
+        std::unordered_map<int, std::unordered_map<size_t, std::vector<size_t> >> m_kd2d_index_g2l;
     };
 
     std::vector<DynamicPointCloud::DPCPoint>
@@ -101,7 +101,7 @@ namespace WireCell::PointCloud::Facade {
         const double step, const double angle, const IDetectorVolumes::pointer dv,
         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
 
-    // void fill_wrap_points(const Cluster *cluster, const geo_point_t &point, std::vector<double>& p_x, std::vector<double>& p_y);
+    void fill_wrap_points(const Cluster *cluster, const geo_point_t &point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid);
 
 }  // namespace WireCell::PointCloud::Facade
 
