@@ -347,7 +347,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         // std::vector<std::tuple<double, const Cluster *, size_t>> results =
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, 0, 0); // HACKING
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, face, apa); 
                         LogDebug("#b " << cluster->nkd_blobs() << " test_point " << test_point << " loose_dis_cut " << loose_dis_cut << " results.size() " << results.size());
                         bool flag_unique = true;
                         if (results.size() > 0) {
@@ -387,7 +387,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         // std::vector<std::tuple<double, const Cluster *, size_t>> results =
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, 0, 0); // HACKING
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, face, apa); 
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -421,7 +421,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         // std::vector<std::tuple<double, const Cluster *, size_t>> results =
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, 0, 0); // HACKING
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, face, apa);
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -448,7 +448,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         // std::vector<std::tuple<double, const Cluster *, size_t>> results =
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, 0, 0); // HACKING
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, face, apa); 
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -482,7 +482,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         // std::vector<std::tuple<double, const Cluster *, size_t>> results =
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, 0, 0); // HACKING
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, face, apa); 
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
@@ -509,7 +509,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         // std::vector<std::tuple<double, const Cluster *, size_t>> results =
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, 0, 0); // HACKING
+                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, face, apa); 
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;

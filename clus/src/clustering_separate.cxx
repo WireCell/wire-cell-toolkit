@@ -931,12 +931,6 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
 
 
-    // auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(*grouping, dv);
-    // auto temp_cloud = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
-    // std::map<int, std::pair<double, double>>& dead_u_index = grouping->get_dead_winds(hack_apa, 0, 0);
-    // std::map<int, std::pair<double, double>>& dead_v_index = grouping->get_dead_winds(hack_apa, 0, 1);
-    // std::map<int, std::pair<double, double>>& dead_w_index = grouping->get_dead_winds(hack_apa, 0, 2);
-
     geo_point_t cluster_center = cluster->get_center();
     geo_point_t main_dir = cluster->get_pca_axis(0);
     geo_point_t second_dir = cluster->get_pca_axis(1);
