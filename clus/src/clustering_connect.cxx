@@ -87,8 +87,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         // global_point_cloud->add_points(cluster, 0);
         global_point_cloud->add_points(make_points_cluster(cluster, wpid_params));
     }
-    LogDebug("global_point_cloud.get_num_points() " << global_point_cloud->get_num_points());
-    LogDebug("dead_u_index.size() " << dead_u_index.size() << " dead_v_index.size() " << dead_v_index.size() << " dead_w_index.size() " << dead_w_index.size());
     // sort the clusters length ...
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
@@ -136,15 +134,10 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         //     std::cout << "Connect 0: " << cluster->get_length()/units::cm << " " << cluster->get_center() << std::endl;
         // }
 
-        LogDebug("#b " << cluster->nkd_blobs() << " length " << cluster->get_length());
 
-        #ifdef __DEBUG__
-        if (cluster->nkd_blobs() == 84) break;
-        #endif
         // cluster->Create_point_cloud();
 
         std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
-        LogDebug("#b " << cluster->nkd_blobs() << " extreme_points " << extreme_points.first << " " << extreme_points.second);
         geo_point_t main_dir(extreme_points.second.x() - extreme_points.first.x(),
                           extreme_points.second.y() - extreme_points.first.y(),
                           extreme_points.second.z() - extreme_points.first.z());
@@ -183,7 +176,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             if (dir1.dot(main_dir) > 0) dir1 *= -1;
             if (dir2.dot(dir1) > 0) dir2 *= -1;
         }
-        LogDebug("#b " << cluster->nkd_blobs() << " dir1 " << dir1 << " dir2 " << dir2);
 
         bool flag_add_dir1 = true;
         bool flag_add_dir2 = true;
@@ -286,7 +278,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
             flag_para_2 = false;
         }
         
-        LogDebug("#b " << cluster->nkd_blobs() << " flag_para_1 " << flag_para_1 << " flag_prol_1 " << flag_prol_1 << " flag_para_2 " << flag_para_2 << " flag_prol_2 " << flag_prol_2);
 
         
 
@@ -327,7 +318,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                     fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
                     cluster->get_length() < 200 * units::cm) {
                 // WCP::WCPointCloud<double> &cloud = cluster->get_point_cloud()->get_cloud();
-                // LogDebug("#b " << cluster->nkd_blobs() << " gsc " << global_skeleton_cloud->get_num_points());
                 int num_total_points = cluster->npoints();
                 const auto& winds = cluster->wire_indices();
                 int num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
@@ -348,12 +338,10 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
                         std::vector<std::tuple<double, const Cluster *, size_t>> results =
                             global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, face, apa); 
-                        LogDebug("#b " << cluster->nkd_blobs() << " test_point " << test_point << " loose_dis_cut " << loose_dis_cut << " results.size() " << results.size());
                         bool flag_unique = true;
                         if (results.size() > 0) {
                             std::set<const Cluster *> temp_clusters;
                             for (size_t k = 0; k != results.size(); k++) {
-                                // LogDebug("#b " << cluster->nkd_blobs() << " results.at(k) " << std::get<0>(results.at(k)) << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))));
                                 // if (cluster->children().size() == 215 && k == 0) {
                                 // if (k == 0) {
                                 //     std::cout
@@ -531,13 +519,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                         if (flag_unique) num_unique[2]++;
                     }
                 } // loop over points
-                LogDebug("num_unique " << num_unique[0] << " " << num_unique[1] << " " << num_unique[2]);
-                LogDebug("map_cluster_num " << map_cluster_num[0].size() << " " << map_cluster_num[1].size() << " " << map_cluster_num[2].size());
-                if (cluster->nkd_blobs() == 84) {
-                    for (auto it = map_cluster_num[0].begin(); it != map_cluster_num[0].end(); it++) {
-                        LogDebug("map_cluster_num[0] " << it->first->nkd_blobs() << " " << it->second);
-                    }
-                }
+                
 
                 bool flag_merge = false;
 
@@ -669,8 +651,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                             // curr_cluster = max_cluster;
                         }
 
-                        LogDebug("max_cluster_u #b " << max_cluster_u->nkd_blobs() << " max_cluster_v #b " << max_cluster_v->nkd_blobs() << " max_cluster_w #b " << max_cluster_w->nkd_blobs());
-                        LogDebug("max_cluster #b " << max_cluster->nkd_blobs() << " map_cluster_dir1 " << map_cluster_dir1[max_cluster] << " map_cluster_dir2 " << map_cluster_dir2[max_cluster]);
+                 
                         if (fabs(dir1.angle(map_cluster_dir1[max_cluster]) - 3.1415926 / 2.) < 75 * 3.1415926 / 180. &&
                             fabs(dir1.angle(map_cluster_dir2[max_cluster]) - 3.1415926 / 2.) < 75 * 3.1415926 / 180.) {
                             flag_add_dir1 = false;
@@ -755,7 +736,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
                 }
             }  // length cut ...
 
-            LogDebug("#b " << cluster->nkd_blobs() << " flag_add_dir1 " << flag_add_dir1 << " flag_add_dir2 " << flag_add_dir2);
 
             // if (cluster->get_length()/units::cm>5){
             //     std::cout << "Connect 0-1: " << cluster->get_length()/units::cm << " " << cluster->get_center() << " " << flag_add_dir1 << " " << flag_add_dir2 << " " << flag_para_1 << " " << flag_prol_1 << " " << flag_para_2 << " " << flag_prol_2 << " " << extreme_points.first << " " << extreme_points.second << " " << dir1 << " " << dir2 << " " << extending_dis << " " << angle << std::endl;
@@ -799,7 +779,6 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
         }  // not the first cluster ...
     }  // loop over clusters ...
 
-    LogDebug("#edges " << boost::num_edges(g) << " #vertices " << boost::num_vertices(g));
 
     // merge clusters
 

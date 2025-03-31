@@ -733,7 +733,6 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
             }
         }
 
-        // std::cout << "Check: " << cluster->nchildren() << " " << num << std::endl;
         // study the independent component again ...
         {
             // point -> component

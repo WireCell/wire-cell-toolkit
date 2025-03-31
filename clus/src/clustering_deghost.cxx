@@ -301,9 +301,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                         (num_unique[1] + num_unique[0] + num_unique[2]) > 25)
                         break;
                 }
-                LogDebug("num_total_points = " << num_total_points);
-                LogDebug("num_unique[0] = " << num_unique[0] << ", num_unique[1] = " << num_unique[1] << ", num_unique[2] = " << num_unique[2]);
-                LogDebug("num_dead[0] = " << num_dead[0] << ", num_dead[1] = " << num_dead[1] << ", num_dead[2] = " << num_dead[2]);
+                // LogDebug("num_total_points = " << num_total_points);
+                // LogDebug("num_unique[0] = " << num_unique[0] << ", num_unique[1] = " << num_unique[1] << ", num_unique[2] = " << num_unique[2]);
+                // LogDebug("num_dead[0] = " << num_dead[0] << ", num_dead[1] = " << num_dead[1] << ", num_dead[2] = " << num_dead[2]);
 
                 bool flag_save = false;
 
@@ -331,7 +331,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                           num_unique[2] < 0.02 * num_total_points)) &&
                     (num_unique[0] + num_unique[1] + num_unique[2]) <= 500) {
                     flag_save = false;
-                    LogDebug("pass the first cut " << num_total_points);
+                    // LogDebug("pass the first cut " << num_total_points);
 
                     // now try to compare
                     // find the maximal for each map
@@ -356,7 +356,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                         }
                     }
                     bool flag_remove = true;
-                    LogDebug("max_value_u: " << max_value_u << ", max_value_v: " << max_value_v << ", max_value_w: " << max_value_w);
+                    // LogDebug("max_value_u: " << max_value_u << ", max_value_v: " << max_value_v << ", max_value_w: " << max_value_w);
 
                     if (max_cluster_u == max_cluster_v && max_value_u > 0.8 * (num_total_points - num_dead[0]) &&
                         max_value_v > 0.8 * (num_total_points - num_dead[1])) {
@@ -638,7 +638,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 }
             }
         }
-        LogDebug("Cluster " << i << " " << live_clusters.at(i)->nkd_blobs() << " " << live_clusters.at(i)->npoints());
+        // LogDebug("Cluster " << i << " " << live_clusters.at(i)->nkd_blobs() << " " << live_clusters.at(i)->npoints());
         // LogDebug("global_point_cloud: " << global_point_cloud->get_num_points() << " global_skeleton_cloud: " << global_skeleton_cloud->get_num_points());
     }
 
