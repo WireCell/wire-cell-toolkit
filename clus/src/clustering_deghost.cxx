@@ -93,12 +93,17 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
     }
 
+    bool flag_first = true;
     for (size_t i = 0; i != live_clusters.size(); i++) {
         if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
             live_clusters.at(i)->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
-        if (i == 0) {
+        
+        // if not within the scope filter, nor processing ...
+        if (!live_clusters.at(i)->get_scope_filter(scope)) continue;
+        
+        if (flag_first) {
             // fill anyway ...
             // live_clusters.at(i)->Create_point_cloud();
             // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
@@ -113,6 +118,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 0);
                 global_skeleton_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             }
+            flag_first = false;
         }
         else {
             // start the process to add things in and perform deghosting ...

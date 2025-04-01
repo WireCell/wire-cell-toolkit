@@ -45,33 +45,37 @@ void WireCell::PointCloud::Facade::clustering_close(
 
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
+    // nor process this cluster if it is not in the filter ...
+    if (!cluster_1->get_scope_filter(scope)) continue;
     if (cluster_1->get_length() < 1.5*units::cm) continue;
     if (used_clusters.find(cluster_1)!=used_clusters.end()) continue;
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
+      // nor process this cluster if it is not in the filter ...
+      if (!cluster_2->get_scope_filter(scope)) continue;
       if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
       if (cluster_2->get_length() < 1.5*units::cm) continue;
       if (Clustering_3rd_round(*cluster_1,*cluster_2,
                                cluster_1->get_length(), cluster_2->get_length(), length_cut)){
-	//to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			ilive2desc[map_cluster_index[cluster_2]], g);
+        //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+        boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+            ilive2desc[map_cluster_index[cluster_2]], g);
 
 
-	
-	if (cluster_1->get_length() < 5*units::cm){
-	  used_clusters.insert(cluster_1);
-	  break;
-	}
-	if (cluster_2->get_length() < 5*units::cm){
-	  used_clusters.insert(cluster_2);
-	}
+        
+        if (cluster_1->get_length() < 5*units::cm){
+          used_clusters.insert(cluster_1);
+          break;
+        }
+        if (cluster_2->get_length() < 5*units::cm){
+          used_clusters.insert(cluster_2);
+        }
       }
     }
   }
 
   //  if (flag_print) std::cout << em("core alg") << std::endl;
-
+  
   // new function to  merge clusters ...
   merge_clusters(g, live_grouping, cluster_connected_dead);
 

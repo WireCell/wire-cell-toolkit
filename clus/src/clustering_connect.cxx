@@ -87,12 +87,13 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
     Tree::Scope scope{pc_name, coords};
     for (Cluster *cluster : live_grouping.children()) {
+        if(!cluster->get_scope_filter(scope)) continue;
         // global_point_cloud->add_points(cluster, 0);
-        global_point_cloud->add_points(make_points_cluster(cluster, wpid_params));
         if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
+        global_point_cloud->add_points(make_points_cluster(cluster, wpid_params));
     }
     // sort the clusters length ...
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
@@ -135,6 +136,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if(!cluster->get_scope_filter(scope)) continue;
         assert (cluster->npoints() > 0); // preempt segfault in get_two_extreme_points()
 
         // if (cluster->get_length()/units::cm>5){
@@ -809,12 +811,14 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     // to_be_merged_pairs.clear(); // clear it for other usage ...
     for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
         const Cluster *cluster_1 = (*it);
+        if (!cluster_1->get_scope_filter(scope)) continue;
         // cluster_1->Calc_PCA();
         geo_point_t p1_c = cluster_1->get_center();
         geo_point_t p1_dir(cluster_1->get_pca_axis(0).x(), cluster_1->get_pca_axis(0).y(), cluster_1->get_pca_axis(0).z());
         Ray l1(p1_c, p1_c+p1_dir);
         for (auto it1 = live_clusters.begin(); it1 != live_clusters.end(); it1++) {
             Cluster *cluster_2 = (*it1);
+            if (!cluster_2->get_scope_filter(scope)) continue;
             if (cluster_2->get_length() < 3 * units::cm) continue;
             if (cluster_2 == cluster_1) continue;
 
