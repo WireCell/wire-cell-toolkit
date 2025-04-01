@@ -101,7 +101,8 @@ void WireCell::PointCloud::Facade::clustering_extend(
   
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
-      if (cluster_1->get_default_scope().hash() != scope.hash()) {
+    if (!cluster_1->get_scope_filter(scope)) continue;
+    if (cluster_1->get_default_scope().hash() != scope.hash()) {
         cluster_1->set_default_scope(scope);
         // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
     }
@@ -155,6 +156,12 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	  
 	  for (size_t j=0;j!=live_clusters.size();j++){
 	    auto cluster_2 = live_clusters.at(j);
+      if (!cluster_2->get_scope_filter(scope)) continue;
+      if (cluster_2->get_default_scope().hash() != scope.hash()) {
+        cluster_2->set_default_scope(scope);
+        // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+      }
+
 	    if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	    if (cluster_2==cluster_1) continue;
 	    if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),earliest_p,dir_earlp,length_cut)){
