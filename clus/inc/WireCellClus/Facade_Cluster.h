@@ -47,8 +47,13 @@ namespace WireCell::PointCloud::Facade {
         const std::vector<std::string>& get_coords_raw() const {return scope_3d_raw.coords;}
         void set_default_scope(const Tree::Scope& scope);
         const Tree::Scope& get_default_scope() const {return m_default_scope;}
+        const Tree::Scope& get_raw_scope() const {return scope_3d_raw;}
         const std::string& get_pc_name() const {return m_default_scope.pcname;}
         const std::vector<std::string>& get_coords() const {return m_default_scope.coords;}
+
+        // set, get scope filter ...
+        void set_scope_filter(const Tree::Scope& scope, bool flag);
+        const bool get_scope_filter(const Tree::Scope& scope) const;
 
 
         // Override Mixin
@@ -439,6 +444,7 @@ namespace WireCell::PointCloud::Facade {
 
        private:
         Tree::Scope m_default_scope = scope_3d_raw;
+        std::map<size_t, bool> m_map_scope_filter={{scope_3d_raw.hash(), true}};
 
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.

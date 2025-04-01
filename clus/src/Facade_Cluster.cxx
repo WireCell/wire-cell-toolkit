@@ -60,6 +60,20 @@ void Cluster::set_default_scope(const Tree::Scope& scope) {
     clear_cache();
 }
 
+
+void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag){
+    // Set the scope filter for the given scope
+    m_map_scope_filter[scope.hash()] = flag;
+}
+const bool Cluster::get_scope_filter(const Tree::Scope& scope) const{
+    auto it = m_map_scope_filter.find(scope.hash());
+    if (it == m_map_scope_filter.end()){
+        return false;
+    }
+    return it->second;
+}
+
+
 void Cluster::clear_cache() const {
 
     // For now, this facade does its own cache management but we forward-call
