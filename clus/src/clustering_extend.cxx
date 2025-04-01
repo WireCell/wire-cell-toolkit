@@ -88,9 +88,14 @@ void WireCell::PointCloud::Facade::clustering_extend(
   
   Tree::Scope scope{pc_name, coords};
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    const auto& live = live_clusters.at(ilive);
+    auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    // set scope ...
+    if (live->get_default_scope().hash() != scope.hash()) {
+      live->set_default_scope(scope);
+      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+    }
   }
 
   // original algorithm ... (establish edges ... )
@@ -102,10 +107,7 @@ void WireCell::PointCloud::Facade::clustering_extend(
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
     if (!cluster_1->get_scope_filter(scope)) continue;
-    if (cluster_1->get_default_scope().hash() != scope.hash()) {
-        cluster_1->set_default_scope(scope);
-        // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
-    }
+   
 
     if (cluster_1->get_length() > length_1_cut){
       geo_point_t highest_p, lowest_p, earliest_p, latest_p;
@@ -157,10 +159,6 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	  for (size_t j=0;j!=live_clusters.size();j++){
 	    auto cluster_2 = live_clusters.at(j);
       if (!cluster_2->get_scope_filter(scope)) continue;
-      if (cluster_2->get_default_scope().hash() != scope.hash()) {
-        cluster_2->set_default_scope(scope);
-        // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
-      }
 
 	    if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	    if (cluster_2==cluster_1) continue;
@@ -182,6 +180,7 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	  // flag_prol = true;
 	  for (size_t j=0;j!=live_clusters.size();j++){
 	    auto cluster_2 = live_clusters.at(j);
+      if (!cluster_2->get_scope_filter(scope)) continue;
 	    if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	    if (cluster_2==cluster_1) continue;
 	    if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),latest_p,dir_latep,length_cut)){
@@ -209,6 +208,7 @@ void WireCell::PointCloud::Facade::clustering_extend(
 
 	   for (size_t j=0;j!=live_clusters.size();j++){
 	     auto cluster_2 = live_clusters.at(j);
+       if (!cluster_2->get_scope_filter(scope)) continue;
 	     if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	     if (cluster_2==cluster_1) continue;
 	     
@@ -230,6 +230,7 @@ void WireCell::PointCloud::Facade::clustering_extend(
 
 	   for (size_t j=0;j!=live_clusters.size();j++){
 	     auto cluster_2 = live_clusters.at(j);
+       if (!cluster_2->get_scope_filter(scope)) continue;
 	     if (cluster_2==cluster_1) continue;
 	     if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),lowest_p,dir_lowp,length_cut)){
 	       // to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
@@ -258,6 +259,8 @@ void WireCell::PointCloud::Facade::clustering_extend(
 
 	for (size_t j=0;j!=live_clusters.size();j++){
 	  auto cluster_2 = live_clusters.at(j);
+    if (!cluster_2->get_scope_filter(scope)) continue;
+
 	  if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	  if (cluster_2==cluster_1) continue;
 	  
@@ -288,6 +291,8 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	  used_clusters.insert(cluster_1);
 	  for (size_t j=0;j!=live_clusters.size();j++){
 	    auto cluster_2 = live_clusters.at(j);
+      if (!cluster_2->get_scope_filter(scope)) continue;
+
 	    if (cluster_2->get_length() < length_2_cut) continue;
 	    if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	    if (Clustering_4th_dead(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),length_cut,num_dead_try,  wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
