@@ -89,7 +89,7 @@ void WireCell::PointCloud::Facade::merge_clusters(
             auto live = orig_clusters[idx];
             fresh_cluster.take_children(*live, true);
 
-            // set scope filter, assuming merging all scopes have the same filter information
+            // set scope filter assuming union of all clusters
             {   
                 const Tree::Scope& default_scope = live->get_default_scope();
                 bool flag = live->get_scope_filter(default_scope);

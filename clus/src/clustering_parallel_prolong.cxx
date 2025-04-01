@@ -72,7 +72,7 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
   Tree::Scope scope{pc_name, coords};
 
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    const auto& live = live_clusters[ilive];
+    auto& live = live_clusters[ilive];
     map_cluster_index[live] = ilive;
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
 	if (live->get_default_scope().hash() != scope.hash()) {
@@ -86,8 +86,10 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
 
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
+	if (!cluster_1->get_scope_filter(scope)) continue;
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
+	  if(!cluster_2->get_scope_filter(scope)) continue;
       if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut)){
 
 		// // debug ...
