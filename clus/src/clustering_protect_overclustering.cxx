@@ -15,7 +15,7 @@ using namespace WireCell::PointCloud::Tree;
 
 
 static
-std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolumes::pointer dv)
+std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolumes::pointer dv, Scope& scope)
 {
     // can follow ToyClustering_separate to add clusters ...
     auto* grouping = cluster->grouping();
@@ -748,7 +748,12 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                     const int bind = cluster->kd3d().major_index(i);
                     b2groupid.at(bind) = component1[i];
                 }
-                return grouping->separate(cluster, b2groupid, true); 
+                auto id2clusters = grouping->separate(cluster, b2groupid, true); 
+                // Apply the scope filter settings to all new clusters
+                for (auto& [id, new_cluster] : id2clusters) {
+                    new_cluster->set_scope_filter(scope, true);
+                }
+                return id2clusters;
             }
         }
 
@@ -766,11 +771,12 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if (!cluster->get_scope_filter(scope)) continue;
         if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
-        Separate_overclustering(cluster, dv);
+        Separate_overclustering(cluster, dv, scope);
     }
 }
