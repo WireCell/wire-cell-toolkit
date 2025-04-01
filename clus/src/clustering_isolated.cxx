@@ -99,6 +99,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     std::vector<Cluster*> small_clusters;
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
+        if (!live_clusters.at(i)->get_scope_filter(scope)) continue;
         auto map_wpid_uvwt_range = live_clusters.at(i)->get_uvwt_range();
         std::vector<int> ranges(4, 0);  // Initialize a vector with 4 zeros
           
