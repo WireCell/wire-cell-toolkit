@@ -28,6 +28,7 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
     std::vector<Cluster *> live_clusters = live_grouping.children();
     Tree::Scope scope{pc_name, coords};
     for (size_t i=0;i!=live_clusters.size();i++){
+        if (!live_clusters.at(i)->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
         if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
             live_clusters.at(i)->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
