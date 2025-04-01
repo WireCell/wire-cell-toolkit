@@ -118,7 +118,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
-        if (!cluster->get_filter_scope(scope)) continue;
+        if (!cluster->get_scope_filter(scope)) continue;
         if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
@@ -238,11 +238,11 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     // calculate the closest distance??? ...
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster1 = live_clusters.at(i);
-        if (!cluster1->get_filter_scope(scope)) continue;
+        if (!cluster1->get_scope_filter(scope)) continue;
         // ToyPointCloud *cloud1 = cluster1->get_point_cloud();
         for (size_t j = i + 1; j != live_clusters.size(); j++) {
             Cluster *cluster2 = live_clusters.at(j);
-            if (!cluster2->get_filter_scope(scope)) continue;
+            if (!cluster2->get_scope_filter(scope)) continue;
             // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
 
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
@@ -348,6 +348,12 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
                     // false: do not remove the cluster1
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
+
+                    // Apply the scope filter settings to all new clusters
+                    for (auto& [id, new_cluster] : sep_clusters) {
+                        new_cluster->set_scope_filter(scope, true);
+                    }
+
                     assert(cluster1 != nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
@@ -523,6 +529,12 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
+                    
+                    // Apply the scope filter settings to all new clusters
+                    for (auto& [id, new_cluster] : sep_clusters) {
+                        new_cluster->set_scope_filter(scope, true);
+                    }
+
                     assert(cluster2 != nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
