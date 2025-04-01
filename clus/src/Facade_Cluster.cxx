@@ -54,7 +54,11 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
 Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
 const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
 
-
+void Cluster::set_default_scope(const Tree::Scope& scope) {
+    m_default_scope = scope;
+    // Clear caches that depend on the scope
+    clear_cache();
+}
 
 void Cluster::clear_cache() const {
 
@@ -747,12 +751,18 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
     return std::make_pair(min_point, min_dis1);
 }
 
-const Cluster::sv3d_t& Cluster::sv3d() const { return m_node->value.scoped_view(scope_3d_raw); }
-
+const Cluster::sv3d_t& Cluster::sv3d() const { return m_node->value.scoped_view(m_default_scope); }
 const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
 geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
+
+const Cluster::sv3d_t& Cluster::sv3d_raw() const { return m_node->value.scoped_view(scope_3d_raw); }
+const Cluster::kd3d_t& Cluster::kd3d_raw() const { return sv3d_raw().kd(); }
+const Cluster::kd3d_t& Cluster::kd_raw() const { return kd3d_raw(); }
+geo_point_t Cluster::point3d_raw(size_t point_index) const { return kd3d_raw().point3d(point_index); }
+geo_point_t Cluster::point_raw(size_t point_index) const { return point3d_raw(point_index); }
+
 
 WirePlaneId Cluster::wire_plane_id(size_t point_index) const {  
     if (m_cached_wpid.empty()) {
@@ -817,33 +827,6 @@ std::pair<int, int> Cluster::ndipole(const geo_point_t& point, const geo_point_t
     return std::make_pair(num_p1, num_p2);
 }
 
-// std::pair<int, int> Cluster::nprojection(const geo_point_t& point, const geo_point_t& dir, double dis) const
-// {
-//     const auto& sv = m_node->value.scoped_view(scope_3d_raw);       // get the kdtree
-//     const auto& skd = sv.kd();
-//     const auto& points = skd.points();
-
-//     int num_p1 = 0;
-//     int num_p2 = 0;
-
-//     auto rad = skd.radius(dis*dis, point);
-//     for (const auto& [index,_] : rad) {
-
-//         geo_point_t dir1(points[0][index] - point.x(),
-//                          points[1][index] - point.y(),
-//                          points[2][index] - point.z());
-
-//         if (dir1.dot(dir) >= 0) {
-//             ++num_p1;
-//         }
-//         else{
-//             ++num_p2;
-//         }
-
-//     }
-
-//     return std::make_pair(num_p1, num_p2);
-// }
 
 Cluster::kd_results_t Cluster::kd_knn(int nn, const geo_point_t& query_point) const
 {
@@ -1650,9 +1633,9 @@ std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
 bool Cluster::sanity(Log::logptr_t log) const
 {
     {
-        const auto* svptr = m_node->value.get_scoped(scope_3d_raw);
+        const auto* svptr = m_node->value.get_scoped(m_default_scope);
         if (!svptr) {
-            if (log) log->debug("cluster sanity: note, not yet a scoped view {}", scope_3d_raw);
+            if (log) log->debug("cluster sanity: note, not yet a scoped view {}", m_default_scope);
         }
     }
     if (!nchildren()) {
@@ -1660,7 +1643,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         return false;
     }
 
-    const auto& sv = m_node->value.scoped_view(scope_3d_raw);
+    const auto& sv = m_node->value.scoped_view(m_default_scope);
     const auto& snodes = sv.nodes();
     if (snodes.empty()) {
         if (log) log->debug("cluster sanity: no scoped nodes");

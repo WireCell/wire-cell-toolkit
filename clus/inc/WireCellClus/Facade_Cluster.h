@@ -42,8 +42,21 @@ namespace WireCell::PointCloud::Facade {
         Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
 
+        // return raw pc information ...
+        const std::string& get_pc_name_raw() const {return scope_3d_raw.pcname;}
+        const std::vector<std::string>& get_coords_raw() const {return scope_3d_raw.coords;}
+        void set_default_scope(const Tree::Scope& scope);
+        const Tree::Scope& get_default_scope() const {return m_default_scope;}
+        const std::string& get_pc_name() const {return m_default_scope.pcname;}
+        const std::vector<std::string>& get_coords() const {return m_default_scope.coords;}
+
+
         // Override Mixin
         virtual void clear_cache() const;
+
+
+
+
 
         // Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
@@ -83,12 +96,16 @@ namespace WireCell::PointCloud::Facade {
         // Get the scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
         const sv3d_t& sv3d() const;
+        const sv3d_t& sv3d_raw() const;
+
 
         // Access the k-d tree for "3d" point cloud (x,y,z).
         // Note, this may trigger the underlying k-d build.
         using kd3d_t = sv3d_t::nfkd_t;
         const kd3d_t& kd3d() const;
         const kd3d_t& kd() const;
+        const kd3d_t& kd3d_raw() const;
+        const kd3d_t& kd_raw() const;
 
         using kd_results_t = kd3d_t::results_type;
         // Perform a k-d tree radius query.  This radius is linear distance
@@ -125,6 +142,10 @@ namespace WireCell::PointCloud::Facade {
         geo_point_t point3d(size_t point_index) const;
         // alias for point3d to match the Simple3DPointCloud interface
         geo_point_t point(size_t point_index) const;
+
+        geo_point_t point3d_raw(size_t point_index) const;
+        // alias for point3d to match the Simple3DPointCloud interface
+        geo_point_t point_raw(size_t point_index) const;
 
         // return WirePlaneId for an index ...
         WirePlaneId wire_plane_id(size_t point_index) const;
@@ -413,6 +434,8 @@ namespace WireCell::PointCloud::Facade {
         Flash get_flash() const;
 
        private:
+        Tree::Scope m_default_scope = scope_3d_raw;
+
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
 
