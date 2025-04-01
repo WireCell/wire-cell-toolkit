@@ -82,25 +82,29 @@ void WireCell::PointCloud::Facade::clustering_regular(
   std::map<const Cluster*, int> map_cluster_index;
   const auto& live_clusters = live_grouping.children();
   
+  Tree::Scope scope{pc_name, coords};
 
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    const auto& live = live_clusters.at(ilive);
+    auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    if (live->get_default_scope().hash() != scope.hash()) {
+      live->set_default_scope(scope);
+      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+   }
   }
 
   // original algorithm ... (establish edges ... )
 
-  Tree::Scope scope{pc_name, coords};
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
-    if (cluster_1->get_default_scope().hash() != scope.hash()) {
-      cluster_1->set_default_scope(scope);
-      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
-   }
+    if (!cluster_1->get_scope_filter(scope)) continue;
+    
     if (cluster_1->get_length() < internal_length_cut) continue;
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
+      if (!cluster_2->get_scope_filter(scope)) continue;
+
       if (cluster_2->get_length() < internal_length_cut) continue;
 
       if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut, flag_enable_extend)){
