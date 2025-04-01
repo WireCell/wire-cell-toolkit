@@ -64,7 +64,7 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
 
     for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
         const auto& live = live_clusters.at(ilive);
-      //const Cluster*& live = live_clusters[ilive];
+        if (!live->get_scope_filter(scope)) continue;
       for (size_t idead = 0; idead < dead_clusters.size(); ++idead) {
         const auto& dead = dead_clusters.at(idead);
 	
