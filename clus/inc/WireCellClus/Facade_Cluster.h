@@ -109,8 +109,8 @@ namespace WireCell::PointCloud::Facade {
         // order and different that sort_blobs() order.
         std::vector<Blob*> kd_blobs();
         std::vector<const Blob*> kd_blobs() const;
-        // Return the number of blobs from the k-d tree
-        size_t nkd_blobs() const;
+        // // Return the number of blobs from the k-d tree
+        // size_t nkd_blobs() const;
 
         // Return the blob with the point at the given k-d tree point index.
         Blob* blob_with_point(size_t point_index);

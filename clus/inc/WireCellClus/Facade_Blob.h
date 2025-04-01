@@ -92,7 +92,8 @@ namespace WireCell::PointCloud::Facade {
         size_t hash() const;
 
         // Return the scope points.
-        std::vector<geo_point_t> points() const;
+        // std::vector<geo_point_t> points(const std::string& pc_name = "3d", const std::vector<std::string>& coords = {"x", "y", "z"}) const;
+        std::vector<geo_point_t> points(const std::string& pc_name, const std::vector<std::string>& coords) const;
         size_t nbpoints() const;
 
         // Check facade consistency

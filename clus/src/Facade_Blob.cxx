@@ -170,10 +170,11 @@ bool Blob::sanity(Log::logptr_t log) const
     return false;
 }
 
-std::vector<geo_point_t> Blob::points() const
+std::vector<geo_point_t> Blob::points(const std::string& pc_name, 
+                                      const std::vector<std::string>& coords) const
 {
-    const auto& pc = m_node->value.local_pcs()["3d"];
-    auto sel = pc.selection({"x", "y", "z"});
+    const auto& pc = m_node->value.local_pcs()[pc_name];
+    auto sel = pc.selection(coords);
     const size_t npts = sel[0]->size_major();
 
     std::vector<geo_point_t> ret(npts);

@@ -642,8 +642,6 @@ const Cluster::kd2d_t& Cluster::kd2d(const int apa, const int face, const size_t
 
 std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int apa, const int face, const int plane) const {
 
-    // const auto& tp = grouping()->get_params();
-    // double angle_uvw[3] = {tp.angle_u, tp.angle_v, tp.angle_w};
     auto angles = grouping()->wire_angles(apa,face);
     double angle_uvw[3];
     angle_uvw[0] = std::get<0>(angles);
@@ -896,11 +894,11 @@ std::vector<const Blob*> Cluster::kd_blobs() const
     return ret;
 }
 
-size_t Cluster::nkd_blobs() const
-{
-    const auto& skd = kd3d();
-    return skd.nblocks();
-}
+// size_t Cluster::nkd_blobs() const
+// {
+//     const auto& skd = kd3d();
+//     return skd.nblocks();
+// }
 
 Blob* Cluster::blob_with_point(size_t point_index)
 {
@@ -1718,6 +1716,9 @@ bool Cluster::sanity(Log::logptr_t log) const
     const Blob* sblob = nullptr;
     std::vector<geo_point_t> spoints;
 
+    std::string hack_pc_name = "3d";
+    std::vector<std::string> hack_coords = {"x", "y", "z"};
+
     for (size_t ind = 0; ind < npts; ++ind) {
         auto kdpt = skd.point3d(ind);
 
@@ -1733,7 +1734,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         const auto* tblob = tnode->value.facade<Blob>();
         if (tblob != sblob) {
             sblob = tblob;
-            spoints = sblob->points();
+            spoints = sblob->points(hack_pc_name, hack_coords);
         }
 
         if (minind >= spoints.size()) {
@@ -3700,10 +3701,13 @@ void Cluster::Calc_PCA() const
 {
     if (m_pca_calculated) return;
 
+    std::string hack_pc_name = "3d";
+    std::vector<std::string> hack_coords = {"x", "y", "z"};
+
     m_center.set(0, 0, 0);
     int nsum = 0;
     for (const Blob* blob : children()) {
-        for (const geo_point_t& p : blob->points()) {
+        for (const geo_point_t& p : blob->points(hack_pc_name, hack_coords)) {
             m_center += p;
             nsum++;
         }
@@ -3725,7 +3729,7 @@ void Cluster::Calc_PCA() const
         for (int j = i; j != 3; j++) {
             cov_matrix(i, j) = 0;
             for (const Blob* blob : children()) {
-                for (const geo_point_t& p : blob->points()) {
+                for (const geo_point_t& p : blob->points(hack_pc_name, hack_coords)) {
                     cov_matrix(i, j) += (p[i] - m_center[i]) * (p[j] - m_center[j]);
                 }
             }
@@ -3902,6 +3906,7 @@ double Cluster::get_pca_value(int axis) const {
 }
 
 
+
 // std::unordered_map<int, Cluster*> 
 std::vector<int> Cluster::examine_x_boundary(const double low_limit, const double high_limit)
 // designed to run for single face ... limits are for per face only ...
@@ -3910,9 +3915,13 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
     double x_max = -1e9;
     double x_min = 1e9;
     auto& mcells = children();
+
+    std::string hack_pc_name = "3d";
+    std::vector<std::string> hack_coords = {"x", "y", "z"};
+
     for (Blob* mcell : mcells) {
         /// TODO: no caching, could be slow
-        std::vector<geo_point_t> pts = mcell->points();
+        std::vector<geo_point_t> pts = mcell->points(hack_pc_name, hack_coords);
         for (size_t i = 0; i != pts.size(); i++) {
             if (pts.at(i).x() < low_limit) {
                 num_points[0]++;
@@ -3960,7 +3969,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
             groupids.insert(2);
             for (size_t idx=0; idx < mcells.size(); idx++) {
                 Blob *mcell = mcells.at(idx);
-                if (mcell->points()[0].x() < low_limit) {
+                if (mcell->points(hack_pc_name, hack_coords)[0].x() < low_limit) {
                     if (groupids.find(1) != groupids.end()) {
                         // cluster_1->AddCell(mcell, mcell->GetTimeSlice());
                         b2groupid[idx] = 1;
@@ -3970,7 +3979,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
                         b2groupid[idx] = 2;
                     }
                 }
-                else if (mcell->points()[0].x() > high_limit) {
+                else if (mcell->points(hack_pc_name, hack_coords)[0].x() > high_limit) {
                     if (groupids.find(3) != groupids.end()) {
                         // cluster_3->AddCell(mcell, mcell->GetTimeSlice());
                         b2groupid[idx] = 3;

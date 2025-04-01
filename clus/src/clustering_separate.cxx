@@ -1618,6 +1618,8 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
     }
 
     {
+        std::string hack_pc_name = "3d";
+        std::vector<std::string> hack_coords = {"x", "y", "z"};
         // std::cout << "Separate_2: num_edges: " << num_edges(graph) << std::endl;
         std::vector<int> component(num_vertices(graph));
         const int num = connected_components(graph, &component[0]);
@@ -1632,7 +1634,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
             for (i = 0; i != component.size(); ++i) {
                 vec_vec.at(component[i]).push_back(i);
                 Blob *mcell = mcells.at(i);
-                for (const auto & pt : mcell->points()) {
+                for (const auto & pt : mcell->points(hack_pc_name, hack_coords)) {
                     pt_clouds.at(component[i])->add({pt.x(), pt.y(), pt.z()});
                 }
             }
