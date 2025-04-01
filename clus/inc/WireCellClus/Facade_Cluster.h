@@ -116,6 +116,9 @@ namespace WireCell::PointCloud::Facade {
         std::vector<geo_point_t> kd_points(const kd_results_t& res);
         std::vector<geo_point_t> kd_points(const kd_results_t& res) const;
 
+        std::vector<geo_point_t> kd_points_raw(const kd_results_t& res);
+        std::vector<geo_point_t> kd_points_raw(const kd_results_t& res) const;
+
         // print all blob information
         void print_blobs_info() const;
 
@@ -153,6 +156,7 @@ namespace WireCell::PointCloud::Facade {
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.
         using points_type = kd3d_t::points_type;
         const points_type& points() const;
+        const points_type& points_raw() const;
 
         // Return charge-weighted average position of points of blobs within distance of point.
         geo_point_t calc_ave_pos(const geo_point_t& origin, const double dis) const;

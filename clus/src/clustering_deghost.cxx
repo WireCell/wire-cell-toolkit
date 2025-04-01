@@ -638,7 +638,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 }
             }
         }
-        // LogDebug("Cluster " << i << " " << live_clusters.at(i)->nkd_blobs() << " " << live_clusters.at(i)->npoints());
+        // LogDebug("Cluster " << i << " " << live_clusters.at(i)->n_blobs() << " " << live_clusters.at(i)->npoints());
         // LogDebug("global_point_cloud: " << global_point_cloud->get_num_points() << " global_skeleton_cloud: " << global_skeleton_cloud->get_num_points());
     }
 

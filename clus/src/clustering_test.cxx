@@ -170,7 +170,7 @@ void WireCell::PointCloud::Facade::clustering_test(
 
         auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
         auto dpc = std::make_shared<DynamicPointCloud>(wpid_params);
-        auto dpcl = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+        // auto dpcl = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
         double extending_dis = 50 * units::cm;
         double angle = 7.5;
         double loose_dis_cut = 7.5 * units::cm;
@@ -179,19 +179,19 @@ void WireCell::PointCloud::Facade::clustering_test(
             Cluster* cluster = live_clusters.at(iclus);
             const auto test_point = cluster->point3d(0);
             std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
-            dpcl->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
+            // dpcl->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
             dpc->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
-            const auto results_legacy = dpcl->get_2d_points_info(test_point, loose_dis_cut, 0);
+            // const auto results_legacy = dpcl->get_2d_points_info(test_point, loose_dis_cut, 0);
             const auto results = dpc->get_2d_points_info(test_point, loose_dis_cut, 0, 0, 0);
-            SPDLOG_INFO("CTest Cluster {} results_legacy.size() {} results.size() {}", iclus, results_legacy.size(), results.size());
+            // SPDLOG_INFO("CTest Cluster {} results_legacy.size() {} results.size() {}", iclus, results_legacy.size(), results.size());
         }
         for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
             Cluster* cluster = live_clusters.at(iclus);
             std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
-            dpcl->add_points(cluster,0);
+            // dpcl->add_points(cluster,0);
             dpc->add_points(make_points_cluster(cluster, wpid_params));
-            SPDLOG_INFO("CTest dpcl->get_num_points() {} dpc->get_points().size() {}",
-                        dpcl->get_num_points(), dpc->get_points().size());
+            // SPDLOG_INFO("CTest dpcl->get_num_points() {} dpc->get_points().size() {}",
+                        // dpcl->get_num_points(), dpc->get_points().size());
             const auto dir_hough = dpc->vhough_transform(extreme_points.first, extending_dis);
             SPDLOG_INFO("CTest Cluster {} dir_hough {} ", iclus, dir_hough);
             // const auto dir_hough_legacy = dpcl->vhough_transform(extreme_points.first, extending_dis);

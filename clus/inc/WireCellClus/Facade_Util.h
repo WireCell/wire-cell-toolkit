@@ -461,44 +461,44 @@ namespace WireCell::PointCloud::Facade {
     std::ostream& operator<<(std::ostream& os, const Multi2DPointCloud& s3dpc);
 
 
-    class DynamicPointCloudLegacy {
-       public:
-        DynamicPointCloudLegacy(double angle_u, double angle_v, double angle_w);
-        using points3d_type = Simple3DPointCloud::points_type;
-        using points2d_type = Multi2DPointCloud::points_type;
-        using point_type = std::vector<double>;
-        inline size_t get_num_points() const { return m_pc3d.get_num_points(); }
-        inline point_type point2d(const size_t plane, const size_t ind) const {
-            return m_pc2d.point(plane, ind);
-        }
-        inline geo_point_t point3d(const size_t ind) const { return m_pc3d.point(ind); }
+    // class DynamicPointCloudLegacy {
+    //    public:
+    //     DynamicPointCloudLegacy(double angle_u, double angle_v, double angle_w);
+    //     using points3d_type = Simple3DPointCloud::points_type;
+    //     using points2d_type = Multi2DPointCloud::points_type;
+    //     using point_type = std::vector<double>;
+    //     inline size_t get_num_points() const { return m_pc3d.get_num_points(); }
+    //     inline point_type point2d(const size_t plane, const size_t ind) const {
+    //         return m_pc2d.point(plane, ind);
+    //     }
+    //     inline geo_point_t point3d(const size_t ind) const { return m_pc3d.point(ind); }
 
-        // useful when hacking the winds with dist_cut
-        inline int dist_cut(const size_t plane, const size_t ind) const { return m_winds[plane].at(ind); }
+    //     // useful when hacking the winds with dist_cut
+    //     inline int dist_cut(const size_t plane, const size_t ind) const { return m_winds[plane].at(ind); }
 
-        /// @brief flag 0 points, flag 1 skeleton
-        void add_points(const Cluster* cluster, const int flag=0, const double step = 0.6*units::cm); // flag 0 points, flag 1 scheleton
+    //     /// @brief flag 0 points, flag 1 skeleton
+    //     void add_points(const Cluster* cluster, const int flag=0, const double step = 0.6*units::cm); // flag 0 points, flag 1 scheleton
 
-        /// @brief add points from p_test along dir with range and step
-        /// @attention: the index_uvw is hacked to store the distance cut
-        void add_points(const Cluster* cluster, const geo_point_t& p_test, const geo_point_t& dir_unmorm, const double range,
-                        const double step, const double angle);
+    //     /// @brief add points from p_test along dir with range and step
+    //     /// @attention: the index_uvw is hacked to store the distance cut
+    //     void add_points(const Cluster* cluster, const geo_point_t& p_test, const geo_point_t& dir_unmorm, const double range,
+    //                     const double step, const double angle);
 
-        /// @return: dist, Cluster, point_index
-        std::vector<std::tuple<double, const Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
-                                                                             const int plane);
-        /// @brief 
-        std::tuple<double, const Cluster*, size_t> get_closest_2d_point_info(const geo_point_t& p, const int plane);
+    //     /// @return: dist, Cluster, point_index
+    //     std::vector<std::tuple<double, const Cluster*, size_t>> get_2d_points_info(const geo_point_t& p, const double radius,
+    //                                                                          const int plane);
+    //     /// @brief 
+    //     std::tuple<double, const Cluster*, size_t> get_closest_2d_point_info(const geo_point_t& p, const int plane);
 
-        std::pair<double, double> hough_transform(const geo_point_t& origin, const double dis) const;
-        geo_point_t vhough_transform(const geo_point_t& origin, const double dis) const;
-       private:
-        Multi2DPointCloud m_pc2d;
-        Simple3DPointCloud m_pc3d;
-        std::vector<int> m_winds[3]; // u, v, w
-        std::vector<const Cluster*> m_clusters;
-        std::vector<const Blob*> m_blobs;
-    };
+    //     std::pair<double, double> hough_transform(const geo_point_t& origin, const double dis) const;
+    //     geo_point_t vhough_transform(const geo_point_t& origin, const double dis) const;
+    //    private:
+    //     Multi2DPointCloud m_pc2d;
+    //     Simple3DPointCloud m_pc3d;
+    //     std::vector<int> m_winds[3]; // u, v, w
+    //     std::vector<const Cluster*> m_clusters;
+    //     std::vector<const Blob*> m_blobs;
+    // };
 
     void process_mst_deterministically(
             const boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,

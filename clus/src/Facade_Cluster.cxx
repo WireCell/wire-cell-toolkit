@@ -644,6 +644,7 @@ const Cluster::kd2d_t& Cluster::kd2d(const int apa, const int face, const size_t
     return sv.kd();
 }
 
+// this point p needs to be raw point, since this is 2D PC ...
 std::vector<size_t> Cluster::get_closest_2d_index(const geo_point_t& p, const double search_radius, const int apa, const int face, const int plane) const {
 
     auto angles = grouping()->wire_angles(apa,face);
@@ -772,6 +773,8 @@ WirePlaneId Cluster::wire_plane_id(size_t point_index) const {
 }
 
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
+const Cluster::points_type& Cluster::points_raw() const { return kd3d_raw().points(); }
+
 int Cluster::npoints() const
 {
     if (!m_npoints) {
@@ -780,6 +783,8 @@ int Cluster::npoints() const
     }
     return m_npoints;
 }
+
+
 
 // size_t Cluster::nbpoints() const
 // {
@@ -848,6 +853,20 @@ std::vector<geo_point_t> Cluster::kd_points(const Cluster::kd_results_t& res) co
 {
     std::vector<geo_point_t> ret;
     const auto& points = this->points();
+    for (const auto& [point_index, _] : res) {
+        ret.emplace_back(points[0][point_index], points[1][point_index], points[2][point_index]);
+    }
+    return ret;
+}
+
+std::vector<geo_point_t> Cluster::kd_points_raw(const Cluster::kd_results_t& res)
+{
+    return const_cast<const Cluster*>(this)->kd_points_raw(res);
+}
+std::vector<geo_point_t> Cluster::kd_points_raw(const Cluster::kd_results_t& res) const
+{
+    std::vector<geo_point_t> ret;
+    const auto& points = this->points_raw();
     for (const auto& [point_index, _] : res) {
         ret.emplace_back(points[0][point_index], points[1][point_index], points[2][point_index]);
     }
@@ -1699,8 +1718,6 @@ bool Cluster::sanity(Log::logptr_t log) const
     const Blob* sblob = nullptr;
     std::vector<geo_point_t> spoints;
 
-    std::string hack_pc_name = "3d";
-    std::vector<std::string> hack_coords = {"x", "y", "z"};
 
     for (size_t ind = 0; ind < npts; ++ind) {
         auto kdpt = skd.point3d(ind);
@@ -1717,7 +1734,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         const auto* tblob = tnode->value.facade<Blob>();
         if (tblob != sblob) {
             sblob = tblob;
-            spoints = sblob->points(hack_pc_name, hack_coords);
+            spoints = sblob->points(get_pc_name(), get_coords());
         }
 
         if (minind >= spoints.size()) {
@@ -3684,13 +3701,10 @@ void Cluster::Calc_PCA() const
 {
     if (m_pca_calculated) return;
 
-    std::string hack_pc_name = "3d";
-    std::vector<std::string> hack_coords = {"x", "y", "z"};
-
     m_center.set(0, 0, 0);
     int nsum = 0;
     for (const Blob* blob : children()) {
-        for (const geo_point_t& p : blob->points(hack_pc_name, hack_coords)) {
+        for (const geo_point_t& p : blob->points(get_pc_name(), get_coords())) {
             m_center += p;
             nsum++;
         }
@@ -3712,7 +3726,7 @@ void Cluster::Calc_PCA() const
         for (int j = i; j != 3; j++) {
             cov_matrix(i, j) = 0;
             for (const Blob* blob : children()) {
-                for (const geo_point_t& p : blob->points(hack_pc_name, hack_coords)) {
+                for (const geo_point_t& p : blob->points(get_pc_name(), get_coords())) {
                     cov_matrix(i, j) += (p[i] - m_center[i]) * (p[j] - m_center[j]);
                 }
             }
@@ -3899,12 +3913,10 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
     double x_min = 1e9;
     auto& mcells = children();
 
-    std::string hack_pc_name = "3d";
-    std::vector<std::string> hack_coords = {"x", "y", "z"};
 
     for (Blob* mcell : mcells) {
         /// TODO: no caching, could be slow
-        std::vector<geo_point_t> pts = mcell->points(hack_pc_name, hack_coords);
+        std::vector<geo_point_t> pts = mcell->points(get_pc_name(), get_coords());
         for (size_t i = 0; i != pts.size(); i++) {
             if (pts.at(i).x() < low_limit) {
                 num_points[0]++;
@@ -3952,7 +3964,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
             groupids.insert(2);
             for (size_t idx=0; idx < mcells.size(); idx++) {
                 Blob *mcell = mcells.at(idx);
-                if (mcell->points(hack_pc_name, hack_coords)[0].x() < low_limit) {
+                if (mcell->points(get_pc_name(), get_coords())[0].x() < low_limit) {
                     if (groupids.find(1) != groupids.end()) {
                         // cluster_1->AddCell(mcell, mcell->GetTimeSlice());
                         b2groupid[idx] = 1;
@@ -3962,7 +3974,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
                         b2groupid[idx] = 2;
                     }
                 }
-                else if (mcell->points(hack_pc_name, hack_coords)[0].x() > high_limit) {
+                else if (mcell->points(get_pc_name(), get_coords())[0].x() > high_limit) {
                     if (groupids.find(3) != groupids.end()) {
                         // cluster_3->AddCell(mcell, mcell->GetTimeSlice());
                         b2groupid[idx] = 3;
