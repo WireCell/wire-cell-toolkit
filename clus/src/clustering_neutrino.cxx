@@ -12,7 +12,9 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try, IDetectorVolumes::pointer dv)
+void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try, IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords            // coordinate names
+    )
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -112,9 +114,15 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     // find all the clusters that are inside the box ...
     std::vector<Cluster *> contained_clusters;
     std::vector<Cluster *> candidate_clusters;
+    Tree::Scope scope{pc_name, coords};
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if (cluster->get_default_scope().hash() != scope.hash()) {
+            cluster->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+
         // cluster->Create_point_cloud();
         std::pair<geo_point_t, geo_point_t> hl_wcps = cluster->get_highest_lowest_points();
         std::pair<geo_point_t, geo_point_t> fb_wcps = cluster->get_front_back_points();

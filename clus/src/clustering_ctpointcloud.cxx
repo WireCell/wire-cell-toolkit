@@ -13,7 +13,9 @@ using namespace WireCell::PointCloud::Tree;
 
 
 // This is a test function, not used in clustering
-void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_grouping, IDetectorVolumes::pointer dv){
+void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_grouping, IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords            // coordinate names
+    ){
 
     // test a few different functions and then print out ...
     std::cout << "Test CTPointCloud" << std::endl;

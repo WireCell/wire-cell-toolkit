@@ -20,6 +20,8 @@ using namespace WireCell::PointCloud::Tree;
 
 // This can handle entire APA (including all faces) data
 void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, IDetectorVolumes::pointer dv,
+    const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords,            // coordinate names
                                   const bool use_ctpc, double length_cut)
 {
     // Get all the wire plane IDs from the grouping
@@ -68,6 +70,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
   
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
+    Tree::Scope scope{pc_name, coords};
     // sort the clusters by length using a lambda function
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
@@ -91,6 +94,10 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     }
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
+        if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
+            live_clusters.at(i)->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
         if (i == 0) {
             // fill anyway ...
             // live_clusters.at(i)->Create_point_cloud();

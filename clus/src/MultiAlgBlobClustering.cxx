@@ -69,8 +69,6 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
-    // m_x_boundary_low_limit = get(cfg, "x_boundary_low_limit", m_x_boundary_low_limit);
-    // m_x_boundary_high_limit = get(cfg, "x_boundary_high_limit", m_x_boundary_high_limit);
 
     m_func_cfgs = cfg["func_cfgs"];
 

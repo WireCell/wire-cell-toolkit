@@ -15,6 +15,8 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
 	const IDetectorVolumes::pointer dv,                // detector volumes
+	const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords,            // coordinate names
     const double length_cut                    //
 )
 {
@@ -67,11 +69,16 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
   std::map<const Cluster*, int> map_cluster_index;
   const auto& live_clusters = live_grouping.children();
   
-  
+  Tree::Scope scope{pc_name, coords};
+
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     const auto& live = live_clusters[ilive];
     map_cluster_index[live] = ilive;
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
+	if (live->get_default_scope().hash() != scope.hash()) {
+		live->set_default_scope(scope);
+		// std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+	}
   }
 
   // original algorithm ... (establish edges ... )

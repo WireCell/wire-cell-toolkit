@@ -9,7 +9,9 @@ using namespace WireCell::PointCloud::Tree;
 
 // This function only handles Single APA/Face!
 void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
-    Grouping& live_grouping, const IDetectorVolumes::pointer dv
+    Grouping& live_grouping, const IDetectorVolumes::pointer dv,
+    const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords            // coordinate names
     )
 {
     // Check that live_grouping has exactly one wpid
@@ -38,9 +40,14 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
 
     // std::vector<PR3DCluster *> new_clusters;
     // std::vector<PR3DCluster *> del_clusters;
+    Tree::Scope scope{pc_name, coords};
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if (cluster->get_default_scope().hash() != scope.hash()) {
+            cluster->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
         // only examine big clusters ...
         if (cluster->get_length() > 5 * units::cm && cluster->get_length() < 150 * units::cm) {
             // cluster->Create_point_cloud();

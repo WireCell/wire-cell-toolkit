@@ -16,6 +16,8 @@ void WireCell::PointCloud::Facade::clustering_regular(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,            // in/out
     const IDetectorVolumes::pointer dv,                // detector volumes
+    const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords,            // coordinate names
     const double length_cut,                                       //
     bool flag_enable_extend                                        //
 )
@@ -89,9 +91,13 @@ void WireCell::PointCloud::Facade::clustering_regular(
 
   // original algorithm ... (establish edges ... )
 
-
+  Tree::Scope scope{pc_name, coords};
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
+    if (cluster_1->get_default_scope().hash() != scope.hash()) {
+      cluster_1->set_default_scope(scope);
+      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+   }
     if (cluster_1->get_length() < internal_length_cut) continue;
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);

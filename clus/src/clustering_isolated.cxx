@@ -22,7 +22,10 @@ using namespace WireCell::PointCloud::Tree;
  * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
  * @return large cluster -> {small cluster, distance} 
 */
-void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv)
+void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
+    const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords            // coordinate names
+)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -61,6 +64,13 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
+    Tree::Scope scope{pc_name, coords};
+    for (auto& cluster : live_clusters) {
+          if (cluster->get_default_scope().hash() != scope.hash()) {
+            cluster->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+    }
     
     // const auto &mp = live_grouping.get_params();
     // this is for 4 time slices

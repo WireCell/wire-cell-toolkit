@@ -21,7 +21,9 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // This is for only one APA/face
-void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, const IDetectorVolumes::pointer dv)
+void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, const IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords            // coordinate names
+    )
 {
     // Check that live_grouping has exactly one wpid
 	if (live_grouping.wpids().size() != 1 ) {
@@ -83,9 +85,14 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
     // auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
-    for (const Cluster *cluster : live_grouping.children()) {
+    Tree::Scope scope{pc_name, coords};
+    for (Cluster *cluster : live_grouping.children()) {
         // global_point_cloud->add_points(cluster, 0);
         global_point_cloud->add_points(make_points_cluster(cluster, wpid_params));
+        if (cluster->get_default_scope().hash() != scope.hash()) {
+            cluster->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
     }
     // sort the clusters length ...
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy

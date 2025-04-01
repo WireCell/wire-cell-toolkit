@@ -67,6 +67,8 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
         raise<ValueError>("failed to get IDetectorVolumes %s", cfg["detector_volumes"].asString());
     }
 
+    m_pc_name = WireCell::convert<std::string>(cfg["pc_name"], "3d");
+    if (!cfg["coords"].isNull()) m_coords = WireCell::convert<std::vector<std::string>>(cfg["coords"],{"x","y","z"});
     
 }
 

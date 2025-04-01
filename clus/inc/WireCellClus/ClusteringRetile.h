@@ -111,6 +111,8 @@ namespace WireCell::PointCloud::Facade {
         std::vector<Aux::WirePlaneInfo> m_plane_infos;
         
         IDetectorVolumes::pointer m_dv;
+        std::string m_pc_name{"3d"};
+        std::vector<std::string> m_coords{"x", "y", "z"};
 
         /** Configuration "anode" (required)
 

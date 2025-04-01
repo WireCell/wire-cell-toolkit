@@ -19,13 +19,20 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping, const IDetectorVolumes::pointer dv ,
+    const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords,            // coordinate names
     const bool use_ctpc)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
 
     std::vector<Cluster *> live_clusters = live_grouping.children();
-    
+    Tree::Scope scope{pc_name, coords};
     for (size_t i=0;i!=live_clusters.size();i++){
+        if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
+            live_clusters.at(i)->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+
         // if there is a cc component, record the main cluster as id of the blobs???
         auto old_cc_array = live_clusters.at(i)->get_pcarray("isolated", "perblob");
         

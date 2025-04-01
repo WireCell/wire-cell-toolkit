@@ -16,8 +16,9 @@ void WireCell::PointCloud::Facade::clustering_test(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
     cluster_set_t& cluster_connected_dead,
-    const IDetectorVolumes::pointer dv
-
+    const IDetectorVolumes::pointer dv,
+    const std::string& pc_name,                        // point cloud name
+    const std::vector<std::string>& coords            // coordinate names
 )
 {
     using spdlog::debug;
