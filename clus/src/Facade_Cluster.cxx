@@ -378,12 +378,13 @@ geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, 
     return old_wcp;
 }
 
+// This function works with raw points internally, different from most of the functions ...
 void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
 {
     const auto& winds = wire_indices();
 
-    geo_point_t start_p = point3d(start_idx);
-    geo_point_t end_p = point3d(end_idx);
+    geo_point_t start_p = point3d_raw(start_idx);
+    geo_point_t end_p = point3d_raw(end_idx);
 
     WirePlaneId start_wpid = wire_plane_id(start_idx);
     WirePlaneId end_wpid = wire_plane_id(end_idx);
@@ -410,7 +411,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
 
     // assumes u, v, w, need to expand to includ wpid ???
     for (int pt_idx = 0; pt_idx != npoints(); pt_idx++) {
-        geo_point_t current = point3d(pt_idx);
+        geo_point_t current = point3d_raw(pt_idx);
         WirePlaneId wpid = wire_plane_id(pt_idx);
         // WirePlaneId wpid = start_wpid;
 
@@ -481,8 +482,8 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
             const auto& low_idxes = it->second;
             const auto& high_idxes = map_wpid_high_indices[wpid];
             if (flags[pind]) {
-                geo_point_t low_p = point3d(low_idxes[pind]);
-                geo_point_t high_p = point3d(high_idxes[pind]);
+                geo_point_t low_p = point3d_raw(low_idxes[pind]);
+                geo_point_t high_p = point3d_raw(high_idxes[pind]);
                 std::vector<geo_point_t> test_points = {low_p, high_p};
                 for (const auto& test_point : test_points) {
                     temp_indices = get_closest_2d_index(test_point, 0.5 * units::cm, wpid.apa(), wpid.face(), pind);
@@ -521,9 +522,9 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
             // double value = pow(winds[0][indices.at(i)] - winds[0][indices.at(j)], 2) +
             //                pow(winds[1][indices.at(i)] - winds[1][indices.at(j)], 2) +
             //                pow(winds[2][indices.at(i)] - winds[2][indices.at(j)], 2);
-            double value = pow(point3d(indices.at(i)).x() - point3d(indices.at(j)).x(), 2) +
-                           pow(point3d(indices.at(i)).y() - point3d(indices.at(j)).y(), 2) +
-                           pow(point3d(indices.at(i)).z() - point3d(indices.at(j)).z(), 2);
+            double value = pow(point3d_raw(indices.at(i)).x() - point3d_raw(indices.at(j)).x(), 2) +
+                           pow(point3d_raw(indices.at(i)).y() - point3d_raw(indices.at(j)).y(), 2) +
+                           pow(point3d_raw(indices.at(i)).z() - point3d_raw(indices.at(j)).z(), 2);
 
             if (value > sum_value) {
                 // old_dis = dis;
@@ -535,8 +536,8 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
                     new_start_idx = indices.at(j);
                     new_end_idx = indices.at(i);
                 }
-                geo_point_t new_start_p = point3d(new_start_idx);
-                geo_point_t new_end_p = point3d(new_end_idx);
+                geo_point_t new_start_p = point3d_raw(new_start_idx);
+                geo_point_t new_end_p = point3d_raw(new_end_idx);
 
                 if (sqrt(pow(new_start_p.x() - start_p.x(), 2) + pow(new_start_p.y() - start_p.y(), 2) +
                          pow(new_start_p.z() - start_p.z(), 2)) < 30 * units::cm &&
@@ -2434,6 +2435,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
+                            // Hack, need to transform test_p to raw point ...
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
@@ -2465,6 +2467,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
+                            // Hack, need to transform test_p to raw point ...
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
@@ -2496,6 +2499,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
+                            // Hack, need to transform test_p to raw point ...
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
@@ -3058,6 +3062,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
+                            // Hack, need to transform test_p to raw point ...
                             scores = grouping()->test_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             
                             // Check overall quality
@@ -3213,10 +3218,12 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
+                            // Hack, need to transform test_p to raw point ...
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) {
                                 num_bad++;
                             }
+                            // Hack, need to transform test_p to raw point ...
                             if (!grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
@@ -3295,10 +3302,12 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
+                            // Hack, need to transform test_p to raw point ...
                             const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
                             if (!good_point) {
                                 num_bad++;
                             }
+                            // Hack, need to transform test_p to raw point ...
                             if (!grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
