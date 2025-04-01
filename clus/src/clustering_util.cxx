@@ -77,7 +77,6 @@ void WireCell::PointCloud::Facade::merge_clusters(
 
         // it starts with no cluster facade
         Cluster& fresh_cluster = grouping.make_child();
-        bool flag_set_filter = false;
 
         std::vector<int> cc;
         int parent_id = 0;
@@ -91,11 +90,10 @@ void WireCell::PointCloud::Facade::merge_clusters(
             fresh_cluster.take_children(*live, true);
 
             // set scope filter, assuming merging all scopes have the same filter information
-            if (!flag_set_filter){
+            {   
                 const Tree::Scope& default_scope = live->get_default_scope();
                 bool flag = live->get_scope_filter(default_scope);
-                fresh_cluster.set_scope_filter(default_scope, flag);
-                flag_set_filter = true;    
+                if (flag) fresh_cluster.set_scope_filter(default_scope, flag);
             }
 
             if (savecc) {
