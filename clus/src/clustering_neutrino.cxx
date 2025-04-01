@@ -118,6 +118,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if (!cluster->get_filter_scope(scope)) continue;
         if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
@@ -237,9 +238,11 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     // calculate the closest distance??? ...
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster1 = live_clusters.at(i);
+        if (!cluster1->get_filter_scope(scope)) continue;
         // ToyPointCloud *cloud1 = cluster1->get_point_cloud();
         for (size_t j = i + 1; j != live_clusters.size(); j++) {
             Cluster *cluster2 = live_clusters.at(j);
+            if (!cluster2->get_filter_scope(scope)) continue;
             // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
 
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
