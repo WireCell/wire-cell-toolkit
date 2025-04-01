@@ -50,6 +50,7 @@ namespace WireCell::PointCloud::Facade {
 
     // There is a hard-wired factory method in ClusteringFuncs to which this
     // class is added.
+    // this function so far only takes the raw data points ...
     class ClusteringRetile {
     public:
         ClusteringRetile(const WireCell::Configuration& config);
@@ -111,8 +112,7 @@ namespace WireCell::PointCloud::Facade {
         std::vector<Aux::WirePlaneInfo> m_plane_infos;
         
         IDetectorVolumes::pointer m_dv;
-        std::string m_pc_name{"3d"};
-        std::vector<std::string> m_coords{"x", "y", "z"};
+
 
         /** Configuration "anode" (required)
 

@@ -66,10 +66,6 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
     if (m_dv == nullptr) {
         raise<ValueError>("failed to get IDetectorVolumes %s", cfg["detector_volumes"].asString());
     }
-
-    m_pc_name = WireCell::convert<std::string>(cfg["pc_name"], "3d");
-    if (!cfg["coords"].isNull()) m_coords = WireCell::convert<std::vector<std::string>>(cfg["coords"],{"x","y","z"});
-    
 }
 
 
@@ -459,6 +455,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // std::cout << shadow.children().size() << std::endl;
     // const auto [angle_u,angle_v,angle_w] = original.wire_angles();
 
+
     for (auto* orig_cluster : original.children()) {
 
         // find the flash time:
@@ -484,6 +481,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 // use the vector for separate()
                 // origi_cluster still have the original main cluster ... 
                 auto splits = original.separate(orig_cluster, cc_vec);
+             
                 
                 std::map<int, Cluster*> map_id_cluster = splits;
                 map_id_cluster[-1] = orig_cluster;
@@ -495,8 +493,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                     // make a shadow cluster, insert ID ...
                     auto& shad_cluster = shadow.make_child();
-                    shad_cluster.set_ident(cluster->ident());
-                    
+                    shad_cluster.set_ident(cluster->ident());                    
                     // std::cout <<"bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
 
                     if (id==-1) shadow_orig_cluster = &shad_cluster;
