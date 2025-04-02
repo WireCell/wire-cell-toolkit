@@ -70,6 +70,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
     Tree::Scope scope{pc_name, coords};
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if (!cluster->get_scope_filter(scope)) continue;
         if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
@@ -154,7 +155,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     // const size_t orig_nchildren = cluster->nchildren();
                     //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     std::vector<Cluster *> sep_clusters =
-                        Separate_1(use_ctpc, cluster, boundary_points, independent_points,  cluster->get_length(), vertical_dir, beam_dir, dv);
+                        Separate_1(use_ctpc, cluster, boundary_points, independent_points,  cluster->get_length(), vertical_dir, beam_dir, dv, scope);
                     
                     //std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                     Cluster *cluster1 = sep_clusters.at(0);
@@ -183,7 +184,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                 JudgeSeparateDec_2(cluster2, dv, drift_dir_abs, boundary_points, independent_points,
                                                    length_1)) {
                                 std::vector<Cluster *> sep_clusters =
-                                    Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv);
+                                    Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, scope);
 
                                 //std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
@@ -211,7 +212,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                             //	std::cout << "Separate 3rd level" << std::endl;
 
                                             std::vector<Cluster *> sep_clusters = Separate_1(
-                                                use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv);
+                                                use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, scope);
 
                                             //		  std::cerr << em("sep sep3") << std::endl;
 
@@ -255,7 +256,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                     // std::cout << "Separate final one" << std::endl;
 
                                     std::vector<Cluster *> sep_clusters = Separate_1(
-                                        use_ctpc, final_sep_cluster, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv);
+                                        use_ctpc, final_sep_cluster, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, scope);
                                     //std::cout << "Separate Separate_1 2 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
                                     //	      std::cerr << em("sep sep4") << std::endl;
 
@@ -283,6 +284,12 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                 // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                                 const auto b2id = Separate_2(final_sep_cluster);
                                 auto final_sep_clusters = live_grouping.separate(final_sep_cluster,b2id,true); 
+                                 
+                                // Apply the scope filter settings to all new clusters
+                                for (auto& [id, new_cluster] : final_sep_clusters) {
+                                    new_cluster->set_scope_filter(scope, true);
+                                }
+
                                 assert(final_sep_cluster == nullptr);
                      
                             }
@@ -295,7 +302,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     //std::cout << "Stripping Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
                     std::vector<Cluster *> sep_clusters =
-                        Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster->get_length(), vertical_dir, beam_dir, dv);
+                        Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster->get_length(), vertical_dir, beam_dir, dv, scope);
                     // std::cout << "Stripping Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                     Cluster *cluster1 = sep_clusters.at(0);
@@ -317,6 +324,10 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                         const auto b2id = Separate_2(final_sep_cluster);
                         auto final_sep_clusters = live_grouping.separate(final_sep_cluster, b2id, true);
+                        // Apply the scope filter settings to all new clusters
+                        for (auto& [id, new_cluster] : final_sep_clusters) {
+                            new_cluster->set_scope_filter(scope, true);
+                        }
                         assert(final_sep_cluster == nullptr);
                         cluster2 = final_sep_cluster = sep_clusters[1] = nullptr;
 
@@ -898,7 +909,7 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
 std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_ctpc, Cluster *cluster,
                                                      std::vector<geo_point_t> &boundary_points,
                                                      std::vector<geo_point_t> &independent_points,
-                                                     double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv)
+                                                     double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, Tree::Scope& scope)
 {
     
     auto* grouping = cluster->grouping();
@@ -1356,6 +1367,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
     }
     auto clusters_step0 = grouping->separate(cluster, b2groupid, true);
+    // Apply the scope filter settings to all new clusters
+    for (auto& [id, new_cluster] : clusters_step0) {
+        new_cluster->set_scope_filter(scope, true);
+    }
     assert(cluster == nullptr);
 
 
@@ -1365,6 +1380,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         // other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
         const auto b2id = Separate_2(clusters_step0[1], 5 * units::cm);
         auto other_clusters1 = grouping->separate(clusters_step0[1],b2id, true); // the cluster is now nullptr
+        // Apply the scope filter settings to all new clusters
+        for (auto& [id, new_cluster] : other_clusters1) {
+            new_cluster->set_scope_filter(scope, true);
+        }
         assert(clusters_step0[1] == nullptr);
 
         for (auto it = other_clusters1.begin(); it != other_clusters1.end(); it++) {

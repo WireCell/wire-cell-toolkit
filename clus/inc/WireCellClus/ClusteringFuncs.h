@@ -696,7 +696,7 @@ namespace WireCell::PointCloud::Facade {
     std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
                                                          std::vector<geo_point_t> &boundary_points,
                                                          std::vector<geo_point_t> &independent_points,
-                                                         double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv);
+                                                         double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, Tree::Scope& scope);
 
     std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm);
 
