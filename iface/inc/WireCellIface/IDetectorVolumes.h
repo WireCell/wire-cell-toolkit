@@ -11,7 +11,9 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Configuration.h"
 #include "WireCellUtil/BoundingBox.h"
+#include "WireCellUtil/PointCloudTransform.h"
 #include "WireCellIface/WirePlaneId.h"
+#include "WireCellIface/IAnodePlane.h"
 
 
 namespace WireCell {
@@ -66,6 +68,13 @@ namespace WireCell {
         /// Forward any user-provided, application specific metadata for a
         /// particular wpid.  
         virtual Configuration metadata(WirePlaneId wpid) const = 0;
+
+        /// Return a map of all the faces in the detector volume.  The key is
+        /// the WirePlaneId::ident() of the face.
+        virtual const std::map<int, IAnodeFace::pointer>& wpident_faces() const = 0;
+
+        /// Return a reference to a named transform.
+        virtual const PointCloud::Transform::pointer pc_transform(const std::string& transform_name) const = 0;
 
     };
 

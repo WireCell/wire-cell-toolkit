@@ -5,24 +5,132 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/PointCloudTransform.h"
 
 #include <vector>
 // #include <iostream>             // only debug
 
 // Implementation is totally local to this comp. unit so no need for namespacing.
 class DetectorVolumes;
+class T0Correction;
 
 WIRECELL_FACTORY(DetectorVolumes, DetectorVolumes,
                  WireCell::IDetectorVolumes, WireCell::IConfigurable)
 
 
 using namespace WireCell;
+using WireCell::PointCloud::Dataset;
+using WireCell::PointCloud::Array;
 
-class DetectorVolumes : public IDetectorVolumes, public IFiducial, public IConfigurable {
+class T0Correction : public WireCell::PointCloud::Transform {
+    public:
+     T0Correction(IDetectorVolumes::pointer dv) : m_dv(dv) {
+         for (const auto& [wfid, _] : m_dv->wpident_faces()) {
+             WirePlaneId wpid(wfid);
+             m_time_global_offsets[wpid.apa()][wpid.face()] = m_dv->metadata(wpid)["time_offset"].asDouble();
+         }
+     }
+     virtual ~T0Correction() = default;
+ 
+     /**
+      * From time2drift in Facade_Util.cxx
+      * x_raw = xorig + face->dirx * (time_read_out + time_global_offset) * abs_drift_speed;
+      * x_corr = xorig + face->dirx * (time_read_out - clustser_t0) * abs_drift_speed;
+      *x_corr - x_raw = face->dirx * (- clustser_t0 - time_global_offset) * abs_drift_speed;
+      */
+     virtual Point forward(const Point &pos, double clustser_t0, int face,
+                                         int apa) const override
+     {
+         Point result(pos);
+         result[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+         return result;
+     }
+     virtual Point backward(const Point &pos, double clustser_t0, int face,
+                                          int apa) const override
+     {
+         Point result(pos);
+         result[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+         return result;
+     }
+     virtual bool filter(const Point &pos, double clustser_t0, int face,
+                         int apa) const override
+     {
+         return m_dv->contained_by(pos);
+     }
+     virtual Dataset forward(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
+                              int apa) const override
+     {
+         const auto &arr_x = pc.get(arr_names[0])->elements<double>();
+         std::vector<double> arr_x_corr(arr_x.size());
+         for (size_t i = 0; i < arr_x.size(); ++i) {
+             arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+         }
+         Dataset ds;
+         ds.add("x", Array(arr_x_corr));
+         return ds;
+     }
+     virtual Dataset backward(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
+                               int apa) const override
+     {
+         const auto &arr_x = pc.get(arr_names[0])->elements<double>();
+         std::vector<double> arr_x_corr(arr_x.size());
+         for (size_t i = 0; i < arr_x.size(); ++i) {
+             arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+         }
+         Dataset ds;
+         ds.add("x", Array(arr_x_corr));
+         return ds;
+     }
+     virtual Dataset filter(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
+                            int apa) const override
+     {
+         std::vector<double> arr_filter(pc.size_major());
+         const auto &arr_x = pc.get(arr_names[0])->elements<double>();
+         const auto &arr_y = pc.get(arr_names[1])->elements<double>();
+         const auto &arr_z = pc.get(arr_names[2])->elements<double>();
+         for (size_t i = 0; i < arr_x.size(); ++i) {
+             arr_filter[i] = m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]));
+         }
+         Dataset ds;
+         ds.add("filter", Array(arr_filter));
+         return ds;
+     }
+ 
+    private:
+     IDetectorVolumes::pointer m_dv; // do not own
+ 
+     // // m_time_global_offsets.at(apa).at(face) = time_global_offset
+     std::map<int, std::map<int, double>> m_time_global_offsets;
+     // // lazy load time_global_offset from metadata
+     // double time_global_offset(const int face, const int apa) const
+     // {
+     //     auto it = m_time_global_offsets.find(apa);
+     //     if (it == m_time_global_offsets.end()) {
+     //         WirePlaneId wpid_all(kAllLayers, face, apa);
+     //         double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble();
+     //         m_time_global_offsets.at(apa).at(face) = time_offset;
+     //         return time_offset;
+     //     }
+     //     auto it2 = it->second.find(face);
+     //     if (it2 == it->second.end()) {
+     //         WirePlaneId wpid_all(kAllLayers, face, apa);
+     //         double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble();
+     //         m_time_global_offsets.at(apa).at(face) = time_offset;
+     //         return time_offset;
+     //     }
+     //     return it2->second;
+     // }
+ };
+ 
 
-public:
+class DetectorVolumes : public IDetectorVolumes,
+                        public IFiducial,
+                        public IConfigurable {
 
-    DetectorVolumes()  {}
+   public:
+
+    DetectorVolumes()  {
+    }
     virtual ~DetectorVolumes() {}
 
     virtual Configuration default_configuration() const {
@@ -98,6 +206,8 @@ public:
         initialize_spatial_queries();
 
         m_md = cfg["metadata"];
+
+        m_transforms["t0_correction"] = std::make_shared<T0Correction>(IDetectorVolumes::pointer(this));
 
         Json::FastWriter fastWriter;
         SPDLOG_TRACE("metadata: {}", fastWriter.write(m_md));
@@ -403,8 +513,23 @@ public:
     }
 
 
+    virtual const std::map<int, IAnodeFace::pointer>& wpident_faces() const {
+        return m_faces;
+    }
+
+    const WireCell::PointCloud::Transform::pointer pc_transform(const std::string& transform_name) const {
+        auto it = m_transforms.find(transform_name);
+        if (it == m_transforms.end()) {
+            raise<KeyError>("No transform found for name: %s", transform_name.c_str());
+        }
+        return it->second;
+    }
+
+
 
 private:
+    // A map of transform names to their respective transform objects
+    std::map<std::string, WireCell::PointCloud::Transform::pointer> m_transforms;
 
     // Map wpid with layer=0 to its face.
     std::map<int, IAnodeFace::pointer> m_faces;
@@ -430,6 +555,6 @@ private:
     // 3D grid of face IDs for spatial lookups
     // Format: [x][y][z] -> list of wpidents that overlap this cell
     std::vector<std::vector<std::vector<std::vector<int>>>> m_grid;
-
 };
+
 
