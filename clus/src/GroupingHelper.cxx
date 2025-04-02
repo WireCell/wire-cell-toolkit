@@ -34,6 +34,16 @@ WireCell::PointCloud::Facade::process_groupings_helper(
         // Separate clusters
         auto orig_splits = original.separate(mutable_cluster, cc_vec);
 
+         {
+            // Apply the scope filter settings to all new clusters
+            auto& scope = mutable_cluster->get_default_scope();
+            bool flag = mutable_cluster->get_scope_filter(scope);
+            for (auto& [id, new_cluster] : orig_splits) {
+                new_cluster->set_scope_filter(scope, flag);
+            }
+        }
+
+
         // Get cluster index array
         auto shad_cc = shad_cluster->get_pcarray(aname, pname);
         std::vector<int> shad_cc_vec(shad_cc.begin(), shad_cc.end());
@@ -41,6 +51,14 @@ WireCell::PointCloud::Facade::process_groupings_helper(
         Cluster* mutable_shad_cluster = shad_cluster;
         // Separate clusters
         auto shad_splits = shadow.separate(mutable_shad_cluster, shad_cc_vec);
+
+        {
+            auto& scope = mutable_shad_cluster->get_default_scope();
+            bool flag = mutable_shad_cluster->get_scope_filter(scope);
+            for (auto& [id, new_cluster] : shad_splits) {
+                new_cluster->set_scope_filter(scope, flag);
+            }
+        }   
 
         // fill in the main cluster information ...
         result[mutable_cluster] = std::make_tuple(mutable_shad_cluster, -1, mutable_cluster);

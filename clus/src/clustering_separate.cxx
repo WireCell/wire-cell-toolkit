@@ -1504,6 +1504,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
 
         Cluster& cluster2 = grouping->make_child();
+        cluster2.set_scope_filter(scope, true);
         for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
             cluster2.take_children(*to_be_merged_clusters[i], true);
             grouping->destroy_child(to_be_merged_clusters[i]);
