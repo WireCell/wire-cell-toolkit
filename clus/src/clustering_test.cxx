@@ -196,7 +196,44 @@ void WireCell::PointCloud::Facade::clustering_test(
             const auto dir_hough = dpc->vhough_transform(extreme_points.first, extending_dis);
             SPDLOG_INFO("CTest Cluster {} dir_hough {} ", iclus, dir_hough);
             // const auto dir_hough_legacy = dpcl->vhough_transform(extreme_points.first, extending_dis);
+            break;
         }
+    }
+
+    /// TEST T0Correction
+    {
+        int face = 0;
+        int apa = 0;
+        double cluster_t0 = 0;
+        WireCell::Point test_point(0, 0, 0);
+        WirePlaneId wpid_all(kAllLayers, face, apa);
+        double drift_speed = dv->metadata(wpid_all)["drift_speed"].asDouble();
+        double time_offset = dv->metadata(wpid_all)["time_offset"].asDouble();
+        int face_dirx = dv->face_dirx(wpid_all);
+        // expectation:
+        const auto expected_corrected_point_x = test_point.x() - face_dirx * (cluster_t0 + time_offset);
+        const auto T0Correction = dv->pc_transform("T0Correction");
+        const auto corrected_point = T0Correction->forward(test_point, cluster_t0, face, apa);
+        const auto filter_result = T0Correction->filter(corrected_point, cluster_t0, face, apa);
+        const auto backward_corrected_point = T0Correction->backward(corrected_point, cluster_t0, face, apa);
+        SPDLOG_INFO("CTest T0Correction test_point {} corrected_point {} expected_corrected_point_x {} filter_result {} backward_corrected_point {}",
+                    test_point, corrected_point, expected_corrected_point_x, filter_result, backward_corrected_point);
+        Dataset pc;
+        pc.add("x", Array({test_point.x()}));
+        pc.add("y", Array({test_point.y()}));
+        pc.add("z", Array({test_point.z()}));
+        const auto fpc = T0Correction->forward(pc, {"x", "y", "z"}, cluster_t0, face, apa);
+        const auto bpc = T0Correction->backward(fpc, {"x", "y", "z"}, cluster_t0, face, apa);
+        const auto filter_result_fpc = T0Correction->filter(fpc, {"x", "y", "z"}, cluster_t0, face, apa);
+        const auto fpc_x = fpc.get("x")->elements<double>();
+        const auto fpc_y = fpc.get("y")->elements<double>();
+        const auto fpc_z = fpc.get("z")->elements<double>();
+        const auto bpc_x = bpc.get("x")->elements<double>();
+        const auto bpc_y = bpc.get("y")->elements<double>();
+        const auto bpc_z = bpc.get("z")->elements<double>();
+        const auto filter_result_fpc_filter = filter_result_fpc.get("filter")->elements<double>();
+        SPDLOG_INFO("CTest T0Correction fpc_x {} fpc_y {} fpc_z {} bpc_x {} bpc_y {} bpc_z {} filter_result_fpc_filter {}",
+                    fpc_x[0], fpc_y[0], fpc_z[0], bpc_x[0], bpc_y[0], bpc_z[0], filter_result_fpc_filter[0]);
     }
 
 }

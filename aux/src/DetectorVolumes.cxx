@@ -61,24 +61,32 @@ class T0Correction : public WireCell::PointCloud::Transform {
                               int apa) const override
      {
          const auto &arr_x = pc.get(arr_names[0])->elements<double>();
+         const auto &arr_y = pc.get(arr_names[1])->elements<double>();
+         const auto &arr_z = pc.get(arr_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
              arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
          }
          Dataset ds;
          ds.add("x", Array(arr_x_corr));
+         ds.add("y", Array(arr_y));
+         ds.add("z", Array(arr_z));
          return ds;
      }
      virtual Dataset backward(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
                                int apa) const override
      {
          const auto &arr_x = pc.get(arr_names[0])->elements<double>();
+         const auto &arr_y = pc.get(arr_names[1])->elements<double>();
+         const auto &arr_z = pc.get(arr_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
              arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
          }
          Dataset ds;
          ds.add("x", Array(arr_x_corr));
+         ds.add("y", Array(arr_y));
+         ds.add("z", Array(arr_z));
          return ds;
      }
      virtual Dataset filter(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
@@ -207,7 +215,7 @@ class DetectorVolumes : public IDetectorVolumes,
 
         m_md = cfg["metadata"];
 
-        m_transforms["t0_correction"] = std::make_shared<T0Correction>(IDetectorVolumes::pointer(this));
+        m_transforms["T0Correction"] = std::make_shared<T0Correction>(IDetectorVolumes::pointer(this));
 
         Json::FastWriter fastWriter;
         SPDLOG_TRACE("metadata: {}", fastWriter.write(m_md));
