@@ -33,11 +33,6 @@ namespace WireCell::PointCloud::Facade {
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
     class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
 
-        // default scope for all points with raw x,y,z as coordinates
-        const Tree::Scope scope_3d_raw = {"3d", {"x", "y", "z"}};
-        const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
-        std::string scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
-
        public:
         Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
@@ -54,6 +49,9 @@ namespace WireCell::PointCloud::Facade {
         // set, get scope filter ...
         void set_scope_filter(const Tree::Scope& scope, bool flag);
         const bool get_scope_filter(const Tree::Scope& scope) const;
+
+        /// @param correction_name: T0Correction
+        std::vector<int> add_corrected_points(const IDetectorVolumes::pointer dv, const std::string &correction_name);
 
 
         // Override Mixin
@@ -443,6 +441,15 @@ namespace WireCell::PointCloud::Facade {
         Flash get_flash() const;
 
        private:
+
+        // default scope for all points with raw x,y,z as coordinates
+        std::map<std::string, Tree::Scope> m_scopes = {
+            {"scope_3d_raw", {"3d", {"x", "y", "z"}}}
+        };
+        // FIXME: shoud we remove this in the future?
+        const Tree::Scope& scope_3d_raw = m_scopes.at("scope_3d_raw");
+        const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
+        std::string scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
         Tree::Scope m_default_scope = scope_3d_raw;
         std::map<size_t, bool> m_map_scope_filter={{scope_3d_raw.hash(), true}};
 

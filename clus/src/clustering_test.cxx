@@ -236,5 +236,7 @@ void WireCell::PointCloud::Facade::clustering_test(
                     fpc_x[0], fpc_y[0], fpc_z[0], bpc_x[0], bpc_y[0], bpc_z[0], filter_result_fpc_filter[0]);
     }
 
+    /// TEST: add corrected points to Cluster and separate according to filter
+
 }
 #pragma GCC diagnostic pop
