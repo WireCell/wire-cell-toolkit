@@ -248,7 +248,8 @@ void WireCell::PointCloud::Facade::clustering_test(
                 SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
             }
             std::vector<int> b2filter_result = cluster->add_corrected_points(dv, "T0Correction");
-            cluster->set_default_scope(cluster->get_scope("T0Correction"));
+            const auto scope_T0Correction = cluster->get_scope("T0Correction");
+            cluster->set_default_scope(scope_T0Correction);
             {
                 const auto [earliest, latest] = cluster->get_earliest_latest_points();
                 SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
@@ -262,8 +263,15 @@ void WireCell::PointCloud::Facade::clustering_test(
                 // new_cluster->set_scope_filter(new_cluster->get_scope("T0Correction"), id);
                 SPDLOG_INFO("CTest add corrected points id {} nchildren {}",
                     id, new_cluster->nchildren());
-                const auto [earliest, latest] = new_cluster->get_earliest_latest_points();
-                SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
+                {
+                    const auto [earliest, latest] = new_cluster->get_earliest_latest_points();
+                    SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
+                }
+                new_cluster->set_default_scope(scope_T0Correction);
+                {
+                    const auto [earliest, latest] = new_cluster->get_earliest_latest_points();
+                    SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
+                }
             }
             break;
         }
