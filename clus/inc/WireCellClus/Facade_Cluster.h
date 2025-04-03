@@ -50,6 +50,14 @@ namespace WireCell::PointCloud::Facade {
         void set_scope_filter(const Tree::Scope& scope, bool flag);
         const bool get_scope_filter(const Tree::Scope& scope) const;
 
+        const Tree::Scope& scope(const std::string& scope_name) const
+        {
+            if (m_scopes.find(scope_name) == m_scopes.end()) {
+                raise<RuntimeError>("Cluster::scope: no such scope: %s", scope_name);
+            }
+            return m_scopes.at(scope_name);
+        }
+
         /// @param correction_name: T0Correction
         std::vector<int> add_corrected_points(const IDetectorVolumes::pointer dv, const std::string &correction_name);
 

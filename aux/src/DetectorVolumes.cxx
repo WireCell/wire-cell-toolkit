@@ -92,7 +92,7 @@ class T0Correction : public WireCell::PointCloud::Transform {
      virtual Dataset filter(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
                             int apa) const override
      {
-         std::vector<double> arr_filter(pc.size_major());
+         std::vector<int> arr_filter(pc.size_major());
          const auto &arr_x = pc.get(arr_names[0])->elements<double>();
          const auto &arr_y = pc.get(arr_names[1])->elements<double>();
          const auto &arr_z = pc.get(arr_names[2])->elements<double>();

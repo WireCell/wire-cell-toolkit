@@ -231,12 +231,28 @@ void WireCell::PointCloud::Facade::clustering_test(
         const auto bpc_x = bpc.get("x")->elements<double>();
         const auto bpc_y = bpc.get("y")->elements<double>();
         const auto bpc_z = bpc.get("z")->elements<double>();
-        const auto filter_result_fpc_filter = filter_result_fpc.get("filter")->elements<double>();
+        const auto filter_result_fpc_filter = filter_result_fpc.get("filter")->elements<int>();
         SPDLOG_INFO("CTest T0Correction fpc_x {} fpc_y {} fpc_z {} bpc_x {} bpc_y {} bpc_z {} filter_result_fpc_filter {}",
                     fpc_x[0], fpc_y[0], fpc_z[0], bpc_x[0], bpc_y[0], bpc_z[0], filter_result_fpc_filter[0]);
     }
 
     /// TEST: add corrected points to Cluster and separate according to filter
-
+    {
+        for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
+            Cluster *cluster = live_clusters.at(iclus);
+            std::vector<int> b2filter_result = cluster->add_corrected_points(dv, "T0Correction");
+            for (const auto filter_result : b2filter_result) {
+                SPDLOG_INFO("CTest add corrected points filter_result {}", filter_result);
+                break;
+            }
+            auto clusters_sep = live_grouping.separate(cluster, b2filter_result, true);
+            for (auto &[id, new_cluster] : clusters_sep) {
+                // new_cluster->set_scope_filter(cluster->scope("T0Correction"), id);
+                SPDLOG_INFO("CTest add corrected points id {} nchildren {}",
+                            id, new_cluster->nchildren());
+            }
+            break;
+        }
+    }
 }
 #pragma GCC diagnostic pop
