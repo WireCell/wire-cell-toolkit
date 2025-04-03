@@ -1,5 +1,6 @@
 #include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellUtil/ExecMon.h"
+#include <set>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
@@ -211,7 +212,7 @@ void WireCell::PointCloud::Facade::clustering_test(
         double time_offset = dv->metadata(wpid_all)["time_offset"].asDouble();
         int face_dirx = dv->face_dirx(wpid_all);
         // expectation:
-        const auto expected_corrected_point_x = test_point.x() - face_dirx * (cluster_t0 + time_offset);
+        const auto expected_corrected_point_x = test_point.x() - face_dirx * (cluster_t0 + time_offset) * drift_speed;
         const auto T0Correction = dv->pc_transform("T0Correction");
         const auto corrected_point = T0Correction->forward(test_point, cluster_t0, face, apa);
         const auto filter_result = T0Correction->filter(corrected_point, cluster_t0, face, apa);
@@ -240,16 +241,29 @@ void WireCell::PointCloud::Facade::clustering_test(
     {
         for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
             Cluster *cluster = live_clusters.at(iclus);
+
+            {
+                // earliest (-52.848 -1137.79 2036.5) latest (594.54 1137.27 1897.01)
+                const auto [earliest, latest] = cluster->get_earliest_latest_points();
+                SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
+            }
             std::vector<int> b2filter_result = cluster->add_corrected_points(dv, "T0Correction");
-            for (const auto filter_result : b2filter_result) {
+            cluster->set_default_scope(cluster->get_scope("T0Correction"));
+            {
+                const auto [earliest, latest] = cluster->get_earliest_latest_points();
+                SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
+            }
+            std::set<int> b2filter_result_set(b2filter_result.begin(), b2filter_result.end());
+            for (const auto filter_result : b2filter_result_set) {
                 SPDLOG_INFO("CTest add corrected points filter_result {}", filter_result);
-                break;
             }
             auto clusters_sep = live_grouping.separate(cluster, b2filter_result, true);
             for (auto &[id, new_cluster] : clusters_sep) {
-                // new_cluster->set_scope_filter(cluster->scope("T0Correction"), id);
+                // new_cluster->set_scope_filter(new_cluster->get_scope("T0Correction"), id);
                 SPDLOG_INFO("CTest add corrected points id {} nchildren {}",
-                            id, new_cluster->nchildren());
+                    id, new_cluster->nchildren());
+                const auto [earliest, latest] = new_cluster->get_earliest_latest_points();
+                SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
             }
             break;
         }

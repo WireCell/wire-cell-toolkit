@@ -50,7 +50,7 @@ namespace WireCell::PointCloud::Facade {
         void set_scope_filter(const Tree::Scope& scope, bool flag);
         const bool get_scope_filter(const Tree::Scope& scope) const;
 
-        const Tree::Scope& scope(const std::string& scope_name) const
+        const Tree::Scope& get_scope(const std::string& scope_name) const
         {
             if (m_scopes.find(scope_name) == m_scopes.end()) {
                 raise<RuntimeError>("Cluster::scope: no such scope: %s", scope_name);
@@ -60,6 +60,8 @@ namespace WireCell::PointCloud::Facade {
 
         /// @param correction_name: T0Correction
         std::vector<int> add_corrected_points(const IDetectorVolumes::pointer dv, const std::string &correction_name);
+        double get_cluster_t0() const { return m_cluster_t0; }
+        void set_cluster_t0(double cluster_t0) { m_cluster_t0 = cluster_t0; }
 
 
         // Override Mixin
@@ -482,6 +484,8 @@ namespace WireCell::PointCloud::Facade {
         mutable geo_point_t m_center;
         mutable geo_vector_t m_pca_axis[3];
         mutable double m_pca_values[3];
+
+        double m_cluster_t0{0};
 
         // m_graph
         mutable std::unique_ptr<MCUGraph> m_graph;

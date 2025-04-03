@@ -28,6 +28,7 @@ class T0Correction : public WireCell::PointCloud::Transform {
          for (const auto& [wfid, _] : m_dv->wpident_faces()) {
              WirePlaneId wpid(wfid);
              m_time_global_offsets[wpid.apa()][wpid.face()] = m_dv->metadata(wpid)["time_offset"].asDouble();
+             m_drift_speeds[wpid.apa()][wpid.face()] = m_dv->metadata(wpid)["drift_speed"].asDouble();
          }
      }
      virtual ~T0Correction() = default;
@@ -42,14 +43,16 @@ class T0Correction : public WireCell::PointCloud::Transform {
                                          int apa) const override
      {
          Point result(pos);
-         result[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+         result[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+         m_drift_speeds.at(apa).at(face);
          return result;
      }
      virtual Point backward(const Point &pos, double clustser_t0, int face,
                                           int apa) const override
      {
          Point result(pos);
-         result[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+         result[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+         m_drift_speeds.at(apa).at(face);
          return result;
      }
      virtual bool filter(const Point &pos, double clustser_t0, int face,
@@ -65,7 +68,8 @@ class T0Correction : public WireCell::PointCloud::Transform {
          const auto &arr_z = pc.get(arr_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
-             arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+             arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+             m_drift_speeds.at(apa).at(face);
          }
          Dataset ds;
          ds.add("x", Array(arr_x_corr));
@@ -81,7 +85,8 @@ class T0Correction : public WireCell::PointCloud::Transform {
          const auto &arr_z = pc.get(arr_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
-             arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face));
+             arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+             m_drift_speeds.at(apa).at(face);
          }
          Dataset ds;
          ds.add("x", Array(arr_x_corr));
@@ -109,25 +114,7 @@ class T0Correction : public WireCell::PointCloud::Transform {
  
      // // m_time_global_offsets.at(apa).at(face) = time_global_offset
      std::map<int, std::map<int, double>> m_time_global_offsets;
-     // // lazy load time_global_offset from metadata
-     // double time_global_offset(const int face, const int apa) const
-     // {
-     //     auto it = m_time_global_offsets.find(apa);
-     //     if (it == m_time_global_offsets.end()) {
-     //         WirePlaneId wpid_all(kAllLayers, face, apa);
-     //         double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble();
-     //         m_time_global_offsets.at(apa).at(face) = time_offset;
-     //         return time_offset;
-     //     }
-     //     auto it2 = it->second.find(face);
-     //     if (it2 == it->second.end()) {
-     //         WirePlaneId wpid_all(kAllLayers, face, apa);
-     //         double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble();
-     //         m_time_global_offsets.at(apa).at(face) = time_offset;
-     //         return time_offset;
-     //     }
-     //     return it2->second;
-     // }
+     std::map<int, std::map<int, double>> m_drift_speeds;
  };
  
 

@@ -77,13 +77,12 @@ std::vector<int> Cluster::add_corrected_points(const IDetectorVolumes::pointer d
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
     if (correction_name == "T0Correction") {
-        double cluster_t0 = 0; // HACKING
         const auto& pct = dv->pc_transform("T0Correction");
         for (Blob* blob : children()) {
             auto &lpc_3d = blob->local_pcs().at("3d");
-            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, cluster_t0, blob->wpid().face(), blob->wpid().apa());
+            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
             lpc_3d.add("x_t0cor", *corrected_points.get("x")); // only add x_t0cor
-            auto filter_result = pct->filter(corrected_points, {"x", "y", "z"}, cluster_t0, blob->wpid().face(), blob->wpid().apa());
+            auto filter_result = pct->filter(corrected_points, {"x", "y", "z"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
             auto arr_filter = filter_result.get("filter")->elements<int>();
             for (size_t i = 0; i < arr_filter.size(); ++i) {
                 if (arr_filter[i] == 1) {
