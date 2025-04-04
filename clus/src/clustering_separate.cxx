@@ -916,9 +916,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     for (auto wpid : gwpids) {
         int apa = wpid.apa();
         int face = wpid.face();
-        af_dead_u_index[apa][face] = grouping->get_dead_winds(apa, face, 0);
-        af_dead_v_index[apa][face] = grouping->get_dead_winds(apa, face, 1);
-        af_dead_w_index[apa][face] = grouping->get_dead_winds(apa, face, 2);
+        af_dead_u_index[apa][face] = grouping->get_dead_winds(apa, face, 0); // raw 
+        af_dead_v_index[apa][face] = grouping->get_dead_winds(apa, face, 1); // raw
+        af_dead_w_index[apa][face] = grouping->get_dead_winds(apa, face, 2); // raw 
 
         // Create wpids for all three planes with this APA and face
         WirePlaneId wpid_u(kUlayer, face, apa);
@@ -935,7 +935,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
-        af_temp_cloud[apa][face] = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
+        af_temp_cloud[apa][face] = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w); // 2D Dynamic Point Cloud
     }
 
     auto& pc_name = scope.pcname;
@@ -1232,8 +1232,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         else {
             auto& dead_u_index = af_dead_u_index.at(test_wpid.apa()).at(test_wpid.face());
             if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
-                if (cluster->point3d(j).x() >= dead_u_index[winds[0][j]].first &&
-                    cluster->point3d(j).x() <= dead_u_index[winds[0][j]].second) {
+                // dead channels are corresponding to raw points
+                if (cluster->point3d_raw(j).x() >= dead_u_index[winds[0][j]].first &&
+                    cluster->point3d_raw(j).x() <= dead_u_index[winds[0][j]].second) {
                     if (dis < 10 * units::cm) flag1_u_pts.at(j) = true;
                     flag2_u_pts.at(j) = true;
                 }
@@ -1249,9 +1250,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
         else {
             auto& dead_v_index = af_dead_v_index.at(test_wpid.apa()).at(test_wpid.face());
+            // dead channels are corresponding to raw points
             if (dead_v_index.find(winds[1][j]) != dead_v_index.end()) {
-                if (cluster->point3d(j).x() >= dead_v_index[winds[1][j]].first &&
-                    cluster->point3d(j).x() <= dead_v_index[winds[1][j]].second) {
+                if (cluster->point3d_raw(j).x() >= dead_v_index[winds[1][j]].first &&
+                    cluster->point3d_raw(j).x() <= dead_v_index[winds[1][j]].second) {
                     if (dis < 10.0 * units::cm) flag1_v_pts.at(j) = true;
                     flag2_v_pts.at(j) = true;
                 }
@@ -1267,10 +1269,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
         else {
             auto& dead_w_index = af_dead_w_index.at(test_wpid.apa()).at(test_wpid.face());
-
+            // dead channels are corresponding to raw points
             if (dead_w_index.find(winds[2][j]) != dead_w_index.end()) {
-                if (cluster->point3d(j).x() >= dead_w_index[winds[2][j]].first &&
-                    cluster->point3d(j).x() <= dead_w_index[winds[2][j]].second) {
+                if (cluster->point3d_raw(j).x() >= dead_w_index[winds[2][j]].first &&
+                    cluster->point3d_raw(j).x() <= dead_w_index[winds[2][j]].second) {
                     if (dis < 10 * units::cm) flag1_w_pts.at(j) = true;
                     flag2_w_pts.at(j) = true;
                 }
@@ -1281,29 +1283,33 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
     // special treatment of first and last point
     {
         auto wpid_front = cluster->wpid(pts.front());
+        auto idx_front =  cluster->get_closest_point_index(pts.front());
+
+
         auto wpid_back = cluster->wpid(pts.back());
-        std::vector<size_t> indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, wpid_front.apa(), wpid_back.face(), 0);
-    
+        auto idx_back =  cluster->get_closest_point_index(pts.back());
+
+        std::vector<size_t> indices = cluster->get_closest_2d_index(cluster->point3d_raw(idx_front), 2.1 * units::cm, wpid_front.apa(), wpid_front.face(), 0);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_u_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, wpid_front.face(), wpid_front.face(), 1);
+        indices = cluster->get_closest_2d_index(cluster->point3d_raw(idx_front), 2.1 * units::cm, wpid_front.apa(), wpid_front.face(), 1);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_v_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.front(), 2.1 * units::cm, wpid_front.apa(), wpid_front.face(), 2);
+        indices = cluster->get_closest_2d_index(cluster->point3d_raw(idx_front), 2.1 * units::cm, wpid_front.apa(), wpid_front.face(), 2);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_w_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, wpid_back.apa(), wpid_back.face(), 0);
+        indices = cluster->get_closest_2d_index(cluster->point3d_raw(idx_back), 2.1 * units::cm, wpid_back.apa(), wpid_back.face(), 0);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_u_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, wpid_back.apa(), wpid_back.face(), 1);
+        indices = cluster->get_closest_2d_index(cluster->point3d_raw(idx_back), 2.1 * units::cm, wpid_back.apa(), wpid_back.face(), 1);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_v_pts.at(indices.at(k)) = true;
         }
-        indices = cluster->get_closest_2d_index(pts.back(), 2.1 * units::cm, wpid_back.apa(), wpid_back.face(), 2);
+        indices = cluster->get_closest_2d_index(cluster->point3d_raw(idx_back), 2.1 * units::cm, wpid_back.apa(), wpid_back.face(), 2);
         for (size_t k = 0; k != indices.size(); k++) {
             flag_w_pts.at(indices.at(k)) = true;
         }
