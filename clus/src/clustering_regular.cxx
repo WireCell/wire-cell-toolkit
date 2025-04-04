@@ -22,12 +22,6 @@ void WireCell::PointCloud::Facade::clustering_regular(
     bool flag_enable_extend                                        //
 )
 {
-  // Check that live_grouping has exactly one wpid
-  // if (live_grouping.wpids().size() != 1 ) {
-      // throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
-  // }
-  // auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
-
   // Get all the wire plane IDs from the grouping
   const auto& wpids = live_grouping.wpids();
 
@@ -99,19 +93,12 @@ void WireCell::PointCloud::Facade::clustering_regular(
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
     if (!cluster_1->get_scope_filter(scope)) continue;
-    
     if (cluster_1->get_length() < internal_length_cut) continue;
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
       if (!cluster_2->get_scope_filter(scope)) continue;
-
       if (cluster_2->get_length() < internal_length_cut) continue;
-
       if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut, flag_enable_extend)){
-
-        // debug ...
-        //std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
-
 	      //	to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
 	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
 			  ilive2desc[map_cluster_index[cluster_2]], g);
@@ -130,7 +117,6 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     double length_2,
     const std::map<WirePlaneId, geo_point_t>& wpid_U_dir, const std::map<WirePlaneId, geo_point_t>& wpid_V_dir, const std::map<WirePlaneId, geo_point_t>& wpid_W_dir,
     const IDetectorVolumes::pointer dv,
-    // double angle_u, double angle_v, double angle_w,
     double length_cut,
     bool flag_enable_extend)
 {
@@ -151,16 +137,6 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
   auto wpid_p2 = cluster2.wpid(p2);
   auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
 
-  // if (flag_print) {
-  //   std::cout << length_1/units::cm << " " << length_2/units::cm << " " << cluster1.npoints() << 
-  //   " " << cluster2.npoints() << " " << p1 << " " << p2 << " " << dis/units::cm << std::endl;
-  //   std::cout << (*cluster1.get_first_blob()) << " " << cluster1.get_first_blob()->center_pos() << " " << (*cluster1.get_last_blob()) << " " << cluster1.get_last_blob()->center_pos() << std::endl;
-  //   auto points = cluster1.get_first_blob()->points();
-  //   for (auto it1 = points.begin();it1!=points.end();it1++){
-  //     std::cout << (*it1).x() << " " << (*it1).y() << " " << (*it1).z() << std::endl;
-  //   }
-  // }
-
 
   if (dis < length_cut){
     bool flag_para = false;
@@ -176,13 +152,6 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
 
     geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
     
-    // double angle_u = -1.0471975; double angle_v = 1.0471975; double angle_w = 0;
-    // pronlonged case for U 3 and V 4 ...
-    // geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    // geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    // geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
-
-
     // calculate average distance ... 
     geo_point_t cluster1_ave_pos = cluster1.calc_ave_pos(p1,5*units::cm);
     auto wpid_ave_p1 = cluster1.wpid(cluster1_ave_pos);
@@ -277,7 +246,7 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
       flag_regular = true;
     }else if ( length_1 > 30*units::cm && length_2 > 30*units::cm) {
       if (dis <= 25*units::cm)
-	flag_regular = true;
+	      flag_regular = true;
     }
     
     if ((flag_para_U || flag_para_V )  ||
