@@ -58,7 +58,7 @@ class T0Correction : public WireCell::PointCloud::Transform {
      virtual bool filter(const Point &pos, double clustser_t0, int face,
                          int apa) const override
      {
-         return m_dv->contained_by(pos);
+         return (m_dv->contained_by(pos)) ? true : false;
      }
      virtual Dataset forward(const Dataset &pc, const std::vector<std::string>& arr_names, double clustser_t0, int face,
                               int apa) const override
@@ -102,7 +102,8 @@ class T0Correction : public WireCell::PointCloud::Transform {
          const auto &arr_y = pc.get(arr_names[1])->elements<double>();
          const auto &arr_z = pc.get(arr_names[2])->elements<double>();
          for (size_t i = 0; i < arr_x.size(); ++i) {
-             arr_filter[i] = m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]));
+             arr_filter[i] = (m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]))) ? 1 : 0;
+            //  std::cout << "yuhw: {" << arr_x[i] << " " << arr_y[i] << " " << arr_z[i] << "} -> " << arr_filter[i] << std::endl;
          }
          Dataset ds;
          ds.add("filter", Array(arr_filter));

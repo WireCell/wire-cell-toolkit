@@ -205,12 +205,14 @@ void WireCell::PointCloud::Facade::clustering_test(
     {
         int face = 0;
         int apa = 0;
-        double cluster_t0 = 0;
+        double cluster_t0 = -400*units::us;
         WireCell::Point test_point(0, 0, 0);
         WirePlaneId wpid_all(kAllLayers, face, apa);
         double drift_speed = dv->metadata(wpid_all)["drift_speed"].asDouble();
         double time_offset = dv->metadata(wpid_all)["time_offset"].asDouble();
         int face_dirx = dv->face_dirx(wpid_all);
+        SPDLOG_INFO("CTest T0Correction face_dirx {} drift_speed {} time_offset {} cluster_t0 {}",
+                    face_dirx, drift_speed, time_offset, cluster_t0);
         // expectation:
         const auto expected_corrected_point_x = test_point.x() - face_dirx * (cluster_t0 + time_offset) * drift_speed;
         const auto T0Correction = dv->pc_transform("T0Correction");
@@ -237,6 +239,19 @@ void WireCell::PointCloud::Facade::clustering_test(
                     fpc_x[0], fpc_y[0], fpc_z[0], bpc_x[0], bpc_y[0], bpc_z[0], filter_result_fpc_filter[0]);
     }
 
+    /// TEST: dv->contained_by()
+    {
+        for (double x = 254*units::cm; x < 255*units::cm; x += 0.1*units::cm) {
+            Point point(x, 0*units::cm, 50*units::cm);
+            WirePlaneId wpid = dv->contained_by(point);
+            if (wpid) {
+                SPDLOG_INFO("CTest dv->contained_by point {} wpid {}", point, wpid.name());
+            } else {
+                SPDLOG_INFO("CTest dv->contained_by point {} wpid not found", point);
+            }
+        }
+    }
+
     /// TEST: add corrected points to Cluster and separate according to filter
     {
         for (size_t iclus = 0; iclus != live_clusters.size(); iclus++) {
@@ -247,6 +262,7 @@ void WireCell::PointCloud::Facade::clustering_test(
                 const auto [earliest, latest] = cluster->get_earliest_latest_points();
                 SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
             }
+            cluster->set_cluster_t0(-400*units::us);
             std::vector<int> b2filter_result = cluster->add_corrected_points(dv, "T0Correction");
             const auto scope_T0Correction = cluster->get_scope("T0Correction");
             cluster->set_default_scope(scope_T0Correction);

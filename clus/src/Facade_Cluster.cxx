@@ -78,20 +78,21 @@ std::vector<int> Cluster::add_corrected_points(const IDetectorVolumes::pointer d
     blob_passed.resize(children().size(), 0); // not passed by default
     if (correction_name == "T0Correction") {
         const auto& pct = dv->pc_transform("T0Correction");
-        for (Blob* blob : children()) {
+        for (size_t iblob = 0; iblob < children().size(); ++iblob) {
+            Blob* blob = children().at(iblob);
             auto &lpc_3d = blob->local_pcs().at("3d");
             auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
             lpc_3d.add("x_t0cor", *corrected_points.get("x")); // only add x_t0cor
             auto filter_result = pct->filter(corrected_points, {"x", "y", "z"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
             auto arr_filter = filter_result.get("filter")->elements<int>();
-            for (size_t i = 0; i < arr_filter.size(); ++i) {
-                if (arr_filter[i] == 1) {
-                    blob_passed[i] = 1;
+            for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
+                if (arr_filter[ipt] == 1) {
+                    blob_passed[iblob] = 1;
                     break; // only one point pass is enough
                 }
             }
-            m_scopes["T0Correction"] = {"3d", {"x_t0cor", "y", "z"}}; // add the new scope
         }
+        m_scopes["T0Correction"] = {"3d", {"x_t0cor", "y", "z"}}; // add the new scope
     } else {
         raise<RuntimeError>("Cluster::add_corrected_points: no such correction: %s", correction_name);
     }
