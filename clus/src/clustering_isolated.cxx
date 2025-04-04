@@ -124,7 +124,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
             if (live_clusters.at(i)->get_length() < 60 * units::cm) {
                 if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir_abs, live_clusters.at(i)->get_length())) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
-                    const auto b2id = Separate_2(live_clusters.at(i), 2.5 * units::cm);
+                    const auto b2id = Separate_2(live_clusters.at(i), pc_name, coords, 2.5 * units::cm);
                     std::set<int> ids;
                     for (const auto& id : b2id) {
                         ids.insert(id);

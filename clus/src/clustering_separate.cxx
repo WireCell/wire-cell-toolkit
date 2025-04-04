@@ -11,9 +11,7 @@ using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
-// bool flag_debug_porting = false;
-
-
+// this algorithm should be able to handle multiple APA/face now ..
 void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                      const IDetectorVolumes::pointer dv,                // detector volumes
                                      const std::string& pc_name,            // point cloud name
@@ -21,10 +19,9 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                       const bool use_ctpc)
 {
     // Check that live_grouping has exactly one wpid
-	if (live_grouping.wpids().size() != 1 ) {
-		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
-	}
-	// Example usage in clustering_parallel_prolong()
+	// if (live_grouping.wpids().size() != 1 ) {
+	// 	throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+	// }
     geo_point_t drift_dir_abs(1,0,0);
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
@@ -60,10 +57,6 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             beam_dir_json[2].asDouble()
         );
     } 
-
-    // std::cout << "Test: " << vertical_dir << " " << beam_dir << std::endl;
-
-
 
     std::vector<Cluster *> new_clusters;
     std::vector<Cluster *> del_clusters;
@@ -115,7 +108,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
                             cluster->get_pca_value(1) > 0.2 * cluster->get_pca_value(0)) {
                             // std::vector<Cluster *> temp_sep_clusters = Separate_2(cluster, 10 * units::cm);
-                            const auto b2id = Separate_2(cluster, 10 * units::cm);
+                            const auto b2id = Separate_2(cluster, pc_name, coords, 10 * units::cm);
                             std::set<int> ids;
                             for (const auto& id : b2id) {
                                 ids.insert(id);
@@ -282,7 +275,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
                             if (final_sep_cluster != 0) {  // 2
                                 // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
-                                const auto b2id = Separate_2(final_sep_cluster);
+                                const auto b2id = Separate_2(final_sep_cluster, pc_name, coords);
                                 auto final_sep_clusters = live_grouping.separate(final_sep_cluster,b2id,true); 
                                  
                                 // Apply the scope filter settings to all new clusters
@@ -322,7 +315,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                         Cluster *final_sep_cluster = cluster2;
 
                         // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
-                        const auto b2id = Separate_2(final_sep_cluster);
+                        const auto b2id = Separate_2(final_sep_cluster, pc_name, coords);
                         auto final_sep_clusters = live_grouping.separate(final_sep_cluster, b2id, true);
                         // Apply the scope filter settings to all new clusters
                         for (auto& [id, new_cluster] : final_sep_clusters) {
@@ -945,7 +938,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         af_temp_cloud[apa][face] = std::make_shared<Multi2DPointCloud>(angle_u, angle_v, angle_w);
     }
 
+    auto& pc_name = scope.pcname;
+    auto& coords = scope.coords;
 
+    // std::cout << "Test: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << std::endl;
 
     geo_point_t cluster_center = cluster->get_center();
     geo_point_t main_dir = cluster->get_pca_axis(0);
@@ -1378,7 +1374,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 
     if (clusters_step0.find(1) != clusters_step0.end()) {
         // other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
-        const auto b2id = Separate_2(clusters_step0[1], 5 * units::cm);
+        const auto b2id = Separate_2(clusters_step0[1], pc_name, coords, 5 * units::cm);
         auto other_clusters1 = grouping->separate(clusters_step0[1],b2id, true); // the cluster is now nullptr
         // Apply the scope filter settings to all new clusters
         for (auto& [id, new_cluster] : other_clusters1) {
@@ -1530,7 +1526,10 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 #endif //_INDEV_
 
 /// blob -> cluster_id
-std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, const double dis_cut)
+std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, 
+                                const std::string& pc_name,            // point cloud name
+                                const std::vector<std::string>& coords, // coordinate names
+    const double dis_cut)
 {
     if (cluster->nchildren() == 0) {
         return std::vector<int>();
@@ -1643,8 +1642,8 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
     }
 
     {
-        std::string hack_pc_name = "3d";
-        std::vector<std::string> hack_coords = {"x", "y", "z"};
+        // std::string hack_pc_name = "3d";
+        // std::vector<std::string> hack_coords = {"x", "y", "z"};
         // std::cout << "Separate_2: num_edges: " << num_edges(graph) << std::endl;
         std::vector<int> component(num_vertices(graph));
         const int num = connected_components(graph, &component[0]);
@@ -1659,7 +1658,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, cons
             for (i = 0; i != component.size(); ++i) {
                 vec_vec.at(component[i]).push_back(i);
                 Blob *mcell = mcells.at(i);
-                for (const auto & pt : mcell->points(hack_pc_name, hack_coords)) {
+                for (const auto & pt : mcell->points(pc_name, coords)) {
                     pt_clouds.at(component[i])->add({pt.x(), pt.y(), pt.z()});
                 }
             }

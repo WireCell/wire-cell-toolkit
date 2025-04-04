@@ -698,7 +698,10 @@ namespace WireCell::PointCloud::Facade {
                                                          std::vector<geo_point_t> &independent_points,
                                                          double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, Tree::Scope& scope);
 
-    std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm);
+    std::vector<int> Separate_2(Cluster *cluster, 
+                                const std::string& pc_name,            // point cloud name
+                                const std::vector<std::string>& coords, // coordinate names
+                                const double dis_cut =  5*units::cm);
 
 
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
