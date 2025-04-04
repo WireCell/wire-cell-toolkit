@@ -24,17 +24,6 @@ void WireCell::PointCloud::Facade::clustering_extend(
     const int num_dead_try                                         //
 ){
 
-  // Check that live_grouping has exactly one wpid
-  // if (live_grouping.wpids().size() != 1) {
-    // throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
-  // }
-  // auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
-  // pronlonged case for U 3 and V 4 ...
-  // geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-  // geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-  // geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
-
-
   // Get all the wire plane IDs from the grouping
 	const auto& wpids = live_grouping.wpids();
 
@@ -94,7 +83,6 @@ void WireCell::PointCloud::Facade::clustering_extend(
     // set scope ...
     if (live->get_default_scope().hash() != scope.hash()) {
       live->set_default_scope(scope);
-      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
     }
   }
 
@@ -111,119 +99,118 @@ void WireCell::PointCloud::Facade::clustering_extend(
 
     if (cluster_1->get_length() > length_1_cut){
       geo_point_t highest_p, lowest_p, earliest_p, latest_p;
-      // bool flag_para = false;
-      // bool flag_prol = false;
+
 
       if (flag==1){// prolong case ... 
 
-	std::tie(earliest_p, latest_p) = cluster_1->get_earliest_latest_points();
-	// find earliest point
+        std::tie(earliest_p, latest_p) = cluster_1->get_earliest_latest_points();
+        // find earliest point
 
-	geo_point_t dir_earlp = cluster_1->vhough_transform(earliest_p,60*units::cm);
-  auto wpid_earliest_p = cluster_1->wpid(earliest_p);
-	
-	geo_point_t tempV5,tempV1;
-	tempV1.set(0,dir_earlp.y(),dir_earlp.z());
-	double angle1 = tempV1.angle(wpid_U_dir.at(wpid_earliest_p).first);
-	tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle1),0);
-	angle1 = tempV5.angle(drift_dir_abs);
+        geo_point_t dir_earlp = cluster_1->vhough_transform(earliest_p,60*units::cm);
+        auto wpid_earliest_p = cluster_1->wpid(earliest_p);
+        
+        geo_point_t tempV5,tempV1;
+        tempV1.set(0,dir_earlp.y(),dir_earlp.z());
+        double angle1 = tempV1.angle(wpid_U_dir.at(wpid_earliest_p).first);
+        tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle1),0);
+        angle1 = tempV5.angle(drift_dir_abs);
 
-	double angle2 = tempV1.angle(wpid_V_dir.at(wpid_earliest_p).first);
-	tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle2),0);
-	angle2 = tempV5.angle(drift_dir_abs);
+        double angle2 = tempV1.angle(wpid_V_dir.at(wpid_earliest_p).first);
+        tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle2),0);
+        angle2 = tempV5.angle(drift_dir_abs);
 
-	double angle3 = tempV1.angle(wpid_W_dir.at(wpid_earliest_p).first);
-	tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle3),0);
-	angle3 = tempV5.angle(drift_dir_abs);
+        double angle3 = tempV1.angle(wpid_W_dir.at(wpid_earliest_p).first);
+        tempV5.set(fabs(dir_earlp.x()),sqrt(pow(dir_earlp.y(),2)+pow(dir_earlp.z(),2))*sin(angle3),0);
+        angle3 = tempV5.angle(drift_dir_abs);
 
 
-	// find latest point
-	geo_point_t dir_latep = cluster_1->vhough_transform(latest_p, 60*units::cm);
-  auto wpid_latest_p = cluster_1->wpid(latest_p);
-	tempV1.set(0,dir_latep.y(),dir_latep.z());
-	double angle4 = tempV1.angle(wpid_U_dir.at(wpid_latest_p).first);
-	tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle4),0);
-	angle4 = tempV5.angle(drift_dir_abs);
+        // find latest point
+        geo_point_t dir_latep = cluster_1->vhough_transform(latest_p, 60*units::cm);
+        auto wpid_latest_p = cluster_1->wpid(latest_p);
+        tempV1.set(0,dir_latep.y(),dir_latep.z());
+        double angle4 = tempV1.angle(wpid_U_dir.at(wpid_latest_p).first);
+        tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle4),0);
+        angle4 = tempV5.angle(drift_dir_abs);
 
-	double angle5 = tempV1.angle(wpid_V_dir.at(wpid_latest_p).first);
-	tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle5),0);
-	angle5 = tempV5.angle(drift_dir_abs);
+        double angle5 = tempV1.angle(wpid_V_dir.at(wpid_latest_p).first);
+        tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle5),0);
+        angle5 = tempV5.angle(drift_dir_abs);
 
-	double angle6 = tempV1.angle(wpid_W_dir.at(wpid_latest_p).first);
-	tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle6),0);
-	angle6 = tempV5.angle(drift_dir_abs);
+        double angle6 = tempV1.angle(wpid_W_dir.at(wpid_latest_p).first);
+        tempV5.set(fabs(dir_latep.x()),sqrt(pow(dir_latep.y(),2)+pow(dir_latep.z(),2))*sin(angle6),0);
+        angle6 = tempV5.angle(drift_dir_abs);
 
-	if (angle1 <5./180.*3.1415926 || angle2 < 5./180.*3.1415926 || angle3 < 5./180.*3.1415926){
-	  // flag_prol = true;
+        if (angle1 <5./180.*3.1415926 || angle2 < 5./180.*3.1415926 || angle3 < 5./180.*3.1415926){
+          // flag_prol = true;
 	  
-	  for (size_t j=0;j!=live_clusters.size();j++){
-	    auto cluster_2 = live_clusters.at(j);
-      if (!cluster_2->get_scope_filter(scope)) continue;
+          for (size_t j=0;j!=live_clusters.size();j++){
+            auto cluster_2 = live_clusters.at(j);
+            if (!cluster_2->get_scope_filter(scope)) continue;
 
-	    if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
-	    if (cluster_2==cluster_1) continue;
-	    if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),earliest_p,dir_earlp,length_cut)){
-	      //	      to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			      ilive2desc[map_cluster_index[cluster_2]], g);
+            if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+            if (cluster_2==cluster_1) continue;
+            if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),earliest_p,dir_earlp,length_cut)){
+              //	      to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+              boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                  ilive2desc[map_cluster_index[cluster_2]], g);
 
 
-	      
-	      if (cluster_2->get_length()<10*units::cm)
-		used_clusters.insert(cluster_2);
-	    }
-	  }
-	}
+              
+              if (cluster_2->get_length()<10*units::cm)
+                used_clusters.insert(cluster_2);
+            }
+          }
+        }
 	
-	if (angle4<5./180.*3.1415926 || angle5 < 5./180.*3.1415926 || angle6 < 5./180.*3.1415926){
+        if (angle4<5./180.*3.1415926 || angle5 < 5./180.*3.1415926 || angle6 < 5./180.*3.1415926){
 
-	  // flag_prol = true;
-	  for (size_t j=0;j!=live_clusters.size();j++){
-	    auto cluster_2 = live_clusters.at(j);
-      if (!cluster_2->get_scope_filter(scope)) continue;
-	    if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
-	    if (cluster_2==cluster_1) continue;
-	    if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),latest_p,dir_latep,length_cut)){
-	      //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			      ilive2desc[map_cluster_index[cluster_2]], g);
+          // flag_prol = true;
+          for (size_t j=0;j!=live_clusters.size();j++){
+            auto cluster_2 = live_clusters.at(j);
+            if (!cluster_2->get_scope_filter(scope)) continue;
+            if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+            if (cluster_2==cluster_1) continue;
+            if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),latest_p,dir_latep,length_cut)){
+              //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+              boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                  ilive2desc[map_cluster_index[cluster_2]], g);
 
 
-	      if (cluster_2->get_length()<10*units::cm)
-		used_clusters.insert(cluster_2);
-	    }
-	  }
-	}
+              if (cluster_2->get_length()<10*units::cm)
+                used_clusters.insert(cluster_2);
+            }
+          }
+        }
       }else if (flag==2){ // parallel case ...
-	std::tie(highest_p, lowest_p) = cluster_1->get_highest_lowest_points();
-	
-	highest_p = cluster_1->calc_ave_pos(highest_p,5*units::cm);
-        geo_point_t dir_highp = cluster_1->vhough_transform(highest_p,100*units::cm);
+        std::tie(highest_p, lowest_p) = cluster_1->get_highest_lowest_points();
+        
+        highest_p = cluster_1->calc_ave_pos(highest_p,5*units::cm);
+              geo_point_t dir_highp = cluster_1->vhough_transform(highest_p,100*units::cm);
 
-	lowest_p = cluster_1->calc_ave_pos(lowest_p,5*units::cm);
-	geo_point_t dir_lowp = cluster_1->vhough_transform(lowest_p, 100*units::cm);
+        lowest_p = cluster_1->calc_ave_pos(lowest_p,5*units::cm);
+        geo_point_t dir_lowp = cluster_1->vhough_transform(lowest_p, 100*units::cm);
 
-	 if (fabs(dir_highp.angle(drift_dir_abs)-3.1415926/2.)<5/180.*3.1415926){ 
-	   // flag_para = true; 
+        if (fabs(dir_highp.angle(drift_dir_abs)-3.1415926/2.)<5/180.*3.1415926){ 
+          // flag_para = true; 
 
-	   for (size_t j=0;j!=live_clusters.size();j++){
-	     auto cluster_2 = live_clusters.at(j);
-       if (!cluster_2->get_scope_filter(scope)) continue;
-	     if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
-	     if (cluster_2==cluster_1) continue;
-	     
-	     if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),highest_p,dir_highp,length_cut)){
-	       //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	       boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			      ilive2desc[map_cluster_index[cluster_2]], g);
+          for (size_t j=0;j!=live_clusters.size();j++){
+            auto cluster_2 = live_clusters.at(j);
+            if (!cluster_2->get_scope_filter(scope)) continue;
+            if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+            if (cluster_2==cluster_1) continue;
+            
+            if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),highest_p,dir_highp,length_cut)){
+              //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+              boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                  ilive2desc[map_cluster_index[cluster_2]], g);
 
 
 	       
-              if (cluster_2->get_length()<15*units::cm)
-		 used_clusters.insert(cluster_2);
-	     }
-	   }
-	 }
+            if (cluster_2->get_length()<15*units::cm)
+		          used_clusters.insert(cluster_2);
+      }
+    }
+  }
 
 	 if (fabs(dir_lowp.angle(drift_dir_abs)-3.1415926/2.)<5/180.*3.1415926 ){ 
 	   // flag_para = true; 
@@ -243,47 +230,47 @@ void WireCell::PointCloud::Facade::clustering_extend(
 	   
 	 }
       }else if (flag==3){ // regular case ...
-	auto hl_ps = cluster_1->get_highest_lowest_points();
-	auto el_ps = cluster_1->get_earliest_latest_points();
+        auto hl_ps = cluster_1->get_highest_lowest_points();
+        auto el_ps = cluster_1->get_earliest_latest_points();
 
-	geo_point_t first_p, second_p;
+        geo_point_t first_p, second_p;
 
-		
-	if (pow(hl_ps.first.x()-hl_ps.second.x(),2)+pow(hl_ps.first.y()-hl_ps.second.y(),2)+pow(hl_ps.first.z()-hl_ps.second.z(),2) > pow(el_ps.first.x()-el_ps.second.x(),2)+pow(el_ps.first.y()-el_ps.second.y(),2)+pow(el_ps.first.z()-el_ps.second.z(),2)){
-	  first_p = hl_ps.first;
-	  second_p = hl_ps.second;
-	}else{
-	  first_p = el_ps.first;
-	  second_p = el_ps.second;
-	}
+          
+        if (pow(hl_ps.first.x()-hl_ps.second.x(),2)+pow(hl_ps.first.y()-hl_ps.second.y(),2)+pow(hl_ps.first.z()-hl_ps.second.z(),2) > pow(el_ps.first.x()-el_ps.second.x(),2)+pow(el_ps.first.y()-el_ps.second.y(),2)+pow(el_ps.first.z()-el_ps.second.z(),2)){
+          first_p = hl_ps.first;
+          second_p = hl_ps.second;
+        }else{
+          first_p = el_ps.first;
+          second_p = el_ps.second;
+        }
 
-	for (size_t j=0;j!=live_clusters.size();j++){
-	  auto cluster_2 = live_clusters.at(j);
-    if (!cluster_2->get_scope_filter(scope)) continue;
+        for (size_t j=0;j!=live_clusters.size();j++){
+          auto cluster_2 = live_clusters.at(j);
+          if (!cluster_2->get_scope_filter(scope)) continue;
 
-	  if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
-	  if (cluster_2==cluster_1) continue;
-	  
-	  if (Clustering_4th_reg(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),first_p,length_cut, wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
-	    //	    to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	    boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			       ilive2desc[map_cluster_index[cluster_2]], g);
-
-
-               if (cluster_2->get_length()<10*units::cm)
-                   used_clusters.insert(cluster_2);
-	      
-	  }else if (Clustering_4th_reg(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),second_p,length_cut,  wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
-	    //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	    boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			       ilive2desc[map_cluster_index[cluster_2]], g);
+          if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+          if (cluster_2==cluster_1) continue;
+          
+          if (Clustering_4th_reg(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),first_p,length_cut, wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
+            //	    to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+            boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                  ilive2desc[map_cluster_index[cluster_2]], g);
 
 
-               if (cluster_2->get_length()<10*units::cm)
-                   used_clusters.insert(cluster_2);
-	  }
-		     	  
-	}
+                    if (cluster_2->get_length()<10*units::cm)
+                        used_clusters.insert(cluster_2);
+              
+          }else if (Clustering_4th_reg(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),second_p,length_cut,  wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
+            //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+            boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                  ilive2desc[map_cluster_index[cluster_2]], g);
+
+
+                    if (cluster_2->get_length()<10*units::cm)
+                        used_clusters.insert(cluster_2);
+          }
+                  
+        }
 
 	
       }else if (flag==4){
