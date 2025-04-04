@@ -20,12 +20,9 @@ void WireCell::PointCloud::Facade::clustering_close(
     const std::vector<std::string>& coords,            // coordinate names
     const double length_cut)
 {
-  // bool flag_print = false;
-  // ExecMon em("starting");
 
   cluster_set_t used_clusters;
   
-
   // prepare graph ...
   typedef cluster_connectivity_graph_t Graph;
   Graph g;
@@ -37,8 +34,7 @@ void WireCell::PointCloud::Facade::clustering_close(
     const auto& live = live_clusters.at(ilive);
     if (live->get_default_scope().hash() != scope.hash()) {
       live->set_default_scope(scope);
-      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
-  }
+    }
     map_cluster_index[live] = ilive;
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
   }
@@ -157,10 +153,6 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round(
     geo_point_t tempV1(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
     geo_point_t tempV2(cluster2_ave_pos.x() - cluster1_ave_pos.x(), cluster2_ave_pos.y() - cluster1_ave_pos.y(), cluster2_ave_pos.z() - cluster1_ave_pos.z());
     
-    /* if (length_1 > 150*units::cm || length_2 > 150*units::cm) */
-    /*   std::cout << cluster1.get_cluster_id() << " " << cluster2.get_cluster_id() << " " << length_1/units::cm << " " << length_2/units::cm << " " << num_p1 << " " << num_p2 << " " << num_tp1 << " " << num_tp2 << std::endl; */
-    /* return false; */
-    
     // one small the other one is big 
     if (length_1 < 12 *units::cm && num_p1 > 0.5*num_tp1 && (num_p2> 50 || num_p2 > 0.25*num_tp2) ||
 	length_2 < 12*units::cm && num_p2 > 0.5*num_tp2 && (num_p1>50 || num_p1 > 0.25*num_tp1) )
@@ -173,31 +165,31 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round(
       double angle5 = tempV1.angle(tempV2);
               
       if (length_1 < 60*units::cm || length_2 < 60*units::cm){
-	if (angle5 < 30/180.*3.1415926)
-	  return true;
-	if (angle5 < 90/180.*3.1415926 && (num_p1 > 50 && num_p2 > 50) && (num_p1>75 || num_p2>75))
-	  return true;
+        if (angle5 < 30/180.*3.1415926)
+          return true;
+        if (angle5 < 90/180.*3.1415926 && (num_p1 > 50 && num_p2 > 50) && (num_p1>75 || num_p2>75))
+          return true;
       }
       
       if ((length_1 < 60*units::cm || num_p1 >40) && (length_2 < 60*units::cm || num_p2 > 40)){
 	
-	if ((3.1415926 - dir1.angle(dir2))/3.1415926*180 < 30 &&
-	    (3.1415926 - dir1.angle(tempV1))/3.1415926*180. < 60 &&
-	     dir2.angle(tempV1)/3.1415926*180.<60 ||
-	    (3.1415926 - dir1.angle(dir2))/3.1415926*180 < 15)
-	  return true;
+        if ((3.1415926 - dir1.angle(dir2))/3.1415926*180 < 30 &&
+            (3.1415926 - dir1.angle(tempV1))/3.1415926*180. < 60 &&
+            dir2.angle(tempV1)/3.1415926*180.<60 ||
+            (3.1415926 - dir1.angle(dir2))/3.1415926*180 < 15)
+          return true;
 
-	geo_point_t dir3 = cluster1.vhough_transform(cluster1_ave_pos,50*units::cm); // cluster 1 direction based on hough
-	geo_point_t dir4 = cluster2.vhough_transform(cluster2_ave_pos,50*units::cm); // cluster 1 direction based on hough
+        geo_point_t dir3 = cluster1.vhough_transform(cluster1_ave_pos,50*units::cm); // cluster 1 direction based on hough
+        geo_point_t dir4 = cluster2.vhough_transform(cluster2_ave_pos,50*units::cm); // cluster 1 direction based on hough
 
-	if ((3.1415926 - dir3.angle(dir4))/3.1415926*180 < 25 &&
-	    (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 15 &&
-	     dir4.angle(tempV2)/3.1415926*180.<15 ||
-	    (3.1415926 - dir3.angle(dir4))/3.1415926*180 < 15)
-	  return true;
+        if ((3.1415926 - dir3.angle(dir4))/3.1415926*180 < 25 &&
+            (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 15 &&
+            dir4.angle(tempV2)/3.1415926*180.<15 ||
+            (3.1415926 - dir3.angle(dir4))/3.1415926*180 < 15)
+          return true;
 
-	if (dis<0.6*units::cm && ((3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 45 && dir4.angle(tempV2)/3.1415926*180. < 90 || (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 90 && dir4.angle(tempV2)/3.1415926*180. < 45))
-	  return true;
+        if (dis<0.6*units::cm && ((3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 45 && dir4.angle(tempV2)/3.1415926*180. < 90 || (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 90 && dir4.angle(tempV2)/3.1415926*180. < 45))
+          return true;
 	
       }
     }
