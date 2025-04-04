@@ -407,6 +407,8 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
 
 void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& shadow, cluster_set_t&) const
 {
+
+
     // FIXME: With #377 fixed, we would make the shadow grouping here from
     // scratch and add it to the input map by name, eg "shadow".  Instead, we
     // smash whatever is in the 2nd grouping to fill with "shadow" clusters.  In
@@ -457,6 +459,13 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
 
     for (auto* orig_cluster : original.children()) {
+        auto& scope = orig_cluster->get_default_scope();
+        auto& scope_raw = orig_cluster->get_raw_scope();
+
+        if (scope.hash()!=scope_raw.hash()){
+            throw std::runtime_error("live grouping must have the raw points scope as the default");
+        }
+
 
         // find the flash time:
         auto flash = orig_cluster->get_flash();
