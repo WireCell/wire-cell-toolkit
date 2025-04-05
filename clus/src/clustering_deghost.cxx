@@ -150,8 +150,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     
                     auto& dead_u_index = af_dead_u_index.at(test_wpid.apa()).at(test_wpid.face());
                     if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
-                        if (cluster->point3d(j).x() >= dead_u_index[winds[0][j]].first &&
-                            cluster->point3d(j).x() <= dead_u_index[winds[0][j]].second) {
+                        if (cluster->point3d_raw(j).x() >= dead_u_index[winds[0][j]].first &&
+                            cluster->point3d_raw(j).x() <= dead_u_index[winds[0][j]].second) {
                             flag_dead = true;
                         }
                     }
@@ -201,8 +201,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                             std::cout << "dead_v_index: " << winds[1][j] << " " << dead_v_index[winds[1][j]].first << " " << dead_v_index[winds[1][j]].second << std::endl;
                         }
                         #endif
-                        if (cluster->point3d(j).x() >= dead_v_index[winds[1][j]].first &&
-                            cluster->point3d(j).x() <= dead_v_index[winds[1][j]].second) {
+                        if (cluster->point3d_raw(j).x() >= dead_v_index[winds[1][j]].first &&
+                            cluster->point3d_raw(j).x() <= dead_v_index[winds[1][j]].second) {
                             flag_dead = true;
                         }
                     }
@@ -265,8 +265,8 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     auto& dead_w_index = af_dead_w_index.at(test_wpid.apa()).at(test_wpid.face());
 
                     if (dead_w_index.find(winds[2][j]) != dead_w_index.end()) {
-                        if (cluster->point3d(j).x() >= dead_w_index[winds[2][j]].first &&
-                            cluster->point3d(j).x() <= dead_w_index[winds[2][j]].second) {
+                        if (cluster->point3d_raw(j).x() >= dead_w_index[winds[2][j]].first &&
+                            cluster->point3d_raw(j).x() <= dead_w_index[winds[2][j]].second) {
                             flag_dead = true;
                         }
                     }
