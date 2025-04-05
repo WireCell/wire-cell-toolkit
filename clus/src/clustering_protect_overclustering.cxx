@@ -548,12 +548,17 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                         test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        if (true) {
-                            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
-                            if (test_wpid.apa()!=-1){
-                                const bool good_point = cluster->grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
-                                if (!good_point) num_bad++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            geo_point_t test_p_raw = test_p;
+                            // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
+                            if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
+                                const auto transform = dv->pc_transform(cluster->get_default_scope().pcname);
+                                double cluster_t0 = cluster->get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
+                            const bool good_point = cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) num_bad++;
                         }
                     }
 
@@ -578,13 +583,17 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                         test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
-                        if (true) {
-                            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
-                            if (test_wpid.apa()!=-1){
-                                const bool good_point = cluster->grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
-                                if (!good_point) num_bad++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            geo_point_t test_p_raw = test_p;
+                            // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
+                            if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
+                                const auto transform = dv->pc_transform(cluster->get_default_scope().pcname);
+                                double cluster_t0 = cluster->get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
+                            const bool good_point = cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) num_bad++;
                         }
                     }
 
@@ -609,13 +618,17 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                         test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
-                        if (true) {
-                            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
-                            if (test_wpid.apa()!=-1){
-                                const bool good_point = cluster->grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
-                                if (!good_point) num_bad++;
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                        if (test_wpid.apa()!=-1){
+                            geo_point_t test_p_raw = test_p;
+                            // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
+                            if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
+                                const auto transform = dv->pc_transform(cluster->get_default_scope().pcname);
+                                double cluster_t0 = cluster->get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
+                            const bool good_point = cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                            if (!good_point) num_bad++;
                         }
                     }
 

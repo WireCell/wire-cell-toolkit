@@ -92,6 +92,7 @@ std::vector<int> Cluster::add_corrected_points(const IDetectorVolumes::pointer d
                 }
             }
         }
+        // the new scope should have the same name as the correction name. This is how the code can find corrections in the code ...
         m_scopes["T0Correction"] = {"3d", {"x_t0cor", "y", "z"}}; // add the new scope
     } else {
         raise<RuntimeError>("Cluster::add_corrected_points: no such correction: %s", correction_name);
@@ -2476,8 +2477,13 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            // Hack, need to transform test_p to raw point ...
-                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            geo_point_t test_p_raw = test_p;
+                            if (get_default_scope().hash() != get_raw_scope().hash()){
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                double cluster_t0 = get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }
+                            const bool good_point = grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -2508,8 +2514,13 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            // Hack, need to transform test_p to raw point ...
-                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            geo_point_t test_p_raw = test_p;
+                            if (get_default_scope().hash() != get_raw_scope().hash()){
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                double cluster_t0 = get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }
+                            const bool good_point = grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -2536,12 +2547,16 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                     test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                    // if (!ct_point_cloud.is_good_point(test_p)) num_bad++;
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            // Hack, need to transform test_p to raw point ...
-                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            geo_point_t test_p_raw = test_p;
+                            if (get_default_scope().hash() != get_raw_scope().hash()){
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                double cluster_t0 = get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }
+                            const bool good_point = grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
                         }
                     }
@@ -3103,8 +3118,13 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            // Hack, need to transform test_p to raw point ...
-                            scores = grouping()->test_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            geo_point_t test_p_raw = test_p;
+                            if (get_default_scope().hash() != get_raw_scope().hash()){
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                double cluster_t0 = get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }
+                            scores = grouping()->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             
                             // Check overall quality
                             if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
@@ -3259,13 +3279,17 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            // Hack, need to transform test_p to raw point ...
-                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            geo_point_t test_p_raw = test_p;
+                            if (get_default_scope().hash() != get_raw_scope().hash()){
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                double cluster_t0 = get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }                            
+                            const bool good_point = grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) {
                                 num_bad++;
                             }
-                            // Hack, need to transform test_p to raw point ...
-                            if (!grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
+                            if (!grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
                         }
@@ -3343,13 +3367,17 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
                         if (test_wpid.apa()!=-1){
-                            // Hack, need to transform test_p to raw point ...
-                            const bool good_point = grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face());
+                            geo_point_t test_p_raw = test_p;
+                            if (get_default_scope().hash() != get_raw_scope().hash()){
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                double cluster_t0 = get_flash().time();
+                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }
+                            const bool good_point = grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) {
                                 num_bad++;
                             }
-                            // Hack, need to transform test_p to raw point ...
-                            if (!grouping()->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
+                            if (!grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
                         }
