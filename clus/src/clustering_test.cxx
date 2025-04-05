@@ -225,12 +225,12 @@ void WireCell::PointCloud::Facade::clustering_test(
         pc.add("x", Array({test_point.x()}));
         pc.add("y", Array({test_point.y()}));
         pc.add("z", Array({test_point.z()}));
-        const auto fpc = T0Correction->forward(pc, {"x", "y", "z"}, cluster_t0, face, apa);
-        const auto bpc = T0Correction->backward(fpc, {"x", "y", "z"}, cluster_t0, face, apa);
-        const auto filter_result_fpc = T0Correction->filter(fpc, {"x", "y", "z"}, cluster_t0, face, apa);
-        const auto fpc_x = fpc.get("x")->elements<double>();
-        const auto fpc_y = fpc.get("y")->elements<double>();
-        const auto fpc_z = fpc.get("z")->elements<double>();
+        const auto fpc = T0Correction->forward(pc, {"x", "y", "z"}, {"x_cor","y_cor","z_cor"},  cluster_t0, face, apa);
+        const auto bpc = T0Correction->backward(fpc, {"x", "y", "z"}, {"x_cor","y_cor","z_cor"}, cluster_t0, face, apa);
+        const auto filter_result_fpc = T0Correction->filter(fpc, {"x_cor", "y_cor", "z_cor"}, cluster_t0, face, apa);
+        const auto fpc_x = fpc.get("x_cor")->elements<double>();
+        const auto fpc_y = fpc.get("y_cor")->elements<double>();
+        const auto fpc_z = fpc.get("z_cor")->elements<double>();
         const auto bpc_x = bpc.get("x")->elements<double>();
         const auto bpc_y = bpc.get("y")->elements<double>();
         const auto bpc_z = bpc.get("z")->elements<double>();

@@ -81,9 +81,9 @@ std::vector<int> Cluster::add_corrected_points(const IDetectorVolumes::pointer d
         for (size_t iblob = 0; iblob < children().size(); ++iblob) {
             Blob* blob = children().at(iblob);
             auto &lpc_3d = blob->local_pcs().at("3d");
-            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
-            lpc_3d.add("x_t0cor", *corrected_points.get("x")); // only add x_t0cor
-            auto filter_result = pct->filter(corrected_points, {"x", "y", "z"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
+            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, {"x_t0cor","y_t0cor","z_t0cor"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
+            lpc_3d.add("x_t0cor", *corrected_points.get("x_t0cor")); // only add x_t0cor
+            auto filter_result = pct->filter(corrected_points, {"x_t0cor", "y_t0cor", "z_t0cor"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
             auto arr_filter = filter_result.get("filter")->elements<int>();
             for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
                 if (arr_filter[ipt] == 1) {

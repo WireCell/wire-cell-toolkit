@@ -62,29 +62,33 @@ class T0Correction : public WireCell::PointCloud::Transform {
      {
          return (m_dv->contained_by(pos_corr)) ? true : false;
      }
-     virtual Dataset forward(const Dataset &pc_raw, const std::vector<std::string>& arr_names, double clustser_t0, int face,
+     virtual Dataset forward(const Dataset &pc_raw, const std::vector<std::string>& arr_raw_names, const std::vector<std::string>& arr_cor_names, double clustser_t0, int face,
                               int apa) const override
      {
-         const auto &arr_x = pc_raw.get(arr_names[0])->elements<double>();
-         const auto &arr_y = pc_raw.get(arr_names[1])->elements<double>();
-         const auto &arr_z = pc_raw.get(arr_names[2])->elements<double>();
+         const auto &arr_x = pc_raw.get(arr_raw_names[0])->elements<double>();
+         const auto &arr_y = pc_raw.get(arr_raw_names[1])->elements<double>();
+         const auto &arr_z = pc_raw.get(arr_raw_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
              arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
              m_drift_speeds.at(apa).at(face);
          }
          Dataset ds_corr;
-         ds_corr.add("x_corr", Array(arr_x_corr));
-         ds_corr.add("y_corr", Array(arr_y));
-         ds_corr.add("z_corr", Array(arr_z));
+         ds_corr.add(arr_cor_names[0], Array(arr_x_corr));
+         ds_corr.add(arr_cor_names[1], Array(arr_y));
+         ds_corr.add(arr_cor_names[2], Array(arr_z));
+         
+        //  ds_corr.add("x_corr", Array(arr_x_corr));
+        //  ds_corr.add("y_corr", Array(arr_y));
+        //  ds_corr.add("z_corr", Array(arr_z));
          return ds_corr;
      }
-     virtual Dataset backward(const Dataset &pc_corr, const std::vector<std::string>& arr_names, double clustser_t0, int face,
+     virtual Dataset backward(const Dataset &pc_corr, const std::vector<std::string>& arr_cor_names, const std::vector<std::string>& arr_raw_names, double clustser_t0, int face,
                                int apa) const override
      {
-         const auto &arr_x = pc_corr.get(arr_names[0])->elements<double>();
-         const auto &arr_y = pc_corr.get(arr_names[1])->elements<double>();
-         const auto &arr_z = pc_corr.get(arr_names[2])->elements<double>();
+         const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
+         const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
+         const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
              arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
@@ -96,13 +100,13 @@ class T0Correction : public WireCell::PointCloud::Transform {
          ds_raw.add("z", Array(arr_z));
          return ds_raw;
      }
-     virtual Dataset filter(const Dataset &pc_corr, const std::vector<std::string>& arr_names, double clustser_t0, int face,
+     virtual Dataset filter(const Dataset &pc_corr, const std::vector<std::string>& arr_cor_names, double clustser_t0, int face,
                             int apa) const override
      {
          std::vector<int> arr_filter(pc_corr.size_major());
-         const auto &arr_x = pc_corr.get(arr_names[0])->elements<double>();
-         const auto &arr_y = pc_corr.get(arr_names[1])->elements<double>();
-         const auto &arr_z = pc_corr.get(arr_names[2])->elements<double>();
+         const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
+         const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
+         const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
          for (size_t i = 0; i < arr_x.size(); ++i) {
              arr_filter[i] = (m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]))) ? 1 : 0;
          }
