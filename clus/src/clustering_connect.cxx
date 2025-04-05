@@ -336,8 +336,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
                     bool flag_dead = false;
                     if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
-                        if (cluster->point3d(j).x() >= dead_u_index[winds[0][j]].first &&
-                            cluster->point3d(j).x() <= dead_u_index[winds[0][j]].second) {
+                        if (cluster->point3d_raw(j).x() >= dead_u_index[winds[0][j]].first &&
+                            cluster->point3d_raw(j).x() <= dead_u_index[winds[0][j]].second) {
                             flag_dead = true;
                         }
                     }
@@ -408,8 +408,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
                     flag_dead = false;
                     if (dead_v_index.find(winds[1][j]) != dead_v_index.end()) {
-                        if (cluster->point3d(j).x() >= dead_v_index[winds[1][j]].first &&
-                            cluster->point3d(j).x() <= dead_v_index[winds[1][j]].second) {
+                        if (cluster->point3d_raw(j).x() >= dead_v_index[winds[1][j]].first &&
+                            cluster->point3d_raw(j).x() <= dead_v_index[winds[1][j]].second) {
                             flag_dead = true;
                         }
                     }
@@ -469,8 +469,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
                     flag_dead = false;
                     if (dead_w_index.find(winds[2][j]) != dead_w_index.end()) {
-                        if (cluster->point3d(j).x() >= dead_w_index[winds[2][j]].first &&
-                            cluster->point3d(j).x() <= dead_w_index[winds[2][j]].second) {
+                        if (cluster->point3d_raw(j).x() >= dead_w_index[winds[2][j]].first &&
+                            cluster->point3d_raw(j).x() <= dead_w_index[winds[2][j]].second) {
                             flag_dead = true;
                         }
                     }
