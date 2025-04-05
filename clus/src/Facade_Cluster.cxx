@@ -522,6 +522,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
             const auto& low_idxes = it->second;
             const auto& high_idxes = map_wpid_high_indices[wpid];
             if (flags[pind]) {
+                // raw data points ... 
                 geo_point_t low_p = point3d_raw(low_idxes[pind]);
                 geo_point_t high_p = point3d_raw(high_idxes[pind]);
                 std::vector<geo_point_t> test_points = {low_p, high_p};
