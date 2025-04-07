@@ -347,11 +347,14 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     // std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                     const auto b2id = Separate_2(cluster1, pc_name, coords, 2.5 * units::cm);
                     // false: do not remove the cluster1
+                    auto scope_transform = cluster1->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
 
                     // Apply the scope filter settings to all new clusters
                     for (auto& [id, new_cluster] : sep_clusters) {
+                        new_cluster->set_default_scope(scope);
                         new_cluster->set_scope_filter(scope, true);
+                        new_cluster->set_scope_transform(scope, scope_transform);
                     }
 
                     assert(cluster1 != nullptr);
@@ -528,11 +531,14 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
                     const auto b2id = Separate_2(cluster2, pc_name, coords, 2.5 * units::cm);
+                    auto scope_transform = cluster2->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
                     
                     // Apply the scope filter settings to all new clusters
                     for (auto& [id, new_cluster] : sep_clusters) {
+                        new_cluster->set_default_scope(scope);
                         new_cluster->set_scope_filter(scope, true);
+                        new_cluster->set_scope_transform(scope, scope_transform);
                     }
 
                     assert(cluster2 != nullptr);
@@ -940,4 +946,13 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     merge_clusters(g, live_grouping, new_clusters);
 
  
+    //       {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //      // Process each cluster
+    //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //          Cluster* cluster = live_clusters.at(iclus);
+    //          auto& scope = cluster->get_default_scope();
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+    //      }
+    //    }
 }

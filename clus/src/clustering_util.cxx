@@ -87,13 +87,15 @@ void WireCell::PointCloud::Facade::merge_clusters(
             }
 
             auto live = orig_clusters[idx];
+            const Tree::Scope& default_scope = live->get_default_scope();
+            bool flag = live->get_scope_filter(default_scope);
+            auto scope_transform = live->get_scope_transform(live->get_default_scope());
             fresh_cluster.take_children(*live, true);
-
             // set scope filter assuming union of all clusters
             {   
-                const Tree::Scope& default_scope = live->get_default_scope();
-                bool flag = live->get_scope_filter(default_scope);
+                fresh_cluster.set_default_scope(default_scope);
                 if (flag) fresh_cluster.set_scope_filter(default_scope, flag);
+                fresh_cluster.set_scope_transform(default_scope, scope_transform);
             }
 
             if (savecc) {

@@ -22,7 +22,7 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, IDetectorVolumes::pointer dv,
     const std::string& pc_name,                        // point cloud name
     const std::vector<std::string>& coords,            // coordinate names
-                                  const bool use_ctpc, double length_cut)
+    const bool use_ctpc, double length_cut)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -666,5 +666,16 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         live_grouping.destroy_child(live);
         assert(live == nullptr);
     } 
+
+
+//      {
+//    auto live_clusters = live_grouping.children(); // copy
+//     // Process each cluster
+//     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+//         Cluster* cluster = live_clusters.at(iclus);
+//         auto& scope = cluster->get_default_scope();
+//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+//     }
+//   }
 
 }

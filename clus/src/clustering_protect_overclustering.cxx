@@ -553,7 +553,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
                             if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
-                                const auto transform = dv->pc_transform(cluster->get_default_scope().pcname);
+                                const auto transform = dv->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                                 double cluster_t0 = cluster->get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -588,7 +588,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
                             if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
-                                const auto transform = dv->pc_transform(cluster->get_default_scope().pcname);
+                                const auto transform = dv->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                                 double cluster_t0 = cluster->get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -623,7 +623,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
                             if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
-                                const auto transform = dv->pc_transform(cluster->get_default_scope().pcname);
+                                const auto transform = dv->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                                 double cluster_t0 = cluster->get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -761,10 +761,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                     const int bind = cluster->kd3d().major_index(i);
                     b2groupid.at(bind) = component1[i];
                 }
+                auto scope_name = cluster->get_scope_transform(scope);
                 auto id2clusters = grouping->separate(cluster, b2groupid, true); 
                 // Apply the scope filter settings to all new clusters
                 for (auto& [id, new_cluster] : id2clusters) {
+                    new_cluster->set_default_scope(scope);
                     new_cluster->set_scope_filter(scope, true);
+                    new_cluster->set_scope_transform(scope, scope_name);
                 }
                 return id2clusters;
             }
@@ -792,4 +795,14 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
         Separate_overclustering(cluster, dv, scope);
     }
+
+    //   {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //      // Process each cluster
+    //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //          Cluster* cluster = live_clusters.at(iclus);
+    //          auto& scope = cluster->get_default_scope();
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+    //      }
+    //    }
 }

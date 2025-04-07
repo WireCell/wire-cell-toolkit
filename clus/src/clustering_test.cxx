@@ -288,6 +288,13 @@ void WireCell::PointCloud::Facade::clustering_test(
                     const auto [earliest, latest] = new_cluster->get_earliest_latest_points();
                     SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
                 }
+                // set filter (how to judge good or bad ???)
+                if (id==0) {
+                    new_cluster->set_scope_filter(scope_T0Correction, false);
+                } else if (id==1) {
+                    new_cluster->set_scope_filter(scope_T0Correction, true);
+                }
+                new_cluster->set_scope_transform(scope_T0Correction, "T0Correction");
             }
             break;
         }

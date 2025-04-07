@@ -489,7 +489,7 @@ namespace WireCell::PointCloud::Facade {
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_deghost(live_clusters, m_dv, pc_name, coords, use_ctpc_, length_cut_);
+            clustering_deghost(live_clusters, m_dv, pc_name, coords,  use_ctpc_, length_cut_);
         }
 
        private:

@@ -295,5 +295,14 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
 
     // new function to merge clusters ...
     merge_clusters(g, live_grouping, cluster_connected_dead);
+
+
+    // live_clusters = live_grouping.children(); // copy
+    // // Process each cluster
+    // for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //     Cluster* cluster = live_clusters.at(iclus);
+    //     auto& scope = cluster->get_default_scope();
+    //     std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+    // }
 }
 #pragma GCC diagnostic pop

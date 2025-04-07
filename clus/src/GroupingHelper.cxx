@@ -32,14 +32,16 @@ WireCell::PointCloud::Facade::process_groupings_helper(
         // Create a non-const pointer for separate()
         Cluster* mutable_cluster = orig_cluster;
         // Separate clusters
+        auto scope_transform = mutable_cluster->get_scope_transform(mutable_cluster->get_default_scope());
+        auto& scope = mutable_cluster->get_default_scope();
+        bool flag = mutable_cluster->get_scope_filter(scope);
         auto orig_splits = original.separate(mutable_cluster, cc_vec);
-
          {
             // Apply the scope filter settings to all new clusters
-            auto& scope = mutable_cluster->get_default_scope();
-            bool flag = mutable_cluster->get_scope_filter(scope);
             for (auto& [id, new_cluster] : orig_splits) {
                 new_cluster->set_scope_filter(scope, flag);
+                new_cluster->set_default_scope(scope);
+                new_cluster->set_scope_transform(scope, scope_transform);
             }
         }
 
@@ -50,13 +52,13 @@ WireCell::PointCloud::Facade::process_groupings_helper(
         // Create a non-const pointer for separate()
         Cluster* mutable_shad_cluster = shad_cluster;
         // Separate clusters
+        flag = mutable_shad_cluster->get_scope_filter(scope);
         auto shad_splits = shadow.separate(mutable_shad_cluster, shad_cc_vec);
-
         {
-            auto& scope = mutable_shad_cluster->get_default_scope();
-            bool flag = mutable_shad_cluster->get_scope_filter(scope);
             for (auto& [id, new_cluster] : shad_splits) {
                 new_cluster->set_scope_filter(scope, flag);
+                new_cluster->set_default_scope(scope);
+                new_cluster->set_scope_transform(scope, scope_transform);
             }
         }   
 

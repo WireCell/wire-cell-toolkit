@@ -73,6 +73,19 @@ const bool Cluster::get_scope_filter(const Tree::Scope& scope) const{
     return it->second;
 }
 
+
+void Cluster::set_scope_transform(const Tree::Scope& scope, const std::string& transform_name){
+    // Set the scope transform for the given scope
+    m_map_scope_transform[scope.hash()] = transform_name;
+}
+const std::string Cluster::get_scope_transform(const Tree::Scope& scope) const{
+    auto it = m_map_scope_transform.find(scope.hash());
+    if (it == m_map_scope_transform.end()){
+        return "Unity";
+    }
+    return it->second;
+}
+
 std::vector<int> Cluster::add_corrected_points(const IDetectorVolumes::pointer dv, const std::string &correction_name) {
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
@@ -2479,7 +2492,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -2516,7 +2529,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -2552,7 +2565,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -3120,7 +3133,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -3281,7 +3294,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }                            
@@ -3369,7 +3382,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_default_scope().pcname);
+                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }

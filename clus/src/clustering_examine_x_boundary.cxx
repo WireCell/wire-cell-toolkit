@@ -60,11 +60,13 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
             }
 
             // Perform separation
+            auto scope_transform = cluster->get_scope_transform(scope);
             auto id2clusters = live_grouping.separate(cluster, b2groupid, true);
-
             // Apply the scope filter settings to all new clusters
             for (auto& [id, new_cluster] : id2clusters) {
+                new_cluster->set_default_scope(scope);
                 new_cluster->set_scope_filter(scope, true);
+                new_cluster->set_scope_transform(scope, scope_transform);
             }
 
             assert(cluster == nullptr);
@@ -80,6 +82,17 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
             // }
         }
     }
+
+
+    // {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //      // Process each cluster
+    //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //          Cluster* cluster = live_clusters.at(iclus);
+    //          auto& scope = cluster->get_default_scope();
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+    //      }
+    //    }
 
     
 }

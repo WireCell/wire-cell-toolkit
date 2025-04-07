@@ -276,11 +276,14 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                             if (final_sep_cluster != 0) {  // 2
                                 // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                                 const auto b2id = Separate_2(final_sep_cluster, pc_name, coords);
+                                auto scope_transform = final_sep_cluster->get_scope_transform(scope);
                                 auto final_sep_clusters = live_grouping.separate(final_sep_cluster,b2id,true); 
                                  
                                 // Apply the scope filter settings to all new clusters
                                 for (auto& [id, new_cluster] : final_sep_clusters) {
                                     new_cluster->set_scope_filter(scope, true);
+                                    new_cluster->set_default_scope(scope);
+                                    new_cluster->set_scope_transform(scope,scope_transform);
                                 }
 
                                 assert(final_sep_cluster == nullptr);
@@ -316,10 +319,13 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 
                         // std::vector<Cluster *> final_sep_clusters = Separate_2(final_sep_cluster);
                         const auto b2id = Separate_2(final_sep_cluster, pc_name, coords);
+                        auto scope_transform = final_sep_cluster->get_scope_transform(scope);
                         auto final_sep_clusters = live_grouping.separate(final_sep_cluster, b2id, true);
                         // Apply the scope filter settings to all new clusters
                         for (auto& [id, new_cluster] : final_sep_clusters) {
                             new_cluster->set_scope_filter(scope, true);
+                            new_cluster->set_default_scope(scope);
+                            new_cluster->set_scope_transform(scope, scope_transform);
                         }
                         assert(final_sep_cluster == nullptr);
                         cluster2 = final_sep_cluster = sep_clusters[1] = nullptr;
@@ -329,6 +335,17 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
             }
         }
     }
+
+
+//  {
+//    auto live_clusters = live_grouping.children(); // copy
+//     // Process each cluster
+//     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+//         Cluster* cluster = live_clusters.at(iclus);
+//         auto& scope = cluster->get_default_scope();
+//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+//     }
+//   }
 
 }
 
@@ -1368,10 +1385,13 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
             groupids.insert(1);
         }
     }
+    auto scope_transform = cluster->get_scope_transform(scope);
     auto clusters_step0 = grouping->separate(cluster, b2groupid, true);
     // Apply the scope filter settings to all new clusters
     for (auto& [id, new_cluster] : clusters_step0) {
         new_cluster->set_scope_filter(scope, true);
+        new_cluster->set_default_scope(scope);
+        new_cluster->set_scope_transform(scope, scope_transform);
     }
     assert(cluster == nullptr);
 
@@ -1384,7 +1404,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         auto other_clusters1 = grouping->separate(clusters_step0[1],b2id, true); // the cluster is now nullptr
         // Apply the scope filter settings to all new clusters
         for (auto& [id, new_cluster] : other_clusters1) {
+            new_cluster->set_default_scope(scope);
             new_cluster->set_scope_filter(scope, true);
+            new_cluster->set_scope_transform(scope, scope_transform);
         }
         assert(clusters_step0[1] == nullptr);
 
@@ -1423,12 +1445,18 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
                 }
             }
 
+            auto scope = clusters_step0[0]->get_default_scope();
+            auto scope_transform = clusters_step0[0]->get_scope_transform(scope);
+
             for (auto temp_cluster : temp_merge_clusters) {
                 other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
                 clusters_step0[0]->take_children(*temp_cluster, true);
                 grouping->destroy_child(temp_cluster);
                 assert(temp_cluster == nullptr);
             }
+            clusters_step0[0]->set_default_scope(scope);
+            clusters_step0[0]->set_scope_filter(scope, true);
+            clusters_step0[0]->set_scope_transform(scope, scope_transform);
 
             final_clusters.push_back(clusters_step0[0]);
         }
@@ -1506,12 +1534,16 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
 
         Cluster& cluster2 = grouping->make_child();
+        cluster2.set_default_scope(scope);
         cluster2.set_scope_filter(scope, true);
+        if (to_be_merged_clusters.size() > 0) cluster2.set_scope_transform(scope, to_be_merged_clusters[0]->get_scope_transform(scope));
         for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
             cluster2.take_children(*to_be_merged_clusters[i], true);
             grouping->destroy_child(to_be_merged_clusters[i]);
             assert(to_be_merged_clusters[i] == nullptr);
         }
+        
+        
         to_be_merged_clusters.clear();
 
         final_clusters.push_back(&cluster2);

@@ -41,19 +41,19 @@ class T0Correction : public WireCell::PointCloud::Transform {
       */
 
       // get x_corr from x_raw
-     virtual Point forward(const Point &pos_raw, double clustser_t0, int face,
+     virtual Point forward(const Point &pos_raw, double cluster_t0, int face,
                                          int apa) const override
      {
          Point pos_corr(pos_raw);
-         pos_corr[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+         pos_corr[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
          m_drift_speeds.at(apa).at(face);
          return pos_corr;
      }
-     virtual Point backward(const Point &pos_corr, double clustser_t0, int face,
+     virtual Point backward(const Point &pos_corr, double cluster_t0, int face,
                                           int apa) const override
      {
          Point pos_raw(pos_corr);
-         pos_raw[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+         pos_raw[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
          m_drift_speeds.at(apa).at(face);
          return pos_raw;
      }
@@ -62,15 +62,17 @@ class T0Correction : public WireCell::PointCloud::Transform {
      {
          return (m_dv->contained_by(pos_corr)) ? true : false;
      }
-     virtual Dataset forward(const Dataset &pc_raw, const std::vector<std::string>& arr_raw_names, const std::vector<std::string>& arr_cor_names, double clustser_t0, int face,
+     virtual Dataset forward(const Dataset &pc_raw, const std::vector<std::string>& arr_raw_names, const std::vector<std::string>& arr_cor_names, double cluster_t0, int face,
                               int apa) const override
      {
+        // std::cout << "Test: " << m_time_global_offsets.at(apa).at(face) << " " << cluster_t0 << std::endl;
+
          const auto &arr_x = pc_raw.get(arr_raw_names[0])->elements<double>();
          const auto &arr_y = pc_raw.get(arr_raw_names[1])->elements<double>();
          const auto &arr_z = pc_raw.get(arr_raw_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
-             arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+             arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
              m_drift_speeds.at(apa).at(face);
          }
          Dataset ds_corr;
@@ -83,7 +85,7 @@ class T0Correction : public WireCell::PointCloud::Transform {
         //  ds_corr.add("z_corr", Array(arr_z));
          return ds_corr;
      }
-     virtual Dataset backward(const Dataset &pc_corr, const std::vector<std::string>& arr_cor_names, const std::vector<std::string>& arr_raw_names, double clustser_t0, int face,
+     virtual Dataset backward(const Dataset &pc_corr, const std::vector<std::string>& arr_cor_names, const std::vector<std::string>& arr_raw_names, double cluster_t0, int face,
                                int apa) const override
      {
          const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
@@ -91,7 +93,7 @@ class T0Correction : public WireCell::PointCloud::Transform {
          const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
          std::vector<double> arr_x_corr(arr_x.size());
          for (size_t i = 0; i < arr_x.size(); ++i) {
-             arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (clustser_t0 + m_time_global_offsets.at(apa).at(face)) *
+             arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
              m_drift_speeds.at(apa).at(face);
          }
          Dataset ds_raw;

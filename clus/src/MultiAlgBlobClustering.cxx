@@ -158,22 +158,28 @@ void MultiAlgBlobClustering::flush(int ident)
 // many schema and there is no "standard".  So we keep this dumper here, since
 // it is here we know the pc tree schema.
 static
-void fill_bee_points(WireCell::Bee::Points& bpts, const Points::node_t& root)
+void fill_bee_points(WireCell::Bee::Points& bpts, const Points::node_t& root, const Scope& scope)
 {
+    auto& coords = scope.coords;
+    auto& pc_name = scope.pcname;
+
+    std::cout << "Test Bee: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << std::endl;
+    // The root node is the "3d" point cloud.  We need to get the
+
     int clid = bpts.back_cluster_id();
     const double charge = 0;
     for (const auto cnode : root.children()) {  // this is a loop through all clusters ...
         ++clid;
 
-        Scope scope = {"3d", {"x", "y", "z"}};
+        // Scope scope = {"3d", {"x", "y", "z"}};
         const auto& sv = cnode->value.scoped_view(scope);
 
         const auto& spcs = sv.pcs();  // spcs 'contains' all blobs in this cluster ...
 
         for (const auto& spc : spcs) {  // each little 3D pc --> (blobs)   spc represents x,y,z in a blob
-            auto x = spc.get().get("x")->elements<double>();
-            auto y = spc.get().get("y")->elements<double>();
-            auto z = spc.get().get("z")->elements<double>();
+            auto x = spc.get().get(coords[0])->elements<double>();
+            auto y = spc.get().get(coords[1])->elements<double>();
+            auto z = spc.get().get(coords[2])->elements<double>();
             const size_t size = x.size();
             // fixme: add to Bee::Points a method to append vector-like things...
             for (size_t ind = 0 ; ind<size; ++ind) {
@@ -326,7 +332,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         root_dead = std::make_unique<Points::node_t>();
     }
 
-    fill_bee_points(m_bee_img, *root_live.get());
+    fill_bee_points(m_bee_img, *root_live.get(), grouping->children().front()->get_default_scope());
     perf("loaded dump live clusters to bee");
     if (m_save_deadarea) {
         fill_bee_patches(m_bee_dead, *root_dead.get());
@@ -361,7 +367,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         perf.dump(func_cfg["name"].asString(), live_grouping);
     }
 
-    fill_bee_points(m_bee_ld, *root_live.get());
+    fill_bee_points(m_bee_ld, *root_live.get(), live_grouping.children().front()->get_default_scope());
     perf("dump live clusters to bee");
 
     if (m_dump_json) {

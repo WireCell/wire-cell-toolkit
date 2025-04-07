@@ -50,6 +50,9 @@ namespace WireCell::PointCloud::Facade {
         void set_scope_filter(const Tree::Scope& scope, bool flag);
         const bool get_scope_filter(const Tree::Scope& scope) const;
 
+        void set_scope_transform(const Tree::Scope& scope, const std::string& transform_name);
+        const std::string get_scope_transform(const Tree::Scope& scope) const;
+
         const Tree::Scope& get_scope(const std::string& scope_name) const
         {
             if (m_scopes.find(scope_name) == m_scopes.end()) {
@@ -462,6 +465,7 @@ namespace WireCell::PointCloud::Facade {
         std::string scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
         Tree::Scope m_default_scope = scope_3d_raw;
         std::map<size_t, bool> m_map_scope_filter={{scope_3d_raw.hash(), true}};
+        std::map<size_t, std::string> m_map_scope_transform={{scope_3d_raw.hash(), "Unity"}};
 
         mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
         mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
