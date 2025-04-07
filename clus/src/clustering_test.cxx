@@ -226,7 +226,7 @@ void WireCell::PointCloud::Facade::clustering_test(
         pc.add("y", Array({test_point.y()}));
         pc.add("z", Array({test_point.z()}));
         const auto fpc = T0Correction->forward(pc, {"x", "y", "z"}, {"x_cor","y_cor","z_cor"},  cluster_t0, face, apa);
-        const auto bpc = T0Correction->backward(fpc, {"x", "y", "z"}, {"x_cor","y_cor","z_cor"}, cluster_t0, face, apa);
+        const auto bpc = T0Correction->backward(fpc, {"x_cor", "y_cor", "z_cor"}, {"x","y","z"}, cluster_t0, face, apa);
         const auto filter_result_fpc = T0Correction->filter(fpc, {"x_cor", "y_cor", "z_cor"}, cluster_t0, face, apa);
         const auto fpc_x = fpc.get("x_cor")->elements<double>();
         const auto fpc_y = fpc.get("y_cor")->elements<double>();

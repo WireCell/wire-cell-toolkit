@@ -704,6 +704,42 @@ namespace WireCell::PointCloud::Facade {
                                 const double dis_cut =  5*units::cm);
 
 
+    // clustering_switch_scope.cxx
+    void clustering_switch_scope(Grouping& live_grouping,
+        const IDetectorVolumes::pointer dv,      // detector volumes
+        const std::string& pc_name,              // point cloud name
+        const std::vector<std::string>& coords,  // coordinate names
+        const std::string& correction_name      // name of correction to apply
+    );
+
+    class ClusteringSwitchScope {
+        public:
+        ClusteringSwitchScope(const WireCell::Configuration& config)
+        {
+            // Get the detector volumes pointer
+            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
+            if (m_dv == nullptr) {
+                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            }
+
+            // Get configuration parameters
+            correction_name_ = convert<std::string>(config["correction_name"], "T0Correction");
+            pc_name = convert<std::string>(config["pc_name"], "3d");
+            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+        }
+
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        {
+            clustering_switch_scope(live_clusters, m_dv, pc_name, coords, correction_name_);
+        }
+
+        private:
+            std::string correction_name_{"T0Correction"};
+            std::string pc_name{"3d"};
+            std::vector<std::string> coords{"x", "y", "z"};
+            IDetectorVolumes::pointer m_dv;
+    };
+
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
         std::string function_name = config["name"].asString();
 
@@ -757,6 +793,9 @@ namespace WireCell::PointCloud::Facade {
         }
         else if (function_name == "clustering_examine_bundles") {
             return ClusteringExamineBundles(config);
+        }
+        else if (function_name == "clustering_switch_scope") {
+            return ClusteringSwitchScope(config);
         }
         else {
             throw std::invalid_argument("Unknown function name in configuration");
