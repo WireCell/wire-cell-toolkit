@@ -158,6 +158,7 @@ void Cluster::clear_cache() const {
 
     // Clear the new cached wpid data
     m_cached_wpid.clear();
+
 }
 
 
@@ -827,6 +828,7 @@ WirePlaneId Cluster::wire_plane_id(size_t point_index) const {
     }
     return WirePlaneId(m_cached_wpid[point_index]);
 }
+
 
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
 const Cluster::points_type& Cluster::points_raw() const { return kd3d_raw().points(); }

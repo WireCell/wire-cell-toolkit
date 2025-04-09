@@ -109,7 +109,7 @@ void Bee::Points::append(const Point& p, double q, int clid)
 void Bee::Points::append(const Bee::Points& obj)
 {
     const int num = obj.size();
-    const std::vector<std::string> xyzq = {"x","y","z","q","cluser_id"};
+    const std::vector<std::string> xyzq = {"x","y","z","q","cluster_id"};
     for (const auto& key : xyzq) {
         const auto& arr = obj.m_data[key];
         for (int ind=0; ind<num; ++ind) {
@@ -131,7 +131,7 @@ int Bee::Points::back_cluster_id() const
 {
     int siz = size();
     if (!siz) { return -1; }
-    return m_data["cluser_id"][siz-1].asInt();
+    return m_data["cluster_id"][siz-1].asInt();
 }
 
 

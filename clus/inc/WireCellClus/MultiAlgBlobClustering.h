@@ -9,6 +9,8 @@
 #include "WireCellIface/ITerminal.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellUtil/Bee.h"
+#include "WireCellClus/Facade.h"
+
 
 namespace WireCell::Clus {
 
@@ -35,8 +37,47 @@ namespace WireCell::Clus {
         Bee::Sink m_sink;
         int m_last_ident{-1};
         int m_initial_index{0};  // Default to 0 for backward compatibility
-        Bee::Points m_bee_img, m_bee_ld;
-        Bee::Patches m_bee_dead;
+        
+        // Replace the existing bee points structures with a more flexible approach
+        struct BeePointsConfig {
+            std::string name;
+            std::string detector;
+            std::string algorithm;
+            std::string pcname;
+            std::vector<std::string> coords;
+            bool individual;
+        };
+
+        // Vector to store configurations for multiple bee points sets
+        std::vector<BeePointsConfig> m_bee_points_configs;
+        
+         // Nested structure to store bee points objects for each configuration, by APA and face
+        // First key: bee points set name, second key: "anode_id-face_id" string
+        struct ApaBeePoints {
+             // Default constructor (add this)
+            ApaBeePoints() = default;
+            
+            // Global points (used when individual == false)
+            Bee::Points global;
+            
+            // Individual points (used when individual == true)
+            // Key is "anode_id-face_id" string
+            std::map<int, std::map<int , Bee::Points> > by_apa_face; // apa, face
+            
+        };
+    
+        std::map<std::string, ApaBeePoints> m_bee_points;
+
+        // New helper function to fill bee points
+        void fill_bee_points(const std::string& name, const WireCell::PointCloud::Facade::Grouping& grouping);
+        void fill_bee_points_from_cluster(
+            Bee::Points& bpts, const WireCell::PointCloud::Facade::Cluster& cluster, 
+            const std::string& pcname, const std::vector<std::string>& coords);
+
+        // Bee::Points m_bee_img; // imaging points
+        // Bee::Points m_bee_ld;  // clustering points
+        Bee::Patches m_bee_dead; // dead region ...
+
         // Add new member variables for run/subrun/event
         int m_runNo{0};
         int m_subRunNo{0};
