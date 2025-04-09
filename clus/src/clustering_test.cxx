@@ -262,7 +262,7 @@ void WireCell::PointCloud::Facade::clustering_test(
                 const auto [earliest, latest] = cluster->get_earliest_latest_points();
                 SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
             }
-            cluster->set_cluster_t0(-400*units::us);
+            cluster->set_cluster_t0(1600*units::us);
             std::vector<int> b2filter_result = cluster->add_corrected_points(dv, "T0Correction");
             const auto scope_T0Correction = cluster->get_scope("T0Correction");
             cluster->set_default_scope(scope_T0Correction);
@@ -295,6 +295,9 @@ void WireCell::PointCloud::Facade::clustering_test(
                     new_cluster->set_scope_filter(scope_T0Correction, true);
                 }
                 new_cluster->set_scope_transform(scope_T0Correction, "T0Correction");
+                // if (id == 0) {
+                //     live_grouping.remove_child(*new_cluster);
+                // }
             }
             break;
         }
