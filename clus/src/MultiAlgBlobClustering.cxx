@@ -395,7 +395,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
             const size_t size = x.size();
             for (size_t ind = 0; ind < size; ++ind) {
                 // Use the calculated point_charge instead of the original charge
-                bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid);
+                bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid, clid);
             }
         }
 

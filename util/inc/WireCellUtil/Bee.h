@@ -103,7 +103,7 @@ namespace WireCell::Bee {
         std::vector<int> rse() const;
 
         /// Add a WCT point.  Note, p is expected to be in usual WCT system-of-units.
-        void append(const Point& p, double q=0, int clid=0);
+        void append(const Point& p, double q=0, int clid=0, int real_clid=0);
 
         /// Simply append obj's x,y,z,q,cluster_id arrays to this.
         void append(const Points& obj);
