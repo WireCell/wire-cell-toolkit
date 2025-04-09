@@ -1,5 +1,4 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
-#include "WireCellClus/Facade.h"
 #include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellClus/Facade_Summary.h"
 
@@ -31,8 +30,6 @@ using namespace WireCell::PointCloud::Tree;
 
 MultiAlgBlobClustering::MultiAlgBlobClustering()
   : Aux::Logger("MultiAlgBlobClustering", "clus")
-  , m_bee_img("uboone", "img")
-  , m_bee_ld("uboone", "clustering")
   , m_bee_dead("channel-deadarea", 1*units::mm, 3) // tolerance, minpts
 {
 }
@@ -82,18 +79,60 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
 
-    m_face = get<int>(cfg, "face", 0);
-
-    m_bee_img.detector(get<std::string>(cfg, "bee_detector", "uboone"));
-    m_bee_img.algorithm(String::format("%s-%d-%d", m_bee_img.algorithm().c_str(), m_anodes.front()->ident(), m_face));
-    log->debug("m_bee_img.algorithm: {}", m_bee_img.algorithm());
-    m_bee_ld.detector(get<std::string>(cfg, "bee_detector", "uboone"));
-    m_bee_ld.algorithm(String::format("%s-%d-%d", m_bee_ld.algorithm().c_str(), m_anodes.front()->ident(), m_face));
-    log->debug("m_bee_ld.algorithm: {}", m_bee_ld.algorithm());
-
-    // m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
-
     m_dump_json = get<bool>(cfg, "dump_json", false);
+
+    // Configure bee points sets
+    if (cfg.isMember("bee_points_sets")) {
+        auto bee_points_sets = cfg["bee_points_sets"];
+        for (const auto& bps : bee_points_sets) {
+            BeePointsConfig bpc;
+            bpc.name = get<std::string>(bps, "name", "");
+            bpc.detector = get<std::string>(bps, "detector", "uboone");
+            bpc.algorithm = get<std::string>(bps, "algorithm", bpc.name);
+            bpc.pcname = get<std::string>(bps, "pcname", "3d");
+            
+            // Get coordinates
+            if (bps.isMember("coords")) {
+                for (const auto& coord : bps["coords"]) {
+                    bpc.coords.push_back(coord.asString());
+                }
+            } else {
+                // Default coordinates
+                bpc.coords = {"x", "y", "z"};
+            }
+            
+            bpc.individual = get<bool>(bps, "individual", false);
+            
+            m_bee_points_configs.push_back(bpc);
+            
+            
+            // If individual, also initialize bee points for each APA and face
+            if (bpc.individual) {
+                for (const auto& anode : m_anodes) {
+                    int apa = anode->ident();
+                    // Initialize the outer map if it doesn't exist
+                    if (m_bee_points[bpc.name].by_apa_face.find(apa) == 
+                        m_bee_points[bpc.name].by_apa_face.end()) {
+                        m_bee_points[bpc.name].by_apa_face[apa] = std::map<int, Bee::Points>();
+                    }
+                    
+                    // Initialize bee points for each face
+                    for (size_t face_index = 0; face_index < m_anodes.at(apa)->faces().size(); ++face_index) {
+                        std::string algo_name = String::format("%s-apa%d-face%d", bpc.algorithm.c_str(), apa,  m_anodes.at(apa)->faces()[face_index]->which());
+                        // std::cout << "Test: Individual: " << algo_name << std::endl;
+                        m_bee_points[bpc.name].by_apa_face[apa][face_index] =  Bee::Points(bpc.detector, algo_name);
+                    }
+                }
+            }else{
+                m_bee_points[bpc.name].global.detector(bpc.detector);
+                m_bee_points[bpc.name].global.algorithm(String::format("%s-global", bpc.name));
+                // std::cout << "Test: Global: " << m_bee_points[bpc.name].global.algorithm() << std::endl;
+            }
+            
+            log->debug("Configured bee points set: {}, algorithm: {}, individual: {}", 
+                        bpc.name, bpc.algorithm, bpc.individual ? "true" : "false");
+        }
+    } 
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -144,8 +183,48 @@ void MultiAlgBlobClustering::flush(WireCell::Bee::Points& bpts, int ident)
 
 void MultiAlgBlobClustering::flush(int ident)
 {
-    flush(m_bee_img, ident);
-    flush(m_bee_ld,  ident);
+    // flush(m_bee_img, ident);
+    // flush(m_bee_ld,  ident);
+     // Flush all bee points sets
+     for (auto& [name, apa_bpts] : m_bee_points) {
+        // Find the configuration for this name to check if it's individual
+        auto it = std::find_if(m_bee_points_configs.begin(), m_bee_points_configs.end(),
+                              [&name](const BeePointsConfig& cfg) { return cfg.name == name; });
+        
+        bool individual = (it != m_bee_points_configs.end()) ? it->individual : false;
+        
+        if (individual) {
+            // Write individual bee points
+            for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
+                for (auto& [face, bpts] : face_map) {
+                    if (!bpts.empty()) {
+                        m_sink.write(bpts);
+                        // Clear after writing
+                        int run = 0, evt = 0;
+                        if (ident > 0) {
+                            run = (ident >> 16) & 0x7fff;
+                            evt = (ident) & 0xffff;
+                        }
+                        bpts.reset(evt, 0, run);
+                    }
+                }
+            }
+        } else {
+            // Write global bee points
+            if (!apa_bpts.global.empty()) {
+                m_sink.write(apa_bpts.global);
+                // Clear after writing
+                int run = 0, evt = 0;
+                if (ident > 0) {
+                    run = (ident >> 16) & 0x7fff;
+                    evt = (ident) & 0xffff;
+                }
+                apa_bpts.global.reset(evt, 0, run);
+            }
+        }
+    }
+
+
     if (m_save_deadarea && m_bee_dead.size()) {
         m_bee_dead.flush();
         m_sink.write(m_bee_dead);
@@ -154,40 +233,141 @@ void MultiAlgBlobClustering::flush(int ident)
     m_last_ident = ident;
 }
 
-// There are equivalent functions in Aux::Bee:: but the pc tree is subject to
-// many schema and there is no "standard".  So we keep this dumper here, since
-// it is here we know the pc tree schema.
-static
-void fill_bee_points(WireCell::Bee::Points& bpts, const Points::node_t& root, const Scope& scope)
+
+
+// Helper function remains the same as in the previous response
+
+void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grouping& grouping)
 {
-    auto& coords = scope.coords;
-    auto& pc_name = scope.pcname;
-
-    std::cout << "Test Bee: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << std::endl;
-    // The root node is the "3d" point cloud.  We need to get the
-
-    int clid = bpts.back_cluster_id();
-    const double charge = 0;
-    for (const auto cnode : root.children()) {  // this is a loop through all clusters ...
-        ++clid;
-
-        // Scope scope = {"3d", {"x", "y", "z"}};
-        const auto& sv = cnode->value.scoped_view(scope);
-
-        const auto& spcs = sv.pcs();  // spcs 'contains' all blobs in this cluster ...
-
-        for (const auto& spc : spcs) {  // each little 3D pc --> (blobs)   spc represents x,y,z in a blob
-            auto x = spc.get().get(coords[0])->elements<double>();
-            auto y = spc.get().get(coords[1])->elements<double>();
-            auto z = spc.get().get(coords[2])->elements<double>();
-            const size_t size = x.size();
-            // fixme: add to Bee::Points a method to append vector-like things...
-            for (size_t ind = 0 ; ind<size; ++ind) {
-                bpts.append(Point(x[ind], y[ind], z[ind]), charge, clid);
+    if (m_bee_points.find(name) == m_bee_points.end()) {
+        log->warn("Bee points set '{}' not found, skipping", name);
+        return;
+    }
+    
+    auto& apa_bpts = m_bee_points[name];
+    
+    // Find the configuration for this name
+    auto it = std::find_if(m_bee_points_configs.begin(), m_bee_points_configs.end(),
+                          [&name](const BeePointsConfig& cfg) { return cfg.name == name; });
+    
+    if (it == m_bee_points_configs.end()) {
+        log->warn("Configuration for bee points set '{}' not found, skipping", name);
+        return;
+    }
+    
+    const auto& config = *it;
+    
+    // Reset RSE values for all points objects
+    if (m_use_config_rse) {
+        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+        for (auto& [apa, face_map] : apa_bpts.by_apa_face) {
+            for (auto& [face, bpts] : face_map) {
+                bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+            }
+        }
+    } else {
+        // Use the default approach with ident
+        int run = 0, evt = 0;
+        if (m_last_ident > 0) {
+            run = (m_last_ident >> 16) & 0x7fff;
+            evt = (m_last_ident) & 0xffff;
+        }
+        apa_bpts.global.reset(evt, 0, run);
+        for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
+            for (auto& [face, bpts] : face_map) {
+                bpts.reset(evt, 0, run);
             }
         }
     }
+    
+    auto wpids = grouping.wpids();
+
+
+    if (config.individual){ // fill in the individual APA
+        for (auto wpid: wpids) {
+            int apa = wpid.apa();
+            int face = wpid.face();
+            auto it = apa_bpts.by_apa_face.find(apa);
+            if (it != apa_bpts.by_apa_face.end()) {
+                auto it2 = it->second.find(face);
+                if (it2 != it->second.end()) {
+                    for (const auto* cluster : grouping.children()) {
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords);
+                    }
+                }
+            }
+        }
+    }else{ // fill in the global
+        for (const auto* cluster : grouping.children()) {
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords);
+        }
+    }
 }
+
+
+// Helper function to fill bee points from a single cluster
+void MultiAlgBlobClustering::fill_bee_points_from_cluster(
+    Bee::Points& bpts, const Cluster& cluster, 
+    const std::string& pcname, const std::vector<std::string>& coords)
+{
+    int clid = bpts.back_cluster_id() + 1;
+
+    // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
+
+
+    // Get the scope
+    Scope scope = {pcname, coords};
+    
+    auto filter_scope = cluster.get_scope_filter(scope);
+
+    if(filter_scope){
+        // Access the points through the cluster's scoped view
+        const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
+        const auto& spcs = sv.pcs();
+        const auto& nodes = sv.nodes(); // Get the nodes in the scoped view
+
+        // Create a map to cache blob information to avoid recalculating for points in the same blob
+        std::unordered_map<const WireCell::PointCloud::Facade::Blob*, std::pair<double, size_t>> blob_info;
+
+        // For each scoped pointcloud (each corresponds to a blob)
+        for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
+            const auto& spc = spcs[spc_idx];
+            auto x = spc.get().get(coords[0])->elements<double>();
+            auto y = spc.get().get(coords[1])->elements<double>();
+            auto z = spc.get().get(coords[2])->elements<double>();
+            
+            // Get the blob associated with this spc
+            // The node_with_major() function gets the node for this major index (blob)
+            const auto* node = nodes[spc_idx];
+            const auto* blob = node->value.facade<WireCell::PointCloud::Facade::Blob>();
+            
+            // Calculate blob information if not already cached
+            if (blob_info.find(blob) == blob_info.end()) {
+                double blob_charge = blob->charge();
+                size_t blob_npoints = blob->npoints();
+                blob_info[blob] = {blob_charge, blob_npoints};
+            }
+            
+            // Get cached blob info
+            const auto& [blob_charge, blob_npoints] = blob_info[blob];
+            
+            // Calculate charge per point
+            double point_charge = 0.0;
+            if (blob_npoints > 0) {
+                point_charge = blob_charge / blob_npoints;
+            }
+            
+            const size_t size = x.size();
+            for (size_t ind = 0; ind < size; ++ind) {
+                // Use the calculated point_charge instead of the original charge
+                bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid);
+            }
+        }
+
+    }
+
+}
+
 
 static
 void fill_bee_patches(WireCell::Bee::Patches& bee, const Points::node_t& root)
@@ -271,8 +451,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
         // Use default behavior
-        reset_bee(ident, m_bee_img);
-        reset_bee(ident, m_bee_ld);
+        // reset_bee(ident, m_bee_img);
+        // reset_bee(ident, m_bee_ld);
         m_last_ident = ident;
     }
     else if (m_last_ident != ident) {
@@ -332,7 +512,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         root_dead = std::make_unique<Points::node_t>();
     }
 
-    fill_bee_points(m_bee_img, *root_live.get(), grouping->children().front()->get_default_scope());
+    // fill_bee_points(m_bee_img, *root_live.get(), grouping->children().front()->get_default_scope()); // separate ... 
     perf("loaded dump live clusters to bee");
     if (m_save_deadarea) {
         fill_bee_patches(m_bee_dead, *root_dead.get());
@@ -367,7 +547,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         perf.dump(func_cfg["name"].asString(), live_grouping);
     }
 
-    fill_bee_points(m_bee_ld, *root_live.get(), live_grouping.children().front()->get_default_scope());
+    // fill_bee_points(m_bee_ld, *root_live.get(), live_grouping.children().front()->get_default_scope());
+    // Fill all configured bee points sets
+    for (const auto& config : m_bee_points_configs) {
+        fill_bee_points(config.name, live_grouping);
+    }
+
     perf("dump live clusters to bee");
 
     if (m_dump_json) {

@@ -501,6 +501,7 @@ namespace WireCell::PointCloud::Facade {
         mutable std::list<const Blob*> m_path_mcells;
 
         mutable std::vector<int> m_cached_wpid;
+        mutable std::vector<double> m_cached_charge;
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.
