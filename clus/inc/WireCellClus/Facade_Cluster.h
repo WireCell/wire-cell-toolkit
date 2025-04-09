@@ -70,7 +70,8 @@ namespace WireCell::PointCloud::Facade {
         // Override Mixin
         virtual void clear_cache() const;
 
-
+        void set_cluster_id(int id){m_cluster_id = id;};
+        const int get_cluster_id() const {return m_cluster_id;};
 
 
 
@@ -491,6 +492,8 @@ namespace WireCell::PointCloud::Facade {
 
         double m_cluster_t0{0};
 
+        int m_cluster_id{-1};
+
         // m_graph
         mutable std::unique_ptr<MCUGraph> m_graph;
         // create things for Dijkstra
@@ -501,7 +504,6 @@ namespace WireCell::PointCloud::Facade {
         mutable std::list<const Blob*> m_path_mcells;
 
         mutable std::vector<int> m_cached_wpid;
-        mutable std::vector<double> m_cached_charge;
 
        public:  // made public only for debugging
         // Return the number of unique wires or ticks.

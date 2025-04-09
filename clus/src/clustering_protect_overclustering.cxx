@@ -805,4 +805,10 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
     //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
     //      }
     //    }
+
+    // set cluster id ... 
+    int cluster_id = 1;
+    for (auto* cluster : live_grouping.children()) {
+        cluster->set_cluster_id(cluster_id++);
+    }
 }

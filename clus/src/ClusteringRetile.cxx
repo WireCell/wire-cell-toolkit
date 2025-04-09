@@ -660,18 +660,27 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
         }
     }
 
+     // set cluster id ... 
+    int cluster_id = 1;
+    for (auto* cluster : original.children()) {
+        cluster->set_cluster_id(cluster_id++);
+    }
 
     // // Process groupings after all shadow clusters are created
     // auto cluster_mapping = process_groupings(original, shadow);
+    //     int cluster_id = 1;
     // for (const auto& [orig_cluster, tuple] : cluster_mapping) {
     //     std::cout << orig_cluster << " " << std::get<0>(tuple) << " " << std::get<1>(tuple) << " " << std::get<2>(tuple) << std::endl;
     // //     auto* shad_cluster = pair.first;
     // //     auto* main_cluster = pair.second;
-        
+    // shad_cluster->set_cluster_id(cluster_id);
+    // main_cluster->set_cluster_id(cluster_id);
+    // cluster_id ++;
     // //     // You can now use these mapped clusters for further processing
     // //     // For example, transfer any necessary properties or perform additional operations
     // }
 
+   
     
 
 }

@@ -297,6 +297,12 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     merge_clusters(g, live_grouping, cluster_connected_dead);
 
 
+    // set cluster id ... 
+    int cluster_id = 1;
+    for (auto* cluster : live_grouping.children()) {
+        cluster->set_cluster_id(cluster_id++);
+    }
+
     // live_clusters = live_grouping.children(); // copy
     // // Process each cluster
     // for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {

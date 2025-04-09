@@ -347,6 +347,12 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
 //     }
 //   }
 
+    // set cluster id ... 
+    int cluster_id = 1;
+    for (auto* cluster : live_grouping.children()) {
+        cluster->set_cluster_id(cluster_id++);
+    }
+
 }
 
 /// @brief PCA based, drift_dir +x, -x the same ...

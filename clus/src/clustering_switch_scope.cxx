@@ -107,6 +107,12 @@ void WireCell::PointCloud::Facade::clustering_switch_scope(
     //     std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< std::endl;
     // }
 
+    // set cluster id ... 
+    int cluster_id = 1;
+    for (auto* cluster : live_grouping.children()) {
+        cluster->set_cluster_id(cluster_id++);
+    }
+
     
     // info("Completed scope switching with correction: {}", correction_name);
 }

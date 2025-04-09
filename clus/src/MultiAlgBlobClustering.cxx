@@ -310,7 +310,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     Bee::Points& bpts, const Cluster& cluster, 
     const std::string& pcname, const std::vector<std::string>& coords)
 {
-    int clid = bpts.back_cluster_id() + 1;
+    int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
 
     // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
 
@@ -512,7 +512,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         root_dead = std::make_unique<Points::node_t>();
     }
 
-    // fill_bee_points(m_bee_img, *root_live.get(), grouping->children().front()->get_default_scope()); // separate ... 
+
     perf("loaded dump live clusters to bee");
     if (m_save_deadarea) {
         fill_bee_patches(m_bee_dead, *root_dead.get());
@@ -536,7 +536,16 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     perf.dump("pre clustering", live_grouping);
 
-  
+    // set cluster id ... 
+    int cluster_id = 1;
+    for (auto* cluster : live_grouping.children()) {
+        cluster->set_cluster_id(cluster_id++);
+    }
+
+    for (const auto& config : m_bee_points_configs) {
+        if(config.name == "img")
+            fill_bee_points(config.name, live_grouping);
+    }
 
     for (const auto& func_cfg : m_func_cfgs) {
         // std::cout << "func_cfg: " << func_cfg << std::endl;
@@ -547,10 +556,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         perf.dump(func_cfg["name"].asString(), live_grouping);
     }
 
-    // fill_bee_points(m_bee_ld, *root_live.get(), live_grouping.children().front()->get_default_scope());
     // Fill all configured bee points sets
     for (const auto& config : m_bee_points_configs) {
-        fill_bee_points(config.name, live_grouping);
+        if(config.name != "img")
+            fill_bee_points(config.name, live_grouping);
     }
 
     perf("dump live clusters to bee");
