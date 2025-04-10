@@ -66,7 +66,9 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
         af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
     }
 
-    if (apas.size()!=1) throw std::runtime_error("live_grouping must have exactly one APA");
+    if (apas.size() > 1) {
+        raise<ValueError>("apas.size() %d > 1", apas.size());
+    }
   
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy

@@ -31,8 +31,14 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     //std::cout << "Live: " << live_grouping.wpids().size() << " " << dead_grouping.wpids().size() << std::endl;
     
     // Check that live_grouping has exactly one wpid
-    if (live_grouping.wpids().size() != 1 || dead_grouping.wpids().size() != 1) {
-        throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
+    if (live_grouping.wpids().size() > 1 || dead_grouping.wpids().size() > 1) {
+        for (const auto& wpid : live_grouping.wpids()) {
+            std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
+        }
+        for (const auto& wpid : dead_grouping.wpids()) {
+            std::cout << "Dead grouping wpid: " << wpid.name() << std::endl;
+        }
+        raise<ValueError>("Live %d > 1, Dead %d > 1", live_grouping.wpids().size(), dead_grouping.wpids().size());
     }
     auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     

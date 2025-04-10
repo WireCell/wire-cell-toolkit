@@ -117,8 +117,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                     }
                     
                     // Initialize bee points for each face
-                    for (size_t face_index = 0; face_index < m_anodes.at(apa)->faces().size(); ++face_index) {
-                        std::string algo_name = String::format("%s-apa%d-face%d", bpc.algorithm.c_str(), apa,  m_anodes.at(apa)->faces()[face_index]->which());
+                    for (size_t face_index = 0; face_index < anode->faces().size(); ++face_index) {
+                        std::string algo_name = String::format("%s-apa%d-face%d", bpc.algorithm.c_str(), apa, anode->faces()[face_index]->which());
                         // std::cout << "Test: Individual: " << algo_name << std::endl;
                         m_bee_points[bpc.name].by_apa_face[apa][face_index] =  Bee::Points(bpc.detector, algo_name);
                     }
