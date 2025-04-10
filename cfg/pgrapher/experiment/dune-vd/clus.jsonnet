@@ -132,7 +132,7 @@ local clus_per_face (
                 // {name:"grid", step:2, planes:[2,0]},
             ],
             // extra: [".*"] // want all the extra
-            extra: [".*wire_index"] //
+            extra: [".*wire_index", "wpid"] //
             // extra: [] //
         }},
     local bs_dead = {
@@ -336,7 +336,7 @@ local clus_per_apa (
                 // {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_connect1", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_deghost", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                // {name: "clustering_deghost", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_examine_x_boundary", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_protect_overclustering", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_neutrino", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
@@ -445,7 +445,7 @@ local clus_all_apa (
                 // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
+                // {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
                 // {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_connect1", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
