@@ -132,12 +132,21 @@ void Grouping::fill_cache(GroupingCache& gc) const
         for (size_t iclus = 0; iclus != children().size(); iclus++) {
             const Cluster* cluster = children().at(iclus);
             const auto& wpids = cluster->wpids_blob();
-            gc.wpids.insert(wpids.begin(), wpids.end());
+            gc.cluster_wpids.insert(wpids.begin(), wpids.end());
         }
+        // for (const auto wpid : gc.cluster_wpids) {
+        //     std::cout << "Grouping::fill_cache wpid: " << wpid.name() << std::endl;
+        // }
     }
 
     // fill cache related to the detector volume
+    // for (const auto wpid : gc.dv_wpids) {
+    //     std::cout << "DEBUG Grouping::fill_cache wpid: " << wpid.name() << std::endl;
+    // }
     fill_dv_cache(gc);
+    // for (const auto wpid : gc.dv_wpids) {
+    //     std::cout << "DEBUG Grouping::fill_cache wpid: " << wpid.name() << std::endl;
+    // }
 
     // fill plane_channels ...
     fill_plane_channels_cache(gc);
@@ -145,7 +154,7 @@ void Grouping::fill_cache(GroupingCache& gc) const
 
 void Grouping::fill_plane_channels_cache(GroupingCache& gc) const
 {
-    for (auto wpid : gc.wpids) {
+    for (auto wpid : gc.dv_wpids) {
         int face = wpid.face();
         int apa = wpid.apa();
 
@@ -166,7 +175,11 @@ void Grouping::fill_plane_channels_cache(GroupingCache& gc) const
 void Grouping::fill_dv_cache(GroupingCache& gc) const
 {
     if (m_dv != nullptr) {
-        for (auto wpid : gc.wpids) {
+        for (auto& [wpid_ident, iface] : m_dv->wpident_faces()) {
+            const WirePlaneId wpid(wpid_ident);
+            // std::cout << "DEBUG Grouping::fill_dv_cache wpid: " << wpid.name() << std::endl;
+            gc.dv_wpids.insert(wpid);
+            // std::cout << "DEBUG Grouping::fill_dv_cache gc.dv_wpids.size() " << gc.dv_wpids.size() << std::endl;
             int face = wpid.face();
             int apa = wpid.apa();
             int plane = wpid.index();
@@ -197,6 +210,9 @@ void Grouping::fill_dv_cache(GroupingCache& gc) const
 
             // std::cout << "Test: " << gc.map_time_offset[apa][face] << " " << gc.map_drift_speed[apa][face] << " " << gc.map_tick[apa][face] << " " << gc.map_drift_dir[apa][face]  << std::endl;
         }
+        // for (auto wpid : gc.dv_wpids) {
+        //     std::cout << "DEBUG Grouping::fill_dv_cache gc.dv_wpids wpid: " << wpid.name() << std::endl;
+        // }
         // double time_offset = m_dv->metadata(wpid_all)["time_offset"].asDouble(); 
         // std::map<int, std::map<int, std::map<string, double> > > map_time_offset;
         // std::map<int, std::map<int, std::map<string, double> > > map_drift_speed;
@@ -223,7 +239,7 @@ const IAnodePlane::pointer Grouping::get_anode(const int ident) const {
 size_t Grouping::hash() const
 {
     std::size_t h = 0;
-    for (auto wpid : cache().wpids) {
+    for (auto wpid : cache().dv_wpids) {
         boost::hash_combine(h, wpid.ident());
     }
     auto clusters = children();  // copy vector

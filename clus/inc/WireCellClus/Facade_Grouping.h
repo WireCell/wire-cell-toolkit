@@ -28,8 +28,9 @@ namespace WireCell::PointCloud::Facade {
         std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>> proj_centers;
         std::unordered_map<int, std::unordered_map<int, std::unordered_map<int,double >>> pitch_mags;
 
-        // what wpids the grouping has.
-        std::set<WireCell::WirePlaneId> wpids;
+        // what cluster_wpids the grouping has.
+        std::set<WireCell::WirePlaneId> cluster_wpids;
+        std::set<WireCell::WirePlaneId> dv_wpids;
 
         // #381 if you give a crap about dead_winds.  
 
@@ -85,7 +86,8 @@ namespace WireCell::PointCloud::Facade {
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
-        std::set<WireCell::WirePlaneId> wpids() const { return cache().wpids; }
+        std::set<WireCell::WirePlaneId> wpids() const { return cache().cluster_wpids; }
+        std::set<WireCell::WirePlaneId> dv_wpids() const { return cache().dv_wpids; }
 
         const std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > >& all_dead_winds() const {
             // this is added in order that we may dump it in json_summary() for debugging.
