@@ -152,6 +152,49 @@ local clus_per_face (
         "name": "dv-%s-%d"%[anode.name, face],
         "data": {
             "anodes": [wc.tn(anode)],
+            metadata:
+                {overall: {
+                    FV_xmin: 1 * wc.cm,
+                    FV_xmax: 255 * wc.cm,
+                    FV_ymin: -99.5 * wc.cm,
+                    FV_ymax: 101.5 * wc.cm,
+                    FV_zmin: 15 * wc.cm,
+                    FV_zmax: 1022 * wc.cm,
+                    FV_xmin_margin: 2 * wc.cm,
+                    FV_xmax_margin: 2 * wc.cm,
+                    FV_ymin_margin: 2.5 * wc.cm,
+                    FV_ymax_margin: 2.5 * wc.cm,
+                    FV_zmin_margin: 3 * wc.cm,
+                    FV_zmax_margin: 3 * wc.cm,
+                    vertical_dir: [0,1,0],
+                    beam_dir: [0,0,1]
+                }} +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f0pA" ]: {
+                        drift_speed: drift_speed,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: time_offset,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in [anode]
+                } +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f1pA" ]: {
+                        drift_speed: drift_speed,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: time_offset,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in [anode]
+                }
         }
     },
 
@@ -225,10 +268,10 @@ local clus_per_face (
                 // {name: "clustering_ctpointcloud", detector_volumes: wc.tn(detector_volumes)},
                 // {name: "clustering_switch_scope", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction"},
                 {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                // {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
                 // {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
@@ -299,6 +342,49 @@ local clus_per_apa (
         "name": "dv-%s"%[anode.name],
         "data": {
             "anodes": [wc.tn(anode)],
+            metadata:
+                {overall: {
+                    FV_xmin: 1 * wc.cm,
+                    FV_xmax: 255 * wc.cm,
+                    FV_ymin: -99.5 * wc.cm,
+                    FV_ymax: 101.5 * wc.cm,
+                    FV_zmin: 15 * wc.cm,
+                    FV_zmax: 1022 * wc.cm,
+                    FV_xmin_margin: 2 * wc.cm,
+                    FV_xmax_margin: 2 * wc.cm,
+                    FV_ymin_margin: 2.5 * wc.cm,
+                    FV_ymax_margin: 2.5 * wc.cm,
+                    FV_zmin_margin: 3 * wc.cm,
+                    FV_zmax_margin: 3 * wc.cm,
+                    vertical_dir: [0,1,0],
+                    beam_dir: [0,0,1]
+                }} +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f0pA" ]: {
+                        drift_speed: drift_speed,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: time_offset,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in [anode]
+                } +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f1pA" ]: {
+                        drift_speed: drift_speed,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: time_offset,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in [anode]
+                }
         }
     },
 
@@ -395,6 +481,49 @@ local clus_all_apa (
         "name": "clus_all_apa",
         "data": {
             "anodes": [wc.tn(anode) for anode in anodes],
+            metadata:
+                {overall: {
+                    FV_xmin: 1 * wc.cm,
+                    FV_xmax: 255 * wc.cm,
+                    FV_ymin: -99.5 * wc.cm,
+                    FV_ymax: 101.5 * wc.cm,
+                    FV_zmin: 15 * wc.cm,
+                    FV_zmax: 1022 * wc.cm,
+                    FV_xmin_margin: 2 * wc.cm,
+                    FV_xmax_margin: 2 * wc.cm,
+                    FV_ymin_margin: 2.5 * wc.cm,
+                    FV_ymax_margin: 2.5 * wc.cm,
+                    FV_zmin_margin: 3 * wc.cm,
+                    FV_zmax_margin: 3 * wc.cm,
+                    vertical_dir: [0,1,0],
+                    beam_dir: [0,0,1]
+                }} +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f0pA" ]: {
+                        drift_speed: drift_speed,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: time_offset,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in anodes
+                } +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f1pA" ]: {
+                        drift_speed: drift_speed,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: time_offset,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in anodes
+                }
         }
     },
     local mabc = g.pnode({
@@ -445,7 +574,7 @@ local clus_all_apa (
                 // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                // {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
+                {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
                 // {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                 // {name: "clustering_connect1", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
