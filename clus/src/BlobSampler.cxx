@@ -176,7 +176,7 @@ struct BlobSampler::Sampler : public Aux::Logger
         const double drift = (time + cc.time_offset)*cc.drift_speed;
         double xorig = plane_x(2); // colpimpos->origin()[0];
         /// TODO: how to determine xsign?
-        double xsign = colpimpos->axis(0)[0];
+        double xsign = anodeface->dirx();
         return xorig + xsign*drift;
     }
 

@@ -504,7 +504,7 @@ std::ostream& Facade::operator<<(std::ostream& os, const Multi2DPointCloud& m2dp
 double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
     // std::cout << "time2drift: " << time << " " << time_offset << " " << drift_speed << std::endl;
     const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
-    double xsign = colpimpos->axis(0)[0];
+    double xsign = anodeface->dirx();
     double xorig = anodeface->planes()[2]->wires().front()->center().x();
     const double drift = (time + time_offset)*drift_speed;
     /// TODO: how to determine xsign?
@@ -515,7 +515,7 @@ double Facade::time2drift(const IAnodeFace::pointer anodeface, const double time
 // time = (drift - xorig) / (xsign * m_drift_speed) - m_time_offset
 double Facade::drift2time(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double drift) {
     const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
-    double xsign = colpimpos->axis(0)[0];
+    double xsign = anodeface->dirx();
     double xorig = anodeface->planes()[2]->wires().front()->center().x();
     return (drift - xorig) / (xsign * drift_speed) - time_offset;
 }
