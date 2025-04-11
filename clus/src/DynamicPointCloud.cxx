@@ -411,7 +411,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
         point.x = pt.x();
         point.y = pt.y();
         point.z = pt.z();
-        point.wpid = WirePlaneId(wpid);
+        point.wpid = wpid.ident();
         point.cluster = cluster;
         point.blob = cluster->blob_with_point(ipt);
         
@@ -426,7 +426,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
                 point.x_2d[pindex].push_back(point.x);
                 point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
             }
-            point.wpid_2d.push_back(WirePlaneId(wpid));
+            point.wpid_2d.push_back(wpid.ident());
         }
         
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
@@ -488,7 +488,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
 
         if (dis <= step) {
             DynamicPointCloud::DPCPoint point;
-            point.wpid = WirePlaneId(wpid_test_point); // Direct assignment without recreation
+            point.wpid = wpid_test_point.ident(); // Direct assignment without recreation
             point.cluster = cluster;
             point.blob = nullptr;
             
@@ -509,7 +509,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                     point.x_2d[pindex].push_back(test_point.x());
                     point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y());
                 }
-                point.wpid_2d.push_back(WirePlaneId(wpid_test_point));
+                point.wpid_2d.push_back(wpid_test_point.ident());
             }
             
             dpc_points.push_back(std::move(point));
@@ -535,7 +535,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 auto temp_wpid = WirePlaneId(get_wireplaneid(temp_point, prev_wpid, wpid_test_point, 
                                                cluster->grouping()->get_detector_volumes()));
                 
-                point.wpid = temp_wpid; // Direct assignment
+                point.wpid = temp_wpid.ident(); // Direct assignment
                 point.cluster = cluster;
                 point.blob = nullptr;
                 point.wind = {-1e12, -1e12, -1e12};
@@ -563,7 +563,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                             point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
                                                 sin(temp_angle_uvw[pindex]) * point.y);
                         }
-                        point.wpid_2d.push_back(WirePlaneId(temp_wpid));
+                        point.wpid_2d.push_back(temp_wpid.ident());
                     }
                 }
                 // } else {
@@ -648,7 +648,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         point.x = x;
         point.y = y;
         point.z = z;
-        point.wpid = WirePlaneId(wpid);
+        point.wpid = wpid.ident();
         
         // Initialize arrays
         point.x_2d.resize(3); 
@@ -661,7 +661,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
             point.x_2d[pindex].push_back(x);
             point.y_2d[pindex].push_back(cos_angle_uvw[pindex] * z - sin_angle_uvw[pindex] * y);
         }
-        point.wpid_2d.push_back(WirePlaneId(wpid));
+        point.wpid_2d.push_back(wpid.ident());
     }
 
     return dpc_points;
@@ -719,7 +719,7 @@ void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_poin
             }
             p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
             if (pind==0){ // fill in the wpid
-                p_wpid.push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()));
+                p_wpid.push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()).ident());
             }
         }
     }

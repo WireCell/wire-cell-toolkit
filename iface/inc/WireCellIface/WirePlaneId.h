@@ -49,7 +49,7 @@ namespace WireCell {
         /// Return true if the wpid has only legal values for apa, face and
         /// layer.  Layer must be well defined as a single layer (u,v,w) or as
         /// "all" layers  which then represents the anode+face context.
-        operator bool() const;
+        // operator bool() const;
 
         bool operator==(const WirePlaneId& rhs) const;
 

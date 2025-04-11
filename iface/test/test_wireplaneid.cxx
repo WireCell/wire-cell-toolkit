@@ -80,7 +80,7 @@ int main()
         {
             WirePlaneId wpid(kAllLayers,0,0);
             cerr << "wpid=" << wpid << endl;
-            cerr << "packed=" << wpid.ident() << " layer=" << wpid.layer() << " face=" << wpid.face() << " apa=" << wpid.apa() << " valid=" << wpid.valid() << " bool() " << (wpid ? "true" : "false") << "\n";
+            cerr << "packed=" << wpid.ident() << " layer=" << wpid.layer() << " face=" << wpid.face() << " apa=" << wpid.apa() << " valid=" << wpid.valid() << "\n";
         }
     }
     return 0;

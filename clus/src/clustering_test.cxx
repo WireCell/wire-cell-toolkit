@@ -244,7 +244,7 @@ void WireCell::PointCloud::Facade::clustering_test(
         for (double x = 254*units::cm; x < 255*units::cm; x += 0.1*units::cm) {
             Point point(x, 0*units::cm, 50*units::cm);
             WirePlaneId wpid = dv->contained_by(point);
-            if (wpid) {
+            if (wpid.valid()) {
                 SPDLOG_INFO("CTest dv->contained_by point {} wpid {}", point, wpid.name());
             } else {
                 SPDLOG_INFO("CTest dv->contained_by point {} wpid not found", point);

@@ -639,11 +639,11 @@ TEST_CASE("haiwang")
 
     {
         WireCell::WirePlaneId wpid{-1};
-        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid? true : false, wpid.valid());
+        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid.valid()? true : false, wpid.valid());
     }
 
     {
         WireCell::WirePlaneId wpid{0};
-        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid? true : false, wpid.valid());
+        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid.valid()? true : false, wpid.valid());
     }
 }

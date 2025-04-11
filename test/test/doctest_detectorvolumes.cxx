@@ -213,12 +213,12 @@ TEST_CASE("detectorvolumes")
     //	0: x=-3584.63mm dx=9.5250mm n=1148 pitch=(4.6691 +/- 0.000006 [4.6684<4.6693], p0=4.6691) 
     //	1: x=-3589.39mm dx=4.7620mm n=1148 pitch=(4.6691 +/- 0.000005 [4.6684<4.6693], p0=4.6691) 
     //	2: x=-3594.16mm dx=0.0000mm n=480 pitch=(4.7920 +/- 0.000000 [4.7920<4.7920], p0=4.7920)
-    CHECK(false == dv->contained_by(Point(0,0,0)));
+    CHECK(false == dv->contained_by(Point(0,0,0)).valid());
     CHECK(false == fv->contained(Point(0,0,0)));
-    CHECK(false == dv->contained_by(Point(-3400*units::mm, 0, 0)));
+    CHECK(false == dv->contained_by(Point(-3400*units::mm, 0, 0)).valid());
     CHECK(false == fv->contained(Point(-3400*units::mm, 0, 0)));
     auto wpid = dv->contained_by(Point(-3500*units::mm, 100*units::mm, 100*units::mm));
-    CHECK(true == wpid);
+    CHECK(true == wpid.valid());
     CHECK(wpid.apa() == 0);
     CHECK(wpid.face() == 0);
     CHECK(fv->contained(Point(-3500*units::mm, 100*units::mm, 100*units::mm)));
@@ -260,7 +260,7 @@ TEST_CASE("detectorvolumes")
     auto wpid_u = wpid.to_u();
     CHECK(wpid_u.index() == 0);
     CHECK(wpid_u.valid());
-    CHECK(wpid_u == true);
+    // CHECK(wpid_u == true);
 
     auto wdir = dv->wire_direction(wpid_u);
     debug("wire direction: {}", wdir);

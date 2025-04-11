@@ -45,14 +45,14 @@ bool WireCell::WirePlaneId::valid() const
     return 0 <= ind && ind < 3;
 }
 
-WireCell::WirePlaneId::operator bool() const
-{
-    if (apa() < 0) return false;
-    if (face() < 0) return false;
-    if (layer() == kAllLayers) return true;
-    const int ind = index();
-    return 0 <= ind && ind < 3;
-}
+// WireCell::WirePlaneId::operator bool() const
+// {
+//     if (apa() < 0) return false;
+//     if (face() < 0) return false;
+//     if (layer() == kAllLayers) return true;
+//     const int ind = index();
+//     return 0 <= ind && ind < 3;
+// }
 
 WirePlaneId WirePlaneId::to_layer(WirePlaneLayer_t layer) const
 {
@@ -113,12 +113,12 @@ std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneId&
     else {
         o << " bogus";
     }
-    if (wpid) {
-        o << " true";
-    }
-    else {
-        o << " false";
-    }
+    // if (wpid) {
+    //     o << " true";
+    // }
+    // else {
+    //     o << " false";
+    // }
     o << "]";
     return o;
 }
