@@ -712,37 +712,36 @@ struct Stepped : public BlobSampler::Sampler
     void sample(Dataset& ds, Dataset& aux) {
         const auto& coords = anodeface->raygrid();
         auto strips = iblob->shape().strips();
+        const int ndummy_index = strips.size() == 5 ? 2 : 0; // use this to skip dummy planes
+        const int li[3] = {ndummy_index+0, ndummy_index+1, ndummy_index+2}; // layer index
+        // std::cout << "DEBUG strips.size() " << strips.size() << std::endl;
+        // for (const auto& strip : strips) {
+        //     std::cout << "DEBUG strip " << strip.layer << " " << strip.bounds.first << " " << strip.bounds.second << std::endl;
+        // }
 
         auto swidth = [](const Strip& s) -> int {
             return s.bounds.second - s.bounds.first;
         };
-        // std::sort(strips.begin()+2, strips.end(),
-        //           [&](const Strip& a, const Strip& b) -> bool {
-        //               return swidth(a) < swidth(b);
-        //           });
-        // const Strip& smin = strips[2];
-        // const Strip& smid = strips[3];
-        // const Strip& smax = strips[4];
 
         // XQ update this part of code to match WCP
-        Strip smax = strips[2]; int max_id = 2;
-        Strip smin = strips[3]; int min_id = 3;
-        Strip smid = strips[4]; /*int mid_id = 4;*/
+        Strip smax = strips[li[0]]; int max_id = li[0];
+        Strip smin = strips[li[1]]; int min_id = li[1];
+        Strip smid = strips[li[2]]; /*int mid_id = li[2];*/
 
-        if (swidth(strips[3]) > swidth(smax)){
-            smax = strips[3]; max_id = 3;
+        if (swidth(strips[li[1]]) > swidth(smax)){
+            smax = strips[li[1]]; max_id = li[1];
         }
-        if(swidth(strips[4]) > swidth(smax)){
-            smax = strips[4]; max_id = 4;
+        if(swidth(strips[li[2]]) > swidth(smax)){
+            smax = strips[li[2]]; max_id = li[2];
         }
-        if (swidth(strips[2]) < swidth(smin)){
-            smin = strips[2]; min_id = 2;
+        if (swidth(strips[li[0]]) < swidth(smin)){
+            smin = strips[li[0]]; min_id = li[0];
         }
-        if(swidth(strips[4]) < swidth(smin)){
-            smin = strips[4]; min_id = 4;
+        if(swidth(strips[li[2]]) < swidth(smin)){
+            smin = strips[li[2]]; min_id = li[2];
         }
 
-        for (int i = 2;i!=5;i++){
+        for (int i = li[0];i!=li[2]+1;i++){
             if (i != max_id && i != min_id){
                 smid = strips[i];        
                 // mid_id = i;
@@ -755,6 +754,9 @@ struct Stepped : public BlobSampler::Sampler
         std::vector<Point> points;
 
         //XQ: is the order of 0 vs. 1 correct for the wire center???
+        std::cout << "DEBUG "
+        << smin.layer << " " << smax.layer << " " << smid.layer << " "
+        << smin.bounds.first << " " << smin.bounds.second << " " << smax.bounds.first << " " << smax.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second << std::endl;
         const Vector adjust = offset * (
             coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}) -
             coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}));
