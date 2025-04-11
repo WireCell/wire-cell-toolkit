@@ -74,9 +74,11 @@ namespace WireCell::Clus {
             Bee::Points& bpts, const WireCell::PointCloud::Facade::Cluster& cluster, 
             const std::string& pcname, const std::vector<std::string>& coords);
 
-        // Bee::Points m_bee_img; // imaging points
-        // Bee::Points m_bee_ld;  // clustering points
-        Bee::Patches m_bee_dead; // dead region ...
+        void fill_bee_patches_from_grouping(const WireCell::PointCloud::Facade::Grouping& grouping);
+        void fill_bee_patches_from_cluster(Bee::Patches& patches, const WireCell::PointCloud::Facade::Cluster& cluster);
+
+        std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
+        // Bee::Patches m_bee_dead; // dead region ...
 
         // Add new member variables for run/subrun/event
         int m_runNo{0};

@@ -30,7 +30,7 @@ using namespace WireCell::PointCloud::Tree;
 
 MultiAlgBlobClustering::MultiAlgBlobClustering()
   : Aux::Logger("MultiAlgBlobClustering", "clus")
-  , m_bee_dead("channel-deadarea", 1*units::mm, 3) // tolerance, minpts
+//   , m_bee_dead("channel-deadarea", 1*units::mm, 3) // tolerance, minpts
 {
 }
 
@@ -118,9 +118,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                     
                     // Initialize bee points for each face
                     for (size_t face_index = 0; face_index < anode->faces().size(); ++face_index) {
-                        std::string algo_name = String::format("%s-apa%d-face%d", bpc.algorithm.c_str(), apa, anode->faces()[face_index]->which());
+                        int face = anode->faces()[face_index]->which();
+                        std::string algo_name = String::format("%s-apa%d-face%d", bpc.algorithm.c_str(), apa,  face);
                         // std::cout << "Test: Individual: " << algo_name << std::endl;
-                        m_bee_points[bpc.name].by_apa_face[apa][face_index] =  Bee::Points(bpc.detector, algo_name);
+                        m_bee_points[bpc.name].by_apa_face[apa][face] =  Bee::Points(bpc.detector, algo_name);
                     }
                 }
             }else{
@@ -133,6 +134,26 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                         bpc.name, bpc.algorithm, bpc.individual ? "true" : "false");
         }
     } 
+
+    // Initialize patches for each APA and face
+    if (m_save_deadarea) {
+        for (const auto& anode : m_anodes) {
+            int apa = anode->ident();
+            
+            // Initialize the outer map if it doesn't exist
+            if (m_bee_dead_patches.find(apa) == 
+                m_bee_dead_patches.end()) {
+                m_bee_dead_patches[apa] = std::map<int, Bee::Patches>();
+            }
+            
+            // Initialize patches for each face
+            for (size_t face_index = 0; face_index < anode->faces().size(); ++face_index) {
+                int face = anode->faces()[face_index]->which();
+                std::string name = String::format("channel-deadarea-apa%d-face%d", apa, face);
+                m_bee_dead_patches[apa].insert({face,Bee::Patches(name, 1*units::mm, 3)}); // Same parameters as the global one
+            }
+        }
+    }
 }
 
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
@@ -225,11 +246,25 @@ void MultiAlgBlobClustering::flush(int ident)
     }
 
 
-    if (m_save_deadarea && m_bee_dead.size()) {
-        m_bee_dead.flush();
-        m_sink.write(m_bee_dead);
-        m_bee_dead.clear();
+    // if (m_save_deadarea && m_bee_dead.size()) {
+    //     m_bee_dead.flush();
+    //     m_sink.write(m_bee_dead);
+    //     m_bee_dead.clear();
+    // }
+    if (m_save_deadarea) {
+        
+        // Flush individual patches
+        for (auto& [apa, face_map] : m_bee_dead_patches) {
+            for (auto& [face, patches] : face_map) {
+                if (patches.size()) {
+                    patches.flush();
+                    m_sink.write(patches);
+                    patches.clear();
+                }
+            }
+        }
     }
+
     m_last_ident = ident;
 }
 
@@ -360,7 +395,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
             const size_t size = x.size();
             for (size_t ind = 0; ind < size; ++ind) {
                 // Use the calculated point_charge instead of the original charge
-                bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid);
+                bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid, clid);
             }
         }
 
@@ -369,28 +404,114 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
 }
 
 
-static
-void fill_bee_patches(WireCell::Bee::Patches& bee, const Points::node_t& root)
+
+
+void MultiAlgBlobClustering::fill_bee_patches_from_grouping(
+    const WireCell::PointCloud::Facade::Grouping& grouping)
+{
+    auto wpids = grouping.wpids();
+
+    // For each cluster in the grouping
+    for (const auto* cluster : grouping.children()) {
+        // Get the wpids to determine which APA and face this cluster belongs to
+        
+        if (!wpids.empty()) {
+            // Store patches by APA and face
+            for (auto wpid : wpids) {
+                int apa = wpid.apa();
+                int face = wpid.face();
+                
+                auto it_apa = m_bee_dead_patches.find(apa);
+                if (it_apa != m_bee_dead_patches.end()) {
+                    auto it_face = it_apa->second.find(face);
+                    if (it_face != it_apa->second.end()) {
+                        fill_bee_patches_from_cluster(it_face->second, *cluster);
+                    }
+                }
+            }
+        } 
+    }
+}
+
+// static
+// void fill_bee_patches(WireCell::Bee::Patches& bee, const Points::node_t& root)
+// {
+//     int first_slice = -1;
+//     for (const auto cnode : root.children()) {
+//         for (const auto bnode : cnode->children()) {  // blobs ...
+//             const auto& lpcs = bnode->value.local_pcs();
+
+//             const auto& pc_scalar = lpcs.at("scalar");
+//             int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
+//             if (first_slice < 0) {
+//                 first_slice = slice_index_min;
+//             }
+//             if (slice_index_min != first_slice) continue;
+
+//             const auto& pc_corner = lpcs.at("corner");
+//             const auto& y = pc_corner.get("y")->elements<double>();
+//             const auto& z = pc_corner.get("z")->elements<double>();
+//             bee.append(y.begin(), y.end(), z.begin(), z.end());
+//         }
+//     }
+// }
+
+// Helper function to fill patches from a single cluster
+void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
+    Bee::Patches& patches, const WireCell::PointCloud::Facade::Cluster& cluster)
 {
     int first_slice = -1;
-    for (const auto cnode : root.children()) {
-        for (const auto bnode : cnode->children()) {  // blobs ...
-            const auto& lpcs = bnode->value.local_pcs();
-
-            const auto& pc_scalar = lpcs.at("scalar");
-            int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
-            if (first_slice < 0) {
-                first_slice = slice_index_min;
-            }
-            if (slice_index_min != first_slice) continue;
-
-            const auto& pc_corner = lpcs.at("corner");
-            const auto& y = pc_corner.get("y")->elements<double>();
-            const auto& z = pc_corner.get("z")->elements<double>();
-            bee.append(y.begin(), y.end(), z.begin(), z.end());
+    
+    // Get the underlying node that contains this cluster
+    const auto* cluster_node = cluster.node();
+    if (!cluster_node) {
+        log->warn("Cannot access node for cluster");
+        return;
+    }
+    
+    // Iterate through child nodes (blobs)
+    for (const auto* bnode : cluster_node->children()) {
+        // Access the local point clouds in the node
+        const auto& lpcs = bnode->value.local_pcs();
+        
+        // Get the scalar PC to find the slice index
+        if (lpcs.find("scalar") == lpcs.end()) {
+            continue;  // Skip if no scalar PC
         }
+        const auto& pc_scalar = lpcs.at("scalar");
+        
+        // Get slice_index_min
+        if (!pc_scalar.get("slice_index_min")) {
+            continue;  // Skip if no slice_index_min
+        }
+        int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
+        
+        // Set first_slice if not already set
+        if (first_slice < 0) {
+            first_slice = slice_index_min;
+        }
+        
+        // Skip blobs not on the first slice
+        if (slice_index_min != first_slice) continue;
+        
+        // Access the corner point cloud
+        if (lpcs.find("corner") == lpcs.end()) {
+            continue;  // Skip if no corner PC
+        }
+        const auto& pc_corner = lpcs.at("corner");
+        
+        // Get y and z coordinates
+        if (!pc_corner.get("y") || !pc_corner.get("z")) {
+            continue;  // Skip if missing y or z
+        }
+        const auto& y = pc_corner.get("y")->elements<double>();
+        const auto& z = pc_corner.get("z")->elements<double>();
+        
+        // Add to patches
+        patches.append(y.begin(), y.end(), z.begin(), z.end());
     }
 }
+
 
 struct Perf {
     bool enable;
@@ -513,12 +634,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
 
-    perf("loaded dump live clusters to bee");
-    if (m_save_deadarea) {
-        fill_bee_patches(m_bee_dead, *root_dead.get());
-        perf("loaded dump dead regions to bee");
-    }
-    log->debug("will {} {} dead patches", m_save_deadarea ? "save" : "not save", m_bee_dead.size());
+    
+    // if (m_save_deadarea) {
+    //     // fill_bee_patches(m_bee_dead, *root_dead.get());
+    //     perf("loaded dump dead regions to bee");
+    // }
+    // log->debug("will {} {} dead patches", m_save_deadarea ? "save" : "not save", m_bee_dead.size());
 
     cluster_set_t cluster_connected_dead;
 
@@ -530,6 +651,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     dead_grouping.set_detector_volumes(m_dv);
     // dead_grouping.set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
     
+    perf("loaded dump live clusters to bee");
+    if (m_save_deadarea) {
+        // Fill patches from the dead grouping
+        fill_bee_patches_from_grouping(dead_grouping); // true means use individual patches by APA/face
+        perf("loaded dump dead regions to bee");
+    }
 
     //perf.dump("original live clusters", live_grouping, false, false);
     //perf.dump("original dead clusters", dead_grouping, false, false);
