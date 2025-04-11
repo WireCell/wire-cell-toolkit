@@ -30,7 +30,7 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     // check if the grouping's wpid ... 
     //std::cout << "Live: " << live_grouping.wpids().size() << " " << dead_grouping.wpids().size() << std::endl;
     
-    // Check that live_grouping has exactly one wpid
+    // Check that groupings has less than one wpid
     if (live_grouping.wpids().size() > 1 || dead_grouping.wpids().size() > 1) {
         for (const auto& wpid : live_grouping.wpids()) {
             std::cout << "Live grouping wpid: " << wpid.name() << std::endl;

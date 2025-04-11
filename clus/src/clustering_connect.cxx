@@ -25,10 +25,13 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
     const std::vector<std::string>& coords            // coordinate names
     )
 {
-    // Check that live_grouping has exactly one wpid
-	if (live_grouping.wpids().size() != 1 ) {
-		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
-	}
+    // Check that live_grouping has less than one wpid
+    if (live_grouping.wpids().size() > 1) {
+        for (const auto& wpid : live_grouping.wpids()) {
+            std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
+        }
+        raise<ValueError>("Live %d > 1", live_grouping.wpids().size());
+    }
 	// Example usage in clustering_parallel_prolong()
 	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     geo_point_t drift_dir_abs(1,0,0);

@@ -14,10 +14,13 @@ void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
     const std::vector<std::string>& coords            // coordinate names
     )
 {
-    // Check that live_grouping has exactly one wpid
-	if (live_grouping.wpids().size() != 1 ) {
-		throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
-	}
+    // Check that live_grouping has less than one wpid
+    if (live_grouping.wpids().size() > 1) {
+        for (const auto& wpid : live_grouping.wpids()) {
+            std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
+        }
+        raise<ValueError>("Live %d > 1", live_grouping.wpids().size());
+    }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
