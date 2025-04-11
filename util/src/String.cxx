@@ -11,6 +11,27 @@ std::vector<std::string> WireCell::String::split(const std::string& in, const st
     return chunks;
 }
 
+std::string WireCell::String::strip(std::string s)
+{
+    size_t beg = 0;
+    size_t end = s.size();
+
+    while (beg < end && (s[beg] == ' ' || s[beg] == '\t' || s[beg] == '\n')) {
+        ++beg;
+    }
+    if (beg == end) {
+        return "";
+    }
+    --end;
+    while (end > beg && (s[end] == ' ' || s[end] == '\t' || s[end] == '\n')) {
+        --end;
+    }
+    if (beg == end) {
+        return "";
+    }
+    return s.substr(beg, end+1-beg);
+}
+
 std::pair<std::string, std::string> WireCell::String::parse_pair(const std::string& in, const std::string& delim)
 {
     std::vector<std::string> chunks = split(in, delim);
