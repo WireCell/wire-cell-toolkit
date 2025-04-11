@@ -754,9 +754,6 @@ struct Stepped : public BlobSampler::Sampler
         std::vector<Point> points;
 
         //XQ: is the order of 0 vs. 1 correct for the wire center???
-        std::cout << "DEBUG "
-        << smin.layer << " " << smax.layer << " " << smid.layer << " "
-        << smin.bounds.first << " " << smin.bounds.second << " " << smax.bounds.first << " " << smax.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second << std::endl;
         const Vector adjust = offset * (
             coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}) -
             coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}));
