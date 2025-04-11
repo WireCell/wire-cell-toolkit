@@ -51,11 +51,11 @@ namespace WireCell {
         /// "all" layers  which then represents the anode+face context.
         operator bool() const;
 
-        bool operator==(const WirePlaneId& rhs);
+        bool operator==(const WirePlaneId& rhs) const;
 
-        bool operator!=(const WirePlaneId& rhs);
+        bool operator!=(const WirePlaneId& rhs) const;
 
-        bool operator<(const WirePlaneId& rhs);
+        bool operator<(const WirePlaneId& rhs) const;
 
         /// Return a new wpid defined with the given layer value but same apa/face.
         WirePlaneId to_layer(WirePlaneLayer_t layer) const;        

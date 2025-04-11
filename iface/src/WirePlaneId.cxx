@@ -40,6 +40,7 @@ bool WireCell::WirePlaneId::valid() const
 {
     if (apa() < 0) return false;
     if (face() < 0) return false;
+    if (layer() == kAllLayers) return true;
     const int ind = index();
     return 0 <= ind && ind < 3;
 }
@@ -81,23 +82,24 @@ std::string WirePlaneId::name() const
 }
 
 
-bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) { return m_pack == rhs.m_pack; }
+bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) const { return m_pack == rhs.m_pack; }
 
-bool WireCell::WirePlaneId::operator!=(const WirePlaneId& rhs) { return !(*this == rhs); }
+bool WireCell::WirePlaneId::operator!=(const WirePlaneId& rhs) const { return !(*this == rhs); }
 
-bool WireCell::WirePlaneId::operator<(const WirePlaneId& rhs)
+bool WireCell::WirePlaneId::operator<(const WirePlaneId& rhs) const
 {
-    if (!this->valid() || !rhs.valid()) {
-        return false;
-    }
+    return m_pack < rhs.m_pack;
+    // if (!this->valid() || !rhs.valid()) {
+    //     return false;
+    // }
 
-    if (apa() == rhs.apa()) {
-        if (face() == rhs.face()) {
-            return index() < rhs.index();
-        }
-        return face() < rhs.face();
-    }
-    return apa() < rhs.apa();
+    // if (apa() == rhs.apa()) {
+    //     if (face() == rhs.face()) {
+    //         return index() < rhs.index();
+    //     }
+    //     return face() < rhs.face();
+    // }
+    // return apa() < rhs.apa();
 }
 
 std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneId& wpid)
