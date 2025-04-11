@@ -318,6 +318,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
     auto wpids = grouping.wpids();
 
 
+
     if (config.individual){ // fill in the individual APA
         for (auto wpid: wpids) {
             int apa = wpid.apa();
