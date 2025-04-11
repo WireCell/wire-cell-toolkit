@@ -391,6 +391,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
     for (size_t ipt = 0; ipt < num_points; ++ipt) {
         geo_point_t pt = cluster->point3d(ipt);
         const auto wpid = cluster->wire_plane_id(ipt);
+        // std::cout << " DEBUG PointCloud::Facade::make_points_cluster wpid " << wpid.name() << std::endl;
         int wpid_ident = wpid.ident();
         
         // Check cache first, then populate if needed
@@ -667,12 +668,12 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
 }
 
 
-void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, int wpid_point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid){
-    auto wpid = WirePlaneId(wpid_point);
+void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId& wpid, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid){
     int apa = wpid.apa();
     int face = wpid.face();
     auto grouping = cluster->grouping();
     std::map<int, std::vector<double>> map_angles; // face -->angles 
+    // std::cout << "fill_wrap_points: apa " << apa << " face " << face << std::endl;
     const auto wire_angles = grouping->wire_angles(apa, face);
     auto& angles = map_angles[face];
     angles.push_back(std::get<0>(wire_angles));
