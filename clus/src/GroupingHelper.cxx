@@ -25,7 +25,7 @@ WireCell::PointCloud::Facade::process_groupings_helper(
 
     // Step 2: Process each pair
     for (const auto& [orig_cluster, shad_cluster] : orig_to_shadow) {
-        std::cout << orig_cluster << " " << shad_cluster << std::endl;
+        // std::cout << orig_cluster << " " << shad_cluster << std::endl;
         // Get cluster index array
         auto cc = orig_cluster->get_pcarray(aname, pname);
         std::vector<int> cc_vec(cc.begin(), cc.end());

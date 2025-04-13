@@ -68,16 +68,16 @@ namespace WireCell::PointCloud::Facade {
     private:
 
         // Step 1. Build activities from blobs in a cluster.
-        void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
+        void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
 
         // Step 2. Modify activity to suit.
-        void hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa_ident) const;
+        void hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
         // Step 3. Form IBlobs from activities.
-        std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures) const;
+        std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
-        std::set<const WireCell::PointCloud::Facade::Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span) const;
+        std::set<const WireCell::PointCloud::Facade::Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
 
         // Remaining steps are done in the operator() directly.
 
@@ -87,7 +87,7 @@ namespace WireCell::PointCloud::Facade {
 
             If not given, the retailed blob tree nodes will not have point clouds.
         */
-        WireCell::IBlobSampler::pointer m_sampler;
+        std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> m_samplers;
 
         // fixme: this restricts ClusteringRetile to single-anode-face clusters.
         // As such, it will likely freak out if fed clusters that have been
@@ -95,9 +95,9 @@ namespace WireCell::PointCloud::Facade {
         // operation, this may be okay.
         /** Configuration "face" (optional, default is 0)
 
-            The INDEX of the face in the anode's list of faces to use.
+        The INDEX of the face in the anode's list of faces to use.
         */
-        IAnodeFace::pointer m_face;
+        std::map<int, std::map<int, IAnodeFace::pointer>> m_face; // now apa/face --> m_face
 
         /** Configuration "cut_time_low" (optional, default is -1e9)
             Lower bound for time cut in nanoseconds
@@ -109,7 +109,7 @@ namespace WireCell::PointCloud::Facade {
         */
         double m_cut_time_high;
 
-        std::vector<Aux::WirePlaneInfo> m_plane_infos;
+        std::map<int, std::map<int, std::vector<Aux::WirePlaneInfo>>> m_plane_infos;
         
         IDetectorVolumes::pointer m_dv;
 
