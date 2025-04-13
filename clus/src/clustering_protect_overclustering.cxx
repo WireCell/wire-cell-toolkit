@@ -90,6 +90,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
         for (const int index1 : wcps) {
             // WCPointCloud<double>::WCPoint &wcp1 = cloud.pts[*it1];
             // int index1 = wcp1.index;
+            // std::cout << winds.size() << " " << max_wire_type << " " << min_wire_type << " " << winds[max_wire_type].size() << winds[min_wire_type].size() << std::endl;
             int index_max_wire = winds[max_wire_type][index1];
             int index_min_wire = winds[min_wire_type][index1];
             

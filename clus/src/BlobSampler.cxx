@@ -805,8 +805,8 @@ struct Stepped : public BlobSampler::Sampler
         /// TODO: hard coded for 5 planes, i.e., wire_type is id - "2"
         aux.add("max_wire_interval", Array({(int)nmax}));
         aux.add("min_wire_interval", Array({(int)nmin}));
-        aux.add("max_wire_type", Array({(int)(max_id-2)}));
-        aux.add("min_wire_type", Array({(int)(min_id-2)}));
+        aux.add("max_wire_type", Array({(int)(max_id-ndummy_index)}));
+        aux.add("min_wire_type", Array({(int)(min_id-ndummy_index)}));
     }
 };
 
