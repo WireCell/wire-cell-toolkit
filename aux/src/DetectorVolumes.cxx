@@ -60,7 +60,11 @@ class T0Correction : public WireCell::PointCloud::Transform {
      virtual bool filter(const Point &pos_corr, double clustser_t0, int face,
                          int apa) const override
      {
-         return (m_dv->contained_by(pos_corr)).valid() ? true : false;
+        auto wpid = m_dv->contained_by(pos_corr);
+        if (!wpid.valid()) return false;
+        if (wpid.apa() != apa || wpid.face() != face) return false;    
+        return true;
+        //  return ().valid() ? true : false;
      }
      virtual Dataset forward(const Dataset &pc_raw, const std::vector<std::string>& arr_raw_names, const std::vector<std::string>& arr_cor_names, double cluster_t0, int face,
                               int apa) const override
@@ -110,7 +114,15 @@ class T0Correction : public WireCell::PointCloud::Transform {
          const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
          const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
          for (size_t i = 0; i < arr_x.size(); ++i) {
-             arr_filter[i] = (m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]))).valid() ? 1 : 0;
+            arr_filter[i] = false;
+            auto wpid = m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]));
+            if (wpid.valid()) {
+                if (wpid.apa() == apa && wpid.face() == face) {
+                    arr_filter[i] = true;
+                }
+            }
+        // if (wpid.apa() != apa || wpid.face() != face) return false;   
+            //   ().valid() ? 1 : 0;
          }
          Dataset ds;
          ds.add("filter", Array(arr_filter));
