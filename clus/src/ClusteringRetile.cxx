@@ -94,6 +94,9 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
     m_cut_time_low = get(cfg, "cut_time_low", -1e9);
     m_cut_time_high = get(cfg, "cut_time_high", 1e9);
 
+    m_pc_name = convert<std::string>(cfg["pc_name"], "3d");
+    if (!cfg["coords"].isNull()) m_coords = convert<std::vector<std::string>>(cfg["coords"],{"x","y","z"});
+
     // Get the detector volumes pointer
     m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
     if (m_dv == nullptr) {
@@ -506,14 +509,16 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // std::cout << shadow.children().size() << std::endl;
     // const auto [angle_u,angle_v,angle_w] = original.wire_angles();
 
+    Tree::Scope scope{m_pc_name, m_coords};
+ 
+
 
     for (auto* orig_cluster : original.children()) {
-        // auto& scope = orig_cluster->get_default_scope();
-        // auto& scope_raw = orig_cluster->get_raw_scope();
 
-        // if (scope.hash()!=scope_raw.hash()){
-        //     throw std::runtime_error("live grouping must have the raw points scope as the default");
-        // }
+        if (!orig_cluster->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
+        if (orig_cluster->get_default_scope().hash() != scope.hash()) {
+            orig_cluster->set_default_scope(scope);
+        }
 
         // find the flash time:
         auto flash = orig_cluster->get_flash();

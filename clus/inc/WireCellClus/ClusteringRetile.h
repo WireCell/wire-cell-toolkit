@@ -110,7 +110,9 @@ namespace WireCell::PointCloud::Facade {
         double m_cut_time_high;
 
         std::map<int, std::map<int, std::vector<Aux::WirePlaneInfo>>> m_plane_infos;
-        
+
+        std::string m_pc_name{"3d"};
+        std::vector<std::string> m_coords{"x", "y", "z"};
         IDetectorVolumes::pointer m_dv;
 
 
