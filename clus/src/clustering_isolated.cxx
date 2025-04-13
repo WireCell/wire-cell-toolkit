@@ -22,6 +22,7 @@ using namespace WireCell::PointCloud::Tree;
  * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
  * @return large cluster -> {small cluster, distance} 
 */
+// Handle all APA/Faces
 void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
     const std::string& pc_name,                        // point cloud name
     const std::vector<std::string>& coords            // coordinate names

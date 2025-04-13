@@ -25,7 +25,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
     const bool use_ctpc, double length_cut)
 {
     // Get all the wire plane IDs from the grouping
-    const auto& wpids = live_grouping.wpids();
+    const auto& wpids = live_grouping.dv_wpids();
     // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
     std::set<int> apas;

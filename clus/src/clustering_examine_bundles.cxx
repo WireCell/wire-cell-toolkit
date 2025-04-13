@@ -18,6 +18,7 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
+// All APA Faces 
 void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping, const IDetectorVolumes::pointer dv ,
     const std::string& pc_name,                        // point cloud name
     const std::vector<std::string>& coords,            // coordinate names

@@ -52,7 +52,10 @@ const std::unordered_map<size_t, size_t> &DynamicPointCloud::kd2d_l2g(const int 
     // }
 
     if (iter == m_kd2d_index_l2g.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing 2D index l2g for wpid %s", wpid.name());
+        // Create empty mapping for this wpid instead of raising an error
+        m_kd2d_index_l2g[wpid.ident()] = std::unordered_map<size_t, size_t>();
+        iter = m_kd2d_index_l2g.find(wpid.ident());
+        SPDLOG_DEBUG("DynamicPointCloud: created empty 2D index l2g for wpid {}", wpid.name());
     }
     return iter->second;
 }
@@ -120,9 +123,12 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
         
         // Process 2D points for each plane
         for (size_t pindex = 0; pindex < 3; ++pindex) {
+
+            // std::cout << "Test: " << pindex << " " << pt.x_2d[pindex].size() << " " << pt.y_2d[pindex].size() << " " << pt.wpid_2d[pindex].size() << std::endl;
+
             // Add 2D point to plane data
             for (size_t j = 0; j < pt.x_2d[pindex].size(); ++j) {
-                WirePlaneId wpid_2d(pt.wpid_2d.at(j));
+                WirePlaneId wpid_2d(pt.wpid_2d[pindex].at(j));
                 WirePlaneId wpid_plane(iplane2layer[pindex], wpid_2d.face(), wpid_2d.apa());
                 int key = wpid_plane.ident();
                 // Initialize plane data structures if not exists
@@ -418,6 +424,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
         // Pre-allocate vectors with correct size
         point.x_2d.resize(3);
         point.y_2d.resize(3);
+        point.wpid_2d.resize(3);
         
         if (flag_wrap){
             fill_wrap_points(cluster, pt, WirePlaneId(wpid), point.x_2d, point.y_2d, point.wpid_2d);
@@ -425,9 +432,10 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
             for (size_t pindex = 0; pindex < 3; ++pindex) {
                 point.x_2d[pindex].push_back(point.x);
                 point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
+                point.wpid_2d[pindex].push_back(wpid.ident());
             }
-            point.wpid_2d.push_back(wpid.ident());
         }
+
         
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
         point.dist_cut = {-1e12, -1e12, -1e12};
@@ -495,6 +503,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
             // Pre-allocate and initialize vectors
             point.x_2d.resize(3);
             point.y_2d.resize(3);
+            point.wpid_2d.resize(3);
             point.wind = {-1e12, -1e12, -1e12};
             point.dist_cut = {dist_cut_value, dist_cut_value, dist_cut_value};
             
@@ -508,8 +517,8 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 for (size_t pindex = 0; pindex < 3; ++pindex) {
                     point.x_2d[pindex].push_back(test_point.x());
                     point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * test_point.z() - sin(angle_uvw[pindex]) * test_point.y());
+                    point.wpid_2d[pindex].push_back(wpid_test_point.ident());
                 }
-                point.wpid_2d.push_back(wpid_test_point.ident());
             }
             
             dpc_points.push_back(std::move(point));
@@ -542,6 +551,8 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 point.dist_cut = {dist_cut_value, dist_cut_value, dist_cut_value};
                 point.x_2d.resize(3);
                 point.y_2d.resize(3);
+                point.wpid_2d.resize(3);
+
                 
                 if (temp_wpid.apa() != -1) {
                     // Get cached angles if available
@@ -562,8 +573,9 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                             point.x_2d[pindex].push_back(point.x);
                             point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
                                                 sin(temp_angle_uvw[pindex]) * point.y);
+                            point.wpid_2d[pindex].push_back(temp_wpid.ident());
+
                         }
-                        point.wpid_2d.push_back(temp_wpid.ident());
                     }
                 }
                 // } else {
@@ -653,6 +665,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         // Initialize arrays
         point.x_2d.resize(3); 
         point.y_2d.resize(3);
+        point.wpid_2d.resize(3);
         point.wind = {-1e12, -1e12, -1e12};
         point.dist_cut = {dis_cut_int, dis_cut_int, dis_cut_int};
         
@@ -660,15 +673,15 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         for (size_t pindex = 0; pindex < 3; ++pindex) {
             point.x_2d[pindex].push_back(x);
             point.y_2d[pindex].push_back(cos_angle_uvw[pindex] * z - sin_angle_uvw[pindex] * y);
+            point.wpid_2d[pindex].push_back(wpid.ident());
         }
-        point.wpid_2d.push_back(wpid.ident());
     }
 
     return dpc_points;
 }
 
 
-void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId& wpid, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<int>& p_wpid){
+void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId& wpid, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<std::vector<int>>& p_wpid){
     int apa = wpid.apa();
     int face = wpid.face();
     auto grouping = cluster->grouping();
@@ -700,7 +713,10 @@ void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_poin
         const double angle = map_angles.at(face)[pind];
         const double pitch = map_pitch_mags.at(face).at(pind);
         const double center = map_proj_centers.at(face).at(pind);
-        const int wind = point2wind(point, angle, pitch, center);
+        int wind = point2wind(point, angle, pitch, center);
+        if (wind < 0) wind = 0;
+        size_t max_wind = grouping->get_plane_channels(apa, face, iplane2layer[pind]).size() - 1;
+        if (wind > max_wind) wind = max_wind;
         // get channel ...
         auto channel = grouping->get_plane_channel_wind(apa, face, iplane2layer[pind], wind);
 
@@ -718,9 +734,7 @@ void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_poin
                 angles.push_back(std::get<2>(wire_angles1));
             }
             p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
-            if (pind==0){ // fill in the wpid
-                p_wpid.push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()).ident());
-            }
+            p_wpid[pind].push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()).ident());
         }
     }
     

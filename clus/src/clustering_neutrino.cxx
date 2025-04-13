@@ -12,6 +12,7 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
+// handle all APA/Face
 void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try, IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
     const std::vector<std::string>& coords            // coordinate names
     )
