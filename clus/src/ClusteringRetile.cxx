@@ -25,6 +25,7 @@ namespace WCC = WireCell::PointCloud::Facade;
 namespace WRG = WireCell::RayGrid;
 
 
+// Now can handle all APA/Faces 
 WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
 {
     // auto sampler = get<std::string>(cfg, "sampler","");
