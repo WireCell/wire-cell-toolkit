@@ -12,35 +12,17 @@ base {
   // redefine the detector volumes with the cryostat side included
   det : {
 
-      // define the 6 APAs.  This must use the coordinate system
-      // defined by the wire geometry file.
-      // A full drift is a box: xyz=[3.594*wc.m, 5.9*wc.m, 2.2944*wc.m].
-      //
       // The "faces" is consumed by, at least, the Drifter and
       // AnodePlane.  The "wires" number is used to set
       // AnodePlane.ident used to lookup the anode in WireSchema.
       // It corresponds to the anode number.
-      //
-      // Also see:
-      //   wirecell-util wire-volumes protodune-wires-larsoft-v3.json.bz2
-      // to help with defining these parameters.
 
-      // from DocDB 203 and assuming wires are symmetric across x=0
-      // however, DocDB 203 is obsolete, use most recent value from LArSoft
-      // Also see: lar -c dump_protodunesp_geometry.fcl
-
-      // between center lines
-      // local apa_cpa = 3.637*wc.m, // DocDB 203
-      local apa_cpa = 3.63075*wc.m, // LArSoft
-      // local cpa_thick = 50.8*wc.mm, // DocDB 203
+      // Numbers determined from protodunehd_v6 gdml
+      local apa_cpa = 3.5734*wc.m,
       local cpa_thick = 3.175*wc.mm, // 1/8", from Bo Yu (BNL) and confirmed with LArSoft
-      local apa_w2w = 85.725*wc.mm, // DocDB 203 calls "W" as "X"
+      local apa_w2w = 85.87*wc.mm,
       local plane_gap = 4.76*wc.mm,
-      local apa_g2g = 114.3*wc.mm, // note that grid plane must have
-                                   // gap 4.7675mm for this number
-                                   // to be consistent with above.
-                                   // There's probably round-off
-                                   // error in DocDB 203.
+      local apa_g2g = apa_w2w + 6*plane_gap,
 
       // The "anode" cut off plane, here measured from APA
       // centerline, determines how close to the wires do we

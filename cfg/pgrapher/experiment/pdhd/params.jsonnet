@@ -8,31 +8,17 @@ base {
     // This section will be overwritten in simparams.jsonnet
     det : {
 
-        // define the 6 APAs.  This must use the coordinate system
-        // defined by the wire geometry file.
-        // A full drift is a box: xyz=[3.594*wc.m, 5.9*wc.m, 2.2944*wc.m].
-        //
         // The "faces" is consumed by, at least, the Drifter and
         // AnodePlane.  The "wires" number is used to set
         // AnodePlane.ident used to lookup the anode in WireSchema.
         // It corresponds to the anode number.
-        //
-        // Also see:
-        //   wirecell-util wire-volumes protodune-wires-larsoft-v3.json.bz2
-        // to help with defining these parameters.
 
-        // from DocDB 203 and assuming wires are symmetric across x=0
-
-        // between center lines
-        local apa_cpa = 3.637*wc.m,
-        local cpa_thick = 50.8*wc.mm,
-        local apa_w2w = 85.725*wc.mm, // DocDB 203 calls "W" as "X"
+        // Numbers determined from protodunehd_v6 gdml
+        local apa_cpa = 3.5734*wc.m,
+        local cpa_thick = 3.175*wc.mm, // 1/8", from Bo Yu (BNL) and confirmed with LArSoft
+        local apa_w2w = 85.87*wc.mm,
         local plane_gap = 4.76*wc.mm,
-        local apa_g2g = 114.3*wc.mm, // note that grid plane must have
-                                     // gap 4.7675mm for this number
-                                     // to be consistent with above.
-                                     // There's probably round-off
-                                     // error in DocDB 203.
+        local apa_g2g = apa_w2w + 6*plane_gap,
 
         // The "anode" cut off plane, here measured from APA
         // centerline, determines how close to the wires do we
@@ -42,7 +28,8 @@ base {
         // Placing it w/in the response plane means any depos that are
         // "backed up" won't have proper field response.  But, the
         // tighter this is made, the less volume is simulated.
-        local apa_plane = 0.5*apa_g2g, // pick it to be at the grid wires
+        // local apa_plane = 0.5*apa_g2g, // pick it to be at the grid wires
+        local apa_plane = 0.5*apa_g2g - plane_gap, // pick it to be at the first induction wires
 
         // The "response" plane is where the field response functions
         // start.  Garfield calcualtions start somewhere relative to
@@ -118,6 +105,12 @@ base {
 
     elecs: [
       super.elec {
+        // The FE amplifier gain in units of Voltage/Charge.
+        // gain : 14.0*wc.mV/wc.fC,
+        // gain : std.extVar("elecGain")*wc.mV/wc.fC,
+
+        // The shaping (aka peaking) time of the amplifier shaper.
+        shaping : 2.2*wc.us,
       }
       for n in std.range(0,3)
     ],
@@ -154,20 +147,23 @@ base {
     },
 
     files: {
-        wires: "protodunehd-wires-larsoft-v1.json.bz2", 
+        wires: "protodunehd-wires-larsoft-v1.json.bz2",
 
         fields: [
-	    "np04hd-garfield-6paths.json.bz2", // this is modified PDHD field response, for APA1
-	    //"dune-garfield-1d565.json.bz2", // this is generic one, normal field response
+            "np04hd-garfield-6paths-mcmc-bestfit.json.bz2",
             "dune-garfield-1d565.json.bz2",
             "dune-garfield-1d565.json.bz2",
             "dune-garfield-1d565.json.bz2",
         ],
 
-        // fixme: this is for microboone and probably bogus for
-        // protodune because (at least) the span of MB wire lengths do
-        // not cover pdsp's.
-        noise: "protodune-noise-spectra-v1.json.bz2",
+        fltresp: "protodunehd-field-response-filters.json.bz2",
+
+        // Noise models for different FE amplifier gains
+        // Note: set gain value accordingly in the field of elecs
+        // noise: "protodunehd-noise-spectra-14mVfC-v1.json.bz2",
+        // noise: "protodunehd-noise-spectra-7d8mVfC-v1.json.bz2",
+        noise: if $.elec.gain > 8*wc.mV/wc.fC then "protodunehd-noise-spectra-14mVfC-v1.json.bz2"
+               else "protodunehd-noise-spectra-7d8mVfC-v1.json.bz2",
 
 
         chresp: null,
