@@ -787,6 +787,14 @@ struct Stepped : public BlobSampler::Sampler
                 const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust;
                 // XQ: how was the closest wire is found, if the pitch is exactly at the middle between two wires?
                 const double pitch_relative = coords.pitch_relative(pitch, smid.layer); 
+                const double ploc0 = coords.pitch_location(cmin, cmax, 0);
+                const double prel0 = coords.pitch_relative(ploc0, 0);
+                const double ploc1 = coords.pitch_location(cmin, cmax, 1);
+                const double prel1 = coords.pitch_relative(ploc1, 1);
+                if (prel0 > 1 or prel0 < 0 or prel1 > 1 or prel1 < 0) {
+                    // std::cout << "yuhw: " << " ploc0 " << ploc0 << " prel0 " << prel0 << " " << "ploc1 " << ploc1 << " prel1 " << prel1 << std::endl;
+                    continue;
+                }
 //                auto gmid = coords.pitch_index(pitch, smid.layer);
  //               if (smid.in(gmid)) {
                 // if (smax.bounds.first==1006 && smax.bounds.second==1011)
