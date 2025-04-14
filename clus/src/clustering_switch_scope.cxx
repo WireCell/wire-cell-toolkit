@@ -66,10 +66,10 @@ void WireCell::PointCloud::Facade::clustering_switch_scope(
             
             // Get unique filter result values
             std::set<int> filter_result_set(filter_results.begin(), filter_results.end());
-            info("Cluster {} has {} unique filter results:", iclus, filter_result_set.size());
-            for (const auto& result : filter_result_set) {
-                info("  filter result: {}", result);
-            }
+            // info("Cluster {} has {} unique filter results:", iclus, filter_result_set.size());
+            // for (const auto& result : filter_result_set) {
+            //     info("  filter result: {}", result);
+            // }
             
             // Separate the cluster based on filter results
             // This will create new clusters in the grouping
