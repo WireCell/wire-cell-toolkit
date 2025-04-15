@@ -6,6 +6,8 @@
 #include <boost/histogram.hpp>
 #include <boost/histogram/algorithm/sum.hpp>
 
+#include <climits>
+
 using namespace WireCell;
 using namespace WireCell::PointCloud::Facade;
 using spdlog::debug;
@@ -15,6 +17,10 @@ using spdlog::debug;
 #else
 #define LogDebug(x)
 #endif
+
+const static std::vector<int> wind_bogus = {INT_MIN, INT_MIN, INT_MIN};
+const static std::vector<double> dist_cut_bogus = {-1e12, -1e12, -1e12};
+
 
 DynamicPointCloud::nfkd_t &DynamicPointCloud::kd3d() const
 {
@@ -438,7 +444,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
 
         
         point.wind = {winds[0][ipt], winds[1][ipt], winds[2][ipt]};
-        point.dist_cut = {-1e12, -1e12, -1e12};
+        point.dist_cut = dist_cut_bogus;
 
         dpc_points.push_back(std::move(point));
     }
@@ -504,7 +510,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
             point.x_2d.resize(3);
             point.y_2d.resize(3);
             point.wpid_2d.resize(3);
-            point.wind = {-1e12, -1e12, -1e12};
+            point.wind = wind_bogus;
             point.dist_cut = {dist_cut_value, dist_cut_value, dist_cut_value};
             
             point.x = test_point.x();
@@ -547,7 +553,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 point.wpid = temp_wpid.ident(); // Direct assignment
                 point.cluster = cluster;
                 point.blob = nullptr;
-                point.wind = {-1e12, -1e12, -1e12};
+                point.wind = wind_bogus;
                 point.dist_cut = {dist_cut_value, dist_cut_value, dist_cut_value};
                 point.x_2d.resize(3);
                 point.y_2d.resize(3);
@@ -666,7 +672,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
         point.x_2d.resize(3); 
         point.y_2d.resize(3);
         point.wpid_2d.resize(3);
-        point.wind = {-1e12, -1e12, -1e12};
+        point.wind = wind_bogus;
         point.dist_cut = {dis_cut_int, dis_cut_int, dis_cut_int};
         
         // Calculate 2D projections

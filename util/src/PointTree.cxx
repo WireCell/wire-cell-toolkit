@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <sstream>
 
 using spdlog::debug;
 using namespace WireCell::PointCloud;
@@ -309,7 +310,7 @@ bool in_scope(const Tree::Scope& scope, const Tree::Points::node_t* node, size_t
     if (pcit == lpcs.end()) {
         // debug("not in scope: node has no named lpc in scope:{}", scope);
         // for (auto lit : lpcs) {
-        //     debug("\tname: {}", lit.first);
+        //     debug("\tinserted pc: {}", lit.first);
         // }
         return false;
     }
@@ -330,7 +331,17 @@ bool in_scope(const Tree::Scope& scope, const Tree::Points::node_t* node, size_t
 
 bool Tree::Points::on_insert(const std::vector<node_type*>& path)
 {
-    auto* node = path.back();
+    // {                           // debug
+    //     debug("inserting with path length {} in node with pcs:", path.size());
+    //     // The scope must name a node-local PC 
+
+    //     for (auto lit : local_pcs()) {
+    //         debug("\tparent pc: {}", lit.first);
+    //     }
+    // }
+
+    // auto* node = path.back();
+    auto* node = path.front();
 
     // Give node to any views for which the node is in scope.
     for (auto& [scope,sci] : m_scoped) {
@@ -367,3 +378,25 @@ bool Tree::Points::on_remove(const std::vector<node_type*>& path)
     return true;                // continue ascent
 }
 
+std::string Tree::Points::as_string(bool recur, int level) const
+{
+    std::stringstream ss;
+    std::string tab(level, ' ');
+    ss << tab << "pcs:[";
+    for (auto lit : local_pcs()) {
+        ss << " " << lit.first;
+    }
+    ss << " ] scopes:[";
+    for (auto& [scope, sci] : m_scoped) {
+        ss << " " << scope;
+    }
+    ss << " ]";
+    if (! recur) {
+        return ss.str();
+    }
+    ss << "\n";
+    for (const auto& child : m_node->children()) {
+        ss << child->value.as_string(recur, level+1);
+    }
+    return ss.str();
+}
