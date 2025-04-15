@@ -59,7 +59,7 @@ bool ClusterScopeFilter::operator()(const input_pointer& in, output_pointer& out
     using VFiltered =
         typename boost::filtered_graph<cluster_graph_t, boost::keep_all, std::function<bool(cluster_vertex_t)> >;
     VFiltered filtered_graph(in_graph, {}, [&](auto vtx) {
-        if (in_graph[vtx].code() != 'b') return false;
+        if (in_graph[vtx].code() != 'b') return true;
         const auto iblob = std::get<cluster_node_t::blob_t>(in_graph[vtx].ptr);
         if (iblob->face()->which() == m_face_index) return true;
         return false;
