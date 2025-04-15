@@ -207,6 +207,10 @@ namespace WireCell::PointCloud::Tree {
         const ScopedBase* get_scoped(const Scope& scope) const;
         ScopedBase* get_scoped(const Scope& scope);
 
+        // Return representation of this as a string.  By default this recurs
+        // into children.  The "level" is used to provide indentation.
+        std::string as_string(bool recur=true, int level=0) const;
+
       private:
 
         // our node-local point clouds

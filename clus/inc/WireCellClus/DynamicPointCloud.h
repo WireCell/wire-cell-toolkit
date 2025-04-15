@@ -38,7 +38,7 @@ namespace WireCell::PointCloud::Facade {
             std::vector<std::vector<double>> y_2d;
             std::vector<std::vector<int>> wpid_2d;
             std::vector<int> wind;      // length 3 or 0
-            std::vector<int> dist_cut;  // length 3 or 0
+            std::vector<double> dist_cut;  // length 3 or 0
         };
         using nfkd_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
 

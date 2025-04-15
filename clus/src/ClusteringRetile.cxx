@@ -24,6 +24,15 @@ namespace WCC = WireCell::PointCloud::Facade;
 // Nick name for less typing.
 namespace WRG = WireCell::RayGrid;
 
+static void debug_cluster(WCC::Cluster* cluster, const std::string& ctx)
+{
+    std::cout << "Cluster: " << cluster->node()->value.as_string(false) << "\n";
+    auto nblobs = cluster->kd_blobs().size();
+    auto nchild = cluster->nchildren();
+    if (nblobs == nchild) return;
+    std::cout << ctx << " n kd_blobs=" << nblobs << " nchildren=" << nchild << "\n";
+}
+
 
 // Now can handle all APA/Faces 
 WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
@@ -581,10 +590,10 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 auto scope = orig_cluster->get_default_scope();
                 auto scope_transform = orig_cluster->get_scope_transform(scope);
                 // origi_cluster still have the original main cluster ... 
-                std::cout << "Start: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+                // debug_cluster(orig_cluster, "Start:");
 
                 auto splits = original.separate(orig_cluster, cc_vec);
-                std::cout << "Mid: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+                // debug_cluster(orig_cluster, "Mid:");
 
                 // Apply the scope filter settings to all new clusters
                 for (auto& [id, new_cluster] : splits) {
@@ -778,17 +787,23 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 //     }
                 // }
 
-                // auto cc2 = original.merge(splits,orig_cluster);
-                // {auto temp_scope = orig_cluster->get_default_scope();
-                // std::cout << "Test: " << orig_cluster->value().m_scoped[temp_scope].indices_valid << " " << orig_cluster->sv3d().nodes().size() << " " << orig_cluster->sv3d_raw().nodes().size()<< std::endl; }                
+                // {
+                //     debug_cluster(orig_cluster, "Premerge:");
+                //     std::cout << "Splits:\n";
+                //     for (const auto& [gid, split] : splits) {
+                //         debug_cluster(split, "Split " + std::to_string(gid) + ":");
+                //     }
+                // }
+                auto cc2 = original.merge(splits,orig_cluster);
+                // debug_cluster(orig_cluster, "Merged:");
 
-                // // for (const auto& val : cc2) {
-                // //     std::cout << val << " ";
-                // // }
-                // // std::cout << std::endl;
-                // orig_cluster->put_pcarray(cc2, "isolated", "perblob");
+                // for (const auto& val : cc2) {
+                //     std::cout << val << " ";
+                // }
+                // std::cout << std::endl;
+                orig_cluster->put_pcarray(cc2, "isolated", "perblob");
 
-                // std::cout << "End: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+                // debug_cluster(orig_cluster, "Put:");
 
                 // {auto temp_scope = orig_cluster->get_default_scope();
                 //     std::cout << "Test: " << orig_cluster->value().m_scoped[temp_scope].indices_valid << " " << orig_cluster->sv3d().nodes().size() << " " << orig_cluster->sv3d_raw().nodes().size() << std::endl; }    

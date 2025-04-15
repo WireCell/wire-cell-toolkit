@@ -298,10 +298,10 @@ namespace WireCell::NaryTree {
 
         // Vector-like iterator version of merge.  The target will adopt the
         // children of the facades given in the iterator range {cbeg,cend}.  If
-        // target is not given, a new target facade one is created.  The range
+        // target is not given, a new target facade is created.  The range
         // of facades are removed by default unless keep is true.
         //
-        // A commented components (CC) style array is returned and records the
+        // A connected components (CC) style array is returned and records the
         // provenience of the children now held by the target facade.  Children
         // that originally came from the target facade are given CC element
         // value (ID) of 'existingID', default -1.  Children from facades in the
