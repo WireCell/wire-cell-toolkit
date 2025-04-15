@@ -568,14 +568,14 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
         // int nblobs =
         // orig_cluster->kd_blobs().size();
         
-        // // Apply time cut
-        // if (flash) {
-        //     double flash_time = flash.time();
-        //     // std::cout << "Test: " << flash_time << " " << std::endl;
+        // Apply time cut
+        if (flash) {
+            double flash_time = flash.time();
+            // std::cout << "Test: " << flash_time << " " << std::endl;
 
-        //     if (flash_time >= m_cut_time_low && flash_time <= m_cut_time_high) {
-        if(1){
-            if(1){
+            if (flash_time >= m_cut_time_low && flash_time <= m_cut_time_high) {
+        // if(1){
+        //     if(1){
                 // std::cout << "Tests: " << nblobs << " at time " << flash_time/units::us << " " << m_cut_time_low/units::us << " " << m_cut_time_high/units::us << "\n";
                 
                 // get the span of indices
@@ -823,7 +823,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     for (auto* cluster : original.children()) {
         cluster->set_cluster_id(cluster_id++);
     }
-    
+
     {
         int cluster_id = 1;
         for (auto* cluster : shadow.children()) {
