@@ -274,6 +274,8 @@ void MultiAlgBlobClustering::flush(int ident)
 
 void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grouping& grouping)
 {
+    // std::cout << "Test: " << name << " " << grouping.wpids().size() << std::endl;
+    
     if (m_bee_points.find(name) == m_bee_points.end()) {
         log->warn("Bee points set '{}' not found, skipping", name);
         return;
@@ -334,6 +336,8 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
             }
         }
     }else{ // fill in the global
+        // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
+
         for (const auto* cluster : grouping.children()) {
             fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords);
         }
@@ -356,6 +360,8 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     
     auto filter_scope = cluster.get_scope_filter(scope);
 
+    // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << filter_scope << std::endl;
+
     if(filter_scope){
         // Access the points through the cluster's scoped view
         const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
@@ -364,6 +370,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
 
         // Create a map to cache blob information to avoid recalculating for points in the same blob
         std::unordered_map<const WireCell::PointCloud::Facade::Blob*, std::pair<double, size_t>> blob_info;
+
+        // std::cout << "Test: " << cluster.get_cluster_id() << " " << spcs.size() << std::endl;
+
 
         // For each scoped pointcloud (each corresponds to a blob)
         for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
@@ -688,6 +697,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     for (const auto& config : m_bee_points_configs) {
         if(config.name != "img")
             fill_bee_points(config.name, live_grouping);
+            // fill_bee_points(config.name, dead_grouping); // hack to check ClusteringRetile, shad_grouping is loaded as dead_grouping
     }
 
     perf("dump live clusters to bee");

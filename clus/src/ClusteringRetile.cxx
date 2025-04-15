@@ -601,6 +601,9 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     new_cluster->set_default_scope(scope);
                     new_cluster->set_scope_transform(scope,scope_transform);
                 }
+                orig_cluster->set_scope_filter(scope, true);
+                orig_cluster->set_default_scope(scope);
+                orig_cluster->set_scope_transform(scope,scope_transform);
                 
                 std::map<int, Cluster*> map_id_cluster = splits;
                 map_id_cluster[-1] = orig_cluster;
@@ -626,151 +629,152 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     cluster->dijkstra_shortest_paths(high_idx, false);
                     cluster->cal_shortest_path(low_idx);
 
-                    // auto wpids = cluster->wpids_blob();
-                    // std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
-                    // for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
-                    //     int apa = it->apa();
-                    //     int face = it->face();
-                    //     auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(*it);
-                    //     // std::cout << "Test: " << apa << " " << face << " " << angle_u << " " << angle_v << " " << angle_w << std::endl;
+                    auto wpids = cluster->wpids_blob();
+                    std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
+                    for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
+                        int apa = it->apa();
+                        int face = it->face();
+                        auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(*it);
+                        // std::cout << "Test: " << apa << " " << face << " " << angle_u << " " << angle_v << " " << angle_w << std::endl;
 
-                    //     // Step 1.
-                    //     std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
-                    //     get_activity(*cluster, map_slices_measures, apa, face);
+                        // Step 1.
+                        std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
+                        get_activity(*cluster, map_slices_measures, apa, face);
 
-                    //     // Step 2.
-                    //     hack_activity(*cluster, map_slices_measures, apa, face); // may need more args
+                        // Step 2.
+                        hack_activity(*cluster, map_slices_measures, apa, face); // may need more args
 
-                    //     // Check for time slices with same start and end
-                    //     // for (const auto& [time_range, measures] : map_slices_measures) {
-                    //     //     if (time_range.first == 480 or time_range.first == 1148) {
-                    //     //         std::cout << "Warning: Time slice with same start and end found: " 
-                    //     //                   << time_range.first << " " << time_range.second << std::endl;
-                    //     //     }
-                    //     // }
+                        // Check for time slices with same start and end
+                        // for (const auto& [time_range, measures] : map_slices_measures) {
+                        //     if (time_range.first == 480 or time_range.first == 1148) {
+                        //         std::cout << "Warning: Time slice with same start and end found: " 
+                        //                   << time_range.first << " " << time_range.second << std::endl;
+                        //     }
+                        // }
                         
-                    //     // Step 3.  Must make IBlobs for this is what the sampler takes.
-                    //     auto shad_iblobs = make_iblobs(map_slices_measures, apa, face); // may need more args
+                        // Step 3.  Must make IBlobs for this is what the sampler takes.
+                        auto shad_iblobs = make_iblobs(map_slices_measures, apa, face); // may need more args
 
-                    //     // Steps 4-6.
-                    //     auto niblobs = shad_iblobs.size();
-                    //     // Forgive me (and small-f fixme), but this is now the 3rd generation of
-                    //     // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
-                    //     // PointTreeBuilding.  The reason for the copy-pastes is insufficient
-                    //     // factoring of the de-factor standard sampling code in PointTreeBuilding.
-                    //     // Over time, it is almost guaranteed these copy-pastes become out-of-sync. 
+                        // Steps 4-6.
+                        auto niblobs = shad_iblobs.size();
+                        // Forgive me (and small-f fixme), but this is now the 3rd generation of
+                        // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
+                        // PointTreeBuilding.  The reason for the copy-pastes is insufficient
+                        // factoring of the de-factor standard sampling code in PointTreeBuilding.
+                        // Over time, it is almost guaranteed these copy-pastes become out-of-sync. 
 
-                    //     for (size_t bind=0; bind<niblobs; ++bind) {
-                    //         if (!m_samplers.at(apa).at(face)) {
-                    //             shad_cluster.make_child();
-                    //             continue;
-                    //         }
-                    //         const IBlob::pointer iblob = shad_iblobs[bind];
+                        for (size_t bind=0; bind<niblobs; ++bind) {
+                            if (!m_samplers.at(apa).at(face)) {
+                                shad_cluster.make_child();
+                                continue;
+                            }
+                            const IBlob::pointer iblob = shad_iblobs[bind];
 
-                    //         // Sample the iblob, make a new blob node.
-                    //         PointCloud::Tree::named_pointclouds_t pcs;
+                            // Sample the iblob, make a new blob node.
+                            PointCloud::Tree::named_pointclouds_t pcs;
 
-                    //         auto [pc3d, aux] = m_samplers.at(apa).at(face)->sample_blob(iblob, bind);
+                            auto [pc3d, aux] = m_samplers.at(apa).at(face)->sample_blob(iblob, bind);
                             
-                    //         // how to sample points ... 
-                    //         // std::cout << pc3d.size() << " " << aux.size() << " " <<  pc3d.get("x")->size_major() << " " << pc3d.get("y")->size_major() << " " << pc3d.get("z")->size_major() << std::endl;
-                    //         // const auto& arr_x1 = pc3d.get("x")->elements<Point::coordinate_t>();
+                            // how to sample points ... 
+                            // std::cout << pc3d.size() << " " << aux.size() << " " <<  pc3d.get("x")->size_major() << " " << pc3d.get("y")->size_major() << " " << pc3d.get("z")->size_major() << std::endl;
+                            // const auto& arr_x1 = pc3d.get("x")->elements<Point::coordinate_t>();
 
-                    //         /// These seem unused and bring in yet more copy-paste code
-                    //         // pcs.emplace("2dp0", WireCell::Aux::make2dds(pc3d, angle_u));
-                    //         // pcs.emplace("2dp1", WireCell::Aux::make2dds(pc3d, angle_v));
-                    //         // pcs.emplace("2dp2", WireCell::Aux::make2dds(pc3d, angle_w));
-                    //         auto pc2dp0 = WireCell::Aux::make2dds(pc3d, angle_u);
-                    //         auto pc2dp1 = WireCell::Aux::make2dds(pc3d, angle_v);
-                    //         auto pc2dp2 = WireCell::Aux::make2dds(pc3d, angle_w);
-                    //         pc3d.add("2dp0_x", *pc2dp0.get("x"));
-                    //         pc3d.add("2dp0_y", *pc2dp0.get("y"));
-                    //         pc3d.add("2dp1_x", *pc2dp1.get("x"));
-                    //         pc3d.add("2dp1_y", *pc2dp1.get("y"));
-                    //         pc3d.add("2dp2_x", *pc2dp2.get("x"));
-                    //         pc3d.add("2dp2_y", *pc2dp2.get("y"));
-                    //         pcs.emplace("3d", pc3d);
-                    //         // std::cout << pcs["3d"].get("x")->size_major() << " " << pcs["3d"].get("y")->size_major() << " " << pcs["3d"].get("z")->size_major() << std::endl;
-                    //         // const auto& arr_x = pcs["3d"].get("x")->elements<Point::coordinate_t>();
-                    //         // std::cout << arr_x.size() << " " << arr_x1.size() << std::endl;
-                    //         // std::cout << iblob->shape() << std::endl;
-                    //         if (pc3d.get("x")->size_major() > 0){
-                    //             const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
-                    //             auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-                    //             int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-                    //             int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-                    //             int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-                    //             int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-                    //             scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-                    //             scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-                    //             scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-                    //             scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-                    //             pcs.emplace("scalar", std::move(scalar_ds));
+                            /// These seem unused and bring in yet more copy-paste code
+                            // pcs.emplace("2dp0", WireCell::Aux::make2dds(pc3d, angle_u));
+                            // pcs.emplace("2dp1", WireCell::Aux::make2dds(pc3d, angle_v));
+                            // pcs.emplace("2dp2", WireCell::Aux::make2dds(pc3d, angle_w));
+                            auto pc2dp0 = WireCell::Aux::make2dds(pc3d, angle_u);
+                            auto pc2dp1 = WireCell::Aux::make2dds(pc3d, angle_v);
+                            auto pc2dp2 = WireCell::Aux::make2dds(pc3d, angle_w);
+                            pc3d.add("2dp0_x", *pc2dp0.get("x"));
+                            pc3d.add("2dp0_y", *pc2dp0.get("y"));
+                            pc3d.add("2dp1_x", *pc2dp1.get("x"));
+                            pc3d.add("2dp1_y", *pc2dp1.get("y"));
+                            pc3d.add("2dp2_x", *pc2dp2.get("x"));
+                            pc3d.add("2dp2_y", *pc2dp2.get("y"));
+                            pcs.emplace("3d", pc3d);
+                            // std::cout << pcs["3d"].get("x")->size_major() << " " << pcs["3d"].get("y")->size_major() << " " << pcs["3d"].get("z")->size_major() << std::endl;
+                            // const auto& arr_x = pcs["3d"].get("x")->elements<Point::coordinate_t>();
+                            // std::cout << arr_x.size() << " " << arr_x1.size() << std::endl;
+                            // std::cout << iblob->shape() << std::endl;
+                            if (pc3d.get("x")->size_major() > 0){
+                                const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
+                                auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
+                                int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
+                                int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
+                                int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
+                                int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
+                                scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
+                                scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
+                                scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
+                                scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
+                                pcs.emplace("scalar", std::move(scalar_ds));
 
-                    //             shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
-                    //         }else{
-                    //             SPDLOG_WARN("blob {} has no points", iblob->ident());
-                    //         }
-                    //     }
-                    //     int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
-                    //     // std::cout << "Test: " << shad_cluster.npoints() << " " << " " << shad_cluster.nchildren() << std::endl;
+                                shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
+                            }else{
+                                SPDLOG_WARN("blob {} has no points", iblob->ident());
+                            }
+                        }
+                        int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
+                        // std::cout << "Test: " << shad_cluster.npoints() << " " << " " << shad_cluster.nchildren() << std::endl;
 
-                    //     // remove blobs after creating facade_blobs ... 
-                    //     auto blobs_to_remove = remove_bad_blobs(*cluster, shad_cluster, tick_span, apa, face);
-                    //     for (const Blob* blob : blobs_to_remove) {
-                    //         Blob& b = const_cast<Blob&>(*blob);
-                    //         shad_cluster.remove_child(b);
-                    //     }
-                    //     shad_cluster.clear_cache();
-                    //     // std::cout << "Test: " << apa << " " << face << " " << blobs_to_remove.size() << std::endl;
-                    // }
+                        // remove blobs after creating facade_blobs ... 
+                        auto blobs_to_remove = remove_bad_blobs(*cluster, shad_cluster, tick_span, apa, face);
+                        for (const Blob* blob : blobs_to_remove) {
+                            Blob& b = const_cast<Blob&>(*blob);
+                            shad_cluster.remove_child(b);
+                        }
+                        shad_cluster.clear_cache();
+                        // std::cout << "Test: " << apa << " " << face << " " << blobs_to_remove.size() << std::endl;
+                    }
                     
-                    // // // Reset cached data that depends on cluster contents
-                    // // shad_cluster.reset_pca();         // Reset PCA calculations
-                    // // // Force rebuild of time blob map by accessing it
-                    // // shad_cluster.time_blob_map();
-                    // // shad_cluster.point3d(0); // This will trigger PC tree rebuild
-                    // // std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
-                    // // How to call overlap_fast ??? 
-                    // // for (auto* fblob : shad_cluster.children()) {
-                    // //     shad_cluster.remove_child(*fblob);
-                    // // }
+                    // // Reset cached data that depends on cluster contents
+                    // shad_cluster.reset_pca();         // Reset PCA calculations
+                    // // Force rebuild of time blob map by accessing it
+                    // shad_cluster.time_blob_map();
+                    // shad_cluster.point3d(0); // This will trigger PC tree rebuild
+                    // std::cout << shad_cluster.npoints() << " " << shad_cluster.nbpoints() << " " << shad_cluster.nchildren() << std::endl;
+                    // How to call overlap_fast ??? 
+                    // for (auto* fblob : shad_cluster.children()) {
+                    //     shad_cluster.remove_child(*fblob);
+                    // }
 
                     // std::cout << "Test: remove: "  << " " << cluster->kd_blobs().size() << " " << shad_cluster.kd_blobs().size()  << std::endl;
                
-                    // // Example code to access shadown cluster information ...
-                    // // // shad cluster getting highest and lowest points and then do shortest path ... 
-                    // // // find the highest and lowest points
-                    // // std::pair<geo_point_t, geo_point_t> shad_pair_points = shad_cluster.get_highest_lowest_points();
-                    // // //std::cout << pair_points.first << " " << pair_points.second << std::endl;
-                    // // int shad_high_idx = shad_cluster.get_closest_point_index(shad_pair_points.first);
-                    // // int shad_low_idx = shad_cluster.get_closest_point_index(shad_pair_points.second);
-                    // // shad_cluster.dijkstra_shortest_paths(shad_high_idx, false);
-                    // // shad_cluster.cal_shortest_path(shad_low_idx);
-                    // // {
-                    // //     auto path_wcps = shad_cluster.get_path_wcps();                
-                    // //     // Convert list points to vector with interpolation
-                    // //     for (const auto& wcp : path_wcps) {
-                    // //         geo_point_t p= shad_cluster.point3d(wcp);
-                    // //         std::cout << p << std::endl;
-                    // //     }
-                    // // }
-
-                    // // add the new scope to the newly corrected shad_cluster ...
-                    // auto& default_scope = cluster->get_default_scope();
-                    // auto& raw_scope = cluster->get_raw_scope();
-
-                    // if (default_scope.hash()!=raw_scope.hash()){
-                    //     auto correction_name = cluster->get_scope_transform(default_scope);
-                    //     // std::vector<int> filter_results = c
-                    //     shad_cluster.add_corrected_points(m_dv, correction_name);
-                    //     // Get the new scope with corrected points
-                    //     const auto correction_scope = shad_cluster.get_scope(correction_name);
-                    //     // // Set this as the default scope for viewing
-                    //     shad_cluster.set_default_scope(correction_scope);
-                    //     shad_cluster.set_scope_transform(correction_scope, correction_name);
-                    //     // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
+                    // Example code to access shadown cluster information ...
+                    // // shad cluster getting highest and lowest points and then do shortest path ... 
+                    // // find the highest and lowest points
+                    // std::pair<geo_point_t, geo_point_t> shad_pair_points = shad_cluster.get_highest_lowest_points();
+                    // //std::cout << pair_points.first << " " << pair_points.second << std::endl;
+                    // int shad_high_idx = shad_cluster.get_closest_point_index(shad_pair_points.first);
+                    // int shad_low_idx = shad_cluster.get_closest_point_index(shad_pair_points.second);
+                    // shad_cluster.dijkstra_shortest_paths(shad_high_idx, false);
+                    // shad_cluster.cal_shortest_path(shad_low_idx);
+                    // {
+                    //     auto path_wcps = shad_cluster.get_path_wcps();                
+                    //     // Convert list points to vector with interpolation
+                    //     for (const auto& wcp : path_wcps) {
+                    //         geo_point_t p= shad_cluster.point3d(wcp);
+                    //         std::cout << p << std::endl;
+                    //     }
                     // }
+
+                    // add the new scope to the newly corrected shad_cluster ...
+                    auto& default_scope = cluster->get_default_scope();
+                    auto& raw_scope = cluster->get_raw_scope();
+
+                    if (default_scope.hash()!=raw_scope.hash()){
+                        auto correction_name = cluster->get_scope_transform(default_scope);
+                        // std::vector<int> filter_results = c
+                        shad_cluster.add_corrected_points(m_dv, correction_name);
+                        // Get the new scope with corrected points
+                        const auto correction_scope = shad_cluster.get_scope(correction_name);
+                        // // Set this as the default scope for viewing
+                        shad_cluster.set_default_scope(correction_scope);
+                        shad_cluster.set_scope_transform(correction_scope, correction_name);
+                        shad_cluster.set_scope_filter(scope, true);
+                        // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
+                    }
 
                 }
 
@@ -779,13 +783,6 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 //     // FIXME: above we add cluster_id to the "cluster_scalar" PC.  Do we
                 //     // want to also try to copy over the "light" index entry?
 
-
-                // {
-                //     auto temp_scope = orig_cluster->get_default_scope();
-                //     for (auto& [id, cluster] : splits) {
-                //         std::cout << "Test: " << id << " " << temp_scope.hash() << " " << cluster->get_default_scope().hash() << " " << cluster->value().m_scoped[temp_scope].indices_valid << " " << cluster->sv3d().nodes().size() << " " << cluster->sv3d_raw().nodes().size()<< std::endl; 
-                //     }
-                // }
 
                 // {
                 //     debug_cluster(orig_cluster, "Premerge:");
@@ -805,19 +802,14 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
 
                 // debug_cluster(orig_cluster, "Put:");
 
-                // {auto temp_scope = orig_cluster->get_default_scope();
-                //     std::cout << "Test: " << orig_cluster->value().m_scoped[temp_scope].indices_valid << " " << orig_cluster->sv3d().nodes().size() << " " << orig_cluster->sv3d_raw().nodes().size() << std::endl; }    
-                    
-                // std::cout << "End: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
 
 
-
-                // auto cc3 = shadow.merge(shadow_splits,shadow_orig_cluster);
-                // // for (const auto& val : cc3) {
-                // //     std::cout << val << " ";
-                // // }
-                // // std::cout << std::endl;
-                // shadow_orig_cluster->put_pcarray(cc3, "isolated", "perblob");
+                auto cc3 = shadow.merge(shadow_splits,shadow_orig_cluster);
+                // for (const auto& val : cc3) {
+                //     std::cout << val << " ";
+                // }
+                // std::cout << std::endl;
+                shadow_orig_cluster->put_pcarray(cc3, "isolated", "perblob");
 
             }
             // FIXME: do we need/want to copy over any PCs in the grouping?
@@ -830,6 +822,13 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     int cluster_id = 1;
     for (auto* cluster : original.children()) {
         cluster->set_cluster_id(cluster_id++);
+    }
+    
+    {
+        int cluster_id = 1;
+        for (auto* cluster : shadow.children()) {
+            cluster->set_cluster_id(cluster_id++);
+        }
     }
 
     // // Process groupings after all shadow clusters are created
