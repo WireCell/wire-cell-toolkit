@@ -954,11 +954,7 @@ std::vector<const Blob*> Cluster::kd_blobs() const
     return ret;
 }
 
-// size_t Cluster::nkd_blobs() const
-// {
-//     const auto& skd = kd3d();
-//     return skd.nblocks();
-// }
+
 
 Blob* Cluster::blob_with_point(size_t point_index)
 {

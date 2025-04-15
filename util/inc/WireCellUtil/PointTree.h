@@ -213,6 +213,7 @@ namespace WireCell::PointCloud::Tree {
         named_pointclouds_t m_lpcs;
 
         // mutable cache
+    //  public: // debugging purpose ...
         using unique_scoped_t = std::unique_ptr<ScopedBase>;
         struct ScopedViewCacheItem {
             unique_scoped_t scoped;

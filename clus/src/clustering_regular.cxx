@@ -355,6 +355,12 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
 
 
       if (flag_para && (flag_para_U || flag_para_V  || flag_regular)){
+
+        // add a special fix for very long tracks  PDHD
+        if (flag_para && (wpid_p1.apa() != wpid_p2.apa() || wpid_p1.face() != wpid_p2.face())){
+          if (length_1 > 100*units::cm && length_2 > 100*units::cm && dis < 5*units::cm ) return true;
+        }
+        // if (length_1 > 250*units::cm && length_2 > 250*units::cm) std::cout << "Test: " << length_1/units::cm << " " << length_2/units::cm << " " << flag_para << " " << dis/units::cm <<  " " << length_cut/units::cm << std::endl;
 	
 	double dangle1 = (dir1.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
 	double dangle1_1 = (dir1_1.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;

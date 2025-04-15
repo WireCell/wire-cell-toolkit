@@ -145,12 +145,13 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                 if (JudgeSeparateDec_1(cluster, drift_dir_abs, cluster->get_length())) {
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
-                    // const size_t orig_nchildren = cluster->nchildren();
+                    const size_t orig_nchildren = cluster->nchildren();
                     //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points,  cluster->get_length(), vertical_dir, beam_dir, dv, scope);
                     
-                    //std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                    std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+
                     Cluster *cluster1 = sep_clusters.at(0);
                     new_clusters.push_back(cluster1);
 
@@ -179,7 +180,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, scope);
 
-                                //std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                                // std::cout << "Separate Separate_1 1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                                 Cluster *cluster3 = sep_clusters.at(0);
                                 new_clusters.push_back(cluster3);
@@ -202,7 +203,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                         if (JudgeSeparateDec_1(cluster4, drift_dir_abs, length_1) &&
                                             JudgeSeparateDec_2(cluster4, dv, drift_dir_abs, boundary_points, independent_points,
                                                                length_1)) {
-                                            //	std::cout << "Separate 3rd level" << std::endl;
+                                            
+                                                                // std::cout << "Separate 3rd level" << std::endl;
 
                                             std::vector<Cluster *> sep_clusters = Separate_1(
                                                 use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, scope);
@@ -246,6 +248,7 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                                 JudgeSeparateDec_2(final_sep_cluster, dv, drift_dir_abs, boundary_points, independent_points,
                                                    length_1);
                                 if (independent_points.size() > 0) {
+                                    
                                     // std::cout << "Separate final one" << std::endl;
 
                                     std::vector<Cluster *> sep_clusters = Separate_1(
@@ -299,7 +302,8 @@ void WireCell::PointCloud::Facade::clustering_separate(Grouping& live_grouping,
                     // std::cout << boundary_points.size() << " " << independent_points.size() << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster->get_length(), vertical_dir, beam_dir, dv, scope);
-                    // std::cout << "Stripping Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
+                    
+                        // std::cout << "Stripping Separate_1 for " << orig_nchildren << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                     Cluster *cluster1 = sep_clusters.at(0);
                     new_clusters.push_back(cluster1);
@@ -373,9 +377,15 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, co
     double ratio1 = cluster->get_pca_value(1) / cluster->get_pca_value(0);
     double ratio2 = cluster->get_pca_value(2) / cluster->get_pca_value(0);
 
+    // std::cout << ratio1 << " " <<  pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2)  << " "  << ratio1 << " " << pow(10, exp(1.38115 - 1.19312 * pow(temp_angle1, 1. / 3.)) - 2.2) << " " << ratio2 << " " << pow(10, exp(1.38115 - 1.19312 * pow(angle2, 1. / 3.)) - 2.2) << " " << ratio1 << " " << angle1 << " " << angle2 << std::endl;
+    
+    // add some additional check ... PDHD
+    if (angle1 < 5 && ratio2 < 0.05 && cluster->get_length() > 300*units::cm) return false;
+
     if (ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2) ||
         ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(temp_angle1, 1. / 3.)) - 2.2) ||
-        ratio2 > pow(10, exp(1.38115 - 1.19312 * pow(angle2, 1. / 3.)) - 2.2) || ratio1 > 0.75)
+        ratio2 > pow(10, exp(1.38115 - 1.19312 * pow(angle2, 1. / 3.)) - 2.2) || 
+        ratio1 > 0.75)
         return true;
     return false;
 }

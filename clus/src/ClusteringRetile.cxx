@@ -771,15 +771,30 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 //     // want to also try to copy over the "light" index entry?
 
 
-
-                auto cc2 = original.merge(splits,orig_cluster);
-                // for (const auto& val : cc2) {
-                //     std::cout << val << " ";
+                // {
+                //     auto temp_scope = orig_cluster->get_default_scope();
+                //     for (auto& [id, cluster] : splits) {
+                //         std::cout << "Test: " << id << " " << temp_scope.hash() << " " << cluster->get_default_scope().hash() << " " << cluster->value().m_scoped[temp_scope].indices_valid << " " << cluster->sv3d().nodes().size() << " " << cluster->sv3d_raw().nodes().size()<< std::endl; 
+                //     }
                 // }
-                // std::cout << std::endl;
-                orig_cluster->put_pcarray(cc2, "isolated", "perblob");
 
-                std::cout << "End: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+                // auto cc2 = original.merge(splits,orig_cluster);
+                // {auto temp_scope = orig_cluster->get_default_scope();
+                // std::cout << "Test: " << orig_cluster->value().m_scoped[temp_scope].indices_valid << " " << orig_cluster->sv3d().nodes().size() << " " << orig_cluster->sv3d_raw().nodes().size()<< std::endl; }                
+
+                // // for (const auto& val : cc2) {
+                // //     std::cout << val << " ";
+                // // }
+                // // std::cout << std::endl;
+                // orig_cluster->put_pcarray(cc2, "isolated", "perblob");
+
+                // std::cout << "End: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+
+                // {auto temp_scope = orig_cluster->get_default_scope();
+                //     std::cout << "Test: " << orig_cluster->value().m_scoped[temp_scope].indices_valid << " " << orig_cluster->sv3d().nodes().size() << " " << orig_cluster->sv3d_raw().nodes().size() << std::endl; }    
+                    
+                // std::cout << "End: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+
 
 
                 // auto cc3 = shadow.merge(shadow_splits,shadow_orig_cluster);
