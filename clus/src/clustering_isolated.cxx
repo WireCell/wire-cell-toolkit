@@ -455,6 +455,36 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
         merge_clusters(g, live_grouping, temp_clusters, "isolated");
     }
 
+    // example separation ... 
+    // {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //         if (!live_clusters.at(iclus)->get_scope_filter(scope)) continue;
+
+    //         auto cc = live_clusters.at(iclus)->get_pcarray("isolated", "perblob");
+    //         // convert span to vector
+    //         std::vector<int> cc_vec(cc.begin(), cc.end());
+    //         // for (const auto& val : cc_vec) {
+    //         //     std::cout << val << " ";
+    //         // }
+    //         // std::cout << std::endl;
+    //         if (cc_vec.size() < 2) continue;
+    //         auto scope = live_clusters.at(iclus)->get_default_scope();
+    //         auto scope_transform = live_clusters.at(iclus)->get_scope_transform(scope);
+    //         // // origi_cluster still have the original main cluster ... 
+    //         // std::cout << "Start: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+    //         auto splits = live_grouping.separate(live_clusters.at(iclus), cc_vec);
+    //         // std::cout << "Mid: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+
+    //         // Apply the scope filter settings to all new clusters
+    //         for (auto& [id, new_cluster] : splits) {
+    //             new_cluster->set_scope_filter(scope, true);
+    //             new_cluster->set_default_scope(scope);
+    //             new_cluster->set_scope_transform(scope,scope_transform);
+    //         }
+    //     }
+    // }
+
 
     //         {
     //     auto live_clusters = live_grouping.children(); // copy

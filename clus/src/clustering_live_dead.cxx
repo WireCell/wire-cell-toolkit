@@ -24,8 +24,16 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
 {
     using spdlog::debug;
 
-    
+    // {
+    //     auto wpids = live_grouping.wpids();
+    //     for (const auto& wpid : wpids) {
+    //         int apa = wpid.apa();
+    //         int face = wpid.face();
 
+    //         std::cout << "Test Number of Points: " << apa << " " << face << " " << live_grouping.get_num_points(apa, face, 0) << " " << live_grouping.get_num_points(apa, face, 1) << " " << live_grouping.get_num_points(apa, face, 2) << std::endl;
+
+    //     }
+    // }
 
     // check if the grouping's wpid ... 
     //std::cout << "Live: " << live_grouping.wpids().size() << " " << dead_grouping.wpids().size() << std::endl;
