@@ -24,6 +24,8 @@ WIRECELL_FACTORY(PDHDOneChannelNoise, WireCell::SigProc::PDHD::OneChannelNoise, 
                  WireCell::IConfigurable)
 WIRECELL_FACTORY(PDHDCoherentNoiseSub, WireCell::SigProc::PDHD::CoherentNoiseSub, WireCell::IChannelFilter,
                  WireCell::IConfigurable)
+WIRECELL_FACTORY(PDHDFEMBNoiseSub, WireCell::SigProc::PDHD::FEMBNoiseSub, WireCell::IChannelFilter,
+                 WireCell::IConfigurable)
 
 using namespace WireCell::SigProc;
 using WireCell::Aux::DftTools::fwd_r2c;
@@ -691,6 +693,81 @@ bool PDHD::NoisyFilterAlg(WireCell::Waveform::realseq_t& sig, float min_rms, flo
     return false;
 }
 
+float PDHD::get_rms_and_rois(const WireCell::Waveform::realseq_t& signal, std::vector<std::vector<int> >& rois)
+{
+
+    std::pair<double, double> temp = Derivations::CalcRMS(signal);
+
+    std::vector<int> roi;
+    int last_bin_roi=0;
+    int flag_continue=0;
+    int start=1;
+    int IS_signal=0;
+    for (int j = 0; j != signal.size(); j++)
+    {
+        if (signal.at(j) - temp.first < -3.5 * temp.second)
+        {
+            IS_signal=1;
+
+            if (start == 1) {
+                last_bin_roi = j;
+                start=0;
+                roi.push_back(j);
+            }
+            else {
+
+                if ((last_bin_roi + 1) == j) {
+                    flag_continue = 1;
+                    last_bin_roi = j;
+                    //cout<<" 1 "<<last_bin_roi<<" j "<<j<<endl;
+                }
+                else {
+                    flag_continue = 0;
+                    last_bin_roi = j;
+                    rois.push_back(roi);
+                    roi.clear();
+                    roi.resize(0);
+
+                    roi.push_back(j); //start of next roi
+                }
+
+                if (flag_continue == 1) { roi.push_back(j); }
+            }
+
+        }
+    }
+    if (IS_signal==1) {
+        rois.push_back(roi);
+        roi.clear();
+        roi.resize(0);
+    }
+
+    return temp.second;
+}
+
+bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig, int& beg, int& end, float min_width)
+{
+    // project all channels to 1D signal
+    int nsignals = chansig.begin()->second.size();
+    WireCell::Waveform::realseq_t signal(nsignals);
+    for (const auto& cs: chansig) {
+        std::transform(signal.begin(), signal.end(), cs.second.begin(), signal.begin(), std::plus<float>() );
+    }
+
+    std::vector<std::vector<int>> rois;
+    double rms = PDHD::get_rms_and_rois(signal, rois);
+    for(auto roi_tmp : rois){
+        double width = roi_tmp.size();
+        if( width > min_width ){ // found the noise
+            beg = std::max(roi_tmp[0]-20, 0); // FIXME: make it configurable? 
+            end = std::min(roi_tmp.back()+20, nsignals-1);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 
 /*
  * Classes
@@ -911,6 +988,54 @@ WireCell::Configuration PDHD::CoherentNoiseSub::default_configuration() const
     return cfg;
 }
 
+PDHD::FEMBNoiseSub::FEMBNoiseSub(const std::string& anode, float width)
+  : m_anode_tn(anode)
+  , m_width(width)
+{
+}
+PDHD::FEMBNoiseSub::~FEMBNoiseSub() {}
+
+WireCell::Waveform::ChannelMaskMap PDHD::FEMBNoiseSub::apply(channel_signals_t& chansig) const
+{
+    WireCell::Waveform::ChannelMaskMap ret;
+
+    // WireCell::Waveform::realseq_t medians = Derivations::CalcMedian(chansig);
+    // const int achannel = chansig.begin()->first;
+    // std::cout << "[wgu] PDHD::FEMBNoiseSub::apply first channel: " << achannel << std::endl;
+
+    // determine if FEMB negative pulse
+    WireCell::Waveform::BinRange fembnoise_bins;
+    bool is_femb_noise = Is_FEMB_noise(chansig, fembnoise_bins.first, fembnoise_bins.second, m_width);
+    if (is_femb_noise) {
+        for (auto const& cs : chansig) {
+            ret["femb_noise"][cs.first].push_back(fembnoise_bins);
+            // std::cout << "[wgu] FEMB Noise channel= " << cs.first << " , time bins: "
+            // << fembnoise_bins.first << " " << fembnoise_bins.second << std::endl;
+        }
+    }
+
+    return ret;
+}
+WireCell::Waveform::ChannelMaskMap PDHD::FEMBNoiseSub::apply(int channel, signal_t& sig) const
+{
+    return WireCell::Waveform::ChannelMaskMap();  // not implemented
+}
+
+void PDHD::FEMBNoiseSub::configure(const WireCell::Configuration& cfg)
+{
+    m_anode_tn = get(cfg, "anode", m_anode_tn);
+    m_anode = Factory::find_tn<IAnodePlane>(m_anode_tn);
+
+    m_width = get<float>(cfg, "width", m_width);
+}
+WireCell::Configuration PDHD::FEMBNoiseSub::default_configuration() const
+{
+    Configuration cfg;
+    cfg["anode"] = m_anode_tn;
+    cfg["width"] = m_width;
+
+    return cfg;
+}
 
 // Local Variables:
 // mode: c++
