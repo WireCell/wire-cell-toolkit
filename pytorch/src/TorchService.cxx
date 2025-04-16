@@ -5,6 +5,7 @@
 #include "WireCellUtil/Persist.h"
 
 #include <omp.h>
+#include <ATen/Parallel.h>
 
 WIRECELL_FACTORY(TorchService, 
                  WireCell::Pytorch::TorchService,
@@ -30,6 +31,7 @@ Pytorch::TorchService::TorchService()
       log->critical("error interpreting OMP_NUM_THREADS as integer ({})", env_str);
     } // env var not set
   }
+  log->info("TorchService parallel info:\n{}",  at::get_parallel_info());
 }
 
 Configuration Pytorch::TorchService::default_configuration() const
