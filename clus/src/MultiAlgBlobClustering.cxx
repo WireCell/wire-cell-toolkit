@@ -419,56 +419,30 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
 void MultiAlgBlobClustering::fill_bee_patches_from_grouping(
     const WireCell::PointCloud::Facade::Grouping& grouping)
 {
-    auto wpids = grouping.wpids();
+    // auto wpids = grouping.wpids();
 
     // For each cluster in the grouping
     for (const auto* cluster : grouping.children()) {
         // Get the wpids to determine which APA and face this cluster belongs to
+
+        fill_bee_patches_from_cluster(*cluster);
+
         
-        if (!wpids.empty()) {
-            // Store patches by APA and face
-            for (auto wpid : wpids) {
-                int apa = wpid.apa();
-                int face = wpid.face();
-                
-                auto it_apa = m_bee_dead_patches.find(apa);
-                if (it_apa != m_bee_dead_patches.end()) {
-                    auto it_face = it_apa->second.find(face);
-                    if (it_face != it_apa->second.end()) {
-                        fill_bee_patches_from_cluster(it_face->second, *cluster);
-                    }
-                }
-            }
-        } 
+        // if (!wpids.empty()) {
+        //     // Store patches by APA and face
+        //     for (auto wpid : wpids) {
+        //         int apa = wpid.apa();
+        //         int face = wpid.face();
+        //        
+        //     }
+        // } 
     }
 }
 
-// static
-// void fill_bee_patches(WireCell::Bee::Patches& bee, const Points::node_t& root)
-// {
-//     int first_slice = -1;
-//     for (const auto cnode : root.children()) {
-//         for (const auto bnode : cnode->children()) {  // blobs ...
-//             const auto& lpcs = bnode->value.local_pcs();
-
-//             const auto& pc_scalar = lpcs.at("scalar");
-//             int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
-//             if (first_slice < 0) {
-//                 first_slice = slice_index_min;
-//             }
-//             if (slice_index_min != first_slice) continue;
-
-//             const auto& pc_corner = lpcs.at("corner");
-//             const auto& y = pc_corner.get("y")->elements<double>();
-//             const auto& z = pc_corner.get("z")->elements<double>();
-//             bee.append(y.begin(), y.end(), z.begin(), z.end());
-//         }
-//     }
-// }
 
 // Helper function to fill patches from a single cluster
 void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
-    Bee::Patches& patches, const WireCell::PointCloud::Facade::Cluster& cluster)
+    const WireCell::PointCloud::Facade::Cluster& cluster)
 {
     int first_slice = -1;
     
@@ -481,44 +455,57 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
     
     // Iterate through child nodes (blobs)
     for (const auto* bnode : cluster_node->children()) {
-        // Access the local point clouds in the node
-        const auto& lpcs = bnode->value.local_pcs();
-        
-        // Get the scalar PC to find the slice index
-        if (lpcs.find("scalar") == lpcs.end()) {
-            continue;  // Skip if no scalar PC
-        }
-        const auto& pc_scalar = lpcs.at("scalar");
-        
-        // Get slice_index_min
-        if (!pc_scalar.get("slice_index_min")) {
-            continue;  // Skip if no slice_index_min
-        }
-        int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
-        
-        // Set first_slice if not already set
-        if (first_slice < 0) {
-            first_slice = slice_index_min;
-        }
-        
-        // Skip blobs not on the first slice
-        if (slice_index_min != first_slice) continue;
-        
-        // Access the corner point cloud
-        if (lpcs.find("corner") == lpcs.end()) {
-            continue;  // Skip if no corner PC
-        }
-        const auto& pc_corner = lpcs.at("corner");
-        
-        // Get y and z coordinates
-        if (!pc_corner.get("y") || !pc_corner.get("z")) {
-            continue;  // Skip if missing y or z
-        }
-        const auto& y = pc_corner.get("y")->elements<double>();
-        const auto& z = pc_corner.get("z")->elements<double>();
-        
-        // Add to patches
-        patches.append(y.begin(), y.end(), z.begin(), z.end());
+        auto wpid = bnode->value.facade<Blob>()->wpid();
+        int apa = wpid.apa();
+        int face = wpid.face();
+
+
+        auto it_apa = m_bee_dead_patches.find(apa);
+        if (it_apa != m_bee_dead_patches.end()) {
+            auto it_face = it_apa->second.find(face);
+            if (it_face != it_apa->second.end()) {
+                auto & patches = it_face->second;
+
+                // Access the local point clouds in the node
+                const auto& lpcs = bnode->value.local_pcs();
+                
+                // Get the scalar PC to find the slice index
+                if (lpcs.find("scalar") == lpcs.end()) {
+                    continue;  // Skip if no scalar PC
+                }
+                const auto& pc_scalar = lpcs.at("scalar");
+                
+                // Get slice_index_min
+                if (!pc_scalar.get("slice_index_min")) {
+                    continue;  // Skip if no slice_index_min
+                }
+                int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
+                
+                // Set first_slice if not already set
+                if (first_slice < 0) {
+                    first_slice = slice_index_min;
+                }
+                
+                // Skip blobs not on the first slice
+                if (slice_index_min != first_slice) continue;
+                
+                // Access the corner point cloud
+                if (lpcs.find("corner") == lpcs.end()) {
+                    continue;  // Skip if no corner PC
+                }
+                const auto& pc_corner = lpcs.at("corner");
+                
+                // Get y and z coordinates
+                if (!pc_corner.get("y") || !pc_corner.get("z")) {
+                    continue;  // Skip if missing y or z
+                }
+                const auto& y = pc_corner.get("y")->elements<double>();
+                const auto& z = pc_corner.get("z")->elements<double>();
+                
+                // Add to patches
+                patches.append(y.begin(), y.end(), z.begin(), z.end());
+            }
+        }        
     }
 }
 
