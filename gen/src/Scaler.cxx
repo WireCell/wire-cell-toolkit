@@ -137,7 +137,7 @@ bool Gen::Scaler::operator()(const input_pointer& depo, output_queue& outq)
 
   double scale = yzmap[depo_bin_z][depo_bin_y];
 
-  auto newdepo = make_shared<Aux::SimpleDepo>(depo->time(), depo->pos(), Qi*scale, depo, depo->extent_long(), depo->extent_tran());
+  auto newdepo = make_shared<Aux::SimpleDepo>(depo->time(), depo->pos(), Qi*scale, depo->prior(), depo->extent_long(), depo->extent_tran(), depo->prior()->id(), depo->prior()->pdg(), depo->prior()->energy());
 
   outq.push_back(newdepo);
 
