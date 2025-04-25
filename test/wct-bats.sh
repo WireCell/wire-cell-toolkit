@@ -308,6 +308,17 @@ function srcdir () {
 }
 
 
+
+# current-test-name
+#
+# Emit the name of the current test.
+#
+# This is simply the base file name with .bats removed.
+function current-test-file-name () {
+    basename "$BATS_TEST_FILENAME" .bats    
+}
+
+
 # saveout [options] <src> ...
 #
 # Save a file out of the test area to the build/tests/ area.
@@ -347,7 +358,7 @@ function saveout () {
     fi
 
     local name base
-    name="$(basename "$BATS_TEST_FILENAME" .bats)"
+    name="$(current-test-file-name)"
     base="$(blddir)/tests/$subdir/$(version)/${name}"
 
     # single, directed target
@@ -870,7 +881,7 @@ function resolve_file () {
 #   If given, will match locally modified versions.
 #
 # Results are emitted in lexical order of version string.
-function find_category_version_paths () {
+function category_version_paths () {
     local category="history"
     # match "git describe --tags" 
     local matcher='+([0-9])\.+([0-9])\.+([x0-9])'
@@ -936,17 +947,22 @@ function find_category_versions () {
 #
 # -v, --version <version>
 #   Set the version, default uses current version.
+# 
+# --allow-missing
+#   Do not die if path not found.
 #
 # <path>
 #   A relative path to resolve.
 function category_path () {
     local ver cat="history"
+    local err="die"
     ver="$(version)"
     declare -a paths
     while [[ $# -gt 0 ]] ; do
         case $1 in
             -v|--version) ver="$2"; shift 2;;
             -c|--category) cat="$2"; shift 2;;
+            --allow-missing) err="warn"; shift;;
             -*) die "unknown argument: $1";;
             *) paths+=( "$1" ); shift;;
         esac
@@ -960,8 +976,9 @@ function category_path () {
         if [ -f "$catdir/$path" ] || [ -d "$catdir/$path" ] ; then
             echo "$catdir/$path"
         else
-            die "No such file or directory: $catdir/$path"
+            $err "No such category path: $catdir/$path"
         fi
+
     done
 }
     
@@ -997,17 +1014,23 @@ function historical_versions () {
 #
 # -c, --current
 #
-#   Include the current software version, even if not a decalred
+#   Include the current software version, even if not a declared
 #   release.
+# 
+# --allow-missing
+#   If no file is found, emit warn-level log instead of dying.
+#
 #
 function historical_files () {
     local last current
     declare -a paths versions
+    local pass_through=""
     while [[ $# -gt 0 ]] ; do
         case $1 in
             -l|--last) last="$2"; shift 2;;
             -v|--version) versions+=( "$2" ); shift 2;;
             -c|--current) current="$(version)"; shift;;
+            --allow-missing) pass_through="--allow-missing"; shift;;
             -*) die "unknown option $1" ;;
             *) paths+=( "$1" ); shift;;
         esac
@@ -1028,11 +1051,13 @@ function historical_files () {
         verlines=$(echo "$verlines" | tail -n "$last")
     fi
 
+    # debug "historical_files: versions: ${verlines[@]}"
+
     # shellcheck disable=SC2068
     for ver in ${verlines[@]}
     do
-        yell "historical_files: ver=|$ver| paths: ${paths[*]}"
-        category_path -c history -v "$ver" "${paths[@]}"
+        #yell "historical_files: ver=|$ver| paths: ${paths[*]}"
+        category_path $pass_through -c history -v "$ver" "${paths[@]}"
     done
 }
 
@@ -1083,13 +1108,80 @@ function download_file () {
     local path
     path="$(downloads)/$tgt"
     if [ -s "$path" ] ; then
+        debug "already downloaded: $path"
         echo "$path"
         return
     fi
 
+    debug "downloading: $path"
     wget -O "$path" "$url" 1>&2 || return
     echo "$path"
 }
+
+
+# download_git_subdir [options] <giturl> <subdir>
+#
+# Efficiently download just a sub directory from a git remote into downloads area.
+#
+# <giturl>
+#   The remote git URL as may be used in a "git clone"
+#
+# <subdir>
+#   Sub directory relative to the top of the repo (no leading "/")
+#
+# Options:
+#
+# -r/--ref
+#   A reference (eg, tag, hash) to checkout.  Default is HEAD
+#
+# -t/--target
+#   A target location for the subidr.
+download_git_subdir () {
+    
+
+    local ref=""
+    local target=""
+
+    while [[ $# -gt 0 ]] ; do
+        case $1 in
+            -r|--ref) ref="$2"; shift 2;;
+            -t|--target) target="$2"; shift 2;;
+            *) break;;          # assume positional arg
+        esac
+    done
+    local url="$1"; shift
+    test -n "$url"
+    local subdir="$1"; shift
+    test -n "$subidr"
+
+    local path
+    path="$(downloads)"
+    if [ -n "$target" ] ; then
+        path="$path/$target"
+    fi
+
+    local subpath="$path/$subdir"
+
+    if [ -d "$subpath" ] ; then
+        debug "Already have $subpath"
+        echo "$subpath"
+        return
+    fi
+
+    local out=$(git clone -n --depth=1 --filter=tree:0 "$url" "$path" 2>&1)
+    if [ -n "$out" ] ; then debug $out ; fi
+
+    cd "$path" || die "failed to cd to $path"
+
+    out=$(git sparse-checkout set --no-cone "/$subdir" 2>&1)
+    if [ -n "$out" ] ; then debug $out ; fi
+
+    out=$(git checkout "$ref" 2>&1)
+    if [ -n "$out" ] ; then debug $out ; fi
+
+    echo "$subpath"
+}
+
 
 
 # mv_if_diff <src> <dst>
