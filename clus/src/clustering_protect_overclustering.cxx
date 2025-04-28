@@ -552,7 +552,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
@@ -587,7 +587,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
@@ -622,7 +622,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
                                    p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                    p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;

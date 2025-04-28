@@ -24,14 +24,14 @@ namespace WCC = WireCell::PointCloud::Facade;
 // Nick name for less typing.
 namespace WRG = WireCell::RayGrid;
 
-static void debug_cluster(WCC::Cluster* cluster, const std::string& ctx)
-{
-    std::cout << "Cluster: " << cluster->node()->value.as_string(false) << "\n";
-    auto nblobs = cluster->kd_blobs().size();
-    auto nchild = cluster->nchildren();
-    if (nblobs == nchild) return;
-    std::cout << ctx << " n kd_blobs=" << nblobs << " nchildren=" << nchild << "\n";
-}
+// static void debug_cluster(WCC::Cluster* cluster, const std::string& ctx)
+// {
+//     std::cout << "Cluster: " << cluster->node()->value.as_string(false) << "\n";
+//     auto nblobs = cluster->kd_blobs().size();
+//     auto nchild = cluster->nchildren();
+//     if (nblobs == nchild) return;
+//     std::cout << ctx << " n kd_blobs=" << nblobs << " nchildren=" << nchild << "\n";
+// }
 
 
 // Now can handle all APA/Faces 
@@ -542,11 +542,15 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // const auto [angle_u,angle_v,angle_w] = original.wire_angles();
 
 
+    // The variable "scope" is overridden below.  I make a copy here so this
+    // code acts identically as before.
+    Tree::Scope scope = m_scope;
+
     for (auto* orig_cluster : original.children()) {
 
-        if (!orig_cluster->get_scope_filter(m_scope)) continue; // move on if the cluster is not in the scope filter ...
-        if (orig_cluster->get_default_scope().hash() != m_scope.hash()) {
-            orig_cluster->set_default_scope(m_scope);
+        if (!orig_cluster->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
+        if (orig_cluster->get_default_scope().hash() != scope.hash()) {
+            orig_cluster->set_default_scope(scope);
         }
 
         // find the flash time:
@@ -594,7 +598,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                 std::map<int, Cluster*> map_id_cluster = splits;
                 map_id_cluster[-1] = orig_cluster;
 
-                Cluster *shadow_orig_cluster;
+                Cluster *shadow_orig_cluster=nullptr;
                 std::map<int, Cluster*> shadow_splits;
 
                 for (auto& [id, cluster] : map_id_cluster) {
@@ -612,7 +616,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     //std::cout << pair_points.first << " " << pair_points.second << std::endl;
                     int high_idx = cluster->get_closest_point_index(pair_points.first);
                     int low_idx = cluster->get_closest_point_index(pair_points.second);
-                    cluster->dijkstra_shortest_paths(m_pcts, high_idx, false);
+                    cluster->dijkstra_shortest_paths(m_dv, m_pcts, high_idx, false);
                     cluster->cal_shortest_path(low_idx);
 
                     auto wpids = cluster->wpids_blob();

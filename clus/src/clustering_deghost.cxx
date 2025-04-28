@@ -114,7 +114,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(
             global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
-                live_clusters.at(i)->construct_skeleton(pcts, use_ctpc);
+                live_clusters.at(i)->construct_skeleton(dv, pcts, use_ctpc);
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                 global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
             }
@@ -638,7 +638,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(
                     // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                     global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                        live_clusters.at(i)->construct_skeleton(pcts, use_ctpc);
+                        live_clusters.at(i)->construct_skeleton(dv, pcts, use_ctpc);
                         // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                         global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params,true ));
                     }
@@ -649,7 +649,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(
                 // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                 global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                    live_clusters.at(i)->construct_skeleton(pcts, use_ctpc);
+                    live_clusters.at(i)->construct_skeleton(dv, pcts, use_ctpc);
                     // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                     global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
                 }

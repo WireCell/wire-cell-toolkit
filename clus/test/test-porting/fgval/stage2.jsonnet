@@ -108,6 +108,13 @@ function (
         },
     };
 
+    local pctransforms = {
+        type: "PCTransformSet",
+        name: "",
+        data: { detector_volumes: wc.tn(detector_volumes) },
+        uses: [detector_volumes]
+    };
+
 
     local ptb = g.pnode({
         type: "PointTreeBuilding",
@@ -121,7 +128,7 @@ function (
             tags: ["live", "dead"],
             anode: wc.tn(anodes[0]),
             face: 0,
-            detector_volumes: "DetectorVolumes",
+            detector_volumes: wc.tn(detector_volumes),
         }
     }, nin=2, nout=1, uses=[bs_live, bs_dead, detector_volumes]);
 
@@ -152,7 +159,7 @@ function (
             eventNo: LeventNo,
             save_deadarea: true, 
             anodes: [wc.tn(a) for a in anodes],
-            detector_volumes: "DetectorVolumes",
+            detector_volumes: wc.tn(detector_volumes),
             bee_points_sets: [  // New configuration for multiple bee points sets
                 {
                     name: "img",                // Name of the bee points set
@@ -172,26 +179,26 @@ function (
                 }
             ],
             func_cfgs: [
-               // {name: "clustering_test", detector_volumes: "DetectorVolumes"},
-               // {name: "clustering_ctpointcloud", detector_volumes: "DetectorVolumes"},
-               {name: "clustering_switch_scope", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction"},
-               {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
+               // {name: "clustering_test", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
+               // {name: "clustering_ctpointcloud", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
+               {name: "clustering_switch_scope", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction", pc_transforms: wc.tn(pctransforms)},
+               {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
                {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
-               {name: "clustering_extend_loop", num_try: 3, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_separate", use_ctpc: true, detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_connect1", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_deghost", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_examine_x_boundary", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_protect_overclustering", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_neutrino", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
-               {name: "clustering_isolated", detector_volumes: "DetectorVolumes", pc_name: "3d", coords: common_coords},
+               {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)},
+               {name: "clustering_connect1", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_deghost", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)},
+               {name: "clustering_examine_x_boundary", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_protect_overclustering", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)},
+               {name: "clustering_neutrino", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+               {name: "clustering_isolated", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
             ],
         }
-    }, nin=1, nout=1, uses=[]);
+    }, nin=1, nout=1, uses=[detector_volumes, pctransforms]);
 
     local sink = g.pnode({
         type: "TensorFileSink",

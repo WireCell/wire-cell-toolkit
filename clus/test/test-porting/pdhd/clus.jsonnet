@@ -68,12 +68,44 @@ local dvm = {
     a3f1pA: $.a1f1pA,
 };
 
+local detector_volumes(anodes, en="") = {
+    "type": "DetectorVolumes",
+    "name": "dv-" + en + std.join("-", [std.toString(a.data.ident) for a in anodes]),
+    "data": {
+        "anodes": [wc.tn(anode) for anode in anodes],
+        metadata:
+            {overall: dvm["overall"]} +
+            {
+                [ "a" + std.toString(a.data.ident) + "f0pA" ]:
+                    dvm[ "a" + std.toString(a.data.ident) + "f0pA" ]
+                for a in anodes
+            } +
+            {
+                [ "a" + std.toString(a.data.ident) + "f1pA" ]:
+                    dvm[ "a" + std.toString(a.data.ident) + "f1pA" ]
+                for a in anodes
+            }
+    },
+    uses: anodes
+};
+
+      
+local pctransforms(dv) = {
+    type: "PCTransformSet",
+    name: dv.name,
+    data: { detector_volumes: wc.tn(dv) },
+    uses: [dv]
+};
+
 local clus_per_face (
     anode,
     face,
     dump = true,
     ) =
 {
+
+    local dv = detector_volumes([anode], "f%d-"%face),
+    local pcts = pctransforms(dv),
 
     // Note, the "sampler" must be unique to the "sampling".
     local bs_live = {
@@ -110,27 +142,6 @@ local clus_per_face (
         }},
 
 
-    local detector_volumes = 
-    {
-        "type": "DetectorVolumes",
-        "name": "dv-%s-%d"%[anode.name, face],
-        "data": {
-            "anodes": [wc.tn(anode)],
-            metadata:
-                {overall: dvm["overall"]} +
-                {
-                    [ "a" + std.toString(a.data.ident) + "f0pA" ]:
-                    dvm[ "a" + std.toString(a.data.ident) + "f0pA" ]
-                    for a in [anode]
-                } +
-                {
-                    [ "a" + std.toString(a.data.ident) + "f1pA" ]:
-                    dvm[ "a" + std.toString(a.data.ident) + "f1pA" ]
-                    for a in [anode]
-                }
-        }
-    },
-
     local cluster_scope_filter_live = g.pnode({
         type: "ClusterScopeFilter",
         name: "csf-live-%s-%d"%[anode.name, face],
@@ -159,9 +170,9 @@ local clus_per_face (
             tags: ["live", "dead"],
             anode: wc.tn(anode),
             face: face,
-            detector_volumes: wc.tn(detector_volumes),
+            detector_volumes: wc.tn(dv),
         }
-    }, nin=2, nout=1, uses=[bs_live, bs_dead, detector_volumes]),
+    }, nin=2, nout=1, uses=[bs_live, bs_dead, dv]),
 
     local cluster2pct = g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
@@ -193,7 +204,7 @@ local clus_per_face (
             save_deadarea: true, 
             anodes: [wc.tn(anode)],
             face: face,
-            detector_volumes: wc.tn(detector_volumes),
+            detector_volumes: wc.tn(dv),
             bee_points_sets: [  // New configuration for multiple bee points sets
                 {
                     name: "clustering",         // Name of the bee points set
@@ -205,23 +216,23 @@ local clus_per_face (
                 }
             ],
             func_cfgs: [
-                // {name: "clustering_ctpointcloud", detector_volumes:  wc.tn(detector_volumes)},
-                {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                // {name: "clustering_ctpointcloud", detector_volumes:  wc.tn(dv), pc_transforms: wc.tn(pcts)},
+                {name: "clustering_live_dead", dead_live_overlap_offset: 2, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
+                {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
+                {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
+                {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
+                {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
                 {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
-                {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_connect1", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                // {name: "clustering_isolated", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}, // hack for now ...
+                {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
+                {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)},
+                {name: "clustering_connect1", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords},
+                // {name: "clustering_isolated", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}, // hack for now ...
                 // {name: "clustering_retile", 
                 // samplers: [{apa : anode.data.ident, face : face, name: wc.tn(bs_live)}], 
-                // anodes: [wc.tn(anode)], cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: wc.tn(detector_volumes)},
+                // anodes: [wc.tn(anode)], cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: wc.tn(dv), pc_transforms: wc.tn(pcts)},
             ],
         }
-    }, nin=1, nout=1, uses=[]),
+    }, nin=1, nout=1, uses=[dv, anode, pcts]),
 
     local sink = g.pnode({
         type: "TensorFileSink",
@@ -274,26 +285,8 @@ local clus_per_apa (
         }
     }, nin=2, nout=1),
 
-    local detector_volumes = 
-    {
-        "type": "DetectorVolumes",
-        "name": "dv-%s"%[anode.name],
-        "data": {
-            "anodes": [wc.tn(anode)],
-            metadata:
-                {overall: dvm["overall"]} +
-                {
-                    [ "a" + std.toString(a.data.ident) + "f0pA" ]:
-                    dvm[ "a" + std.toString(a.data.ident) + "f0pA" ]
-                    for a in [anode]
-                } +
-                {
-                    [ "a" + std.toString(a.data.ident) + "f1pA" ]:
-                    dvm[ "a" + std.toString(a.data.ident) + "f1pA" ]
-                    for a in [anode]
-                }
-        }
-    },
+    local dv = detector_volumes([anode]),
+    local pcts = pctransforms(dv),
 
     local mabc = g.pnode({
         type: "MultiAlgBlobClustering",
@@ -313,13 +306,13 @@ local clus_per_apa (
             eventNo: LeventNo,
             save_deadarea: true,
             anodes: [wc.tn(anode)],
-            detector_volumes: wc.tn(detector_volumes),
+            detector_volumes: wc.tn(dv),
             func_cfgs: [
-                {name: "clustering_deghost", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_protect_overclustering", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
+                {name: "clustering_deghost", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)},
+                {name: "clustering_protect_overclustering", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)},
             ],
         }
-    }, nin=1, nout=1, uses=[detector_volumes]),
+    }, nin=1, nout=1, uses=[anode, dv, pcts]),
 
     local sink = g.pnode({
         type: "TensorFileSink",
@@ -365,26 +358,10 @@ local clus_all_apa (
             outpath: "pointtrees/%d",
         }
     }, nin=nanodes, nout=1),
-    local detector_volumes = 
-    {
-        "type": "DetectorVolumes",
-        "name": "clus_all_apa",
-        "data": {
-            "anodes": [wc.tn(anode) for anode in anodes],
-            metadata:
-                {overall: dvm["overall"]} +
-                {
-                    [ "a" + std.toString(a.data.ident) + "f0pA" ]:
-                    dvm[ "a" + std.toString(a.data.ident) + "f0pA" ]
-                    for a in anodes
-                } +
-                {
-                    [ "a" + std.toString(a.data.ident) + "f1pA" ]:
-                    dvm[ "a" + std.toString(a.data.ident) + "f1pA" ]
-                    for a in anodes
-                }
-        }
-    },
+
+    local dv = detector_volumes(anodes),
+    local pcts = pctransforms(dv),
+
     local mabc = g.pnode({
         type: "MultiAlgBlobClustering",
         name: "clus_all_apa",
@@ -403,7 +380,7 @@ local clus_all_apa (
             eventNo: LeventNo,
             save_deadarea: true, 
             anodes: [wc.tn(a) for a in anodes],
-            detector_volumes: wc.tn(detector_volumes),
+            detector_volumes: wc.tn(dv),
             bee_points_sets: [  // New configuration for multiple bee points sets
             //    {
             //        name: "img",                // Name of the bee points set
@@ -423,18 +400,18 @@ local clus_all_apa (
                 }
             ],
             func_cfgs: [
-                // {name: "clustering_examine_x_boundary", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-                {name: "clustering_switch_scope", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction"},
-                {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
+                // {name: "clustering_examine_x_boundary", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)},
+                {name: "clustering_switch_scope", detector_volumes: wc.tn(dv), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction", pc_transforms: wc.tn(pcts)},
+                {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
+                {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
+                {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
+                {name: "clustering_parallel_prolong", length_cut: 35*wc.cm, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
                 {name: "clustering_close", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_neutrino", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_isolated", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
-                {name: "clustering_examine_bundles", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},  
+                {name: "clustering_extend_loop", num_try: 3, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
+                {name: "clustering_separate", use_ctpc: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords, pc_transforms: wc.tn(pcts)},
+                {name: "clustering_neutrino", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
+                {name: "clustering_isolated", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords},
+                {name: "clustering_examine_bundles", detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords, pc_transforms: wc.tn(pcts)},  
                 {name: "clustering_retile",  
                 samplers: [{apa : 0, face : 0, name: "BlobSampler:apa0-0"},
                            {apa : 0, face : 1, name: "BlobSampler:apa0-1"},
@@ -445,10 +422,10 @@ local clus_all_apa (
                             {apa : 3, face : 0, name: "BlobSampler:apa3-0"},
                             {apa : 3, face : 1, name: "BlobSampler:apa3-1"}
                 ], 
-                anodes: [wc.tn(a) for a in anodes], cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_corr_coords},
+                anodes: [wc.tn(a) for a in anodes], cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords, pc_transforms: wc.tn(pcts)},
             ],
         },
-    }, nin=1, nout=1, uses=[detector_volumes]),
+    }, nin=1, nout=1, uses=anodes+[dv, pcts]),
 
     local sink = g.pnode({
         type: "TensorFileSink",

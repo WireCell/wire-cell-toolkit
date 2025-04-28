@@ -81,7 +81,7 @@ namespace WireCell::PointCloud::Facade {
         const IAnodePlane::pointer get_anode(const int ident) const;  // also apa
 
         void set_detector_volumes(const IDetectorVolumes::pointer dv) { m_dv = dv; }
-        const IDetectorVolumes::pointer get_detector_volumes() const { return m_dv; }
+        // const IDetectorVolumes::pointer get_detector_volumes() const { return m_dv; }
 
         // Return a value representing the content of this grouping.
         size_t hash() const;

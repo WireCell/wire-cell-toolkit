@@ -547,8 +547,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
                 point.z = prev_wcp.z() + t * dz;
                 
                 geo_point_t temp_point(point.x, point.y, point.z);
-                auto temp_wpid = WirePlaneId(get_wireplaneid(temp_point, prev_wpid, wpid_test_point, 
-                                               cluster->grouping()->get_detector_volumes()));
+                auto temp_wpid = WirePlaneId(get_wireplaneid(temp_point, prev_wpid, wpid_test_point, dv));
                 
                 point.wpid = temp_wpid.ident(); // Direct assignment
                 point.cluster = cluster;

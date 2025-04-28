@@ -51,8 +51,14 @@ do_prep () {
     local bee="$name.zip"
     local log="$name.log"
     local dig="$name.dig"
+    local dag="$name.pdf"
 
     test -n "$dat"
+
+    run_idempotently -s "$cfg" -t "$dag" -- \
+                     wirecell-pgraph dotify $cfg $dag \
+                     -A kind=both -A "infiles=$dat" -A "beezip=$bee"
+
 
     run_idempotently -s "$cfg" -s "$dat" -t "$bee" -t "$log" -- \
                      wire-cell -l "$log" -L debug \

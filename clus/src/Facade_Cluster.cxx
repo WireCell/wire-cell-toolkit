@@ -616,7 +616,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
 
 }
 
-bool Cluster::construct_skeleton(IPCTransformSet::pointer pcts, const bool use_ctpc)
+bool Cluster::construct_skeleton(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc)
 {
     if (m_path_wcps.size() > 0) return false;
     // Calc_PCA();
@@ -668,7 +668,7 @@ bool Cluster::construct_skeleton(IPCTransformSet::pointer pcts, const bool use_c
         }
     }
 
-    dijkstra_shortest_paths(pcts, highest_index, use_ctpc);
+    dijkstra_shortest_paths(dv, pcts, highest_index, use_ctpc);
     cal_shortest_path(lowest_index);
     return true;
 }
@@ -1837,15 +1837,17 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 }
 
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
-void Cluster::Create_graph(Clus::IPCTransformSet::pointer pcts, const bool use_ctpc) const
+void Cluster::Create_graph(IDetectorVolumes::pointer dv,
+                           Clus::IPCTransformSet::pointer pcts, 
+                           const bool use_ctpc) const
 {
     // std::cout << "Create Graph!" << std::endl;
-    // LogDebug("Create Graph! " << graph);
+    LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(npoints());
     // std::cout << "Test:" << "Create Graph!" << std::endl;
     Establish_close_connected_graph();
-    if (use_ctpc) Connect_graph(pcts, true);
+    if (use_ctpc) Connect_graph(dv, pcts, true);
     Connect_graph();
 }
 
@@ -2354,7 +2356,8 @@ void Cluster::Establish_close_connected_graph() const
 
 }
 
-void Cluster::Connect_graph(Clus::IPCTransformSet::pointer pcts,
+void Cluster::Connect_graph(IDetectorVolumes::pointer dv,
+                            Clus::IPCTransformSet::pointer pcts,
                             const bool use_ctpc) const {
 
     // now form the connected components
@@ -2491,7 +2494,7 @@ void Cluster::Connect_graph(Clus::IPCTransformSet::pointer pcts,
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
 
                     if (use_ctpc) {
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
@@ -2528,7 +2531,7 @@ void Cluster::Connect_graph(Clus::IPCTransformSet::pointer pcts,
                                p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     if (use_ctpc) {
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
@@ -2564,7 +2567,7 @@ void Cluster::Connect_graph(Clus::IPCTransformSet::pointer pcts,
                                p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
                                p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
                     if (use_ctpc) {
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
@@ -3136,7 +3139,7 @@ void Cluster::Connect_graph_overclustering_protection(
                     // Test point quality using grouping parameters
                     std::vector<int> scores;
                     if (use_ctpc) {
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
@@ -3175,7 +3178,7 @@ void Cluster::Connect_graph_overclustering_protection(
                 //     std::cout << "Test: num_bad: " << num_bad[0] << " " << num_bad[1] << " " << num_bad[2] << " " << num_bad[3] << std::endl;
                 // }
 
-                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, grouping()->get_detector_volumes());
+                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
 
                 // Calculate angles between directions
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
@@ -3297,7 +3300,7 @@ void Cluster::Connect_graph_overclustering_protection(
                     );
 
                     if (use_ctpc) {
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
@@ -3316,7 +3319,7 @@ void Cluster::Connect_graph_overclustering_protection(
                     }
                 }
                 
-                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, grouping()->get_detector_volumes());
+                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
 
                 // Calculate angles
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
@@ -3385,7 +3388,7 @@ void Cluster::Connect_graph_overclustering_protection(
                     );
 
                     if (use_ctpc) {
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, grouping()->get_detector_volumes());
+                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
@@ -3404,7 +3407,7 @@ void Cluster::Connect_graph_overclustering_protection(
                     }
                 }
 
-                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, grouping()->get_detector_volumes());
+                auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
 
                 // Calculate angles between directions
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
@@ -3609,10 +3612,13 @@ std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransfo
     return b2groupid;
 }
 
-void Cluster::dijkstra_shortest_paths(IPCTransformSet::pointer pcts, const size_t pt_idx, const bool use_ctpc) const
+void Cluster::dijkstra_shortest_paths(
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const size_t pt_idx, const bool use_ctpc) const
 {
     if (m_graph == nullptr) {
-        Create_graph(pcts, use_ctpc);
+        Create_graph(dv, pcts, use_ctpc);
     }
 
     if ((int)pt_idx == m_source_pt_index) return;

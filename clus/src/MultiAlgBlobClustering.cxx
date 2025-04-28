@@ -39,9 +39,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_inpath = get(cfg, "inpath", m_inpath);
     m_outpath = get(cfg, "outpath", m_outpath);
 
-    if (cfg.isMember("bee_dir")) {
-        log->warn("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
-    }
+    // if (cfg.isMember("bee_dir")) {
+    //     log->debug("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
+    // }
     std::string bee_zip = get<std::string>(cfg, "bee_zip", "mabc.zip");
     // Add new configuration option for initial index
     m_initial_index = get<int>(cfg, "initial_index", m_initial_index);
@@ -603,12 +603,15 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     {
         size_t npoints_total = 0;
         size_t nzero = 0;
+        size_t count = 0;
         for (const auto* cluster : grouping->children()) {
             int n = cluster->npoints();
             if (n == 0) {
                 ++nzero;
             }
             npoints_total += n;
+            // log->debug("loaded cluster {} with {} points out of {}", count, n, npoints_total);
+            ++count;
         }
         log->debug("loaded live grouping with {} clusters, {} points, and {} clusters with no points",
                    grouping->nchildren(), npoints_total, nzero);

@@ -1182,7 +1182,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
         }
     }
   
-    cluster->dijkstra_shortest_paths(pcts, start_wcpoint_idx, use_ctpc);
+    cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, use_ctpc);
     cluster->cal_shortest_path(end_wcpoint_idx);
 
     const auto& path_wcps = cluster->get_path_wcps();
@@ -1459,8 +1459,8 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
                 }
             }
 
-            auto other_scope = clusters_step0[0]->get_default_scope();
-            auto scope_transform = clusters_step0[0]->get_scope_transform(other_scope);
+            auto scope = clusters_step0[0]->get_default_scope();
+            auto scope_transform = clusters_step0[0]->get_scope_transform(scope);
 
             for (auto temp_cluster : temp_merge_clusters) {
                 other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
@@ -1468,9 +1468,9 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
                 grouping->destroy_child(temp_cluster);
                 assert(temp_cluster == nullptr);
             }
-            clusters_step0[0]->set_default_scope(other_scope);
-            clusters_step0[0]->set_scope_filter(other_scope, true);
-            clusters_step0[0]->set_scope_transform(other_scope, scope_transform);
+            clusters_step0[0]->set_default_scope(scope);
+            clusters_step0[0]->set_scope_filter(scope, true);
+            clusters_step0[0]->set_scope_transform(scope, scope_transform);
 
             final_clusters.push_back(clusters_step0[0]);
         }

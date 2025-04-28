@@ -33,8 +33,8 @@ void WireCell::PointCloud::Facade::clustering_connect1(
         }
         raise<ValueError>("Live %d > 1", live_grouping.wpids().size());
     }
-	// Example usage in clustering_parallel_prolong()
-	auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
+    // Example usage in clustering_parallel_prolong()
+    auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     geo_point_t drift_dir_abs(1,0,0);
 
     int apa = (*live_grouping.wpids().begin()).apa();

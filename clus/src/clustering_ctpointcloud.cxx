@@ -195,7 +195,7 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(
             auto start_wcpoint_idx = live_cluster->get_closest_point_index(points.first);
             auto end_wcpoint_idx = live_cluster->get_closest_point_index(points.second);
 
-            live_cluster->dijkstra_shortest_paths(pcts, start_wcpoint_idx, true);
+            live_cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, true);
             live_cluster->cal_shortest_path(end_wcpoint_idx);
 
             auto indices = live_cluster->get_path_wcps();

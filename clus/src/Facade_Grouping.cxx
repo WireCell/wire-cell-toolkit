@@ -113,7 +113,7 @@ void Grouping::fill_cache(GroupingCache& gc) const
         if (m_anodes.size()==0) {
             raise<ValueError>("anode is null");
         }
-        for (const auto [ident, anode] : m_anodes) {
+        for (const auto& [ident, anode] : m_anodes) {
             for (const auto& face : anode->faces()) {
                 const auto& coords = face->raygrid();
                 // skip dummy layers so the vector matches 0, 1, 2 plane order
@@ -182,7 +182,7 @@ void Grouping::fill_dv_cache(GroupingCache& gc) const
             // std::cout << "DEBUG Grouping::fill_dv_cache gc.dv_wpids.size() " << gc.dv_wpids.size() << std::endl;
             int face = wpid.face();
             int apa = wpid.apa();
-            int plane = wpid.index();
+            // int plane = wpid.index();
             // std::cout << "Test: " << apa << " " << face << " " << plane << " " << kAllLayers << " " << m_dv << std::endl;
             WirePlaneId wpid_all(kAllLayers, face, apa);
             gc.map_time_offset[apa][face] = m_dv->metadata(wpid_all)["time_offset"].asDouble();

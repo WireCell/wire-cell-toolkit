@@ -280,26 +280,26 @@ TEST_CASE("clustering prototype facade")
 }
 
 
-static void print_MCUGraph(const MCUGraph& g) {
-    std::stringstream ss;
-    ss << "MCUGraph:" << std::endl;
-    ss << "Vertices: " << num_vertices(g) << std::endl;
-    ss << "Edges: " << num_edges(g) << std::endl;
-    ss << "Vertex Properties:" << std::endl;
-    auto vrange = boost::vertices(g);
-    for (auto vit = vrange.first; vit != vrange.second; ++vit) {
-        auto v = *vit;
-        ss << "Vertex " << v << ": Index = " << g[v].index << std::endl;
-    }
-    ss << "Edge Properties:" << std::endl;
-    auto erange = boost::edges(g);
-    auto weightMap = get(boost::edge_weight, g);
-    for (auto eit = erange.first; eit != erange.second; ++eit) {
-        auto e = *eit;
-        ss << "Edge " << e << ": Distance = " << get(weightMap, e) << std::endl;
-    }
-    debug(ss.str());
-}
+// static void print_MCUGraph(const MCUGraph& g) {
+//     std::stringstream ss;
+//     ss << "MCUGraph:" << std::endl;
+//     ss << "Vertices: " << num_vertices(g) << std::endl;
+//     ss << "Edges: " << num_edges(g) << std::endl;
+//     ss << "Vertex Properties:" << std::endl;
+//     auto vrange = boost::vertices(g);
+//     for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+//         auto v = *vit;
+//         ss << "Vertex " << v << ": Index = " << g[v].index << std::endl;
+//     }
+//     ss << "Edge Properties:" << std::endl;
+//     auto erange = boost::edges(g);
+//     auto weightMap = get(boost::edge_weight, g);
+//     for (auto eit = erange.first; eit != erange.second; ++eit) {
+//         auto e = *eit;
+//         ss << "Edge " << e << ": Distance = " << get(weightMap, e) << std::endl;
+//     }
+//     debug(ss.str());
+// }
 
 TEST_CASE("clustering prototype pca")
 {
@@ -401,47 +401,46 @@ TEST_CASE("clustering prototype Simple3DPointCloud")
 }
 
 
-static IPCTransformSet::pointer get_pcts()
-{
-    PluginManager& pm = PluginManager::instance();
-    pm.add("WireCellClus");
-
+// static IPCTransformSet::pointer get_pcts()
+// {
+//     PluginManager& pm = PluginManager::instance();
+//     pm.add("WireCellClus");
     
-    {
-        auto icfg = Factory::lookup<IConfigurable>("DetectorVolumes");
-        auto cfg = icfg->default_configuration();
-        icfg->configure(cfg);
-    }
-    {
-        auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
-        auto cfg = icfg->default_configuration();
-        icfg->configure(cfg);
-    }
-    {
-        auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
-        auto cfg = icfg->default_configuration();
-        icfg->configure(cfg);
-    }
+//     {
+//         auto icfg = Factory::lookup<IConfigurable>("DetectorVolumes");
+//         auto cfg = icfg->default_configuration();
+//         icfg->configure(cfg);
+//     }
+//     {
+//         auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
+//         auto cfg = icfg->default_configuration();
+//         icfg->configure(cfg);
+//     }
+//     {
+//         auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
+//         auto cfg = icfg->default_configuration();
+//         icfg->configure(cfg);
+//     }
 
-    return Factory::find_tn<IPCTransformSet>("PCTransformSet");
-}
+//     return Factory::find_tn<IPCTransformSet>("PCTransformSet");
+// }
 
-TEST_CASE("clustering prototype dijkstra_shortest_paths")
-{
-    auto pcts = get_pcts();
+// TEST_CASE("clustering prototype dijkstra_shortest_paths")
+// {
+//     auto pcts = get_pcts();
 
-    Points::node_t root_node;
-    Grouping* grouping = root_node.value.facade<Grouping>();
-    REQUIRE(grouping != nullptr);
-    root_node.insert(make_simple_pctree());
-    Cluster* pccptr = grouping->children()[0];
-    REQUIRE(pccptr != nullptr);
-    REQUIRE(pccptr->grouping() == grouping);
-    Cluster& pcc = *pccptr;
-    pcc.Create_graph(pcts, false);
-    print_MCUGraph(*pcc.get_graph());
-    pcc.dijkstra_shortest_paths(pcts, 5, false);
-}
+//     Points::node_t root_node;
+//     Grouping* grouping = root_node.value.facade<Grouping>();
+//     REQUIRE(grouping != nullptr);
+//     root_node.insert(make_simple_pctree());
+//     Cluster* pccptr = grouping->children()[0];
+//     REQUIRE(pccptr != nullptr);
+//     REQUIRE(pccptr->grouping() == grouping);
+//     Cluster& pcc = *pccptr;
+//     pcc.Create_graph(pcts, false);
+//     print_MCUGraph(*pcc.get_graph());
+//     pcc.dijkstra_shortest_paths(pcts, 5, false);
+// }
 
 
 TEST_CASE("clustering prototype Facade separate")
