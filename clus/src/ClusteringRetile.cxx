@@ -37,6 +37,10 @@ static void debug_cluster(WCC::Cluster* cluster, const std::string& ctx)
 // Now can handle all APA/Faces 
 WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
 {
+    NeedDV::configure(cfg);
+    NeedPCTS::configure(cfg);
+    NeedScope::configure(cfg);
+
     // auto sampler = get<std::string>(cfg, "sampler","");
     // if (sampler.empty()) {
     //     raise<ValueError>("ClusteringRetile requires an IBlobSampler type/name in 'sampler' parameter");
@@ -91,26 +95,11 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
             m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kWlayer));
         }
     }
-
-
-
-    
-    
-
-
     
     // Add time cut configuration
     m_cut_time_low = get(cfg, "cut_time_low", -1e9);
     m_cut_time_high = get(cfg, "cut_time_high", 1e9);
 
-    m_pc_name = convert<std::string>(cfg["pc_name"], "3d");
-    if (!cfg["coords"].isNull()) m_coords = convert<std::vector<std::string>>(cfg["coords"],{"x","y","z"});
-
-    // Get the detector volumes pointer
-    m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
-    if (m_dv == nullptr) {
-        raise<ValueError>("failed to get IDetectorVolumes %s", cfg["detector_volumes"].asString());
-    }
 }
 
 
@@ -552,15 +541,12 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
     // std::cout << shadow.children().size() << std::endl;
     // const auto [angle_u,angle_v,angle_w] = original.wire_angles();
 
-    Tree::Scope scope{m_pc_name, m_coords};
- 
-
 
     for (auto* orig_cluster : original.children()) {
 
-        if (!orig_cluster->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
-        if (orig_cluster->get_default_scope().hash() != scope.hash()) {
-            orig_cluster->set_default_scope(scope);
+        if (!orig_cluster->get_scope_filter(m_scope)) continue; // move on if the cluster is not in the scope filter ...
+        if (orig_cluster->get_default_scope().hash() != m_scope.hash()) {
+            orig_cluster->set_default_scope(m_scope);
         }
 
         // find the flash time:
@@ -626,7 +612,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     //std::cout << pair_points.first << " " << pair_points.second << std::endl;
                     int high_idx = cluster->get_closest_point_index(pair_points.first);
                     int low_idx = cluster->get_closest_point_index(pair_points.second);
-                    cluster->dijkstra_shortest_paths(high_idx, false);
+                    cluster->dijkstra_shortest_paths(m_pcts, high_idx, false);
                     cluster->cal_shortest_path(low_idx);
 
                     auto wpids = cluster->wpids_blob();
@@ -766,7 +752,7 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
                     if (default_scope.hash()!=raw_scope.hash()){
                         auto correction_name = cluster->get_scope_transform(default_scope);
                         // std::vector<int> filter_results = c
-                        shad_cluster.add_corrected_points(m_dv, correction_name);
+                        shad_cluster.add_corrected_points(m_pcts, correction_name);
                         // Get the new scope with corrected points
                         const auto correction_scope = shad_cluster.get_scope(correction_name);
                         // // Set this as the default scope for viewing

@@ -19,15 +19,17 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // All APA Faces 
-void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping, const IDetectorVolumes::pointer dv ,
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords,            // coordinate names
+void WireCell::PointCloud::Facade::clustering_examine_bundles(
+    Grouping& live_grouping, 
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope,
     const bool use_ctpc)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
 
     std::vector<Cluster *> live_clusters = live_grouping.children();
-    Tree::Scope scope{pc_name, coords};
+
     for (size_t i=0;i!=live_clusters.size();i++){
         if (!live_clusters.at(i)->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
         if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
@@ -41,7 +43,7 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
         // currently reset the cc component (todo: find the main component)
 
         // do the examine graph
-        auto b2groupid = live_clusters.at(i)->examine_graph(dv, true);
+        auto b2groupid = live_clusters.at(i)->examine_graph(dv, pcts, true);
         
         bool flag_largest = false;
         // Compare old and new cluster groupings

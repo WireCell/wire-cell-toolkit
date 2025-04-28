@@ -13,9 +13,11 @@ using namespace WireCell::PointCloud::Tree;
 
 
 // handle all APA/Face
-void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try, IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
-    )
+void WireCell::PointCloud::Facade::clustering_neutrino(
+    Grouping &live_grouping,
+    int num_try, 
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -115,7 +117,6 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     // find all the clusters that are inside the box ...
     std::vector<Cluster *> contained_clusters;
     std::vector<Cluster *> candidate_clusters;
-    Tree::Scope scope{pc_name, coords};
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
@@ -346,7 +347,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
                     const double orig_cluster_length = cluster1->get_length();
                     // std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
-                    const auto b2id = Separate_2(cluster1, pc_name, coords, 2.5 * units::cm);
+                    const auto b2id = Separate_2(cluster1, scope, 2.5 * units::cm);
                     // false: do not remove the cluster1
                     auto scope_transform = cluster1->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
@@ -531,7 +532,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
                     // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
-                    const auto b2id = Separate_2(cluster2, pc_name, coords, 2.5 * units::cm);
+                    const auto b2id = Separate_2(cluster2, scope, 2.5 * units::cm);
                     auto scope_transform = cluster2->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
                     

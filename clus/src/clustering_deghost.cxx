@@ -19,9 +19,11 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // This can handle entire APA (including all faces) data
-void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, IDetectorVolumes::pointer dv,
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords,            // coordinate names
+void WireCell::PointCloud::Facade::clustering_deghost(
+    Grouping& live_grouping,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope,
     const bool use_ctpc, double length_cut)
 {
     // Get all the wire plane IDs from the grouping
@@ -72,7 +74,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
   
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    Tree::Scope scope{pc_name, coords};
+
     // sort the clusters by length using a lambda function
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
@@ -112,7 +114,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
             global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
-                live_clusters.at(i)->construct_skeleton(use_ctpc);
+                live_clusters.at(i)->construct_skeleton(pcts, use_ctpc);
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                 global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
             }
@@ -636,7 +638,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                     // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                     global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                        live_clusters.at(i)->construct_skeleton(use_ctpc);
+                        live_clusters.at(i)->construct_skeleton(pcts, use_ctpc);
                         // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                         global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params,true ));
                     }
@@ -647,7 +649,7 @@ void WireCell::PointCloud::Facade::clustering_deghost(Grouping& live_grouping, I
                 // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                 global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                    live_clusters.at(i)->construct_skeleton(use_ctpc);
+                    live_clusters.at(i)->construct_skeleton(pcts, use_ctpc);
                     // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                     global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
                 }

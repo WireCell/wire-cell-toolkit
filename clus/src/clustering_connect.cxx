@@ -21,9 +21,10 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // This is for only one APA/face
-void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, const IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
-    )
+void WireCell::PointCloud::Facade::clustering_connect1(
+    Grouping& live_grouping, 
+    const IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope)
 {
     // Check that live_grouping has less than one wpid
     if (live_grouping.wpids().size() > 1) {
@@ -88,7 +89,7 @@ void WireCell::PointCloud::Facade::clustering_connect1(Grouping& live_grouping, 
 
     // auto global_point_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
-    Tree::Scope scope{pc_name, coords};
+
     for (Cluster *cluster : live_grouping.children()) {
         if(!cluster->get_scope_filter(scope)) continue;
         // global_point_cloud->add_points(cluster, 0);

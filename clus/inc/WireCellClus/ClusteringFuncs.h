@@ -1,21 +1,36 @@
-#include "WireCellClus/MultiAlgBlobClustering.h"
-#include "WireCellClus/Facade.h"
-#include "WireCellClus/ClusteringRetile.h"
+/**
+
+   This implements a hard-wired factory pattern.
+
+   It desperately needs refactoring. 
+*/
+
+#ifndef WIRECELLCLUS_CLUSTERINGFUNCS
+#define WIRECELLCLUS_CLUSTERINGFUNCS
+
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
+#include "WireCellUtil/Graph.h"
+
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensorSet.h"
 
-#include "WireCellUtil/Graph.h"
+
+#include "WireCellClus/MultiAlgBlobClustering.h"
+#include "WireCellClus/Facade.h"
+#include "WireCellClus/ClusteringRetile.h"
+#include "WireCellClus/IPCTransform.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
 
 
 #include <fstream>
 
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::PointCloud::Facade { // fixme this is not the right namespace!
     using namespace WireCell::PointCloud::Tree;
+    using namespace WireCell::Clus;
 
     struct ClusterLess {
         bool operator()(const Cluster* a, const Cluster* b) const {
@@ -61,39 +76,29 @@ namespace WireCell::PointCloud::Facade {
      */
     std::tuple<geo_point_t, double, double, double> extract_geometry_params(
         const Grouping& grouping,
-        const IDetectorVolumes::pointer dv);
+        IDetectorVolumes::pointer dv);
 
 
 
     // only for testing/development
     void clustering_test(Grouping& live_clusters,
-                              const Grouping& dead_clusters,
-                              cluster_set_t& cluster_connected_dead,
-                              const IDetectorVolumes::pointer dv,
-                                const std::string& pc_name,            // point cloud name
-                                const std::vector<std::string>& coords // coordinate names
-    );
-    class ClusteringTest {
+                         const Grouping& dead_clusters,
+                         cluster_set_t& cluster_connected_dead,
+                         IDetectorVolumes::pointer dv,
+                         IPCTransformSet::pointer pcts);
+
+    class ClusteringTest : private NeedDV, private NeedPCTS {
        public:
         ClusteringTest(const WireCell::Configuration& config)
         {
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+            NeedDV::configure(config);
+            NeedPCTS::configure(config);
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_test(live_clusters, dead_clusters, cluster_connected_dead, m_dv, pc_name, coords);
+            clustering_test(live_clusters, dead_clusters, cluster_connected_dead, m_dv, m_pcts);
         }
-
-       private:
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
     
     // clustering_live_dead.cxx
@@ -102,36 +107,26 @@ namespace WireCell::PointCloud::Facade {
                               const Grouping& dead_clusters,
                               cluster_set_t& cluster_connected_dead,  // in/out
                               const int dead_live_overlap_offset,      // specific params
-                              const IDetectorVolumes::pointer dv,      // detector volumes
-                              const std::string& pc_name,            // point cloud name
-                              const std::vector<std::string>& coords // coordinate names
-    );
-    class ClusteringLiveDead {
-       public:
-        ClusteringLiveDead(const WireCell::Configuration& config)
-        {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+                              IDetectorVolumes::pointer dv,      // detector volumes
+                              const Tree::Scope& scope);
+    
+    class ClusteringLiveDead : private NeedDV, private NeedScope {
+    public:
+        ClusteringLiveDead(const WireCell::Configuration& config) {
+            NeedDV::configure(config);
+            NeedScope::configure(config);
+
             // FIXME: throw if not found?
             dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
             // std::cout << "Test: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << std::endl;
-            clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_, m_dv, pc_name, coords);
+            clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_, m_dv, m_scope);
         }
 
-       private:
+    private:
         int dead_live_overlap_offset_{2};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
 
@@ -156,93 +151,73 @@ namespace WireCell::PointCloud::Facade {
     // second function ...
     void clustering_extend(Grouping& live_clusters,
                            cluster_set_t& cluster_connected_dead,            // in/out
-                           const IDetectorVolumes::pointer dv,      // detector volumes
-                           const std::string& pc_name,                             // point cloud name
-                           const std::vector<std::string>& coords, // coordinate names
+                           IDetectorVolumes::pointer dv,      // detector volumes
+                           const Tree::Scope& scope,
                            const int flag,                                                //
                            const double length_cut = 150*units::cm,                       //
                            const int num_try = 0,                                         //
                            const double length_2_cut = 3*units::cm,                       //
                            const int num_dead_try =3                                      //
-			   );
-    class ClusteringExtend {
-       public:
+        );
+
+    class ClusteringExtend : private NeedDV, private NeedScope {
+    public:
         ClusteringExtend(const WireCell::Configuration& config)
-        {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
+            {
+                NeedDV::configure(config);
+                NeedScope::configure(config);
+
+                flag_ = get(config, "flag", 0);
+                length_cut_ = get(config, "length_cut", 150*units::cm);
+                num_try_ = get(config, "num_try", 0);
+                length_2_cut_ = get(config, "length_2_cut", 3*units::cm);
+                num_dead_try_ = get(config, "num_dead_try", 3);
             }
 
-            // FIXME: throw if not found?
-            flag_ = get(config, "flag", 0);
-            length_cut_ = get(config, "length_cut", 150*units::cm);
-            num_try_ = get(config, "num_try", 0);
-            length_2_cut_ = get(config, "length_2_cut", 3*units::cm);
-            num_dead_try_ = get(config, "num_dead_try", 3);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
+            clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_extend(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
-        }
-
-       private:
+    private:
         int flag_{0};
         double length_cut_{150*units::cm};
         int num_try_{0};
         double length_2_cut_{3*units::cm};
         int num_dead_try_{3};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
-    class ClusteringExtendLoop {
-       public:
-        ClusteringExtendLoop(const WireCell::Configuration& config)
-        {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+    
+    class ClusteringExtendLoop : private NeedDV, private NeedScope {
+    public:
+        ClusteringExtendLoop(const WireCell::Configuration& config) {
+            NeedDV::configure(config);
+            NeedScope::configure(config);
 
-            // FIXME: throw if not found?
             num_try_ = get(config, "num_try", 0);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
             // for very busy events do less ...
             int num_try = num_try_;
             if (live_clusters.nchildren() > 1100) num_try = 1;
             for (int i = 0; i != num_try; i++) {
                 // deal with prolong case
-                clustering_extend(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, 1, 150*units::cm, 0);
+                clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 1, 150*units::cm, 0);
                 // deal with parallel case
-                clustering_extend(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, 2, 30*units::cm, 0);
+                clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 2, 30*units::cm, 0);
                 // extension regular case
-                clustering_extend(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, 3, 15*units::cm, 0);
+                clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 3, 15*units::cm, 0);
                 // extension ones connected to dead region ...
                 if (i == 0) {
-                    clustering_extend(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, 4, 60 * units::cm, i);
+                    clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 4, 60 * units::cm, i);
                 }
                 else {
-                    clustering_extend(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, 4, 35 * units::cm, i);
+                    clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 4, 35 * units::cm, i);
                 }
             }
         }
 
        private:
         int num_try_{0};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
     bool Clustering_4th_prol(const Cluster& cluster1,
@@ -263,133 +238,115 @@ namespace WireCell::PointCloud::Facade {
 			    const Cluster& cluster2,
 			    double length_1, double length_2,
 			    geo_point_t p1, double length_cut,  
-                const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv);
+                const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  IDetectorVolumes::pointer dv);
 
     bool Clustering_4th_dead(const Cluster& cluster1,
 			     const Cluster& cluster2,
 			     double length_1, double length_2, double length_cut, int num_dead_try, 
-                 const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv);
+                 const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  IDetectorVolumes::pointer dv);
       
 
     // clustering_regular.cxx
     // third function 
     void clustering_regular(Grouping& live_clusters,
                             cluster_set_t& cluster_connected_dead,            // in/out
-                            const IDetectorVolumes::pointer dv,      // detector volumes
-                            const std::string& pc_name,                             // point cloud name
-                            const std::vector<std::string>& coords, // coordinate names
+                            IDetectorVolumes::pointer dv,      // detector volumes
+                            const Tree::Scope& scope,
                             const double length_cut = 45*units::cm,                                       //
                             bool flag_enable_extend = true                                       //
     );
-    class ClusteringRegular {
+    class ClusteringRegular : private NeedDV, private NeedScope {
        public:
         ClusteringRegular(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+            NeedDV::configure(config);
+            NeedScope::configure(config);
 
-            // FIXME: throw if not found?
             length_cut_ = get(config, "length_cut", 45*units::cm);
             flag_enable_extend_ = get(config, "flag_enable_extend", true);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_regular(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, length_cut_, flag_enable_extend_);
+            clustering_regular(live_clusters, cluster_connected_dead, m_dv, m_scope, length_cut_, flag_enable_extend_);
         }
 
        private:
         double length_cut_{45*units::cm};
         bool flag_enable_extend_{true};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
     bool Clustering_1st_round(const Cluster& cluster1,
 			      const Cluster& cluster2,
 			      double length_1,
 			      double length_2,
-                  const std::map<WirePlaneId, geo_point_t>& wpid_U_dir, const std::map<WirePlaneId, geo_point_t>& wpid_V_dir, const std::map<WirePlaneId, geo_point_t>& wpid_W_dir,
-                  const IDetectorVolumes::pointer dv,
-                //   double angle_u, double angle_v, double angle_w,
+                              const std::map<WirePlaneId, geo_point_t>& wpid_U_dir, 
+                              const std::map<WirePlaneId, geo_point_t>& wpid_V_dir, 
+                              const std::map<WirePlaneId, geo_point_t>& wpid_W_dir,
+                              IDetectorVolumes::pointer dv,
+                              //   double angle_u, double angle_v, double angle_w,
 			      double length_cut = 45*units::cm,
 			      bool flag_enable_extend = true);
 
     // clustering_parallel_prolong.cxx:
     void clustering_parallel_prolong(Grouping& live_clusters,
                                      cluster_set_t& cluster_connected_dead, // in/out
-                                     const IDetectorVolumes::pointer dv,      // detector volumes
-                                        const std::string& pc_name,            // point cloud name
-                                        const std::vector<std::string>& coords, // coordinate names
+                                     IDetectorVolumes::pointer dv,      // detector volumes
+                                     const Tree::Scope& scope,
                                      const double length_cut = 35*units::cm
-    );
-    class ClusteringParallelProlong {
-       public:
-        ClusteringParallelProlong(const WireCell::Configuration& config)
-        {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+        );
+
+    class ClusteringParallelProlong : private NeedDV, private NeedScope {
+    public:
+        ClusteringParallelProlong(const WireCell::Configuration& config) {
+            NeedDV::configure(config);
+            NeedScope::configure(config);
 
             // FIXME: throw if not found?
             length_cut_ = get(config, "length_cut", 35*units::cm);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_parallel_prolong(live_clusters, cluster_connected_dead, m_dv, pc_name, coords, length_cut_);
-        }
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t& cluster_connected_dead) const
+            {
+                clustering_parallel_prolong(live_clusters, cluster_connected_dead, m_dv, m_scope, length_cut_);
+            }
 
-       private:
+    private:
         double length_cut_{35*units::cm};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
     bool Clustering_2nd_round(const Cluster& cluster1,
 			      const Cluster& cluster2,
 			      double length_1,
 			      double length_2,
-                  const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv,
+                              const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir,
+                              const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir,
+                              const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                 
+                              IDetectorVolumes::pointer dv,
 			      double length_cut = 35*units::cm);
     
     // clustering_close.cxx
     void clustering_close(Grouping& live_clusters,           // 
                           cluster_set_t& cluster_connected_dead, // in/out
-                          const std::string& pc_name,            // point cloud name
-                          const std::vector<std::string>& coords, // coordinate names
+                          const Tree::Scope& scope,
                           const double length_cut = 1*units::cm //
     );
-    class ClusteringClose {
-       public:
+    class ClusteringClose : private NeedScope {
+    public:
         ClusteringClose(const WireCell::Configuration& config)
         {
-            // FIXME: throw if not found?
+            NeedScope::configure(config);
+
             length_cut_ = get(config, "length_cut", 1*units::cm);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
         void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
         {
-            clustering_close(live_clusters, cluster_connected_dead, pc_name, coords, length_cut_);
+            clustering_close(live_clusters, cluster_connected_dead, m_scope, length_cut_);
         }
 
        private:
         double length_cut_{1*units::cm};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
     };
 
     bool Clustering_3rd_round( const Cluster& cluster1,
@@ -404,279 +361,212 @@ namespace WireCell::PointCloud::Facade {
     //                          std::map<int, std::pair<double, double>>& dead_w_index);
 
     void clustering_separate(Grouping& live_grouping,
-                            const IDetectorVolumes::pointer dv,      // detector volumes
-                            const std::string& pc_name,            // point cloud name
-                            const std::vector<std::string>& coords, // coordinate names
+                             IDetectorVolumes::pointer dv,      // detector volumes
+                             IPCTransformSet::pointer pcts,
+                             const Tree::Scope& scope, 
                              const bool use_ctpc);
-    class ClusteringSeparate {
-       public:
+    class ClusteringSeparate : private NeedDV, private NeedPCTS, private NeedScope {
+    public:
         ClusteringSeparate(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+            NeedDV::configure(config);
+            NeedPCTS::configure(config);
+            NeedScope::configure(config);
 
-            // FIXME: throw if not found?
             use_ctpc_ = get(config, "use_ctpc", true);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
-            clustering_separate(live_clusters, m_dv, pc_name, coords, use_ctpc_);
+            clustering_separate(live_clusters, m_dv, m_pcts, m_scope, use_ctpc_);
         }
 
-       private:
+    private:
         double use_ctpc_{true};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
-    void clustering_connect1(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
-        const std::string& pc_name,            // point cloud name
-        const std::vector<std::string>& coords // coordinate names 
-    );      
-    class ClusteringConnect1 {
-       public:
-        ClusteringConnect1(const WireCell::Configuration& config)
-        {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+
+    void clustering_connect1(Grouping& live_grouping, 
+                             IDetectorVolumes::pointer dv,
+                             const Tree::Scope& scope);
+
+    class ClusteringConnect1 : private NeedDV, private NeedScope {
+    public:
+        ClusteringConnect1(const WireCell::Configuration& config) {
+            NeedDV::configure(config);
+            NeedScope::configure(config);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_connect1(live_clusters, m_dv, pc_name, coords);
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+            clustering_connect1(live_clusters, m_dv, m_scope);
         }
-
-       private:
-            std::string pc_name{"3d"};
-            std::vector<std::string> coords{"x", "y", "z"};
-           IDetectorVolumes::pointer m_dv;
     };
 
     void clustering_deghost(Grouping& live_grouping,
-                             const IDetectorVolumes::pointer dv,      // detector volumes
-                             const std::string& pc_name,            // point cloud name
-                             const std::vector<std::string>& coords, // coordinate names
+                            IDetectorVolumes::pointer dv,      // detector volumes
+                            IPCTransformSet::pointer pcts,
+                            const Tree::Scope& scope,
                             const bool use_ctpc,
                             double length_cut = 0);
-    class ClusteringDeGhost {
-       public:
-        ClusteringDeGhost(const WireCell::Configuration& config)
+    class ClusteringDeGhost : private NeedDV, private NeedPCTS, private NeedScope {
+    public:
+        ClusteringDeGhost(const WireCell::Configuration& config) 
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+            NeedDV::configure(config);
+            NeedPCTS::configure(config);
+            NeedScope::configure(config);
 
-            // FIXME: throw if not found?
             use_ctpc_ = get(config, "use_ctpc", true);
             length_cut_ = get(config, "length_cut", 0);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const 
         {
-            clustering_deghost(live_clusters, m_dv, pc_name, coords,  use_ctpc_, length_cut_);
+            clustering_deghost(live_clusters, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
         }
 
-       private:
+    private:
         double use_ctpc_{true};
         double length_cut_{0};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
     // this is a function to test the implementation of CT point cloud ...
-    void clustering_ctpointcloud(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,            // point cloud name
-    const std::vector<std::string>& coords // coordinate names 
-    );
-    class ClusteringCTPointCloud {
-       public:
+    void clustering_ctpointcloud(Grouping& live_grouping,
+                                 IDetectorVolumes::pointer dv,
+                                 IPCTransformSet::pointer pcts);
+    class ClusteringCTPointCloud : private NeedDV, private NeedPCTS {
+    public:
         ClusteringCTPointCloud(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+            NeedDV::configure(config);
+            NeedPCTS::configure(config);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
-            clustering_ctpointcloud(live_clusters, m_dv, pc_name, coords);
+            clustering_ctpointcloud(live_clusters, m_dv, m_pcts);
         }
-
-       private:
-           IDetectorVolumes::pointer m_dv;
-           std::string pc_name{"3d"};
-           std::vector<std::string> coords{"x", "y", "z"};
     };
 
 
     // this is a function to test the implementation of examine bundles ...
-    void clustering_examine_bundles(Grouping& live_grouping, const IDetectorVolumes::pointer dv, 
-        const std::string& pc_name,            // point cloud name
-        const std::vector<std::string>& coords, // coordinate names 
+    void clustering_examine_bundles(
+        Grouping& live_grouping,
+        IDetectorVolumes::pointer dv, 
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope,
         const bool use_ctpc);
-    class ClusteringExamineBundles {
+
+    class ClusteringExamineBundles : private NeedDV, private NeedPCTS, private NeedScope {
        public:
         ClusteringExamineBundles(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+            NeedDV::configure(config);
+            NeedPCTS::configure(config);
+            NeedScope::configure(config);
+
+            // note: there is/was no way to configure use_ctpc
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
-            clustering_examine_bundles(live_clusters, m_dv, pc_name, coords, use_ctpc_);
+            clustering_examine_bundles(live_clusters, m_dv, m_pcts, m_scope, use_ctpc_);
         }
-
-       private:
+        
+    private:
         double use_ctpc_{true};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
 
-    void clustering_examine_x_boundary(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,            // point cloud name
-    const std::vector<std::string>& coords // coordinate names 
-);
-    class ClusteringExamineXBoundary {
-       public:
+    void clustering_examine_x_boundary(
+        Grouping& live_grouping, 
+        IDetectorVolumes::pointer dv,
+        const Tree::Scope& scope
+        );
+
+    class ClusteringExamineXBoundary : private NeedDV, private NeedScope {
+    public:
         ClusteringExamineXBoundary(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+            NeedDV::configure(config);
+            NeedScope::configure(config);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
-            clustering_examine_x_boundary(live_clusters, m_dv, pc_name, coords);
+            clustering_examine_x_boundary(live_clusters, m_dv, m_scope);
         }
 
-       private:
-       std::string pc_name{"3d"};
-       std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
-    void clustering_protect_overclustering(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,            // point cloud name
-    const std::vector<std::string>& coords // coordinate names
-    );
-    class ClusteringProtectOverClustering {
-       public:
-        ClusteringProtectOverClustering(const WireCell::Configuration& config)
-        {
-             // Get the detector volumes pointer
-             m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-             if (m_dv == nullptr) {
-                 raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-             }
-             pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+    void clustering_protect_overclustering(
+        Grouping &live_grouping,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope
+        );
+
+    class ClusteringProtectOverClustering : private NeedDV, private NeedPCTS, private NeedScope {
+    public:
+        ClusteringProtectOverClustering(const WireCell::Configuration& config) {
+            NeedDV::configure(config);
+            NeedPCTS::configure(config);
+            NeedScope::configure(config);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_protect_overclustering(live_clusters, m_dv, pc_name, coords);
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t& ) const {
+            clustering_protect_overclustering(live_clusters, m_dv, m_pcts, m_scope);
         }
 
-       private:
-       std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-       IDetectorVolumes::pointer m_dv;
     };
 
-    void clustering_neutrino(Grouping &live_grouping, int num_try, const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,            // point cloud name
-    const std::vector<std::string>& coords // coordinate names
-);
-    class ClusteringNeutrino {
-       public:
+    void clustering_neutrino(
+        Grouping &live_grouping, 
+        int num_try, 
+        IDetectorVolumes::pointer dv,
+        const Tree::Scope& scope
+        );
+
+    class ClusteringNeutrino : private NeedDV, private NeedScope {
+    public:
         ClusteringNeutrino(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+            NeedDV::configure(config);
+            NeedScope::configure(config);
 
-            // FIXME: throw if not found?
             num_try_ = get(config, "num_try", 1);
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
             for (int i = 0; i != num_try_; i++) {
-                clustering_neutrino(live_clusters, i, m_dv, pc_name, coords);
+                clustering_neutrino(live_clusters, i, m_dv, m_scope);
             }
         }
 
-       private:
+    private:
         int num_try_{1};
-        std::string pc_name{"3d"};
-        std::vector<std::string> coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
     };
 
-    void clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,            // point cloud name
-    const std::vector<std::string>& coords // coordinate names
+    void clustering_isolated(
+        Grouping& live_grouping,
+        IDetectorVolumes::pointer dv,
+        const Tree::Scope& scope
     );
-    class ClusteringIsolated {
-       public:
+
+    class ClusteringIsolated : private NeedDV, private NeedScope {
+    public:
         ClusteringIsolated(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
+            NeedDV::configure(config);
+            NeedScope::configure(config);
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
-            return clustering_isolated(live_clusters, m_dv, pc_name, coords);
+            return clustering_isolated(live_clusters, m_dv, m_scope);
         }
 
-       private:
-       std::string pc_name{"3d"};
-       std::vector<std::string> coords{"x", "y", "z"};
-          IDetectorVolumes::pointer m_dv;
     };
 
 
@@ -685,7 +575,7 @@ namespace WireCell::PointCloud::Facade {
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
-    bool JudgeSeparateDec_2(const Cluster* cluster, const IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
+    bool JudgeSeparateDec_2(const Cluster* cluster, IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length);
     
@@ -694,50 +584,44 @@ namespace WireCell::PointCloud::Facade {
 
 
     std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
-                                                         std::vector<geo_point_t> &boundary_points,
-                                                         std::vector<geo_point_t> &independent_points,
-                                                         double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, Tree::Scope& scope);
+                                      std::vector<geo_point_t> &boundary_points,
+                                      std::vector<geo_point_t> &independent_points,
+                                      double length, geo_point_t dir_cosmic, geo_point_t dir_beam, 
+                                      IDetectorVolumes::pointer dv, 
+                                      IPCTransformSet::pointer pcts,
+                                      const Tree::Scope& scope);
 
     std::vector<int> Separate_2(Cluster *cluster, 
-                                const std::string& pc_name,            // point cloud name
-                                const std::vector<std::string>& coords, // coordinate names
+                                const Tree::Scope& scope,
                                 const double dis_cut =  5*units::cm);
 
 
     // clustering_switch_scope.cxx
-    void clustering_switch_scope(Grouping& live_grouping,
-        const IDetectorVolumes::pointer dv,      // detector volumes
-        const std::string& pc_name,              // point cloud name
-        const std::vector<std::string>& coords,  // coordinate names
-        const std::string& correction_name      // name of correction to apply
+    void clustering_switch_scope(
+        Grouping& live_grouping,
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope,
+        const std::string& correction_name // name of correction to apply
     );
 
-    class ClusteringSwitchScope {
-        public:
+    class ClusteringSwitchScope : private NeedPCTS, private NeedScope {
+    public:
         ClusteringSwitchScope(const WireCell::Configuration& config)
         {
-            // Get the detector volumes pointer
-            m_dv = Factory::find_tn<IDetectorVolumes>(config["detector_volumes"].asString());
-            if (m_dv == nullptr) {
-                raise<ValueError>("failed to get IDetectorVolumes %s", config["detector_volumes"].asString());
-            }
+            NeedPCTS::configure(config);
+            NeedScope::configure(config);
 
             // Get configuration parameters
             correction_name_ = convert<std::string>(config["correction_name"], "T0Correction");
-            pc_name = convert<std::string>(config["pc_name"], "3d");
-            if (!config["coords"].isNull()) coords = convert<std::vector<std::string>>(config["coords"],{"x","y","z"});
         }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
+        void operator()(Grouping& live_clusters, Grouping&, cluster_set_t&) const
         {
-            clustering_switch_scope(live_clusters, m_dv, pc_name, coords, correction_name_);
+            clustering_switch_scope(live_clusters, m_pcts, m_scope, correction_name_);
         }
 
-        private:
-            std::string correction_name_{"T0Correction"};
-            std::string pc_name{"3d"};
-            std::vector<std::string> coords{"x", "y", "z"};
-            IDetectorVolumes::pointer m_dv;
+    private:
+        std::string correction_name_{"T0Correction"};
     };
 
     inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
@@ -802,3 +686,5 @@ namespace WireCell::PointCloud::Facade {
         }
     }
 }  // namespace WireCell::PointCloud::Facade
+
+#endif

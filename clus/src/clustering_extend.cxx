@@ -15,8 +15,7 @@ void WireCell::PointCloud::Facade::clustering_extend(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
     const IDetectorVolumes::pointer dv,                // detector volumes
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords,            // coordinate names
+    const Tree::Scope& scope,
     const int flag,                                                //
     const double length_cut,                                       //
     const int num_try,                                             //
@@ -75,7 +74,6 @@ void WireCell::PointCloud::Facade::clustering_extend(
   std::map<const Cluster*, int> map_cluster_index;
   const auto& live_clusters = live_grouping.children();
   
-  Tree::Scope scope{pc_name, coords};
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;

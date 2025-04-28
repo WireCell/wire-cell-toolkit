@@ -18,6 +18,7 @@
 
 
 using namespace WireCell;
+using namespace WireCell::Clus;
 using namespace WireCell::PointCloud;
 using namespace WireCell::PointCloud::Facade;
 // using WireCell::PointCloud::Dataset;
@@ -86,11 +87,14 @@ const std::string Cluster::get_scope_transform(const Tree::Scope& scope) const{
     return it->second;
 }
 
-std::vector<int> Cluster::add_corrected_points(const IDetectorVolumes::pointer dv, const std::string &correction_name) {
+std::vector<int> Cluster::add_corrected_points(
+    Clus::IPCTransformSet::pointer pcts,
+    const std::string &correction_name) 
+{
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
     if (correction_name == "T0Correction") {
-        const auto& pct = dv->pc_transform("T0Correction");
+        const auto& pct = pcts->pc_transform("T0Correction");
         for (size_t iblob = 0; iblob < children().size(); ++iblob) {
             Blob* blob = children().at(iblob);
             auto &lpc_3d = blob->local_pcs().at("3d");
@@ -612,7 +616,7 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
 
 }
 
-bool Cluster::construct_skeleton(const bool use_ctpc)
+bool Cluster::construct_skeleton(IPCTransformSet::pointer pcts, const bool use_ctpc)
 {
     if (m_path_wcps.size() > 0) return false;
     // Calc_PCA();
@@ -664,7 +668,7 @@ bool Cluster::construct_skeleton(const bool use_ctpc)
         }
     }
 
-    dijkstra_shortest_paths(highest_index, use_ctpc);
+    dijkstra_shortest_paths(pcts, highest_index, use_ctpc);
     cal_shortest_path(lowest_index);
     return true;
 }
@@ -1833,15 +1837,15 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 }
 
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
-void Cluster::Create_graph(const bool use_ctpc) const
+void Cluster::Create_graph(Clus::IPCTransformSet::pointer pcts, const bool use_ctpc) const
 {
     // std::cout << "Create Graph!" << std::endl;
-    LogDebug("Create Graph! " << graph);
+    // LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
     m_graph = std::make_unique<MCUGraph>(npoints());
     // std::cout << "Test:" << "Create Graph!" << std::endl;
     Establish_close_connected_graph();
-    if (use_ctpc) Connect_graph(true);
+    if (use_ctpc) Connect_graph(pcts, true);
     Connect_graph();
 }
 
@@ -2350,7 +2354,8 @@ void Cluster::Establish_close_connected_graph() const
 
 }
 
-void Cluster::Connect_graph(const bool use_ctpc) const {
+void Cluster::Connect_graph(Clus::IPCTransformSet::pointer pcts,
+                            const bool use_ctpc) const {
 
     // now form the connected components
     std::vector<int> component(num_vertices(*m_graph));
@@ -2490,7 +2495,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
+                                const auto transform = pcts->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -2527,7 +2532,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
+                                const auto transform = pcts->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -2563,7 +2568,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
+                                const auto transform = pcts->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -2934,7 +2939,11 @@ void Cluster::Connect_graph() const{
 }
 
 
-void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::pointer dv, const bool use_ctpc) const {
+void Cluster::Connect_graph_overclustering_protection(
+    IDetectorVolumes::pointer dv, 
+    IPCTransformSet::pointer pcts,
+    const bool use_ctpc) const 
+{
     // Get all the wire plane IDs from the grouping
     const auto& wpids = grouping()->wpids();
 
@@ -3131,7 +3140,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
+                                const auto transform = pcts->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -3292,7 +3301,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
+                                const auto transform = pcts->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }                            
@@ -3380,7 +3389,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
                             if (get_default_scope().hash() != get_raw_scope().hash()){
-                                const auto transform = grouping()->get_detector_volumes()->pc_transform(get_scope_transform(m_default_scope));
+                                const auto transform = pcts->pc_transform(get_scope_transform(m_default_scope));
                                 double cluster_t0 = get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -3559,7 +3568,7 @@ void Cluster::Connect_graph_overclustering_protection(const IDetectorVolumes::po
 
 
 // In Facade_Cluster.cxx
-std::vector<int> Cluster::examine_graph(const IDetectorVolumes::pointer dv, const bool use_ctpc) const 
+std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc) const 
 {
     // Create new graph
     if (m_graph != nullptr) {
@@ -3572,7 +3581,7 @@ std::vector<int> Cluster::examine_graph(const IDetectorVolumes::pointer dv, cons
     Establish_close_connected_graph();
     
     // Connect using overclustering protection (not easy to debug ...)
-    Connect_graph_overclustering_protection(dv, use_ctpc); 
+    Connect_graph_overclustering_protection(dv, pcts, use_ctpc); 
     
     // Find connected components
     std::vector<int> component(num_vertices(*m_graph));
@@ -3600,9 +3609,12 @@ std::vector<int> Cluster::examine_graph(const IDetectorVolumes::pointer dv, cons
     return b2groupid;
 }
 
-void Cluster::dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc) const
+void Cluster::dijkstra_shortest_paths(IPCTransformSet::pointer pcts, const size_t pt_idx, const bool use_ctpc) const
 {
-    if (m_graph == nullptr) Create_graph(use_ctpc);
+    if (m_graph == nullptr) {
+        Create_graph(pcts, use_ctpc);
+    }
+
     if ((int)pt_idx == m_source_pt_index) return;
     m_source_pt_index = pt_idx;
     m_parents.resize(num_vertices(*m_graph));
@@ -4086,7 +4098,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
     return b2groupid;
 }
 
-bool Cluster::judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer dv, const double asy_cut, const double occupied_cut)
+bool Cluster::judge_vertex(geo_point_t& p_test, IDetectorVolumes::pointer dv, const double asy_cut, const double occupied_cut)
 {
     p_test = calc_ave_pos(p_test, 3 * units::cm);
 

@@ -23,9 +23,10 @@ using namespace WireCell::PointCloud::Tree;
  * @return large cluster -> {small cluster, distance} 
 */
 // Handle all APA/Faces
-void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
+void WireCell::PointCloud::Facade::clustering_isolated(
+    Grouping& live_grouping,
+    const IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope
 )
 {
     // Get all the wire plane IDs from the grouping
@@ -65,7 +66,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
-    Tree::Scope scope{pc_name, coords};
+
     for (auto& cluster : live_clusters) {
           if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
@@ -125,7 +126,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping, 
             if (live_clusters.at(i)->get_length() < 60 * units::cm) {
                 if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir_abs, live_clusters.at(i)->get_length())) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
-                    const auto b2id = Separate_2(live_clusters.at(i), pc_name, coords, 2.5 * units::cm);
+                    const auto b2id = Separate_2(live_clusters.at(i), scope, 2.5 * units::cm);
                     std::set<int> ids;
                     for (const auto& id : b2id) {
                         ids.insert(id);

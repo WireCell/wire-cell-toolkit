@@ -15,11 +15,10 @@ using namespace WireCell::PointCloud::Tree;
 void WireCell::PointCloud::Facade::clustering_live_dead(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
-    cluster_set_t& cluster_connected_dead,            // in/out
-    const int dead_live_overlap_offset,                             // specific params
-    const IDetectorVolumes::pointer dv,                // detector volumes
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
+    cluster_set_t& cluster_connected_dead, // in/out
+    const int dead_live_overlap_offset,    // specific params
+    const IDetectorVolumes::pointer dv,    // detector volumes
+    const Tree::Scope& scope
 )
 {
     using spdlog::debug;
@@ -58,12 +57,11 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
     std::map<const Cluster*, std::vector<std::vector<const Blob*>>> dead_live_mcells_mapping;
 
     std::vector<Cluster*> live_clusters = live_grouping.children(); // copy
-    // Set the default scope for all clusters in the live grouping ...
-    Tree::Scope scope{pc_name, coords};
+
     for (auto& cluster : live_clusters) {
           if (cluster->get_default_scope().hash() != scope.hash()) {
             cluster->set_default_scope(scope);
-            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+            // std::cout << "Test: Set default scope: " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
     }
 

@@ -421,6 +421,7 @@ namespace WireCell::PointCloud::Tree {
             m_global_to_local[global_index] = local_index;
         }
 
+        // Xin, this is bad.  You are conflating int's and size_t's.
         int global_to_local(size_t global_idx) const {
             auto it = m_global_to_local.find(global_idx);
             if (it != m_global_to_local.end()) {

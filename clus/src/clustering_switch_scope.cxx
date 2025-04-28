@@ -14,9 +14,8 @@ using namespace WireCell::PointCloud::Tree;
 
 void WireCell::PointCloud::Facade::clustering_switch_scope(
     Grouping& live_grouping,
-    const IDetectorVolumes::pointer dv,          // detector volumes
-    const std::string& pc_name,                  // point cloud name
-    const std::vector<std::string>& coords,      // coordinate names
+    const Clus::IPCTransformSet::pointer pcts,          // detector volumes
+    const Tree::Scope& default_scope,
     const std::string& correction_name          // name of correction to apply
 )
 {
@@ -31,8 +30,6 @@ void WireCell::PointCloud::Facade::clustering_switch_scope(
     // Get all clusters from the grouping
     std::vector<Cluster*> live_clusters = live_grouping.children(); // copy
     
-    // Set the default scope for all clusters in the live grouping
-    Tree::Scope default_scope{pc_name, coords};
     
     // std::cout << "Test: " << pc_name << " " << correction_name << " " << live_clusters.size() << std::endl;
 
@@ -49,7 +46,7 @@ void WireCell::PointCloud::Facade::clustering_switch_scope(
             
             // Add corrected points - this returns filter values for each blob
             // cluster->set_cluster_t0(-1000 * units::us); // Set cluster t0 for correction
-            std::vector<int> filter_results = cluster->add_corrected_points(dv, correction_name);
+            std::vector<int> filter_results = cluster->add_corrected_points(pcts, correction_name);
             // Get the new scope with corrected points
             const auto correction_scope = cluster->get_scope(correction_name);
 

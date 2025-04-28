@@ -13,9 +13,11 @@ using namespace WireCell::PointCloud::Tree;
 
 
 // This is a test function, not used in clustering
-void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_grouping, IDetectorVolumes::pointer dv, const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
-    ){
+void WireCell::PointCloud::Facade::clustering_ctpointcloud(
+    Grouping& live_grouping,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts)
+{
 
     // test a few different functions and then print out ...
     std::cout << "Test CTPointCloud" << std::endl;
@@ -193,7 +195,7 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
             auto start_wcpoint_idx = live_cluster->get_closest_point_index(points.first);
             auto end_wcpoint_idx = live_cluster->get_closest_point_index(points.second);
 
-            live_cluster->dijkstra_shortest_paths(start_wcpoint_idx, true);
+            live_cluster->dijkstra_shortest_paths(pcts, start_wcpoint_idx, true);
             live_cluster->cal_shortest_path(end_wcpoint_idx);
 
             auto indices = live_cluster->get_path_wcps();
@@ -562,7 +564,7 @@ void WireCell::PointCloud::Facade::clustering_ctpointcloud(Grouping& live_groupi
             live_cluster->organize_path_points(points6,0.6*units::cm);
             std::cout << "Test: " << points6.size() << " " << points6.at(0) << " " << points6.at(points6.size()-1) << std::endl;
 
-            live_cluster->examine_graph(dv, true);
+            live_cluster->examine_graph(dv, pcts, true);
         }
     }
 }

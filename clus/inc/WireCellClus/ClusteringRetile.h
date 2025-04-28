@@ -31,15 +31,18 @@
 #define WIRECELLCLUS_CLUSTERINGRETILE
 
 #include "WireCellUtil/RayTiling.h"
+#include "WireCellUtil/RayHelpers.h"
+
 #include "WireCellIface/IBlob.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IDetectorVolumes.h"
 
+#include "WireCellAux/PlaneTools.h"
+
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Cluster.h"
-#include "WireCellUtil/RayHelpers.h"
-#include "WireCellAux/PlaneTools.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
 
 
 #include <vector>
@@ -51,7 +54,7 @@ namespace WireCell::PointCloud::Facade {
     // There is a hard-wired factory method in ClusteringFuncs to which this
     // class is added.
     // this function so far only takes the raw data points ...
-    class ClusteringRetile {
+    class ClusteringRetile : private Clus::NeedDV, private Clus::NeedScope, private Clus::NeedPCTS {
     public:
         ClusteringRetile(const WireCell::Configuration& config);
         // This class only handles Single APA/Face!
@@ -110,10 +113,6 @@ namespace WireCell::PointCloud::Facade {
         double m_cut_time_high;
 
         std::map<int, std::map<int, std::vector<Aux::WirePlaneInfo>>> m_plane_infos;
-
-        std::string m_pc_name{"3d"};
-        std::vector<std::string> m_coords{"x", "y", "z"};
-        IDetectorVolumes::pointer m_dv;
 
 
         /** Configuration "anode" (required)

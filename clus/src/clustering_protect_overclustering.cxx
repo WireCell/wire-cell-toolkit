@@ -14,8 +14,11 @@ using namespace WireCell::PointCloud::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-static
-std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolumes::pointer dv, Scope& scope)
+static std::map<int, Cluster *> Separate_overclustering(
+    Cluster *cluster, 
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts, 
+    const Scope& scope)
 {
     // can follow ToyClustering_separate to add clusters ...
     auto* grouping = cluster->grouping();
@@ -554,7 +557,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
                             if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
-                                const auto transform = dv->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+                                const auto transform = pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                                 double cluster_t0 = cluster->get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -589,7 +592,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
                             if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
-                                const auto transform = dv->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+                                const auto transform = pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                                 double cluster_t0 = cluster->get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -624,7 +627,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
                             geo_point_t test_p_raw = test_p;
                             // std::cout <<"Test: " << cluster->get_flash().time() << std::endl;
                             if (cluster->get_default_scope().hash() != cluster->get_raw_scope().hash()){
-                                const auto transform = dv->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+                                const auto transform = pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                                 double cluster_t0 = cluster->get_flash().time();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
@@ -778,13 +781,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster, IDetectorVolum
     return {};
 }
 
-void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& live_grouping, IDetectorVolumes::pointer dv,
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
-    )
+void WireCell::PointCloud::Facade::clustering_protect_overclustering(
+    Grouping &live_grouping,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    Tree::Scope scope{pc_name, coords};
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
@@ -794,7 +797,7 @@ void WireCell::PointCloud::Facade::clustering_protect_overclustering(Grouping& l
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
-        Separate_overclustering(cluster, dv, scope);
+        Separate_overclustering(cluster, dv, pcts, scope);
     }
 
     //   {

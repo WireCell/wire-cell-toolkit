@@ -17,13 +17,16 @@
 
 #include "WireCellClus/Facade_Util.h"
 #include "WireCellClus/Facade_Blob.h"
-
-
-// using namespace WireCell;  NO!  do not open up namespaces in header files!
+#include "WireCellClus/IPCTransform.h"
 
 namespace WireCell::PointCloud::Facade {
+    // once the above wrong use of PointCloud::Facade namespace is fixed to be
+    // Clus, the following should be removed.
+    using IPCTransformSet = Clus::IPCTransformSet;
+
     class Blob;
     class Grouping;
+
 
     struct ClusterCache {
         // order is synchronized with children()
@@ -62,7 +65,8 @@ namespace WireCell::PointCloud::Facade {
         }
 
         /// @param correction_name: T0Correction
-        std::vector<int> add_corrected_points(const IDetectorVolumes::pointer dv, const std::string &correction_name);
+        std::vector<int> add_corrected_points(const Clus::IPCTransformSet::pointer pcts,
+                                              const std::string &correction_name);
         double get_cluster_t0() const { return m_cluster_t0; }
         void set_cluster_t0(double cluster_t0) { m_cluster_t0 = cluster_t0; }
 
@@ -279,7 +283,7 @@ namespace WireCell::PointCloud::Facade {
         void adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const;
         
         /// WCP: Construct_skeleton
-        bool construct_skeleton(const bool use_ctpc);
+        bool construct_skeleton(Clus::IPCTransformSet::pointer pcts, const bool use_ctpc);
 
         /// section for 2D PC
 
@@ -345,19 +349,22 @@ namespace WireCell::PointCloud::Facade {
 
         inline MCUGraph* get_graph() { return m_graph.get(); }
         inline const MCUGraph* get_graph() const { return m_graph.get(); }
-        void Create_graph(const bool use_ctpc = true) const;
+        void Create_graph(IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
 
         /// @brief edges inside blobs and between overlapping blobs
         /// @attention has distance-based cuts
         void Establish_close_connected_graph() const;
         /// @attention some distance-based cuts
-        void Connect_graph(const bool use_ctpc) const;
+        void Connect_graph(IPCTransformSet::pointer pcts, const bool use_ctpc) const;
         void Connect_graph() const;
-        void Connect_graph_overclustering_protection(const IDetectorVolumes::pointer dv, const bool use_ctpc) const;
-        std::vector<int> examine_graph(const IDetectorVolumes::pointer dv, const bool use_ctpc = true) const;
+        void Connect_graph_overclustering_protection(
+            const IDetectorVolumes::pointer dv,
+            IPCTransformSet::pointer pcts,
+            const bool use_ctpc) const;
+        std::vector<int> examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
 
         ///
-        void dijkstra_shortest_paths(const size_t pt_idx, const bool use_ctpc = true) const;
+        void dijkstra_shortest_paths(IPCTransformSet::pointer pcts, const size_t pt_idx, const bool use_ctpc = true) const;
 
         ///
         void cal_shortest_path(const size_t dest_wcp_index) const;

@@ -18,9 +18,7 @@ void WireCell::PointCloud::Facade::clustering_test(
     const Grouping& dead_grouping,
     cluster_set_t& cluster_connected_dead,
     const IDetectorVolumes::pointer dv,
-    const std::string& pc_name,                        // point cloud name
-    const std::vector<std::string>& coords            // coordinate names
-)
+    const Clus::IPCTransformSet::pointer pcts)
 {
     using spdlog::debug;
   
@@ -215,7 +213,7 @@ void WireCell::PointCloud::Facade::clustering_test(
                     face_dirx, drift_speed, time_offset, cluster_t0);
         // expectation:
         const auto expected_corrected_point_x = test_point.x() - face_dirx * (cluster_t0 + time_offset) * drift_speed;
-        const auto T0Correction = dv->pc_transform("T0Correction");
+        const auto T0Correction = pcts->pc_transform("T0Correction");
         const auto corrected_point = T0Correction->forward(test_point, cluster_t0, face, apa);
         const auto filter_result = T0Correction->filter(corrected_point, cluster_t0, face, apa);
         const auto backward_corrected_point = T0Correction->backward(corrected_point, cluster_t0, face, apa);
@@ -263,7 +261,7 @@ void WireCell::PointCloud::Facade::clustering_test(
                 SPDLOG_INFO("CTest Cluster {} earliest {} latest {}", iclus, earliest, latest);
             }
             cluster->set_cluster_t0(1600*units::us);
-            std::vector<int> b2filter_result = cluster->add_corrected_points(dv, "T0Correction");
+            std::vector<int> b2filter_result = cluster->add_corrected_points(pcts, "T0Correction");
             const auto scope_T0Correction = cluster->get_scope("T0Correction");
             cluster->set_default_scope(scope_T0Correction);
             {
