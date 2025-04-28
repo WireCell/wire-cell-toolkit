@@ -1,9 +1,15 @@
+#include "WireCellClus/Facade.h"
+#include "WireCellClus/IPCTransform.h"
+
+#include "WireCellIface/IConfigurable.h"
+
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/PointTesting.h"
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/PluginManager.h"
+#include "WireCellUtil/NamedFactory.h"
 
-#include "WireCellClus/Facade.h"
 
 #include <unordered_map>
 
@@ -395,8 +401,35 @@ TEST_CASE("clustering prototype Simple3DPointCloud")
 }
 
 
+static IPCTransformSet::pointer get_pcts()
+{
+    PluginManager& pm = PluginManager::instance();
+    pm.add("WireCellClus");
+
+    
+    {
+        auto icfg = Factory::lookup<IConfigurable>("DetectorVolumes");
+        auto cfg = icfg->default_configuration();
+        icfg->configure(cfg);
+    }
+    {
+        auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
+        auto cfg = icfg->default_configuration();
+        icfg->configure(cfg);
+    }
+    {
+        auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
+        auto cfg = icfg->default_configuration();
+        icfg->configure(cfg);
+    }
+
+    return Factory::find_tn<IPCTransformSet>("PCTransformSet");
+}
+
 TEST_CASE("clustering prototype dijkstra_shortest_paths")
 {
+    auto pcts = get_pcts();
+
     Points::node_t root_node;
     Grouping* grouping = root_node.value.facade<Grouping>();
     REQUIRE(grouping != nullptr);
@@ -405,9 +438,9 @@ TEST_CASE("clustering prototype dijkstra_shortest_paths")
     REQUIRE(pccptr != nullptr);
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
-    pcc.Create_graph(false);
+    pcc.Create_graph(pcts, false);
     print_MCUGraph(*pcc.get_graph());
-    pcc.dijkstra_shortest_paths(5, false);
+    pcc.dijkstra_shortest_paths(pcts, 5, false);
 }
 
 
@@ -608,7 +641,7 @@ TEST_CASE("haiwang")
             }
             const auto& pc = it->second;
             const auto& x = pc.get("x");
-            const auto xv = x->elements<double>();
+            // const auto xv = x->elements<double>();
             const auto& wpid = pc.get("wpid");
             const auto wpidv = wpid->elements<int>();
             // for (auto val : xv) {
