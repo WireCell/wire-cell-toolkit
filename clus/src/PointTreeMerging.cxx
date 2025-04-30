@@ -74,6 +74,7 @@ static void merge_pct(Points::node_t* tgt, Points::node_t* src)
     tgt->take_children(*src, notify_value);
 }
 
+
 bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointer& outts)
 {
     outts = nullptr;
@@ -122,9 +123,13 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
             raise<ValueError>("missing input tensor %d", i);
         }
         merge_pct(root_live.get(), as_pctree(*invec[i]->tensors(), inpath + "/live").get());
+        // log->debug("live root node {} with {} children", i, root_live->nchildren());
         merge_pct(root_dead.get(), as_pctree(*invec[i]->tensors(), inpath + "/dead").get());
     }
 
+
+    log->debug("merged live PC tree with {} children", root_live->nchildren());
+    log->debug("merged dead PC tree with {} children", root_dead->nchildren());
 
     // output
     std::string outpath = m_outpath;

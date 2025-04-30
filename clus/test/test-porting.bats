@@ -90,8 +90,8 @@ do_prep () {
     local dig="$name.dig"
 
     run_idempotently -s "$cfg" -s "$dat" -t "$bee" -t "$log" -- \
-                     wire-cell -l "$log" -L debug \
-                     -A input=$indir "$cfg" 
+                     bash -c "wire-cell -l stderr -L debug \
+                              -A input=$indir $cfg > $log 2>&1" 
 
     # Note, "empty" zips have finite size, but none should 0 bytes.
     for zip in *.zip ; do
@@ -139,15 +139,15 @@ do_prep () {
     local out="tensor-apa-uboone.tar.gz"
 
     run_idempotently -s "$cfg2" -s "live/clusters.npz" -s "dead/clusters.npz" -t "$bee" -t "$log" -t "$out" -- \
-                     wire-cell -l "$log" -L debug \
-                     -A "active_clusters=live/clusters.npz" \
-                     -A "masked_clusters=dead/clusters.npz" \
-                     -A "bee_zip=$bee" \
+                     bash -c "wire-cell -l stderr -L debug \
+                     -A active_clusters=live/clusters.npz \
+                     -A masked_clusters=dead/clusters.npz \
+                     -A bee_zip=$bee \
                      -A initial_index=0 \
                      -A initial_runNo=$run \
                      -A initial_subRunNo=$sub \
                      -A initial_eventNo=$evt \
-                     "$cfg2"
+                     $cfg2 > $log 2>&1"
     do_log_digest "$log" npz
 
 

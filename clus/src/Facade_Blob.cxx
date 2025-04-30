@@ -257,6 +257,13 @@ bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
         if (na < nb) return true;
         if (nb < na) return false;
     }
+    // After exhausting all "content" comparison, we are left with the question,
+    // are these two blobs really different or not.  We have two choices.  We
+    // may compare on pointer value which will surely "break the tie" but will
+    // introduce randomness.  We may return "false" which says "these are equal"
+    // in which case any unordered set/map will not hold both.  Randomness is
+    // the better choice as we would have a better chance to detect that in some
+    // future bug.
     return a < b;
 }
 

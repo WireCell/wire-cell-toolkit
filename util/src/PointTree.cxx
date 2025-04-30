@@ -382,7 +382,7 @@ std::string Tree::Points::as_string(bool recur, int level) const
 {
     std::stringstream ss;
     std::string tab(level, ' ');
-    ss << tab << "pcs:[";
+    ss << level << "\t" << tab << "pcs:[";
     for (auto lit : local_pcs()) {
         ss << " " << lit.first;
     }
@@ -394,8 +394,9 @@ std::string Tree::Points::as_string(bool recur, int level) const
     if (! recur) {
         return ss.str();
     }
-    ss << "\n";
-    for (const auto& child : m_node->children()) {
+    auto children = m_node->children();
+    ss << " " << children.size() << " children:\n";
+    for (const auto& child : children) {
         ss << child->value.as_string(recur, level+1);
     }
     return ss.str();

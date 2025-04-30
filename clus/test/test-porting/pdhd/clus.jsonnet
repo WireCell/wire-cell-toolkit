@@ -68,9 +68,13 @@ local dvm = {
     a3f1pA: $.a1f1pA,
 };
 
-local detector_volumes(anodes, en="") = {
+local anodes_name(anodes, face="") =
+    std.join("-", [std.toString(a.data.ident) for a in anodes]) + if face == "" then "" else "-" + std.toString(face);
+          
+
+local detector_volumes(anodes, face="") = {
     "type": "DetectorVolumes",
-    "name": "dv-" + en + std.join("-", [std.toString(a.data.ident) for a in anodes]),
+    "name": "dv-apa" + anodes_name(anodes, face),
     "data": {
         "anodes": [wc.tn(anode) for anode in anodes],
         metadata:
@@ -104,7 +108,7 @@ local clus_per_face (
     ) =
 {
 
-    local dv = detector_volumes([anode], "f%d-"%face),
+    local dv = detector_volumes([anode], face),
     local pcts = pctransforms(dv),
 
     // Note, the "sampler" must be unique to the "sampling".

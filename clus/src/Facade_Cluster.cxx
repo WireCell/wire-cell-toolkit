@@ -1817,7 +1817,7 @@ size_t Cluster::hash() const
     std::size_t h = 0;
     boost::hash_combine(h, (size_t) (get_length() / units::mm));
     auto blobs = children();  // copy vector
-    sort_blobs(blobs);
+    // sort_blobs(blobs);
     for (const Blob* blob : blobs) {
         boost::hash_combine(h, blob->hash());
     }
@@ -4255,10 +4255,25 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (get<3>(ar) < get<3>(br)) return true;
         if (get<3>(br) < get<3>(ar)) return false;
     }
+    {
+        auto ac = a->get_center();
+        auto bc = b->get_center();
+        if (ac[0] < bc[0]) return true;
+        if (bc[0] < bc[0]) return false;
+        if (ac[1] < bc[1]) return true;
+        if (bc[1] < bc[1]) return false;
+        if (ac[2] < bc[2]) return true;
+        if (bc[2] < bc[2]) return false;
+    }
 
-    // The two are very similar.  What is left to check?  Only pointer?.  This
-    // will cause "randomness"!
-    return a < b;
+    // After exhausting all "content" comparison, we are left with the question,
+    // are these two clusters really different or not.  We have two choices.  We
+    // may compare on pointer value which will surely "break the tie" but will
+    // introduce randomness.  We may return "false" which says "these are equal"
+    // in which case any unordered set/map will not hold both.  Randomness is
+    // the better choice as we would have a better chance to detect that in some
+    // future bug.
+    return a < b;    
 }
 void Facade::sort_clusters(std::vector<const Cluster*>& clusters)
 {

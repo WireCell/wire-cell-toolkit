@@ -243,7 +243,7 @@ size_t Grouping::hash() const
         boost::hash_combine(h, wpid.ident());
     }
     auto clusters = children();  // copy vector
-    sort_clusters(clusters);
+    // sort_clusters(clusters);
     for (const Cluster* cluster : clusters) {
         boost::hash_combine(h, cluster->hash());
     }
