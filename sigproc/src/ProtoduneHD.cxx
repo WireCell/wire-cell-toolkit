@@ -699,11 +699,11 @@ float PDHD::get_rms_and_rois(const WireCell::Waveform::realseq_t& signal, std::v
     std::pair<double, double> temp = Derivations::CalcRMS(signal);
 
     std::vector<int> roi;
-    int last_bin_roi=0;
+    size_t last_bin_roi=0;
     int flag_continue=0;
     int start=1;
     int IS_signal=0;
-    for (int j = 0; j != signal.size(); j++)
+    for (size_t j = 0; j != signal.size(); j++)
     {
         if (signal.at(j) - temp.first < -3.5 * temp.second)
         {
@@ -755,7 +755,7 @@ bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chan
     }
 
     std::vector<std::vector<int>> rois;
-    double rms = PDHD::get_rms_and_rois(signal, rois);
+    /*double rms =*/ PDHD::get_rms_and_rois(signal, rois);
     for(auto roi_tmp : rois){
         double width = roi_tmp.size();
         if( width > min_width ){ // found the noise
