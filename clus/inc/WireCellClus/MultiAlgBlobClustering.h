@@ -1,16 +1,21 @@
 #ifndef WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 #define WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/IClusGeomHelper.h"
+#include "WireCellClus/Facade.h"
+
 #include "WireCellAux/Logger.h"
+
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/ITerminal.h"
-#include "WireCellClus/IClusGeomHelper.h"
-#include "WireCellUtil/Bee.h"
-#include "WireCellClus/Facade.h"
 
+#include "WireCellUtil/Bee.h"
+
+#include <vector>
 
 namespace WireCell::Clus {
 
@@ -68,14 +73,22 @@ namespace WireCell::Clus {
     
         std::map<std::string, ApaBeePoints> m_bee_points;
 
+
+        // Fixme: #413
+        // From Facade_Grouping.h
+        using Grouping = WireCell::PointCloud::Facade::Grouping;
+        // From Facade_Cluster.h
+        using Cluster = WireCell::PointCloud::Facade::Cluster;
+        using cluster_set_t = std::set<const Cluster*>;
+
         // New helper function to fill bee points
-        void fill_bee_points(const std::string& name, const WireCell::PointCloud::Facade::Grouping& grouping);
+        void fill_bee_points(const std::string& name, const Grouping& grouping);
         void fill_bee_points_from_cluster(
-            Bee::Points& bpts, const WireCell::PointCloud::Facade::Cluster& cluster, 
+            Bee::Points& bpts, const Cluster& cluster, 
             const std::string& pcname, const std::vector<std::string>& coords);
 
-        void fill_bee_patches_from_grouping(const WireCell::PointCloud::Facade::Grouping& grouping);
-        void fill_bee_patches_from_cluster(const WireCell::PointCloud::Facade::Cluster& cluster);
+        void fill_bee_patches_from_grouping(const Grouping& grouping);
+        void fill_bee_patches_from_cluster(const Cluster& cluster);
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
         // Bee::Patches m_bee_dead; // dead region ...
@@ -135,7 +148,16 @@ namespace WireCell::Clus {
         // double m_x_boundary_low_limit{-1*units::cm};
         // double m_x_boundary_high_limit{257*units::cm};
 
-        Configuration m_func_cfgs;
+        // Keep track of configured clustering methods with their metadata to
+        // assist in debugging/logging.
+        struct ClusteringMethod {
+            using method_t = std::function<void(Grouping&, Grouping&, cluster_set_t&)>;
+            std::string name;
+            method_t meth;
+            Configuration config;
+        };
+        std::vector<ClusteringMethod> m_clustering_chain;
+        //Configuration m_func_cfgs;
 
         // the anode to be processed
         std::vector<IAnodePlane::pointer> m_anodes;

@@ -61,8 +61,8 @@ do_prep () {
 
 
     run_idempotently -s "$cfg" -s "$dat" -t "$bee" -t "$log" -- \
-                     wire-cell -l "$log" -L debug \
-                     -A kind=both -A "infiles=$dat" -A "beezip=$bee" "$cfg" 
+                     bash -c "wire-cell -l stderr -L debug \
+                     -A kind=both -A infiles=$dat -A beezip=$bee $cfg > $log 2>&1" 
     do_log_digest $log $dat
 
     for zip in qlport.zip

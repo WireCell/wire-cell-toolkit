@@ -1,5 +1,4 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
-#include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellClus/Facade_Summary.h"
 
 
@@ -67,7 +66,13 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
-    m_func_cfgs = cfg["func_cfgs"];
+    for (auto cfg : cfg["func_cfgs"]) {
+        std::string name = cfg["name"].asString();
+        log->debug("configuring clustering method: {}", name);
+        auto meth = getClusteringFunction(cfg);
+        m_clustering_chain.emplace_back(ClusteringMethod{name, meth, cfg});
+    }
+
 
 
     m_perf = get(cfg, "perf", m_perf);
@@ -677,13 +682,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             fill_bee_points(config.name, live_grouping);
     }
 
-    for (const auto& func_cfg : m_func_cfgs) {
-        // std::cout << "func_cfg: " << func_cfg << std::endl;
-        auto func = getClusteringFunction(func_cfg);
-
-        func(live_grouping, dead_grouping, cluster_connected_dead);
-
-        perf.dump(func_cfg["name"].asString(), live_grouping);
+    for (const auto& cmeth : m_clustering_chain) {
+        cmeth.meth(live_grouping, dead_grouping, cluster_connected_dead);
+        perf.dump(cmeth.name, live_grouping);
     }
 
     // Fill all configured bee points sets
