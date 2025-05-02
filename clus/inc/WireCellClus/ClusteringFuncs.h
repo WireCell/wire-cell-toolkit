@@ -28,9 +28,8 @@
 
 #include <fstream>
 
-namespace WireCell::PointCloud::Facade { // fixme this is not the right namespace!
+namespace WireCell::Clus::Facade {
     using namespace WireCell::PointCloud::Tree;
-    using namespace WireCell::Clus;
 
     struct ClusterLess {
         bool operator()(const Cluster* a, const Cluster* b) const {
@@ -685,6 +684,6 @@ namespace WireCell::PointCloud::Facade { // fixme this is not the right namespac
             throw std::invalid_argument("Unknown function name in configuration");
         }
     }
-}  // namespace WireCell::PointCloud::Facade
+}  // namespace WireCell::Clus::Facade
 
 #endif

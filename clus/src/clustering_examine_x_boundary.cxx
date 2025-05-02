@@ -4,11 +4,11 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // This function only handles Single APA/Face!
-void WireCell::PointCloud::Facade::clustering_examine_x_boundary(
+void WireCell::Clus::Facade::clustering_examine_x_boundary(
     Grouping& live_grouping, 
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope

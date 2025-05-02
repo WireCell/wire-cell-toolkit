@@ -19,12 +19,12 @@
 using namespace WireCell;
 
 // Segregate this weird choice for namespace.
-namespace WCC = WireCell::PointCloud::Facade;
+namespace WCF = WireCell::Clus::Facade;
 
 // Nick name for less typing.
 namespace WRG = WireCell::RayGrid;
 
-// static void debug_cluster(WCC::Cluster* cluster, const std::string& ctx)
+// static void debug_cluster(WCF::Cluster* cluster, const std::string& ctx)
 // {
 //     std::cout << "Cluster: " << cluster->node()->value.as_string(false) << "\n";
 //     auto nblobs = cluster->kd_blobs().size();
@@ -35,7 +35,7 @@ namespace WRG = WireCell::RayGrid;
 
 
 // Now can handle all APA/Faces 
-WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
+WCF::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
 {
     NeedDV::configure(cfg);
     NeedPCTS::configure(cfg);
@@ -104,7 +104,7 @@ WCC::ClusteringRetile::ClusteringRetile(const WireCell::Configuration& cfg)
 
 
 // Step 1. Build activities from blobs in a cluster.
-void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
+void WCF::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
 {
     const int nlayers = 2+3;
 
@@ -118,16 +118,16 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
     //     std::cout << "test1: " << info.start_index << " " << info.end_index << " " << info.total_wires << std::endl;
     // }
 
-    int (WCC::Blob::*wmin[])(void) const = {
-        &WCC::Blob::u_wire_index_min,
-        &WCC::Blob::v_wire_index_min,
-        &WCC::Blob::w_wire_index_min
+    int (WCF::Blob::*wmin[])(void) const = {
+        &WCF::Blob::u_wire_index_min,
+        &WCF::Blob::v_wire_index_min,
+        &WCF::Blob::w_wire_index_min
     };
 
-    int (WCC::Blob::*wmax[])(void) const = {
-        &WCC::Blob::u_wire_index_max,
-        &WCC::Blob::v_wire_index_max,
-        &WCC::Blob::w_wire_index_max
+    int (WCF::Blob::*wmax[])(void) const = {
+        &WCF::Blob::u_wire_index_max,
+        &WCF::Blob::v_wire_index_max,
+        &WCF::Blob::w_wire_index_max
     };
         
     const double hit=1.0;       // actual charge value does not matter to tiling.
@@ -177,7 +177,7 @@ void WCC::ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::p
 
 
 // Step 2. Modify activity to suit.
-void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
+void WCF::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
 {
 
     // for (auto it = map_slices_measures.begin(); it!= map_slices_measures.end(); it++){
@@ -356,7 +356,7 @@ void WCC::ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::
 
 
 // Step 3. Form IBlobs from activities.
-std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
+std::vector<IBlob::pointer> WCF::ClusteringRetile::make_iblobs(std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
 {
     std::vector<IBlob::pointer> ret;
 
@@ -400,8 +400,8 @@ std::vector<IBlob::pointer> WCC::ClusteringRetile::make_iblobs(std::map<std::pai
     return ret;
 }
 
-std::set<const WireCell::PointCloud::Facade::Blob*> 
-WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
+std::set<const WireCell::Clus::Facade::Blob*> 
+WireCell::Clus::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
 {
     const auto& wpids = cluster.grouping()->wpids();
     const auto& shad_wpids = shad_cluster.grouping()->wpids();
@@ -482,7 +482,7 @@ WireCell::PointCloud::Facade::ClusteringRetile::remove_bad_blobs(const Cluster& 
 
 
 
-void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& shadow, cluster_set_t&) const
+void WCF::ClusteringRetile::operator()(WCF::Grouping& original, WCF::Grouping& shadow, cluster_set_t&) const
 {
 
 
@@ -838,10 +838,10 @@ void WCC::ClusteringRetile::operator()(WCC::Grouping& original, WCC::Grouping& s
    
 }
 
-std::map<WCC::Cluster*, std::tuple<WCC::Cluster*, int, WCC::Cluster*>> 
-WCC::ClusteringRetile::process_groupings(
-    WCC::Grouping& original,
-    WCC::Grouping& shadow,
+std::map<WCF::Cluster*, std::tuple<WCF::Cluster*, int, WCF::Cluster*>> 
+WCF::ClusteringRetile::process_groupings(
+    WCF::Grouping& original,
+    WCF::Grouping& shadow,
     const std::string& aname,
     const std::string& pname) const
 {

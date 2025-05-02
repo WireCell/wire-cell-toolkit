@@ -1,9 +1,9 @@
 #include "WireCellClus/GroupingHelper.h"
 
-std::map<WireCell::PointCloud::Facade::Cluster*, std::tuple<WireCell::PointCloud::Facade::Cluster*, int, WireCell::PointCloud::Facade::Cluster*>> 
-WireCell::PointCloud::Facade::process_groupings_helper(
-    WireCell::PointCloud::Facade::Grouping& original,
-    WireCell::PointCloud::Facade::Grouping& shadow,
+std::map<WireCell::Clus::Facade::Cluster*, std::tuple<WireCell::Clus::Facade::Cluster*, int, WireCell::Clus::Facade::Cluster*>> 
+WireCell::Clus::Facade::process_groupings_helper(
+    WireCell::Clus::Facade::Grouping& original,
+    WireCell::Clus::Facade::Grouping& shadow,
     const std::string& aname,
     const std::string& pname)  // Removed const here
 {

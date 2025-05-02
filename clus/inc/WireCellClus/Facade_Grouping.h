@@ -18,10 +18,9 @@
 #include "WireCellClus/Facade_Util.h"
 
 
-// using namespace WireCell;  NO!  do not open up namespaces in header files!
-
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
     class Cluster;
+    using namespace WireCell::PointCloud;
 
     struct GroupingCache {
 
@@ -198,8 +197,8 @@ namespace WireCell::PointCloud::Facade {
     // about the blobs.
     std::string dump(const Grouping& grouping, int level = 0);
 
-}  // namespace WireCell::PointCloud::Facade
+}  // namespace WireCell::Clus::Facade
 
-template <> struct fmt::formatter<WireCell::PointCloud::Facade::Grouping> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::Clus::Facade::Grouping> : fmt::ostream_formatter {};
 
 #endif

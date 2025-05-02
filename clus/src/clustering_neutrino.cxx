@@ -8,12 +8,12 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
 // handle all APA/Face
-void WireCell::PointCloud::Facade::clustering_neutrino(
+void WireCell::Clus::Facade::clustering_neutrino(
     Grouping &live_grouping,
     int num_try, 
     IDetectorVolumes::pointer dv,

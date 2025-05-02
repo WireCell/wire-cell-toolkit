@@ -7,12 +7,12 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
 // Expand this function to handle multiple APA/Faces ...
-void WireCell::PointCloud::Facade::clustering_regular(
+void WireCell::Clus::Facade::clustering_regular(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,            // in/out
     const IDetectorVolumes::pointer dv,                // detector volumes
@@ -124,7 +124,7 @@ void WireCell::PointCloud::Facade::clustering_regular(
   }
 }
 
-bool WireCell::PointCloud::Facade::Clustering_1st_round(
+bool WireCell::Clus::Facade::Clustering_1st_round(
     const Cluster& cluster1,
     const Cluster& cluster2,
     double length_1,
@@ -143,7 +143,7 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     // if (fabs(length_1 + length_2 - 12.9601*units::cm - 83.8829*units::cm) < 0.3*units::cm 
     // && fabs(fabs(length_1-length_2) - fabs(12.9601*units::cm - 83.8829*units::cm)) < 0.3*units::cm) flag_print =true;
 
-  double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
+  double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
 

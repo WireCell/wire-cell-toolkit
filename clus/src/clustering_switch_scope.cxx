@@ -9,10 +9,10 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
-void WireCell::PointCloud::Facade::clustering_switch_scope(
+void WireCell::Clus::Facade::clustering_switch_scope(
     Grouping& live_grouping,
     const Clus::IPCTransformSet::pointer pcts,          // detector volumes
     const Tree::Scope& default_scope,

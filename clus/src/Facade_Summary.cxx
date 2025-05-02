@@ -5,7 +5,7 @@ using namespace WireCell;
 using WireCell::PointCloud::json_summary;
 
 Configuration
-PointCloud::Facade::json_summary(const PointCloud::Facade::Grouping& grp)
+Clus::Facade::json_summary(const Clus::Facade::Grouping& grp)
 {
     Configuration ret;
     ret["type"] = "Grouping";
@@ -20,7 +20,7 @@ PointCloud::Facade::json_summary(const PointCloud::Facade::Grouping& grp)
     return ret;
 }
 
-Configuration PointCloud::Facade::json_summary(const PointCloud::Facade::Cluster& cls) 
+Configuration Clus::Facade::json_summary(const Clus::Facade::Cluster& cls) 
 {
     Configuration ret;
     // this is too huge to be exhaustive
@@ -35,7 +35,7 @@ Configuration PointCloud::Facade::json_summary(const PointCloud::Facade::Cluster
     return ret;
 }
 
-Configuration PointCloud::Facade::json_summary(const PointCloud::Facade::Blob& blb) 
+Configuration Clus::Facade::json_summary(const Clus::Facade::Blob& blb) 
 {
     Configuration ret;
     ret["type"] = "Blob";

@@ -19,10 +19,10 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/IPCTransform.h"
 
-namespace WireCell::PointCloud::Facade {
-    // once the above wrong use of PointCloud::Facade namespace is fixed to be
-    // Clus, the following should be removed.
+namespace WireCell::Clus::Facade {
+
     using IPCTransformSet = Clus::IPCTransformSet;
+    using namespace WireCell::PointCloud;
 
     class Blob;
     class Grouping;
@@ -199,7 +199,7 @@ namespace WireCell::PointCloud::Facade {
         template <typename PCType>
         std::tuple<int, int, double> get_closest_points(const PCType& two) const
         {
-            return PointCloud::Facade::get_closest_points(*this, two);
+            return get_closest_points(*this, two);
         }
 
         // 
@@ -563,8 +563,8 @@ namespace WireCell::PointCloud::Facade {
         }
     };
 
-}  // namespace WireCell::PointCloud::Facade
+}  // namespace WireCell::Clus::Facade
 
-template <> struct fmt::formatter<WireCell::PointCloud::Facade::Cluster> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::Clus::Facade::Cluster> : fmt::ostream_formatter {};
 
 #endif

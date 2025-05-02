@@ -73,22 +73,14 @@ namespace WireCell::Clus {
     
         std::map<std::string, ApaBeePoints> m_bee_points;
 
-
-        // Fixme: #413
-        // From Facade_Grouping.h
-        using Grouping = WireCell::PointCloud::Facade::Grouping;
-        // From Facade_Cluster.h
-        using Cluster = WireCell::PointCloud::Facade::Cluster;
-        using cluster_set_t = std::set<const Cluster*>;
-
         // New helper function to fill bee points
-        void fill_bee_points(const std::string& name, const Grouping& grouping);
+        void fill_bee_points(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_points_from_cluster(
-            Bee::Points& bpts, const Cluster& cluster, 
+            Bee::Points& bpts, const Facade::Cluster& cluster, 
             const std::string& pcname, const std::vector<std::string>& coords);
 
-        void fill_bee_patches_from_grouping(const Grouping& grouping);
-        void fill_bee_patches_from_cluster(const Cluster& cluster);
+        void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
+        void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
         // Bee::Patches m_bee_dead; // dead region ...
@@ -167,7 +159,8 @@ namespace WireCell::Clus {
         // Keep track of configured clustering methods with their metadata to
         // assist in debugging/logging.
         struct ClusteringMethod {
-            using method_t = std::function<void(Grouping&, Grouping&, cluster_set_t&)>;
+            using cluster_set_t = std::set<const Facade::Cluster*>;
+            using method_t = std::function<void(Facade::Grouping&, Facade::Grouping&, cluster_set_t&)>;
             std::string name;
             method_t meth;
             Configuration config;

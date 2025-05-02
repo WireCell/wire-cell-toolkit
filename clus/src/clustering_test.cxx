@@ -9,11 +9,11 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // This is a test function, not used in clustering
-void WireCell::PointCloud::Facade::clustering_test(
+void WireCell::Clus::Facade::clustering_test(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
     cluster_set_t& cluster_connected_dead,

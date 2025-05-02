@@ -47,9 +47,7 @@
 
 #include <vector>
 
-// This is not an appropriate name but I propagate it because that is what is
-// used in ClusteringFuncs.h.  Better that it be WireCell::Clus.
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
 
     // There is a hard-wired factory method in ClusteringFuncs to which this
     // class is added.
@@ -80,7 +78,7 @@ namespace WireCell::PointCloud::Facade {
         // Step 3. Form IBlobs from activities.
         std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
-        std::set<const WireCell::PointCloud::Facade::Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
+        std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
 
         // Remaining steps are done in the operator() directly.
 

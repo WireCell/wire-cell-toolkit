@@ -17,9 +17,9 @@ using namespace WireCell;
 using namespace WireCell::PointTesting;
 using namespace WireCell::PointCloud;
 using namespace WireCell::PointCloud::Tree;
-using namespace WireCell::PointCloud::Facade;
-using fa_float_t = WireCell::PointCloud::Facade::float_t;
-using fa_int_t = WireCell::PointCloud::Facade::int_t;
+using namespace WireCell::Clus::Facade;
+using fa_float_t = WireCell::Clus::Facade::float_t;
+using fa_int_t = WireCell::Clus::Facade::int_t;
 // WireCell::PointCloud::Tree::scoped_pointcloud_t
 using spdlog::debug;
 using spdlog::warn;

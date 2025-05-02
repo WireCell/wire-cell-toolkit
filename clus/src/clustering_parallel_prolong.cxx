@@ -7,11 +7,11 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // Expand this function to handle multiple APA/Faces ...
-void WireCell::PointCloud::Facade::clustering_parallel_prolong(
+void WireCell::Clus::Facade::clustering_parallel_prolong(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
     const IDetectorVolumes::pointer dv,                // detector volumes
@@ -117,7 +117,7 @@ void WireCell::PointCloud::Facade::clustering_parallel_prolong(
 }
 
 
-bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
+bool  WireCell::Clus::Facade::Clustering_2nd_round(
     const Cluster& cluster1,
     const Cluster& cluster2,
     double length_1,
@@ -133,7 +133,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
   geo_point_t p1;
   geo_point_t p2;
 
-  double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
+  double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1, p2);
 
@@ -207,7 +207,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	    }else if (fabs(angle2-3.1415926/2.)<2.5/180.*3.1415926 && fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592 ){
 	      // parallel case, but exclude both very long tracks
 	      if (length_1 < 60*units::cm || length_2 < 60*units::cm){
-			if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,15, wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) &&     WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) return true;
+			if (WireCell::Clus::Facade::is_angle_consistent(dir1,tempV1,false,15, wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) &&     WireCell::Clus::Facade::is_angle_consistent(dir2,tempV1,true,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) return true;
 			}else if (dis <5*units::cm){
 				return true;
 			}else{
@@ -215,7 +215,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 				double angle8 = (3.1415926-dir1.angle(tempV1))/3.1415926*180.; // dir1 = -p1, tempV1 = p2 - p1
 				double angle9 = dir2.angle(tempV1)/3.1415926*180.; // dir2 = -p2
 				if (angle7 < 30 && angle8 < 30 && angle9 < 30) return true;
-			if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
+			if (WireCell::Clus::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::Clus::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 				return true; 
 			}
 	    }else{
@@ -227,7 +227,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 		   fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592 &&
 		   angle7 < 45 && angle8 < 45 && angle9 < 45) && dis < 20*units::cm)
 			return true;
-	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
+	      if (WireCell::Clus::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::Clus::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 			return true; 
 	    }
 	  }
@@ -244,7 +244,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 	    }else if (dis < 15*units::cm && fabs(angle3-3.1415926/2.)<2.5/180.*3.1415926 && (length_1 < 60*units::cm || length_2 < 60*units::cm) ){
 	      return true;
 	    }else if (fabs(angle3-3.1415926/2.)<2.5/180.*3.1415926 && fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592){
-	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
+	      if (WireCell::Clus::Facade::is_angle_consistent(dir1,tempV1,false,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::Clus::Facade::is_angle_consistent(dir2,tempV1,true,15,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second)) 
 		return true;
 	    }else{
 	      double angle7 = (3.1415926-dir1.angle(dir2))/3.1415926*180.;
@@ -254,7 +254,7 @@ bool  WireCell::PointCloud::Facade::Clustering_2nd_round(
 		  fabs(angle5-3.1415926/2.)<5/180.*3.1415926 && fabs(angle6-3.1415926/2.)<5/180.*3.141592 &&
 		  angle7 < 60 && angle8 < 60 && angle9 < 60)
 		return true;
-	      if (WireCell::PointCloud::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::PointCloud::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second))
+	      if (WireCell::Clus::Facade::is_angle_consistent(dir1,tempV1,false,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second) && WireCell::Clus::Facade::is_angle_consistent(dir2,tempV1,true,10,wpid_U_dir.at(wpid_ps).second, wpid_V_dir.at(wpid_ps).second, wpid_W_dir.at(wpid_ps).second))
 	      	  return true;
 	    }
 	  }

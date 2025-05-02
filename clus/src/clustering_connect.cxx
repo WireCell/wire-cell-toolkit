@@ -9,7 +9,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
@@ -21,7 +21,7 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // This is for only one APA/face
-void WireCell::PointCloud::Facade::clustering_connect1(
+void WireCell::Clus::Facade::clustering_connect1(
     Grouping& live_grouping, 
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope)

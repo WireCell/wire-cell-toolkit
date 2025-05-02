@@ -8,12 +8,12 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
 // This function can handle multiple APA/Faces
-void WireCell::PointCloud::Facade::clustering_close(
+void WireCell::Clus::Facade::clustering_close(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
     const Tree::Scope& scope,
@@ -96,7 +96,7 @@ void WireCell::PointCloud::Facade::clustering_close(
 
 
 
-bool WireCell::PointCloud::Facade::Clustering_3rd_round(
+bool WireCell::Clus::Facade::Clustering_3rd_round(
   const Cluster& cluster1,
   const Cluster& cluster2,
   double length_1,
@@ -109,7 +109,7 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round(
   bool flag_print = false;
   ExecMon em("starting");
   
-  double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
+  double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
 

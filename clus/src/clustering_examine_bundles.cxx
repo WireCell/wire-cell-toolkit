@@ -4,7 +4,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // The original developers do not care.
@@ -19,7 +19,7 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // All APA Faces 
-void WireCell::PointCloud::Facade::clustering_examine_bundles(
+void WireCell::Clus::Facade::clustering_examine_bundles(
     Grouping& live_grouping, 
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,

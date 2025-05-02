@@ -8,11 +8,11 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // this algorithm should be able to handle multiple APA/face now ..
-void WireCell::PointCloud::Facade::clustering_separate(
+void WireCell::Clus::Facade::clustering_separate(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,                // detector volumes
     const IPCTransformSet::pointer pcts,
@@ -361,7 +361,7 @@ void WireCell::PointCloud::Facade::clustering_separate(
 }
 
 /// @brief PCA based, drift_dir +x, -x the same ...
-bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length)
+bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length)
 {
     // get the main axis
     geo_point_t dir1(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
@@ -391,7 +391,7 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_1(const Cluster* cluster, co
     return false;
 }
 
-bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, const IDetectorVolumes::pointer dv, const geo_point_t& drift_dir_abs,
+bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const IDetectorVolumes::pointer dv, const geo_point_t& drift_dir_abs,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length)
 {
@@ -933,7 +933,7 @@ bool WireCell::PointCloud::Facade::JudgeSeparateDec_2(const Cluster* cluster, co
 #define _INDEV_
 #ifdef _INDEV_
 
-std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_ctpc, Cluster *cluster,
+std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, Cluster *cluster,
                                                      std::vector<geo_point_t> &boundary_points,
                                                      std::vector<geo_point_t> &independent_points,
                                                      double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, const IPCTransformSet::pointer pcts, const Tree::Scope& scope)
@@ -1578,7 +1578,7 @@ std::vector<Cluster *> WireCell::PointCloud::Facade::Separate_1(const bool use_c
 #endif //_INDEV_
 
 /// blob -> cluster_id
-std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster, 
+std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster, 
                                                           const Tree::Scope& scope,
                                                           const double dis_cut)
 {
@@ -1689,7 +1689,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster,
         // if (edge.second) {
         //     (graph)[edge.first].dist = 1;
         // }
-        /*auto edge =*/ add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
+        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(1),graph);
     }
 
     {
@@ -1725,7 +1725,7 @@ std::vector<int> WireCell::PointCloud::Facade::Separate_2(Cluster *cluster,
                         // if (edge.second) {
                         //     (graph)[edge.first].dist = 1;
                         // }
-                        /*auto edge =*/ add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(1),graph);
+                        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(1),graph);
                     }
                 }
             }

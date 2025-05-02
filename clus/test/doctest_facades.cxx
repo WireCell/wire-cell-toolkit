@@ -1,12 +1,11 @@
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
-#include "WireCellUtil/Logging.h"
 
 #include "WireCellClus/Facade_Cluster.h"
 
 using namespace WireCell;
 using namespace WireCell::PointCloud::Tree;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using spdlog::debug;
 
 TEST_CASE("clustering facade scalar")

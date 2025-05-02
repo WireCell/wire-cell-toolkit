@@ -25,7 +25,7 @@
 
 // using namespace WireCell;  NO!  do not open up namespaces in header files!
 
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
 
     struct DummyCache{};
 
@@ -261,14 +261,14 @@ namespace WireCell::PointCloud::Facade {
                 arr->template assign(vec.data(), shape, false);
             }
             else {
-                pc.add(aname, Array(vec, shape, false));
+                pc.add(aname, PointCloud::Array(vec, shape, false));
             }
         }
     };
 
 
-    using points_t = Tree::Points;
-    using node_t = Tree::Points::node_t;
+    using points_t = WireCell::PointCloud::Tree::Points;
+    using node_t = WireCell::PointCloud::Tree::Points::node_t;
     using node_ptr = std::unique_ptr<node_t>;
     using geo_point_t = WireCell::Point;
     using geo_vector_t = WireCell::Vector;
@@ -419,7 +419,7 @@ namespace WireCell::PointCloud::Facade {
         template <typename PCType>
         std::tuple<int, int, double> get_closest_points(const PCType& two) const
         {
-            return PointCloud::Facade::get_closest_points(*this, two);
+            return Clus::Facade::get_closest_points(*this, two);
         
         }
 
@@ -556,6 +556,6 @@ namespace WireCell::PointCloud::Facade {
 
 
 
-}  // namespace WireCell::PointCloud::Facade
+}  // namespace WireCell::Clus::Facade
 
 #endif

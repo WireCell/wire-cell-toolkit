@@ -10,7 +10,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
@@ -140,7 +140,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         const geo_point_t wcp2 = cluster->point3d(index2);
                         double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
                        
-                        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                        auto edge = add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(dis),*graph);
                         if (edge.second) {
                             num_edges++;
                         }
@@ -411,7 +411,7 @@ static std::map<int, Cluster *> Separate_overclustering(
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+            auto edge = add_edge(index1,index2,WireCell::Clus::Facade::EdgeProp(dis),*graph);
             if (edge.second){
                 //      (*graph)[edge.first].dist = dis;
                 num_edges ++;
@@ -709,7 +709,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                     }
                     // }
 
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis),*graph);
                 }
 
                 if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -727,7 +727,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                             dis = std::get<2>(index_index_dis_dir1[j][k]);
                         }
                         // }
-                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis),*graph);
                     }
                     if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                         // auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]),
@@ -743,7 +743,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                             dis = std::get<2>(index_index_dis_dir2[j][k]);
                         }
                         // }
-                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *graph);
+                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *graph);
                     }
                 }
                 // end check ...
@@ -781,7 +781,7 @@ static std::map<int, Cluster *> Separate_overclustering(
     return {};
 }
 
-void WireCell::PointCloud::Facade::clustering_protect_overclustering(
+void WireCell::Clus::Facade::clustering_protect_overclustering(
     Grouping &live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,

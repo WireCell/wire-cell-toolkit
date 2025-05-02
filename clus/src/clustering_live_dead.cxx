@@ -8,11 +8,11 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // This function only handles Single APA/Face!
-void WireCell::PointCloud::Facade::clustering_live_dead(
+void WireCell::Clus::Facade::clustering_live_dead(
     Grouping& live_grouping,
     const Grouping& dead_grouping,
     cluster_set_t& cluster_connected_dead, // in/out
@@ -203,28 +203,28 @@ void WireCell::PointCloud::Facade::clustering_live_dead(
                                         25 / 180. * 3.1415926) {
                                     flag_para = true;
 
-                                    if (WireCell::PointCloud::Facade::is_angle_consistent(
+                                    if (WireCell::Clus::Facade::is_angle_consistent(
                                             dir1, dir2, false, 15, angle_u, angle_v, angle_w, 3) &&
-                                        WireCell::PointCloud::Facade::is_angle_consistent(
+                                        WireCell::Clus::Facade::is_angle_consistent(
                                             dir3, dir2, true, 15, angle_u, angle_v, angle_w, 3))
                                         flag_merge = true;
                                 }
                                 else {
-                                    bool flag_const1 = WireCell::PointCloud::Facade::is_angle_consistent(
+                                    bool flag_const1 = WireCell::Clus::Facade::is_angle_consistent(
                                         dir1, dir2, false, 10, angle_u, angle_v, angle_w, 2);
-                                    bool flag_const2 = WireCell::PointCloud::Facade::is_angle_consistent(
+                                    bool flag_const2 = WireCell::Clus::Facade::is_angle_consistent(
                                         dir3, dir2, true, 10, angle_u, angle_v, angle_w, 2);
 
                                     if (flag_const1 && flag_const2) {
                                         flag_merge = true;
                                     }
                                     else if (flag_const1 && length_2 < 6 * units::cm && length_1 > 15 * units::cm) {
-                                        if (WireCell::PointCloud::Facade::is_angle_consistent(
+                                        if (WireCell::Clus::Facade::is_angle_consistent(
                                                 dir1, dir2, false, 5, angle_u, angle_v, angle_w, 3))
                                             flag_merge = true;
                                     }
                                     else if (flag_const2 && length_1 < 6 * units::cm && length_2 > 15 * units::cm) {
-                                        if (WireCell::PointCloud::Facade::is_angle_consistent(
+                                        if (WireCell::Clus::Facade::is_angle_consistent(
                                                 dir3, dir2, true, 5, angle_u, angle_v, angle_w, 3))
                                             flag_merge = true;
                                     }

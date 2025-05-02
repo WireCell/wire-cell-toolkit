@@ -9,7 +9,7 @@
 #include <climits>
 
 using namespace WireCell;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using spdlog::debug;
 
 #ifdef __DEBUG__
@@ -383,7 +383,7 @@ geo_point_t DynamicPointCloud::vhough_transform(const geo_point_t &origin, const
 
 
 
-std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster(
+std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
     const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap)
 {
     if (!cluster) {
@@ -403,7 +403,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
     for (size_t ipt = 0; ipt < num_points; ++ipt) {
         geo_point_t pt = cluster->point3d(ipt);
         const auto wpid = cluster->wire_plane_id(ipt);
-        // std::cout << " DEBUG PointCloud::Facade::make_points_cluster wpid " << wpid.name() << std::endl;
+        // std::cout << " DEBUG Clus::Facade::make_points_cluster wpid " << wpid.name() << std::endl;
         int wpid_ident = wpid.ident();
         
         // Check cache first, then populate if needed
@@ -455,7 +455,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_cluster
 
 
 std::vector<DynamicPointCloud::DPCPoint>
-PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const IDetectorVolumes::pointer dv,
+Clus::Facade::make_points_cluster_skeleton(const Cluster *cluster, const IDetectorVolumes::pointer dv,
                              const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap,
                              const double step)
 {
@@ -601,7 +601,7 @@ PointCloud::Facade::make_points_cluster_skeleton(const Cluster *cluster, const I
 
 
 
-std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_extrapolation(
+std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrapolation(
     const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
     const double step, const double angle, const IDetectorVolumes::pointer dv,
     const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
@@ -686,7 +686,7 @@ std::vector<DynamicPointCloud::DPCPoint> PointCloud::Facade::make_points_linear_
 }
 
 
-void PointCloud::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId& wpid, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<std::vector<int>>& p_wpid){
+void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId& wpid, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<std::vector<int>>& p_wpid){
     int apa = wpid.apa();
     int face = wpid.face();
     auto grouping = cluster->grouping();

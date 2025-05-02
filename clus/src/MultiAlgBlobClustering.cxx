@@ -24,7 +24,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 MultiAlgBlobClustering::MultiAlgBlobClustering()
@@ -387,7 +387,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
         const auto& nodes = sv.nodes(); // Get the nodes in the scoped view
 
         // Create a map to cache blob information to avoid recalculating for points in the same blob
-        std::unordered_map<const WireCell::PointCloud::Facade::Blob*, std::pair<double, size_t>> blob_info;
+        std::unordered_map<const WireCell::Clus::Facade::Blob*, std::pair<double, size_t>> blob_info;
 
         // std::cout << "Test: " << cluster.get_cluster_id() << " " << spcs.size() << std::endl;
 
@@ -402,7 +402,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
             // Get the blob associated with this spc
             // The node_with_major() function gets the node for this major index (blob)
             const auto* node = nodes[spc_idx];
-            const auto* blob = node->value.facade<WireCell::PointCloud::Facade::Blob>();
+            const auto* blob = node->value.facade<WireCell::Clus::Facade::Blob>();
             
             // Calculate blob information if not already cached
             if (blob_info.find(blob) == blob_info.end()) {
@@ -435,7 +435,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
 
 
 void MultiAlgBlobClustering::fill_bee_patches_from_grouping(
-    const WireCell::PointCloud::Facade::Grouping& grouping)
+    const WireCell::Clus::Facade::Grouping& grouping)
 {
     // auto wpids = grouping.wpids();
 
@@ -460,7 +460,7 @@ void MultiAlgBlobClustering::fill_bee_patches_from_grouping(
 
 // Helper function to fill patches from a single cluster
 void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
-    const WireCell::PointCloud::Facade::Cluster& cluster)
+    const WireCell::Clus::Facade::Cluster& cluster)
 {
     int first_slice = -1;
     

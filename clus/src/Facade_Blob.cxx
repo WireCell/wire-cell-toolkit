@@ -3,11 +3,10 @@
 #include <boost/container_hash/hash.hpp>
 
 using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud;
-using namespace WireCell::PointCloud::Facade;
-// using WireCell::PointCloud::Dataset;
 using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
-// using WireCell::PointCloud::Tree::named_pointclouds_t;
 
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;

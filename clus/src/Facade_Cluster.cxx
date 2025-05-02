@@ -20,7 +20,7 @@
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::PointCloud;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 // using WireCell::PointCloud::Dataset;
 using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 // using WireCell::PointCloud::Tree::named_pointclouds_t;
@@ -2000,7 +2000,7 @@ void Cluster::Establish_close_connected_graph() const
                         //                                      pow(points[2][pind1] - points[2][pind2], 2));
                         //     num_edges++;
                         // }
-                        auto edge = add_edge(pind1,pind2,WireCell::PointCloud::Facade::EdgeProp(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                        auto edge = add_edge(pind1,pind2,WireCell::Clus::Facade::EdgeProp(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
                                                              pow(points[1][pind1] - points[1][pind2], 2) +
                                                              pow(points[2][pind1] - points[2][pind2], 2))),*m_graph);
 	    //	    std::cout << index1 << " " << index2 << " " << edge.second << std::endl;
@@ -2324,14 +2324,14 @@ void Cluster::Establish_close_connected_graph() const
         int index1 = it4->first.first;
         // int index2 = it4->second.first;
         // double dis = it4->second.second;
-        // auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+        // auto edge = add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
         // if (edge.second) {
         //     num_edges++;
         // }
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*m_graph);
+            auto edge = add_edge(index1,index2,WireCell::Clus::Facade::EdgeProp(dis),*m_graph);
             if (edge.second){
                 //      (*graph)[edge.first].dist = dis;
                 num_edges ++;
@@ -2657,7 +2657,7 @@ void Cluster::Connect_graph(IDetectorVolumes::pointer dv,
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
                 // }
-                /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -2675,7 +2675,7 @@ void Cluster::Connect_graph(IDetectorVolumes::pointer dv,
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -2691,7 +2691,7 @@ void Cluster::Connect_graph(IDetectorVolumes::pointer dv,
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
                 }
             }
 
@@ -2887,7 +2887,7 @@ void Cluster::Connect_graph() const{
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
                 // }
-                /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -2910,7 +2910,7 @@ void Cluster::Connect_graph() const{
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -2931,7 +2931,7 @@ void Cluster::Connect_graph() const{
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
                 }
             }
 
@@ -3526,7 +3526,7 @@ void Cluster::Connect_graph_overclustering_protection(
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
                 // }
-                /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -3544,7 +3544,7 @@ void Cluster::Connect_graph_overclustering_protection(
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -3560,7 +3560,7 @@ void Cluster::Connect_graph_overclustering_protection(
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::PointCloud::Facade::EdgeProp(dis), *m_graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *m_graph);
                 }
             }
 

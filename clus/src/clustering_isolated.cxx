@@ -4,7 +4,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 // The original developers do not care.
@@ -23,7 +23,7 @@ using namespace WireCell::PointCloud::Tree;
  * @return large cluster -> {small cluster, distance} 
 */
 // Handle all APA/Faces
-void WireCell::PointCloud::Facade::clustering_isolated(
+void WireCell::Clus::Facade::clustering_isolated(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope

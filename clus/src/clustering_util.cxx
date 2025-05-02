@@ -2,13 +2,13 @@
 
 #include <iostream>              // temp debug
 
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 
 
 // Add this to your clustering_util.cxx file
 
 std::tuple<geo_point_t, double, double, double> 
-WireCell::PointCloud::Facade::extract_geometry_params(
+WireCell::Clus::Facade::extract_geometry_params(
     const Grouping& grouping,
     const IDetectorVolumes::pointer dv)
 {
@@ -43,7 +43,7 @@ WireCell::PointCloud::Facade::extract_geometry_params(
     return std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
 }
 
-void WireCell::PointCloud::Facade::merge_clusters(
+void WireCell::Clus::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,
     cluster_set_t& known_clusters, // in/out

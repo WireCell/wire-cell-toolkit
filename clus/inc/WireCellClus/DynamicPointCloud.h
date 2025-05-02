@@ -12,9 +12,9 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
 
-namespace WireCell::PointCloud::Facade {
-    using points_t = Tree::Points;
-    using node_t = Tree::Points::node_t;
+namespace WireCell::Clus::Facade {
+    using points_t = PointCloud::Tree::Points;
+    using node_t = PointCloud::Tree::Points::node_t;
     using node_ptr = std::unique_ptr<node_t>;
     using geo_point_t = WireCell::Point;
     using geo_vector_t = WireCell::Vector;
@@ -103,6 +103,6 @@ namespace WireCell::PointCloud::Facade {
 
     void fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId &wpid_point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<std::vector<int>>& p_wpid);
 
-}  // namespace WireCell::PointCloud::Facade
+}  // namespace WireCell::Clus::Facade
 
 #endif  // WIRECELLCLUS_DYNAMICPOINTCLOUD_H
