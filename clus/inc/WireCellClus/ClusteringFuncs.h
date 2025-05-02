@@ -120,12 +120,6 @@ namespace WireCell::Clus::Facade {
 
 
 
-    // This is vestige of previous hard-wired factory pattern.  It will get and
-    // configure the clustering method for the given config.  It is temporary
-    // and will go away to be replaced with proper named factory usage.  While
-    // it is here, the old config patterns work.
-    WireCell::Clus::IClusteringMethod::pointer getClusteringMethod(const WireCell::Configuration& config);
-
 }  // namespace WireCell::Clus::Facade
 
 #endif

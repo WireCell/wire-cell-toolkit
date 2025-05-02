@@ -25,6 +25,76 @@ local tools = tools_maker(params);
 local anode = tools.anodes[0];
 local anodes = tools.anodes;
 
+// This defines the clustering methods that MABC uses below.
+local mabc_clustering(dv, pcts, anodes, live_sampler) = 
+    local dvd = {detector_volumes:wc.tn(dv)};
+    local pcd = {pc_transforms: wc.tn(pcts)};
+    [
+    // {
+    //     type:"ClusteringTest", name:"", data:dvd+pcd, uses:[dv,pcts]}
+    // },
+    // {
+    //     type:"ClusteringCTPointcloud", name:"", data:dvd+pcd, uses:[dv,pcts],
+    // },
+    // {
+    //     type: "ClusteringLiveDead", name:"", data:{dead_live_overlap_offset: 2}+dvd, uses:[dv],
+    // },
+    // {
+    //     type: "ClusteringExtend", name:"", data:{flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1}+dv, uses:[dv]
+    // },
+    // {
+    //     type: "ClusteringRegular:1", name:"1", data:{length_cut: 60*wc.cm, flag_enable_extend: false}+dv, uses:[dv],
+    // },
+    // {
+    //     type: "ClusteringRegular:2", name:"", data:{length_cut: 30*wc.cm, flag_enable_extend: true}+dv, uses:[dv],
+    // },
+    // {
+    //     type: "ClusteringParallelProlong", name:"", data:{length_cut: 35*wc.cm}+dvd, uses:[dvd],
+    // },
+    // {
+    //     type: "ClusteringClose", name:"", data:{length_cut: 1.2*wc.cm},
+    // },
+    // {
+    //     type: "ClusteringExtendLoop", name:"", data:{num_try: 3}+dvd, uses:[dvd],
+    // },
+    // {
+    //     type: "ClusteringSeparate", name:"", data:{use_ctpc: true}+dvd+pcd, uses=[dv, pcts],
+    // },
+    // {
+    //     type: "ClusteringConnect1", name:"", data:dvd, uses:[dv],
+    // },
+    // {
+    //     type: "ClusteringDeghost", name:"", data:dvd+pcd, uses:[dv,pcts],
+    // },
+    // {
+    //     type: "ClusteringExamineXBoundary", name:"", data:dvd, uses:[dv},
+    // },
+    // {
+    //     type: "ClusteringProtectOverclustering", name:"", data:dvd+pcd, uses:[dv,pcts],
+    // },
+    // {
+    //     type: "ClusteringNeutrino", name:"", data:dvd, uses:[dv],
+    // },
+    // {
+    //     type: "ClusteringIsolated", name:"", data:dvd, uses:[dv],
+    // },
+    {
+        type: "ClusteringExamineBundles", name:"", data:dvd+pcd, uses:[dv,pcts],
+    },
+    {
+        type: "ClusteringRetile",
+        name:"",
+        data: {
+            samplers: [{apa: 0, face: 0, name: wc.tn(live_sampler)}], 
+            anodes: [wc.tn(a) for a in anodes],
+            cut_time_low: 3*wc.us,
+            cut_time_high: 5*wc.us
+        }+dvd+pcd,
+        uses:[dv,pcts]+anodes
+    }
+];
+    
+
 
 
 
@@ -281,7 +351,9 @@ local ub = {
         pg.intern(innodes=[fan], centernodes=[sink],
                   edges=[ pg.edge(fan, sink, 1, 0) ]),
 
-    MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, live_sampler=$.bs_live) :: pg.pnode({
+    MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, live_sampler=$.bs_live) :: 
+        local cmeths = mabc_clustering(detector_volumes, pctransforms, anodes, live_sampler);
+        pg.pnode({
         type: "MultiAlgBlobClustering",
         name: "",
         data:  {
@@ -315,30 +387,9 @@ local ub = {
                     individual: true            // Output individual APA/Face
                 }
             ],
-            func_cfgs: [
-                // {name: "ClusteringTest", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-                // {name: "ClusteringCTPointcloud, "detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-                // {name: "ClusteringLiveDead", dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringExtend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringRegular:1", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringRegular:2", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringParallelProlong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringClose", length_cut: 1.2*wc.cm},
-                // {name: "ClusteringExtendLoop", num_try: 3, detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringSeparate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-                // {name: "ClusteringConnect1", detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringDeghost", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-                // {name: "ClusteringExamineXBoundary", detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringProtectOverclustering", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-                // {name: "ClusteringNeutrino", detector_volumes: wc.tn(detector_volumes)},
-                // {name: "ClusteringIsolated", detector_volumes: wc.tn(detector_volumes)},
-                {name: "ClusteringExamineBundles", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-                {name: "ClusteringRetile", 
-                samplers: [{apa: 0, face: 0, name: wc.tn(live_sampler)}], 
-                anodes: [wc.tn(anode)], cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-            ],
+            clustering_methods: [wc.tn(cmeth) for cmeth in cmeths]
         }
-    }, nin=1, nout=1, uses=[live_sampler, anode, detector_volumes, pctransforms]),
+    }, nin=1, nout=1, uses=[live_sampler, anode, detector_volumes, pctransforms]+cmeths),
 
     TensorFileSink(fname) :: pg.pnode({
         type: "TensorFileSink",

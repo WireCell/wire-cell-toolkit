@@ -14,6 +14,7 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Graph.h"
+#include "WireCellUtil/NamedFactory.h"
 
 #include <fstream>
 
@@ -71,14 +72,12 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
-    for (auto cfg : cfg["func_cfgs"]) {
-        std::string name = cfg["name"].asString();
-        log->debug("configuring clustering method: {}", name);
-        auto imeth = getClusteringMethod(cfg);
-        m_clustering_chain.emplace_back(ClusteringMethod{name, imeth, cfg});
+    for (auto jtn : cfg["clustering_methods"]) {
+        std::string tn = jtn.asString();
+        log->debug("configuring clustering method: {}", tn);
+        auto imeth = Factory::find_tn<IClusteringMethod>(tn);
+        m_clustering_chain.emplace_back(ClusteringMethod{tn, imeth});
     }
-
-
 
     m_perf = get(cfg, "perf", m_perf);
 

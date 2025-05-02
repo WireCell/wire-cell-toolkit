@@ -143,6 +143,27 @@ function (
 
     local common_coords = ["x_t0cor", "y", "z"];
     // local common_coords = ["x", "y", "z"];
+    local mabc_clustering = [
+        // {type: "ClusteringTest", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)}},
+        // {type: "ClusteringCTPointcloud", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)}},
+        {type: "ClusteringSwitchScope", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction", pc_transforms: wc.tn(pctransforms)}},
+        {type: "ClusteringLiveDead", name:"", data:{dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringExtend", name:"", data:{flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringRegular", name:"one", data:{length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringRegular", name:"two", data:{length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringParallelProlong", name:"", data:{length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringClose", name:"", data:{length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringExtendLoop", name:"", data:{num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringSeparate", name:"", data:{use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)}},
+        {type: "ClusteringConnect1", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringDeghost", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)}},
+        {type: "ClusteringExamineXBoundary", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringProtectOverclustering", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)}},
+        {type: "ClusteringNeutrino", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        {type: "ClusteringIsolated", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+    ];
+
+
     local mabc = g.pnode({
         type: "MultiAlgBlobClustering",
         name: "",
@@ -178,27 +199,9 @@ function (
                     individual: true            // Output individual APA/Face
                 }
             ],
-            func_cfgs: [
-               // {name: "ClusteringTest", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-               // {name: "ClusteringCTPointcloud", detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)},
-               {name: "ClusteringSwitchScope", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction", pc_transforms: wc.tn(pctransforms)},
-               {name: "ClusteringLiveDead", dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringExtend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringRegular:1", length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringRegular:2", length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringParallelProlong", length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringClose", length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords},
-               {name: "ClusteringExtendLoop", num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringSeparate", use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)},
-               {name: "ClusteringConnect1", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringDeghost", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)},
-               {name: "ClusteringExamineXBoundary", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringProtectOverclustering", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)},
-               {name: "ClusteringNeutrino", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-               {name: "ClusteringIsolated", detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords},
-            ],
+            clustering_methods: [wc.tn(cmeth) for cmeth in mabc_clustering],
         }
-    }, nin=1, nout=1, uses=[detector_volumes, pctransforms]);
+    }, nin=1, nout=1, uses=[detector_volumes, pctransforms]+mabc_clustering);
 
     local sink = g.pnode({
         type: "TensorFileSink",

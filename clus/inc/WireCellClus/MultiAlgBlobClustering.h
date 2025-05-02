@@ -162,7 +162,6 @@ namespace WireCell::Clus {
         struct ClusteringMethod {
             std::string name;
             IClusteringMethod::pointer meth;
-            Configuration config;
         };
         std::vector<ClusteringMethod> m_clustering_chain;
         //Configuration m_func_cfgs;
