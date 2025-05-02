@@ -1,17 +1,47 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringConnect1;
+WIRECELL_FACTORY(ClusteringConnect1, ClusteringConnect1,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::PointCloud::Tree;
+
+static void clustering_connect1(Grouping& live_grouping, 
+                                IDetectorVolumes::pointer dv,
+                                const Tree::Scope& scope);
+
+class ClusteringConnect1 : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+    ClusteringConnect1() {}
+    virtual ~ClusteringConnect1() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+    }
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        clustering_connect1(live_clusters, m_dv, m_scope);
+    }
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        return cfg;
+    }
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
-
-
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
 
 // #define __DEBUG__
 #ifdef __DEBUG__
@@ -21,7 +51,7 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // This is for only one APA/face
-void WireCell::Clus::Facade::clustering_connect1(
+void clustering_connect1(
     Grouping& live_grouping, 
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope)

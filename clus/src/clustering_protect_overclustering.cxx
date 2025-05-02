@@ -1,18 +1,51 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
+
+class ClusteringProtectOverclustering;
+WIRECELL_FACTORY(ClusteringProtectOverclustering, ClusteringProtectOverclustering,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::PointCloud::Tree;
+
+static void clustering_protect_overclustering(
+    Grouping &live_grouping,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope
+    );
+
+class ClusteringProtectOverclustering : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringProtectOverclustering() {}
+    virtual ~ClusteringProtectOverclustering() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+    }
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t& ) const {
+        clustering_protect_overclustering(live_clusters, m_dv, m_pcts, m_scope);
+    }
+
+};
 
 // The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
-
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
 
 static std::map<int, Cluster *> Separate_overclustering(
     Cluster *cluster, 
@@ -781,7 +814,7 @@ static std::map<int, Cluster *> Separate_overclustering(
     return {};
 }
 
-void WireCell::Clus::Facade::clustering_protect_overclustering(
+static void clustering_protect_overclustering(
     Grouping &live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,

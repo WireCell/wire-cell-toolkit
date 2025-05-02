@@ -1,11 +1,51 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+
+class ClusteringExamineBundles;
+WIRECELL_FACTORY(ClusteringExamineBundles, ClusteringExamineBundles,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_examine_bundles(
+        Grouping& live_grouping,
+        IDetectorVolumes::pointer dv, 
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope,
+        const bool use_ctpc);
+
+class ClusteringExamineBundles : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringExamineBundles() {}
+    virtual ~ClusteringExamineBundles() {}
+    
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+        
+        // note: there is/was no way to configure use_ctpc
+    }
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        clustering_examine_bundles(live_clusters, m_dv, m_pcts, m_scope, use_ctpc_);
+    }
+        
+private:
+    double use_ctpc_{true};
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -19,7 +59,7 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // All APA Faces 
-void WireCell::Clus::Facade::clustering_examine_bundles(
+static void clustering_examine_bundles(
     Grouping& live_grouping, 
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,

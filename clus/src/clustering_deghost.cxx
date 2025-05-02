@@ -1,11 +1,55 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringDeghost;
+WIRECELL_FACTORY(ClusteringDeghost, ClusteringDeghost,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+static void clustering_deghost(Grouping& live_grouping,
+                               IDetectorVolumes::pointer dv,
+                               IPCTransformSet::pointer pcts,
+                               const Tree::Scope& scope,
+                               const bool use_ctpc,
+                               double length_cut = 0);
+
+class ClusteringDeghost : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringDeghost() {}
+    virtual ~ClusteringDeghost() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+        
+        use_ctpc_ = get(config, "use_ctpc", true);
+        length_cut_ = get(config, "length_cut", 0);
+    }
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        return cfg;
+    }
+    
+    void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
+        clustering_deghost(live_clusters, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
+    }
+    
+private:
+    double use_ctpc_{true};
+    double length_cut_{0};
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -19,7 +63,7 @@ using namespace WireCell::PointCloud::Tree;
 #endif
 
 // This can handle entire APA (including all faces) data
-void WireCell::Clus::Facade::clustering_deghost(
+static void clustering_deghost(
     Grouping& live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,

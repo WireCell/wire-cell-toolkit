@@ -1,123 +1,58 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringParallelProlong;
+WIRECELL_FACTORY(ClusteringParallelProlong, ClusteringParallelProlong,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+
+static void clustering_parallel_prolong(
+    Grouping& live_clusters,
+    cluster_set_t& cluster_connected_dead, // in/out
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope,
+    const double length_cut = 35*units::cm);
+
+class ClusteringParallelProlong : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+    ClusteringParallelProlong() {}
+    virtual ~ClusteringParallelProlong() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+        
+        length_cut_ = get(config, "length_cut", 35*units::cm);
+    }
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        return cfg;
+    }
+    
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t& cluster_connected_dead) const {
+        clustering_parallel_prolong(live_clusters, cluster_connected_dead, m_dv, m_scope, length_cut_);
+    }
+
+private:
+    double length_cut_{35*units::cm};
+};
+
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
+// using namespace WireCell::PointCloud::Tree;
 
-// Expand this function to handle multiple APA/Faces ...
-void WireCell::Clus::Facade::clustering_parallel_prolong(
-    Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,     // in/out
-    const IDetectorVolumes::pointer dv,                // detector volumes
-    const Tree::Scope& scope,
-    const double length_cut                    //
-)
-{
-
-	// Get all the wire plane IDs from the grouping
-	const auto& wpids = live_grouping.wpids();
-
-	// Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
-	std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
-	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
-	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
-	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
-	std::set<int> apas;
-	for (const auto& wpid : wpids) {
-		int apa = wpid.apa();
-		int face = wpid.face();
-		apas.insert(apa);
-  
-		// Create wpids for all three planes with this APA and face
-		WirePlaneId wpid_u(kUlayer, face, apa);
-		WirePlaneId wpid_v(kVlayer, face, apa);
-		WirePlaneId wpid_w(kWlayer, face, apa);
-	 
-		// Get drift direction based on face orientation
-		int face_dirx = dv->face_dirx(wpid_u);
-		geo_point_t drift_dir(face_dirx, 0, 0);
-		
-		// Get wire directions for all planes
-		Vector wire_dir_u = dv->wire_direction(wpid_u);
-		Vector wire_dir_v = dv->wire_direction(wpid_v);
-		Vector wire_dir_w = dv->wire_direction(wpid_w);
-  
-		// Calculate angles
-		double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
-		double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
-		double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
-  
-		wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
-		wpid_U_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_u), sin(angle_u)), angle_u);
-		wpid_V_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_v), sin(angle_v)), angle_v);
-		wpid_W_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_w), sin(angle_w)), angle_w);
-	}
-  
-
-
-  // prepare graph ...
-  typedef cluster_connectivity_graph_t Graph;
-  Graph g;
-  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
-  
-  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    auto& live = live_clusters[ilive];
-    map_cluster_index[live] = ilive;
-    ilive2desc[ilive] = boost::add_vertex(ilive, g);
-	if (live->get_default_scope().hash() != scope.hash()) {
-		live->set_default_scope(scope);
-		// std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
-	}
-  }
-
-  // original algorithm ... (establish edges ... )
-
-
-  for (size_t i=0;i!=live_clusters.size();i++){
-    auto cluster_1 = live_clusters.at(i);
-	if (!cluster_1->get_scope_filter(scope)) continue;
-    for (size_t j=i+1;j<live_clusters.size();j++){
-      auto cluster_2 = live_clusters.at(j);
-	  if(!cluster_2->get_scope_filter(scope)) continue;
-      if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut)){
-		boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			ilive2desc[map_cluster_index[cluster_2]], g);
-
-
-      }
-    }
-  }
-
-  // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
-
- // {
-  //  auto live_clusters = live_grouping.children(); // copy
-  //   // Process each cluster
-  //   for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
-  //       Cluster* cluster = live_clusters.at(iclus);
-  //       auto& scope = cluster->get_default_scope();
-  //       std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
-  //   }
-  // }
-
-  // set cluster id ... 
-  int cluster_id = 1;
-  for (auto* cluster : live_grouping.children()) {
-	  cluster->set_cluster_id(cluster_id++);
-  }
-}
-
-
-bool  WireCell::Clus::Facade::Clustering_2nd_round(
+static bool Clustering_2nd_round(
     const Cluster& cluster1,
     const Cluster& cluster2,
     double length_1,
@@ -316,5 +251,113 @@ bool  WireCell::Clus::Facade::Clustering_2nd_round(
   }
   return false;
 }
+
+// Expand this function to handle multiple APA/Faces ...
+static void clustering_parallel_prolong(
+    Grouping& live_grouping,
+    cluster_set_t& cluster_connected_dead,     // in/out
+    const IDetectorVolumes::pointer dv,                // detector volumes
+    const Tree::Scope& scope,
+    const double length_cut                    //
+)
+{
+
+	// Get all the wire plane IDs from the grouping
+	const auto& wpids = live_grouping.wpids();
+
+	// Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+	std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
+	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
+	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
+	std::set<int> apas;
+	for (const auto& wpid : wpids) {
+		int apa = wpid.apa();
+		int face = wpid.face();
+		apas.insert(apa);
+  
+		// Create wpids for all three planes with this APA and face
+		WirePlaneId wpid_u(kUlayer, face, apa);
+		WirePlaneId wpid_v(kVlayer, face, apa);
+		WirePlaneId wpid_w(kWlayer, face, apa);
+	 
+		// Get drift direction based on face orientation
+		int face_dirx = dv->face_dirx(wpid_u);
+		geo_point_t drift_dir(face_dirx, 0, 0);
+		
+		// Get wire directions for all planes
+		Vector wire_dir_u = dv->wire_direction(wpid_u);
+		Vector wire_dir_v = dv->wire_direction(wpid_v);
+		Vector wire_dir_w = dv->wire_direction(wpid_w);
+  
+		// Calculate angles
+		double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+		double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+		double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+  
+		wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+		wpid_U_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_u), sin(angle_u)), angle_u);
+		wpid_V_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_v), sin(angle_v)), angle_v);
+		wpid_W_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_w), sin(angle_w)), angle_w);
+	}
+  
+
+
+  // prepare graph ...
+  typedef cluster_connectivity_graph_t Graph;
+  Graph g;
+  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+  std::map<const Cluster*, int> map_cluster_index;
+  const auto& live_clusters = live_grouping.children();
+  
+  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+    auto& live = live_clusters[ilive];
+    map_cluster_index[live] = ilive;
+    ilive2desc[ilive] = boost::add_vertex(ilive, g);
+	if (live->get_default_scope().hash() != scope.hash()) {
+		live->set_default_scope(scope);
+		// std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+	}
+  }
+
+  // original algorithm ... (establish edges ... )
+
+
+  for (size_t i=0;i!=live_clusters.size();i++){
+    auto cluster_1 = live_clusters.at(i);
+	if (!cluster_1->get_scope_filter(scope)) continue;
+    for (size_t j=i+1;j<live_clusters.size();j++){
+      auto cluster_2 = live_clusters.at(j);
+	  if(!cluster_2->get_scope_filter(scope)) continue;
+      if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut)){
+		boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+			ilive2desc[map_cluster_index[cluster_2]], g);
+
+
+      }
+    }
+  }
+
+  // new function to  merge clusters ...
+  merge_clusters(g, live_grouping, cluster_connected_dead);
+
+ // {
+  //  auto live_clusters = live_grouping.children(); // copy
+  //   // Process each cluster
+  //   for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+  //       Cluster* cluster = live_clusters.at(iclus);
+  //       auto& scope = cluster->get_default_scope();
+  //       std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+  //   }
+  // }
+
+  // set cluster id ... 
+  int cluster_id = 1;
+  for (auto* cluster : live_grouping.children()) {
+	  cluster->set_cluster_id(cluster_id++);
+  }
+}
+
+
 
 #pragma GCC diagnostic pop

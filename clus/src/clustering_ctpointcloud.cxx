@@ -1,11 +1,46 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+
+class ClusteringCTPointCloud;
+WIRECELL_FACTORY(ClusteringCTPointCloud, ClusteringCTPointCloud,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_ctpointcloud(Grouping& live_grouping,
+                                    IDetectorVolumes::pointer dv,
+                                    IPCTransformSet::pointer pcts);
+
+class ClusteringCTPointCloud : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS {
+public:
+    ClusteringCTPointCloud() {}
+    virtual ~ClusteringCTPointCloud() {}
+    
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+    }
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        return cfg;
+    }
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        clustering_ctpointcloud(live_clusters, m_dv, m_pcts);
+    }
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -13,7 +48,7 @@ using namespace WireCell::PointCloud::Tree;
 
 
 // This is a test function, not used in clustering
-void WireCell::Clus::Facade::clustering_ctpointcloud(
+static void clustering_ctpointcloud(
     Grouping& live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts)

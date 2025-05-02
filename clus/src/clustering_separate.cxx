@@ -1,18 +1,57 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringSeparate;
+WIRECELL_FACTORY(ClusteringSeparate, ClusteringSeparate,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::PointCloud::Tree;
+
+
+
+static void clustering_separate(Grouping& live_grouping,
+                                IDetectorVolumes::pointer dv,
+                                IPCTransformSet::pointer pcts,
+                                const Tree::Scope& scope, 
+                                const bool use_ctpc);
+
+class ClusteringSeparate : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringSeparate() {}
+    virtual ~ClusteringSeparate() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+        
+        use_ctpc_ = get(config, "use_ctpc", true);
+    }
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        clustering_separate(live_clusters, m_dv, m_pcts, m_scope, use_ctpc_);
+    }
+
+private:
+    double use_ctpc_{true};
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
 // this algorithm should be able to handle multiple APA/face now ..
-void WireCell::Clus::Facade::clustering_separate(
+static void clustering_separate(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,                // detector volumes
     const IPCTransformSet::pointer pcts,

@@ -74,8 +74,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     for (auto cfg : cfg["func_cfgs"]) {
         std::string name = cfg["name"].asString();
         log->debug("configuring clustering method: {}", name);
-        auto meth = getClusteringFunction(cfg);
-        m_clustering_chain.emplace_back(ClusteringMethod{name, meth, cfg});
+        auto imeth = getClusteringMethod(cfg);
+        m_clustering_chain.emplace_back(ClusteringMethod{name, imeth, cfg});
     }
 
 
@@ -703,7 +703,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
     for (const auto& cmeth : m_clustering_chain) {
-        cmeth.meth(live_grouping, dead_grouping, cluster_connected_dead);
+        cmeth.meth->clustering(live_grouping, dead_grouping, cluster_connected_dead);
         perf.dump(cmeth.name, live_grouping);
     }
 

@@ -1,18 +1,54 @@
-#include <WireCellClus/ClusteringFuncs.h>
-#include "WireCellUtil/ExecMon.h"
-#include <set>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringSwitchScope;
+WIRECELL_FACTORY(ClusteringSwitchScope, ClusteringSwitchScope,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_switch_scope(
+        Grouping& live_grouping,
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope,
+        const std::string& correction_name // name of correction to apply
+    );
+
+class ClusteringSwitchScope : public IConfigurable, public Clus::IClusteringMethod, private NeedPCTS, private NeedScope {
+public:
+    ClusteringSwitchScope() {}
+    virtual ~ClusteringSwitchScope() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+        
+        // Get configuration parameters
+        correction_name_ = convert<std::string>(config["correction_name"], "T0Correction");
+    }
+    
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        clustering_switch_scope(live_clusters, m_pcts, m_scope, correction_name_);
+    }
+
+private:
+    std::string correction_name_{"T0Correction"};
+};
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
-void WireCell::Clus::Facade::clustering_switch_scope(
+static void clustering_switch_scope(
     Grouping& live_grouping,
     const Clus::IPCTransformSet::pointer pcts,          // detector volumes
     const Tree::Scope& default_scope,

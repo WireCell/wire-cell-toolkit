@@ -1,14 +1,45 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringExamineXBoundary;
+WIRECELL_FACTORY(ClusteringExamineXBoundary, ClusteringExamineXBoundary,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+static void clustering_examine_x_boundary(
+    Grouping& live_grouping, 
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope
+    );
+
+class ClusteringExamineXBoundary : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+    ClusteringExamineXBoundary() {}
+    virtual ~ClusteringExamineXBoundary() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+    }
+
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        clustering_examine_x_boundary(live_clusters, m_dv, m_scope);
+    }
+    
+};
+
+
 // This function only handles Single APA/Face!
-void WireCell::Clus::Facade::clustering_examine_x_boundary(
+static void clustering_examine_x_boundary(
     Grouping& live_grouping, 
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope

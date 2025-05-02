@@ -3,6 +3,7 @@
 
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/IClusGeomHelper.h"
+#include "WireCellClus/IClusteringMethod.h"
 #include "WireCellClus/Facade.h"
 
 #include "WireCellAux/Logger.h"
@@ -159,10 +160,8 @@ namespace WireCell::Clus {
         // Keep track of configured clustering methods with their metadata to
         // assist in debugging/logging.
         struct ClusteringMethod {
-            using cluster_set_t = std::set<const Facade::Cluster*>;
-            using method_t = std::function<void(Facade::Grouping&, Facade::Grouping&, cluster_set_t&)>;
             std::string name;
-            method_t meth;
+            IClusteringMethod::pointer meth;
             Configuration config;
         };
         std::vector<ClusteringMethod> m_clustering_chain;

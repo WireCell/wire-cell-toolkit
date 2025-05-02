@@ -1,11 +1,43 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringIsolated;
+WIRECELL_FACTORY(ClusteringIsolated, ClusteringIsolated,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_isolated(
+    Grouping& live_grouping,
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope
+    );
+
+class ClusteringIsolated : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+    ClusteringIsolated() {}
+    virtual ~ClusteringIsolated() {}
+    
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+    }
+    
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        return clustering_isolated(live_clusters, m_dv, m_scope);
+    }
+    
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -23,7 +55,7 @@ using namespace WireCell::PointCloud::Tree;
  * @return large cluster -> {small cluster, distance} 
 */
 // Handle all APA/Faces
-void WireCell::Clus::Facade::clustering_isolated(
+static void clustering_isolated(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope

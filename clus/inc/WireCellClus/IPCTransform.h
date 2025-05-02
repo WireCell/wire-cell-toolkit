@@ -3,8 +3,8 @@
     These interfaces are not at all general purpose so it is buried inside clus. 
 
  */
-#ifndef WIRECELL_IPCTRANSFORM
-#define WIRECELL_IPCTRANSFORM
+#ifndef WIRECELLCLUS_IPCTRANSFORM
+#define WIRECELLCLUS_IPCTRANSFORM
 
 #include "WireCellUtil/IComponent.h"
 #include "WireCellUtil/Point.h"

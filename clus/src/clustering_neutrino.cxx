@@ -1,19 +1,58 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringNeutrino;
+WIRECELL_FACTORY(ClusteringNeutrino, ClusteringNeutrino,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::Aux;
+using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_neutrino(
+    Grouping &live_grouping, 
+    int num_try, 
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope
+    );
+
+class ClusteringNeutrino :  public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+    ClusteringNeutrino() {}
+    virtual ~ClusteringNeutrino() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+        
+        num_try_ = get(config, "num_try", 1);
+    }
+    
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+        for (int i = 0; i != num_try_; i++) {
+            clustering_neutrino(live_clusters, i, m_dv, m_scope);
+        }
+    }
+    
+private:
+    int num_try_{1};
+};
 
 // The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
-
 // handle all APA/Face
-void WireCell::Clus::Facade::clustering_neutrino(
+static void clustering_neutrino(
     Grouping &live_grouping,
     int num_try, 
     IDetectorVolumes::pointer dv,

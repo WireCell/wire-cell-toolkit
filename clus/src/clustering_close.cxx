@@ -1,102 +1,55 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/ExecMon.h"
+
+class ClusteringClose;
+WIRECELL_FACTORY(ClusteringClose, ClusteringClose,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+
+static void clustering_close(Grouping& live_clusters,           // 
+                             cluster_set_t& cluster_connected_dead, // in/out
+                             const Tree::Scope& scope,
+                             const double length_cut = 1*units::cm //
+  );
+
+class ClusteringClose : public IConfigurable, public Clus::IClusteringMethod, private NeedScope {
+public:
+  ClusteringClose() {}
+  virtual ~ClusteringClose() {}
+
+  void configure(const WireCell::Configuration& config) {
+    NeedScope::configure(config);
+    
+    length_cut_ = get(config, "length_cut", 1*units::cm);
+  }
+  virtual Configuration default_configuration() const {
+    Configuration cfg;
+    return cfg;
+  }
+
+  void clustering(Grouping& live_clusters, Grouping& , cluster_set_t& cluster_connected_dead) const {
+    clustering_close(live_clusters, cluster_connected_dead, m_scope, length_cut_);
+  }
+  
+private:
+  double length_cut_{1*units::cm};
+};
+
+
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
-
-// This function can handle multiple APA/Faces
-void WireCell::Clus::Facade::clustering_close(
-    Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,     // in/out
-    const Tree::Scope& scope,
-    const double length_cut)
-{
-
-  cluster_set_t used_clusters;
-  
-  // prepare graph ...
-  typedef cluster_connectivity_graph_t Graph;
-  Graph g;
-  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
-
-  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    const auto& live = live_clusters.at(ilive);
-    if (live->get_default_scope().hash() != scope.hash()) {
-      live->set_default_scope(scope);
-    }
-    map_cluster_index[live] = ilive;
-    ilive2desc[ilive] = boost::add_vertex(ilive, g);
-  }
-
-  for (size_t i=0;i!=live_clusters.size();i++){
-    auto cluster_1 = live_clusters.at(i);
-    // nor process this cluster if it is not in the filter ...
-    if (!cluster_1->get_scope_filter(scope)) continue;
-    if (cluster_1->get_length() < 1.5*units::cm) continue;
-    if (used_clusters.find(cluster_1)!=used_clusters.end()) continue;
-    for (size_t j=i+1;j<live_clusters.size();j++){
-      auto cluster_2 = live_clusters.at(j);
-      // nor process this cluster if it is not in the filter ...
-      if (!cluster_2->get_scope_filter(scope)) continue;
-      if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
-      if (cluster_2->get_length() < 1.5*units::cm) continue;
-      if (Clustering_3rd_round(*cluster_1,*cluster_2,
-                               cluster_1->get_length(), cluster_2->get_length(), length_cut)){
-        //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-        boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-            ilive2desc[map_cluster_index[cluster_2]], g);
-
-
-        
-        if (cluster_1->get_length() < 5*units::cm){
-          used_clusters.insert(cluster_1);
-          break;
-        }
-        if (cluster_2->get_length() < 5*units::cm){
-          used_clusters.insert(cluster_2);
-        }
-      }
-    }
-  }
-
-  //  if (flag_print) std::cout << em("core alg") << std::endl;
-  
-  // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
-
-  //  if (flag_print) std::cout << em("merge clusters") << std::endl;
-
-  //  {
-  //  auto live_clusters = live_grouping.children(); // copy
-  //   // Process each cluster
-  //   for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
-  //       Cluster* cluster = live_clusters.at(iclus);
-  //       auto& scope = cluster->get_default_scope();
-  //       std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
-  //   }
-  // }
-
-  // set cluster id ... 
-  int cluster_id = 1;
-  for (auto* cluster : live_grouping.children()) {
-      cluster->set_cluster_id(cluster_id++);
-  }
-}
-
-
-
-
-bool WireCell::Clus::Facade::Clustering_3rd_round(
+static bool Clustering_3rd_round(
   const Cluster& cluster1,
   const Cluster& cluster2,
   double length_1,
@@ -211,11 +164,94 @@ bool WireCell::Clus::Facade::Clustering_3rd_round(
     //    if (flag_print) std::cout << em("additional running") << std::endl;
   }
 
- 
-
   return false;
+}
+
+
+// This function can handle multiple APA/Faces
+static void clustering_close(
+    Grouping& live_grouping,
+    cluster_set_t& cluster_connected_dead,     // in/out
+    const Tree::Scope& scope,
+    const double length_cut)
+{
+
+  cluster_set_t used_clusters;
   
- }
+  // prepare graph ...
+  typedef cluster_connectivity_graph_t Graph;
+  Graph g;
+  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+  std::map<const Cluster*, int> map_cluster_index;
+  const auto& live_clusters = live_grouping.children();
+
+  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+    const auto& live = live_clusters.at(ilive);
+    if (live->get_default_scope().hash() != scope.hash()) {
+      live->set_default_scope(scope);
+    }
+    map_cluster_index[live] = ilive;
+    ilive2desc[ilive] = boost::add_vertex(ilive, g);
+  }
+
+  for (size_t i=0;i!=live_clusters.size();i++){
+    auto cluster_1 = live_clusters.at(i);
+    // nor process this cluster if it is not in the filter ...
+    if (!cluster_1->get_scope_filter(scope)) continue;
+    if (cluster_1->get_length() < 1.5*units::cm) continue;
+    if (used_clusters.find(cluster_1)!=used_clusters.end()) continue;
+    for (size_t j=i+1;j<live_clusters.size();j++){
+      auto cluster_2 = live_clusters.at(j);
+      // nor process this cluster if it is not in the filter ...
+      if (!cluster_2->get_scope_filter(scope)) continue;
+      if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+      if (cluster_2->get_length() < 1.5*units::cm) continue;
+      if (Clustering_3rd_round(*cluster_1,*cluster_2,
+                               cluster_1->get_length(), cluster_2->get_length(), length_cut)){
+        //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+        boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+            ilive2desc[map_cluster_index[cluster_2]], g);
+
+
+        
+        if (cluster_1->get_length() < 5*units::cm){
+          used_clusters.insert(cluster_1);
+          break;
+        }
+        if (cluster_2->get_length() < 5*units::cm){
+          used_clusters.insert(cluster_2);
+        }
+      }
+    }
+  }
+
+  //  if (flag_print) std::cout << em("core alg") << std::endl;
+  
+  // new function to  merge clusters ...
+  merge_clusters(g, live_grouping, cluster_connected_dead);
+
+  //  if (flag_print) std::cout << em("merge clusters") << std::endl;
+
+  //  {
+  //  auto live_clusters = live_grouping.children(); // copy
+  //   // Process each cluster
+  //   for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+  //       Cluster* cluster = live_clusters.at(iclus);
+  //       auto& scope = cluster->get_default_scope();
+  //       std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+  //   }
+  // }
+
+  // set cluster id ... 
+  int cluster_id = 1;
+  for (auto* cluster : live_grouping.children()) {
+      cluster->set_cluster_id(cluster_id++);
+  }
+}
+
+
+
+
 #pragma GCC diagnostic pop
 
 // Local Variables:

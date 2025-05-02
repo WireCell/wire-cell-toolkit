@@ -1,17 +1,554 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringExtend;
+class ClusteringExtendLoop;
+WIRECELL_FACTORY(ClusteringExtend, ClusteringExtend,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+WIRECELL_FACTORY(ClusteringExtendLoop, ClusteringExtendLoop,
+                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+
+static
+void clustering_extend(Grouping& live_clusters,
+                       cluster_set_t& cluster_connected_dead,            // in/out
+                       IDetectorVolumes::pointer dv,      // detector volumes
+                       const Tree::Scope& scope,
+                       const int flag,                                                //
+                       const double length_cut = 150*units::cm,                       //
+                       const int num_try = 0,                                         //
+                       const double length_2_cut = 3*units::cm,                       //
+                       const int num_dead_try =3                                      //
+  );
+
+class ClusteringExtend : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+  ClusteringExtend() {}
+  virtual ~ClusteringExtend() {}
+
+  void configure(const WireCell::Configuration& config) {
+    NeedDV::configure(config);
+    NeedScope::configure(config);
+
+    flag_ = get(config, "flag", 0);
+    length_cut_ = get(config, "length_cut", 150*units::cm);
+    num_try_ = get(config, "num_try", 0);
+    length_2_cut_ = get(config, "length_2_cut", 3*units::cm);
+    num_dead_try_ = get(config, "num_dead_try", 3);
+  }
+
+  virtual Configuration default_configuration() const {
+    Configuration cfg;
+    return cfg;
+  }
+
+  void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
+            clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
+  }
+
+private:
+  int flag_{0};
+  double length_cut_{150*units::cm};
+  int num_try_{0};
+  double length_2_cut_{3*units::cm};
+  int num_dead_try_{3};
+};
+    
+class ClusteringExtendLoop : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+public:
+  ClusteringExtendLoop() {}
+  virtual ~ClusteringExtendLoop() {}
+
+  void configure(const WireCell::Configuration& config) {
+    NeedDV::configure(config);
+    NeedScope::configure(config);
+    
+    num_try_ = get(config, "num_try", 0);
+  }
+
+  virtual Configuration default_configuration() const {
+    Configuration cfg;
+    return cfg;
+  }
+
+  void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
+    // for very busy events do less ...
+    int num_try = num_try_;
+    if (live_clusters.nchildren() > 1100) num_try = 1;
+    for (int i = 0; i != num_try; i++) {
+      // deal with prolong case
+      clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 1, 150*units::cm, 0);
+      // deal with parallel case
+      clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 2, 30*units::cm, 0);
+      // extension regular case
+      clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 3, 15*units::cm, 0);
+      // extension ones connected to dead region ...
+      if (i == 0) {
+        clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 4, 60 * units::cm, i);
+      }
+      else {
+        clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 4, 35 * units::cm, i);
+      }
+    }
+  }
+
+private:
+  int num_try_{0};
+};
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+static bool Clustering_4th_prol(
+    const Cluster& cluster_1,
+    const Cluster& cluster_2,
+    double length_2,
+    geo_point_t& earliest_p,
+    geo_point_t& dir_earlp,
+    double length_cut)
+{
+  auto temp_results = cluster_2.get_closest_point_blob(earliest_p);
+  geo_point_t p2 = temp_results.first;
+  geo_point_t diff = earliest_p - p2;
+  double dis = diff.magnitude();
+  if (dis < length_cut){
+    geo_point_t dir_bp(p2.x()-earliest_p.x(),p2.y()-earliest_p.y(),p2.z()-earliest_p.z());
+    double angle_diff = (3.1415926-dir_bp.angle( dir_earlp))/3.1415926*180.;
+    if ( (angle_diff < 3 || angle_diff>177 || 
+	  dis * sin(angle_diff/180.*3.1415926) < 6*units::cm)){
+      geo_point_t dir = cluster_2.vhough_transform(p2,60*units::cm);
+      if (length_2<10*units::cm && fabs(dir.angle(dir_earlp)-3.141926/2.)>30/180.*3.1415926){
+	return true;
+      }else{
+	if ((3.14151926-dir.angle(dir_earlp))/3.1415926*180.<5. ||
+	    dir.angle(dir_earlp)/3.1415926*180.<5.)
+	  return true;
+      }
+    }
+    
+  }
+    
+  return false;
+}
+
+static bool Clustering_4th_para(
+    const Cluster& cluster_1,
+    const Cluster& cluster_2,
+    double length_1, double length_2,
+    geo_point_t& earliest_p,
+    geo_point_t& dir_earlp,
+    double length_cut)
+{
+
+  auto temp_results = cluster_2.get_closest_point_blob(earliest_p);
+  geo_point_t p2 = temp_results.first;
+  
+  geo_point_t diff = p2 - earliest_p;
+  double dis = diff.magnitude();
+  
+  if (dis < length_cut ){
+    
+    geo_point_t test_point; 
+    double min_dis = 1e9, max_dis = -1e9;
+
+     for (int i=-5;i!=10;i++){ 
+       test_point.set(earliest_p.x() - dir_earlp.x() * (dis +i*2*units::cm), earliest_p.y() - dir_earlp.y() * (dis +i*2*units::cm), earliest_p.z() - dir_earlp.z() * (dis +i*2*units::cm)); 
+	
+       auto temp_results = cluster_2.get_closest_point_blob(test_point); 
+ 	//reuse this 
+       geo_point_t test_point1 = temp_results.first;
+
+       if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){ 
+	 double temp_dis = (test_point1.x() - earliest_p.x())*dir_earlp.x() + (test_point1.y() - earliest_p.y())*dir_earlp.y() + (test_point1.z() - earliest_p.z())*dir_earlp.z(); 
+	 temp_dis =(-1) * temp_dis; 
+	 if (temp_dis < min_dis) min_dis = temp_dis; 
+	 if (temp_dis > max_dis) max_dis = temp_dis; 
+       } 
+     }
+     
+     if ((max_dis - min_dis)>2.5*units::cm) return true; 
+     
+  }
+
+  return false;
+}
+
+static bool Clustering_4th_reg(
+    const Cluster& cluster_1,
+    const Cluster& cluster_2,
+    double length_1, double length_2,
+    geo_point_t p1, double length_cut, 
+    const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv)
+{
+  auto temp_results = cluster_2.get_closest_point_blob(p1);
+  geo_point_t p2 = temp_results.first;
+  auto wpid_p2 = cluster_2.wpid(p2);
+  geo_point_t diff = p1 - p2;
+  double dis1 = diff.magnitude();
+  
+  temp_results = cluster_1.get_closest_point_blob(p2);
+  p1 = temp_results.first;
+  auto wpid_p1 = cluster_1.wpid(p1);
+
+  auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
+
+  /* temp_results = cluster_2.get_closest_point_blob(p1); */
+  /* p2 = temp_results.second; */
+
+  diff = p1 - p2;
+  double dis = diff.magnitude();
+
+  geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
+
+  if (dis1 > 15*units::cm && dis < 3*units::cm && length_2 > 80*units::cm &&length_1>80*units::cm) return false;
+  
+  if (dis < length_cut && (length_2 >= 40*units::cm || dis < 3*units::cm)){
+    geo_point_t cluster1_ave_pos = cluster_1.calc_ave_pos(p1,5*units::cm);
+    geo_point_t cluster2_ave_pos = cluster_2.calc_ave_pos(p2,5*units::cm);
+    geo_point_t dir1;
+    
+    if (cluster_1.nnearby(cluster1_ave_pos, 30*units::cm)>50 && length_1 < 120*units::cm){
+      dir1 = cluster_1.vhough_transform(cluster1_ave_pos,30*units::cm);
+    }else{
+      dir1 = cluster_1.vhough_transform(cluster1_ave_pos,80*units::cm);
+    }
+
+    geo_point_t dir3;
+    if (cluster_2.nnearby(cluster2_ave_pos, 30*units::cm)>50&&length_2 < 120*units::cm){
+      dir3 = cluster_2.vhough_transform(cluster2_ave_pos,30*units::cm);
+    }else{
+      dir3 = cluster_2.vhough_transform(cluster2_ave_pos,80*units::cm);
+    }
+
+    geo_point_t dir2(cluster2_ave_pos.x() - cluster1_ave_pos.x(),
+		     cluster2_ave_pos.y() - cluster1_ave_pos.y(),
+		     cluster2_ave_pos.z() - cluster1_ave_pos.z());
+
+    
+    double ave_dis = sqrt(pow(cluster1_ave_pos.x()-cluster2_ave_pos.x(),2) + pow(cluster1_ave_pos.y()-cluster2_ave_pos.y(),2) + pow(cluster1_ave_pos.z()-cluster2_ave_pos.z(),2));
+    geo_point_t test_point;
+    double min_dis = 1e9, max_dis = -1e9;
+
+    if (dir2.angle(dir1)>3.1415926/2. ){
+          
+      for (int i=-5;i!=10;i++){
+	test_point.set(cluster1_ave_pos.x() - dir1.x() * (ave_dis +i*2*units::cm), cluster1_ave_pos.y() - dir1.y() * (ave_dis +i*2*units::cm), cluster1_ave_pos.z() - dir1.z() * (ave_dis +i*2*units::cm));
+	
+	auto temp_results = cluster_2.get_closest_point_blob(test_point);
+	//reuse this
+	geo_point_t test_point1 = temp_results.first;
+	if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
+	  double temp_dis = (test_point1.x() - cluster1_ave_pos.x())*dir1.x() + (test_point1.y() - cluster1_ave_pos.y())*dir1.y() + (test_point1.z() - cluster1_ave_pos.z())*dir1.z();
+	  temp_dis *=-1;
+	  if (temp_dis < min_dis) min_dis = temp_dis;
+	  if (temp_dis > max_dis) max_dis = temp_dis;
+	}
+      }
+
+      if ((max_dis - min_dis)>2.5*units::cm) return true;
+    }
+
+    if (dir2.angle(dir3)<3.1415926/2.){
+            
+      // look at the other side (repeat)
+      // cluster2_ave_pos, dir2
+      min_dis = 1e9;
+      max_dis = -1e9;
+      for (int i=-5;i!=10;i++){
+	test_point.set(cluster2_ave_pos.x() - dir3.x() * (ave_dis +i*2*units::cm), cluster2_ave_pos.y() - dir3.y() * (ave_dis +i*2*units::cm), cluster2_ave_pos.z() - dir3.z() * (ave_dis +i*2*units::cm));
+	
+	auto temp_results = cluster_1.get_closest_point_blob(test_point);
+	//reuse this
+	geo_point_t test_point1 = temp_results.first;
+	if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
+	  double temp_dis = (test_point1.x() - cluster2_ave_pos.x())*dir3.x() + (test_point1.y() - cluster2_ave_pos.y())*dir3.y() + (test_point1.z() - cluster2_ave_pos.z())*dir3.z();
+	  temp_dis *=-1;
+	  if (temp_dis < min_dis) min_dis = temp_dis;
+	  if (temp_dis > max_dis) max_dis = temp_dis;
+	}
+      }
+      
+      if ((max_dis - min_dis)>2.5*units::cm) return true;
+    }
+    
+  }else if (dis < 2 * length_cut && length_2 < 40*units::cm){
+
+    // pronlonged case for U 3 and V 4 ...
+    // geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
+    // geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
+    
+    geo_point_t dir2(p2.x()-p1.x(),p2.y()-p1.y(),p2.z()-p1.z());
+    
+    bool flag_para = false, flag_prol =false, flag_reg = false;
+    
+    double angle1 = fabs(dir2.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
+    
+    if (angle1 < 5 && dis < 2*length_cut || angle1 < 2 ){
+      flag_para = true;
+    }else if (dis < 2*length_cut){
+      geo_point_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
+      geo_point_t tempV5;
+      double angle2 = tempV1.angle(wpid_U_dir.at(wpid_ps).first);
+      tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle2),0);
+      angle2 = tempV5.angle(drift_dir_abs)/3.1415926*180.;
+      
+      double angle3 = tempV1.angle(wpid_V_dir.at(wpid_ps).first);
+      tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle3),0);
+      angle3 = tempV5.angle(drift_dir_abs)/3.1415926*180.;
+      if (angle2<7.5 || angle3 < 7.5)
+  	  flag_prol = true;
+    }
+
+
+    if (flag_para || flag_prol || flag_reg){
+
+      geo_point_t dir1;
+      if (cluster_1.nnearby(p1, 15*units::cm)>30 && (flag_prol ||flag_reg) ){
+	      dir1 = cluster_1.vhough_transform(p1,15*units::cm);
+      }else{
+	      dir1 = cluster_1.vhough_transform(p1,60*units::cm);
+      }
+
+      geo_point_t dir3;
+      if (cluster_2.nnearby(p2, 15*units::cm)>30 && (flag_prol || flag_reg)){
+	      dir3 = cluster_2.vhough_transform(p2,15*units::cm);
+      }else{
+	      dir3 = cluster_2.vhough_transform(p2,60*units::cm);
+      }
+
+       
+      double angle4 = (3.1415926-dir1.angle(dir2))/3.1415926*180.;
+      double angle5 = dir2.angle(dir3)/3.1415926*180.;
+      
+      if (flag_para && fabs(dir3.angle(drift_dir_abs)-3.141592/2.)<10/180.*3.1415926 && fabs(dir1.angle(drift_dir_abs)-3.141592/2.)<10/180.*3.1415926){
+        if (angle4 < 30 && (length_2 < 12*units::cm && fabs(angle5-90.)>30 || angle5 < 45))
+          return true;
+      }else if (flag_prol){
+        if (angle4 < 25 && (length_2 < 15*units::cm && fabs(angle5-90.)>30 || angle5 < 25))
+          return true;
+      }
+
+      if (fabs(dir2.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.>7.5){
+	// non-parallel case ... 
+	if (WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,10,wpid_U_dir.at(wpid_p1).second, wpid_V_dir.at(wpid_p1).second, wpid_W_dir.at(wpid_p1).second,2)){
+	  if (length_2 < 8*units::cm && WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,5,wpid_U_dir.at(wpid_p1).second, wpid_V_dir.at(wpid_p1).second, wpid_W_dir.at(wpid_p1).second,2)) 
+		return true; 
+	  if (WireCell::Clus::Facade::is_angle_consistent(dir3,dir2,true,10,wpid_U_dir.at(wpid_p2).second, wpid_V_dir.at(wpid_p2).second, wpid_W_dir.at(wpid_p2).second,2)){
+	    return true;
+	  }
+	}
+      }
+    }
+  }
+  return false;
+}
+
+
+static bool Clustering_4th_dead(
+    const Cluster& cluster_1,
+    const Cluster& cluster_2,
+    double length_1, double length_2, double length_cut, int num_dead_try,
+    const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv)
+{
+  geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
+  // const auto [angle_u,angle_v,angle_w] = cluster_1.grouping()->wire_angles();
+
+  geo_point_t p1;
+  geo_point_t p2;
+  
+  double dis = Find_Closest_Points(cluster_1, cluster_2, length_1, length_2, length_cut, p1, p2);
+
+  // auto wpid_p1 = cluster_1.wpid(p1);
+	// auto wpid_p2 = cluster_2.wpid(p2);
+	// auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
+
+  //add a special one ...  for uboone ...
+  /*
+  if (length_1 > 30*units::cm && length_2 > 30*units::cm &&
+      (dis < 3*units::cm ||
+       fabs(p1.x()-p2.x()) < 1.6*units::cm && (dis < 20*units::cm &&
+						     p1.z() > 700.6*units::cm && p1.z() < 739.6*units::cm &&     // special region
+						     p2.z() > 700.6*units::cm && p2.z() < 739.6*units::cm &&     // special region ...
+						     p1.y() > -10.4*units::cm && p1.y() < 29*units::cm &&
+						     p2.y() > -10.4*units::cm && p2.y() < 29*units::cm )
+       )){
+    return true; 
+  }
+  */
+
+  if ((dis < length_cut || (length_2 > 50*units::cm && dis < 80*units::cm))){
+
+    geo_point_t cluster1_ave_pos_save;
+    geo_point_t cluster2_ave_pos_save;
+    geo_point_t dir1_save;
+    geo_point_t dir3_save;
+
+    for (int i=0;i!=num_dead_try;i++){
+      geo_point_t cluster1_ave_pos; 
+      geo_point_t cluster2_ave_pos; 
+      
+      geo_point_t dir1; 
+      geo_point_t dir3; 
+      geo_point_t dir2;
+
+      if (i==0){
+        cluster1_ave_pos = cluster_1.calc_ave_pos(p1,5*units::cm);
+        cluster1_ave_pos_save = cluster1_ave_pos;
+        cluster2_ave_pos = cluster_2.calc_ave_pos(p2,5*units::cm);
+        cluster2_ave_pos_save = cluster2_ave_pos;
+
+        if (num_dead_try==1){
+          dir1 = cluster_1.vhough_transform(cluster1_ave_pos,20*units::cm);
+          dir3 = cluster_2.vhough_transform(cluster2_ave_pos,20*units::cm);
+        }else{
+          dir1 = cluster_1.vhough_transform(cluster1_ave_pos,80*units::cm);
+          dir3 = cluster_2.vhough_transform(cluster2_ave_pos,80*units::cm);
+        }
+        dir1_save = dir1;
+        dir3_save = dir3;
+
+	      dir2.set(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9, cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9, cluster2_ave_pos.z() - cluster1_ave_pos.z()+1e-9); // 2-1
+	
+      }else if (i==1){
+        if (length_2 >= 15*units::cm &&(!(length_2 > 150*units::cm && dis<15*units::cm))){
+          cluster1_ave_pos = cluster1_ave_pos_save;//cluster_1->calc_ave_pos(p1,5*units::cm);
+          dir1 = dir1_save;//cluster_1->VHoughTrans(cluster1_ave_pos,80*units::cm);
+          
+          geo_vector_t dir_test(dir1);
+          dir_test = dir_test/dir_test.magnitude();
+          dir_test = (-1) * dir_test;
+          
+          std::pair<geo_point_t, double> temp_results = cluster_2.get_closest_point_along_vec(cluster1_ave_pos, dir_test, dis*2, 5*units::cm, 15, 10*units::cm);
+          
+          if (temp_results.second < 100*units::cm){
+            cluster2_ave_pos = cluster_2.calc_ave_pos(temp_results.first,5*units::cm);
+            dir3 = cluster_2.vhough_transform(cluster2_ave_pos,80*units::cm);
+            dir2.set(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9, cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9, cluster2_ave_pos.z() - cluster1_ave_pos.z()+1e-9); // 2-1
+            
+          }else{
+            continue;
+          }
+        }else{
+          continue;
+        }
+      }else if (i==2){
+	      if (length_2 >=15*units::cm&&(!(length_2 > 150*units::cm && dis<15*units::cm))){
+          cluster2_ave_pos = cluster2_ave_pos_save;//cluster_2->calc_ave_pos(p2,5*units::cm);
+          dir3 = dir3_save;//cluster_2->VHoughTrans(cluster2_ave_pos,80*units::cm);
+          
+          geo_point_t dir_test(dir3);
+          dir_test = dir_test / dir_test.magnitude();
+          dir_test = (-1) * dir_test;
+          
+          std::pair<geo_point_t, double> temp_results = cluster_1.get_closest_point_along_vec(cluster2_ave_pos, dir_test, dis*2, 5*units::cm, 15, 10*units::cm);
+          
+          if (temp_results.second < 100*units::cm){
+            cluster1_ave_pos = cluster_1.calc_ave_pos(temp_results.first,5*units::cm);
+            dir1 = cluster_1.vhough_transform(cluster1_ave_pos,80*units::cm);
+            dir2.set(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9, cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9, cluster2_ave_pos.z() - cluster1_ave_pos.z()+1e-9); // 2-1
+            
+          }else{
+            continue;
+          }
+        }else{
+          continue;
+        }
+      }
+      
+      geo_point_t ave_dir(cluster1_ave_pos.x()-cluster2_ave_pos.x(),cluster1_ave_pos.y()-cluster2_ave_pos.y(),cluster1_ave_pos.z()-cluster2_ave_pos.z());
+
+      auto wpid_ave_p1 = cluster_1.wpid(cluster1_ave_pos);
+      auto wpid_ave_p2 = cluster_2.wpid(cluster2_ave_pos);
+      // auto wpid_ave_ps = get_wireplaneid(cluster1_ave_pos, wpid_ave_p1, cluster2_ave_pos, wpid_ave_p2, dv);
+
+      // use projection to deal with stuff ...
+      if (fabs(ave_dir.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.>7.5){
+      	// non-parallel case ...
+      	if (WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,10,wpid_U_dir.at(wpid_ave_p1).second, wpid_V_dir.at(wpid_ave_p1).second, wpid_W_dir.at(wpid_ave_p1).second,2)){
+      	  if (length_2 < 8*units::cm&& WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,5,wpid_U_dir.at(wpid_ave_p1).second, wpid_V_dir.at(wpid_ave_p1).second, wpid_W_dir.at(wpid_ave_p1).second,2))
+      	    return true;
+      	  if (length_2 < 15*units::cm && WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,7.5,wpid_U_dir.at(wpid_ave_p1).second, wpid_V_dir.at(wpid_ave_p1).second, wpid_W_dir.at(wpid_ave_p1).second))
+      	    return true;
+      	  if (WireCell::Clus::Facade::is_angle_consistent(dir3,dir2,true,10,wpid_U_dir.at(wpid_ave_p2).second, wpid_V_dir.at(wpid_ave_p2).second, wpid_W_dir.at(wpid_ave_p2).second,2)){
+      	    return true;
+      	  }
+      	}
+      }
+      
+      
+      double angle1 = (3.1415926-dir1.angle(dir2))/3.1415926*180.;
+      double angle2 = dir3.angle(dir2)/3.1415926*180.;
+      double angle3 = (3.1415926-dir1.angle(dir3))/3.1415926*180.;
+
+      
+      if (length_2 <=10*units::cm){
+	if (angle1 < 15 && (angle2 < 60 || length_2 < 5*units::cm) ) return true;
+      }else{
+	if (angle1 < 15 && angle2 <15 && angle3 < 25 ||
+	    angle3 < 10 && (angle1+angle2)<45 && dis < 5*units::cm )
+	  return true;
+
+	double ave_dis = sqrt(pow(cluster1_ave_pos.x()-cluster2_ave_pos.x(),2) + pow(cluster1_ave_pos.y()-cluster2_ave_pos.y(),2) + pow(cluster1_ave_pos.z()-cluster2_ave_pos.z(),2));
+	geo_point_t test_point;
+	double min_dis = 1e9, max_dis = -1e9;
+
+	if (fabs(ave_dir.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180. > 7.5  && ave_dis < 30*units::cm){
+	  if (i==1){
+	    for (int k=-5;k!=10;k++){
+	      test_point.set(cluster1_ave_pos.x() - dir1.x() * (ave_dis +k*2*units::cm), cluster1_ave_pos.y() - dir1.y() * (ave_dis +k*2*units::cm), cluster1_ave_pos.z() - dir1.z() * (ave_dis +k*2*units::cm));
+	      
+	      auto temp_results = cluster_2.get_closest_point_blob(test_point);
+	      //reuse this
+	      geo_point_t test_point1 = temp_results.first;
+	      if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
+		double temp_dis = (test_point1.x() - cluster1_ave_pos.x())*dir1.x() + (test_point1.y() - cluster1_ave_pos.y())*dir1.y() + (test_point1.z() - cluster1_ave_pos.z())*dir1.z();
+		temp_dis *=-1;
+		if (temp_dis < min_dis) min_dis = temp_dis;
+		if (temp_dis > max_dis) max_dis = temp_dis;
+	      }
+	    }
+	    
+	    if ((max_dis - min_dis)>2.5*units::cm) return true;
+	  }else if (i==2){
+	    for (int k=-5;k!=10;k++){
+	      test_point.set(cluster2_ave_pos.x() - dir3.x() * (ave_dis +k*2*units::cm), cluster2_ave_pos.y() - dir3.y() * (ave_dis +k*2*units::cm),  cluster2_ave_pos.z() - dir3.z() * (ave_dis +k*2*units::cm));
+	      
+	      auto temp_results = cluster_1.get_closest_point_blob(test_point);
+	      //reuse this
+	      geo_point_t test_point1 = temp_results.first;
+	      if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
+		double temp_dis = (test_point1.x() - cluster2_ave_pos.x())*dir3.x() + (test_point1.y() - cluster2_ave_pos.y())*dir3.y() + (test_point1.z() - cluster2_ave_pos.z())*dir3.z();
+		temp_dis *=-1;
+		if (temp_dis < min_dis) min_dis = temp_dis;
+		if (temp_dis > max_dis) max_dis = temp_dis;
+	      }
+	    }
+	     
+	    if ((max_dis - min_dis)>2.5*units::cm) return true;
+	  }
+
+	}
+	
+      }
+    }
+  }
+
+  return false;
+}
+
+
 // Expand this function to handle multiple APA/Faces ...
-void WireCell::Clus::Facade::clustering_extend(
+static void clustering_extend(
     Grouping& live_grouping,
     cluster_set_t& cluster_connected_dead,     // in/out
     const IDetectorVolumes::pointer dv,                // detector volumes
@@ -318,251 +855,7 @@ void WireCell::Clus::Facade::clustering_extend(
 
 
 
-bool WireCell::Clus::Facade::Clustering_4th_prol(
-    const Cluster& cluster_1,
-    const Cluster& cluster_2,
-    double length_2,
-    geo_point_t& earliest_p,
-    geo_point_t& dir_earlp,
-    double length_cut)
-{
-  auto temp_results = cluster_2.get_closest_point_blob(earliest_p);
-  geo_point_t p2 = temp_results.first;
-  geo_point_t diff = earliest_p - p2;
-  double dis = diff.magnitude();
-  if (dis < length_cut){
-    geo_point_t dir_bp(p2.x()-earliest_p.x(),p2.y()-earliest_p.y(),p2.z()-earliest_p.z());
-    double angle_diff = (3.1415926-dir_bp.angle( dir_earlp))/3.1415926*180.;
-    if ( (angle_diff < 3 || angle_diff>177 || 
-	  dis * sin(angle_diff/180.*3.1415926) < 6*units::cm)){
-      geo_point_t dir = cluster_2.vhough_transform(p2,60*units::cm);
-      if (length_2<10*units::cm && fabs(dir.angle(dir_earlp)-3.141926/2.)>30/180.*3.1415926){
-	return true;
-      }else{
-	if ((3.14151926-dir.angle(dir_earlp))/3.1415926*180.<5. ||
-	    dir.angle(dir_earlp)/3.1415926*180.<5.)
-	  return true;
-      }
-    }
-    
-  }
-    
-  return false;
-  
-  
-}
 
-bool WireCell::Clus::Facade::Clustering_4th_para(
-    const Cluster& cluster_1,
-    const Cluster& cluster_2,
-    double length_1, double length_2,
-    geo_point_t& earliest_p,
-    geo_point_t& dir_earlp,
-    double length_cut)
-{
-
-  auto temp_results = cluster_2.get_closest_point_blob(earliest_p);
-  geo_point_t p2 = temp_results.first;
-  
-  geo_point_t diff = p2 - earliest_p;
-  double dis = diff.magnitude();
-  
-  if (dis < length_cut ){
-    
-    geo_point_t test_point; 
-    double min_dis = 1e9, max_dis = -1e9;
-
-     for (int i=-5;i!=10;i++){ 
-       test_point.set(earliest_p.x() - dir_earlp.x() * (dis +i*2*units::cm), earliest_p.y() - dir_earlp.y() * (dis +i*2*units::cm), earliest_p.z() - dir_earlp.z() * (dis +i*2*units::cm)); 
-	
-       auto temp_results = cluster_2.get_closest_point_blob(test_point); 
- 	//reuse this 
-       geo_point_t test_point1 = temp_results.first;
-
-       if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){ 
-	 double temp_dis = (test_point1.x() - earliest_p.x())*dir_earlp.x() + (test_point1.y() - earliest_p.y())*dir_earlp.y() + (test_point1.z() - earliest_p.z())*dir_earlp.z(); 
-	 temp_dis =(-1) * temp_dis; 
-	 if (temp_dis < min_dis) min_dis = temp_dis; 
-	 if (temp_dis > max_dis) max_dis = temp_dis; 
-       } 
-     }
-     
-     if ((max_dis - min_dis)>2.5*units::cm) return true; 
-     
-  }
-
-  return false;
-}
-
-bool WireCell::Clus::Facade::Clustering_4th_reg(
-    const Cluster& cluster_1,
-    const Cluster& cluster_2,
-    double length_1, double length_2,
-    geo_point_t p1, double length_cut, 
-    const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv)
-{
-  auto temp_results = cluster_2.get_closest_point_blob(p1);
-  geo_point_t p2 = temp_results.first;
-  auto wpid_p2 = cluster_2.wpid(p2);
-  geo_point_t diff = p1 - p2;
-  double dis1 = diff.magnitude();
-  
-  temp_results = cluster_1.get_closest_point_blob(p2);
-  p1 = temp_results.first;
-  auto wpid_p1 = cluster_1.wpid(p1);
-
-  auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
-
-  /* temp_results = cluster_2.get_closest_point_blob(p1); */
-  /* p2 = temp_results.second; */
-
-  diff = p1 - p2;
-  double dis = diff.magnitude();
-
-  geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
-
-  if (dis1 > 15*units::cm && dis < 3*units::cm && length_2 > 80*units::cm &&length_1>80*units::cm) return false;
-  
-  if (dis < length_cut && (length_2 >= 40*units::cm || dis < 3*units::cm)){
-    geo_point_t cluster1_ave_pos = cluster_1.calc_ave_pos(p1,5*units::cm);
-    geo_point_t cluster2_ave_pos = cluster_2.calc_ave_pos(p2,5*units::cm);
-    geo_point_t dir1;
-    
-    if (cluster_1.nnearby(cluster1_ave_pos, 30*units::cm)>50 && length_1 < 120*units::cm){
-      dir1 = cluster_1.vhough_transform(cluster1_ave_pos,30*units::cm);
-    }else{
-      dir1 = cluster_1.vhough_transform(cluster1_ave_pos,80*units::cm);
-    }
-
-    geo_point_t dir3;
-    if (cluster_2.nnearby(cluster2_ave_pos, 30*units::cm)>50&&length_2 < 120*units::cm){
-      dir3 = cluster_2.vhough_transform(cluster2_ave_pos,30*units::cm);
-    }else{
-      dir3 = cluster_2.vhough_transform(cluster2_ave_pos,80*units::cm);
-    }
-
-    geo_point_t dir2(cluster2_ave_pos.x() - cluster1_ave_pos.x(),
-		     cluster2_ave_pos.y() - cluster1_ave_pos.y(),
-		     cluster2_ave_pos.z() - cluster1_ave_pos.z());
-
-    
-    double ave_dis = sqrt(pow(cluster1_ave_pos.x()-cluster2_ave_pos.x(),2) + pow(cluster1_ave_pos.y()-cluster2_ave_pos.y(),2) + pow(cluster1_ave_pos.z()-cluster2_ave_pos.z(),2));
-    geo_point_t test_point;
-    double min_dis = 1e9, max_dis = -1e9;
-
-    if (dir2.angle(dir1)>3.1415926/2. ){
-          
-      for (int i=-5;i!=10;i++){
-	test_point.set(cluster1_ave_pos.x() - dir1.x() * (ave_dis +i*2*units::cm), cluster1_ave_pos.y() - dir1.y() * (ave_dis +i*2*units::cm), cluster1_ave_pos.z() - dir1.z() * (ave_dis +i*2*units::cm));
-	
-	auto temp_results = cluster_2.get_closest_point_blob(test_point);
-	//reuse this
-	geo_point_t test_point1 = temp_results.first;
-	if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
-	  double temp_dis = (test_point1.x() - cluster1_ave_pos.x())*dir1.x() + (test_point1.y() - cluster1_ave_pos.y())*dir1.y() + (test_point1.z() - cluster1_ave_pos.z())*dir1.z();
-	  temp_dis *=-1;
-	  if (temp_dis < min_dis) min_dis = temp_dis;
-	  if (temp_dis > max_dis) max_dis = temp_dis;
-	}
-      }
-
-      if ((max_dis - min_dis)>2.5*units::cm) return true;
-    }
-
-    if (dir2.angle(dir3)<3.1415926/2.){
-            
-      // look at the other side (repeat)
-      // cluster2_ave_pos, dir2
-      min_dis = 1e9;
-      max_dis = -1e9;
-      for (int i=-5;i!=10;i++){
-	test_point.set(cluster2_ave_pos.x() - dir3.x() * (ave_dis +i*2*units::cm), cluster2_ave_pos.y() - dir3.y() * (ave_dis +i*2*units::cm), cluster2_ave_pos.z() - dir3.z() * (ave_dis +i*2*units::cm));
-	
-	auto temp_results = cluster_1.get_closest_point_blob(test_point);
-	//reuse this
-	geo_point_t test_point1 = temp_results.first;
-	if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
-	  double temp_dis = (test_point1.x() - cluster2_ave_pos.x())*dir3.x() + (test_point1.y() - cluster2_ave_pos.y())*dir3.y() + (test_point1.z() - cluster2_ave_pos.z())*dir3.z();
-	  temp_dis *=-1;
-	  if (temp_dis < min_dis) min_dis = temp_dis;
-	  if (temp_dis > max_dis) max_dis = temp_dis;
-	}
-      }
-      
-      if ((max_dis - min_dis)>2.5*units::cm) return true;
-    }
-    
-  }else if (dis < 2 * length_cut && length_2 < 40*units::cm){
-
-    // pronlonged case for U 3 and V 4 ...
-    // geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    // geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    
-    geo_point_t dir2(p2.x()-p1.x(),p2.y()-p1.y(),p2.z()-p1.z());
-    
-    bool flag_para = false, flag_prol =false, flag_reg = false;
-    
-    double angle1 = fabs(dir2.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
-    
-    if (angle1 < 5 && dis < 2*length_cut || angle1 < 2 ){
-      flag_para = true;
-    }else if (dis < 2*length_cut){
-      geo_point_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
-      geo_point_t tempV5;
-      double angle2 = tempV1.angle(wpid_U_dir.at(wpid_ps).first);
-      tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle2),0);
-      angle2 = tempV5.angle(drift_dir_abs)/3.1415926*180.;
-      
-      double angle3 = tempV1.angle(wpid_V_dir.at(wpid_ps).first);
-      tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle3),0);
-      angle3 = tempV5.angle(drift_dir_abs)/3.1415926*180.;
-      if (angle2<7.5 || angle3 < 7.5)
-  	  flag_prol = true;
-    }
-
-
-    if (flag_para || flag_prol || flag_reg){
-
-      geo_point_t dir1;
-      if (cluster_1.nnearby(p1, 15*units::cm)>30 && (flag_prol ||flag_reg) ){
-	      dir1 = cluster_1.vhough_transform(p1,15*units::cm);
-      }else{
-	      dir1 = cluster_1.vhough_transform(p1,60*units::cm);
-      }
-
-      geo_point_t dir3;
-      if (cluster_2.nnearby(p2, 15*units::cm)>30 && (flag_prol || flag_reg)){
-	      dir3 = cluster_2.vhough_transform(p2,15*units::cm);
-      }else{
-	      dir3 = cluster_2.vhough_transform(p2,60*units::cm);
-      }
-
-       
-      double angle4 = (3.1415926-dir1.angle(dir2))/3.1415926*180.;
-      double angle5 = dir2.angle(dir3)/3.1415926*180.;
-      
-      if (flag_para && fabs(dir3.angle(drift_dir_abs)-3.141592/2.)<10/180.*3.1415926 && fabs(dir1.angle(drift_dir_abs)-3.141592/2.)<10/180.*3.1415926){
-        if (angle4 < 30 && (length_2 < 12*units::cm && fabs(angle5-90.)>30 || angle5 < 45))
-          return true;
-      }else if (flag_prol){
-        if (angle4 < 25 && (length_2 < 15*units::cm && fabs(angle5-90.)>30 || angle5 < 25))
-          return true;
-      }
-
-      if (fabs(dir2.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.>7.5){
-	// non-parallel case ... 
-	if (WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,10,wpid_U_dir.at(wpid_p1).second, wpid_V_dir.at(wpid_p1).second, wpid_W_dir.at(wpid_p1).second,2)){
-	  if (length_2 < 8*units::cm && WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,5,wpid_U_dir.at(wpid_p1).second, wpid_V_dir.at(wpid_p1).second, wpid_W_dir.at(wpid_p1).second,2)) 
-		return true; 
-	  if (WireCell::Clus::Facade::is_angle_consistent(dir3,dir2,true,10,wpid_U_dir.at(wpid_p2).second, wpid_V_dir.at(wpid_p2).second, wpid_W_dir.at(wpid_p2).second,2)){
-	    return true;
-	  }
-	}
-      }
-    }
-  }
-  return false;
-}
 
 
 std::vector<std::pair<geo_point_t, const Blob*>> WireCell::Clus::Facade::get_strategic_points(const Cluster& cluster) {
@@ -842,197 +1135,6 @@ double WireCell::Clus::Facade::Find_Closest_Points(
 }
 
 
-bool WireCell::Clus::Facade::Clustering_4th_dead(
-    const Cluster& cluster_1,
-    const Cluster& cluster_2,
-    double length_1, double length_2, double length_cut, int num_dead_try,
-    const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_U_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_V_dir, const std::map<WirePlaneId, std::pair<geo_point_t, double> > & wpid_W_dir,                  const IDetectorVolumes::pointer dv)
-{
-  geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
-  // const auto [angle_u,angle_v,angle_w] = cluster_1.grouping()->wire_angles();
-
-  geo_point_t p1;
-  geo_point_t p2;
-  
-  double dis = Find_Closest_Points(cluster_1, cluster_2, length_1, length_2, length_cut, p1, p2);
-
-  auto wpid_p1 = cluster_1.wpid(p1);
-	auto wpid_p2 = cluster_2.wpid(p2);
-	auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
-
-  //add a special one ...  for uboone ...
-  /*
-  if (length_1 > 30*units::cm && length_2 > 30*units::cm &&
-      (dis < 3*units::cm ||
-       fabs(p1.x()-p2.x()) < 1.6*units::cm && (dis < 20*units::cm &&
-						     p1.z() > 700.6*units::cm && p1.z() < 739.6*units::cm &&     // special region
-						     p2.z() > 700.6*units::cm && p2.z() < 739.6*units::cm &&     // special region ...
-						     p1.y() > -10.4*units::cm && p1.y() < 29*units::cm &&
-						     p2.y() > -10.4*units::cm && p2.y() < 29*units::cm )
-       )){
-    return true; 
-  }
-  */
-
-  if ((dis < length_cut || (length_2 > 50*units::cm && dis < 80*units::cm))){
-
-    geo_point_t cluster1_ave_pos_save;
-    geo_point_t cluster2_ave_pos_save;
-    geo_point_t dir1_save;
-    geo_point_t dir3_save;
-
-    for (int i=0;i!=num_dead_try;i++){
-      geo_point_t cluster1_ave_pos; 
-      geo_point_t cluster2_ave_pos; 
-      
-      geo_point_t dir1; 
-      geo_point_t dir3; 
-      geo_point_t dir2;
-
-      if (i==0){
-        cluster1_ave_pos = cluster_1.calc_ave_pos(p1,5*units::cm);
-        cluster1_ave_pos_save = cluster1_ave_pos;
-        cluster2_ave_pos = cluster_2.calc_ave_pos(p2,5*units::cm);
-        cluster2_ave_pos_save = cluster2_ave_pos;
-
-        if (num_dead_try==1){
-          dir1 = cluster_1.vhough_transform(cluster1_ave_pos,20*units::cm);
-          dir3 = cluster_2.vhough_transform(cluster2_ave_pos,20*units::cm);
-        }else{
-          dir1 = cluster_1.vhough_transform(cluster1_ave_pos,80*units::cm);
-          dir3 = cluster_2.vhough_transform(cluster2_ave_pos,80*units::cm);
-        }
-        dir1_save = dir1;
-        dir3_save = dir3;
-
-	      dir2.set(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9, cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9, cluster2_ave_pos.z() - cluster1_ave_pos.z()+1e-9); // 2-1
-	
-      }else if (i==1){
-        if (length_2 >= 15*units::cm &&(!(length_2 > 150*units::cm && dis<15*units::cm))){
-          cluster1_ave_pos = cluster1_ave_pos_save;//cluster_1->calc_ave_pos(p1,5*units::cm);
-          dir1 = dir1_save;//cluster_1->VHoughTrans(cluster1_ave_pos,80*units::cm);
-          
-          geo_vector_t dir_test(dir1);
-          dir_test = dir_test/dir_test.magnitude();
-          dir_test = (-1) * dir_test;
-          
-          std::pair<geo_point_t, double> temp_results = cluster_2.get_closest_point_along_vec(cluster1_ave_pos, dir_test, dis*2, 5*units::cm, 15, 10*units::cm);
-          
-          if (temp_results.second < 100*units::cm){
-            cluster2_ave_pos = cluster_2.calc_ave_pos(temp_results.first,5*units::cm);
-            dir3 = cluster_2.vhough_transform(cluster2_ave_pos,80*units::cm);
-            dir2.set(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9, cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9, cluster2_ave_pos.z() - cluster1_ave_pos.z()+1e-9); // 2-1
-            
-          }else{
-            continue;
-          }
-        }else{
-          continue;
-        }
-      }else if (i==2){
-	      if (length_2 >=15*units::cm&&(!(length_2 > 150*units::cm && dis<15*units::cm))){
-          cluster2_ave_pos = cluster2_ave_pos_save;//cluster_2->calc_ave_pos(p2,5*units::cm);
-          dir3 = dir3_save;//cluster_2->VHoughTrans(cluster2_ave_pos,80*units::cm);
-          
-          geo_point_t dir_test(dir3);
-          dir_test = dir_test / dir_test.magnitude();
-          dir_test = (-1) * dir_test;
-          
-          std::pair<geo_point_t, double> temp_results = cluster_1.get_closest_point_along_vec(cluster2_ave_pos, dir_test, dis*2, 5*units::cm, 15, 10*units::cm);
-          
-          if (temp_results.second < 100*units::cm){
-            cluster1_ave_pos = cluster_1.calc_ave_pos(temp_results.first,5*units::cm);
-            dir1 = cluster_1.vhough_transform(cluster1_ave_pos,80*units::cm);
-            dir2.set(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9, cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9, cluster2_ave_pos.z() - cluster1_ave_pos.z()+1e-9); // 2-1
-            
-          }else{
-            continue;
-          }
-        }else{
-          continue;
-        }
-      }
-      
-      geo_point_t ave_dir(cluster1_ave_pos.x()-cluster2_ave_pos.x(),cluster1_ave_pos.y()-cluster2_ave_pos.y(),cluster1_ave_pos.z()-cluster2_ave_pos.z());
-
-      auto wpid_ave_p1 = cluster_1.wpid(cluster1_ave_pos);
-      auto wpid_ave_p2 = cluster_2.wpid(cluster2_ave_pos);
-      auto wpid_ave_ps = get_wireplaneid(cluster1_ave_pos, wpid_ave_p1, cluster2_ave_pos, wpid_ave_p2, dv);
-
-      // use projection to deal with stuff ...
-      if (fabs(ave_dir.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.>7.5){
-      	// non-parallel case ...
-      	if (WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,10,wpid_U_dir.at(wpid_ave_p1).second, wpid_V_dir.at(wpid_ave_p1).second, wpid_W_dir.at(wpid_ave_p1).second,2)){
-      	  if (length_2 < 8*units::cm&& WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,5,wpid_U_dir.at(wpid_ave_p1).second, wpid_V_dir.at(wpid_ave_p1).second, wpid_W_dir.at(wpid_ave_p1).second,2))
-      	    return true;
-      	  if (length_2 < 15*units::cm && WireCell::Clus::Facade::is_angle_consistent(dir1,dir2,false,7.5,wpid_U_dir.at(wpid_ave_p1).second, wpid_V_dir.at(wpid_ave_p1).second, wpid_W_dir.at(wpid_ave_p1).second))
-      	    return true;
-      	  if (WireCell::Clus::Facade::is_angle_consistent(dir3,dir2,true,10,wpid_U_dir.at(wpid_ave_p2).second, wpid_V_dir.at(wpid_ave_p2).second, wpid_W_dir.at(wpid_ave_p2).second,2)){
-      	    return true;
-      	  }
-      	}
-      }
-      
-      
-      double angle1 = (3.1415926-dir1.angle(dir2))/3.1415926*180.;
-      double angle2 = dir3.angle(dir2)/3.1415926*180.;
-      double angle3 = (3.1415926-dir1.angle(dir3))/3.1415926*180.;
-
-      
-      if (length_2 <=10*units::cm){
-	if (angle1 < 15 && (angle2 < 60 || length_2 < 5*units::cm) ) return true;
-      }else{
-	if (angle1 < 15 && angle2 <15 && angle3 < 25 ||
-	    angle3 < 10 && (angle1+angle2)<45 && dis < 5*units::cm )
-	  return true;
-
-	double ave_dis = sqrt(pow(cluster1_ave_pos.x()-cluster2_ave_pos.x(),2) + pow(cluster1_ave_pos.y()-cluster2_ave_pos.y(),2) + pow(cluster1_ave_pos.z()-cluster2_ave_pos.z(),2));
-	geo_point_t test_point;
-	double min_dis = 1e9, max_dis = -1e9;
-
-	if (fabs(ave_dir.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180. > 7.5  && ave_dis < 30*units::cm){
-	  if (i==1){
-	    for (int k=-5;k!=10;k++){
-	      test_point.set(cluster1_ave_pos.x() - dir1.x() * (ave_dis +k*2*units::cm), cluster1_ave_pos.y() - dir1.y() * (ave_dis +k*2*units::cm), cluster1_ave_pos.z() - dir1.z() * (ave_dis +k*2*units::cm));
-	      
-	      auto temp_results = cluster_2.get_closest_point_blob(test_point);
-	      //reuse this
-	      geo_point_t test_point1 = temp_results.first;
-	      if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
-		double temp_dis = (test_point1.x() - cluster1_ave_pos.x())*dir1.x() + (test_point1.y() - cluster1_ave_pos.y())*dir1.y() + (test_point1.z() - cluster1_ave_pos.z())*dir1.z();
-		temp_dis *=-1;
-		if (temp_dis < min_dis) min_dis = temp_dis;
-		if (temp_dis > max_dis) max_dis = temp_dis;
-	      }
-	    }
-	    
-	    if ((max_dis - min_dis)>2.5*units::cm) return true;
-	  }else if (i==2){
-	    for (int k=-5;k!=10;k++){
-	      test_point.set(cluster2_ave_pos.x() - dir3.x() * (ave_dis +k*2*units::cm), cluster2_ave_pos.y() - dir3.y() * (ave_dis +k*2*units::cm),  cluster2_ave_pos.z() - dir3.z() * (ave_dis +k*2*units::cm));
-	      
-	      auto temp_results = cluster_1.get_closest_point_blob(test_point);
-	      //reuse this
-	      geo_point_t test_point1 = temp_results.first;
-	      if (sqrt(pow(test_point1.x()-test_point.x(),2)+pow(test_point1.y()-test_point.y(),2)+pow(test_point1.z()-test_point.z(),2))<1.5*units::cm){
-		double temp_dis = (test_point1.x() - cluster2_ave_pos.x())*dir3.x() + (test_point1.y() - cluster2_ave_pos.y())*dir3.y() + (test_point1.z() - cluster2_ave_pos.z())*dir3.z();
-		temp_dis *=-1;
-		if (temp_dis < min_dis) min_dis = temp_dis;
-		if (temp_dis > max_dis) max_dis = temp_dis;
-	      }
-	    }
-	     
-	    if ((max_dis - min_dis)>2.5*units::cm) return true;
-	  }
-
-	}
-	
-      }
-    }
-  }
-
-  return false;
-}
 #pragma GCC diagnostic pop
 
 
