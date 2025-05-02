@@ -38,6 +38,11 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_inpath = get(cfg, "inpath", m_inpath);
     m_outpath = get(cfg, "outpath", m_outpath);
 
+    m_inlive = m_inpath + get(cfg, "inlive", m_inlive);
+    m_outlive = m_outpath + get(cfg, "outlive", m_outlive);
+    m_indead = m_inpath + get(cfg, "indead", m_indead);
+    m_outdead = m_outpath + get(cfg, "outdead", m_outdead);
+
     if (cfg.isMember("bee_dir")) {
         log->debug("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
     }
@@ -166,6 +171,14 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     Configuration cfg;
     cfg["inpath"] = m_inpath;
     cfg["outpath"] = m_outpath;
+
+    // repeat defaults as literals just incase some "clever" person tries to
+    // call this method AFTER configure() as that method mutates m_inlive, etc.
+    cfg["inlive"] = "/live";
+    cfg["outlive"] = "/live";
+    cfg["indead"] = "/dead";
+    cfg["outdead"] = "/dead";
+
     // cfg["bee_dir"] = m_bee_dir;
     cfg["bee_zip"] = "mabc.zip";
     cfg["save_deadarea"] = m_save_deadarea;
@@ -555,6 +568,15 @@ struct Perf {
     }
 };
 
+static 
+std::string format_path(std::string path, int ident)
+{
+    if (path.find("%") == std::string::npos) {
+        return path;
+    }
+    return String::format(path, ident);
+}    
+
 bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointer& outts)
 {
     outts = nullptr;
@@ -589,19 +611,17 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
     // else do nothing when ident is unchanged.
 
-    std::string inpath = m_inpath;
-    if (inpath.find("%") != std::string::npos) {
-        inpath = String::format(inpath, ident);
-    }
 
     const auto& intens = *ints->tensors();
     // for(const auto& ten : intens) {
     //     log->debug("tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
     // }
-    auto root_live = std::move(as_pctree(intens, inpath + "/live"));
+
+    const auto inlive = format_path(m_inlive, ident);
+    auto root_live = std::move(as_pctree(intens, inlive));
     if (!root_live) {
-        log->error("Failed to get dead point cloud tree from \"{}\"", inpath);
-        raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inpath);
+        log->error("Failed to get dead point cloud tree from \"{}\"", inlive);
+        raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inlive);
     }
     auto grouping = root_live->value.facade<Grouping>();
     grouping->set_anodes(m_anodes);
@@ -627,17 +647,17 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
 
+    const auto indead = format_path(m_indead, ident);
     // log->debug("Got live pctree with {} children", root_live->nchildren());
     // log->debug(em("got live pctree"));
-    log->debug("as_pctree from \"{}\"", inpath + "/dead");
-    const std::string deadinpath = inpath + "/dead";
+    log->debug("as_pctree from \"{}\"", indead);
     Points::node_ptr root_dead;
     try {
-        root_dead = as_pctree(intens, deadinpath);
+        root_dead = as_pctree(intens, indead);
         perf("loaded dead clusters");
     }
     catch (WireCell::KeyError& err) {
-        log->warn("No pc-tree at datapath {}, assuming no 'dead' clusters", deadinpath);
+        log->warn("No pc-tree at datapath {}, assuming no 'dead' clusters", indead);
         root_dead = std::make_unique<Points::node_t>();
     }
 
@@ -701,15 +721,17 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         Persist::dump(String::format("dead-summary-%d.json", ident), json_summary(dead_grouping), true);
     }
 
+    log->debug("Produce pctrees with {} live and {} dead children",
+               root_live->nchildren(), root_dead->nchildren());
 
-    std::string outpath = m_outpath;
-    if (outpath.find("%") != std::string::npos) {
-        outpath = String::format(outpath, ident);
-    }
-    auto outtens = as_tensors(*root_live.get(), outpath + "/live");
+    // Convert to tensors
+    const auto outlive = format_path(m_outlive, ident);
+    auto outtens = as_tensors(*root_live.get(), outlive);
     perf("output live clusters to tensors");
-    auto outtens_dead = as_tensors(*root_dead.get(), outpath + "/dead");
+    const auto outdead = format_path(m_outdead, ident);
+    auto outtens_dead = as_tensors(*root_dead.get(), outdead);
     perf("output dead clusters to tensors");
+
     // Merge
     outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
     outts = as_tensorset(outtens, ident);

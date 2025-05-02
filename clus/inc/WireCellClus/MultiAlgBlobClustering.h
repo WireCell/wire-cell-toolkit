@@ -110,21 +110,37 @@ namespace WireCell::Clus {
 
         /** Config: "inpath"
          *
-         * The datapath for the input point graph data.  This may be a
+         * The BASE datapath for the input pc tree data.  This may be a
          * regular expression which will be applied in a first-match
          * basis against the input tensor datapaths.  If the matched
          * tensor is a pcdataset it is interpreted as providing the
          * nodes dataset.  Otherwise the matched tensor must be a
-         * pcgraph.
+         * pcgraph.  See in{live,dead} parameters.
          */
         std::string m_inpath{".*"};
 
         /** Config: "outpath"
          *
-         * The datapath for the resulting pcdataset.  A "%d" will be
-         * interpolated with the ident number of the input tensor set.
+         * The BASE datapath for the resulting pc tree data.  A "%d" will be
+         * interpolated with the ident number of the input tensor set.  See
+         * out{live,dead} parameters.
          */
         std::string m_outpath{""};
+
+        /** Config: inlive, outlive, indead, outdead.
+         *
+         * This quad of parameters {in,out}{live,dead} set suffixes to the
+         * {in,out}path.  By default, they are "/live" and "/dead" for both
+         * in/out pairs.  In exceptional cases, these need setting if the
+         * upstream sources or downstream sinks require different patterns.
+         */
+        // See issue #375.  Note, configure() will expand these to full paths by
+        // appending to m_inpath and m_outpath.
+        std::string m_inlive{"/live"};
+        std::string m_indead{"/dead"};
+        std::string m_outlive{"/live"};
+        std::string m_outdead{"/dead"};
+
 
         /** Config: "perf"
          *
