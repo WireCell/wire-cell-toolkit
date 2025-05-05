@@ -34,8 +34,9 @@ public:
         NeedDV::configure(config);
         NeedPCTS::configure(config);
         NeedScope::configure(config);
-        
-        // note: there is/was no way to configure use_ctpc
+        // std::cerr << "ClusteringExamineBundles: scope: " << m_scope << "\n";
+
+        use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
     }
 
     void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
@@ -43,7 +44,7 @@ public:
     }
         
 private:
-    double use_ctpc_{true};
+    bool use_ctpc_{true};
 };
 
 

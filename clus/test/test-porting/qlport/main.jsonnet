@@ -24,76 +24,7 @@ local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anode = tools.anodes[0];
 local anodes = tools.anodes;
-
-// This defines the clustering methods that MABC uses below.
-local mabc_clustering(dv, pcts, anodes, live_sampler) = 
-    local dvd = {detector_volumes:wc.tn(dv)};
-    local pcd = {pc_transforms: wc.tn(pcts)};
-    [
-    // {
-    //     type:"ClusteringTest", name:"", data:dvd+pcd, uses:[dv,pcts]}
-    // },
-    // {
-    //     type:"ClusteringCTPointcloud", name:"", data:dvd+pcd, uses:[dv,pcts],
-    // },
-    // {
-    //     type: "ClusteringLiveDead", name:"", data:{dead_live_overlap_offset: 2}+dvd, uses:[dv],
-    // },
-    // {
-    //     type: "ClusteringExtend", name:"", data:{flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1}+dv, uses:[dv]
-    // },
-    // {
-    //     type: "ClusteringRegular:1", name:"1", data:{length_cut: 60*wc.cm, flag_enable_extend: false}+dv, uses:[dv],
-    // },
-    // {
-    //     type: "ClusteringRegular:2", name:"", data:{length_cut: 30*wc.cm, flag_enable_extend: true}+dv, uses:[dv],
-    // },
-    // {
-    //     type: "ClusteringParallelProlong", name:"", data:{length_cut: 35*wc.cm}+dvd, uses:[dvd],
-    // },
-    // {
-    //     type: "ClusteringClose", name:"", data:{length_cut: 1.2*wc.cm},
-    // },
-    // {
-    //     type: "ClusteringExtendLoop", name:"", data:{num_try: 3}+dvd, uses:[dvd],
-    // },
-    // {
-    //     type: "ClusteringSeparate", name:"", data:{use_ctpc: true}+dvd+pcd, uses=[dv, pcts],
-    // },
-    // {
-    //     type: "ClusteringConnect1", name:"", data:dvd, uses:[dv],
-    // },
-    // {
-    //     type: "ClusteringDeghost", name:"", data:dvd+pcd, uses:[dv,pcts],
-    // },
-    // {
-    //     type: "ClusteringExamineXBoundary", name:"", data:dvd, uses:[dv},
-    // },
-    // {
-    //     type: "ClusteringProtectOverclustering", name:"", data:dvd+pcd, uses:[dv,pcts],
-    // },
-    // {
-    //     type: "ClusteringNeutrino", name:"", data:dvd, uses:[dv],
-    // },
-    // {
-    //     type: "ClusteringIsolated", name:"", data:dvd, uses:[dv],
-    // },
-    {
-        type: "ClusteringExamineBundles", name:"", data:dvd+pcd, uses:[dv,pcts],
-    },
-    {
-        type: "ClusteringRetile",
-        name:"",
-        data: {
-            samplers: [{apa: 0, face: 0, name: wc.tn(live_sampler)}], 
-            anodes: [wc.tn(a) for a in anodes],
-            cut_time_low: 3*wc.us,
-            cut_time_high: 5*wc.us
-        }+dvd+pcd,
-        uses:[dv,pcts]+anodes
-    }
-];
-    
+local clus = import "pgrapher/common/clus.jsonnet";
 
 
 
@@ -352,7 +283,14 @@ local ub = {
                   edges=[ pg.edge(fan, sink, 1, 0) ]),
 
     MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, live_sampler=$.bs_live) :: 
-        local cmeths = mabc_clustering(detector_volumes, pctransforms, anodes, live_sampler);
+        local cm = clus.clustering_methods(detector_volumes=detector_volumes,
+                                           pc_transforms=pctransforms);
+        local cm_pipeline = [
+            cm.examine_bundles(),
+            cm.retile(cut_time_low=3*wc.us, cut_time_high=5*wc.us,
+                      anodes=anodes,
+                      samplers=[clus.sampler(live_sampler, apa=0, face=0)]),
+        ];
         pg.pnode({
         type: "MultiAlgBlobClustering",
         name: "",
@@ -387,9 +325,10 @@ local ub = {
                     individual: true            // Output individual APA/Face
                 }
             ],
-            clustering_methods: [wc.tn(cmeth) for cmeth in cmeths]
+            clustering_methods: wc.tns(cm_pipeline),
         }
-    }, nin=1, nout=1, uses=[live_sampler, anode, detector_volumes, pctransforms]+cmeths),
+        }, nin=1, nout=1, uses=anodes + [detector_volumes] + cm_pipeline),
+
 
     TensorFileSink(fname) :: pg.pnode({
         type: "TensorFileSink",

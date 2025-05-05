@@ -5,6 +5,7 @@ local params = import "pgrapher/experiment/uboone/simparams.jsonnet";
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anodes = tools.anodes;
+local clus = import "pgrapher/common/clus.jsonnet";
 
 local cluster_source(fname) = g.pnode({
     type: "ClusterFileSource",
@@ -143,24 +144,33 @@ function (
 
     local common_coords = ["x_t0cor", "y", "z"];
     // local common_coords = ["x", "y", "z"];
+
+    // nominal
+    local cm = clus.clustering_methods(detector_volumes=detector_volumes,
+                                       pc_transforms=pctransforms);
+    // alternative with a scope built from common_coords.
+    local cm_com = clus.clustering_methods(detector_volumes=detector_volumes,
+                                           pc_transforms=pctransforms,
+                                           coords=common_coords);
     local mabc_clustering = [
-        // {type: "ClusteringTest", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)}},
-        // {type: "ClusteringCTPointcloud", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_transforms: wc.tn(pctransforms)}},
-        {type: "ClusteringSwitchScope", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction", pc_transforms: wc.tn(pctransforms)}},
-        {type: "ClusteringLiveDead", name:"", data:{dead_live_overlap_offset: 2, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringExtend", name:"", data:{flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringRegular", name:"one", data:{length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringRegular", name:"two", data:{length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringParallelProlong", name:"", data:{length_cut: 35*wc.cm, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringClose", name:"", data:{length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringExtendLoop", name:"", data:{num_try: 3, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringSeparate", name:"", data:{use_ctpc: true, detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)}},
-        {type: "ClusteringConnect1", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringDeghost", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)}},
-        {type: "ClusteringExamineXBoundary", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringProtectOverclustering", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pctransforms)}},
-        {type: "ClusteringNeutrino", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringIsolated", name:"", data:{detector_volumes: wc.tn(detector_volumes), pc_name: "3d", coords: common_coords}},
+        
+        // cm.test(),
+        // cm.ctpointcloud(),
+        cm.switch_scope(),
+        cm_com.live_dead(),
+        cm_com.extend(flag=4, length_cut=60*wc.cm, num_try=0, length_2_cut=15*wc.cm, num_dead_try=1),
+        cm_com.regular("one", length_cut=60*wc.cm, flag_enable_extend=false),
+        cm_com.regular("two", length_cut=30*wc.cm, flag_enable_extend=true),
+        cm_com.parallel_prolong(length_cut=35*wc.cm),
+        cm_com.close(length_cut=1.2*wc.cm),
+        cm_com.extend_loop(num_try=3),
+        cm_com.separate(),
+        cm_com.connect1(),
+        cm_com.deghost(),
+        cm_com.examine_x_boundary(),
+        cm_com.protect_overclustering(),
+        cm_com.neutrino(),
+        cm_com.isolated(),
     ];
 
 
