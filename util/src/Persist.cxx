@@ -145,6 +145,11 @@ static std::vector<std::string> get_path()
         return ret;
     }
     for (auto path : String::split(cpath)) {
+        if (! Persist::exists(path)) {
+            debug("skip non existent directory in load path: {}", path);
+            continue;
+        }
+
         ret.push_back(path);
     }
     return ret;
