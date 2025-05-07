@@ -211,35 +211,35 @@ std::string Cluster::dump() const{
     return ss.str();
 }
 
-std::string Cluster::dump_graph() const{
-    if (m_graph==nullptr){
-        return "empty graph";
-    }
-    auto g = *m_graph;
-    std::stringstream ss;
+// std::string Cluster::dump_graph() const{
+//     if (m_graph==nullptr){
+//         return "empty graph";
+//     }
+//     auto g = *m_graph;
+//     std::stringstream ss;
 
-    ss << "MCUGraph:" << std::endl;
-    ss << "Vertices: " << num_vertices(g) << std::endl;
-    ss << "Edges: " << num_edges(g) << std::endl;
+//     ss << "MCUGraph:" << std::endl;
+//     ss << "Vertices: " << num_vertices(g) << std::endl;
+//     ss << "Edges: " << num_edges(g) << std::endl;
 
-    ss << "Vertex Properties:" << std::endl;
-    auto vrange = boost::vertices(g);
-    for (auto vit = vrange.first; vit != vrange.second; ++vit) {
-        auto v = *vit;
-        ss << "Vertex " << v << ": Index = " << g[v].index << point3d(g[v].index) << std::endl;
-    }
+//     ss << "Vertex Properties:" << std::endl;
+//     auto vrange = boost::vertices(g);
+//     for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+//         auto v = *vit;
+//         ss << "Vertex " << v << ": Index = " << g[v].index << point3d(g[v].index) << std::endl;
+//     }
 
-    ss << "Edge Properties:" << std::endl;
-    auto erange = boost::edges(g);
-    auto weightMap = get(boost::edge_weight, g);
-    for (auto eit = erange.first; eit != erange.second; ++eit) {
-        auto e = *eit;
-        auto src = source(e, g);
-        auto tgt = target(e, g);
-        ss << "Edge " << e << " [ " << point3d(g[src].index) << ", " << point3d(g[tgt].index) << " ]" << ": Distance = " << get(weightMap, e) << std::endl;
-    }
-    return ss.str();
-}
+//     ss << "Edge Properties:" << std::endl;
+//     auto erange = boost::edges(g);
+//     auto weightMap = get(boost::edge_weight, g);
+//     for (auto eit = erange.first; eit != erange.second; ++eit) {
+//         auto e = *eit;
+//         auto src = source(e, g);
+//         auto tgt = target(e, g);
+//         ss << "Edge " << e << " [ " << point3d(g[src].index) << ", " << point3d(g[tgt].index) << " ]" << ": Distance = " << get(weightMap, e) << std::endl;
+//     }
+//     return ss.str();
+// }
 
 const Cluster::time_blob_map_t& Cluster::time_blob_map() const
 {
@@ -3584,7 +3584,7 @@ std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransfo
     Establish_close_connected_graph();
     
     // Connect using overclustering protection (not easy to debug ...)
-    Connect_graph_overclustering_protection(dv, pcts, use_ctpc); 
+    Connect_graph_overclustering_protection(dv, pcts, use_ctpc); // this mutates m_graph!
     
     // Find connected components
     std::vector<int> component(num_vertices(*m_graph));

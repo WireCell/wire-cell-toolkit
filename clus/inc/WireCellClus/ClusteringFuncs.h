@@ -119,7 +119,6 @@ namespace WireCell::Clus::Facade {
                                 const double dis_cut =  5*units::cm);
 
 
-
 }  // namespace WireCell::Clus::Facade
 
 #endif

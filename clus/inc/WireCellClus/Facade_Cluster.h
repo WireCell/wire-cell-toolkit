@@ -144,7 +144,7 @@ namespace WireCell::Clus::Facade {
         void print_blobs_info() const;
 
         std::string dump() const;
-        std::string dump_graph() const;
+        // std::string dump_graph() const;
 
         // Get all blobs in k-d tree order.  This is different than children()
         // order and different that sort_blobs() order.
@@ -348,8 +348,8 @@ namespace WireCell::Clus::Facade {
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
 
-        inline MCUGraph* get_graph() { return m_graph.get(); }
-        inline const MCUGraph* get_graph() const { return m_graph.get(); }
+        // inline MCUGraph* get_graph() { return m_graph.get(); }
+        // inline const MCUGraph* get_graph() const { return m_graph.get(); }
         void Create_graph(IDetectorVolumes::pointer dv, 
                           IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
 
