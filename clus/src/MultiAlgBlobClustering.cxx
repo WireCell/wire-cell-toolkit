@@ -68,7 +68,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
     if (m_grouping2file_prefix.size()) {
-        m_grouping2file_prefix += String::format("%s-%d-%d-%d.npz", m_grouping2file_prefix.c_str(), m_runNo, m_subRunNo, m_eventNo);
+        m_grouping2file_prefix = String::format("%s-%d-%d-%d.npz", m_grouping2file_prefix.c_str(), m_runNo, m_subRunNo, m_eventNo);
     }
 
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);

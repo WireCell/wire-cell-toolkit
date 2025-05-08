@@ -79,12 +79,12 @@ local clus (
                 tick_drift: self.drift_speed * self.tick,
                 time_offset: time_offset,
                 nticks_live_slice: 4,
-                FV_xmin: 1 * wc.cm,
-                FV_xmax: 255 * wc.cm,
-                FV_ymin: -99.5 * wc.cm,
-                FV_ymax: 101.5 * wc.cm,
-                FV_zmin: 15 * wc.cm,
-                FV_zmax: 1022 * wc.cm,
+                FV_xmin: -201.45 * wc.cm,
+                FV_xmax: -0.45 * wc.cm,
+                FV_ymin: -199.792 * wc.cm,
+                FV_ymax: 199.792 * wc.cm,
+                FV_zmin: 5.1 * wc.cm,
+                FV_zmax: 504.3 * wc.cm,
                 FV_xmin_margin: 2 * wc.cm,
                 FV_xmax_margin: 2 * wc.cm,
                 FV_ymin_margin: 2.5 * wc.cm,
@@ -95,6 +95,12 @@ local clus (
             a1f1: self.a0f0 {
                 face: 1,
                 drift_speed: drift_speed*-1,
+                FV_xmin: 0.45 * wc.cm,
+                FV_xmax: 201.45 * wc.cm,
+                FV_ymin: -199.792 * wc.cm,
+                FV_ymax: 199.792 * wc.cm,
+                FV_zmin: 5.1 * wc.cm,
+                FV_zmax: 504.3 * wc.cm,
             }
         }
     },
@@ -125,6 +131,7 @@ local clus (
             bee_dir: bee_dir, // "data/0/0", // not used
             bee_zip: "mabc-%s-face%d.zip"%[anode.name, face],
             bee_detector: "sbnd",
+            grouping2file_prefix: "g2f",
             initial_index: index,   // New RSE configuration
             use_config_rse: true,  // Enable use of configured RSE
             runNo: LrunNo,
