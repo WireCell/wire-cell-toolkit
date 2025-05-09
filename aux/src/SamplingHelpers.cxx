@@ -135,7 +135,7 @@ Dataset Aux::make_corner_dataset(const IBlob::pointer iblob)
 
 double Aux::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
     // std::cout << "time2drift: " << time << " " << time_offset << " " << drift_speed << std::endl;
-    const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
+    // const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
     double xsign = anodeface->dirx();
     double xorig = anodeface->planes()[2]->wires().front()->center().x();
     const double drift = (time + time_offset)*drift_speed;

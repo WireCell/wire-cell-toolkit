@@ -82,7 +82,7 @@ static bool Clustering_2nd_round(
 	auto wpid_ave_p1 = cluster1.wpid(cluster1_ave_pos);
     geo_point_t cluster2_ave_pos = cluster2.calc_ave_pos(p2,10*units::cm);
 	auto wpid_ave_p2 = cluster2.wpid(cluster2_ave_pos);
-    auto wpid_ave_ps = get_wireplaneid(cluster1_ave_pos, wpid_ave_p1, cluster2_ave_pos, wpid_ave_p2, dv);
+    // auto wpid_ave_ps = get_wireplaneid(cluster1_ave_pos, wpid_ave_p1, cluster2_ave_pos, wpid_ave_p2, dv);
 
     bool flag_para = false;
 

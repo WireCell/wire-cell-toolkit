@@ -41,7 +41,7 @@ public:
         return cfg;
     }
     
-    void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
+    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
         clustering_deghost(live_clusters, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
     }
     

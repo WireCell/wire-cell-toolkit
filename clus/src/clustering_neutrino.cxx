@@ -122,8 +122,8 @@ static void clustering_neutrino(
     double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
     double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
     double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
-    double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
-    double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
+    // double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
+    // double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
 
 
 

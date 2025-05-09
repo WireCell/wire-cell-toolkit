@@ -87,8 +87,7 @@ public:
     }
 
 
-    void clustering(Grouping& live_clusters, Grouping& dead_clusters,
-                    cluster_set_t& cluster_connected_dead) const;
+    void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& ) const;
 
 private:
 

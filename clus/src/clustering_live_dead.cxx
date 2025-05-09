@@ -142,7 +142,6 @@ public:
                     const auto& cluster_1 = connected_live_clusters.at(i);
                     const auto& blobs_1 = connected_live_mcells.at(i);
                     cluster_connected_dead.insert(cluster_1);
-
                     for (size_t j = i + 1; j < connected_live_clusters.size(); j++) {
                         const auto& cluster_2 = connected_live_clusters.at(j);
         
