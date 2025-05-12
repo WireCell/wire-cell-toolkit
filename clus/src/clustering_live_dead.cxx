@@ -38,7 +38,7 @@ public:
     }
     
 
-    virtual void clustering(Grouping& live_grouping, Grouping& dead_grouping, cluster_set_t& cluster_connected_dead) const {
+    virtual void clustering(Grouping& live_grouping, Grouping& dead_grouping) const {
         using spdlog::debug;
 
         // {
@@ -70,7 +70,7 @@ public:
 
 
         // form map from dead to set of live clusters ...
-        std::map<const Cluster*, std::vector<const Cluster*>> dead_live_cluster_mapping;
+        std::map<const Cluster*, std::vector<Cluster*>> dead_live_cluster_mapping;
         std::vector<const Cluster*> dead_cluster_order;
         std::map<const Cluster*, std::vector<std::vector<const Blob*>>> dead_live_mcells_mapping;
 
@@ -139,9 +139,10 @@ public:
             if (connected_live_clusters.size() > 1) {
 
                 for (size_t i = 0; i != connected_live_clusters.size(); i++) {
-                    const auto& cluster_1 = connected_live_clusters.at(i);
+                    auto cluster_1 = connected_live_clusters.at(i);
                     const auto& blobs_1 = connected_live_mcells.at(i);
-                    cluster_connected_dead.insert(cluster_1);
+        //            cluster_connected_dead.insert(cluster_1);
+                    // cluster_1->set_scalar("live_dead", 1);
                     for (size_t j = i + 1; j < connected_live_clusters.size(); j++) {
                         const auto& cluster_2 = connected_live_clusters.at(j);
         
@@ -323,7 +324,7 @@ public:
         }
 
         // new function to merge clusters ...
-        merge_clusters(g, live_grouping, cluster_connected_dead);
+        merge_clusters(g, live_grouping);
 
 
         // set cluster id ... 

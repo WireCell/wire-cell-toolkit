@@ -87,7 +87,7 @@ public:
     }
 
 
-    void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& ) const;
+    void clustering(Grouping& live_clusters, Grouping& dead_clusters) const;
 
 private:
 
@@ -616,7 +616,7 @@ ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
 
 
 
-void ClusteringRetile::clustering(WCF::Grouping& original, WCF::Grouping& shadow, cluster_set_t&) const
+void ClusteringRetile::clustering(WCF::Grouping& original, WCF::Grouping& shadow) const
 {
 
 

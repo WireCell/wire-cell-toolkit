@@ -16,7 +16,7 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
 static void clustering_close(Grouping& live_clusters,           // 
-                             cluster_set_t& cluster_connected_dead, // in/out
+
                              const Tree::Scope& scope,
                              const double length_cut = 1*units::cm //
   );
@@ -36,8 +36,8 @@ public:
     return cfg;
   }
 
-  void clustering(Grouping& live_clusters, Grouping& , cluster_set_t& cluster_connected_dead) const {
-    clustering_close(live_clusters, cluster_connected_dead, m_scope, length_cut_);
+  void clustering(Grouping& live_clusters, Grouping& ) const {
+    clustering_close(live_clusters, m_scope, length_cut_);
   }
   
 private:
@@ -171,7 +171,7 @@ static bool Clustering_3rd_round(
 // This function can handle multiple APA/Faces
 static void clustering_close(
     Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,     // in/out
+
     const Tree::Scope& scope,
     const double length_cut)
 {
@@ -228,7 +228,7 @@ static void clustering_close(
   //  if (flag_print) std::cout << em("core alg") << std::endl;
   
   // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
+  merge_clusters(g, live_grouping);
 
   //  if (flag_print) std::cout << em("merge clusters") << std::endl;
 

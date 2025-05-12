@@ -29,7 +29,7 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         clustering_connect1(live_clusters, m_dv, m_scope);
     }
     virtual Configuration default_configuration() const {
@@ -826,8 +826,7 @@ void clustering_connect1(
     // merge clusters
 
 
-    cluster_set_t new_clusters;
-    merge_clusters(g, live_grouping, new_clusters);
+    auto new_clusters = merge_clusters(g, live_grouping);
     live_clusters.clear();
     live_clusters = live_grouping.children();  // copy
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
@@ -908,8 +907,7 @@ void clustering_connect1(
         }
     }
 
-    new_clusters.clear();
-    merge_clusters(g2, live_grouping, new_clusters);
+    new_clusters = merge_clusters(g2, live_grouping);
 
 
     // set cluster id ... 

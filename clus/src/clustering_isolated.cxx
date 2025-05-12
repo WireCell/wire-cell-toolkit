@@ -32,7 +32,7 @@ public:
         NeedScope::configure(config);
     }
     
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         return clustering_isolated(live_clusters, m_dv, m_scope);
     }
     
@@ -485,7 +485,7 @@ static void clustering_isolated(
             }
         }
         cluster_set_t temp_clusters;
-        merge_clusters(g, live_grouping, temp_clusters, "isolated");
+        merge_clusters(g, live_grouping, "isolated");
     }
 
     // example separation ... 

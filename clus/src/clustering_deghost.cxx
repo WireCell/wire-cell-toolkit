@@ -41,7 +41,7 @@ public:
         return cfg;
     }
     
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         clustering_deghost(live_clusters, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
     }
     
@@ -703,9 +703,8 @@ static void clustering_deghost(
         // LogDebug("global_point_cloud: " << global_point_cloud->get_num_points() << " global_skeleton_cloud: " << global_skeleton_cloud->get_num_points());
     }
 
-    // merge clusters
-    cluster_set_t new_clusters;
-    merge_clusters(g, live_grouping, new_clusters);
+
+    auto new_clusters = merge_clusters(g, live_grouping);
 
     // remove clusters
     LogDebug("to_be_removed_clusters.size() = " << to_be_removed_clusters.size());

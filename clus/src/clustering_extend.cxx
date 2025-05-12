@@ -19,7 +19,7 @@ using namespace WireCell::Clus::Facade;
 
 static
 void clustering_extend(Grouping& live_clusters,
-                       cluster_set_t& cluster_connected_dead,            // in/out
+                       std::set<Cluster*>& merged, 
                        IDetectorVolumes::pointer dv,      // detector volumes
                        const Tree::Scope& scope,
                        const int flag,                                                //
@@ -50,8 +50,9 @@ public:
     return cfg;
   }
 
-  void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
-            clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
+  void clustering(Grouping& live_clusters, Grouping&) const {
+    std::set<Cluster*> dummy;
+    clustering_extend(live_clusters, dummy, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
   }
 
 private:
@@ -79,23 +80,30 @@ public:
     return cfg;
   }
 
-  void clustering(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const {
+  void clustering(Grouping& live_clusters, Grouping&) const {
+
+    // This used to be passed in/out the old API as "cluster_connected_dead" but
+    // in fact is it only needed for clustering_extend() to be called
+    // iteratively.  It holds borrowed references (pointers) to the clusters
+    // that have been freshly produced via "merge_clusters()".
+    std::set<Cluster*> merged;
+
     // for very busy events do less ...
     int num_try = num_try_;
     if (live_clusters.nchildren() > 1100) num_try = 1;
     for (int i = 0; i != num_try; i++) {
       // deal with prolong case
-      clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 1, 150*units::cm, 0);
+      clustering_extend(live_clusters, merged, m_dv, m_scope, 1, 150*units::cm, 0);
       // deal with parallel case
-      clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 2, 30*units::cm, 0);
+      clustering_extend(live_clusters, merged, m_dv, m_scope, 2, 30*units::cm, 0);
       // extension regular case
-      clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 3, 15*units::cm, 0);
+      clustering_extend(live_clusters, merged, m_dv, m_scope, 3, 15*units::cm, 0);
       // extension ones connected to dead region ...
       if (i == 0) {
-        clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 4, 60 * units::cm, i);
+        clustering_extend(live_clusters, merged, m_dv, m_scope, 4, 60 * units::cm, i);
       }
       else {
-        clustering_extend(live_clusters, cluster_connected_dead, m_dv, m_scope, 4, 35 * units::cm, i);
+        clustering_extend(live_clusters, merged, m_dv, m_scope, 4, 35 * units::cm, i);
       }
     }
   }
@@ -550,7 +558,7 @@ static bool Clustering_4th_dead(
 // Expand this function to handle multiple APA/Faces ...
 static void clustering_extend(
     Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,     // in/out
+    std::set<Cluster*>& merged,
     const IDetectorVolumes::pointer dv,                // detector volumes
     const Tree::Scope& scope,
     const int flag,                                                //
@@ -809,7 +817,9 @@ static void clustering_extend(
 
 	
       }else if (flag==4){
-        if (cluster_connected_dead.find(cluster_1)!=cluster_connected_dead.end()){
+        // if (cluster_connected_dead.find(cluster_1)!=cluster_connected_dead.end()){
+        // if (cluster_1->get_scalar("live_dead")) {
+        if (merged.find(cluster_1) != merged.end()){
           used_clusters.insert(cluster_1);
           for (size_t j=0;j!=live_clusters.size();j++){
             auto cluster_2 = live_clusters.at(j);
@@ -832,8 +842,9 @@ static void clustering_extend(
     }
   }
   // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
-
+  // merge_clusters(g, live_grouping, cluster_connected_dead, "", "perblob", "live_dead");
+  auto newly_merged = merge_clusters(g, live_grouping);
+  merged.insert(newly_merged.begin(), newly_merged.end());
   // {
   //  auto live_clusters = live_grouping.children(); // copy
   //   // Process each cluster

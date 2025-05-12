@@ -668,7 +668,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // }
     // log->debug("will {} {} dead patches", m_save_deadarea ? "save" : "not save", m_bee_dead.size());
 
-    cluster_set_t cluster_connected_dead;
+
 
     // initialize clusters ...
     Grouping& live_grouping = *root_live->value.facade<Grouping>();
@@ -702,8 +702,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
 
     for (const auto& cmeth : m_clustering_chain) {
-        cmeth.meth->clustering(live_grouping, dead_grouping, cluster_connected_dead);
+        cmeth.meth->clustering(live_grouping, dead_grouping);
         perf.dump(cmeth.name, live_grouping);
+
     }
 
     // Fill all configured bee points sets

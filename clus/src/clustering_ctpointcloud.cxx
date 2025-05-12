@@ -36,7 +36,7 @@ public:
         return cfg;
     }
 
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         clustering_ctpointcloud(live_clusters, m_dv, m_pcts);
     }
 };

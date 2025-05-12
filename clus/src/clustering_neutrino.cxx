@@ -37,7 +37,7 @@ public:
         num_try_ = get(config, "num_try", 1);
     }
     
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         for (int i = 0; i != num_try_; i++) {
             clustering_neutrino(live_clusters, i, m_dv, m_scope);
         }
@@ -983,8 +983,8 @@ static void clustering_neutrino(
         boost::add_edge(ilive2desc[map_cluster_index[cluster1]],
                         ilive2desc[map_cluster_index[cluster2]], g);
     }
-    cluster_set_t new_clusters;
-    merge_clusters(g, live_grouping, new_clusters);
+
+    auto new_clusters = merge_clusters(g, live_grouping);
 
  
     //       {

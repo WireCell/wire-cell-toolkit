@@ -37,7 +37,7 @@ public:
         use_ctpc_ = get(config, "use_ctpc", true);
     }
 
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t&) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         clustering_separate(live_clusters, m_dv, m_pcts, m_scope, use_ctpc_);
     }
 

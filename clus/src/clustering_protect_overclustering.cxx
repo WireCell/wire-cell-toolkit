@@ -37,7 +37,7 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t& ) const {
+    void clustering(Grouping& live_clusters, Grouping&) const {
         clustering_protect_overclustering(live_clusters, m_dv, m_pcts, m_scope);
     }
 

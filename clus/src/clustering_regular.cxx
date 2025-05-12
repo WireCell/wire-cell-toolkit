@@ -16,7 +16,7 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
 static void clustering_regular(Grouping& live_clusters,
-                               cluster_set_t& cluster_connected_dead,            // in/out
+
                                IDetectorVolumes::pointer dv,
                                const Tree::Scope& scope,
                                const double length_cut = 45*units::cm,
@@ -41,8 +41,8 @@ public:
         return cfg;
     }
 
-    void clustering(Grouping& live_clusters, Grouping&, cluster_set_t& cluster_connected_dead) const {
-        clustering_regular(live_clusters, cluster_connected_dead, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
+    void clustering(Grouping& live_clusters, Grouping&) const {
+        clustering_regular(live_clusters, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
     }
 };
 
@@ -417,7 +417,7 @@ static bool Clustering_1st_round(
 // Expand this function to handle multiple APA/Faces ...
 static void clustering_regular(
     Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,            // in/out
+
     IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     const double length_cut,
@@ -506,7 +506,7 @@ static void clustering_regular(
   }
 
   // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
+  merge_clusters(g, live_grouping);
 
 
   // {

@@ -43,10 +43,9 @@ WireCell::Clus::Facade::extract_geometry_params(
     return std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
 }
 
-void WireCell::Clus::Facade::merge_clusters(
+std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,
-    cluster_set_t& known_clusters, // in/out
     const std::string& aname, const std::string& pcname)
 {
     std::unordered_map<int, int> desc2id;
@@ -55,6 +54,8 @@ void WireCell::Clus::Facade::merge_clusters(
     for (const auto& [desc, id] : desc2id) {
         id2desc[id].insert(desc);
     }
+
+    std::vector<Cluster*> fresh;
 
     // Note, here we do an unusual thing and COPY the vector of children
     // facades.  In most simple access we would get the reference to the child
@@ -103,36 +104,20 @@ void WireCell::Clus::Facade::merge_clusters(
                 ++parent_id;
             }
 
-            known_clusters.erase(live);
             grouping.destroy_child(live);
             assert(live == nullptr);
         }
         if (savecc) {
             fresh_cluster.put_pcarray(cc, aname, pcname);
         }
-        known_clusters.insert(&fresh_cluster);
+
+        // Normally, is is weird/wrong to store a pointer to a reference.  But,
+        // we know the Cluster facade is held by the pc tree node that we just
+        // added to the grouping node.  
+        fresh.push_back(&fresh_cluster);
     }
 
-
-
-    // fixme: sanity check / debugging.  remove this if you find it committed.
-    for (const auto* cluster : grouping.children()) {
-        if (!cluster) {
-            std::cerr << "merge_clusters: null live cluster on output!\n";
-            continue;
-        }
-        if (! cluster->nchildren()) {
-            std::cerr << "merge_clusters: empty live cluster on output!\n";
-            continue;
-        }
-        for (const auto* blob : cluster->children()) {
-            if (!blob) {
-                std::cerr << "merge_clusters: null live blob on output!\n";
-                continue;
-            }
-        }
-    }
-
+    return fresh;
 }
 
 

@@ -38,7 +38,7 @@ public:
         return cfg;
     }
  
-    virtual void clustering(Grouping& live_clusters, Grouping& , cluster_set_t& ) const {
+    virtual void clustering(Grouping& live_clusters, Grouping&) const {
         clustering_test(live_clusters);
     }
 

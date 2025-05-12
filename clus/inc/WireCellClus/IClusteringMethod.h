@@ -26,7 +26,7 @@ namespace WireCell::Clus {
         virtual ~IClusteringMethod() {};
 
         /// Mutate a and/or b and maybe fill c.  Note, this API is subject to change
-        virtual void clustering(Facade::Grouping& a, Facade::Grouping& b, cluster_set_t& c) const = 0;
+        virtual void clustering(Facade::Grouping& a, Facade::Grouping& b) const = 0;
     };
 }
 

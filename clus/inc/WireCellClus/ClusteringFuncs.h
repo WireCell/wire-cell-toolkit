@@ -41,24 +41,28 @@ namespace WireCell::Clus::Facade {
 
     // clustering_util.cxx
     //
-    // This function will produce new clusters in live_clusters.  The children
-    // of each "fresh" cluster will be those of the "donor" clusters that are
-    // connected according to the cluster_connectivity_graph_t.  The "fresh"
-    // cluster will be added to and the "donor" clusters will be removed from
-    // "known_clusters".  The "donor" clusters will also be removed from
-    // live_clusters.
+    // This function will produce a new cluster in the grouping corresponding to
+    // each connected component in the cluster_connectivity_graph_t with two or
+    // more clusters.  The cluster in a single-cluster component is simply left
+    // in place in the grouping.
     //
-    // If both aname and pcname are given then store a cc array in any newly
-    // created clusters holding the merged set of blobs.  The cc array will
-    // arbitrarily label each blob with a number corresponding to the original
-    // cluster which was parent to the blob (and which is destroyed after this
-    // function).
+    // Each new cluster will be given the children (blob nodes) of the clusters
+    // in the connected component.  The connected clusters will be left empty,
+    // removed from the grouping and discarded.
     //
-    // See above for cluster_connectivity_graph_t.
-    void merge_clusters(cluster_connectivity_graph_t& g, // 
-			Grouping& grouping,
-			cluster_set_t& known_clusters, // in/out
-                        const std::string& aname="", const std::string& pcname="perblob");
+    // If both aname and pcname are given then a representation of the previous
+    // clustering of blob nodes will be stored in the new cluster.  This
+    // connected component (cc) array is in child-node-order and its integer
+    // value counts which original cluster donated the blob to the new cluster.
+    //
+    // Pointers to the newly created cluster node facades are returned.  These
+    // are loaned.  As usual, the cluster node owns the facade and these nodes
+    // are in turn owned by the grouping node.
+    std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, // 
+                                         Grouping& grouping,
+                                         const std::string& aname="",
+                                         const std::string& pcname="perblob");
+
     
     /**
      * Extract geometry information from a grouping
@@ -122,3 +126,4 @@ namespace WireCell::Clus::Facade {
 }  // namespace WireCell::Clus::Facade
 
 #endif
+
