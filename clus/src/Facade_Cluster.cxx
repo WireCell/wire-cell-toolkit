@@ -61,12 +61,12 @@ void Cluster::set_default_scope(const Tree::Scope& scope) {
     clear_cache();
 }
 
-
 void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag){
     // Set the scope filter for the given scope
     m_map_scope_filter[scope.hash()] = flag;
 }
-const bool Cluster::get_scope_filter(const Tree::Scope& scope) const{
+
+bool Cluster::get_scope_filter(const Tree::Scope& scope) const{
     auto it = m_map_scope_filter.find(scope.hash());
     if (it == m_map_scope_filter.end()){
         return false;
@@ -79,7 +79,7 @@ void Cluster::set_scope_transform(const Tree::Scope& scope, const std::string& t
     // Set the scope transform for the given scope
     m_map_scope_transform[scope.hash()] = transform_name;
 }
-const std::string Cluster::get_scope_transform(const Tree::Scope& scope) const{
+std::string Cluster::get_scope_transform(const Tree::Scope& scope) const{
     auto it = m_map_scope_transform.find(scope.hash());
     if (it == m_map_scope_transform.end()){
         return "Unity";
@@ -87,10 +87,44 @@ const std::string Cluster::get_scope_transform(const Tree::Scope& scope) const{
     return it->second;
 }
 
+void Cluster::set_cluster_id(int cid) {
+    set_ident(cid);
+}
+int Cluster::get_cluster_id() const {
+    return ident();
+}
+
+void Cluster::default_scope_from(const Cluster& other)
+{
+    auto scope = other.get_default_scope();
+    set_default_scope(scope);
+    if (other.get_scope_filter(scope)) {
+        set_scope_filter(scope, other.get_scope_filter(scope));
+    }
+    set_scope_transform(scope, other.get_scope_transform(scope));
+}
+
+void Cluster::from(const Cluster& other)
+{
+    default_scope_from(other);
+    flags_from(other);
+}
+
+
+void Cluster::set_cluster_t0(double t0) {
+    set_scalar<double>("cluster_t0", t0);
+}
+double Cluster::get_cluster_t0() const {
+    return get_scalar<double>("cluster_t0", 0);
+}
+
+
 std::vector<int> Cluster::add_corrected_points(
     Clus::IPCTransformSet::pointer pcts,
     const std::string &correction_name) 
 {
+    const double t0 = get_cluster_t0();
+
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
     if (correction_name == "T0Correction") {
@@ -98,9 +132,9 @@ std::vector<int> Cluster::add_corrected_points(
         for (size_t iblob = 0; iblob < children().size(); ++iblob) {
             Blob* blob = children().at(iblob);
             auto &lpc_3d = blob->local_pcs().at("3d");
-            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, {"x_t0cor","y_t0cor","z_t0cor"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
+            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, {"x_t0cor","y_t0cor","z_t0cor"}, t0, blob->wpid().face(), blob->wpid().apa());
             lpc_3d.add("x_t0cor", *corrected_points.get("x_t0cor")); // only add x_t0cor
-            auto filter_result = pct->filter(corrected_points, {"x_t0cor", "y_t0cor", "z_t0cor"}, m_cluster_t0, blob->wpid().face(), blob->wpid().apa());
+            auto filter_result = pct->filter(corrected_points, {"x_t0cor", "y_t0cor", "z_t0cor"}, t0, blob->wpid().face(), blob->wpid().apa());
             auto arr_filter = filter_result.get("filter")->elements<int>();
             for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
                 if (arr_filter[ipt] == 1) {

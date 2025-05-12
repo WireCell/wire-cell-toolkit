@@ -20,6 +20,9 @@
 
 #include "WCPQuickhull/QuickHull.h"
 
+#include <string>
+
+
 // extern int global_counter_get_closest_wcpoint;
 
 
@@ -159,6 +162,41 @@ namespace WireCell::Clus::Facade {
             }
             arr->template element<T>(0) = (T)val;
         }
+
+        /// A flag is a name that can be "set" on a facade.  It is simply an
+        /// entry in the scalar PC.  Most imply, a flag is Boolean false if
+        /// unset (not defined) or has value 0 and set if defined with non-zero
+        /// value.  Non-boolean values are allowed.  The flag name has a prefix
+        /// (default "flag_") to provide a namespace.
+        void set_flag(const std::string& name, int value=1, const std::string& prefix="flag_") {
+            set_scalar<int>(prefix + name, value);
+        }
+
+        /// Get the value of a flag.  If the flag is unset, return the
+        /// default_value.  See set_flag().
+        int get_flag(const std::string& name, int default_value=0, const std::string& prefix="flag_") const {
+            return get_scalar<int>(prefix + name, default_value);
+        }
+
+        /// Get all set flag names with a given prefix.
+        std::vector<std::string> flag_names(const std::string& prefix="flag_") const {
+            std::vector<std::string> ret;
+            const auto& spc = get_pc(scalar_pc_name);
+            for (const auto& key : spc.keys()) {
+                if (String::startswith(key, prefix)) {
+                    ret.push_back(key.substr(0, prefix.size()));
+                }
+            }
+            return ret;
+        }
+
+        // Any flag set on the other will be set on this.
+        void flags_from(const SelfType& other, const std::string& prefix="flag_") {
+            for (const auto& fname : other.flag_names(prefix)) {
+                set_flag(fname, other.get_flag(fname, 0, prefix), prefix);
+            }
+        }
+
 
         bool has_pc(const std::string& pcname) const
         {

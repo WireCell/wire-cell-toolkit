@@ -88,16 +88,8 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             }
 
             auto live = orig_clusters[idx];
-            const Tree::Scope& default_scope = live->get_default_scope();
-            bool flag = live->get_scope_filter(default_scope);
-            auto scope_transform = live->get_scope_transform(live->get_default_scope());
+            fresh_cluster.from(*live);
             fresh_cluster.take_children(*live, true);
-            // set scope filter assuming union of all clusters
-            {   
-                fresh_cluster.set_default_scope(default_scope);
-                if (flag) fresh_cluster.set_scope_filter(default_scope, flag);
-                fresh_cluster.set_scope_transform(default_scope, scope_transform);
-            }
 
             if (savecc) {
                 cc.resize(fresh_cluster.nchildren(), parent_id);
@@ -111,9 +103,9 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             fresh_cluster.put_pcarray(cc, aname, pcname);
         }
 
-        // Normally, is is weird/wrong to store a pointer to a reference.  But,
-        // we know the Cluster facade is held by the pc tree node that we just
-        // added to the grouping node.  
+        // Normally, it would be weird/wrong to store an address of a reference.
+        // But, we know the Cluster facade is held by the pc tree node that we
+        // just added to the grouping node.
         fresh.push_back(&fresh_cluster);
     }
 

@@ -18,11 +18,23 @@
 #include "WireCellUtil/Graph.h"
 
 
-
+#include <string>
 #include <fstream>
 
 namespace WireCell::Clus::Facade {
     using namespace WireCell::PointCloud::Tree;
+
+    /// Some clustering functions define and react to flags defined on cluster
+    /// facades.  We name these flags with strings in this namespace to assure
+    /// consistency, add documentation/comments and avoid typos.  Note,
+    /// merge_clusters() will call fresh.from(other) to forward flags.
+    namespace Flags {
+
+        /// Indicates the cluster is a "live" cluster and connected to a "dead"
+        /// cluster.
+        inline const std::string live_dead = "live_dead";
+
+    }
 
     struct ClusterLess {
         bool operator()(const Cluster* a, const Cluster* b) const {
@@ -42,18 +54,21 @@ namespace WireCell::Clus::Facade {
     // clustering_util.cxx
     //
     // This function will produce a new cluster in the grouping corresponding to
-    // each connected component in the cluster_connectivity_graph_t with two or
-    // more clusters.  The cluster in a single-cluster component is simply left
-    // in place in the grouping.
+    // each connected component in the cluster_connectivity_graph_t that as two
+    // or more clusters.  Any cluster in a single-cluster component is simply
+    // left in place in the grouping.
     //
     // Each new cluster will be given the children (blob nodes) of the clusters
-    // in the connected component.  The connected clusters will be left empty,
+    // in the associated connected component.  These now empty clusters will be
     // removed from the grouping and discarded.
     //
     // If both aname and pcname are given then a representation of the previous
     // clustering of blob nodes will be stored in the new cluster.  This
     // connected component (cc) array is in child-node-order and its integer
     // value counts which original cluster donated the blob to the new cluster.
+    //
+    // The fresh.from(other) is called to transfer flags, scope and possibly
+    // other bits of information.
     //
     // Pointers to the newly created cluster node facades are returned.  These
     // are loaned.  As usual, the cluster node owns the facade and these nodes
@@ -63,7 +78,6 @@ namespace WireCell::Clus::Facade {
                                          const std::string& aname="",
                                          const std::string& pcname="perblob");
 
-    
     /**
      * Extract geometry information from a grouping
      * @param grouping The input Grouping object

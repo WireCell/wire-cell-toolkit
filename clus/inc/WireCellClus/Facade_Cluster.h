@@ -50,11 +50,11 @@ namespace WireCell::Clus::Facade {
         const std::vector<std::string>& get_coords() const {return m_default_scope.coords;}
 
         // set, get scope filter ...
-        void set_scope_filter(const Tree::Scope& scope, bool flag);
-        const bool get_scope_filter(const Tree::Scope& scope) const;
+        void set_scope_filter(const Tree::Scope& scope, bool flag=true);
+        bool get_scope_filter(const Tree::Scope& scope) const;
 
         void set_scope_transform(const Tree::Scope& scope, const std::string& transform_name);
-        const std::string get_scope_transform(const Tree::Scope& scope) const;
+        std::string get_scope_transform(const Tree::Scope& scope) const;
 
         const Tree::Scope& get_scope(const std::string& scope_name) const
         {
@@ -64,19 +64,35 @@ namespace WireCell::Clus::Facade {
             return m_scopes.at(scope_name);
         }
 
-        /// @param correction_name: T0Correction
-        std::vector<int> add_corrected_points(const Clus::IPCTransformSet::pointer pcts,
-                                              const std::string &correction_name);
-        double get_cluster_t0() const { return m_cluster_t0; }
-        void set_cluster_t0(double cluster_t0) { m_cluster_t0 = cluster_t0; }
+        /// Set other's default scope, filter and transform to this.  See also from().
+        void default_scope_from(const Cluster& other);
+
+        /// Set on this various meta information from the other including
+        /// default scope and any flags in the default flags_ prefix.
+        ///
+        /// This may be appropriate to call when this cluster is made from
+        /// others such as in a cluster merge.
+        ///
+        /// See set_flag(), get_flag(), flag_names() and flag_from() provided by
+        /// base class.
+        void from(const Cluster& other);
+
+        double get_cluster_t0() const;
+        void set_cluster_t0(double cluster_t0);
 
 
         // Override Mixin
         virtual void clear_cache() const;
+        
 
-        void set_cluster_id(int id){m_cluster_id = id;};
-        const int get_cluster_id() const {return m_cluster_id;};
+        // scopes_from() and from()
 
+        void set_cluster_id(int id);
+        int get_cluster_id() const;
+
+        /// @param correction_name: T0Correction
+        std::vector<int> add_corrected_points(const Clus::IPCTransformSet::pointer pcts,
+                                              const std::string &correction_name);
 
 
         // Return the grouping to which this cluster is a child.  May be nullptr.
@@ -503,10 +519,6 @@ namespace WireCell::Clus::Facade {
         mutable geo_point_t m_center;
         mutable geo_vector_t m_pca_axis[3];
         mutable double m_pca_values[3];
-
-        double m_cluster_t0{0};
-
-        int m_cluster_id{-1};
 
         // m_graph
         mutable std::unique_ptr<MCUGraph> m_graph;
