@@ -72,6 +72,12 @@ namespace WireCell::Clus {
             
         };
     
+        Facade::Grouping& load_grouping(
+            Facade::Ensemble& ensemble,
+            const std::string& name,
+            const std::string& path,
+            const ITensorSet::pointer ints);
+
         std::map<std::string, ApaBeePoints> m_bee_points;
 
         // New helper function to fill bee points
@@ -101,39 +107,55 @@ namespace WireCell::Clus {
         // Count how many times we are called
         size_t m_count{0};
 
+        /** Config: "groupings"
+         *
+         * List of groupings to select for processing.
+         *
+         * Default: ["live","dead"].
+         */
+        std::vector<std::string> m_groupings = {"live","dead"};
+
         /** Config: "inpath"
          *
-         * The BASE datapath for the input pc tree data.  This may be a
-         * regular expression which will be applied in a first-match
-         * basis against the input tensor datapaths.  If the matched
-         * tensor is a pcdataset it is interpreted as providing the
-         * nodes dataset.  Otherwise the matched tensor must be a
-         * pcgraph.  See in{live,dead} parameters.
+         * The BASE datapath for the input pc tree data.  This may be a regular
+         * expression which will be applied in a first-match basis against the
+         * input tensor datapaths.  If the matched tensor is a pcdataset it is
+         * interpreted as providing the nodes dataset.  Otherwise the matched
+         * tensor must be a pcgraph.
+         *
+         * A "%d" will be interpolated with the ident number of the input tensor
+         * set.
+         * 
+         * See also "insubpaths".
          */
         std::string m_inpath{".*"};
 
         /** Config: "outpath"
          *
-         * The BASE datapath for the resulting pc tree data.  A "%d" will be
-         * interpolated with the ident number of the input tensor set.  See
-         * out{live,dead} parameters.
+         * The BASE datapath for the resulting pc tree data.
+         *
+         * A "%d" will be interpolated with the ident number of the input tensor
+         * set.
+         *
+         * See outsubpaths.
          */
         std::string m_outpath{""};
 
-        /** Config: inlive, outlive, indead, outdead.
+        /** Config: insubpaths, outsubpaths.
          *
-         * This quad of parameters {in,out}{live,dead} set suffixes to the
-         * {in,out}path.  By default, they are "/live" and "/dead" for both
-         * in/out pairs.  In exceptional cases, these need setting if the
-         * upstream sources or downstream sinks require different patterns.
+         * By default, a grouping of a given NAME is located at an input or
+         * output path spelled as: "{inpath,outpath}/NAME".
+         *
+         * If a grouping NAME is found in either insubpath or outsubpath then
+         * this default is overridden.  Both parameters are array of objects,
+         * each object has keys "name" and "subpath".  The subpath is a simple
+         * string suffix and thus should include a leading "/" if the user
+         * wishes to locate the grouping in a "subdirectory".
          */
-        // See issue #375.  Note, configure() will expand these to full paths by
-        // appending to m_inpath and m_outpath.
-        std::string m_inlive{"/live"};
-        std::string m_indead{"/dead"};
-        std::string m_outlive{"/live"};
-        std::string m_outdead{"/dead"};
-
+        // See issue #375 and #416.  
+        std::map<std::string, std::string> m_insubpaths, m_outsubpaths;
+        std::string inpath(const std::string& name, int ident);
+        std::string outpath(const std::string& name, int ident);
 
         /** Config: "perf"
          *

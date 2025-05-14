@@ -36,8 +36,9 @@ public:
     return cfg;
   }
 
-  void clustering(Grouping& live_clusters, Grouping& ) const {
-    clustering_close(live_clusters, m_scope, length_cut_);
+  void clustering(Ensemble& ensemble) const {
+    auto& live = *ensemble.with_name("live").at(0);
+    clustering_close(live, m_scope, length_cut_);
   }
   
 private:

@@ -38,8 +38,12 @@ public:
     }
     
 
-    virtual void clustering(Grouping& live_grouping, Grouping& dead_grouping) const {
+    virtual void clustering(Ensemble& ensemble) const {
         using spdlog::debug;
+
+        auto& live_grouping = *ensemble.with_name("live").at(0);
+        auto& dead_grouping = *ensemble.with_name("dead").at(0);
+
 
         // {
         //     auto wpids = live_grouping.wpids();

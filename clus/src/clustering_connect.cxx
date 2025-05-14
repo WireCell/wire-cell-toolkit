@@ -29,8 +29,9 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_connect1(live_clusters, m_dv, m_scope);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_connect1(live, m_dv, m_scope);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;

@@ -36,8 +36,9 @@ public:
         return cfg;
     }
 
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_ctpointcloud(live_clusters, m_dv, m_pcts);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_ctpointcloud(live, m_dv, m_pcts);
     }
 };
 

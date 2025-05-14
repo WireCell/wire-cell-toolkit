@@ -52,7 +52,6 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 }
 
 
-
 static std::tuple<int, int, int> parse_dead_winds(const std::string& ds_name) {
     int apa, face;
     char plane;
@@ -102,6 +101,20 @@ void Grouping::on_construct(node_type* node)
     //         }
     //     }
     // }
+}
+
+
+void Facade::Grouping::from(const Grouping& other)
+{
+    m_anodes = other.m_anodes;
+    m_dv = other.m_dv;
+}
+
+void Facade::Grouping::enumerate_idents(int id)
+{
+    for (auto* cluster : children()) {
+        cluster->set_cluster_id(id++);
+    }
 }
 
 

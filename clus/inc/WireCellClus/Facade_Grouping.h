@@ -58,6 +58,10 @@ namespace WireCell::Clus::Facade {
 
         Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
+        /// Incrementally set the ident number on clusters in children-order.
+        /// Note, convention is to start counting from 1.
+        void enumerate_idents(int start=1);
+
         // TODO: remove this in the future
         // void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);
@@ -72,10 +76,15 @@ namespace WireCell::Clus::Facade {
         IChannel::vector get_plane_channels(const int apa, const int face, const WirePlaneLayer_t layer) const{return cache().map_plane_channels.at(apa).at(face).at(layer);}
         std::shared_ptr<const WireCell::IChannel> get_plane_channel_wind(const int apa, const int face, const WirePlaneLayer_t layer, const int wind) const{ return cache().map_plane_channels.at(apa).at(face).at(layer).at(wind);}
 
-        /// TODO: remove this in the future
-        // void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
-        // const IAnodePlane::pointer get_anode() const { return m_anode; }
+        /// Set other's non-tree info on this.
+        ///
+        /// This may be appropriate when making a new grouping from an existing
+        /// grouping.  It will transfer information not related to the PC tree
+        /// such as the any anodes.  It specifically does not transfer any
+        /// information about children clusters.
+        void from(const Grouping& other);
 
+        /// TODO: remove this in the future
         void set_anodes(const std::vector<IAnodePlane::pointer>& anodes);
         const IAnodePlane::pointer get_anode(const int ident) const;  // also apa
 

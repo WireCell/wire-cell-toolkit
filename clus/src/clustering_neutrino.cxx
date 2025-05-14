@@ -37,9 +37,10 @@ public:
         num_try_ = get(config, "num_try", 1);
     }
     
-    void clustering(Grouping& live_clusters, Grouping&) const {
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
         for (int i = 0; i != num_try_; i++) {
-            clustering_neutrino(live_clusters, i, m_dv, m_scope);
+            clustering_neutrino(live, i, m_dv, m_scope);
         }
     }
     

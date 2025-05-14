@@ -41,8 +41,9 @@ public:
         return cfg;
     }
     
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_deghost(live_clusters, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_deghost(live, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
     }
     
 private:

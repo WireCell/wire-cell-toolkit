@@ -31,8 +31,9 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_examine_x_boundary(live_clusters, m_dv, m_scope);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_examine_x_boundary(live, m_dv, m_scope);
     }
     
 };

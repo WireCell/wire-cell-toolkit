@@ -37,8 +37,9 @@ public:
         correction_name_ = convert<std::string>(config["correction_name"], "T0Correction");
     }
     
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_switch_scope(live_clusters, m_pcts, m_scope, correction_name_);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_switch_scope(live, m_pcts, m_scope, correction_name_);
     }
 
 private:

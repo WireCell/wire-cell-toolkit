@@ -16,6 +16,7 @@
 #include "WireCellUtil/Graph.h"
 #include "WireCellUtil/NamedFactory.h"
 
+#include <map>
 #include <fstream>
 
 WIRECELL_FACTORY(MultiAlgBlobClustering, WireCell::Clus::MultiAlgBlobClustering, WireCell::INamed,
@@ -34,15 +35,50 @@ MultiAlgBlobClustering::MultiAlgBlobClustering()
 {
 }
 
+
+static
+std::string format_path(
+    std::string path,
+    const std::string& name,
+    int ident,
+    const std::map<std::string, std::string> subpaths)
+{
+    auto it = subpaths.find(name);
+    if (it == subpaths.end()) {
+        path += "/" + name;
+    }
+    else {
+        path += it->second;
+    }
+    if (path.find("%") == std::string::npos) {
+        return path;
+    }
+    return String::format(path, ident);
+}
+
+std::string MultiAlgBlobClustering::inpath(const std::string& name, int ident)
+{
+    return format_path(m_inpath, name, ident, m_insubpaths);
+}
+std::string MultiAlgBlobClustering::outpath(const std::string& name, int ident)
+{
+    return format_path(m_outpath, name, ident, m_outsubpaths);
+}
+
+
 void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 {
+    m_groupings = convert(cfg["groupings"], m_groupings);
+
     m_inpath = get(cfg, "inpath", m_inpath);
     m_outpath = get(cfg, "outpath", m_outpath);
 
-    m_inlive = m_inpath + get(cfg, "inlive", m_inlive);
-    m_outlive = m_outpath + get(cfg, "outlive", m_outlive);
-    m_indead = m_inpath + get(cfg, "indead", m_indead);
-    m_outdead = m_outpath + get(cfg, "outdead", m_outdead);
+    for (const auto& jsp : cfg["insubpaths"]) {
+        m_insubpaths[jsp["name"].asString()] = jsp["subpath"].asString();
+    }
+    for (const auto& jsp : cfg["outsubpaths"]) {
+        m_outsubpaths[jsp["name"].asString()] = jsp["subpath"].asString();
+    }
 
     if (cfg.isMember("bee_dir")) {
         log->debug("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
@@ -168,6 +204,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
 {
     Configuration cfg;
+
+    assign(cfg["groupings"], m_groupings);
+
     cfg["inpath"] = m_inpath;
     cfg["outpath"] = m_outpath;
 
@@ -551,30 +590,74 @@ struct Perf {
         em(ctx);
     }
 
-    void dump(const std::string& ctx, const Grouping& grouping, bool shallow = true, bool mon = true)
+    void dump(const std::string& ctx, const Ensemble& ensemble, bool shallow = true, bool mon = true)
     {
         if (!enable) return;
         if (mon) (*this)(ctx);
-        log->debug("{} grouping {}", ctx, grouping);
-        if (shallow) return;
-        auto children = grouping.children();  // copy
-        sort_clusters(children);
-        size_t count = 0;
-        for (const auto* cluster : children) {
-            bool sane = cluster->sanity(log);
-            log->debug("{} cluster {} {} sane:{}", ctx, count++, *cluster, sane);
+
+        log->debug("{} ensemble with {} groupings:", ctx, ensemble.nchildren());
+
+        for (const auto* grouping : ensemble.children()) {
+
+            {
+                size_t npoints_total = 0;
+                size_t nzero = 0;
+                size_t count = 0;
+                for (const auto* cluster : grouping->children()) {
+                    int n = cluster->npoints();
+                    if (n == 0) {
+                        ++nzero;
+                    }
+                    npoints_total += n;
+                    // log->debug("loaded cluster {} with {} points out of {}", count, n, npoints_total);
+                    ++count;
+                }
+
+                auto name = grouping->get_name();
+
+                log->debug("\tgrouping \"{}\": {}, {} points and {} clusters with no points",
+                           name, *grouping, npoints_total, nzero);
+            }
+
+            if (shallow) continue;
+
+            auto children = grouping->children();  // copy
+            sort_clusters(children);
+            size_t count = 0;
+            for (const auto* cluster : children) {
+                bool sane = cluster->sanity(log);
+                log->debug("\t\tcluster {} {} sane:{}", count++, *cluster, sane);
+            }
         }
     }
 };
 
-static 
-std::string format_path(std::string path, int ident)
+
+Grouping& MultiAlgBlobClustering::load_grouping(
+    Ensemble& ensemble,
+    const std::string& name,
+    const std::string& path,
+    const ITensorSet::pointer ints)
 {
-    if (path.find("%") == std::string::npos) {
-        return path;
+    const auto& tens = *ints->tensors();
+    try {
+        ensemble.add_grouping_node(name, as_pctree(tens, path));
     }
-    return String::format(path, ident);
-}    
+    catch (WireCell::KeyError& err) {
+        log->warn("No pc-tree at tensor datapath {}, making empty", path);
+        ensemble.make_grouping(name);
+    }
+        
+    Grouping* grouping = ensemble.with_name(name).at(0);
+    if (!grouping) {
+        raise<KeyError>("failed to make grouping node %s at %s", name, path);
+    }
+
+    grouping->enumerate_idents();
+    grouping->set_anodes(m_anodes);
+    grouping->set_detector_volumes(m_dv);
+    return *grouping;
+}
 
 bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointer& outts)
 {
@@ -611,135 +694,99 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // else do nothing when ident is unchanged.
 
 
-    const auto& intens = *ints->tensors();
-    // for(const auto& ten : intens) {
-    //     log->debug("tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
-    // }
+    Points::node_t root;
+    Ensemble& ensemble = *root.value.facade<Ensemble>();
 
-    const auto inlive = format_path(m_inlive, ident);
-    auto root_live = std::move(as_pctree(intens, inlive));
-    if (!root_live) {
-        log->error("Failed to get dead point cloud tree from \"{}\"", inlive);
-        raise<ValueError>("Failed to get live point cloud tree from \"%s\"", inlive);
-    }
-    auto grouping = root_live->value.facade<Grouping>();
-    grouping->set_anodes(m_anodes);
-    grouping->set_detector_volumes(m_dv);
-    // grouping->set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
-    perf("loaded live clusters");
-    {
-        size_t npoints_total = 0;
-        size_t nzero = 0;
-        size_t count = 0;
-        for (const auto* cluster : grouping->children()) {
-            int n = cluster->npoints();
-            if (n == 0) {
-                ++nzero;
-            }
-            npoints_total += n;
-            // log->debug("loaded cluster {} with {} points out of {}", count, n, npoints_total);
-            ++count;
-        }
-        log->debug("loaded live grouping with {} clusters, {} points, and {} clusters with no points",
-                   grouping->nchildren(), npoints_total, nzero);
-        // It is probably an error if nzero is not zero.
-    }
+    for (const auto& gname : m_groupings) {
+        const auto datapath = inpath(gname, ident);
+        load_grouping(ensemble, gname, datapath, ints);
+        perf.dump("loaded " + gname, ensemble);
+    }    
 
-
-    const auto indead = format_path(m_indead, ident);
-    // log->debug("Got live pctree with {} children", root_live->nchildren());
-    // log->debug(em("got live pctree"));
-    log->debug("as_pctree from \"{}\"", indead);
-    Points::node_ptr root_dead;
-    try {
-        root_dead = as_pctree(intens, indead);
-        perf("loaded dead clusters");
-    }
-    catch (WireCell::KeyError& err) {
-        log->warn("No pc-tree at datapath {}, assuming no 'dead' clusters", indead);
-        root_dead = std::make_unique<Points::node_t>();
-    }
-
-
-    
-    // if (m_save_deadarea) {
-    //     // fill_bee_patches(m_bee_dead, *root_dead.get());
-    //     perf("loaded dump dead regions to bee");
-    // }
-    // log->debug("will {} {} dead patches", m_save_deadarea ? "save" : "not save", m_bee_dead.size());
-
-
-
-    // initialize clusters ...
-    Grouping& live_grouping = *root_live->value.facade<Grouping>();
-
-    Grouping& dead_grouping = *root_dead->value.facade<Grouping>();
-    dead_grouping.set_anodes(m_anodes);
-    dead_grouping.set_detector_volumes(m_dv);
-    // dead_grouping.set_params(m_geomhelper->get_params(m_anodes.front()->ident(), m_face));
-    
-    perf("loaded dump live clusters to bee");
     if (m_save_deadarea) {
-        // Fill patches from the dead grouping
-        fill_bee_patches_from_grouping(dead_grouping); // true means use individual patches by APA/face
-        perf("loaded dump dead regions to bee");
+        auto gs = ensemble.with_name("live");
+        if (gs.size()) {
+            // Fill patches from the dead grouping
+            fill_bee_patches_from_grouping(*gs[0]);
+            perf("dump dead regions to bee");
+        }
     }
 
-    //perf.dump("original live clusters", live_grouping, false, false);
-    //perf.dump("original dead clusters", dead_grouping, false, false);
-
-    perf.dump("pre clustering", live_grouping);
-
-    // set cluster id ... 
-    int cluster_id = 1;
-    for (auto* cluster : live_grouping.children()) {
-        cluster->set_cluster_id(cluster_id++);
-    }
+    perf.dump("pre clustering", ensemble);
 
     for (const auto& config : m_bee_points_configs) {
-        if(config.name == "img")
-            fill_bee_points(config.name, live_grouping);
+        if (config.name != "img") {
+            continue;
+        }
+        auto gs = ensemble.with_name("live");
+        if (gs.empty()) {
+            continue;
+        }
+        fill_bee_points(config.name, *gs[0]);
     }
+
+    perf.dump("start clustering", ensemble);
 
     for (const auto& cmeth : m_clustering_chain) {
-        cmeth.meth->clustering(live_grouping, dead_grouping);
-        perf.dump(cmeth.name, live_grouping);
-
+        cmeth.meth->clustering(ensemble);
+        perf.dump(cmeth.name, ensemble);
     }
+
+    //
+    // At this point, the ensemble may have more or fewer groupings just "live"
+    // and "dead" including no groupings at all.  But for now, we assume the
+    // original "live" and "dead" still exist and with their original facades.
+    // Famous last words....
+    //
+    
 
     // Fill all configured bee points sets
     for (const auto& config : m_bee_points_configs) {
-        if(config.name != "img")
-            fill_bee_points(config.name, live_grouping);
-            // fill_bee_points(config.name, dead_grouping); // hack to check ClusteringRetile, shad_grouping is loaded as dead_grouping
-    }
+        if(config.name == "img") continue;
+        auto gs = ensemble.with_name("live");
+        if (gs.empty()) {
+            continue;
+        }
+        fill_bee_points(config.name, *gs[0]);
 
+    }
     perf("dump live clusters to bee");
 
+    auto grouping_names = ensemble.names();
+
     if (m_dump_json) {
-        Persist::dump(String::format("live-summary-%d.json", ident), json_summary(live_grouping), true);
-        Persist::dump(String::format("dead-summary-%d.json", ident), json_summary(dead_grouping), true);
+        for (const auto& name : grouping_names) {
+            auto gs = ensemble.with_name(name);
+            Persist::dump(String::format("%s-summary-%d.json", name, ident),
+                          json_summary(*gs[0]), true);
+        }
     }
 
-    log->debug("Produce pctrees with {} live and {} dead children",
-               root_live->nchildren(), root_dead->nchildren());
+    log->debug("Produce pctrees with {} groupings", grouping_names.size());
+    
+    ITensor::vector outtens;
+    for (const auto& name : grouping_names) {
 
-    // Convert to tensors
-    const auto outlive = format_path(m_outlive, ident);
-    auto outtens = as_tensors(*root_live.get(), outlive);
-    perf("output live clusters to tensors");
-    const auto outdead = format_path(m_outdead, ident);
-    auto outtens_dead = as_tensors(*root_dead.get(), outdead);
-    perf("output dead clusters to tensors");
-
-    // Merge
-    outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
+        // This next bit may look a little weird and it is so some explanation
+        // is warranted.  Originally, we had disembodied "root" grouping nodes,
+        // live and dead.  To clean up the clustering api we added the
+        // "ensemble" as root node with children consisting of grouping nodes.
+        // At the time of writing, the as_tensors() does not like serializing
+        // non-root nodes I do not want to debug right now.  And, I do not want
+        // the "ensemble" concept to leak out from the MABC+clustering context.
+        // So, I remove each grouping child node from the ensemble prior to
+        // serializing.  The remove gives an auto_ptr so the node is destructed
+        // as this loop progresses.
+        auto gs = ensemble.with_name(name);
+        auto& grouping = *gs[0];
+        auto node = ensemble.remove_child(grouping);
+        auto tens = as_tensors(*node, outpath(name, ident));
+        outtens.insert(outtens.end(), tens.begin(), tens.end());
+        log->debug("Produce {} tensors for grouping {}", tens.size(), name);
+    }
     outts = as_tensorset(outtens, ident);
-    perf("combine tensors");
 
-    root_live = nullptr;
-    root_dead = nullptr;
-    perf("clear pc tree memory");
+    perf("done");
 
     return true;
 }

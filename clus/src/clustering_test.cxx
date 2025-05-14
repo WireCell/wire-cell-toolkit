@@ -38,8 +38,9 @@ public:
         return cfg;
     }
  
-    virtual void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_test(live_clusters);
+    virtual void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_test(live);
     }
 
     // This is a test function, not used in clustering

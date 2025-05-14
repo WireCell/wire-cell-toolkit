@@ -140,7 +140,6 @@ namespace WireCell::Clus::Facade {
             if (!arr) {
                 return def;
             }
-            // std::cout << "test1 " << pcname << " " << aname << " " << index << " " << arr->template element<T>(index) << std::endl;
             return arr->template element<T>(index);
         }
 
@@ -211,8 +210,12 @@ namespace WireCell::Clus::Facade {
 
         // Const access to a local PC/Dataset.  If pcname is missing return
         // reference to an empty dataset.
-        const PointCloud::Dataset& get_pc(const std::string& pcname) const
+        const PointCloud::Dataset& get_pc(std::string pcname) const
         {
+            if (pcname.empty()) {
+                pcname = scalar_pc_name;
+            }
+
             static PointCloud::Dataset dummy;
             const auto& lpcs = local_pcs();
             auto it = lpcs.find(pcname);
@@ -223,16 +226,24 @@ namespace WireCell::Clus::Facade {
         }
         // Mutable access to a local PC/Dataset.  If pcname is missing, a new
         // dataset of that name will be created.
-        PointCloud::Dataset& get_pc(const std::string& pcname)
+        PointCloud::Dataset& get_pc(std::string pcname)
         {
+            if (pcname.empty()) {
+                pcname = scalar_pc_name;
+            }
+
             static PointCloud::Dataset dummy;
-            const auto& lpcs = local_pcs();
+            auto& lpcs = local_pcs();
             return lpcs[pcname];
         }
 
         // Return true if this cluster has a PC array and PC of given names and type.
         template<typename ElementType=int>
-        bool has_pcarray(const std::string& aname, const std::string& pcname) const {
+        bool has_pcarray(const std::string& aname, std::string pcname) const {
+            if (pcname.empty()) {
+                pcname = scalar_pc_name;
+            }
+
             auto& lpc = local_pcs();
             auto lit = lpc.find(pcname);
             if (lit == lpc.end()) {
@@ -247,11 +258,14 @@ namespace WireCell::Clus::Facade {
         }
 
         // Return as a span an array named "aname" stored in clusters PC named
-        // "pcname".  Returns default span if PC or array not found or there is
+        // by pcname.  Returns default span if PC or array not found or there is
         // a type mismatch.  Note, span uses array data in place.
         template<typename ElementType=int>
         PointCloud::Array::span_t<ElementType>
-        get_pcarray(const std::string& aname, const std::string& pcname) {
+        get_pcarray(const std::string& aname, std::string pcname) {
+            if (pcname.empty()) {
+                pcname = scalar_pc_name;
+            }
 
             auto& lpc = local_pcs();
             auto lit = lpc.find(pcname);
@@ -267,7 +281,10 @@ namespace WireCell::Clus::Facade {
         }
         template<typename ElementType=int>
         const PointCloud::Array::span_t<ElementType>
-        get_pcarray(const std::string& aname, const std::string& pcname) const {
+        get_pcarray(const std::string& aname, std::string pcname) const {
+            if (pcname.empty()) {
+                pcname = scalar_pc_name;
+            }
 
             auto& lpc = local_pcs();
             auto lit = lpc.find(pcname);
@@ -287,7 +304,10 @@ namespace WireCell::Clus::Facade {
         template<typename ElementType=int>
         void
         put_pcarray(const std::vector<ElementType>& vec,
-                    const std::string& aname, const std::string& pcname) {
+                    const std::string& aname, std::string pcname) {
+            if (pcname.empty()) {
+                pcname = scalar_pc_name;
+            }
 
             auto &lpc = local_pcs();
             auto& pc = lpc[pcname];
@@ -301,6 +321,22 @@ namespace WireCell::Clus::Facade {
             else {
                 pc.add(aname, PointCloud::Array(vec, shape, false));
             }
+        }
+
+        std::string get_name() const {
+            const PointCloud::Dataset& spc = get_pc(scalar_pc_name);
+            const auto& md = spc.metadata();
+            auto jname = md["name"];
+            if (jname.isString()) {
+                return jname.asString();
+            }
+            return "";
+        }
+
+        void set_name(const std::string& name) {
+            PointCloud::Dataset& spc = get_pc(scalar_pc_name);
+            auto& md = spc.metadata();
+            md["name" ] = name;
         }
     };
 

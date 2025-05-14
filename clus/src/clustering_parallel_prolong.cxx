@@ -38,8 +38,9 @@ public:
     }
     
 
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_parallel_prolong(live_clusters, m_dv, m_scope, length_cut_);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_parallel_prolong(live, m_dv, m_scope, length_cut_);
     }
 
 private:

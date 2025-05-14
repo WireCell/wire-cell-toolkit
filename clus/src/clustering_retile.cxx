@@ -87,7 +87,7 @@ public:
     }
 
 
-    void clustering(Grouping& live_clusters, Grouping& dead_clusters) const;
+    void clustering(Ensemble& ensemble) const;
 
 private:
 
@@ -616,15 +616,23 @@ ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
 
 
 
-void ClusteringRetile::clustering(WCF::Grouping& original, WCF::Grouping& shadow) const
+void ClusteringRetile::clustering(Ensemble& ensemble) const
 {
+    auto& original = *ensemble.with_name("live").at(0);
+    auto& shadow = ensemble.make_grouping("shadow");
+    shadow.from(original);
 
-
-    // FIXME: With #377 fixed, we would make the shadow grouping here from
-    // scratch and add it to the input map by name, eg "shadow".  Instead, we
-    // smash whatever is in the 2nd grouping to fill with "shadow" clusters.  In
-    // other cluster functions this second grouping is interpreted as holding
-    // "dead" clusters.
+    std::cerr << "Retile: live is " << original.get_name()
+              << " facade@[" << (void*)&original << "]"
+              << " hash=[" << (void*) original.hash() << "]"
+              << " shadow is " << shadow.get_name()
+              << " facade@[" << (void*)&shadow << "]"
+              << " hash=[" << (void*) shadow.hash() << "]"
+              << "\n";
+    for (const auto* grouping : ensemble.children()) {
+        auto name = grouping->get_name();
+        std::cerr << "grouping: " << name << "\n";
+    }
 
     // std::cout << "Test: " << original.wpids().size() << std::endl;
     // Check that live_grouping has exactly one wpid
@@ -667,11 +675,11 @@ void ClusteringRetile::clustering(WCF::Grouping& original, WCF::Grouping& shadow
 
     // reset the shadown clusters' content ... 
     // std::cout << shadow.children().size() << std::endl;
-    shadow.local_pcs().clear();
-    for (auto* fcluster : shadow.children()) {
-        shadow.remove_child(*fcluster);
-    }
-    shadow.clear_cache();
+    // shadow.local_pcs().clear();
+    // for (auto* fcluster : shadow.children()) {
+    //     shadow.remove_child(*fcluster);
+    // }
+    // shadow.clear_cache();
     // std::cout << shadow.children().size() << std::endl;
     // const auto [angle_u,angle_v,angle_w] = original.wire_angles();
 

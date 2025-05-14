@@ -49,8 +49,9 @@ public:
     return cfg;
   }
 
-  void clustering(Grouping& live_clusters, Grouping&) const {
-    clustering_extend(live_clusters, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
+  void clustering(Ensemble& ensemble) const {
+    auto& live = *ensemble.with_name("live").at(0);
+    clustering_extend(live, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
   }
 
 private:
@@ -78,24 +79,25 @@ public:
     return cfg;
   }
 
-  void clustering(Grouping& live_clusters, Grouping&) const {
+  void clustering(Ensemble& ensemble) const {
+    auto& live = *ensemble.with_name("live").at(0);
 
     // for very busy events do less ...
     int num_try = num_try_;
-    if (live_clusters.nchildren() > 1100) num_try = 1;
+    if (live.nchildren() > 1100) num_try = 1;
     for (int i = 0; i != num_try; i++) {
       // deal with prolong case
-      clustering_extend(live_clusters, m_dv, m_scope, 1, 150*units::cm, 0);
+      clustering_extend(live, m_dv, m_scope, 1, 150*units::cm, 0);
       // deal with parallel case
-      clustering_extend(live_clusters, m_dv, m_scope, 2, 30*units::cm, 0);
+      clustering_extend(live, m_dv, m_scope, 2, 30*units::cm, 0);
       // extension regular case
-      clustering_extend(live_clusters, m_dv, m_scope, 3, 15*units::cm, 0);
+      clustering_extend(live, m_dv, m_scope, 3, 15*units::cm, 0);
       // extension ones connected to dead region ...
       if (i == 0) {
-        clustering_extend(live_clusters, m_dv, m_scope, 4, 60 * units::cm, i);
+        clustering_extend(live, m_dv, m_scope, 4, 60 * units::cm, i);
       }
       else {
-        clustering_extend(live_clusters, m_dv, m_scope, 4, 35 * units::cm, i);
+        clustering_extend(live, m_dv, m_scope, 4, 35 * units::cm, i);
       }
     }
   }
@@ -831,8 +833,7 @@ static void clustering_extend(
       }
     }
   }
-  // new function to  merge clusters ...
-  // merge_clusters(g, live_grouping, cluster_connected_dead, "", "perblob", "live_dead");
+
   merge_clusters(g, live_grouping);
 
   // {

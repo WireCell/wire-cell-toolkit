@@ -41,8 +41,9 @@ public:
         return cfg;
     }
 
-    void clustering(Grouping& live_clusters, Grouping&) const {
-        clustering_regular(live_clusters, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
+    void clustering(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_regular(live, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
     }
 };
 
