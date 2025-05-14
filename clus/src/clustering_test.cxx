@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -12,7 +12,7 @@
 
 class ClusteringTest;
 WIRECELL_FACTORY(ClusteringTest, ClusteringTest,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 // #pragma GCC diagnostic push
@@ -24,7 +24,7 @@ using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
-class ClusteringTest : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS {
+class ClusteringTest : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS {
 public:
     ClusteringTest() {}
     virtual ~ClusteringTest() {};
@@ -38,7 +38,7 @@ public:
         return cfg;
     }
  
-    virtual void clustering(Ensemble& ensemble) const {
+    virtual void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_test(live);
     }

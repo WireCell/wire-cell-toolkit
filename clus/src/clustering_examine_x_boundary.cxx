@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringExamineXBoundary;
 WIRECELL_FACTORY(ClusteringExamineXBoundary, ClusteringExamineXBoundary,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -21,7 +21,7 @@ static void clustering_examine_x_boundary(
     const Tree::Scope& scope
     );
 
-class ClusteringExamineXBoundary : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringExamineXBoundary : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
     ClusteringExamineXBoundary() {}
     virtual ~ClusteringExamineXBoundary() {}
@@ -31,7 +31,7 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_examine_x_boundary(live, m_dv, m_scope);
     }

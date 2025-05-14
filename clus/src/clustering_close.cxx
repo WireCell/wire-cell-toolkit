@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -9,7 +9,7 @@
 
 class ClusteringClose;
 WIRECELL_FACTORY(ClusteringClose, ClusteringClose,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -21,7 +21,7 @@ static void clustering_close(Grouping& live_clusters,           //
                              const double length_cut = 1*units::cm //
   );
 
-class ClusteringClose : public IConfigurable, public Clus::IClusteringMethod, private NeedScope {
+class ClusteringClose : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
 public:
   ClusteringClose() {}
   virtual ~ClusteringClose() {}
@@ -36,7 +36,7 @@ public:
     return cfg;
   }
 
-  void clustering(Ensemble& ensemble) const {
+  void visit(Ensemble& ensemble) const {
     auto& live = *ensemble.with_name("live").at(0);
     clustering_close(live, m_scope, length_cut_);
   }

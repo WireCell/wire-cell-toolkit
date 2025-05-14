@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringIsolated;
 WIRECELL_FACTORY(ClusteringIsolated, ClusteringIsolated,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -22,7 +22,7 @@ static void clustering_isolated(
     const Tree::Scope& scope
     );
 
-class ClusteringIsolated : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
     ClusteringIsolated() {}
     virtual ~ClusteringIsolated() {}
@@ -32,7 +32,7 @@ public:
         NeedScope::configure(config);
     }
     
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         return clustering_isolated(live, m_dv, m_scope);
     }

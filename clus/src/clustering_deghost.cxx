@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringDeghost;
 WIRECELL_FACTORY(ClusteringDeghost, ClusteringDeghost,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -23,7 +23,7 @@ static void clustering_deghost(Grouping& live_grouping,
                                const bool use_ctpc,
                                double length_cut = 0);
 
-class ClusteringDeghost : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+class ClusteringDeghost : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
     ClusteringDeghost() {}
     virtual ~ClusteringDeghost() {}
@@ -41,7 +41,7 @@ public:
         return cfg;
     }
     
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_deghost(live, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_);
     }

@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringRegular;
 WIRECELL_FACTORY(ClusteringRegular, ClusteringRegular,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -22,7 +22,7 @@ static void clustering_regular(Grouping& live_clusters,
                                const double length_cut = 45*units::cm,
                                bool flag_enable_extend = true);
 
-class ClusteringRegular :  public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringRegular :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
     double m_length_cut{45*units::cm};
     bool m_flag_enable_extend{true};
 public:
@@ -41,7 +41,7 @@ public:
         return cfg;
     }
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_regular(live, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
     }

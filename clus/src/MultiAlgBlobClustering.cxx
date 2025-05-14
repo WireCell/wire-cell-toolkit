@@ -111,7 +111,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     for (auto jtn : cfg["clustering_methods"]) {
         std::string tn = jtn.asString();
         log->debug("configuring clustering method: {}", tn);
-        auto imeth = Factory::find_tn<IClusteringMethod>(tn);
+        auto imeth = Factory::find_tn<IEnsembleVisitor>(tn);
         m_clustering_chain.emplace_back(ClusteringMethod{tn, imeth});
     }
 
@@ -728,7 +728,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     perf.dump("start clustering", ensemble);
 
     for (const auto& cmeth : m_clustering_chain) {
-        cmeth.meth->clustering(ensemble);
+        cmeth.meth->visit(ensemble);
         perf.dump(cmeth.name, ensemble);
     }
 

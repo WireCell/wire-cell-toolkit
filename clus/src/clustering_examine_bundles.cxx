@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -9,7 +9,7 @@
 
 class ClusteringExamineBundles;
 WIRECELL_FACTORY(ClusteringExamineBundles, ClusteringExamineBundles,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -25,7 +25,7 @@ static void clustering_examine_bundles(
         const Tree::Scope& scope,
         const bool use_ctpc);
 
-class ClusteringExamineBundles : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
     ClusteringExamineBundles() {}
     virtual ~ClusteringExamineBundles() {}
@@ -39,7 +39,7 @@ public:
         use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
     }
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_);
     }

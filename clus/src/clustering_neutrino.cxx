@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringNeutrino;
 WIRECELL_FACTORY(ClusteringNeutrino, ClusteringNeutrino,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -25,7 +25,7 @@ static void clustering_neutrino(
     const Tree::Scope& scope
     );
 
-class ClusteringNeutrino :  public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringNeutrino :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
     ClusteringNeutrino() {}
     virtual ~ClusteringNeutrino() {}
@@ -37,7 +37,7 @@ public:
         num_try_ = get(config, "num_try", 1);
     }
     
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         for (int i = 0; i != num_try_; i++) {
             clustering_neutrino(live, i, m_dv, m_scope);

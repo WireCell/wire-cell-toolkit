@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -11,7 +11,7 @@
 
 class ClusteringProtectOverclustering;
 WIRECELL_FACTORY(ClusteringProtectOverclustering, ClusteringProtectOverclustering,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -26,7 +26,7 @@ static void clustering_protect_overclustering(
     const Tree::Scope& scope
     );
 
-class ClusteringProtectOverclustering : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS, private NeedScope {
+class ClusteringProtectOverclustering : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
     ClusteringProtectOverclustering() {}
     virtual ~ClusteringProtectOverclustering() {}
@@ -37,7 +37,7 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_protect_overclustering(live, m_dv, m_pcts, m_scope);
     }

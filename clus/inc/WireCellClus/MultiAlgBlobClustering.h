@@ -3,7 +3,7 @@
 
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/IClusGeomHelper.h"
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/Facade.h"
 
 #include "WireCellAux/Logger.h"
@@ -183,7 +183,7 @@ namespace WireCell::Clus {
         // assist in debugging/logging.
         struct ClusteringMethod {
             std::string name;
-            IClusteringMethod::pointer meth;
+            IEnsembleVisitor::pointer meth;
         };
         std::vector<ClusteringMethod> m_clustering_chain;
         //Configuration m_func_cfgs;

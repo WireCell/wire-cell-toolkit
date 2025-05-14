@@ -5,7 +5,7 @@
 #include "WireCellClus/Facade.h"
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"

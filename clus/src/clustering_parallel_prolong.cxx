@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringParallelProlong;
 WIRECELL_FACTORY(ClusteringParallelProlong, ClusteringParallelProlong,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -21,7 +21,7 @@ static void clustering_parallel_prolong(
     const Tree::Scope& scope,
     const double length_cut = 35*units::cm);
 
-class ClusteringParallelProlong : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringParallelProlong : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
     ClusteringParallelProlong() {}
     virtual ~ClusteringParallelProlong() {}
@@ -38,7 +38,7 @@ public:
     }
     
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_parallel_prolong(live, m_dv, m_scope, length_cut_);
     }

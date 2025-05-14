@@ -42,7 +42,7 @@
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
 
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -64,7 +64,7 @@
 
 class ClusteringRetile;
 WIRECELL_FACTORY(ClusteringRetile, ClusteringRetile,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -75,7 +75,7 @@ using namespace WireCell::PointCloud::Tree;
 // There is a hard-wired factory method in ClusteringFuncs to which this
 // class is added.
 // this function so far only takes the raw data points ...
-class ClusteringRetile : public IConfigurable, public Clus::IClusteringMethod, private Clus::NeedDV, private Clus::NeedScope, private Clus::NeedPCTS {
+class ClusteringRetile : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedScope, private Clus::NeedPCTS {
 public:
     ClusteringRetile() {};
     virtual ~ClusteringRetile() {};
@@ -87,7 +87,7 @@ public:
     }
 
 
-    void clustering(Ensemble& ensemble) const;
+    void visit(Ensemble& ensemble) const;
 
 private:
 
@@ -616,29 +616,12 @@ ClusteringRetile::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
 
 
 
-void ClusteringRetile::clustering(Ensemble& ensemble) const
+void ClusteringRetile::visit(Ensemble& ensemble) const
 {
     auto& original = *ensemble.with_name("live").at(0);
     auto& shadow = ensemble.make_grouping("shadow");
     shadow.from(original);
 
-    std::cerr << "Retile: live is " << original.get_name()
-              << " facade@[" << (void*)&original << "]"
-              << " hash=[" << (void*) original.hash() << "]"
-              << " shadow is " << shadow.get_name()
-              << " facade@[" << (void*)&shadow << "]"
-              << " hash=[" << (void*) shadow.hash() << "]"
-              << "\n";
-    for (const auto* grouping : ensemble.children()) {
-        auto name = grouping->get_name();
-        std::cerr << "grouping: " << name << "\n";
-    }
-
-    // std::cout << "Test: " << original.wpids().size() << std::endl;
-    // Check that live_grouping has exactly one wpid
-    // if (original.wpids().size() > 1 ) {
-    //     throw std::runtime_error("Live or Dead grouping must have exactly one wpid");
-    // }
     auto wpids = original.wpids();
 
     // Example usage in clustering_parallel_prolong()

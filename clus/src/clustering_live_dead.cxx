@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringLiveDead;
 WIRECELL_FACTORY(ClusteringLiveDead, ClusteringLiveDead,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 #pragma GCC diagnostic push
@@ -20,7 +20,7 @@ using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
     
-class ClusteringLiveDead :  public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringLiveDead :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
     int dead_live_overlap_offset_{2};
 public:
     ClusteringLiveDead() {}
@@ -38,7 +38,7 @@ public:
     }
     
 
-    virtual void clustering(Ensemble& ensemble) const {
+    virtual void visit(Ensemble& ensemble) const {
         using spdlog::debug;
 
         auto& live_grouping = *ensemble.with_name("live").at(0);

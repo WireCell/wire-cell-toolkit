@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -9,9 +9,9 @@
 class ClusteringExtend;
 class ClusteringExtendLoop;
 WIRECELL_FACTORY(ClusteringExtend, ClusteringExtend,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 WIRECELL_FACTORY(ClusteringExtendLoop, ClusteringExtendLoop,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -28,7 +28,7 @@ void clustering_extend(Grouping& live_clusters,
                        const int num_dead_try =3                                      //
   );
 
-class ClusteringExtend : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringExtend : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
   ClusteringExtend() {}
   virtual ~ClusteringExtend() {}
@@ -49,7 +49,7 @@ public:
     return cfg;
   }
 
-  void clustering(Ensemble& ensemble) const {
+  void visit(Ensemble& ensemble) const {
     auto& live = *ensemble.with_name("live").at(0);
     clustering_extend(live, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
   }
@@ -62,7 +62,7 @@ private:
   int num_dead_try_{3};
 };
     
-class ClusteringExtendLoop : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringExtendLoop : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
   ClusteringExtendLoop() {}
   virtual ~ClusteringExtendLoop() {}
@@ -79,7 +79,7 @@ public:
     return cfg;
   }
 
-  void clustering(Ensemble& ensemble) const {
+  void visit(Ensemble& ensemble) const {
     auto& live = *ensemble.with_name("live").at(0);
 
     // for very busy events do less ...

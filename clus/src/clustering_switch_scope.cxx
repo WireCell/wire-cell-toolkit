@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -9,7 +9,7 @@
 
 class ClusteringSwitchScope;
 WIRECELL_FACTORY(ClusteringSwitchScope, ClusteringSwitchScope,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -24,7 +24,7 @@ static void clustering_switch_scope(
         const std::string& correction_name // name of correction to apply
     );
 
-class ClusteringSwitchScope : public IConfigurable, public Clus::IClusteringMethod, private NeedPCTS, private NeedScope {
+class ClusteringSwitchScope : public IConfigurable, public Clus::IEnsembleVisitor, private NeedPCTS, private NeedScope {
 public:
     ClusteringSwitchScope() {}
     virtual ~ClusteringSwitchScope() {}
@@ -37,7 +37,7 @@ public:
         correction_name_ = convert<std::string>(config["correction_name"], "T0Correction");
     }
     
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_switch_scope(live, m_pcts, m_scope, correction_name_);
     }

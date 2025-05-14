@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -8,7 +8,7 @@
 
 class ClusteringConnect1;
 WIRECELL_FACTORY(ClusteringConnect1, ClusteringConnect1,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -19,7 +19,7 @@ static void clustering_connect1(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 const Tree::Scope& scope);
 
-class ClusteringConnect1 : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedScope {
+class ClusteringConnect1 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
     ClusteringConnect1() {}
     virtual ~ClusteringConnect1() {}
@@ -29,7 +29,7 @@ public:
         NeedScope::configure(config);
     }
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_connect1(live, m_dv, m_scope);
     }

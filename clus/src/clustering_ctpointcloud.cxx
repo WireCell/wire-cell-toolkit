@@ -1,4 +1,4 @@
-#include "WireCellClus/IClusteringMethod.h"
+#include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 
@@ -9,7 +9,7 @@
 
 class ClusteringCTPointCloud;
 WIRECELL_FACTORY(ClusteringCTPointCloud, ClusteringCTPointCloud,
-                 WireCell::IConfigurable, WireCell::Clus::IClusteringMethod)
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -22,7 +22,7 @@ static void clustering_ctpointcloud(Grouping& live_grouping,
                                     IDetectorVolumes::pointer dv,
                                     IPCTransformSet::pointer pcts);
 
-class ClusteringCTPointCloud : public IConfigurable, public Clus::IClusteringMethod, private NeedDV, private NeedPCTS {
+class ClusteringCTPointCloud : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS {
 public:
     ClusteringCTPointCloud() {}
     virtual ~ClusteringCTPointCloud() {}
@@ -36,7 +36,7 @@ public:
         return cfg;
     }
 
-    void clustering(Ensemble& ensemble) const {
+    void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_ctpointcloud(live, m_dv, m_pcts);
     }
