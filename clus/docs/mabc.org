@@ -1,0 +1,28 @@
+#+title: MultiAlgBlobClustering
+
+* Overview
+
+The ~MultiAlgBlobClustering~ (MABC) component manages a pipeline of
+~IEnsembleVisitor~ components which process an "ensemble".  An "ensemble" is one
+of four classes that try to implement the [[https://en.wikipedia.org/wiki/Facade_pattern][facade pattern]] on top of a point-cloud
+tree.  The facade layers are:
+
+- ensemble :: can locate its children by a name
+- grouping :: a "universe" of clusters built on some assumption ("live", "dead", "shadow")
+- cluster :: a set of connected blobs
+- blob :: a 3D voxel which a sampling of points forming the basis of a point cloud
+
+The input and output of the MABC is an ~ITensorSet~ which represents the PC tree
+rooted in the groupings node (explicitly not the ensemble root node).  You must
+configure MABC with a list of groupings to provide in the working ensemble.
+Defaults are "live" and "dead".
+
+The pipeline that MABC executes is configured by the user and consists of
+~IEnsembleVisitor~ components.  For the most part, these compnents are "clustering
+methods" (source in ~src/clustering_*.cxx~) but some components may do other
+operations than "clustering", per se.
+
+Nothing stops the user from defining any pipeline of ensemble visitors.
+However, some components have unwritten order dependencies.  For example, the
+"live dead" clustering method must precede any "extend".
+
