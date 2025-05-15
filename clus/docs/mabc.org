@@ -1,28 +1,110 @@
-#+title: MultiAlgBlobClustering
+#+title: MultiAlgBlobClustering, its functional components and PC tree facades
 
 * Overview
 
-The ~MultiAlgBlobClustering~ (MABC) component manages a pipeline of
-~IEnsembleVisitor~ components which process an "ensemble".  An "ensemble" is one
-of four classes that try to implement the [[https://en.wikipedia.org/wiki/Facade_pattern][facade pattern]] on top of a point-cloud
-tree.  The facade layers are:
+The ~MultiAlgBlobClustering~ (MABC) component is a Wire-Cell Toolkit data-flow
+programming graph node.  Primarily it executes a pipeline of special
+~IEnsembleVisitor~ *functional component* interfaces that process (mutate) a WCT
+point-cloud (PC) tree data structure with the help of PC tree node "facade"
+classes.
 
-- ensemble :: can locate its children by a name
-- grouping :: a "universe" of clusters built on some assumption ("live", "dead", "shadow")
-- cluster :: a set of connected blobs
-- blob :: a 3D voxel which a sampling of points forming the basis of a point cloud
+** Facades
 
-The input and output of the MABC is an ~ITensorSet~ which represents the PC tree
-rooted in the groupings node (explicitly not the ensemble root node).  You must
-configure MABC with a list of groupings to provide in the working ensemble.
-Defaults are "live" and "dead".
+The PC tree "facade" classes are so named as they (attempt to) follow the [[https://en.wikipedia.org/wiki/Facade_pattern][facade
+pattern]].  There is one facade type applied to all nodes in a given PC tree
+layer.  Thus, a facade is meant to apply specific character to the otherwise
+uniform node type.  Its methods are meant to name *interpretations* of the
+underlying PC tree at node's level and to enable *cache-based optimizations*.
+Developers of facades are *strongly cautioned* not to add functionality and data
+beyond these two intentions.
 
-The pipeline that MABC executes is configured by the user and consists of
-~IEnsembleVisitor~ components.  For the most part, these compnents are "clustering
-methods" (source in ~src/clustering_*.cxx~) but some components may do other
-operations than "clustering", per se.
+There are four facade layers.  In order from root to leaves they are:
 
-Nothing stops the user from defining any pipeline of ensemble visitors.
-However, some components have unwritten order dependencies.  For example, the
-"live dead" clustering method must precede any "extend".
+- ensemble :: facade on the root node (no parent), provides named access to child groupings.
+- grouping :: a set of child clusters that have are built based on some defining assumption/mechanism (eg, "live", "dead" and "shadow" groupings).
+- cluster :: a set of child blobs that are considered mutually "connected" in some way.
+- blob :: a leaf (no children) representing a region of 3D space that has been sampled and evaluated to provide a (blob-local) point cloud.
+
+While only one facade hierarchy can be attached to a PC tree at a given time, it
+is possible to enact different hierarchies by defining different facade classes.
+This allows, for example, a PC tree to transition between domains where
+different interpretations of the underlying data are relevant.
+
+** Pipeline components
+
+The main purpose of MABC is to execute a user-configured pipeline of *functional
+components* operating on the ensemble.  Each component executes in series and is
+allowed to "mutate" the ensemble.
+
+For the most part, these functional components are categorized as "clustering
+methods" (source in ~src/clustering_*.cxx~) as their intent is to construct and
+refine clusters.  Subsequent "pattern recognition" (patrec) components evaluate
+and interpret clusters into higher level objects.  These objects have
+representations in the datasets typically stored at grouping level.
+
+The pipeline is executed in a strictly sequential manner.  Some functional
+components may be sensitive to the order of execution.  The user is responsible
+for configuring the sequence in an appropriate order.  For example, the various
+"extend" clustering functions rely on the "live dead" clustering function to
+have been run previously.
+
+The PC tree, facades and function components are not specific to MABC and
+additional WCT data flow programming graph nodes or other code may make use of
+them.
+
+* User configuration
+
+This section may be incomplete, see the [[file:../inc/WireCellClus/MultiAlgBlobClustering.h][MABC header file]] for a more definitive reference.
+
+- ~groupings~ :: an array of grouping names to accept from input.  Defaults to
+  ~["live","dead"]~.  If a named grouping is not available on input, an empty
+  grouping is created.  Any input not named is ignored.
+
+- ~inpath~ :: the *base* datapath under which input tensors may be located.  The
+  ~outpath~ is equivalent for output.
+
+- ~insubpath~ :: an array of objects giving ~.name~ and ~.subpath~ suffixes relative
+  to ~inpath~. A grouping name not found in this mapping will have a corresponding
+  subpath of ~/<name>~.  This setting is optional and only needed if the user
+  requires some datapath that does not follow the default pattern.  The
+  ~outsubpath~ is equivalent for output.
+
+- ~cluster_id_order~ :: determine how cluster identity (ID) numbering is
+  determined.  By default (unset), the ID numbering of output clusters represent
+  the ordering applied by the component operations (typically this is
+  insert-order and/or with redundant and/or non-sequential numbers).  If "tree",
+  the insert-order is used and the IDs are sequentially ordered starting with 1.
+  If "size" then the order is determined by a size heuristic (large to small)
+  and again starting from 1.
+
+- ~pipeline~ :: an array of ~IEnsembleVisitor~ instance identifiers (type/name) of
+  the functional components that will be executed in the MABC pipeline.
+
+Each functional component in the MABC pipeline has its own configuration.
+
+* Developer notes
+
+This section collects some information relevant to developers of MABC pipeline
+components.
+
+** Cluster merging and separating  
+
+Two primitive operations on clusters include merging and separating.  These
+operations are performed in the context of a grouping common to all clusters
+involved.  Separation of a cluster leads to new clusters that become children of
+the same grouping that held the original cluster.  Likewise, merging is
+performed by clusters that have the same parent grouping.  Both operations can
+optionally retain or remove the initial cluster(s) from the grouping.  In
+merging, the single new cluster is given the ID of its first constituent.  In
+separating, all new clusters get a common ID equal to the original.
+
+Separating and merging are governed by a "connected components" (CC) array.
+Separating a cluster requires a CC array that spans the cluster's blob children
+list and provides a "group ID" for each.  All blob children with the same group
+ID are placed in an new cluster and each new cluster is provided with an
+association to its formative group ID.  Conversely, when clusters are merged, a
+new cluster is formed to accept the blob nodes of the input donor clusters.  The
+merging process results in a CC array that records which of the cluster in the
+ordered donor list each blob came from.  CC arrays can be stored in datasets on
+the PC tree so that separation and merging can be reversible operations.
 

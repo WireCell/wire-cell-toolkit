@@ -81,6 +81,7 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
 
         std::vector<int> cc;
         int parent_id = 0;
+        
         for (const auto& desc : descs) {
             const int idx = g[desc];
             if (idx < 0) {  // no need anymore ...
@@ -90,6 +91,10 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             auto live = orig_clusters[idx];
             fresh_cluster.from(*live);
             fresh_cluster.take_children(*live, true);
+
+            if (fresh_cluster.ident() < 0) {
+                fresh_cluster.set_ident(live->ident());
+            }
 
             if (savecc) {
                 cc.resize(fresh_cluster.nchildren(), parent_id);

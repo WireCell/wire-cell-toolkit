@@ -911,11 +911,11 @@ void clustering_connect1(
     new_clusters = merge_clusters(g2, live_grouping);
 
 
-    // set cluster id ... 
-    int cluster_id = 1;
-    for (auto* cluster : live_grouping.children()) {
-        cluster->set_cluster_id(cluster_id++);
-    }
+
+
+
+
+
 
 //  {
 //    auto live_clusters = live_grouping.children(); // copy

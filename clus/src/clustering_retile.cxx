@@ -933,18 +933,18 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
         }
     }
 
-     // set cluster id ... 
-    int cluster_id = 1;
-    for (auto* cluster : original.children()) {
-        cluster->set_cluster_id(cluster_id++);
-    }
 
-    {
-        int cluster_id = 1;
-        for (auto* cluster : shadow.children()) {
-            cluster->set_cluster_id(cluster_id++);
-        }
-    }
+
+
+
+
+
+
+
+
+
+
+
 
     // // Process groupings after all shadow clusters are created
     // auto cluster_mapping = process_groupings(original, shadow);

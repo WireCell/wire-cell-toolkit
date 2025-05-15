@@ -172,21 +172,52 @@ namespace WireCell::Clus {
          */
         bool m_dump_json{false};
 
+        /** Config: "cluster_id_order"
+         *
+         * The various operations can lead to redundantly or non-sequentially
+         * numbered cluster idents.  The application of merge_clusters() will
+         * cause a resulting cluster to have the ID of its first contributing
+         * constituent.  The application of separate() will cause all clusters
+         * to have the ID of the original.
+         *
+         * When this parameter is given, the cluster IDs will be reset after
+         * each component operation, on a per-grouping basis, so that they
+         * represent a specific sort order.
+         *
+         * - "tree" :: use the as-is child-order which represents
+         *   child-insertion order unless some operation has explicitly
+         *   reordered the underlying PC tree.
+         *
+         * - "size" :: use the "size" of the cluster as determined by
+         *   cluster_less() to order the cluster IDs.  This considers the
+         *   cluster length, number of children, number of points followed by
+         *   per-view min then max bounds and finally cluster center.
+         *
+         * - "" :: cluster IDs are not modified.
+         *
+         * By default, no ID rewriting is performed.
+         *
+         * Notes:
+         *
+         * - When an ID cluster order is applied, the ID counting starts from 1.
+         * - The default (unset) ID is -1.
+         */
+        std::string m_clusters_id_order;
+
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
 
-        // clustering_examine_x_boundary
-        // double m_x_boundary_low_limit{-1*units::cm};
-        // double m_x_boundary_high_limit{257*units::cm};
-
         // Keep track of configured clustering methods with their metadata to
         // assist in debugging/logging.
-        struct ClusteringMethod {
+        struct EnsembleVisitor {
             std::string name;
             IEnsembleVisitor::pointer meth;
         };
-        std::vector<ClusteringMethod> m_clustering_chain;
-        //Configuration m_func_cfgs;
+        /** Config: pipeline
+         *
+         * Array of type/name of instances of IEnsembleVisitor to execute in the pipeline.
+         */
+        std::vector<EnsembleVisitor> m_pipeline;
 
         // the anode to be processed
         std::vector<IAnodePlane::pointer> m_anodes;

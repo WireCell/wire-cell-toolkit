@@ -59,8 +59,34 @@ namespace WireCell::Clus::Facade {
         Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
         /// Incrementally set the ident number on clusters in children-order.
+        ///
+        /// The sort_order names a sorting algorithm.
+        /// - tree :: use as-is child-order
+        /// - size :: use cluster_less() order
+        /// - * :: anything else leaves clusters unchanged.
+        /// 
         /// Note, convention is to start counting from 1.
-        void enumerate_idents(int start=1);
+        void enumerate_idents(const std::string& sort_order="tree", int start=1);
+
+
+        /// Separate a cluster into many according to groups.
+        ///
+        /// The return map represents loaned Clusters.  This Grouping retains
+        /// ownership.
+        /// 
+        /// This overrides (and calls) the NaryTree::FacadeParent base class
+        /// method.  See its documentation for reference.  This method will the
+        /// idents of the separated clusters to that of the input cluster.
+        ///
+        /// Note, the setting of IDs are not strongly constrained.  Algorithms
+        /// are cautioned to NOT assume any particular ID assignment rule.  See
+        /// enumerate_idents() and the "mabc.org" document.
+        virtual
+        std::map<int, Cluster*> separate(Cluster*& cluster,
+                                         const std::vector<int> groups,
+                                         bool remove=false,
+                                         bool notify_value=true);
+
 
         // TODO: remove this in the future
         // void set_params(const TPCParams& tp) { m_tp = tp; }

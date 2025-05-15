@@ -110,13 +110,40 @@ void Facade::Grouping::from(const Grouping& other)
     m_dv = other.m_dv;
 }
 
-void Facade::Grouping::enumerate_idents(int id)
+void Facade::Grouping::enumerate_idents(const std::string& sort_order, int id)
 {
+    if (sort_order.empty() or sort_order == "none") {
+        return;
+    }
+
+    auto clusters = children();
+    
+    if (sort_order == "size") {
+        sort_clusters(clusters);
+        std::reverse(clusters.begin(), clusters.end()); // largest first
+    }
+    // Other order is "tree" which means, leave as-is.
+
+    // Count IDs starting with initial value of "id".
     for (auto* cluster : children()) {
-        cluster->set_cluster_id(id++);
+        cluster->set_ident(id++);
     }
 }
 
+
+std::map<int, Cluster*> Grouping::separate(
+    Cluster*& cluster,
+    const std::vector<int> groups,
+    bool remove,
+    bool notify_value)
+{
+    const int ident = cluster->ident();
+    auto ret = this->NaryTree::FacadeParent<Cluster, points_t>::separate(cluster, groups, remove, notify_value);
+    for (auto& [_, c] : ret) {
+        c->set_ident(ident);
+    }
+    return ret;    
+}
 
 void Grouping::fill_cache(GroupingCache& gc) const
 {

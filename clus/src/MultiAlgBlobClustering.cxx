@@ -80,6 +80,13 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         m_outsubpaths[jsp["name"].asString()] = jsp["subpath"].asString();
     }
 
+    {
+        auto jcid = cfg["cluster_id_order"];
+        if (jcid.isString()) {
+            m_clusters_id_order = jcid.asString();
+        }
+    }
+
     if (cfg.isMember("bee_dir")) {
         log->debug("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
     }
@@ -108,11 +115,11 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
-    for (auto jtn : cfg["clustering_methods"]) {
+    for (auto jtn : cfg["pipeline"]) {
         std::string tn = jtn.asString();
         log->debug("configuring clustering method: {}", tn);
         auto imeth = Factory::find_tn<IEnsembleVisitor>(tn);
-        m_clustering_chain.emplace_back(ClusteringMethod{tn, imeth});
+        m_pipeline.emplace_back(EnsembleVisitor{tn, imeth});
     }
 
     m_perf = get(cfg, "perf", m_perf);
@@ -727,9 +734,14 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     perf.dump("start clustering", ensemble);
 
-    for (const auto& cmeth : m_clustering_chain) {
+    // THE MAIN LOOP
+    for (const auto& cmeth : m_pipeline) {
         cmeth.meth->visit(ensemble);
         perf.dump(cmeth.name, ensemble);
+
+        for (auto* grouping : ensemble.children()) {
+            grouping->enumerate_idents(m_clusters_id_order);
+        }
     }
 
     //

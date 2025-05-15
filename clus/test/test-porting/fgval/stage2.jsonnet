@@ -209,7 +209,8 @@ function (
                     individual: true            // Output individual APA/Face
                 }
             ],
-            clustering_methods: [wc.tn(cmeth) for cmeth in mabc_clustering],
+            pipeline: [wc.tn(cmeth) for cmeth in mabc_clustering],
+            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
         }
     }, nin=1, nout=1, uses=[detector_volumes, pctransforms]+mabc_clustering);
 

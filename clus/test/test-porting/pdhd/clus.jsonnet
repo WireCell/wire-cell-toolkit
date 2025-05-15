@@ -238,7 +238,8 @@ local clus_per_face (
                     individual: true            // Output individual APA/Face
                 }
             ],
-            clustering_methods: [wc.tn(cmeth) for cmeth in mabc_cmeths_face],
+            pipeline: [wc.tn(cmeth) for cmeth in mabc_cmeths_face],
+            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
         }
     }, nin=1, nout=1, uses=[dv, anode, pcts]+mabc_cmeths_face),
 
@@ -321,7 +322,8 @@ local clus_per_apa (
             save_deadarea: true,
             anodes: [wc.tn(anode)],
             detector_volumes: wc.tn(dv),
-            clustering_methods: [wc.tn(cmeth) for cmeth in mabc_cmeths_anode],
+            pipeline: [wc.tn(cmeth) for cmeth in mabc_cmeths_anode],
+            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
         }
     }, nin=1, nout=1, uses=[anode, dv, pcts]+mabc_cmeths_anode),
 
@@ -425,14 +427,6 @@ local clus_all_apa (
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             bee_points_sets: [  // New configuration for multiple bee points sets
-            //    {
-            //        name: "img",                // Name of the bee points set
-            //        detector: "protodunehd",         // Detector name
-            //        algorithm: "img",           // Algorithm identifier
-            //        pcname: "3d",           // Which scope to use
-            //        coords: ["x", "y", "z"],    // Coordinates to use
-            //        individual: false           // Whether to output as a whole or individual APA/Face
-            //    },
             {
                     name: "clustering",         // Name of the bee points set
                     detector: "protodunehd",         // Detector name
@@ -442,7 +436,8 @@ local clus_all_apa (
                     individual: false            // Output individual APA/Face
                 }
             ],
-            clustering_methods: [wc.tn(cmeth) for cmeth in mabc_cmeths_all],
+            pipeline: [wc.tn(cmeth) for cmeth in mabc_cmeths_all],
+            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
         },
     }, nin=1, nout=1, uses=anodes+[dv, pcts]+mabc_cmeths_all),
 

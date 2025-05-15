@@ -520,11 +520,11 @@ static void clustering_regular(
   //   }
   // }
 
-  // set cluster id ... 
-  int cluster_id = 1;
-  for (auto* cluster : live_grouping.children()) {
-      cluster->set_cluster_id(cluster_id++);
-  }
+
+
+
+
+
 }
 
 #pragma GCC diagnostic pop

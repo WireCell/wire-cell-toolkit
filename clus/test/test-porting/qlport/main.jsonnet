@@ -325,7 +325,8 @@ local ub = {
                     individual: true            // Output individual APA/Face
                 }
             ],
-            clustering_methods: wc.tns(cm_pipeline),
+            pipeline: wc.tns(cm_pipeline),
+            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
         }
         }, nin=1, nout=1, uses=anodes + [detector_volumes] + cm_pipeline),
 

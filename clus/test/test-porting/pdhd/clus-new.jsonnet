@@ -283,7 +283,7 @@ local clus_per_face (
                     individual: true            // Output individual APA/Face
                 }
             ],
-            clustering_methods: wc.tns(cm_pipeline),
+            pipeline: wc.tns(cm_pipeline),
         }
     }, nin=1, nout=1, uses=[dv, anode, pcts]+cm_pipeline),
 
@@ -370,7 +370,7 @@ local clus_per_apa (
             save_deadarea: true,
             anodes: [wc.tn(anode)],
             detector_volumes: wc.tn(dv),
-            clustering_methods: wc.tns(cm_pipeline),
+            pipeline: wc.tns(cm_pipeline),
         }
     }, nin=1, nout=1, uses=[anode, dv, pcts]+cm_pipeline),
 
@@ -500,7 +500,7 @@ local clus_all_apa (
                     individual: false            // Output individual APA/Face
                 }
             ],
-            clustering_methods: wc.tns(cm_pipeline),
+            pipeline: wc.tns(cm_pipeline),
         },
     }, nin=1, nout=1, uses=anodes+[dv, pcts]+cm_pipeline),
 
