@@ -12,6 +12,7 @@
 #include "WireCellUtil/NFKDVec.h"
 #include "WireCellUtil/NaryTreeFacade.h"
 #include "WireCellUtil/KDTree.h"
+#include "WireCellUtil/Limits.h" // SIZE_MAX
 
 #include "WireCellUtil/Logging.h" // debug
 
@@ -421,20 +422,19 @@ namespace WireCell::PointCloud::Tree {
             m_global_to_local[global_index] = local_index;
         }
 
-        // Xin, this is bad.  You are conflating int's and size_t's.
-        int global_to_local(size_t global_idx) const {
+        size_t global_to_local(size_t global_idx, size_t def=std::numeric_limits<size_t>::max()) const {
             auto it = m_global_to_local.find(global_idx);
             if (it != m_global_to_local.end()) {
                 return it->second;
             }
-            return -1;
+            return def;
         }
 
-        int local_to_global(size_t local_idx) const {
+        size_t local_to_global(size_t local_idx, size_t def=std::numeric_limits<size_t>::max()) const {
             if (local_idx < m_local_to_global.size()) {
                 return m_local_to_global[local_idx];
             }
-            return -1;
+            return def;
         }
 
 
@@ -446,8 +446,8 @@ namespace WireCell::PointCloud::Tree {
         std::unique_ptr<nfkd_t> m_nfkd{nullptr};
 
         // New member variables for indices ...
-        std::unordered_map<int, int> m_global_to_local;
-        std::vector<int> m_local_to_global;
+        std::unordered_map<size_t, size_t> m_global_to_local;
+        std::vector<size_t> m_local_to_global;
     };
 
 }

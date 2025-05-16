@@ -74,7 +74,7 @@ static void clustering_separate(
     auto wpids = live_grouping.wpids();
 
     WirePlaneId wpid_all(0);
-    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
+    // double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
     double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
 
     geo_point_t beam_dir(0, 0, 1);
@@ -457,7 +457,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
     double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
     double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
     double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
-    double det_FV_ymin_margin = dv->metadata(wpid_all)["FV_ymin_margin"].asDouble();
+    // double det_FV_ymin_margin = dv->metadata(wpid_all)["FV_ymin_margin"].asDouble();
     double det_FV_ymax_margin = dv->metadata(wpid_all)["FV_ymax_margin"].asDouble();
     double det_FV_zmin_margin = dv->metadata(wpid_all)["FV_zmin_margin"].asDouble();
     double det_FV_zmax_margin = dv->metadata(wpid_all)["FV_zmax_margin"].asDouble();
@@ -1711,7 +1711,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
     // form ...
 
     const int N = mcells.size();
-    MCUGraph graph(N);
+    Cluster::MCUGraph graph(N);
 
     std::map<const Blob *, int> mcell_index_map;
     for (size_t i = 0; i != mcells.size(); i++) {
@@ -1719,7 +1719,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
         mcell_index_map[curr_mcell] = i;
 
         auto v = vertex(i, graph);  // retrieve vertex descriptor
-        (graph)[v].index = i;
+        (graph)[v].ident = i;
     }
 
     for (auto it = connected_mcells.begin(); it != connected_mcells.end(); it++) {
@@ -1729,7 +1729,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
         // if (edge.second) {
         //     (graph)[edge.first].dist = 1;
         // }
-        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(1),graph);
+        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Graph::Ident::EdgeProp(1),graph);
     }
 
     {
@@ -1765,7 +1765,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
                         // if (edge.second) {
                         //     (graph)[edge.first].dist = 1;
                         // }
-                        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(1),graph);
+                        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Graph::Ident::EdgeProp(1),graph);
                     }
                 }
             }

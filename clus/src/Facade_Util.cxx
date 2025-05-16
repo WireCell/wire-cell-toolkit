@@ -48,9 +48,7 @@ namespace {
 }
 #endif
 
-void Facade::process_mst_deterministically(
-    const boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
-        boost::no_property, boost::property<boost::edge_weight_t, double>>& temp_graph,
+void Facade::process_mst_deterministically(const Graph::Weighted::graph_type& temp_graph,
     std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
     std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst) 
 {
@@ -88,7 +86,7 @@ void Facade::process_mst_deterministically(
         // Use minimum vertex as root
         size_t root_vertex = comp_vertices[0];
         
-        std::vector<boost::graph_traits<MCUGraph>::vertex_descriptor> predecessors(num_vertices(temp_graph));
+        std::vector<Graph::Ident::vertex_descriptor> predecessors(num_vertices(temp_graph));
         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
                                 boost::root_vertex(root_vertex));
 

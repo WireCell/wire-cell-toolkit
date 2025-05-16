@@ -5,20 +5,20 @@
 #ifndef WIRECELL_CLUS_FACADEUTIL
 #define WIRECELL_CLUS_FACADEUTIL
 
+#include "WireCellClus/Graph.h"
+
+#include "WCPQuickhull/QuickHull.h"
+
+#include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IDetectorVolumes.h"
+
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Spdlog.h"
-#include "WireCellUtil/Graph.h"
-// #include "WireCellUtil/D2Vector.h"
-#include "WireCellIface/IAnodePlane.h"
-#include "WireCellIface/IAnodeFace.h"
-#include "WireCellIface/IDetectorVolumes.h"
 
-
-
-#include "WCPQuickhull/QuickHull.h"
 
 #include <string>
 
@@ -32,10 +32,10 @@ namespace WireCell::Clus::Facade {
 
     struct DummyCache{};
 
-    /// The Grouping/Cluster/Facade inherit from this to gain additional methods
-    /// that are common to all three facade types.  The mixin itself needs to
-    /// know its facade type and value but specifically does not include anything
-    /// that requires parent or child types or values.
+    /// The Ensemble/Grouping/Cluster/Facade classes inherit from this to gain
+    /// common methods.  The mixin itself needs to know its facade type and
+    /// instance but specifically does not cover any operation that requires
+    /// knowledge of parent and children.
     ///
     /// It provides helper functions to deal with local PCs and an optional
     /// caching mechanism.  See comments on cache() and fill_cache() and
@@ -341,6 +341,7 @@ namespace WireCell::Clus::Facade {
     };
 
 
+
     using points_t = WireCell::PointCloud::Tree::Points;
     using node_t = WireCell::PointCloud::Tree::Points::node_t;
     using node_ptr = std::unique_ptr<node_t>;
@@ -362,27 +363,6 @@ namespace WireCell::Clus::Facade {
     using float_t = double;
     using int_t = int;
 
-
-    // AVOID DOING THIS in headers!!!  In this case it causes conflict between
-    // boost::units and WireCell::Units in imp files that #include this one.
-    //
-    // If typing the namespace:: is too much, then one can do select "using
-    // namespace::symbol".
-    // 
-    // using namespace boost;
-
-    struct VertexProp {
-        int index;
-        // WCPointCloud<double>::WCPoint wcpoint;
-        //  add pointer to merged cell
-    };
-    using EdgeProp = boost::property<boost::edge_weight_t, float>; 
-    // struct EdgeProp {
-    //     float dist;  // edge distance
-    // };
-    typedef boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, VertexProp, EdgeProp> MCUGraph;
-    typedef boost::graph_traits<MCUGraph>::vertex_descriptor vertex_descriptor;
-    typedef boost::graph_traits<MCUGraph>::edge_descriptor edge_descriptor;
 
     // FIXME: refactor to vector<pitch>, etc?  or vector<TPCPlane> with ::pitch/::angle?
     struct TPCParams {
@@ -574,11 +554,9 @@ namespace WireCell::Clus::Facade {
     //     std::vector<const Blob*> m_blobs;
     // };
 
-    void process_mst_deterministically(
-            const boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
-            boost::no_property, boost::property<boost::edge_weight_t, double>>& temp_graph,
-            std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
-            std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst) ;
+    void process_mst_deterministically(const Graph::Weighted::graph_type& g,
+                                       std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
+                                       std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst);
 
     double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       const double time);

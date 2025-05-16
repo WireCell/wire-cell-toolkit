@@ -66,7 +66,7 @@ static std::map<int, Cluster *> Separate_overclustering(
 
     // cluster->Create_point_cloud();
     const int N = cluster->npoints();
-    std::shared_ptr<MCUGraph> graph = std::make_shared<MCUGraph>(N);
+    auto graph = std::make_shared<Cluster::MCUGraph>(N);
 
     // ToyPointCloud *point_cloud = cluster->get_point_cloud();
     std::vector<Blob*> mcells = cluster->children();
@@ -85,7 +85,7 @@ static std::map<int, Cluster *> Separate_overclustering(
         const std::vector<int> &wcps = cluster->get_blob_indices(mcell);
         for (const int point_index : wcps) {
             auto v = vertex(point_index, *graph);  // retrieve vertex descriptor
-            (*graph)[v].index = point_index;
+            (*graph)[v].ident = point_index;
             
             for (size_t plane_ind=0; plane_ind!=3; ++plane_ind) {
                 const int wind = winds[plane_ind][point_index];
@@ -174,7 +174,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         const geo_point_t wcp2 = cluster->point3d(index2);
                         double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
                        
-                        auto edge = add_edge(index1, index2, WireCell::Clus::Facade::EdgeProp(dis),*graph);
+                        auto edge = add_edge(index1, index2, WireCell::Clus::Graph::Ident::EdgeProp(dis),*graph);
                         if (edge.second) {
                             num_edges++;
                         }
@@ -445,7 +445,7 @@ static std::map<int, Cluster *> Separate_overclustering(
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,WireCell::Clus::Facade::EdgeProp(dis),*graph);
+            auto edge = add_edge(index1,index2,WireCell::Clus::Graph::Ident::EdgeProp(dis),*graph);
             if (edge.second){
                 //      (*graph)[edge.first].dist = dis;
                 num_edges ++;
@@ -680,9 +680,7 @@ static std::map<int, Cluster *> Separate_overclustering(
         // deal with MST
         {
             const int N = num;
-            boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
-                                  boost::property<boost::edge_weight_t, double>>
-                temp_graph(N);
+            Graph::Weighted::graph_type temp_graph(N);
 
             for (int j = 0; j != num; j++) {
                 for (int k = j + 1; k != num; k++) {
@@ -701,9 +699,7 @@ static std::map<int, Cluster *> Separate_overclustering(
         // deal with MST for directionality
         {
             const int N = num;
-            boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS, boost::no_property,
-                                  boost::property<boost::edge_weight_t, double>>
-                temp_graph(N);
+            Graph::Weighted::graph_type temp_graph(N);
 
             for (int j = 0; j != num; j++) {
                 for (int k = j + 1; k != num; k++) {
@@ -743,7 +739,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                     }
                     // }
 
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis),*graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis),*graph);
                 }
 
                 if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -761,7 +757,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                             dis = std::get<2>(index_index_dis_dir1[j][k]);
                         }
                         // }
-                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis),*graph);
+                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis),*graph);
                     }
                     if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                         // auto edge = add_edge(std::get<0>(index_index_dis_dir2[j][k]),
@@ -777,7 +773,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                             dis = std::get<2>(index_index_dis_dir2[j][k]);
                         }
                         // }
-                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Facade::EdgeProp(dis), *graph);
+                        /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), *graph);
                     }
                 }
                 // end check ...
