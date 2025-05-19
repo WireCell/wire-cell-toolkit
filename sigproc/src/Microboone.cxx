@@ -56,7 +56,8 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
                                    std::vector<std::vector<int> >& rois,
                                    const IDFT::pointer& dft,
                                    float decon_limit1, float roi_min_max_ratio,
-                                   float rms_threshold)
+                                   float rms_threshold, float correlation_threshold,
+                                   float default_scaling)
 {
     double ave_coef = 0;
     double_t ave_coef1 = 0;
@@ -79,7 +80,7 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
         //     std::cout << ch << " " << temp.first << " " << temp.second << " "  << std::endl;
 
         for (int j = 0; j != nbin; j++) {
-            if (fabs(signal.at(j)) < 4 * temp.second) {
+            if (fabs(signal.at(j)) < correlation_threshold * temp.second) {
                 sum2 += signal.at(j) * medians.at(j);
                 sum3 += medians.at(j) * medians.at(j);
             }
@@ -105,7 +106,10 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
         int ch = it.first;
         WireCell::IChannelFilter::signal_t& signal = it.second;
         float scaling;
-        if (ave_coef != 0) {
+        if (default_scaling){
+            scaling = default_scaling;
+        }
+        else if (ave_coef != 0) {
             scaling = coef_all[ch] / ave_coef;
             // add some protections ...
             if (scaling < 0) scaling = 0;
@@ -788,9 +792,13 @@ WireCell::Configuration Microboone::ConfigFilterBase::default_configuration() co
 }
 
 Microboone::CoherentNoiseSub::CoherentNoiseSub(const std::string& anode, const std::string& noisedb,
-                                               float rms_threshold)
+                                               float rms_threshold, 
+                                               float correlation_threshold, 
+                                               float default_scaling)
   : ConfigFilterBase(anode, noisedb)
   , m_rms_threshold(rms_threshold)
+  , m_correlation_threshold(correlation_threshold)
+  , m_default_scaling(default_scaling)
 {
 }
 Microboone::CoherentNoiseSub::~CoherentNoiseSub() {}
@@ -855,7 +863,8 @@ WireCell::Waveform::ChannelMaskMap Microboone::CoherentNoiseSub::apply(channel_s
     Microboone::Subtract_WScaling(chansig, medians, respec, res_offset, rois, 
                                   m_dft,
                                   decon_limit1, roi_min_max_ratio,
-                                  m_rms_threshold);
+                                  m_rms_threshold, m_correlation_threshold,
+                                  m_default_scaling);
 
     // WireCell::IChannelFilter::signal_t& signal = chansig.begin()->second;
     // for (size_t i=0;i!=signal.size();i++){
@@ -881,12 +890,16 @@ void Microboone::CoherentNoiseSub::configure(const WireCell::Configuration& cfg)
     ConfigFilterBase::configure(cfg);
 
     m_rms_threshold = get<float>(cfg, "rms_threshold", m_rms_threshold);
+    m_correlation_threshold = get<float>(cfg, "correlation_threshold", m_correlation_threshold);
+    m_default_scaling = get<float>(cfg, "default_scaling", m_default_scaling);
 }
 WireCell::Configuration Microboone::CoherentNoiseSub::default_configuration() const
 {
     Configuration cfg = ConfigFilterBase::default_configuration();
 
     cfg["rms_threshold"] = m_rms_threshold;
+    cfg["correlation_threshold"] = m_correlation_threshold;
+    cfg["default_scaling"] = m_default_scaling;
 
     return cfg;
 }
