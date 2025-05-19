@@ -106,7 +106,7 @@ bool Microboone::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& 
         int ch = it.first;
         WireCell::IChannelFilter::signal_t& signal = it.second;
         float scaling;
-        if (default_scaling){
+        if (default_scaling != 0.0) {
             scaling = default_scaling;
         }
         else if (ave_coef != 0) {
