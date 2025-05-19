@@ -18,13 +18,21 @@ namespace WireCell::GraphTools {
                // ...
            }
 
-       Or vertices
+       Or with a little syntax sugar:
 
-           for (const auto& vtx : mir(boost::vertices(g))) { ... };
+           for (const auto& edge : edge_range(g)) { ... }
 
-       Or even briefer:
 
-           for (const auto& vtx : vertex_range(g)) { ... };
+       For vertices:
+
+           for (const auto& vtx : mir(boost::vertices(g))) {
+               auto param = g[vtx].param;
+               // ...
+           }
+
+       Or with a little syntax sugar:
+
+           for (const auto& vtx : vertex_range(g)) { ... }
 
      */
 

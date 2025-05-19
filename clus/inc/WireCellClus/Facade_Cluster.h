@@ -441,9 +441,10 @@ namespace WireCell::Clus::Facade {
         bool judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer dv, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
 
-        // Historical type name
+        // Graph support.
         using MCUGraph = Graph::Ident::graph_type;
         using vertex_descriptor = Graph::Ident::vertex_descriptor;
+
 
         class Flash {
             friend class Cluster;

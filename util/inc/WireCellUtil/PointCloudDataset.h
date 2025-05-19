@@ -47,6 +47,8 @@ namespace WireCell::PointCloud {
             An exception is thrown if the name is already used or if
             the size of the array does not match others in the dataset.
         */
+        using mutable_array_ptr = std::shared_ptr<Array>;
+
         void add(const std::string& name, const Array& arr);
         void add(const std::string& name, Array&& arr);
 
@@ -55,6 +57,15 @@ namespace WireCell::PointCloud {
 
         // Remove one array if it exists o.w. do nothing.
         void erase(const std::string& name) { m_store.erase(name); }
+
+        /// Construct and return a new array at a name with the given shape initialized to zeros.
+        template<typename ElementType>
+        mutable_array_ptr allocate(const std::string& name, const Array::shape_t& shape) {
+            Array arr;
+            arr.resize<ElementType>(shape);
+            add(name, std::move(arr));
+            return get(name);
+        }
 
         /** A selection is an ordered subset of arrays in the dataset.
 
@@ -92,7 +103,6 @@ namespace WireCell::PointCloud {
             Caller is warned that changing entries directly through
             this array will not trigger the auto update callbacks.
          */
-        using mutable_array_ptr = std::shared_ptr<Array>;
         mutable_array_ptr get(const std::string& name);
 
         // FIXME, add something that returns something that produces a

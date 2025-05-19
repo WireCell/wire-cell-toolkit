@@ -59,11 +59,18 @@ namespace WireCell::PointCloud {
         // Move constructor
         Array(Array&& rhs);
 
-        // special case, 1D constructor using vector-like
+        // special case, 1D constructor using vector-like range
         template<typename Range>
         explicit Array(const Range& r)
         {
             assign(&*std::begin(r), {r.size()}, false);
+        }
+
+        // special case, 1D constructor using vector-like iterator
+        template<typename Iter>
+        explicit Array(Iter b, Iter e)
+        {
+            assign(b, e, {std::distance(b,e)}, false);
         }
 
         /** Store a point array given in flattened, row-major aka
@@ -97,7 +104,6 @@ namespace WireCell::PointCloud {
         Array(std::initializer_list<ElementType> il) {
             assign(&*il.begin(), {il.size()}, false);
         }
-
 
         // Copy assignment 
         Array& operator=(const Array& rhs);
@@ -148,6 +154,21 @@ namespace WireCell::PointCloud {
         void assign(Itr beg, Itr end, const shape_t& shape, bool share) {
             assign((typename Itr::pointer*)&*beg, std::distance(beg,end), shape, share);
         }
+
+        /// Resize to given shape.  This clears the store and reinitializes with zero bytes.
+        template<typename ElementType>
+        void resize(const shape_t& shape) {
+            clear();
+            m_dtype = WireCell::dtype<ElementType>();
+            m_shape = shape;
+            size_t nbytes = m_ele_size = sizeof(ElementType);
+            for (const auto& s : m_shape) {
+                nbytes *= s;
+            }
+            m_store.resize(nbytes, std::byte{0});
+            update_span();
+        }
+
 
         /// Clear all held data.
         void clear()

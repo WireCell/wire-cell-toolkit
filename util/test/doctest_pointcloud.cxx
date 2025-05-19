@@ -532,3 +532,14 @@ TEST_CASE("point cloud dataset")
     }        
 
 }
+TEST_CASE("point cloud dataset allocate")
+{
+    Dataset ds;
+    auto aptr = ds.allocate<int>("a", {10});
+    REQUIRE(aptr != nullptr);
+    auto aspan = aptr->elements<int>();
+    REQUIRE(aspan.size() == 10);
+    REQUIRE(aspan[0] == 0);
+    REQUIRE(aspan[9] == 0);
+    aspan[0] = 42;
+}
