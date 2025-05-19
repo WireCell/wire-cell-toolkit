@@ -40,7 +40,8 @@ namespace WireCell {
                                    std::vector<std::vector<int> >& rois,
                                    const IDFT::pointer& dft,
                                    float upper_decon_limit1 = 0.08,
-                                   float roi_min_max_ratio = 0.8, float rms_threshold = 0.);
+                                   float roi_min_max_ratio = 0.8, float rms_threshold = 0.,
+                                   float correlation_threshold = 4.0, float default_scaling = 0.);
 
             // hold common config stuff
             class ConfigFilterBase : public WireCell::IConfigurable {
@@ -75,7 +76,10 @@ namespace WireCell {
             class CoherentNoiseSub : public WireCell::IChannelFilter, public ConfigFilterBase {
                public:
                 CoherentNoiseSub(const std::string& anode = "AnodePlane",
-                                 const std::string& noisedb = "OmniChannelNoiseDB", float rms_threshold = 0.);
+                                 const std::string& noisedb = "OmniChannelNoiseDB", 
+                                 float rms_threshold = 0., 
+                                 float correlation_threshold = 4.,
+                                 float default_scaling = 0.);
                 virtual ~CoherentNoiseSub();
 
                 virtual void configure(const WireCell::Configuration& config);
@@ -91,6 +95,8 @@ namespace WireCell {
 
                private:
                 float m_rms_threshold;
+                float m_correlation_threshold;
+                float m_default_scaling;
             };
 
             /** Microboone style single channel noise subtraction.
