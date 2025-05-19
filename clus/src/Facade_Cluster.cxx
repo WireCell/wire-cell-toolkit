@@ -1842,6 +1842,13 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
     return m_map_mcell_indices[blob];
 }
 
+// FIXME: This is in close_connected_graph.cxx.  We declare here temporarily as
+// we move graph creation out to a component.
+namespace WireCell::Clus {
+    Graph::Ident::graph_ptr close_connected_graph(const Facade::Cluster& cluster);
+}
+
+
 // #define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
 void Cluster::Create_graph(IDetectorVolumes::pointer dv,
                            Clus::IPCTransformSet::pointer pcts, 
@@ -1850,9 +1857,9 @@ void Cluster::Create_graph(IDetectorVolumes::pointer dv,
     // std::cout << "Create Graph!" << std::endl;
     LogDebug("Create Graph! " << graph);
     if (m_graph != nullptr) return;
-    m_graph = std::make_unique<MCUGraph>(npoints());
-    // std::cout << "Test:" << "Create Graph!" << std::endl;
-    Establish_close_connected_graph();
+    // m_graph = std::make_unique<MCUGraph>(npoints());
+    // Establish_close_connected_graph();
+    m_graph = close_connected_graph(*this);
     if (use_ctpc) Connect_graph(dv, pcts, true);
     Connect_graph();
 }
@@ -3572,10 +3579,9 @@ std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransfo
         m_graph.reset();
     }
     
-    m_graph = std::make_unique<MCUGraph>(npoints());
-    
-    // Establish connections
-    Establish_close_connected_graph();
+    // m_graph = std::make_unique<MCUGraph>(npoints());
+    // Establish_close_connected_graph();
+    m_graph = close_connected_graph(*this);
     
     // Connect using overclustering protection (not easy to debug ...)
     Connect_graph_overclustering_protection(dv, pcts, use_ctpc); // this mutates m_graph!

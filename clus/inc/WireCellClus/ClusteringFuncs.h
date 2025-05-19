@@ -6,6 +6,7 @@
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 #include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/Graph.h"
 
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"
@@ -15,7 +16,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Persist.h"
-#include "WireCellUtil/Graph.h"
+
 
 
 #include <string>
@@ -77,6 +78,8 @@ namespace WireCell::Clus::Facade {
                                          Grouping& grouping,
                                          const std::string& aname="",
                                          const std::string& pcname="perblob");
+
+    
 
     /**
      * Extract geometry information from a grouping

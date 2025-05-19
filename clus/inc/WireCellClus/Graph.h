@@ -79,6 +79,8 @@ namespace WireCell::Clus::Graph {
         using vertex_descriptor = boost::graph_traits<graph_type>::vertex_descriptor;
         using edge_descriptor = boost::graph_traits<graph_type>::edge_descriptor;
         
+        using graph_ptr = std::unique_ptr<graph_type>;
+
         /** Clear and load a graph of the given name from the store. 
          *
          * If no graph data is found in the store, the graph is left cleared.

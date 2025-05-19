@@ -10,7 +10,7 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Spdlog.h"
-#include "WireCellUtil/Graph.h"
+
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IDetectorVolumes.h"
