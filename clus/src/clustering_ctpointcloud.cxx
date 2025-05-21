@@ -238,7 +238,8 @@ static void clustering_ctpointcloud(
             auto points2 = live_cluster->indices_to_points(indices);
             std::cout << "Test shortest path: " << points2.size() << " " << points2.at(0) << " " << points2.at(points2.size()-1) << std::endl;
 
-            live_cluster->examine_graph(dv, pcts, true);
+            // I (bv) comment this out as its results are not used here.
+            // live_cluster->examine_graph(dv, pcts);
         }
     }
 }

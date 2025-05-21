@@ -34,8 +34,8 @@ public:
         NeedDV::configure(config);
         NeedPCTS::configure(config);
         NeedScope::configure(config);
-        // std::cerr << "ClusteringExamineBundles: scope: " << m_scope << "\n";
 
+        // If false, then DV and PCTS are not needed.
         use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
     }
 
@@ -85,7 +85,7 @@ static void clustering_examine_bundles(
         // currently reset the cc component (todo: find the main component)
 
         // do the examine graph
-        auto b2groupid = live_clusters.at(i)->examine_graph(dv, pcts, true);
+        auto b2groupid = live_clusters.at(i)->examine_graph(dv, pcts);
         
         bool flag_largest = false;
         // Compare old and new cluster groupings

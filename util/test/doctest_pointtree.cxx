@@ -21,6 +21,8 @@ using node_ptr = std::unique_ptr<Points::node_t>;
 TEST_CASE("point tree scope")
 {
     Scope s;
+    debug("default scope hash: {}", s.hash());
+
     CHECK(s.pcname == "");
     CHECK(s.coords.empty());
     CHECK(s.depth == 0);

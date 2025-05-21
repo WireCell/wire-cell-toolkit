@@ -3,22 +3,16 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Grouping.h"
 
+#include "connect_graphs.h"
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 
 
-
-namespace WireCell::Clus {
-    Graph::Ident::graph_ptr close_connected_graph(const Facade::Cluster& cluster);
-}
-
-
-Graph::Ident::graph_ptr WireCell::Clus::close_connected_graph(const Facade::Cluster& cluster)
+void WireCell::Clus::connect_graph_closely(const Facade::Cluster& cluster, Graph::Ident::graph_type& graph)
 {
-    auto the_graph = std::make_unique<Graph::Ident::graph_type>(cluster.npoints());
-    
     // What follows used to be in Cluster::Establish_close_connected_graph().
-    // It is/was called from deprecated examine_graph() and Create_graph().
+    // It is/was called from examine_graph() and Create_graph().
 
     using mcell_wire_wcps_map_t = std::map<const Facade::Blob*, std::map<int, std::set<int>>, Facade::blob_less_functor>;
     mcell_wire_wcps_map_t map_mcell_uindex_wcps, map_mcell_vindex_wcps, map_mcell_windex_wcps;
@@ -35,8 +29,8 @@ Graph::Ident::graph_ptr WireCell::Clus::close_connected_graph(const Facade::Clus
 
         std::vector<int> pinds = cluster.get_blob_indices(mcell);
         for (const int pind : pinds) {
-            auto v = vertex(pind, *the_graph);  // retrieve vertex descriptor
-            (*the_graph)[v].ident = pind;
+            auto v = vertex(pind, graph);  // retrieve vertex descriptor
+            (graph)[v].ident = pind;
             if (map_uindex_wcps.find(winds[0][pind]) == map_uindex_wcps.end()) {
                 std::set<int> wcps;
                 wcps.insert(pind);
@@ -153,7 +147,7 @@ Graph::Ident::graph_ptr WireCell::Clus::close_connected_graph(const Facade::Clus
                     if (pind1 != pind2) {
                         auto edge = add_edge(pind1,pind2,Graph::Ident::EdgeProp(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
                                                                                      pow(points[1][pind1] - points[1][pind2], 2) +
-                                                                                     pow(points[2][pind1] - points[2][pind2], 2))),*the_graph);
+                                                                                     pow(points[2][pind1] - points[2][pind2], 2))),graph);
                         if (edge.second){
                             num_edges ++;
                         }
@@ -457,7 +451,7 @@ Graph::Ident::graph_ptr WireCell::Clus::close_connected_graph(const Facade::Clus
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,Graph::Ident::EdgeProp(dis),*the_graph);
+            auto edge = add_edge(index1,index2,Graph::Ident::EdgeProp(dis),graph);
             if (edge.second){
                 num_edges ++;
             }
@@ -467,6 +461,4 @@ Graph::Ident::graph_ptr WireCell::Clus::close_connected_graph(const Facade::Clus
         }
 
     }
-
-    return the_graph;
 }

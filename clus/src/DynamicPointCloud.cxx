@@ -655,8 +655,8 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrap
         double z = p_test.z() + k * dz_step;
         
         // Calculate distance cut
-        double dis_cut = std::min(std::max(MIN_DIS_CUT, k_dis * sin_angle_rad), MAX_DIS_CUT);
-        int dis_cut_int = static_cast<int>(dis_cut);
+        const double dis_cut = std::floor(std::min(std::max(MIN_DIS_CUT, k_dis * sin_angle_rad), MAX_DIS_CUT));
+        // int dis_cut_int = static_cast<int>(dis_cut);
         
         // Set up point
         DynamicPointCloud::DPCPoint& point = dpc_points[k];
@@ -672,7 +672,8 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrap
         point.y_2d.resize(3);
         point.wpid_2d.resize(3);
         point.wind = wind_bogus;
-        point.dist_cut = {dis_cut_int, dis_cut_int, dis_cut_int};
+        //point.dist_cut = {dis_cut_int, dis_cut_int, dis_cut_int};
+        point.dist_cut = {dis_cut, dis_cut, dis_cut};
         
         // Calculate 2D projections
         for (size_t pindex = 0; pindex < 3; ++pindex) {
@@ -721,7 +722,7 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
         int wind = point2wind(point, angle, pitch, center);
         if (wind < 0) wind = 0;
         size_t max_wind = grouping->get_plane_channels(apa, face, iplane2layer[pind]).size() - 1;
-        if (wind > max_wind) wind = max_wind;
+        if ((size_t)wind > max_wind) wind = max_wind;
         // get channel ...
         auto channel = grouping->get_plane_channel_wind(apa, face, iplane2layer[pind], wind);
 

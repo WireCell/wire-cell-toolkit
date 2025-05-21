@@ -55,7 +55,9 @@ namespace WireCell::Clus::Facade {
         bool get_scope_filter(const Tree::Scope& scope) const;
 
         void set_scope_transform(const Tree::Scope& scope, const std::string& transform_name);
-        std::string get_scope_transform(const Tree::Scope& scope) const;
+
+        // If no scope given, will use default scope. 
+        std::string get_scope_transform(Tree::Scope scope = {}) const;
 
         const Tree::Scope& get_scope(const std::string& scope_name) const
         {
@@ -365,12 +367,19 @@ namespace WireCell::Clus::Facade {
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
 
+        /// Return pointer to named graph or nullptr if no such graph is saved.
+        /// Cluster retains ownership of graph.
+        Graph::Ident::graph_type* get_graph(const std::string& name);
+        const Graph::Ident::graph_type* get_graph(const std::string& name) const;
+
+        /// Give cluster a named graph via a unique_ptr.  Caller, remember to
+        /// provide argument through a std::move().
+        void set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr);
+
+
         void Create_graph(IDetectorVolumes::pointer dv, 
                           IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
 
-        /// @brief edges inside blobs and between overlapping blobs
-        /// @attention has distance-based cuts
-        void Establish_close_connected_graph() const;
         /// @attention some distance-based cuts
         void Connect_graph( 
             IDetectorVolumes::pointer dv, 
@@ -379,9 +388,8 @@ namespace WireCell::Clus::Facade {
         void Connect_graph() const;
         void Connect_graph_overclustering_protection(
             const IDetectorVolumes::pointer dv,
-            IPCTransformSet::pointer pcts,
-            const bool use_ctpc) const;
-        std::vector<int> examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
+            IPCTransformSet::pointer pcts) const;
+        std::vector<int> examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
 
         ///
         void dijkstra_shortest_paths(IDetectorVolumes::pointer dv, 
@@ -524,7 +532,13 @@ namespace WireCell::Clus::Facade {
         mutable geo_vector_t m_pca_axis[3];
         mutable double m_pca_values[3];
 
+        // FIXME: this needs to go away.
         mutable std::unique_ptr<MCUGraph> m_graph;
+
+        // A set of named graphs held by unique_ptr.  This is const correct and
+        // NOT mutable.
+        std::map<std::string, Graph::Ident::graph_ptr> m_graphs;
+
         // create things for Dijkstra
         mutable std::vector<vertex_descriptor> m_parents;
         mutable std::vector<int> m_distances;
