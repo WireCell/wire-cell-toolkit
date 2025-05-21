@@ -1856,6 +1856,13 @@ void Cluster::set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr)
     m_graphs[name] = std::move(gptr);
 }
 
+Graph::Ident::graph_type& Cluster::get_or_make_graph(GraphKind kind,
+                                                     dv, pcts, use_ctpc,
+                                                     const std::string& name)
+{
+.......
+}
+
 Graph::Ident::graph_type* Cluster::get_graph(const std::string& name)
 {
     auto it = m_graphs.find(name);
@@ -1962,22 +1969,7 @@ void Cluster::dijkstra_shortest_paths(
     const auto& param = weight_map(get(boost::edge_weight, *m_graph))
 				   .predecessor_map(&m_parents[0])
 				   .distance_map(&m_distances[0]);
-    // const auto& param = boost::weight_map(boost::get(&EdgeProp::dist, *m_graph)).predecessor_map(&m_parents[0]).distance_map(&m_distances[0]);
     boost::dijkstra_shortest_paths(*m_graph, v0, param);
-    
-    // if (nchildren()==3449){
-    //     std::cout << "dijkstra_shortest_paths: " << pt_idx << " " << use_ctpc << std::endl;
-    //     std::cout << "distances: ";
-    //     for (size_t i = 0; i != m_distances.size(); i++) {
-    //         std::cout << i << "->" << m_distances[i] << " ";
-    //     }
-    //     std::cout << std::endl;
-    //     std::cout << "parents: ";
-    //     for (size_t i = 0; i != m_parents.size(); i++) {
-    //         std::cout << i << "->" << m_parents[i] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
 }
 
 
@@ -2002,14 +1994,16 @@ void Cluster::cal_shortest_path(const size_t dest_wcp_index) const
             if (mcell != m_path_mcells.front())
                 m_path_mcells.push_front(mcell);
         }
-        if (i == prev_i)
+        if (i == prev_i) {
             break;
+        }
         prev_i = i;
     }
     auto* src_mcell = blob_with_point(m_source_pt_index);
     m_path_wcps.push_front(m_source_pt_index);
-    if (src_mcell != m_path_mcells.front())
+    if (src_mcell != m_path_mcells.front()) {
         m_path_mcells.push_front(src_mcell);
+    }
 }
 
 std::vector<geo_point_t> Cluster::indices_to_points(const std::list<size_t>& path_indices) const 

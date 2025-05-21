@@ -74,6 +74,7 @@ namespace WireCell::Clus::Graph {
         };
         using EdgeProp = boost::property<boost::edge_weight_t, weight_type>; 
 
+        // Vertices are forced to be unique.  Edges may be duplicate.
         using graph_type = boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
                                                   VertexProp, EdgeProp>;
         using vertex_descriptor = boost::graph_traits<graph_type>::vertex_descriptor;
@@ -117,6 +118,15 @@ namespace WireCell::Clus::Graph {
         /// "head" vertices.
         std::pair<std::vector<vertex_descriptor>, std::vector<vertex_descriptor>>
         edges(const graph_type& g);
+
+        // Result of Dijkstra's shortest paths from vertex.
+        struct DijkstraShortestPaths {
+            vertex_descriptor vertex;
+            std::vector<vertex_descriptor> parents;
+            std::vector<int> distances;
+        };
+        // Find vertex with index, then shortest paths to other vertices.
+        DijkstraShortestPaths dijkstra_shortest_paths(const graph_type& graph, size_t point_index)
 
     }
 

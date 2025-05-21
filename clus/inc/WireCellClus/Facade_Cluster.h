@@ -367,6 +367,7 @@ namespace WireCell::Clus::Facade {
         // Check facade consistency between blob view and k-d tree view.
         bool sanity(Log::logptr_t log = nullptr) const;
 
+
         /// Return pointer to named graph or nullptr if no such graph is saved.
         /// Cluster retains ownership of graph.
         Graph::Ident::graph_type* get_graph(const std::string& name);

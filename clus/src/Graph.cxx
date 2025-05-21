@@ -125,3 +125,21 @@ Ident::edges(const graph_type& g)
 }
 
 
+DijkstraShortestPaths Ident::dijkstra_shortest_paths(const Ident::graph_type& graph, size_t point_index)
+{
+    const size_t nvtx = boost::num_vertices(graph);
+
+    DijkstraShortestPaths ret{
+        boost::vertex(point_index, graph),
+        std::vector<vertex_descriptor>(nvtx),
+        std::vector<int>(nvtex)
+    };
+    const auto& param = boost::weight_map(boost::get(boost::edge_weight, graph))
+        .predecessor_map(&ret.parents[0])
+        .distance_map(&ret.distances[0]);
+
+    boost::dijkstra_shortest_paths(graph, ret.vertex, param);
+    
+    return ret;
+}
+
