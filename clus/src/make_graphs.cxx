@@ -48,3 +48,12 @@ Graph::Ident::graph_ptr WireCell::Clus::make_graph_overclustering_protection(
     return gptr;
 }
 
+
+Graph::Ident::graph_ptr 
+WireCell::Clus::CloseGraphMaker::operator()(const Facade::Cluster& cluster)
+{
+    if (use_ctpc) {
+        return make_graph_ctpc(cluster, dv, pcts);
+    }
+    return make_graph_basic(cluster);
+}

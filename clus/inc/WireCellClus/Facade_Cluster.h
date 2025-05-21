@@ -20,6 +20,8 @@
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/Graph.h"
 
+#include <functional>
+
 namespace WireCell::Clus::Facade {
 
     using IPCTransformSet = Clus::IPCTransformSet;
@@ -375,8 +377,12 @@ namespace WireCell::Clus::Facade {
 
         /// Give cluster a named graph via a unique_ptr.  Caller, remember to
         /// provide argument through a std::move().
-        void set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr);
+        Graph::Ident::graph_type& set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr);
 
+        /// Assure a graph exists with the given name.  If it does not, call the
+        /// maker, accepts its graph, save on name.  Return reference.
+        using GraphMaker = std::function<Graph::Ident::graph_ptr(const Cluster&)>;
+        Graph::Ident::graph_type& assure_graph(const std::string& name, GraphMaker maker);
 
         void Create_graph(IDetectorVolumes::pointer dv, 
                           IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
@@ -406,8 +412,8 @@ namespace WireCell::Clus::Facade {
         inline const std::list<const Blob*>& get_path_blobs() const { return m_path_mcells; }
         // In class declaration: 
         std::vector<geo_point_t> indices_to_points(const std::list<size_t>& path_indices) const;
-        void organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
-        void organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
+        // void organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
+        // void organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
 
 
         // TODO: relying on scoped_view to do the caching?

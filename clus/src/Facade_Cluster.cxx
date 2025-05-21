@@ -1851,16 +1851,21 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 }
 
 
-void Cluster::set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr)
+Graph::Ident::graph_type& Cluster::assure_graph(const std::string& name,
+                                                GraphMaker maker)
 {
-    m_graphs[name] = std::move(gptr);
+    auto* g = get_graph(name);
+    if (g) {
+        return *g;
+    }
+    m_graphs[name] = maker(*this);
+    return *m_graphs[name];
 }
 
-Graph::Ident::graph_type& Cluster::get_or_make_graph(GraphKind kind,
-                                                     dv, pcts, use_ctpc,
-                                                     const std::string& name)
+Graph::Ident::graph_type& Cluster::set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr)
 {
-.......
+    m_graphs[name] = std::move(gptr);
+    return *m_graphs[name];
 }
 
 Graph::Ident::graph_type* Cluster::get_graph(const std::string& name)
@@ -2016,82 +2021,82 @@ std::vector<geo_point_t> Cluster::indices_to_points(const std::list<size_t>& pat
     return points;
 }
 
-void Cluster::organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const
-{
-    std::vector<geo_point_t> temp_points = path_points;
-    path_points.clear();
+// void Cluster::organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const
+// {
+//     std::vector<geo_point_t> temp_points = path_points;
+//     path_points.clear();
 
-    // First pass: filter based on distance
-    for (size_t i = 0; i != temp_points.size(); i++) {
-        if (path_points.empty()) {
-            path_points.push_back(temp_points[i]);
-        }
-        else if (i + 1 == temp_points.size()) {
-            double dis = (temp_points[i] - path_points.back()).magnitude();
-            if (dis > low_dis_limit * 0.75) {
-                path_points.push_back(temp_points[i]);
-            }
-        }
-        else {
-            double dis = (temp_points[i] - path_points.back()).magnitude();
-            double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
+//     // First pass: filter based on distance
+//     for (size_t i = 0; i != temp_points.size(); i++) {
+//         if (path_points.empty()) {
+//             path_points.push_back(temp_points[i]);
+//         }
+//         else if (i + 1 == temp_points.size()) {
+//             double dis = (temp_points[i] - path_points.back()).magnitude();
+//             if (dis > low_dis_limit * 0.75) {
+//                 path_points.push_back(temp_points[i]);
+//             }
+//         }
+//         else {
+//             double dis = (temp_points[i] - path_points.back()).magnitude();
+//             double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
 
-            if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.75)) {
-                path_points.push_back(temp_points[i]);
-            }
-        }
-    }
+//             if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.75)) {
+//                 path_points.push_back(temp_points[i]);
+//             }
+//         }
+//     }
 
-    // Second pass: filter based on angle
-    temp_points = path_points;
-    std::vector<double> angles;
-    for (size_t i = 0; i != temp_points.size(); i++) {
-        if (i == 0 || i + 1 == temp_points.size()) {
-            angles.push_back(M_PI);
-        }
-        else {
-            geo_vector_t v1 = temp_points[i] - temp_points[i - 1];
-            geo_vector_t v2 = temp_points[i] - temp_points[i + 1];
-            angles.push_back(v1.angle(v2));
-        }
-    }
+//     // Second pass: filter based on angle
+//     temp_points = path_points;
+//     std::vector<double> angles;
+//     for (size_t i = 0; i != temp_points.size(); i++) {
+//         if (i == 0 || i + 1 == temp_points.size()) {
+//             angles.push_back(M_PI);
+//         }
+//         else {
+//             geo_vector_t v1 = temp_points[i] - temp_points[i - 1];
+//             geo_vector_t v2 = temp_points[i] - temp_points[i + 1];
+//             angles.push_back(v1.angle(v2));
+//         }
+//     }
 
-    path_points.clear();
-    for (size_t i = 0; i != temp_points.size(); i++) {
-        if (angles[i] * 180.0 / M_PI >= 75) {
-            path_points.push_back(temp_points[i]);
-        }
-    }
-}
+//     path_points.clear();
+//     for (size_t i = 0; i != temp_points.size(); i++) {
+//         if (angles[i] * 180.0 / M_PI >= 75) {
+//             path_points.push_back(temp_points[i]);
+//         }
+//     }
+// }
 
-// this is different from WCP implementation, the path_points is the input ...
-void Cluster::organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const
-{
-    //    std::vector<geo_point_t> temp_points = path_points;
-    path_points.clear();
-    auto indices = get_path_wcps();
-    auto temp_points = indices_to_points(indices);
+// // this is different from WCP implementation, the path_points is the input ...
+// void Cluster::organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const
+// {
+//     //    std::vector<geo_point_t> temp_points = path_points;
+//     path_points.clear();
+//     auto indices = get_path_wcps();
+//     auto temp_points = indices_to_points(indices);
 
-    for (size_t i = 0; i != temp_points.size(); i++) {
-        if (path_points.empty()) {
-            path_points.push_back(temp_points[i]);
-        }
-        else if (i + 1 == temp_points.size()) {
-            double dis = (temp_points[i] - path_points.back()).magnitude();
-            if (dis > low_dis_limit * 0.5) {
-                path_points.push_back(temp_points[i]);
-            }
-        }
-        else {
-            double dis = (temp_points[i] - path_points.back()).magnitude();
-            double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
+//     for (size_t i = 0; i != temp_points.size(); i++) {
+//         if (path_points.empty()) {
+//             path_points.push_back(temp_points[i]);
+//         }
+//         else if (i + 1 == temp_points.size()) {
+//             double dis = (temp_points[i] - path_points.back()).magnitude();
+//             if (dis > low_dis_limit * 0.5) {
+//                 path_points.push_back(temp_points[i]);
+//             }
+//         }
+//         else {
+//             double dis = (temp_points[i] - path_points.back()).magnitude();
+//             double dis1 = (temp_points[i + 1] - path_points.back()).magnitude();
 
-            if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.5)) {
-                path_points.push_back(temp_points[i]);
-            }
-        }
-    }
-}
+//             if (dis > low_dis_limit || (dis1 > low_dis_limit * 1.7 && dis > low_dis_limit * 0.5)) {
+//                 path_points.push_back(temp_points[i]);
+//             }
+//         }
+//     }
+// }
 
 
 std::vector<geo_point_t> Cluster::get_hull() const 

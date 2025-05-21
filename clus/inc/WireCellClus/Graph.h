@@ -126,7 +126,7 @@ namespace WireCell::Clus::Graph {
             std::vector<int> distances;
         };
         // Find vertex with index, then shortest paths to other vertices.
-        DijkstraShortestPaths dijkstra_shortest_paths(const graph_type& graph, size_t point_index)
+        DijkstraShortestPaths dijkstra_shortest_paths(const graph_type& graph, size_t point_index);
 
     }
 

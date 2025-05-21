@@ -11,6 +11,17 @@ namespace WireCell::Clus {
         class Cluster;
     }
 
+    // A "maker" of a graph of a "closely connected" variant.
+    struct CloseGraphMaker {
+        IDetectorVolumes::pointer dv;
+        IPCTransformSet::pointer pcts;
+        bool use_ctpc;
+
+        Graph::Ident::graph_ptr operator()(const Facade::Cluster& cluster);
+    };
+        
+
+
     // factory functions wrapping up construction and various connect_graph*
     // functions.
 
