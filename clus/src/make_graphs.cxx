@@ -9,51 +9,42 @@
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
+using namespace WireCell::Clus::Graphs;
 
 
-Graph::Ident::graph_ptr WireCell::Clus::make_graph_closely(
+Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_closely(
     const Cluster& cluster) 
 {
-    auto gptr = std::make_unique<Graph::Ident::graph_type>(cluster.npoints());
-    connect_graph_closely(cluster, *gptr);
-    return gptr;
+    auto graph = std::make_unique<Weighted::Graph>(cluster.npoints());
+    connect_graph_closely(cluster, *graph);
+    return graph;
 }
 
-Graph::Ident::graph_ptr WireCell::Clus::make_graph_basic(
+Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_basic(
     const Cluster& cluster) 
 {
-    auto gptr = make_graph_closely(cluster);
-    connect_graph(cluster, *gptr);
-    return gptr;
+    auto graph = make_graph_closely(cluster);
+    connect_graph(cluster, *graph);
+    return graph;
 }
 
-Graph::Ident::graph_ptr WireCell::Clus::make_graph_ctpc(
+Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_ctpc(
     const Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts) 
 {
-    auto gptr = make_graph_closely(cluster);
-    connect_graph_ctpc(cluster, dv, pcts, *gptr);
-    connect_graph(cluster, *gptr);
-    return gptr;
+    auto graph = make_graph_closely(cluster);
+    connect_graph_ctpc(cluster, dv, pcts, *graph);
+    connect_graph(cluster, *graph);
+    return graph;
 }
 
-Graph::Ident::graph_ptr WireCell::Clus::make_graph_overclustering_protection(
-    const Cluster& cluster,
+Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_overclustering_protection(
+    const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts) 
 {
-    auto gptr = make_graph_closely(cluster);
-    connect_graph_overclustering_protection(cluster, dv, pcts, *gptr);
-    return gptr;
-}
-
-
-Graph::Ident::graph_ptr 
-WireCell::Clus::CloseGraphMaker::operator()(const Facade::Cluster& cluster)
-{
-    if (use_ctpc) {
-        return make_graph_ctpc(cluster, dv, pcts);
-    }
-    return make_graph_basic(cluster);
+    auto graph = make_graph_closely(cluster);
+    connect_graph_overclustering_protection(cluster, dv, pcts, *graph);
+    return graph;
 }

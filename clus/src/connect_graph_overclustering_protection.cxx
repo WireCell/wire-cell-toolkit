@@ -1,5 +1,5 @@
 
-#include "WireCellClus/Graph.h"
+#include "WireCellClus/Graphs.h"
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
@@ -8,13 +8,14 @@
 
 using namespace WireCell;
 using namespace WireCell::Clus;
+using namespace WireCell::Clus::Graphs;
 using namespace WireCell::Clus::Facade;
 
-void WireCell::Clus::connect_graph_overclustering_protection(
+void Graphs::connect_graph_overclustering_protection(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts,
-    Graph::Ident::graph_type& graph)    
+    Weighted::Graph& graph)    
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
@@ -501,7 +502,7 @@ void WireCell::Clus::connect_graph_overclustering_protection(
 
     // deal with MST of first type
     {
-        Graph::Weighted::graph_type temp_graph(num);
+        Weighted::Graph temp_graph(num);
         for (size_t j = 0; j != num; j++) {
             for (size_t k = j + 1; k != num; k++) {
                 int index1 = j;
@@ -518,7 +519,7 @@ void WireCell::Clus::connect_graph_overclustering_protection(
 
     // MST of the direction ...
     {
-        Graph::Weighted::graph_type temp_graph(num);
+        Weighted::Graph temp_graph(num);
 
         for (size_t j = 0; j != num; j++) {
             for (size_t k = j + 1; k != num; k++) {
@@ -554,7 +555,7 @@ void WireCell::Clus::connect_graph_overclustering_protection(
                 else {
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
-                /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), graph);
+                /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -568,7 +569,7 @@ void WireCell::Clus::connect_graph_overclustering_protection(
                     else {
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -581,7 +582,7 @@ void WireCell::Clus::connect_graph_overclustering_protection(
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
             }
 

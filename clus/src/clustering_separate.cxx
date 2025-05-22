@@ -13,6 +13,7 @@ WIRECELL_FACTORY(ClusteringSeparate, ClusteringSeparate,
 
 using namespace WireCell;
 using namespace WireCell::Clus;
+using namespace WireCell::Clus::Graphs;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
@@ -1710,15 +1711,15 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
     // form ...
 
     const int N = mcells.size();
-    Cluster::MCUGraph graph(N);
+    Weighted::Graph graph(N);
 
     std::map<const Blob *, int> mcell_index_map;
     for (size_t i = 0; i != mcells.size(); i++) {
         Blob *curr_mcell = mcells.at(i);
         mcell_index_map[curr_mcell] = i;
 
-        auto v = vertex(i, graph);  // retrieve vertex descriptor
-        (graph)[v].ident = i;
+        // auto v = vertex(i, graph);  // retrieve vertex descriptor
+        // (graph)[v].ident = i;
     }
 
     for (auto it = connected_mcells.begin(); it != connected_mcells.end(); it++) {
@@ -1728,7 +1729,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
         // if (edge.second) {
         //     (graph)[edge.first].dist = 1;
         // }
-        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Graph::Ident::EdgeProp(1),graph);
+        /*auto edge =*/ add_edge(index1, index2, 1.0,graph);
     }
 
     {
@@ -1764,7 +1765,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
                         // if (edge.second) {
                         //     (graph)[edge.first].dist = 1;
                         // }
-                        /*auto edge =*/ add_edge(index1, index2, WireCell::Clus::Graph::Ident::EdgeProp(1),graph);
+                        /*auto edge =*/ add_edge(index1, index2, 1.0,graph);
                     }
                 }
             }

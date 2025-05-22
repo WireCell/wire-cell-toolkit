@@ -1,7 +1,7 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
-#include "WireCellClus/Graph.h"
+#include "WireCellClus/Graphs.h"
 
 #include "WireCellUtil/Array.h"
 
@@ -21,6 +21,7 @@
 
 using namespace WireCell;
 using namespace WireCell::Clus;
+using namespace WireCell::Clus::Graphs;
 using namespace WireCell::PointCloud;
 using namespace WireCell::Clus::Facade;
 // using WireCell::PointCloud::Dataset;
@@ -1851,40 +1852,6 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 }
 
 
-Graph::Ident::graph_type& Cluster::assure_graph(const std::string& name,
-                                                GraphMaker maker)
-{
-    auto* g = get_graph(name);
-    if (g) {
-        return *g;
-    }
-    m_graphs[name] = maker(*this);
-    return *m_graphs[name];
-}
-
-Graph::Ident::graph_type& Cluster::set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr)
-{
-    m_graphs[name] = std::move(gptr);
-    return *m_graphs[name];
-}
-
-Graph::Ident::graph_type* Cluster::get_graph(const std::string& name)
-{
-    auto it = m_graphs.find(name);
-    if (it == m_graphs.end()) {
-        return nullptr;
-    }
-    return it->second.get();
-}
-const Graph::Ident::graph_type* Cluster::get_graph(const std::string& name) const 
-{
-    auto it = m_graphs.find(name);
-    if (it == m_graphs.end()) {
-        return nullptr;
-    }
-    return it->second.get();
-}
-
 
 void Cluster::Create_graph(IDetectorVolumes::pointer dv,
                            Clus::IPCTransformSet::pointer pcts, 
@@ -1898,16 +1865,6 @@ void Cluster::Create_graph(IDetectorVolumes::pointer dv,
     else {
         m_graph = make_graph_basic(*this);
     }
-    /////// old
-    // m_graph = std::make_unique<Graph::Ident::graph_type>(npoints());
-    // connect_graph_closely(*this, *m_graph);
-    // if (use_ctpc) {
-    //     // Connect_graph(dv, pcts, true);
-    //     connect_graph_ctpc(*this, dv, pcts, *m_graph);
-    // }
-    // // Connect_graph();
-    // connect_graph(*this, *m_graph);
-    /////// old
 }
 
 
@@ -1916,17 +1873,6 @@ void Cluster::Create_graph(IDetectorVolumes::pointer dv,
 // In Facade_Cluster.cxx
 std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const 
 {
-    /////// old
-    // // Create new graph
-    // if (m_graph != nullptr) {
-    //     m_graph.reset();
-    // }
-    // m_graph = std::make_unique<MCUGraph>(npoints());
-    // connect_graph_closely(*this, *m_graph);
-    // // Connect_graph_overclustering_protection(dv, pcts, use_ctpc); // this mutates m_graph!
-    // connect_graph_overclustering_protection(*this, dv, pcts, *m_graph);
-    /////// old
-    
     m_graph = make_graph_overclustering_protection(*this, dv, pcts);
 
     // Find connected components
@@ -1969,12 +1915,15 @@ void Cluster::dijkstra_shortest_paths(
     m_parents.resize(num_vertices(*m_graph));
     m_distances.resize(num_vertices(*m_graph));
 
-    vertex_descriptor v0 = vertex(pt_idx, *m_graph);
+    // vertex_descriptor v0 = vertex(pt_idx, *m_graph);
     // making a param object
+
+    // BUG: this begins a conflation of vertex a property (index/ident) with a
+    // vertex descriptor.
     const auto& param = weight_map(get(boost::edge_weight, *m_graph))
 				   .predecessor_map(&m_parents[0])
 				   .distance_map(&m_distances[0]);
-    boost::dijkstra_shortest_paths(*m_graph, v0, param);
+    boost::dijkstra_shortest_paths(*m_graph, pt_idx, param);
 }
 
 
@@ -2668,6 +2617,43 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
     }
     return flash;
 }
+
+
+
+
+const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph() const
+{
+    const char* name = "basic";
+    auto it = m_spgraphs.find(name);
+    if (it != m_spgraphs.end()) {
+        return it->second;
+    }
+    auto got = m_spgraphs.emplace(name, Weighted::ShortestPathsGraph(make_graph_basic(*this)));
+    return got.first->second;
+}
+
+const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
+                                                                      IPCTransformSet::pointer pcts) const
+{
+    const char* name = "ctpc";
+    auto it = m_spgraphs.find(name);
+    if (it != m_spgraphs.end()) {
+        return it->second;
+    }
+    auto got = m_spgraphs.emplace(name, Weighted::ShortestPathsGraph(make_graph_ctpc(*this, dv, pcts)));
+    return got.first->second;
+}
+
+const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
+                                                                      IPCTransformSet::pointer pcts,
+                                                                      bool use_ctpc) const
+{
+    if (use_ctpc) {
+        return shortest_paths_graph(dv, pcts);
+    }
+    return shortest_paths_graph();
+}
+
 
 
 // Local Variables:

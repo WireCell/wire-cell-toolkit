@@ -5,7 +5,7 @@
 #ifndef WIRECELL_CLUS_FACADEUTIL
 #define WIRECELL_CLUS_FACADEUTIL
 
-#include "WireCellClus/Graph.h"
+#include "WireCellClus/Graphs.h"
 
 #include "WCPQuickhull/QuickHull.h"
 
@@ -554,7 +554,7 @@ namespace WireCell::Clus::Facade {
     //     std::vector<const Blob*> m_blobs;
     // };
 
-    void process_mst_deterministically(const Graph::Weighted::graph_type& g,
+    void process_mst_deterministically(const Graphs::Weighted::Graph& g,
                                        std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
                                        std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst);
 

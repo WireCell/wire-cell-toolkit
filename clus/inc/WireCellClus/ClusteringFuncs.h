@@ -6,7 +6,7 @@
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 #include "WireCellClus/IEnsembleVisitor.h"
-#include "WireCellClus/Graph.h"
+#include "WireCellClus/Graphs.h"
 
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"

@@ -13,7 +13,6 @@
 #include "WireCellUtil/ExecMon.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Exceptions.h"
-#include "WireCellUtil/Graph.h"
 #include "WireCellUtil/NamedFactory.h"
 
 #include <map>

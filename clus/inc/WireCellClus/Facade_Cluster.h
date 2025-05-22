@@ -18,7 +18,7 @@
 #include "WireCellClus/Facade_Util.h"
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/IPCTransform.h"
-#include "WireCellClus/Graph.h"
+#include "WireCellClus/Graphs.h"
 
 #include <functional>
 
@@ -370,19 +370,6 @@ namespace WireCell::Clus::Facade {
         bool sanity(Log::logptr_t log = nullptr) const;
 
 
-        /// Return pointer to named graph or nullptr if no such graph is saved.
-        /// Cluster retains ownership of graph.
-        Graph::Ident::graph_type* get_graph(const std::string& name);
-        const Graph::Ident::graph_type* get_graph(const std::string& name) const;
-
-        /// Give cluster a named graph via a unique_ptr.  Caller, remember to
-        /// provide argument through a std::move().
-        Graph::Ident::graph_type& set_graph(const std::string& name, Graph::Ident::graph_ptr&& gptr);
-
-        /// Assure a graph exists with the given name.  If it does not, call the
-        /// maker, accepts its graph, save on name.  Return reference.
-        using GraphMaker = std::function<Graph::Ident::graph_ptr(const Cluster&)>;
-        Graph::Ident::graph_type& assure_graph(const std::string& name, GraphMaker maker);
 
         void Create_graph(IDetectorVolumes::pointer dv, 
                           IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
@@ -397,6 +384,24 @@ namespace WireCell::Clus::Facade {
             const IDetectorVolumes::pointer dv,
             IPCTransformSet::pointer pcts) const;
         std::vector<int> examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
+        
+        ///
+        /// Shortest path handling.
+        ///
+        // Get the "basic" form for shortest paths calculation.
+        const Graphs::Weighted::ShortestPathsGraph& 
+        shortest_paths_graph() const;
+        // Get the "ctpc" form for shortest paths calculation.
+        const Graphs::Weighted::ShortestPathsGraph& 
+        shortest_paths_graph(IDetectorVolumes::pointer dv, 
+                             IPCTransformSet::pointer pcts) const;
+        // Kitchen sink to select which type based on use_ctps value.  When
+        // false, dv and pcts are ignored.
+        const Graphs::Weighted::ShortestPathsGraph& 
+        shortest_paths_graph(IDetectorVolumes::pointer dv, 
+                             IPCTransformSet::pointer pcts,
+                             bool use_ctpc) const;
+
 
         ///
         void dijkstra_shortest_paths(IDetectorVolumes::pointer dv, 
@@ -454,12 +459,6 @@ namespace WireCell::Clus::Facade {
         /// @brief to assess whether a given point (p_test) in a cluster is a vertex, or endpoint, based on asymmetry and occupancy criteria.
         /// @note p_test will be updated
         bool judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer dv, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
-
-
-        // Graph support.
-        using MCUGraph = Graph::Ident::graph_type;
-        using vertex_descriptor = Graph::Ident::vertex_descriptor;
-
 
         class Flash {
             friend class Cluster;
@@ -540,14 +539,16 @@ namespace WireCell::Clus::Facade {
         mutable double m_pca_values[3];
 
         // FIXME: this needs to go away.
-        mutable std::unique_ptr<MCUGraph> m_graph;
+        mutable Graphs::Weighted::GraphPtr m_graph;
 
-        // A set of named graphs held by unique_ptr.  This is const correct and
-        // NOT mutable.
-        std::map<std::string, Graph::Ident::graph_ptr> m_graphs;
+        // Cluster makes its own graphs for the purpose of calculating shortest
+        // paths.  This is the lazy cache.  For now, the key string is either
+        // "basic" or "ctpc" to distinguish the type of graph.
+        mutable std::map<std::string, Graphs::Weighted::ShortestPathsGraph> m_spgraphs;
 
-        // create things for Dijkstra
-        mutable std::vector<vertex_descriptor> m_parents;
+
+        // FIXME: these go away in favor of ShortestPaths*
+        mutable std::vector<size_t> m_parents;
         mutable std::vector<int> m_distances;
         mutable int m_source_pt_index{-1};
         mutable std::list<size_t> m_path_wcps;

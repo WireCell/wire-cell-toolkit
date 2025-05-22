@@ -5,6 +5,8 @@
 using namespace WireCell;
 using namespace WireCell::PointCloud;
 using namespace WireCell::Clus;
+using namespace WireCell::Clus::Graphs;
+
 using namespace WireCell::Clus::Facade;
 // using WireCell::PointCloud::Dataset;
 using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
@@ -48,7 +50,7 @@ namespace {
 }
 #endif
 
-void Facade::process_mst_deterministically(const Graph::Weighted::graph_type& temp_graph,
+void Facade::process_mst_deterministically(const Weighted::Graph& temp_graph,
     std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis,
     std::vector<std::vector<std::tuple<int,int,double>>>& index_index_dis_mst) 
 {
@@ -86,7 +88,7 @@ void Facade::process_mst_deterministically(const Graph::Weighted::graph_type& te
         // Use minimum vertex as root
         size_t root_vertex = comp_vertices[0];
         
-        std::vector<Graph::Ident::vertex_descriptor> predecessors(num_vertices(temp_graph));
+        std::vector<size_t> predecessors(num_vertices(temp_graph));
         prim_minimum_spanning_tree(temp_graph, &predecessors[0],
                                 boost::root_vertex(root_vertex));
 

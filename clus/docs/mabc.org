@@ -6,7 +6,7 @@ The ~MultiAlgBlobClustering~ (MABC) component is a Wire-Cell Toolkit data-flow
 programming graph node.  Primarily it executes a pipeline of special
 ~IEnsembleVisitor~ *functional component* interfaces that process (mutate) a WCT
 point-cloud (PC) tree data structure with the help of PC tree node "facade"
-classes.
+classes.  See also [[file:cluster.org]].
 
 ** Facades
 

@@ -9,7 +9,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
-void WireCell::Clus::connect_graph(const Cluster& cluster, Graph::Ident::graph_type& graph)
+void Graphs::connect_graph(const Cluster& cluster, Weighted::Graph& graph)
 {
     // This used to be the body of Cluster::Connect_graph().
 
@@ -91,7 +91,7 @@ void WireCell::Clus::connect_graph(const Cluster& cluster, Graph::Ident::graph_t
         }
     }
 
-    Graph::Weighted::graph_type temp_graph(num);
+    Weighted::Graph temp_graph(num);
 
     for (size_t j=0;j!=num;j++){
       for (size_t k=j+1;k!=num;k++){
@@ -143,7 +143,7 @@ void WireCell::Clus::connect_graph(const Cluster& cluster, Graph::Ident::graph_t
 
     // MST for the directionality ...
     {
-        Graph::Weighted::graph_type temp_graph(num);
+        Weighted::Graph temp_graph(num);
 
         for (size_t j = 0; j != num; j++) {
             for (size_t k = j + 1; k != num; k++) {
@@ -177,7 +177,7 @@ void WireCell::Clus::connect_graph(const Cluster& cluster, Graph::Ident::graph_t
                 else {
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
-                /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), graph);
+                /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -192,7 +192,7 @@ void WireCell::Clus::connect_graph(const Cluster& cluster, Graph::Ident::graph_t
                     else {
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -205,7 +205,7 @@ void WireCell::Clus::connect_graph(const Cluster& cluster, Graph::Ident::graph_t
                     else {
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
-                    /*auto edge =*/ add_edge(gind1, gind2, WireCell::Clus::Graph::Ident::EdgeProp(dis), graph);
+                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
             }
 

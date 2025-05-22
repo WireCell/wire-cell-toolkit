@@ -9,7 +9,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 
 
-void WireCell::Clus::connect_graph_closely(const Facade::Cluster& cluster, Graph::Ident::graph_type& graph)
+void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Graph& graph)
 {
     // What follows used to be in Cluster::Establish_close_connected_graph().
     // It is/was called from examine_graph() and Create_graph().
@@ -29,8 +29,8 @@ void WireCell::Clus::connect_graph_closely(const Facade::Cluster& cluster, Graph
 
         std::vector<int> pinds = cluster.get_blob_indices(mcell);
         for (const int pind : pinds) {
-            auto v = vertex(pind, graph);  // retrieve vertex descriptor
-            (graph)[v].ident = pind;
+            // auto v = vertex(pind, graph);  // retrieve vertex descriptor
+            // (graph)[v].ident = pind;
             if (map_uindex_wcps.find(winds[0][pind]) == map_uindex_wcps.end()) {
                 std::set<int> wcps;
                 wcps.insert(pind);
@@ -145,7 +145,7 @@ void WireCell::Clus::connect_graph_closely(const Facade::Cluster& cluster, Graph
                 for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
                     const int pind2 = *it4;
                     if (pind1 != pind2) {
-                        auto edge = add_edge(pind1,pind2,Graph::Ident::EdgeProp(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                        auto edge = add_edge(pind1,pind2,(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
                                                                                      pow(points[1][pind1] - points[1][pind2], 2) +
                                                                                      pow(points[2][pind1] - points[2][pind2], 2))),graph);
                         if (edge.second){
@@ -451,7 +451,7 @@ void WireCell::Clus::connect_graph_closely(const Facade::Cluster& cluster, Graph
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,Graph::Ident::EdgeProp(dis),graph);
+            auto edge = add_edge(index1,index2,dis,graph);
             if (edge.second){
                 num_edges ++;
             }

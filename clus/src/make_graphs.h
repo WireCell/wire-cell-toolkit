@@ -1,50 +1,36 @@
 #ifndef WIRECELLCLUS_PRIVATE_MAKE_GRAPHS
 #define WIRECELLCLUS_PRIVATE_MAKE_GRAPHS
 
-#include "WireCellClus/Graph.h"
+#include "WireCellClus/Graphs.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellClus/IPCTransform.h"
+#include "WireCellClus/Facade_Cluster.h"
 
 
-namespace WireCell::Clus {
-    namespace Facade {
-        class Cluster;
-    }
-
-    // A "maker" of a graph of a "closely connected" variant.
-    struct CloseGraphMaker {
-        IDetectorVolumes::pointer dv;
-        IPCTransformSet::pointer pcts;
-        bool use_ctpc;
-
-        Graph::Ident::graph_ptr operator()(const Facade::Cluster& cluster);
-    };
-        
-
+namespace WireCell::Clus::Graphs {
 
     // factory functions wrapping up construction and various connect_graph*
     // functions.
 
     // just closely connected.
-    Graph::Ident::graph_ptr make_graph_closely(
+    Weighted::GraphPtr make_graph_closely(
         const Facade::Cluster& cluster);
 
     // closely + basic connection
-    Graph::Ident::graph_ptr make_graph_basic(
+    Weighted::GraphPtr make_graph_basic(
         const Facade::Cluster& cluster);
 
     // closely + ctpc connection
-    Graph::Ident::graph_ptr make_graph_ctpc(
+    Weighted::GraphPtr make_graph_ctpc(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
 
-    // closely + overclustering protection connection
-    Graph::Ident::graph_ptr make_graph_overclustering_protection(
-        const Facade::Cluster& clus,
+    // closely + overclustering protection
+    Weighted::GraphPtr make_graph_overclustering_protection(
+        const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
-
 
 }
 
