@@ -12,11 +12,15 @@ collection collects the distances of steps in this walk.
 ** Determinism
 
 There is no randomness in the results of Dijkstra's but results are weakly
-deterministic.  Two sources of determinism should be considered.  First, tie
-breaking in the distance comparisons is required and the chosen strategy may
+deterministic.  Two sources of determinism should be considered.  First,
+tie-breaking in the distance comparisons is required and the chosen strategy may
 lead to result changes due to otherwise unrelated code changes.  Depending on
 tie breaks, different paths with identical distance may be chosen as "shortest".
+Ties can occur more often based on the type for distance.  Using "double" or
+"float" is better than "int".
+
 Second, result ordering is subject to the ordering of the graph vertices.
 Graphs with unstable vertex identifiers will have unstable result ordering.
 With stable vertex identifiers, a change of vertex collection can lead to
-different ordering of otherwise same results.
+different ordering of otherwise same results.  With Boost Graph Library, best to
+use ~vecS~ and not ~setS~ as the former guarantees index-like descriptors.

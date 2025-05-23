@@ -12,27 +12,14 @@ namespace WireCell::Clus::Graphs {
     namespace Weighted {
 
         /**
-         * The basic graph type used in clus is an edge-weighted graph with vertex
-         * descriptors that can serve as indices.  For indices to work, vertex
-         * removal is NOT supported.
+         * The basic graph type used in clus is an edge-weighted graph with
+         * vertex descriptors that can serve as indices.  For indices to remain
+         * stable, vertex removal is NOT supported. 
          */
 
-#define CLUS_FIXME              // eventually remove this, keeping new
-
-#ifdef CLUS_FIXME
-        // Define to switch back to the types used in WCP, which are "bad".
-        // See Graphs.cxx for use of this type.
-        using dijkstra_distance_type = int;
-#else
         using dijkstra_distance_type = double;
-#endif
-
         using Graph = boost::adjacency_list<
-#ifdef CLUS_FIXME
-            boost::setS,        // vertices
-#else
             boost::vecS,        // vertices
-#endif
             boost::vecS,        // edges
             boost::undirectedS, // edge direction (none)
             boost::property<boost::vertex_index_t, size_t>,

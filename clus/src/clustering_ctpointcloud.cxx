@@ -217,7 +217,8 @@ static void clustering_ctpointcloud(
             points1.push_back(points.first);
             points1.push_back(points.second);
             points1.push_back(p);
-            // live_cluster->force_pca(points1);
+            // Removed the wrong idea to set a PCA on live_cluster based on these points.
+            std::cout << "Warning: not calculating any PCA from three points\n";
             std::cout << "Test: " << live_cluster->get_center() << " " << live_cluster->get_pca_axis(0) << " " << live_cluster->get_pca_axis(1) << " " << live_cluster->get_pca_axis(2) << std::endl;
 
             geo_point_t p2(0,0,0);

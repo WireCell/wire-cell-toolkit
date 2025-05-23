@@ -193,7 +193,7 @@ public:
                 af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
             }
 
-            auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, m_dv);
+            // auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, m_dv);
             auto dpc = std::make_shared<DynamicPointCloud>(wpid_params);
             // auto dpcl = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
             double extending_dis = 50 * units::cm;

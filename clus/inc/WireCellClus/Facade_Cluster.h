@@ -421,9 +421,6 @@ namespace WireCell::Clus::Facade {
         geo_vector_t get_pca_axis(int axis) const;
         double get_pca_value(int axis) const;
 
-        // This will forcibly replace the PCA with one made from the given points.
-        void force_pca(const std::vector<geo_point_t>& points);
-
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
         // https://github.com/HaiwangYu/learn-cpp/blob/main/test-multimap.cxx
