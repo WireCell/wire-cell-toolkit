@@ -195,6 +195,7 @@ void Cluster::clear_cache() const {
         m_pca_values[i] = 0;
     }
     
+    m_graphs.clear();
     m_spgraphs.clear();
 
     // Clear the new cached wpid data
