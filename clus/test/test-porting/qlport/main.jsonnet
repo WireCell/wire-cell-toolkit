@@ -323,7 +323,25 @@ local ub = {
                     pcname: "3d",           // Which scope to use
                     coords: ["x", "y", "z"],    // Coordinates to use
                     individual: true            // Output individual APA/Face
-                }
+                },
+                {
+                    name: "retiled",         // Name of the bee points set
+                    grouping: "shadow",
+                    detector: "uboone",         // Detector name
+                    algorithm: "retiled",    // Algorithm identifier
+                    pcname: "3d",           // Which scope to use
+                    coords: ["x", "y", "z"],    // Coordinates to use
+                    individual: true            // Output individual APA/Face
+                },
+                {
+                    name: "examine",         // Name of the bee points set
+                    visitor: "ClusteringExamineBundles",
+                    detector: "uboone",         // Detector name
+                    algorithm: "examine",    // Algorithm identifier
+                    pcname: "3d",           // Which scope to use
+                    coords: ["x", "y", "z"],    // Coordinates to use
+                    individual: true            // Output individual APA/Face
+                },
             ],
             pipeline: wc.tns(cm_pipeline),
             cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting

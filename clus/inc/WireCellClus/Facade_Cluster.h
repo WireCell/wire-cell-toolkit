@@ -303,9 +303,6 @@ namespace WireCell::Clus::Facade {
         /// to be more in line with the overall point cloud.
         void adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const;
         
-        /// WCP: Construct_skeleton
-        bool construct_skeleton(IDetectorVolumes::pointer dv, 
-                                Clus::IPCTransformSet::pointer pcts, const bool use_ctpc);
 
         /// section for 2D PC
 
@@ -370,56 +367,56 @@ namespace WireCell::Clus::Facade {
         bool sanity(Log::logptr_t log = nullptr) const;
 
 
+        ///
+        /// Graphs
+        ///
+        /// A few graph-related methods are provided.  They are lazy and cache
+        /// graphs and results internally on the cluster.  Several kinds of the
+        /// same type of graph are possible (basic, ctpc, overclustering
+        /// protected, etc).
+        ///
+        using graph_type = Graphs::Weighted::Graph;        
 
-        void Create_graph(IDetectorVolumes::pointer dv, 
-                          IPCTransformSet::pointer pcts, const bool use_ctpc = true) const;
-
-        /// @attention some distance-based cuts
-        void Connect_graph( 
-            IDetectorVolumes::pointer dv, 
-            IPCTransformSet::pointer pcts,
-            const bool use_ctpc) const;
-        void Connect_graph() const;
-        void Connect_graph_overclustering_protection(
-            const IDetectorVolumes::pointer dv,
-            IPCTransformSet::pointer pcts) const;
-        std::vector<int> examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
+        ///
+        /// Blob-level connected components
+        /// 
+        /// Return a connected components array that is aligned with the blob
+        /// node children list.  Each element gives a "group number" identifying
+        /// a connected subgraph in which the corresponding blob resides.
+        /// Connection is through the "overclustering protection" point graph.
+        /// The special group number -1 indicates the corresponding blob does
+        /// not contribute points to the graph.
+        ///
+        /// This method used to be called "examine_graph()".
+        ///
+        /// Construct and cache graph
+        std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
+        /// Actual algorithm on existing graph.
+        std::vector<int> connected_blobs(const graph_type& graph) const;
         
         ///
         /// Shortest path handling.
         ///
         // Get the "basic" form for shortest paths calculation.
-        const Graphs::Weighted::ShortestPathsGraph& 
+        const Graphs::Weighted::GraphAlgorithms& 
         shortest_paths_graph() const;
         // Get the "ctpc" form for shortest paths calculation.
-        const Graphs::Weighted::ShortestPathsGraph& 
+        const Graphs::Weighted::GraphAlgorithms& 
         shortest_paths_graph(IDetectorVolumes::pointer dv, 
                              IPCTransformSet::pointer pcts) const;
         // Kitchen sink to select which type based on use_ctps value.  When
         // false, dv and pcts are ignored.
-        const Graphs::Weighted::ShortestPathsGraph& 
+        const Graphs::Weighted::GraphAlgorithms& 
         shortest_paths_graph(IDetectorVolumes::pointer dv, 
                              IPCTransformSet::pointer pcts,
                              bool use_ctpc) const;
 
 
-        ///
-        void dijkstra_shortest_paths(IDetectorVolumes::pointer dv, 
-                                     IPCTransformSet::pointer pcts, 
-                                     const size_t pt_idx, const bool use_ctpc = true) const;
+        // Return 3D points for given indices in the 3d PC.
+        std::vector<geo_point_t> indices_to_points(const std::vector<size_t>& path_indices) const;
 
-        ///
-        void cal_shortest_path(const size_t dest_wcp_index) const;
-
-
-        ///
-        inline const std::list<size_t>& get_path_wcps() const { return m_path_wcps; }
-        inline const std::list<const Blob*>& get_path_blobs() const { return m_path_mcells; }
-        // In class declaration: 
-        std::vector<geo_point_t> indices_to_points(const std::list<size_t>& path_indices) const;
         // void organize_points_path_vec(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
         // void organize_path_points(std::vector<geo_point_t>& path_points, double low_dis_limit) const;
-
 
         // TODO: relying on scoped_view to do the caching?
         using wire_indices_t = std::vector<std::vector<int_t>>;
@@ -538,21 +535,18 @@ namespace WireCell::Clus::Facade {
         mutable geo_vector_t m_pca_axis[3];
         mutable double m_pca_values[3];
 
-        // FIXME: this needs to go away.
-        mutable Graphs::Weighted::GraphPtr m_graph;
+        // A cache of named graphs held by unique_ptr.  For now, this cache is
+        // internal to Cluster.
+        using graph_ptr = std::unique_ptr<graph_type>;
+        const graph_type* get_graph(const std::string& name) const;
+        const graph_type* set_graph(const std::string& name, graph_ptr&& gptr) const;
+        mutable std::map<std::string, graph_ptr> m_graphs;
 
         // Cluster makes its own graphs for the purpose of calculating shortest
         // paths.  This is the lazy cache.  For now, the key string is either
         // "basic" or "ctpc" to distinguish the type of graph.
-        mutable std::map<std::string, Graphs::Weighted::ShortestPathsGraph> m_spgraphs;
+        mutable std::map<std::string, Graphs::Weighted::GraphAlgorithms> m_spgraphs;
 
-
-        // FIXME: these go away in favor of ShortestPaths*
-        mutable std::vector<size_t> m_parents;
-        mutable std::vector<int> m_distances;
-        mutable int m_source_pt_index{-1};
-        mutable std::list<size_t> m_path_wcps;
-        mutable std::list<const Blob*> m_path_mcells;
 
         mutable std::vector<int> m_cached_wpid;
 

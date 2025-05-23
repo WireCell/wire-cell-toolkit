@@ -1,0 +1,22 @@
+#+title: Notes on algorithms used in Wire-Cell Toolkit "clus" subpackage
+
+* Dijkstra's shortest paths
+
+This finds the shortest between a given seed vertex and all vertices in a
+connected graph.  It returns a set of identifiers of "predecessor vertices".
+Eg, a vector of boost graph vertex descriptors.  This set is ordered and aligned
+to the ordered collection of graph vertices.  One recursively "walk" the
+predecessors collection to find the path to a given vertex.  A "distances"
+collection collects the distances of steps in this walk.
+
+** Determinism
+
+There is no randomness in the results of Dijkstra's but results are weakly
+deterministic.  Two sources of determinism should be considered.  First, tie
+breaking in the distance comparisons is required and the chosen strategy may
+lead to result changes due to otherwise unrelated code changes.  Depending on
+tie breaks, different paths with identical distance may be chosen as "shortest".
+Second, result ordering is subject to the ordering of the graph vertices.
+Graphs with unstable vertex identifiers will have unstable result ordering.
+With stable vertex identifiers, a change of vertex collection can lead to
+different ordering of otherwise same results.

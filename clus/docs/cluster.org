@@ -1,0 +1,62 @@
+#+title: Wire-Cell Toolkit Cluster facade
+
+* Overview
+
+The ~WireCell::Clus::Facade::Cluster~ class provides a ~NaryFacade~ over nodes in a
+PC tree representing clusters of blobs of points and which are children nodes of
+the nodes with ~Grouping~ facade.
+
+The ~Cluster~ class provides:
+
+- Specific functionality on top of data in the PC tree.
+- Caching of results of that functionality for optimization.
+- A storage context for certain transient data useful in the context of MABC.
+
+
+See also [[file:mabc.org][MultiAlgBlobClustering (MABC)]] doc.
+
+* Graphs
+
+This summarizes the graphs in use in ~clus/~.
+
+** Shortest paths graphs
+
+A cluster has connectivity that is represented by a (boost) graph as constructed
+by one of several possible graph makers.  Various graph operations are supported.
+
+The following graph types exist:
+
+- basic :: This graph type is used to calcualte shortest paths between two
+  vertices (each representing a blob).  It is used for shortest path
+  calculations.
+
+- ctpc :: This is a variant of *basic* which has extra connectivity applied that
+  considers the "wire-time point cloud" (ctpc - where "c" stood for "channel" in
+  the microboone days).  It is used for shortest path calculations.
+
+
+The operations:
+
+- shortest paths :: A (singular) shortest path depends on the graph type (*basic*
+  vs *ctpc*) and a source and target vertex.  The calculation has three
+  parts.  1. Construct either a *basic* or *ctpc* graph.  2. Apply Dijkstras
+  shortest paths (plural) algorithm from a given source vertex to find shortest
+  paths to all other vertices.  This is an expensive operation.  3. Find the
+  singular path from the source to a specific destination vertex.  This is a
+  cheaper but not free calculation.  Due to the calculation costs a series of
+  caches are applied.  
+
+- connected components (CC) :: An *overcluster* graph is calculated and the
+  standard connected components operation is applied.  This returns a CC array
+  aligned with the collection of vertices and giving a "component" or "group"
+  number in which each vertex is found.
+
+  
+** CC graphs
+
+- overcluster :: This is a variant of *basic* that also includes *ctpc* information
+  and includes "protection" against "over clustering".  It is used for
+  "connected components" calculations.
+
+** temp graphs
+** connectivity graphs

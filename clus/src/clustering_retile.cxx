@@ -96,7 +96,10 @@ private:
 
 
     // Step 2. Modify activity to suit.
-    void hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
+    void hack_activity(const Cluster& cluster,
+                       std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures,
+                       const std::vector<size_t>& path_wcps,
+                       int apa, int face) const;
 
     // Step 3. Form IBlobs from activities.
     std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
@@ -148,6 +151,18 @@ private:
         const std::string& aname = "isolated", 
         const std::string& pname = "perblob") const;
         
+    // Wrap up getting the shortest path for the cluster high/low points.
+    const std::vector<size_t>& cluster_path_wcps(const Cluster* cluster) const {
+        // find the highest and lowest points
+        std::pair<geo_point_t, geo_point_t> pair_points = cluster->get_highest_lowest_points();
+        // std::cerr << "retile: hilo: " << pair_points.first << " " << pair_points.second << std::endl;
+        int high_idx = cluster->get_closest_point_index(pair_points.first);
+        int low_idx = cluster->get_closest_point_index(pair_points.second);
+        // cluster->dijkstra_shortest_paths(m_dv, m_pcts, high_idx, false);
+        // cluster->cal_shortest_path(low_idx);
+        return cluster->shortest_paths_graph().path(high_idx, low_idx);
+
+    }
 };
 
 
@@ -311,7 +326,11 @@ void ClusteringRetile::get_activity(const Cluster& cluster, std::map<std::pair<i
 
 
 // Step 2. Modify activity to suit.
-void ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
+void ClusteringRetile::hack_activity(
+    const Cluster& cluster,
+    std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures,
+    const std::vector<size_t>& path_wcps,
+    int apa, int face) const
 {
 
     // for (auto it = map_slices_measures.begin(); it!= map_slices_measures.end(); it++){
@@ -325,13 +344,14 @@ void ClusteringRetile::hack_activity(const Cluster& cluster, std::map<std::pair<
 
     const double low_dis_limit = 0.3 * units::cm;
     // Get path points
-    auto path_wcps = cluster.get_path_wcps();
+    // auto path_wcps = cluster.get_path_wcps();
     std::vector<std::pair<geo_point_t, WirePlaneId>> path_pts;
 
     // Convert list points to vector with interpolation
     for (const auto& wcp : path_wcps) {
         geo_point_t p= cluster.point3d_raw(wcp); // index ... // raw data points ...
         auto wpid_p = cluster.wire_plane_id(wcp); // wpid ...
+        // std::cerr << "retile: path:" << wcp << " p:" << p << " wpid:" << wpid_p << "\n";
         if (path_pts.empty()) {
             path_pts.push_back(std::make_pair(p, wpid_p));
         } else {
@@ -503,9 +523,15 @@ std::vector<IBlob::pointer> ClusteringRetile::make_iblobs(std::map<std::pair<int
         auto bshapes = WRG::make_blobs(coords, activities);
 
     
-        //std::cout << "abc: " << bshapes.size() << " " << activities.size() << " " << std::endl;
-        // for (const auto& activity : activities) {
-        //     std::cout << activity.as_string() << std::endl;
+        // {
+        //     std::cerr << "abc: "
+        //               << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+        //               << bshapes.size() << " " << activities.size() << " " << std::endl;
+        //     for (const auto& activity : activities) {
+        //         std::cerr <<"act: "
+        //                   << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+        //                   << activity.as_string() << std::endl;
+        //     }
         // }
 
         // Convert RayGrid blob shapes into IBlobs 
@@ -514,6 +540,17 @@ std::vector<IBlob::pointer> ClusteringRetile::make_iblobs(std::map<std::pair<int
     
         for (const auto& bshape : bshapes) {
             IFrame::pointer sframe = nullptr;
+
+            // {
+            //     std::cerr << "blob: "
+            //               << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+            //               << bshape << std::endl;
+            //     for (const auto& strip : bshape.strips()) {
+            //         std::cerr << "strip: "
+            //                   << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+            //                   << strip << std::endl;
+            //     }
+            // }
 
             // 500 ns should be passed from outside?
             ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*500*units::ns, (it->first.second - it->first.first)*500*units::ns);
@@ -526,6 +563,7 @@ std::vector<IBlob::pointer> ClusteringRetile::make_iblobs(std::map<std::pair<int
             // ISlice info.  Are we losing anything important not including that
             // info?
             ret.push_back(iblob);
+
         }
     }
 
@@ -731,18 +769,13 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
                     // make a shadow cluster, insert ID ...
                     auto& shad_cluster = shadow.make_child();
                     shad_cluster.set_ident(cluster->ident());                    
-                    // std::cout <<"Test: bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
+                    // std::cerr <<"retile: bcd: " << cluster->ident() << " " << shad_cluster.ident() << std::endl;
 
                     if (id==-1) shadow_orig_cluster = &shad_cluster;
                     else shadow_splits[id] = &shad_cluster;
 
-                    // find the highest and lowest points
-                    std::pair<geo_point_t, geo_point_t> pair_points = cluster->get_highest_lowest_points();
-                    //std::cout << pair_points.first << " " << pair_points.second << std::endl;
-                    int high_idx = cluster->get_closest_point_index(pair_points.first);
-                    int low_idx = cluster->get_closest_point_index(pair_points.second);
-                    cluster->dijkstra_shortest_paths(m_dv, m_pcts, high_idx, false);
-                    cluster->cal_shortest_path(low_idx);
+                    // Needed in hack_activity() but call it here to avoid call overhead.
+                    const auto& path_wcps = cluster_path_wcps(cluster);
 
                     auto wpids = cluster->wpids_blob();
                     std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
@@ -757,7 +790,7 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
                         get_activity(*cluster, map_slices_measures, apa, face);
 
                         // Step 2.
-                        hack_activity(*cluster, map_slices_measures, apa, face); // may need more args
+                        hack_activity(*cluster, map_slices_measures, path_wcps, apa, face); // may need more args
 
                         // Check for time slices with same start and end
                         // for (const auto& [time_range, measures] : map_slices_measures) {
@@ -791,7 +824,10 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
                             auto [pc3d, aux] = m_samplers.at(apa).at(face)->sample_blob(iblob, bind);
                             
                             // how to sample points ... 
-                            // std::cout << pc3d.size() << " " << aux.size() << " " <<  pc3d.get("x")->size_major() << " " << pc3d.get("y")->size_major() << " " << pc3d.get("z")->size_major() << std::endl;
+                            // std::cerr << "retile: " << pc3d.size() << " " << aux.size()
+                            //           << " " << pc3d.get("x")->size_major()
+                            //           << " " << pc3d.get("y")->size_major()
+                            //           << " " << pc3d.get("z")->size_major() << std::endl;
                             // const auto& arr_x1 = pc3d.get("x")->elements<Point::coordinate_t>();
 
                             /// These seem unused and bring in yet more copy-paste code
@@ -826,8 +862,11 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
                                 pcs.emplace("scalar", std::move(scalar_ds));
 
                                 shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
-                            }else{
-                                SPDLOG_WARN("blob {} has no points", iblob->ident());
+
+                                // SPDLOG_WARN("retile: blob {} has {} points", iblob->ident(), pc3d.size());
+                            }
+                            else{
+                                SPDLOG_WARN("retile: blob {} has no points", iblob->ident());
                             }
                         }
                         int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;

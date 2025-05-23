@@ -141,6 +141,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.detector = get<std::string>(bps, "detector", "uboone");
             bpc.algorithm = get<std::string>(bps, "algorithm", bpc.name);
             bpc.pcname = get<std::string>(bps, "pcname", "3d");
+            bpc.grouping = get<std::string>(bps, "grouping", "live");
+            bpc.visitor = get<std::string>(bps, "visitor", "");
             
             // Get coordinates
             if (bps.isMember("coords")) {
@@ -741,6 +743,16 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         for (auto* grouping : ensemble.children()) {
             grouping->enumerate_idents(m_clusters_id_order);
         }
+
+        for (const auto& config : m_bee_points_configs) {
+            if (config.name == "img") continue;
+            if (config.visitor != cmeth.name) continue;
+            auto gs = ensemble.with_name(config.grouping);
+            if (gs.empty()) {
+                continue;
+            }
+            fill_bee_points(config.name, *gs[0]);
+        }
     }
 
     //
@@ -754,7 +766,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // Fill all configured bee points sets
     for (const auto& config : m_bee_points_configs) {
         if(config.name == "img") continue;
-        auto gs = ensemble.with_name("live");
+
+        auto gs = ensemble.with_name(config.grouping);
         if (gs.empty()) {
             continue;
         }

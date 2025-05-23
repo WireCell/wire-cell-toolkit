@@ -34,10 +34,10 @@ Weighted::ShortestPaths::path(size_t destination) const
     return path;
 }
 
-Weighted::ShortestPathsGraph::ShortestPathsGraph(GraphPtr&& graph) : m_graph(std::move(graph)) {}
+Weighted::GraphAlgorithms::GraphAlgorithms(GraphPtr&& graph) : m_graph(std::move(graph)) {}
 
 const Weighted::ShortestPaths&
-Weighted::ShortestPathsGraph::paths(size_t source) const
+Weighted::GraphAlgorithms::paths(size_t source) const
 {
     auto it = m_sps.find(source);
     if (it != m_sps.end()) {
@@ -46,7 +46,7 @@ Weighted::ShortestPathsGraph::paths(size_t source) const
 
     const size_t nvtx = boost::num_vertices(*m_graph);
     std::vector<size_t> predecessors(nvtx); 
-    std::vector<double> distances(nvtx); // ignore
+    std::vector<Weighted::dijkstra_distance_type> distances(nvtx); // ignore
 
     const auto& param = weight_map(get(boost::edge_weight, *m_graph))
 				   .predecessor_map(&predecessors[0])
@@ -54,12 +54,24 @@ Weighted::ShortestPathsGraph::paths(size_t source) const
     boost::dijkstra_shortest_paths(*m_graph, source, param);
 
     auto got = m_sps.emplace(source, Weighted::ShortestPaths(source, predecessors));
+
+    // {
+    //     const auto& p = predecessors;
+    //     const auto& d = distances;
+    //     const size_t n = nvtx;
+
+    //     for (size_t ind = 0; ind<n; ++ind) {
+    //         std::cerr << "dijk: [" << ind << "/" << n << "] " << " s:" << source << " p:" << p[ind] << " d:" << d[ind] << "\n";
+    //     }
+    // }
+
     return got.first->second;
 }
 
 const std::vector<size_t>&
-Weighted::ShortestPathsGraph::path(size_t source, size_t destination) const
+Weighted::GraphAlgorithms::path(size_t source, size_t destination) const
 {
     return paths(source).path(destination);
 }
+
 

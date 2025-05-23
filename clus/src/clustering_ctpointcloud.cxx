@@ -231,14 +231,16 @@ static void clustering_ctpointcloud(
             auto start_wcpoint_idx = live_cluster->get_closest_point_index(points.first);
             auto end_wcpoint_idx = live_cluster->get_closest_point_index(points.second);
 
-            live_cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, true);
-            live_cluster->cal_shortest_path(end_wcpoint_idx);
+            // live_cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, true);
+            // live_cluster->cal_shortest_path(end_wcpoint_idx);
+            // auto indices = live_cluster->get_path_wcps();
 
-            auto indices = live_cluster->get_path_wcps();
+            const auto& indices = live_cluster->shortest_paths_graph(dv, pcts, true).path(start_wcpoint_idx, end_wcpoint_idx);
+
             auto points2 = live_cluster->indices_to_points(indices);
             std::cout << "Test shortest path: " << points2.size() << " " << points2.at(0) << " " << points2.at(points2.size()-1) << std::endl;
 
-            live_cluster->examine_graph(dv, pcts);
+            live_cluster->connected_blobs(dv, pcts);
         }
     }
 }

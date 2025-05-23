@@ -16,6 +16,53 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+// bool Cluster::construct_skeleton(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc)
+// {
+
+static std::pair<size_t, size_t> skeleton_points_hilo(const Cluster& cluster)
+{
+    geo_point_t highest_wcp = cluster.point3d(0);
+    geo_point_t lowest_wcp = cluster.point3d(0);
+    size_t highest_index = 0;
+    size_t lowest_index = 0;
+
+    geo_point_t main_dir = cluster.get_pca_axis(0);
+    main_dir = main_dir.norm();
+    geo_point_t center = cluster.get_center();
+    geo_point_t temp_pt(highest_wcp.x() - center.x(), highest_wcp.y() - center.y(), highest_wcp.z() - center.z());
+    double highest_value = temp_pt.dot(main_dir);
+    double lowest_value = highest_value;
+
+    for (int i = 1; i < cluster.npoints(); i++) {
+        temp_pt.set(cluster.point3d(i).x() - center.x(),
+                    cluster.point3d(i).y() - center.y(),
+                    cluster.point3d(i).z() - center.z());
+        double value = temp_pt.dot(main_dir);
+        if (value > highest_value) {
+            highest_value = value;
+            highest_wcp = cluster.point3d(i);
+            highest_index = i;
+        }
+        else if (value < lowest_value) {
+            lowest_value = value;
+            lowest_wcp = cluster.point3d(i);
+            lowest_index = i;
+        }
+    }
+    return std::make_pair(highest_index, lowest_index);
+}
+
+static std::vector<size_t> get_path_wcps(const Cluster& cluster, 
+                                         IDetectorVolumes::pointer dv,
+                                         IPCTransformSet::pointer pcts,
+                                         bool use_ctpc)
+{
+    auto [hi, lo] = skeleton_points_hilo(cluster);
+    return cluster.shortest_paths_graph(dv, pcts, use_ctpc).path(hi, lo);
+}
+
+
+
 static void clustering_deghost(Grouping& live_grouping,
                                IDetectorVolumes::pointer dv,
                                IPCTransformSet::pointer pcts,
@@ -159,9 +206,9 @@ static void clustering_deghost(
             global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
-                live_clusters.at(i)->construct_skeleton(dv, pcts, use_ctpc);
+                const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc);
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
-                global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
+                global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, path_wcps, true));
             }
             else {
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 0);
@@ -683,9 +730,9 @@ static void clustering_deghost(
                     // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                     global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                        live_clusters.at(i)->construct_skeleton(dv, pcts, use_ctpc);
+                        const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc);
                         // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
-                        global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params,true ));
+                        global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, path_wcps, true ));
                     }
                 }
             }
@@ -694,9 +741,9 @@ static void clustering_deghost(
                 // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                 global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                    live_clusters.at(i)->construct_skeleton(dv, pcts, use_ctpc);
+                    const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc);
                     // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
-                    global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, true));
+                    global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, path_wcps, true));
                 }
             }
         }

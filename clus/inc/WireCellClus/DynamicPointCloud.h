@@ -91,7 +91,9 @@ namespace WireCell::Clus::Facade {
 
     std::vector<DynamicPointCloud::DPCPoint> make_points_cluster_skeleton(
         const Cluster *cluster, const IDetectorVolumes::pointer dv,
-        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false,
+        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
+        const std::vector<size_t>& path_wcps,
+        bool flag_wrap = false,
         const double step = 0.6 * units::cm);
 
     /// @brief add points from p_test along dir with range and step

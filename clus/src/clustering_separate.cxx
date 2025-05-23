@@ -1223,9 +1223,11 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
         }
     }
   
-    cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, use_ctpc);
-    cluster->cal_shortest_path(end_wcpoint_idx);
-    const auto& path_wcps = cluster->get_path_wcps();
+    // cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, use_ctpc);
+    // cluster->cal_shortest_path(end_wcpoint_idx);
+    // const auto& path_wcps = cluster->get_path_wcps();
+    const auto& path_wcps = cluster->shortest_paths_graph(dv, pcts, use_ctpc).path(start_wcpoint_idx, end_wcpoint_idx);
+
 
     std::vector<bool> flag_u_pts, flag_v_pts, flag_w_pts;
     std::vector<bool> flag1_u_pts, flag1_v_pts, flag1_w_pts;

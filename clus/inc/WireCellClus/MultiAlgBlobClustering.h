@@ -46,10 +46,13 @@ namespace WireCell::Clus {
         
         // Replace the existing bee points structures with a more flexible approach
         struct BeePointsConfig {
-            std::string name;
-            std::string detector;
-            std::string algorithm;
-            std::string pcname;
+            // special name "img" dumps "live" before clustering
+            std::string name;   // bee type name
+            std::string detector;  // bee geom name
+            std::string algorithm; // bee alg name, defaults to type
+            std::string pcname;    // PC to take
+            std::string grouping;  // grouping to take (default to "live")
+            std::string visitor;   // if given, dump just after this visitor runs and any cluster ID enumeration
             std::vector<std::string> coords;
             bool individual;
         };

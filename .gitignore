@@ -88,3 +88,5 @@ spng
 .clangd
 junk*
 downloads
+tmp*
+

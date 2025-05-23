@@ -455,9 +455,12 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
 
 
 std::vector<DynamicPointCloud::DPCPoint>
-Clus::Facade::make_points_cluster_skeleton(const Cluster *cluster, const IDetectorVolumes::pointer dv,
-                             const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap,
-                             const double step)
+Clus::Facade::make_points_cluster_skeleton(
+    const Cluster *cluster, const IDetectorVolumes::pointer dv,
+    const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, 
+    const std::vector<size_t>& path_wcps,
+    bool flag_wrap,
+    const double step)
 {
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
 
@@ -467,7 +470,7 @@ Clus::Facade::make_points_cluster_skeleton(const Cluster *cluster, const IDetect
     }
 
     // Estimate capacity to avoid reallocations
-    const std::list<size_t> &path_wcps = cluster->get_path_wcps();
+    // const auto& path_wcps = cluster->get_path_wcps();
     size_t estimated_capacity = path_wcps.size() * 2; // Rough estimate
     dpc_points.reserve(estimated_capacity);
 

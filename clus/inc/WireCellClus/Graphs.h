@@ -17,12 +17,26 @@ namespace WireCell::Clus::Graphs {
          * removal is NOT supported.
          */
 
+#define CLUS_FIXME              // eventually remove this, keeping new
+
+#ifdef CLUS_FIXME
+        // Define to switch back to the types used in WCP, which are "bad".
+        // See Graphs.cxx for use of this type.
+        using dijkstra_distance_type = int;
+#else
+        using dijkstra_distance_type = double;
+#endif
+
         using Graph = boost::adjacency_list<
+#ifdef CLUS_FIXME
+            boost::setS,        // vertices
+#else
             boost::vecS,        // vertices
+#endif
             boost::vecS,        // edges
             boost::undirectedS, // edge direction (none)
             boost::property<boost::vertex_index_t, size_t>,
-            boost::property<boost::edge_weight_t, double> 
+            boost::property<boost::edge_weight_t, float> 
             >;
     
         using GraphPtr = std::unique_ptr<Graph>;
@@ -46,15 +60,16 @@ namespace WireCell::Clus::Graphs {
             const std::vector<size_t>& path(size_t destination) const;
         };
 
-        // Embody all possible shortest paths between any two identified
-        // vertices of a given graph.
-        class ShortestPathsGraph {
+        // Bind some graph algorithms to a graph, with caching..
+        class GraphAlgorithms {
             GraphPtr m_graph;
 
             // Lazy calculate dijkstra shortest path results.
             mutable std::unordered_map<size_t, ShortestPaths> m_sps;
+            mutable std::vector<int> m_cc;
+
         public:
-            ShortestPathsGraph(GraphPtr&& graph);
+            GraphAlgorithms(GraphPtr&& graph);
         
             /// Return the intermediate result that gives access to the shortest
             /// paths from the source vertex all possible destination vertices.
@@ -63,7 +78,12 @@ namespace WireCell::Clus::Graphs {
             /// Return the unique vertices vertices along the shortest path from
             /// source vertex to destination vertex, inclusive.
             const std::vector<size_t>& path(size_t source, size_t destination) const;
+
+            /// Return a "CC" array giving connected component subgraphs.
+            const std::vector<int>& connected_components() const;
+
         };
+
     }
 
 }

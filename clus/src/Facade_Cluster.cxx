@@ -195,13 +195,7 @@ void Cluster::clear_cache() const {
         m_pca_values[i] = 0;
     }
     
-    // Reset graph and path finding data
-    m_graph.reset();
-    m_parents.clear();
-    m_distances.clear();
-    m_source_pt_index = -1;
-    m_path_wcps.clear();
-    m_path_mcells.clear();
+    m_spgraphs.clear();
 
     // Clear the new cached wpid data
     m_cached_wpid.clear();
@@ -627,63 +621,6 @@ void Cluster::adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const
     }
 
 
-}
-
-bool Cluster::construct_skeleton(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc)
-{
-    if (m_path_wcps.size() > 0) return false;
-    // Calc_PCA();
-
-    // WCP::WCPointCloud<double>& cloud = point_cloud->get_cloud();
-    // WCPointCloud<double>::WCPoint highest_wcp = cloud.pts[0];
-    // WCPointCloud<double>::WCPoint lowest_wcp = cloud.pts[0];
-    geo_point_t highest_wcp = point3d(0);
-    geo_point_t lowest_wcp = point3d(0);
-    int highest_index = 0;
-    int lowest_index = 0;
-
-    // geo_point_t main_dir(PCA_axis[0].x, PCA_axis[0].y, PCA_axis[0].z);
-    // main_dir.SetMag(1);
-    // TVector3 temp_pt(highest_wcp.x - center.x, highest_wcp.y - center.y, highest_wcp.z - center.z);
-    // double highest_value = temp_pt.Dot(main_dir);
-    // double lowest_value = highest_value;
-    geo_point_t main_dir = get_pca_axis(0);
-    main_dir = main_dir.norm();
-    geo_point_t center = get_center();
-    geo_point_t temp_pt(highest_wcp.x() - center.x(), highest_wcp.y() - center.y(), highest_wcp.z() - center.z());
-    double highest_value = temp_pt.dot(main_dir);
-    double lowest_value = highest_value;
-
-    // for (size_t i = 1; i < cloud.pts.size(); i++) {
-    //     temp_pt.SetXYZ(cloud.pts[i].x - center.x, cloud.pts[i].y - center.y, cloud.pts[i].z - center.z);
-    //     double value = temp_pt.Dot(main_dir);
-    //     if (value > highest_value) {
-    //         highest_value = value;
-    //         highest_wcp = cloud.pts[i];
-    //     }
-    //     else if (value < lowest_value) {
-    //         lowest_value = value;
-    //         lowest_wcp = cloud.pts[i];
-    //     }
-    // }
-    for (int i = 1; i < npoints(); i++) {
-        temp_pt.set(point3d(i).x() - center.x(), point3d(i).y() - center.y(), point3d(i).z() - center.z());
-        double value = temp_pt.dot(main_dir);
-        if (value > highest_value) {
-            highest_value = value;
-            highest_wcp = point3d(i);
-            highest_index = i;
-        }
-        else if (value < lowest_value) {
-            lowest_value = value;
-            lowest_wcp = point3d(i);
-            lowest_index = i;
-        }
-    }
-
-    dijkstra_shortest_paths(dv, pcts, highest_index, use_ctpc);
-    cal_shortest_path(lowest_index);
-    return true;
 }
 
 const Cluster::sv2d_t& Cluster::sv2d(const int apa, const int face, const size_t plane) const
@@ -1853,39 +1790,41 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 
 
 
-void Cluster::Create_graph(IDetectorVolumes::pointer dv,
-                           Clus::IPCTransformSet::pointer pcts, 
-                           const bool use_ctpc) const
+const Cluster::graph_type* Cluster::set_graph(const std::string& name, Cluster::graph_ptr&& gptr) const
 {
-    if (m_graph != nullptr) return;
+    const auto* ret = gptr.get();
+    m_graphs[name] = std::move(gptr);
+    return ret;
+}
 
-    if (use_ctpc) {
-        m_graph = make_graph_ctpc(*this, dv, pcts);
+const Cluster::graph_type* Cluster::get_graph(const std::string& name) const 
+{
+    auto it = m_graphs.find(name);
+    if (it == m_graphs.end()) {
+        return nullptr;
     }
-    else {
-        m_graph = make_graph_basic(*this);
-    }
+    return it->second.get();
 }
 
 
 
-
-// In Facade_Cluster.cxx
-std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const 
+// ne' examine_graph
+std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const 
 {
-    m_graph = make_graph_overclustering_protection(*this, dv, pcts);
+    const std::string graph_name = "connected_blobs";
+    const auto* graph = get_graph(graph_name);
+    if (!graph) {
+        graph = set_graph(graph_name, make_graph_overclustering_protection(*this, dv, pcts));
+    }
+    return connected_blobs(*graph);
+}
 
+std::vector<int> Cluster::connected_blobs(const graph_type& graph) const
+{
     // Find connected components
-    std::vector<int> component(num_vertices(*m_graph));
+    std::vector<int> component(num_vertices(graph));
     // const int num_components =
-    connected_components(*m_graph, &component[0]);
-
-    // std::cout << "Test: num components " << num_components << " " << kd_blobs().size() << std::endl;
-
-    // If only one component, no need for mapping
-    // if (num_components <= 1) {
-    //     return std::vector<int>();
-    // }
+    connected_components(graph, &component[0]);
 
     // Create mapping from blob indices to component groups
     std::vector<int> b2groupid(nchildren(), -1);
@@ -1901,66 +1840,8 @@ std::vector<int> Cluster::examine_graph(IDetectorVolumes::pointer dv, IPCTransfo
     return b2groupid;
 }
 
-void Cluster::dijkstra_shortest_paths(
-    IDetectorVolumes::pointer dv,
-    IPCTransformSet::pointer pcts,
-    const size_t pt_idx, const bool use_ctpc) const
-{
-    if (m_graph == nullptr) {
-        Create_graph(dv, pcts, use_ctpc);
-    }
 
-    if ((int)pt_idx == m_source_pt_index) return;
-    m_source_pt_index = pt_idx;
-    m_parents.resize(num_vertices(*m_graph));
-    m_distances.resize(num_vertices(*m_graph));
-
-    // vertex_descriptor v0 = vertex(pt_idx, *m_graph);
-    // making a param object
-
-    // BUG: this begins a conflation of vertex a property (index/ident) with a
-    // vertex descriptor.
-    const auto& param = weight_map(get(boost::edge_weight, *m_graph))
-				   .predecessor_map(&m_parents[0])
-				   .distance_map(&m_distances[0]);
-    boost::dijkstra_shortest_paths(*m_graph, pt_idx, param);
-}
-
-
-
-void Cluster::cal_shortest_path(const size_t dest_wcp_index) const
-{
-    m_path_wcps.clear();
-    m_path_mcells.clear();
-
-    int prev_i = -1;
-    for (int i = dest_wcp_index; i != m_source_pt_index; i = m_parents[i])
-    {
-        const auto* mcell = blob_with_point(i);
-        if (m_path_wcps.size() == 0)
-        {
-            m_path_wcps.push_front(i);
-            m_path_mcells.push_front(mcell);
-        }
-        else
-        {
-            m_path_wcps.push_front(i);
-            if (mcell != m_path_mcells.front())
-                m_path_mcells.push_front(mcell);
-        }
-        if (i == prev_i) {
-            break;
-        }
-        prev_i = i;
-    }
-    auto* src_mcell = blob_with_point(m_source_pt_index);
-    m_path_wcps.push_front(m_source_pt_index);
-    if (src_mcell != m_path_mcells.front()) {
-        m_path_mcells.push_front(src_mcell);
-    }
-}
-
-std::vector<geo_point_t> Cluster::indices_to_points(const std::list<size_t>& path_indices) const 
+std::vector<geo_point_t> Cluster::indices_to_points(const std::vector<size_t>& path_indices) const 
 {
     std::vector<geo_point_t> points;
     points.reserve(path_indices.size());
@@ -2621,18 +2502,18 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 
 
 
-const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph() const
+const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph() const
 {
     const char* name = "basic";
     auto it = m_spgraphs.find(name);
     if (it != m_spgraphs.end()) {
         return it->second;
     }
-    auto got = m_spgraphs.emplace(name, Weighted::ShortestPathsGraph(make_graph_basic(*this)));
+    auto got = m_spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_basic(*this)));
     return got.first->second;
 }
 
-const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
+const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
                                                                       IPCTransformSet::pointer pcts) const
 {
     const char* name = "ctpc";
@@ -2640,11 +2521,11 @@ const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph(IDetec
     if (it != m_spgraphs.end()) {
         return it->second;
     }
-    auto got = m_spgraphs.emplace(name, Weighted::ShortestPathsGraph(make_graph_ctpc(*this, dv, pcts)));
+    auto got = m_spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_ctpc(*this, dv, pcts)));
     return got.first->second;
 }
 
-const Weighted::ShortestPathsGraph& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
+const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
                                                                       IPCTransformSet::pointer pcts,
                                                                       bool use_ctpc) const
 {
