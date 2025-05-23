@@ -39,13 +39,9 @@ namespace WireCell::Clus::Facade {
         virtual ~Cluster() {}
 
         // return raw pc information ...
-        const std::string& get_pc_name_raw() const {return scope_3d_raw.pcname;}
-        const std::vector<std::string>& get_coords_raw() const {return scope_3d_raw.coords;}
         void set_default_scope(const Tree::Scope& scope);
         const Tree::Scope& get_default_scope() const {return m_default_scope;}
         const Tree::Scope& get_raw_scope() const {return scope_3d_raw;}
-        const std::string& get_pc_name() const {return m_default_scope.pcname;}
-        const std::vector<std::string>& get_coords() const {return m_default_scope.coords;}
 
         // set, get scope filter ...
         void set_scope_filter(const Tree::Scope& scope, bool flag=true);

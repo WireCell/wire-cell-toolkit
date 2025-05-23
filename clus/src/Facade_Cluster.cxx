@@ -1730,7 +1730,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         const auto* tblob = tnode->value.facade<Blob>();
         if (tblob != sblob) {
             sblob = tblob;
-            spoints = sblob->points(get_pc_name(), get_coords());
+            spoints = sblob->points(get_default_scope().pcname, get_default_scope().coords);
         }
 
         if (minind >= spoints.size()) {
@@ -1952,11 +1952,14 @@ Cluster::PCA& Cluster::get_pca() const
         return *pcaptr;
     }
 
+    const auto& pcname = get_default_scope().pcname;
+    const auto& coords = get_default_scope().coords;
+
     pcaptr = std::make_unique<PCA>();
     pcaptr->center.set(0, 0, 0);
     int nsum = 0;
     for (const Blob* blob : children()) {
-        for (const geo_point_t& p : blob->points(get_pc_name(), get_coords())) {
+        for (const geo_point_t& p : blob->points(pcname, coords)) {
             pcaptr->center += p;
             nsum++;
         }
@@ -1981,7 +1984,7 @@ Cluster::PCA& Cluster::get_pca() const
         for (int j = i; j != 3; j++) {
             cov_matrix(i, j) = 0;
             for (const Blob* blob : children()) {
-                for (const geo_point_t& p : blob->points(get_pc_name(), get_coords())) {
+                for (const geo_point_t& p : blob->points(pcname, coords)) {
                     cov_matrix(i, j) += (p[i] - pcaptr->center[i]) * (p[j] - pcaptr->center[j]);
                 }
             }
@@ -2091,11 +2094,12 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
     double x_max = -1e9;
     double x_min = 1e9;
     auto& mcells = children();
-
+    const auto& pcname = get_default_scope().pcname;
+    const auto& coords = get_default_scope().coords;
 
     for (Blob* mcell : mcells) {
         /// TODO: no caching, could be slow
-        std::vector<geo_point_t> pts = mcell->points(get_pc_name(), get_coords());
+        std::vector<geo_point_t> pts = mcell->points(pcname, coords);
         for (size_t i = 0; i != pts.size(); i++) {
             if (pts.at(i).x() < low_limit) {
                 num_points[0]++;
@@ -2143,7 +2147,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
             groupids.insert(2);
             for (size_t idx=0; idx < mcells.size(); idx++) {
                 Blob *mcell = mcells.at(idx);
-                if (mcell->points(get_pc_name(), get_coords())[0].x() < low_limit) {
+                if (mcell->points(pcname, coords)[0].x() < low_limit) {
                     if (groupids.find(1) != groupids.end()) {
                         // cluster_1->AddCell(mcell, mcell->GetTimeSlice());
                         b2groupid[idx] = 1;
@@ -2153,7 +2157,7 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
                         b2groupid[idx] = 2;
                     }
                 }
-                else if (mcell->points(get_pc_name(), get_coords())[0].x() > high_limit) {
+                else if (mcell->points(pcname, coords)[0].x() > high_limit) {
                     if (groupids.find(3) != groupids.end()) {
                         // cluster_3->AddCell(mcell, mcell->GetTimeSlice());
                         b2groupid[idx] = 3;
