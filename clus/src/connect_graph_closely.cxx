@@ -14,10 +14,10 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
     // What follows used to be in Cluster::Establish_close_connected_graph().
     // It is/was called from examine_graph() and Create_graph().
 
-    using mcell_wire_wcps_map_t = std::map<const Facade::Blob*, std::map<int, std::set<int>>, Facade::blob_less_functor>;
+    using mcell_wire_wcps_map_t = std::map<const Facade::Blob*, std::map<int, std::set<int>>, Facade::BlobLess>;
     mcell_wire_wcps_map_t map_mcell_uindex_wcps, map_mcell_vindex_wcps, map_mcell_windex_wcps;
 
-    std::map<Facade::Blob*, std::set<int>, Facade::blob_less_functor> map_mcell_indices;
+    std::map<Facade::Blob*, std::set<int>, Facade::BlobLess> map_mcell_indices;
 
     const auto& points = cluster.points();
     const auto& winds = cluster.wire_indices();
@@ -197,7 +197,7 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
                     }
                 }
                 // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
-                std::vector<Facade::Cluster::BlobSet> vec_mcells_set;
+                std::vector<Facade::BlobSet> vec_mcells_set;
                 if (i + 1 < time_slices.size()) {
                     if (time_slices.at(i + 1) - time_slices.at(i) == 1*cluster.grouping()->get_nticks_per_slice().at(apa).at(face)) {
                         vec_mcells_set.push_back(cluster.time_blob_map().at(apa).at(face).at(time_slices.at(i + 1)));

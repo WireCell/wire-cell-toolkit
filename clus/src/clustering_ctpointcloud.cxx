@@ -217,7 +217,7 @@ static void clustering_ctpointcloud(
             points1.push_back(points.first);
             points1.push_back(points.second);
             points1.push_back(p);
-            live_cluster->Calc_PCA(points1);
+            // live_cluster->force_pca(points1);
             std::cout << "Test: " << live_cluster->get_center() << " " << live_cluster->get_pca_axis(0) << " " << live_cluster->get_pca_axis(1) << " " << live_cluster->get_pca_axis(2) << std::endl;
 
             geo_point_t p2(0,0,0);

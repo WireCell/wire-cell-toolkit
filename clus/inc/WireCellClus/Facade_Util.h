@@ -55,10 +55,13 @@ namespace WireCell::Clus::Facade {
         }
 
     protected:
-        /// Facade cache management has three simple rules:
+        /// Facade cache management has a few simple rules, some optional:
         ///
-        /// Cache rule 1: The SelfType may call this to access a full and const cache.
-        const CacheType& cache() const
+        /// Cache rule 1:
+        ///
+        /// The SelfType MAY call this to access the cache instance.  It is
+        /// guaranteed to have fill_cache() called.  See below.
+        CacheType& cache() const
         {
             if (! m_cache) {
                 m_cache = std::make_unique<CacheType>();
@@ -69,19 +72,30 @@ namespace WireCell::Clus::Facade {
 
         /// Cache rule 2:
         ///
-        /// The SelfType overrides this method to fill an empty cache.  This is
-        /// the only place where the cache object can be accessed by Self in
-        /// mutable form.
+        /// Optionally, the SelfType may override this method in order to "bulk
+        /// fill" the cache instance.
         virtual void fill_cache(CacheType& cache) const {}
         
-    public:
+
         /// Cache rule 3:
         ///
-        /// The SelfType may override clear_cache(), for example to clear cached
-        /// data not in the CacheType.  An override must then forward-call the
-        /// Mixin::clear_cache().  The Mixin, the SelfType implementation and/or
-        /// SelfType users may all call this method thought the goal is to make
-        /// clear_cache() called in response to a tree notification.
+        /// Optionally, the SelfType MAY implement lazy, fine-grained caching.
+        /// This can be done with code such as:
+        ///
+        /// auto& mydata = cache().mydata;
+        /// if (mydata.empty()) { /* fill/set mydata */ }
+
+
+        /// Cache rule 4:
+        ///
+        /// Optionally, but not recommended, the SelfType may provide this
+        /// method in order to do something when the clear() method is called.
+        /// The cache instance will be removed just after this call returns.
+        ///
+        /// This is not recommended because you should be putting all cached
+        /// items in the cache.
+        ///
+        /// DO NOT EXPOSE THIS METHOD.
         virtual void clear_cache() const
         {
             m_cache = nullptr;

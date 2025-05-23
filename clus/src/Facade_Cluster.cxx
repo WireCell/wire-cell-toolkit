@@ -40,6 +40,7 @@ using spdlog::debug;
 
 
 
+
 std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluster)
 {
     const auto uvwt_min = cluster.get_uvwt_min();
@@ -55,21 +56,31 @@ std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluste
     return os;
 }
 
-Grouping* Cluster::grouping() { return this->m_node->parent->value.template facade<Grouping>(); }
-const Grouping* Cluster::grouping() const { return this->m_node->parent->value.template facade<Grouping>(); }
-
-void Cluster::set_default_scope(const Tree::Scope& scope) {
-    m_default_scope = scope;
-    // Clear caches that depend on the scope
-    clear_cache();
+Grouping* Cluster::grouping()
+{
+    return this->m_node->parent->value.template facade<Grouping>();
 }
 
-void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag){
+const Grouping* Cluster::grouping() const
+{ 
+    return this->m_node->parent->value.template facade<Grouping>();
+}
+
+void Cluster::set_default_scope(const Tree::Scope& scope)
+{
+    m_default_scope = scope;
+    // Clear caches that depend on the scope
+    clear_cache(); // Why is this here???  It does not do what the comment says.
+}
+
+void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag)
+{
     // Set the scope filter for the given scope
     m_map_scope_filter[scope.hash()] = flag;
 }
 
-bool Cluster::get_scope_filter(const Tree::Scope& scope) const{
+bool Cluster::get_scope_filter(const Tree::Scope& scope) const
+{
     auto it = m_map_scope_filter.find(scope.hash());
     if (it == m_map_scope_filter.end()){
         return false;
@@ -78,12 +89,14 @@ bool Cluster::get_scope_filter(const Tree::Scope& scope) const{
 }
 
 
-void Cluster::set_scope_transform(const Tree::Scope& scope, const std::string& transform_name){
+void Cluster::set_scope_transform(const Tree::Scope& scope, const std::string& transform_name)
+{
     // Set the scope transform for the given scope
     m_map_scope_transform[scope.hash()] = transform_name;
 }
 
-std::string Cluster::get_scope_transform(Tree::Scope scope) const{
+std::string Cluster::get_scope_transform(Tree::Scope scope) const
+{
     Scope the_scope;
     if (scope == the_scope) { // no scope given
         scope = m_default_scope;
@@ -95,11 +108,13 @@ std::string Cluster::get_scope_transform(Tree::Scope scope) const{
     return it->second;
 }
 
-void Cluster::set_cluster_id(int cid) {
+void Cluster::set_cluster_id(int cid)
+{
     set_ident(cid);
 }
 
-int Cluster::get_cluster_id() const {
+int Cluster::get_cluster_id() const
+{
     return ident();
 }
 
@@ -161,62 +176,28 @@ std::vector<int> Cluster::add_corrected_points(
 }
 
 
-void Cluster::clear_cache() const {
 
-    // For now, this facade does its own cache management but we forward-call
-    // the Mixin just to be proper.  Since our ClusterCache is the null-struct,
-    // this is in truth pointless.  
-    this->Mixin<Cluster,ClusterCache>::clear_cache();
-
-    // The reason to keep fine-grained cache management is not all cluster users
-    // need all cached values and by putting them all in fill_cache() we'd spoil
-    // fine-grained laziness.  The cost we pay is that every single cached data
-    // element is a chance to introduce a cache bug.
-
-    // Reset time-blob mapping
-    m_time_blob_map.clear();
-    
-    // Reset blob-indices mapping
-    m_map_mcell_indices.clear();
-    
-    // Reset hull data
-    m_hull_points.clear();
-    m_hull_calculated = false;
-    
-    // Reset length and point count
-    m_length = 0;
-    m_npoints = 0;
-    
-    // Reset PCA data
-    m_pca_calculated = false;
-    m_center = geo_point_t();
-    for(int i = 0; i < 3; i++) {
-        m_pca_axis[i] = geo_vector_t();
-        m_pca_values[i] = 0;
-    }
-    
-    m_graphs.clear();
-    m_spgraphs.clear();
-
-    // Clear the new cached wpid data
-    m_cached_wpid.clear();
-
-}
-
-
+// Called first time cache() is called and the cache is invalid.
 void Cluster::fill_cache(ClusterCache& cache) const
 {
-    for (const Blob* blob : children()) {
-        cache.wpids.push_back(blob->wpid());
-    }
+    // There is nothing generic to "pre fill".  Instead, each individual method
+    // will fill the cache as needed.
 }
 
 // blob wpids ...
-std::vector<WireCell::WirePlaneId> Cluster::wpids_blob() const {
-    return cache().wpids;
+std::vector<WireCell::WirePlaneId> Cluster::wpids_blob() const
+{
+    auto& wpids = cache().blob_wpids;
+    if (wpids.empty()) {
+        for (const Blob* blob : children()) {
+            wpids.push_back(blob->wpid());
+        }
+    }
+    return wpids;
 }
 
-WirePlaneId Cluster::wpid(const geo_point_t& point) const{
+WirePlaneId Cluster::wpid(const geo_point_t& point) const
+{
     // find the closest point_index to this point
     auto point_index = get_closest_point_index(point);
 
@@ -227,7 +208,8 @@ WirePlaneId Cluster::wpid(const geo_point_t& point) const{
 }
 
 
-void Cluster::print_blobs_info() const{
+void Cluster::print_blobs_info() const
+{
     for (const Blob* blob : children()) {
         std::cout << "U: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() 
         << " V: " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() 
@@ -239,7 +221,8 @@ void Cluster::print_blobs_info() const{
     }
 }
 
-std::string Cluster::dump() const{
+std::string Cluster::dump() const
+{
     const auto [u_min, v_min, w_min, t_min] = get_uvwt_min();
     const auto [u_max, v_max, w_max, t_max] = get_uvwt_max();
     std::stringstream ss;
@@ -251,13 +234,14 @@ std::string Cluster::dump() const{
 
 const Cluster::time_blob_map_t& Cluster::time_blob_map() const
 {
-    if (m_time_blob_map.empty()) {
+    auto& tbm = cache().time_blob_map;
+    if (tbm.empty()) {
         for (const Blob* blob : children()) {
             auto wpid = blob->wpid();
-            m_time_blob_map[wpid.apa()][wpid.face()][blob->slice_index_min()].insert(blob);
+            tbm[wpid.apa()][wpid.face()][blob->slice_index_min()].insert(blob);
         }
     }
-    return m_time_blob_map;
+    return tbm;
 }
 
 geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, const double step,
@@ -778,25 +762,26 @@ const Cluster::kd3d_t& Cluster::kd_raw() const { return kd3d_raw(); }
 geo_point_t Cluster::point3d_raw(size_t point_index) const { return kd3d_raw().point3d(point_index); }
 geo_point_t Cluster::point_raw(size_t point_index) const { return point3d_raw(point_index); }
 
-
-WirePlaneId Cluster::wire_plane_id(size_t point_index) const {  
-    if (m_cached_wpid.empty()) {
-        m_cached_wpid = points_property<int>("wpid");
-    }
-    return WirePlaneId(m_cached_wpid[point_index]);
-}
-
-
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
 const Cluster::points_type& Cluster::points_raw() const { return kd3d_raw().points(); }
 
+
+WirePlaneId Cluster::wire_plane_id(size_t point_index) const {  
+    auto& wpids = cache().point_wpids;
+    if (wpids.empty()) {
+        wpids = points_property<int>("wpid");
+    }
+    return WirePlaneId(wpids[point_index]);
+}
+
 int Cluster::npoints() const
 {
-    if (!m_npoints) {
+    auto& n = cache().npoints;
+    if (!n) {
         const auto& sv = sv3d();
-        m_npoints = sv.npoints();
+        n = sv.npoints();
     }
-    return m_npoints;
+    return n;
 }
 
 
@@ -1470,28 +1455,28 @@ std::map<WirePlaneId, std::tuple<int, int, int, int> > Cluster::get_uvwt_range()
 
 double Cluster::get_length() const
 {
-    if (m_length == 0) {  // invalidates when a new node is set
-        // const auto& tp = grouping()->get_params();
-
-        // std::cout << "Test: " << grouping()->get_anode()->face(0)->plane(0)->pimpos()->pitch() << " " << grouping()->get_anode()->face(0)->plane(1)->pimpos()->pitch() << " " << grouping()->get_anode()->face(0)->plane(2)->pimpos()->pitch() << " " << tp.pitch_u << " " << tp.pitch_v << " " << tp.pitch_w << std::endl;
-
-        auto map_wpid_uvwt = get_uvwt_range();
-        for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
-
-            const double tick = grouping()->get_tick().at(wpid.apa()).at(wpid.face());
-            const double drift_speed = grouping()->get_drift_speed().at(wpid.apa()).at(wpid.face());
-
-            // std::cout << "Test: " << wpid.apa() << " " << wpid.face() << " " << tp.tick_drift << " " << tick * drift_speed << std::endl;
-
-            const auto [u, v, w, t] = uvwt;
-            const double pu = u * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(0)->pimpos()->pitch() ;
-            const double pv = v * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(1)->pimpos()->pitch();
-            const double pw = w * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(2)->pimpos()->pitch();
-            const double pt = t * tick * drift_speed;
-            m_length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
-        }
+    auto& length = cache().length;
+    if (length != 0) {
+        return length;
     }
-    return m_length;
+
+    auto map_wpid_uvwt = get_uvwt_range();
+    for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
+
+        const double tick = grouping()->get_tick().at(wpid.apa()).at(wpid.face());
+        const double drift_speed = grouping()->get_drift_speed().at(wpid.apa()).at(wpid.face());
+
+        // std::cout << "Test: " << wpid.apa() << " " << wpid.face() << " " << tp.tick_drift << " " << tick * drift_speed << std::endl;
+
+        const auto [u, v, w, t] = uvwt;
+        const double pu = u * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(0)->pimpos()->pitch() ;
+        const double pv = v * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(1)->pimpos()->pitch();
+        const double pw = w * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(2)->pimpos()->pitch();
+        const double pt = t * tick * drift_speed;
+        length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
+    }
+
+    return length;
 }
 
 std::map<WirePlaneId, std::tuple<int, int, int, int> > Facade::get_uvwt_range(const Cluster* cluster, const std::vector<int>& b2id, const int id)
@@ -1779,14 +1764,15 @@ size_t Cluster::hash() const
 
 std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 {
-    if (m_map_mcell_indices.empty()) {
+    auto& mmi = cache().map_mcell_indices;
+    if (mmi.empty()) {
         const auto& skd = kd3d();
         for (size_t ind = 0; ind < skd.npoints(); ++ind) {
-            const auto* blob = blob_with_point(ind);
-            m_map_mcell_indices[blob].push_back(ind);
+            const auto* bwp = blob_with_point(ind);
+            mmi[bwp].push_back(ind);
         }
     }
-    return m_map_mcell_indices[blob];
+    return mmi[blob];
 }
 
 
@@ -1794,14 +1780,15 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
 const Cluster::graph_type* Cluster::set_graph(const std::string& name, Cluster::graph_ptr&& gptr) const
 {
     const auto* ret = gptr.get();
-    m_graphs[name] = std::move(gptr);
+    cache().graphs[name] = std::move(gptr);
     return ret;
 }
 
 const Cluster::graph_type* Cluster::get_graph(const std::string& name) const 
 {
-    auto it = m_graphs.find(name);
-    if (it == m_graphs.end()) {
+    auto& graphs = cache().graphs;
+    auto it = graphs.find(name);
+    if (it == graphs.end()) {
         return nullptr;
     }
     return it->second.get();
@@ -1932,9 +1919,10 @@ std::vector<geo_point_t> Cluster::indices_to_points(const std::vector<size_t>& p
 
 std::vector<geo_point_t> Cluster::get_hull() const 
 {
-    // add cached ...
-    if (m_hull_calculated) {
-        return m_hull_points;
+    auto& hull_points = cache().hull_points;
+
+    if (hull_points.size()) {
+        return hull_points;
     }
 
     quickhull::QuickHull<float> qh;
@@ -1950,44 +1938,43 @@ std::vector<geo_point_t> Cluster::get_hull() const
         indices.insert(hull.getIndexBuffer().at(i));
     }
 
-    m_hull_points.clear();
     for (auto i : indices) {
-        m_hull_points.push_back({points[0][i], points[1][i], points[2][i]});
+        hull_points.push_back({points[0][i], points[1][i], points[2][i]});
     }
     
-    m_hull_calculated = true;
-    return m_hull_points;
-
-    // std::vector<geo_point_t> results;
-    // for (auto i : indices) {
-    //     results.push_back({points[0][i], points[1][i], points[2][i]});
-    // }
-    // return results;
+    return hull_points;
 }
 
-void Cluster::Calc_PCA() const
+Cluster::PCA& Cluster::get_pca() const
 {
-    if (m_pca_calculated) return;
+    auto& pcaptr = cache().pca;
+    if (pcaptr) {
+        return *pcaptr;
+    }
 
-    m_center.set(0, 0, 0);
+    pcaptr = std::make_unique<PCA>();
+    pcaptr->center.set(0, 0, 0);
     int nsum = 0;
     for (const Blob* blob : children()) {
         for (const geo_point_t& p : blob->points(get_pc_name(), get_coords())) {
-            m_center += p;
+            pcaptr->center += p;
             nsum++;
         }
     }
 
-    for (int i = 0; i != 3; i++) {
-        m_pca_axis[i].set(0, 0, 0);
+    if (nsum < 3) {
+        return *pcaptr;
     }
 
-    if (nsum >= 3) {
-        m_center = m_center / nsum;
+    pcaptr->axis.resize(3);
+    pcaptr->values.resize(3,0);
+
+    for (int i = 0; i != 3; i++) {
+        pcaptr->axis[i].set(0, 0, 0);
     }
-    else {
-        return;
-    }
+
+    pcaptr->center /= nsum;
+
     Eigen::MatrixXd cov_matrix(3, 3);
 
     for (int i = 0; i != 3; i++) {
@@ -1995,7 +1982,7 @@ void Cluster::Calc_PCA() const
             cov_matrix(i, j) = 0;
             for (const Blob* blob : children()) {
                 for (const geo_point_t& p : blob->points(get_pc_name(), get_coords())) {
-                    cov_matrix(i, j) += (p[i] - m_center[i]) * (p[j] - m_center[j]);
+                    cov_matrix(i, j) += (p[i] - pcaptr->center[i]) * (p[j] - pcaptr->center[j]);
                 }
             }
         }
@@ -2012,33 +1999,31 @@ void Cluster::Calc_PCA() const
 
     // ascending order from Eigen, we want descending
     for (int i = 0; i != 3; i++) {
-        m_pca_values[2-i] = eigen_values(i);
+        pcaptr->values[2-i] = eigen_values(i);
         double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + eigen_vectors(1, i) * eigen_vectors(1, i) +
                              eigen_vectors(2, i) * eigen_vectors(2, i));
-        m_pca_axis[2-i].set(eigen_vectors(0, i) / norm, eigen_vectors(1, i) / norm, eigen_vectors(2, i) / norm);
-        // std::cout << "PCA: " << i << " " << m_pca_values[i] << " " << m_pca_axis[i] << std::endl;
+        pcaptr->axis[2-i].set(eigen_vectors(0, i) / norm, eigen_vectors(1, i) / norm, eigen_vectors(2, i) / norm);
     }
 
-    m_pca_calculated = true;
+    return *pcaptr;
 }
 
-void Cluster::Calc_PCA(std::vector<geo_point_t>& points) const
+
+void Cluster::force_pca(const std::vector<geo_point_t>& points) 
 {
+    auto& pcaptr = cache().pca;
+    pcaptr = std::make_unique<PCA>(); // force-clobber
+
     // Reset center
-    m_center.set(0, 0, 0);
+    pcaptr->center.set(0, 0, 0);
     int nsum = 0;
 
     // Calculate center
     for (auto it = children().begin(); it != children().end(); it++) {
         for (size_t k = 0; k != points.size(); k++) {
-            m_center += points[k];
+            pcaptr->center += points[k];
             nsum++;
         }
-    }
-
-    // Reset PCA axes
-    for (int i = 0; i != 3; i++) {
-        m_pca_axis[i].set(0, 0, 0);
     }
 
     // Early return if not enough points
@@ -2046,8 +2031,16 @@ void Cluster::Calc_PCA(std::vector<geo_point_t>& points) const
         return;
     }
 
+    pcaptr->axis.resize(3);
+    pcaptr->values.resize(3,0);
+
+    // Reset PCA axes
+    for (int i = 0; i != 3; i++) {
+        pcaptr->axis[i].set(0, 0, 0);
+    }
+
     // Normalize center
-    m_center = m_center / nsum;
+    pcaptr->center /= nsum;
 
     // Calculate covariance matrix using Eigen
     Eigen::MatrixXd cov_matrix(3, 3);
@@ -2057,7 +2050,7 @@ void Cluster::Calc_PCA(std::vector<geo_point_t>& points) const
             cov_matrix(i, j) = 0;
             for (auto it = children().begin(); it != children().end(); it++) {
                 for (size_t k = 0; k != points.size(); k++) {
-                    cov_matrix(i, j) += (points[k][i] - m_center[i]) * (points[k][j] - m_center[j]);
+                    cov_matrix(i, j) += (points[k][i] - pcaptr->center[i]) * (points[k][j] - pcaptr->center[j]);
                 }
             }
         }
@@ -2076,17 +2069,15 @@ void Cluster::Calc_PCA(std::vector<geo_point_t>& points) const
     // Store eigenvalues and eigenvectors in descending order
     // Note: Eigen returns in ascending order, we want descending
     for (int i = 0; i != 3; i++) {
-        m_pca_values[2-i] = eigen_values(i);
+        pcaptr->values[2-i] = eigen_values(i);
         double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + 
-                         eigen_vectors(1, i) * eigen_vectors(1, i) +
-                         eigen_vectors(2, i) * eigen_vectors(2, i));
+                           eigen_vectors(1, i) * eigen_vectors(1, i) +
+                           eigen_vectors(2, i) * eigen_vectors(2, i));
         
-        m_pca_axis[2-i].set(eigen_vectors(0, i) / norm,
-                           eigen_vectors(1, i) / norm,
-                           eigen_vectors(2, i) / norm);
+        pcaptr->axis[2-i].set(eigen_vectors(0, i) / norm,
+                              eigen_vectors(1, i) / norm,
+                              eigen_vectors(2, i) / norm);
     }
-
-    m_pca_calculated = true;
 }
 
 geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const
@@ -2147,27 +2138,19 @@ geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<
 }
 
 
-
-geo_point_t Cluster::get_center() const {
-    if (!m_pca_calculated) {
-        Calc_PCA();
-    }
-    return m_center;
+geo_point_t Cluster::get_center() const
+{
+    return get_pca().center;
 }
-geo_vector_t Cluster::get_pca_axis(int axis) const {
-    if (!m_pca_calculated) {
-        Calc_PCA();
-    }
+geo_vector_t Cluster::get_pca_axis(int axis) const
+{
     if (axis < 0 || axis >= 3) raise<IndexError>("axis %d < 0 || axis >= 3", axis);
-    return m_pca_axis[axis];
+    return get_pca().axis[axis];
 }
-double Cluster::get_pca_value(int axis) const {
-    if (!m_pca_calculated) {
-        Calc_PCA();
-    }
+double Cluster::get_pca_value(int axis) const
+{
     if (axis < 0 || axis >= 3) raise<IndexError>("axis %d < 0 || axis >= 3", axis);
-    return m_pca_values[axis];
-
+    return get_pca().values[axis];
 }
 
 
@@ -2506,11 +2489,12 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph() const
 {
     const char* name = "basic";
-    auto it = m_spgraphs.find(name);
-    if (it != m_spgraphs.end()) {
+    auto& spgraphs = cache().spgraphs;
+    auto it = spgraphs.find(name);
+    if (it != spgraphs.end()) {
         return it->second;
     }
-    auto got = m_spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_basic(*this)));
+    auto got = spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_basic(*this)));
     return got.first->second;
 }
 
@@ -2518,11 +2502,12 @@ const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetector
                                                                       IPCTransformSet::pointer pcts) const
 {
     const char* name = "ctpc";
-    auto it = m_spgraphs.find(name);
-    if (it != m_spgraphs.end()) {
+    auto& spgraphs = cache().spgraphs;
+    auto it = spgraphs.find(name);
+    if (it != spgraphs.end()) {
         return it->second;
     }
-    auto got = m_spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_ctpc(*this, dv, pcts)));
+    auto got = spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_ctpc(*this, dv, pcts)));
     return got.first->second;
 }
 

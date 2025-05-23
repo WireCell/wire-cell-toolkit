@@ -1650,7 +1650,6 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
         }
     }
 
-    using BlobSet = std::set<const Blob*, blob_less_functor>;
     std::vector<std::pair<const Blob *, const Blob *>> connected_mcells;
 
     for (auto it = af_time_slices.begin(); it != af_time_slices.end(); it++) {

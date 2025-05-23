@@ -216,7 +216,7 @@ static std::map<int, Cluster *> Separate_overclustering(
             int face = it1->first;
             std::vector<int>& time_slices = it1->second;
             for (size_t i = 0; i != time_slices.size(); i++) {
-                const std::set<const Blob*, blob_less_functor> &mcells_set = time_cells_set_map.at(apa).at(face).at(time_slices.at(i));
+                const BlobSet &mcells_set = time_cells_set_map.at(apa).at(face).at(time_slices.at(i));
 
                 // create graph for points in mcell inside the same time slice
                 if (mcells_set.size() >= 2) {
@@ -234,7 +234,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                     }
                 }
                 // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
-                std::vector<std::set<const Blob*, blob_less_functor>> vec_mcells_set;
+                std::vector<BlobSet> vec_mcells_set;
                 if (i + 1 < time_slices.size()) {
                     if (time_slices.at(i + 1) - time_slices.at(i) == 1*grouping->get_nticks_per_slice().at(apa).at(face)) {
                         vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 1)));
@@ -249,7 +249,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                 //    bool flag = false;
                 for (size_t j = 0; j != vec_mcells_set.size(); j++) {
                     //      if (flag) break;
-                    std::set<const Blob*, blob_less_functor> &next_mcells_set = vec_mcells_set.at(j);
+                    BlobSet &next_mcells_set = vec_mcells_set.at(j);
                     for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
                         const Blob *mcell1 = (*it1);
                         for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {

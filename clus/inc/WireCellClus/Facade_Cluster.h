@@ -17,6 +17,7 @@
 
 #include "WireCellClus/Facade_Util.h"
 #include "WireCellClus/Facade_Blob.h"
+#include "WireCellClus/Facade_ClusterCache.h"
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/Graphs.h"
 
@@ -29,12 +30,6 @@ namespace WireCell::Clus::Facade {
 
     class Blob;
     class Grouping;
-
-
-    struct ClusterCache {
-        // order is synchronized with children()
-        std::vector<WireCell::WirePlaneId> wpids;
-    };
 
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
     class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
@@ -84,11 +79,6 @@ namespace WireCell::Clus::Facade {
 
         double get_cluster_t0() const;
         void set_cluster_t0(double cluster_t0);
-
-
-        // Override Mixin
-        virtual void clear_cache() const;
-        
 
         // scopes_from() and from()
 
@@ -375,7 +365,7 @@ namespace WireCell::Clus::Facade {
         /// same type of graph are possible (basic, ctpc, overclustering
         /// protected, etc).
         ///
-        using graph_type = Graphs::Weighted::Graph;        
+        using graph_type = ClusterCache::graph_type;
 
         ///
         /// Blob-level connected components
@@ -424,22 +414,23 @@ namespace WireCell::Clus::Facade {
 
         std::vector<geo_point_t> get_hull() const;
 
-        geo_point_t get_center() const;
+        // Return PCA calculated on blob children sample points
+        using PCA = ClusterCache::PCA;
+        PCA& get_pca() const;
+        geo_point_t get_center() const; // PCA center
         geo_vector_t get_pca_axis(int axis) const;
         double get_pca_value(int axis) const;
-        // Add this inline member function in the class definition:
-        inline void reset_pca() { m_pca_calculated = false; }
+
+        // This will forcibly replace the PCA with one made from the given points.
+        void force_pca(const std::vector<geo_point_t>& points);
 
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
         // https://github.com/HaiwangYu/learn-cpp/blob/main/test-multimap.cxx
         // WCP: get_time_cells_set_map
-        using BlobSet = std::set<const Blob*, blob_less_functor>;
-        using time_blob_map_t = std::map<int, std::map<int, std::map<int, BlobSet> > >; // apa, face, time, blobset
+        using time_blob_map_t = ClusterCache::time_blob_map_t;
         const time_blob_map_t& time_blob_map() const;
    
-        // PCA helper functions
-        void Calc_PCA(std::vector<geo_point_t>& points) const;
         // Calculate PCA direction for a set of points around a center point
         geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const;
 
@@ -452,6 +443,12 @@ namespace WireCell::Clus::Facade {
         /// WCP: get_cell_times_set_map
         /// TODO: currently return copy, return a const reference?
         std::vector<int> get_blob_indices(const Blob*) const;
+
+        // Return the number of unique wires or ticks.
+        std::map<WirePlaneId, std::tuple<int, int, int, int> > get_uvwt_range() const;
+        std::tuple<int, int, int, int> get_uvwt_min() const;
+        std::tuple<int, int, int, int> get_uvwt_max() const;
+
 
         /// @brief to assess whether a given point (p_test) in a cluster is a vertex, or endpoint, based on asymmetry and occupancy criteria.
         /// @note p_test will be updated
@@ -513,53 +510,25 @@ namespace WireCell::Clus::Facade {
         std::map<size_t, bool> m_map_scope_filter={{scope_3d_raw.hash(), true}};
         std::map<size_t, std::string> m_map_scope_transform={{scope_3d_raw.hash(), "Unity"}};
 
-        mutable time_blob_map_t m_time_blob_map;  // lazy, do not access directly.
-        mutable std::map<const Blob*, std::vector<int>> m_map_mcell_indices; // lazy, do not access directly.
-
-        // Add to private members in Facade_Cluster.h:
-        mutable std::vector<geo_point_t> m_hull_points;
-        mutable bool m_hull_calculated{false};
-
-        // Cached and lazily calculated in get_length().
-        // Getting a new node invalidates by setting to 0.
-        mutable double m_length{0};
-        // Cached and lazily calculated in npoints()
-        mutable int m_npoints{0};
-
-        void Calc_PCA() const;
-        
-
-        mutable bool m_pca_calculated{false};
-        // lazy, do not access directly.
-        mutable geo_point_t m_center;
-        mutable geo_vector_t m_pca_axis[3];
-        mutable double m_pca_values[3];
-
-        // A cache of named graphs held by unique_ptr.  For now, this cache is
-        // internal to Cluster.
-        using graph_ptr = std::unique_ptr<graph_type>;
         const graph_type* get_graph(const std::string& name) const;
+        using graph_ptr = ClusterCache::graph_ptr;
         const graph_type* set_graph(const std::string& name, graph_ptr&& gptr) const;
-        mutable std::map<std::string, graph_ptr> m_graphs;
 
-        // Cluster makes its own graphs for the purpose of calculating shortest
-        // paths.  This is the lazy cache.  For now, the key string is either
-        // "basic" or "ctpc" to distinguish the type of graph.
-        mutable std::map<std::string, Graphs::Weighted::GraphAlgorithms> m_spgraphs;
-
-
-        mutable std::vector<int> m_cached_wpid;
-
-       public:  // made public only for debugging
-        // Return the number of unique wires or ticks.
-        std::map<WirePlaneId, std::tuple<int, int, int, int> > get_uvwt_range() const;
-        std::tuple<int, int, int, int> get_uvwt_min() const;
-        std::tuple<int, int, int, int> get_uvwt_max() const;
 
        protected:
+
+        //
+        // Caching.
+        //
+        // See the ClusterCache struct in Facade_ClusterCache.h.
+        //
+        // DO NOT PUT BARE CACHE ITEMS DIRECTLY IN THE Cluster class.
+        //
         virtual void fill_cache(ClusterCache& cache) const;
-    };
+    };                          // Cluster
     std::ostream& operator<<(std::ostream& os, const Cluster& cluster);
+
+
 
     // Return true if a is less than b.  May be used as 3rd arg in std::sort to
     // get ascending order.  For descending, pass to sort() rbegin()/rend()

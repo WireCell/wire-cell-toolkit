@@ -113,11 +113,13 @@ namespace WireCell::Clus::Facade {
     void sort_blobs(std::vector<const Blob*>& blobs);
     void sort_blobs(std::vector<Blob*>& blobs);
 
-    struct blob_less_functor {
-        bool operator()(const Facade::Blob* a, const Facade::Blob* b) const {
-        return Facade::blob_less(a, b);  
+    struct BlobLess {
+        bool operator()(const Blob* a, const Facade::Blob* b) const {
+            return blob_less(a, b);  
         }
     };
+    using BlobSet = std::set<const Blob*, BlobLess>;
+
 
 }  // namespace WireCell::Clus::Facade
 
