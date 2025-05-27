@@ -71,6 +71,8 @@ void Cluster::set_default_scope(const Tree::Scope& scope)
     m_default_scope = scope;
     // Clear caches that depend on the scope
     clear_cache(); // Why is this here???  It does not do what the comment says.
+    // removing it causes crashes in clustering functions.
+    // PCA cache is only thing that depends on it?
 }
 
 void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag)
@@ -107,6 +109,15 @@ std::string Cluster::get_scope_transform(Tree::Scope scope) const
     }
     return it->second;
 }
+
+const Tree::Scope& Cluster::get_scope(const std::string& scope_name) const
+{
+    if (m_scopes.find(scope_name) == m_scopes.end()) {
+        raise<RuntimeError>("Cluster::scope: no such scope: %s", scope_name);
+    }
+    return m_scopes.at(scope_name);
+}
+
 
 void Cluster::set_cluster_id(int cid)
 {

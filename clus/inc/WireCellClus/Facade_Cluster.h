@@ -52,13 +52,7 @@ namespace WireCell::Clus::Facade {
         // If no scope given, will use default scope. 
         std::string get_scope_transform(Tree::Scope scope = {}) const;
 
-        const Tree::Scope& get_scope(const std::string& scope_name) const
-        {
-            if (m_scopes.find(scope_name) == m_scopes.end()) {
-                raise<RuntimeError>("Cluster::scope: no such scope: %s", scope_name);
-            }
-            return m_scopes.at(scope_name);
-        }
+        const Tree::Scope& get_scope(const std::string& scope_name) const;
 
         /// Set other's default scope, filter and transform to this.  See also from().
         void default_scope_from(const Cluster& other);
