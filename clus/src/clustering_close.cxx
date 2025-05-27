@@ -233,15 +233,6 @@ static void clustering_close(
 
   //  if (flag_print) std::cout << em("merge clusters") << std::endl;
 
-  //  {
-  //  auto live_clusters = live_grouping.children(); // copy
-  //   // Process each cluster
-  //   for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
-  //       Cluster* cluster = live_clusters.at(iclus);
-  //       auto& scope = cluster->get_default_scope();
-  //       std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center << std::endl;
-  //   }
-  // }
 
 }
 

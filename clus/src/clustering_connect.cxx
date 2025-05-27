@@ -716,12 +716,12 @@ void clustering_connect1(
                         if (cluster->get_length() > 25 * units::cm ||
                             max_cluster->get_length() > 25 * units::cm) {
                             // if overlap significant, compare the PCA
-                            // cluster->Calc_PCA();
+
                             geo_point_t p1_c = cluster->get_pca().center;
                             geo_point_t p1_dir(cluster->get_pca().axis.at(0).x(),
                                                cluster->get_pca().axis.at(0).y(),
                                                cluster->get_pca().axis.at(0).z());
-                            // max_cluster->Calc_PCA();
+
                             geo_point_t p2_c = max_cluster->get_pca().center;
                             geo_point_t p2_dir(max_cluster->get_pca().axis.at(0).x(),
                                                max_cluster->get_pca().axis.at(0).y(),

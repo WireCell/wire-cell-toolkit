@@ -346,7 +346,7 @@ static void clustering_isolated(
                 // WCP::WCPointCloud<double> &cloud = cloud2->get_cloud();
                 for (int k = 0; k != N; k++) {
                     // Point test_p1(cloud.pts[k].x, cloud.pts[k].y, cloud.pts[k].z);
-                    geo_point_t test_p1 = cluster2->point(k);
+                    geo_point_t test_p1 = cluster2->point3d(k);
                     // double close_dis = cloud1->get_closest_dis(test_p1);
                     double close_dis = cluster1->get_closest_dis(test_p1);
                     if (close_dis > big_dis_range_cut) {

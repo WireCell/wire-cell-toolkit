@@ -426,10 +426,10 @@ namespace WireCell::Clus::Facade {
             
             // Refine search around these neighbors
             for(auto [idx2, dist] : knn) {
-                auto p2 = two.point(idx2);
+                geo_point_t p2; // = two.point3d(idx2); // why call this?
                 
                 // Local refinement by checking neighboring points
-                int curr_idx1 = i;  // Keep track of current point index from first cloud
+                int curr_idx1 = 0; // i;  // Keep track of current point index from first cloud
                 std::tie(idx2, p2) = two.get_closest_wcpoint(p1);
                 std::tie(curr_idx1, p1) = one.get_closest_wcpoint(p2);
                 

@@ -68,11 +68,25 @@ const Grouping* Cluster::grouping() const
 
 void Cluster::set_default_scope(const Tree::Scope& scope)
 {
+    // We can not simply return if scope is unchanged as that will cause a
+    // crash in connect_graph_closely() functions due to bad map_mcell_* lookup.
+    //
+    // if (m_default_scope == scope) {
+    //     return;
+    // }
+
     m_default_scope = scope;
+
     // Clear caches that depend on the scope
     clear_cache(); // Why is this here???  It does not do what the comment says.
-    // removing it causes crashes in clustering functions.
-    // PCA cache is only thing that depends on it?
+                   // It clears all cache.  This side-effect is needed even if
+                   // the default scope is unchanged.
+
+    // The PCA cache is only thing that directly depends on scope but it is not
+    // enough to just clear that...
+    // cache().pca.reset();
+    // ... as connect_graph_closely() still breaks.
+    // For now, we leave the mystery unsolved.
 }
 
 void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag)
@@ -767,17 +781,20 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
     return std::make_pair(min_point, min_dis1);
 }
 
-const Cluster::sv3d_t& Cluster::sv3d() const { return m_node->value.scoped_view(m_default_scope); }
+const Cluster::sv3d_t& Cluster::sv3d() const {
+    return sv(); //  m_node->value.scoped_view(m_default_scope);
+}
 const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
-geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
 
-const Cluster::sv3d_t& Cluster::sv3d_raw() const { return m_node->value.scoped_view(m_scope_3d_raw); }
+
+const Cluster::sv3d_t& Cluster::sv3d_raw() const {
+    return sv(m_scope_3d_raw);
+    // return m_node->value.scoped_view(m_scope_3d_raw);
+}
 const Cluster::kd3d_t& Cluster::kd3d_raw() const { return sv3d_raw().kd(); }
-const Cluster::kd3d_t& Cluster::kd_raw() const { return kd3d_raw(); }
 geo_point_t Cluster::point3d_raw(size_t point_index) const { return kd3d_raw().point3d(point_index); }
-geo_point_t Cluster::point_raw(size_t point_index) const { return point3d_raw(point_index); }
 
 const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
 const Cluster::points_type& Cluster::points_raw() const { return kd3d_raw().points(); }
@@ -876,19 +893,19 @@ std::vector<geo_point_t> Cluster::kd_points(const Cluster::kd_results_t& res) co
     return ret;
 }
 
-std::vector<geo_point_t> Cluster::kd_points_raw(const Cluster::kd_results_t& res)
-{
-    return const_cast<const Cluster*>(this)->kd_points_raw(res);
-}
-std::vector<geo_point_t> Cluster::kd_points_raw(const Cluster::kd_results_t& res) const
-{
-    std::vector<geo_point_t> ret;
-    const auto& points = this->points_raw();
-    for (const auto& [point_index, _] : res) {
-        ret.emplace_back(points[0][point_index], points[1][point_index], points[2][point_index]);
-    }
-    return ret;
-}
+// std::vector<geo_point_t> Cluster::kd_points_raw(const Cluster::kd_results_t& res)
+// {
+//     return const_cast<const Cluster*>(this)->kd_points_raw(res);
+// }
+// std::vector<geo_point_t> Cluster::kd_points_raw(const Cluster::kd_results_t& res) const
+// {
+//     std::vector<geo_point_t> ret;
+//     const auto& points = this->points_raw();
+//     for (const auto& [point_index, _] : res) {
+//         ret.emplace_back(points[0][point_index], points[1][point_index], points[2][point_index]);
+//     }
+//     return ret;
+// }
 
 // can't const_cast a vector.
 template <typename T>
@@ -1477,18 +1494,21 @@ double Cluster::get_length() const
         return length;
     }
 
-    auto map_wpid_uvwt = get_uvwt_range();
+    const auto& grouping = this->grouping();
+
+    auto map_wpid_uvwt = this->get_uvwt_range();
     for (const auto& [wpid, uvwt] : map_wpid_uvwt) {
 
-        const double tick = grouping()->get_tick().at(wpid.apa()).at(wpid.face());
-        const double drift_speed = grouping()->get_drift_speed().at(wpid.apa()).at(wpid.face());
+        const double tick = grouping->get_tick().at(wpid.apa()).at(wpid.face());
+        const double drift_speed = grouping->get_drift_speed().at(wpid.apa()).at(wpid.face());
 
         // std::cout << "Test: " << wpid.apa() << " " << wpid.face() << " " << tp.tick_drift << " " << tick * drift_speed << std::endl;
 
         const auto [u, v, w, t] = uvwt;
-        const double pu = u * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(0)->pimpos()->pitch() ;
-        const double pv = v * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(1)->pimpos()->pitch();
-        const double pw = w * grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(2)->pimpos()->pitch();
+        auto face = grouping->get_anode(wpid.apa())->face(wpid.face());
+        const double pu = u * face->plane(0)->pimpos()->pitch() ;
+        const double pv = v * face->plane(1)->pimpos()->pitch();
+        const double pw = w * face->plane(2)->pimpos()->pitch();
         const double pt = t * tick * drift_speed;
         length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
     }

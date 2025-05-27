@@ -22,17 +22,20 @@ namespace WireCell::Clus::Facade {
 
         using time_blob_map_t = std::map<int, std::map<int, std::map<int, BlobSet> > >; // apa, face, time, blobset
 
-        time_blob_map_t time_blob_map;  // lazy, do not access directly.
-        std::map<const Blob*, std::vector<int>> map_mcell_indices; // lazy, do not access directly.
+        // Maps apa/face/slice to child blob facade.  Depends on PC tree structure.
+        time_blob_map_t time_blob_map;
 
-        // Add to private members in Facade_Cluster.h:
+        // Maps child blob node facade to the set of point indices for points in
+        // that blob.  Depends on DEFAULT SCOPE.
+        std::map<const Blob*, std::vector<int>> map_mcell_indices;
+
+        // The subset of points() that make up a convex hull.  Depends on DEFAULT SCOPE.
         std::vector<geo_point_t> hull_points;
-        // mutable bool m_hull_calculated{false};  // use hull_poits.size()
 
-        // Cached and lazily calculated in get_length().
-        // Getting a new node invalidates by setting to 0.
+        // The "length" of a cluster estimated by time and wire extents.
+        // A zero length is invalid.
         double length{0};
-        // Cached and lazily calculated in npoints()
+        // The number of points in the DEFAULT SCOPE.
         int npoints{0};
 
 
@@ -43,6 +46,7 @@ namespace WireCell::Clus::Facade {
             std::vector<double> values;
             // if vectors are empty, PCA is invalid.
         };
+        // Depends on DEFAULT SCOPE
         std::unique_ptr<PCA> pca;
 
         // A cache of named graphs held by unique_ptr.  For now, this cache is
@@ -57,10 +61,10 @@ namespace WireCell::Clus::Facade {
         // "basic" or "ctpc" to distinguish the type of graph.
         std::map<std::string, Graphs::Weighted::GraphAlgorithms> spgraphs;
 
-        // wire plane IDs by point (3d scoped view) index
+        // Wire plane IDs by point (3d scoped view) index. Depends on the RAW SCOPE.
         std::vector<int> point_wpids;
 
-        // wire plane IDs by blob (child node) index
+        // Wire plane IDs by blob (child node) index. Depends on the DEFAULT SCOPE.
         std::vector<WireCell::WirePlaneId> blob_wpids;
     };
 

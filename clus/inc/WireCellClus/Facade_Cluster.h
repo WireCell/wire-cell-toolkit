@@ -80,56 +80,68 @@ namespace WireCell::Clus::Facade {
                                               const std::string &correction_name);
 
 
-        // Return the grouping to which this cluster is a child.  May be nullptr.
+        /// Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
 
-        // order is synchronized with children()
+        /// Order is synchronized with children().
         std::vector<WireCell::WirePlaneId> wpids_blob() const;
 
-        // return the wpid given a point ...
+        /// return the wpid given a point ...
         WirePlaneId wpid(const geo_point_t& point) const;
 
-        // expose general scove_view for the cluster
-        template <typename T>
+        /// Get an arbitrary scoped view.  Make sure type T matches the type of
+        /// the scope's coords arrays.
+        template <typename T=double>
         const Tree::ScopedView<T>& sv(const Tree::Scope& sc) const
         {
             return m_node->value.scoped_view<T>(sc);
         }
 
-        /// @brief use flat_pc to replace sv().kd().points()
-        /// TODO: currently not cached, can cache it if needed
-        template <typename T>
-        const std::vector<T> points_property(const std::string& key) const
-        {   const auto fpc = sv<T>(m_scope_3d_raw).flat_pc("3d", {key});
-            const auto arr = fpc.get(key);
-            if (!arr) {
-                raise<RuntimeError>("Cluster::points_property: no such array: %s", key);
-            }
-            if (arr->element_size() != sizeof(T)) {
-                raise<RuntimeError>("Cluster::points_property: array %s has element size %d but expected %d",
-                                    key, arr->element_size(), sizeof(T));
-            }
-            const auto span = arr->template elements<T>();
-            // span does not own the data, so copy it.
-            return std::vector<T>(span.begin(), span.end());
+        /// Default scoped view is a view of the default scope.
+        template <typename T=double>
+        const Tree::ScopedView<T>& sv() const
+        {
+            return m_node->value.scoped_view<T>(m_default_scope);
         }
 
-        // Get the scoped view for the "3d" point cloud (x,y,z)
+
+        /// Return a vector of values from given array name "key" that spans the
+        /// points in nodes of the 3D RAW scoped view.  Note, the "key" name
+        /// need not be in the RAW scope.
+        template <typename T=double>
+        const std::vector<T> points_property(const std::string& key) const
+        {
+            return sv().template flat_vector<T>(key);
+        }
+
+        /// Return a vector of values from given array name "key" that spans the
+        /// points in nodes of the given scoped.  Note, the "key" name need not
+        /// be in the RAW scope.  If the pcname is not given, the scope pcname
+        /// is used.
+        template <typename T=double, typename ST=double>
+        const std::vector<T> points_property(const std::string& key,
+                                             const Tree::Scope& scope,
+                                             std::string pcname="") const
+        {
+            return sv<ST>(scope).template flat_vector<T>(key, pcname);
+        }
+
+        // Get a 3D scopeed view scoped view for the "3d" point cloud (x,y,z)
         using sv3d_t = Tree::ScopedView<double>;
         const sv3d_t& sv3d() const;
         const sv3d_t& sv3d_raw() const;
-
 
         // Access the k-d tree for "3d" point cloud (x,y,z).
         // Note, this may trigger the underlying k-d build.
         using kd3d_t = sv3d_t::nfkd_t;
         const kd3d_t& kd3d() const;
         const kd3d_t& kd() const;
-    private:
+
         const kd3d_t& kd3d_raw() const;
+
     public:
-        const kd3d_t& kd_raw() const;
+
 
         using kd_results_t = kd3d_t::results_type;
         // Perform a k-d tree radius query.  This radius is linear distance
@@ -137,11 +149,12 @@ namespace WireCell::Clus::Facade {
         // Perform a k-d tree NN query.
         kd_results_t kd_knn(int nnearest, const geo_point_t& query_point) const;
 
+        /// Return 
         std::vector<geo_point_t> kd_points(const kd_results_t& res);
         std::vector<geo_point_t> kd_points(const kd_results_t& res) const;
 
-        std::vector<geo_point_t> kd_points_raw(const kd_results_t& res);
-        std::vector<geo_point_t> kd_points_raw(const kd_results_t& res) const;
+        // std::vector<geo_point_t> kd_points_raw(const kd_results_t& res);
+        // std::vector<geo_point_t> kd_points_raw(const kd_results_t& res) const;
 
         // print all blob information
         void print_blobs_info() const;
@@ -167,18 +180,14 @@ namespace WireCell::Clus::Facade {
         // Return the 3D point at the k-d tree point index.  Calling this in a
         // tight loop should probably be avoided.  Instead get the full points() array.
         geo_point_t point3d(size_t point_index) const;
-        // alias for point3d to match the Simple3DPointCloud interface
-        geo_point_t point(size_t point_index) const;
-
         geo_point_t point3d_raw(size_t point_index) const;
-        // alias for point3d to match the Simple3DPointCloud interface
-        geo_point_t point_raw(size_t point_index) const;
 
         // return WirePlaneId for an index ...
         WirePlaneId wire_plane_id(size_t point_index) const;
 
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.
         using points_type = kd3d_t::points_type;
+        // Return points in a scope in point order.  If no scope is given, use default_scope.
         const points_type& points() const;
         const points_type& points_raw() const;
 

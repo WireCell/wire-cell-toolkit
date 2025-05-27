@@ -326,6 +326,41 @@ namespace WireCell::PointCloud::Tree {
         pointcloud_t flat_pc(const std::string& pcname,
                              const Dataset::name_list_t& arrnames = Dataset::name_list_t()) const;
 
+
+        /// Return a contiguous, monolithic vector built from the arrays of the
+        /// given "aname" from the PCs of given pcname on the nodes in the
+        /// scope.
+        ///
+        /// If pcname is not given, the scope's PCs are used.
+        ///
+        /// If pcname matches scope's PC name and aname names a scope coord then
+        /// the returned vector will be aligned with the in-scope points.  If
+        /// either names are out-of-scope, there is no alignment guarantee.  If
+        /// any in-scope node lacks the PC or the array, its contribution is
+        /// simply omitted.
+        template<typename T>
+        std::vector<T> flat_vector(const std::string& aname, std::string pcname="") const {
+            if (pcname.empty()) {
+                pcname = m_scope.pcname;
+            }
+
+            std::vector<T> flat;
+    
+            for (auto* node : m_nodes) {
+                if (! node->value.has_pc(pcname)) {
+                    continue;
+                }
+                const auto& lpc = node->value.local_pc(pcname);
+                auto aptr = lpc.get(aname);
+                if (aptr == nullptr) {
+                    continue;
+                }
+                auto ele = aptr->elements<T>();
+                flat.insert(flat.end(), ele.begin(), ele.end());
+            }
+            return flat;
+        }
+
         // Total number of points across the scoped point cloud
         size_t npoints() const;
 
