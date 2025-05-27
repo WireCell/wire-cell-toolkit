@@ -24,6 +24,12 @@ using namespace WireCell;
 
 Gen::Scaler::Scaler()
   : Aux::Logger("Scaler", "gen")
+  , yzmap_scale_filename("Empty")
+  , bin_width(0.0)
+  , tpc_width(0.0)
+  , bin_height(0.0)
+  , anode_name("Empty")
+  , plane(0)
 {
 }
 
@@ -33,12 +39,12 @@ WireCell::Configuration Gen::Scaler::default_configuration() const
 {
   Configuration cfg;
 
-  cfg["yzmap_scale_filename"] = "YZMap_Scale_filename";
-  cfg["bin_width"]      = "BinWidth";
-  cfg["tpc_width"]      = "TPCWidth";
-  cfg["bin_height"]     = "BinHeight";
-  cfg["anode"]          = "AnodePlane";
-  cfg["plane"]          = "WirePlane";
+  cfg["yzmap_scale_filename"] = yzmap_scale_filename;
+  cfg["bin_width"]      = bin_width;
+  cfg["tpc_width"]      = tpc_width;
+  cfg["bin_height"]     = bin_height;
+  cfg["anode"]          = anode_name;
+  cfg["plane"]          = plane;
   return cfg;
 }
 
@@ -67,12 +73,12 @@ void Gen::Scaler::configure(const WireCell::Configuration& cfg)
     m_boxes.push_back(face->sensitive());
   }
   //    log->debug("Rest...");
-  bin_width =  get<double>(cfg, "bin_width");
-  tpc_width =  get<double>(cfg, "tpc_width");
-  bin_height = get<double>(cfg, "bin_height");
-  plane =      get<int>   (cfg, "plane");
+  bin_width =  get<double>(cfg, "bin_width", bin_width);
+  tpc_width =  get<double>(cfg, "tpc_width", tpc_width);
+  bin_height = get<double>(cfg, "bin_height", bin_height);
+  plane =      get<int>   (cfg, "plane", plane);
 
-  anode_name = get<std::string>(cfg, "anode");
+  anode_name = get<std::string>(cfg, "anode", anode_name);
 
   jmap = WireCell::Persist::load(filename);
 
