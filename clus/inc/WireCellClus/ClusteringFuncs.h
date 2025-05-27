@@ -1,3 +1,11 @@
+/**
+   This header provides various free functions used in clustering.
+
+   Some implementations may be found in clustering_*.cxx.  The rest are in
+   ClusteringFuncs.cxx.
+
+ */
+
 #ifndef WIRECELLCLUS_CLUSTERINGFUNCS
 #define WIRECELLCLUS_CLUSTERINGFUNCS
 
@@ -52,8 +60,6 @@ namespace WireCell::Clus::Facade {
     using cluster_vector_t = std::vector<Cluster*>;
 
 
-    // clustering_util.cxx
-    //
     // This function will produce a new cluster in the grouping corresponding to
     // each connected component in the cluster_connectivity_graph_t that as two
     // or more clusters.  Any cluster in a single-cluster component is simply
