@@ -1,4 +1,6 @@
 #include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellUtil/Array.h"
+
 
 #include <iostream>              // temp debug
 
@@ -118,3 +120,59 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
 }
 
 
+geo_vector_t WireCell::Clus::Facade::calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points)
+{
+    // Create covariance matrix
+    Eigen::MatrixXd cov_matrix(3, 3);
+
+    // Calculate covariance matrix elements
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (const auto& p : points) {
+                if (i == 0 && j == 0) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.x() - center.x());
+                }
+                else if (i == 0 && j == 1) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.y() - center.y());
+                }
+                else if (i == 0 && j == 2) {
+                    cov_matrix(i, j) += (p.x() - center.x()) * (p.z() - center.z());
+                }
+                else if (i == 1 && j == 1) {
+                    cov_matrix(i, j) += (p.y() - center.y()) * (p.y() - center.y());
+                }
+                else if (i == 1 && j == 2) {
+                    cov_matrix(i, j) += (p.y() - center.y()) * (p.z() - center.z());
+                }
+                else if (i == 2 && j == 2) {
+                    cov_matrix(i, j) += (p.z() - center.z()) * (p.z() - center.z());
+                }
+            }
+        }
+    }
+
+    // std::cout << "Test: " << center << " " << points.at(0) << std::endl;
+    // std::cout << "Test: " << center << " " << points.at(1) << std::endl;
+    // std::cout << "Test: " << center << " " << points.at(2) << std::endl;
+
+    // Fill symmetric parts
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+
+    // Calculate eigenvalues/eigenvectors using Eigen
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_vectors = eigenSolver.eigenvectors();
+
+    // std::cout << "Test: " << eigen_vectors(0,0) << " " << eigen_vectors(1,0) << " " << eigen_vectors(2,0) << std::endl;
+
+    // Get primary direction (first eigenvector)
+    double norm = sqrt(eigen_vectors(0, 2) * eigen_vectors(0, 2) + 
+                      eigen_vectors(1, 2) * eigen_vectors(1, 2) + 
+                      eigen_vectors(2, 2) * eigen_vectors(2, 2));
+
+    return geo_vector_t(eigen_vectors(0, 2) / norm,
+                       eigen_vectors(1, 2) / norm, 
+                       eigen_vectors(2, 2) / norm);
+}

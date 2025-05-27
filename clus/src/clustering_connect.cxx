@@ -170,12 +170,12 @@ void clustering_connect1(
     // geo_point_t W_dir(0, 1, 0);
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
-        Cluster *cluster = live_clusters.at(i);
+        const Cluster *cluster = live_clusters.at(i);
         if(!cluster->get_scope_filter(scope)) continue;
         assert (cluster->npoints() > 0); // preempt segfault in get_two_extreme_points()
 
         // if (cluster->get_length()/units::cm>5){
-        //     std::cout << "Connect 0: " << cluster->get_length()/units::cm << " " << cluster->get_center() << std::endl;
+        //     std::cout << "Connect 0: " << cluster->get_length()/units::cm << " " << cluster->get_pca().center << std::endl;
         // }
 
 
@@ -573,9 +573,6 @@ void clustering_connect1(
                     int max_value_v[3] = {0, 0, 0};
                     int max_value_w[3] = {0, 0, 0};
 
-                    int max_value[3] = {0, 0, 0};
-                    const Cluster *max_cluster = 0;
-
                     for (auto it = map_cluster_num[0].begin(); it != map_cluster_num[0].end(); it++) {
                         if (it->second > max_value_u[0]) {
                             max_value_u[0] = it->second;
@@ -635,6 +632,9 @@ void clustering_connect1(
                         }
                     }
 
+                    int max_value[3] = {0, 0, 0};
+                    const Cluster *max_cluster = 0;
+
                     if ((max_value_u[0] > 0.33 * num_total_points || max_value_u[0] > 100) &&
                         (max_value_u[1] > 0.33 * num_total_points || max_value_u[1] > 100) &&
                         (max_value_u[2] > 0.33 * num_total_points || max_value_u[2] > 100)) {
@@ -671,7 +671,7 @@ void clustering_connect1(
 
                     // if (max_cluster != 0)
                     // if (fabs(cluster->get_length()/units::cm - 50) < 5 ){
-                    //     std::cout << "Check: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << " " << max_value[0] << " " << max_value[1] << " " << max_value[2] << " " << num_total_points << " " << num_unique[0] << " " << num_unique[1] << " " << num_unique[2] << " "  << std::endl;
+                    //     std::cout << "Check: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << " " << max_value[0] << " " << max_value[1] << " " << max_value[2] << " " << num_total_points << " " << num_unique[0] << " " << num_unique[1] << " " << num_unique[2] << " "  << std::endl;
                     // }
 
                     // if overlap a lot merge
@@ -691,7 +691,7 @@ void clustering_connect1(
                             // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                             boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                             ilive2desc[map_cluster_index[max_cluster]], g);
-                            // std::cout << "Connect 1 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                            // std::cout << "Connect 1 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                             // curr_cluster = max_cluster;
                         }
 
@@ -717,13 +717,15 @@ void clustering_connect1(
                             max_cluster->get_length() > 25 * units::cm) {
                             // if overlap significant, compare the PCA
                             // cluster->Calc_PCA();
-                            geo_point_t p1_c = cluster->get_center();
-                            geo_point_t p1_dir(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(),
-                                            cluster->get_pca_axis(0).z());
+                            geo_point_t p1_c = cluster->get_pca().center;
+                            geo_point_t p1_dir(cluster->get_pca().axis.at(0).x(),
+                                               cluster->get_pca().axis.at(0).y(),
+                                               cluster->get_pca().axis.at(0).z());
                             // max_cluster->Calc_PCA();
-                            geo_point_t p2_c = max_cluster->get_center();
-                            geo_point_t p2_dir(max_cluster->get_pca_axis(0).x(), max_cluster->get_pca_axis(0).y(),
-                                            max_cluster->get_pca_axis(0).z());
+                            geo_point_t p2_c = max_cluster->get_pca().center;
+                            geo_point_t p2_dir(max_cluster->get_pca().axis.at(0).x(),
+                                               max_cluster->get_pca().axis.at(0).y(),
+                                               max_cluster->get_pca().axis.at(0).z());
 
                             double angle_diff = p1_dir.angle(p2_dir) / 3.1415926 * 180.;
                             double angle1_drift = p1_dir.angle(drift_dir_abs) / 3.1415926 * 180.;
@@ -750,7 +752,7 @@ void clustering_connect1(
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
 
-                                // std::cout << "Connect 1 2: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                                // std::cout << "Connect 1 2: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                                 // curr_cluster = max_cluster;
                                 flag_merge = true;
                             }
@@ -761,7 +763,7 @@ void clustering_connect1(
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
 
-                                // std::cout << "Connect 1 3: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                                // std::cout << "Connect 1 3: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                                 flag_merge = true;
                             }
 
@@ -772,7 +774,7 @@ void clustering_connect1(
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
                                 boost::add_edge(ilive2desc[map_cluster_index[cluster]],
                                                 ilive2desc[map_cluster_index[max_cluster]], g);
-                                // std::cout << "Connect 1 4: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_center() << " " << max_cluster->get_center() << std::endl;
+                                // std::cout << "Connect 1 4: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                                 flag_merge = true;
                             }
                         }
@@ -782,7 +784,7 @@ void clustering_connect1(
 
 
             // if (cluster->get_length()/units::cm>5){
-            //     std::cout << "Connect 0-1: " << cluster->get_length()/units::cm << " " << cluster->get_center() << " " << flag_add_dir1 << " " << flag_add_dir2 << " " << flag_para_1 << " " << flag_prol_1 << " " << flag_para_2 << " " << flag_prol_2 << " " << extreme_points.first << " " << extreme_points.second << " " << dir1 << " " << dir2 << " " << extending_dis << " " << angle << std::endl;
+            //     std::cout << "Connect 0-1: " << cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << flag_add_dir1 << " " << flag_add_dir2 << " " << flag_para_1 << " " << flag_prol_1 << " " << flag_para_2 << " " << flag_prol_2 << " " << extreme_points.first << " " << extreme_points.second << " " << dir1 << " " << dir2 << " " << extending_dis << " " << angle << std::endl;
             // }
 
             if (flag_add_dir1) {
@@ -846,9 +848,9 @@ void clustering_connect1(
     for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
         const Cluster *cluster_1 = (*it);
         if (!cluster_1->get_scope_filter(scope)) continue;
-        // cluster_1->Calc_PCA();
-        geo_point_t p1_c = cluster_1->get_center();
-        geo_point_t p1_dir(cluster_1->get_pca_axis(0).x(), cluster_1->get_pca_axis(0).y(), cluster_1->get_pca_axis(0).z());
+        const auto& pca1 = cluster_1->get_pca();
+        geo_point_t p1_c = pca1.center;
+        geo_point_t p1_dir = pca1.axis.at(0);
         Ray l1(p1_c, p1_c+p1_dir);
         for (auto it1 = live_clusters.begin(); it1 != live_clusters.end(); it1++) {
             Cluster *cluster_2 = (*it1);
@@ -856,12 +858,12 @@ void clustering_connect1(
             if (cluster_2->get_length() < 3 * units::cm) continue;
             if (cluster_2 == cluster_1) continue;
 
+            const auto& pca2 = cluster_2->get_pca();
             if (cluster_1->get_length() > 25 * units::cm || cluster_2->get_length() > 25 * units::cm ||
                 (cluster_1->get_length() + cluster_2->get_length()) > 30 * units::cm) {
                 // cluster_2->Calc_PCA();
-                geo_point_t p2_c = cluster_2->get_center();
-                geo_point_t p2_dir(cluster_2->get_pca_axis(0).x(), cluster_2->get_pca_axis(0).y(),
-                                cluster_2->get_pca_axis(0).z());
+                geo_point_t p2_c = pca2.center;
+                geo_point_t p2_dir = pca2.axis.at(0);
 
                 geo_point_t cc_dir(p2_c.x() - p1_c.x(), p2_c.y() - p1_c.y(), p2_c.z() - p1_c.z());
 
@@ -889,7 +891,7 @@ void clustering_connect1(
                     // to_be_merged_pairs.insert(std::make_pair(cluster_1, cluster_2));
                     boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                     ilive2desc[map_cluster_index[cluster_2]], g2);
-                    // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << cluster_1->get_center() << " " << cluster_2->get_center() << std::endl;
+                    // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << pca1.center << " " << pca2.center << std::endl;
                     // flag_merge = true;
                 }
                 else if ((angle_diff > 87) && (angle_diff1 > 90 - 1.5 * (90 - angle_diff)) &&
@@ -901,7 +903,7 @@ void clustering_connect1(
                     // to_be_merged_pairs.insert(std::make_pair(cluster_1, cluster_2));
                     boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                     ilive2desc[map_cluster_index[cluster_2]], g2);
-                    // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << cluster_1->get_center() << " " << cluster_2->get_center() << std::endl;
+                    // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << pca1.center << " " << pca2.center << std::endl;
                     // flag_merge = true;
                 }
             }
@@ -909,22 +911,5 @@ void clustering_connect1(
     }
 
     new_clusters = merge_clusters(g2, live_grouping);
-
-
-
-
-
-
-
-
-//  {
-//    auto live_clusters = live_grouping.children(); // copy
-//     // Process each cluster
-//     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
-//         Cluster* cluster = live_clusters.at(iclus);
-//         auto& scope = cluster->get_default_scope();
-//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
-//     }
-//   }
 
 }

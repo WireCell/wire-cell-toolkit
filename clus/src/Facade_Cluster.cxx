@@ -110,36 +110,38 @@ std::string Cluster::get_scope_transform(Tree::Scope scope) const
 
 void Cluster::set_cluster_id(int cid)
 {
-    set_ident(cid);
+    this->set_ident(cid);
 }
 
 int Cluster::get_cluster_id() const
 {
-    return ident();
+    return this->ident();
 }
 
 void Cluster::default_scope_from(const Cluster& other)
 {
     auto scope = other.get_default_scope();
-    set_default_scope(scope);
+    this->set_default_scope(scope);
     if (other.get_scope_filter(scope)) {
-        set_scope_filter(scope, other.get_scope_filter(scope));
+        this->set_scope_filter(scope, other.get_scope_filter(scope));
     }
-    set_scope_transform(scope, other.get_scope_transform(scope));
+    this->set_scope_transform(scope, other.get_scope_transform(scope));
 }
 
 void Cluster::from(const Cluster& other)
 {
-    default_scope_from(other);
-    flags_from(other);
+    this->default_scope_from(other);
+    this->flags_from(other);
 }
 
 
-void Cluster::set_cluster_t0(double t0) {
-    set_scalar<double>("cluster_t0", t0);
+void Cluster::set_cluster_t0(double t0)
+{
+    this->set_scalar<double>("cluster_t0", t0);
 }
-double Cluster::get_cluster_t0() const {
-    return get_scalar<double>("cluster_t0", 0);
+double Cluster::get_cluster_t0() const
+{
+    return this->get_scalar<double>("cluster_t0", 0);
 }
 
 
@@ -147,18 +149,22 @@ std::vector<int> Cluster::add_corrected_points(
     Clus::IPCTransformSet::pointer pcts,
     const std::string &correction_name) 
 {
-    const double t0 = get_cluster_t0();
+    const double t0 = this->get_cluster_t0();
 
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
     if (correction_name == "T0Correction") {
         const auto& pct = pcts->pc_transform("T0Correction");
-        for (size_t iblob = 0; iblob < children().size(); ++iblob) {
-            Blob* blob = children().at(iblob);
+        for (size_t iblob = 0; iblob < this->children().size(); ++iblob) {
+            Blob* blob = this->children().at(iblob);
             auto &lpc_3d = blob->local_pcs().at("3d");
-            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"}, {"x_t0cor","y_t0cor","z_t0cor"}, t0, blob->wpid().face(), blob->wpid().apa());
+            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"},
+                                                 {"x_t0cor","y_t0cor","z_t0cor"}, t0,
+                                                 blob->wpid().face(), blob->wpid().apa());
             lpc_3d.add("x_t0cor", *corrected_points.get("x_t0cor")); // only add x_t0cor
-            auto filter_result = pct->filter(corrected_points, {"x_t0cor", "y_t0cor", "z_t0cor"}, t0, blob->wpid().face(), blob->wpid().apa());
+            auto filter_result = pct->filter(corrected_points,
+                                             {"x_t0cor", "y_t0cor", "z_t0cor"},
+                                             t0, blob->wpid().face(), blob->wpid().apa());
             auto arr_filter = filter_result.get("filter")->elements<int>();
             for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
                 if (arr_filter[ipt] == 1) {
@@ -189,7 +195,7 @@ std::vector<WireCell::WirePlaneId> Cluster::wpids_blob() const
 {
     auto& wpids = cache().blob_wpids;
     if (wpids.empty()) {
-        for (const Blob* blob : children()) {
+        for (const Blob* blob : this->children()) {
             wpids.push_back(blob->wpid());
         }
     }
@@ -614,7 +620,7 @@ const Cluster::sv2d_t& Cluster::sv2d(const int apa, const int face, const size_t
     //     raise<RuntimeError>("Cluster::sv2d() wpid.layer() {} != kAllLayers");
     // }
     const WirePlaneId wpid(kAllLayers, face, apa);
-    const Tree::Scope scope = {"3d", {scope2ds_prefix[plane]+"_x", scope2ds_prefix[plane]+"_y"}, 0, wpid.name()};
+    const Tree::Scope scope = {"3d", {m_scope2ds_prefix[plane]+"_x", m_scope2ds_prefix[plane]+"_y"}, 0, wpid.name()};
     return m_node->value.scoped_view(scope,
         [&](const Points::node_t& node) {
             const auto& lpcs = node.value.local_pcs();
@@ -756,7 +762,7 @@ const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
 geo_point_t Cluster::point3d(size_t point_index) const { return kd3d().point3d(point_index); }
 geo_point_t Cluster::point(size_t point_index) const { return point3d(point_index); }
 
-const Cluster::sv3d_t& Cluster::sv3d_raw() const { return m_node->value.scoped_view(scope_3d_raw); }
+const Cluster::sv3d_t& Cluster::sv3d_raw() const { return m_node->value.scoped_view(m_scope_3d_raw); }
 const Cluster::kd3d_t& Cluster::kd3d_raw() const { return sv3d_raw().kd(); }
 const Cluster::kd3d_t& Cluster::kd_raw() const { return kd3d_raw(); }
 geo_point_t Cluster::point3d_raw(size_t point_index) const { return kd3d_raw().point3d(point_index); }
@@ -797,7 +803,7 @@ int Cluster::npoints() const
 
 const Cluster::wire_indices_t& Cluster::wire_indices() const
 {
-    const auto& sv = m_node->value.scoped_view<int_t>(scope_wire_index);
+    const auto& sv = m_node->value.scoped_view<int_t>(m_scope_wire_index);
     const auto& skd = sv.kd();
     const auto& points = skd.points();
     LogDebug("points size: " << points.size() << " points[0] size: " << points[0].size());
@@ -1579,7 +1585,7 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_main_axis_points() const
     geo_point_t lowest_point = point3d(0);
 
     // Get main axis and ensure consistent direction (y>0)
-    geo_point_t main_axis = get_pca_axis(0); 
+    geo_point_t main_axis = get_pca().axis.at(0); 
     if (main_axis.y() < 0) {
         main_axis = main_axis * -1;
     }
@@ -1952,8 +1958,8 @@ Cluster::PCA& Cluster::get_pca() const
         return *pcaptr;
     }
 
-    const auto& pcname = get_default_scope().pcname;
-    const auto& coords = get_default_scope().coords;
+    const auto& pcname = this->get_default_scope().pcname;
+    const auto& coords = this->get_default_scope().coords;
 
     pcaptr = std::make_unique<PCA>();
     pcaptr->center.set(0, 0, 0);
@@ -2011,80 +2017,6 @@ Cluster::PCA& Cluster::get_pca() const
     return *pcaptr;
 }
 
-geo_vector_t Cluster::calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const
-{
-    // Create covariance matrix
-    Eigen::MatrixXd cov_matrix(3, 3);
-
-    // Calculate covariance matrix elements
-    for (int i = 0; i != 3; i++) {
-        for (int j = i; j != 3; j++) {
-            cov_matrix(i, j) = 0;
-            for (const auto& p : points) {
-                if (i == 0 && j == 0) {
-                    cov_matrix(i, j) += (p.x() - center.x()) * (p.x() - center.x());
-                }
-                else if (i == 0 && j == 1) {
-                    cov_matrix(i, j) += (p.x() - center.x()) * (p.y() - center.y());
-                }
-                else if (i == 0 && j == 2) {
-                    cov_matrix(i, j) += (p.x() - center.x()) * (p.z() - center.z());
-                }
-                else if (i == 1 && j == 1) {
-                    cov_matrix(i, j) += (p.y() - center.y()) * (p.y() - center.y());
-                }
-                else if (i == 1 && j == 2) {
-                    cov_matrix(i, j) += (p.y() - center.y()) * (p.z() - center.z());
-                }
-                else if (i == 2 && j == 2) {
-                    cov_matrix(i, j) += (p.z() - center.z()) * (p.z() - center.z());
-                }
-            }
-        }
-    }
-
-    // std::cout << "Test: " << center << " " << points.at(0) << std::endl;
-    // std::cout << "Test: " << center << " " << points.at(1) << std::endl;
-    // std::cout << "Test: " << center << " " << points.at(2) << std::endl;
-
-    // Fill symmetric parts
-    cov_matrix(1, 0) = cov_matrix(0, 1);
-    cov_matrix(2, 0) = cov_matrix(0, 2);
-    cov_matrix(2, 1) = cov_matrix(1, 2);
-
-    // Calculate eigenvalues/eigenvectors using Eigen
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
-    auto eigen_vectors = eigenSolver.eigenvectors();
-
-    // std::cout << "Test: " << eigen_vectors(0,0) << " " << eigen_vectors(1,0) << " " << eigen_vectors(2,0) << std::endl;
-
-    // Get primary direction (first eigenvector)
-    double norm = sqrt(eigen_vectors(0, 2) * eigen_vectors(0, 2) + 
-                      eigen_vectors(1, 2) * eigen_vectors(1, 2) + 
-                      eigen_vectors(2, 2) * eigen_vectors(2, 2));
-
-    return geo_vector_t(eigen_vectors(0, 2) / norm,
-                       eigen_vectors(1, 2) / norm, 
-                       eigen_vectors(2, 2) / norm);
-}
-
-
-geo_point_t Cluster::get_center() const
-{
-    return get_pca().center;
-}
-geo_vector_t Cluster::get_pca_axis(int axis) const
-{
-    if (axis < 0 || axis >= 3) raise<IndexError>("axis %d < 0 || axis >= 3", axis);
-    return get_pca().axis[axis];
-}
-double Cluster::get_pca_value(int axis) const
-{
-    if (axis < 0 || axis >= 3) raise<IndexError>("axis %d < 0 || axis >= 3", axis);
-    return get_pca().values[axis];
-}
-
-
 
 // std::unordered_map<int, Cluster*> 
 std::vector<int> Cluster::examine_x_boundary(const double low_limit, const double high_limit)
@@ -2093,9 +2025,9 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
     double num_points[3] = {0, 0, 0};
     double x_max = -1e9;
     double x_min = 1e9;
-    auto& mcells = children();
-    const auto& pcname = get_default_scope().pcname;
-    const auto& coords = get_default_scope().coords;
+    auto& mcells = this->children();
+    const auto& pcname = this->get_default_scope().pcname;
+    const auto& coords = this->get_default_scope().coords;
 
     for (Blob* mcell : mcells) {
         /// TODO: no caching, could be slow
@@ -2182,12 +2114,12 @@ std::vector<int> Cluster::examine_x_boundary(const double low_limit, const doubl
 
 bool Cluster::judge_vertex(geo_point_t& p_test, IDetectorVolumes::pointer dv, const double asy_cut, const double occupied_cut)
 {
-    p_test = calc_ave_pos(p_test, 3 * units::cm);
+    p_test = this->calc_ave_pos(p_test, 3 * units::cm);
 
-    geo_point_t dir = vhough_transform(p_test, 15 * units::cm);
+    geo_point_t dir = this->vhough_transform(p_test, 15 * units::cm);
 
     // judge if this is end points
-    std::pair<int, int> num_pts = ndipole(p_test, dir, 25 * units::cm);
+    std::pair<int, int> num_pts = this->ndipole(p_test, dir, 25 * units::cm);
 
     if ((num_pts.first + num_pts.second) == 0) return false;
 
@@ -2202,7 +2134,7 @@ bool Cluster::judge_vertex(geo_point_t& p_test, IDetectorVolumes::pointer dv, co
         auto wpid = dv->contained_by(p_test);
         // what if the point is not found ... 
         if (wpid.apa()==-1){
-            auto idx = get_closest_point_index(p_test); 
+            auto idx = this->get_closest_point_index(p_test); 
             // Given the idx, one can directly find the wpid actually ... 
             wpid = dv->contained_by(point3d(idx)); 
         }
@@ -2257,11 +2189,11 @@ bool Cluster::judge_vertex(geo_point_t& p_test, IDetectorVolumes::pointer dv, co
         int temp_num_occupied_points = 0;
 
         // const int N = point_cloud->get_num_points();
-        const int N = npoints();
+        const int N = this->npoints();
         // WCP::WCPointCloud<double>& cloud = point_cloud->get_cloud();
         for (int i = 0; i != N; i++) {
             // geo_point_t dir1(cloud.pts[i].x() - p_test.x(), cloud.pts[i].y() - p_test.y(), cloud.pts[i].z() - p_test.z());
-            geo_point_t dir1 = point3d(i) - p_test;
+            geo_point_t dir1 = this->point3d(i) - p_test;
 
             if (dir1.magnitude() < 15 * units::cm) {
                 geo_point_t test_p1 = point3d(i);
@@ -2332,8 +2264,8 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (get<3>(br) < get<3>(ar)) return false;
     }
     {
-        auto ac = a->get_center();
-        auto bc = b->get_center();
+        auto ac = a->get_pca().center;
+        auto bc = b->get_pca().center;
         if (ac[0] < bc[0]) return true;
         if (bc[0] < bc[0]) return false;
         if (ac[1] < bc[1]) return true;
@@ -2365,12 +2297,12 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 {
     Flash flash;                // starts invalid
 
-    const auto* p = node()->parent;
+    const auto* p = this->node()->parent;
     if (!p)  return flash;
     const auto* g = p->value.facade<Grouping>();
     if (!g)  return flash;
 
-    const int flash_index = get_scalar("flash", -1);
+    const int flash_index = this->get_scalar("flash", -1);
 
     //std::cout << "Test3 " << flash_index << std::endl;
     
@@ -2421,7 +2353,7 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph() const
 {
     const char* name = "basic";
-    auto& spgraphs = cache().spgraphs;
+    auto& spgraphs = this->cache().spgraphs;
     auto it = spgraphs.find(name);
     if (it != spgraphs.end()) {
         return it->second;
@@ -2434,7 +2366,7 @@ const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetector
                                                                       IPCTransformSet::pointer pcts) const
 {
     const char* name = "ctpc";
-    auto& spgraphs = cache().spgraphs;
+    auto& spgraphs = this->cache().spgraphs;
     auto it = spgraphs.find(name);
     if (it != spgraphs.end()) {
         return it->second;
@@ -2448,9 +2380,9 @@ const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetector
                                                                       bool use_ctpc) const
 {
     if (use_ctpc) {
-        return shortest_paths_graph(dv, pcts);
+        return this->shortest_paths_graph(dv, pcts);
     }
-    return shortest_paths_graph();
+    return this->shortest_paths_graph();
 }
 
 

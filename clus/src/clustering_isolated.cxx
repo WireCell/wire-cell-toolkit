@@ -151,7 +151,7 @@ static void clustering_isolated(
         for (int j = 0; j != 4; j++) {
             if (ranges.at(j) > max) max = ranges.at(j);
         }
-        // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_center() << " " << max << " " << range_cut << std::endl;
+        // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_pca().center) << " " << max << " " << range_cut << std::endl;
         if (max < range_cut && live_clusters.at(i)->get_length() < length_cut) {
             small_clusters.push_back(live_clusters.at(i));
         }
@@ -192,7 +192,7 @@ static void clustering_isolated(
                     // for (size_t j = 0; j != sep_clusters.size(); j++) {
                     //     delete sep_clusters.at(j);
                     // }
-                    // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_center() << " " << max << " " << range_cut << std::endl;
+                    // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_pca().center) << " " << max << " " << range_cut << std::endl;
 
                     if (max < range_cut && max_length < length_cut) {
                         small_clusters.push_back(live_clusters.at(i));
@@ -236,7 +236,7 @@ static void clustering_isolated(
                 min_dis_cluster = big_cluster;
             }
         }
-        // std::cout << "SB: " << curr_cluster->get_length()/units::cm << " " << min_dis_cluster->get_length()/units::cm << " " << curr_cluster->get_center() << " " << min_dis_cluster->get_center() << " " << min_dis << " " << small_big_dis_cut << std::endl;
+        // std::cout << "SB: " << curr_cluster->get_length()/units::cm << " " << min_dis_cluster->get_length()/units::cm << " " << curr_cluster->get_pca().center) << " " << min_dis_cluster->get_pca().center) << " " << min_dis << " " << small_big_dis_cut << std::endl;
 
         if (min_dis < small_big_dis_cut) {    
 
@@ -263,7 +263,7 @@ static void clustering_isolated(
                     used_small_clusters.find(cluster2) != used_small_clusters.end() &&
                         used_small_clusters.find(cluster1) == used_small_clusters.end()) {
                     to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
-                    // std::cout << "SD: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                    // std::cout << "SD: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center) << " " << cluster2->get_pca().center) << std::endl;
                     used_small_clusters.insert(cluster1);
                     used_small_clusters.insert(cluster2);
                 }
@@ -290,7 +290,7 @@ static void clustering_isolated(
             std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
             double dis = std::get<2>(results);
             if (dis < small_small_dis_cut) {
-                // std::cout << "SS: "<< cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                // std::cout << "SS: "<< cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center) << " " << cluster2->get_pca().center) << std::endl;
                 to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
             }
         }
@@ -316,7 +316,7 @@ static void clustering_isolated(
             //     // cloud2 = cluster2->get_point_cloud();
             //     if (used_big_clusters.find(cluster2) != used_big_clusters.end()) continue;
             //     // cluster2->Calc_pca();
-            //     pca_ratio = cluster2->get_pca_value(1) / cluster2->get_pca_value(0);
+            //     pca_ratio = cluster2->get_pca().values.at(1) / cluster2->get_pca().values.at(0);
             //     small_cluster_length = cluster2->get_length();
             // }
             // else {
@@ -324,13 +324,13 @@ static void clustering_isolated(
             //     // cloud2 = cluster1->get_point_cloud();
             //     if (used_big_clusters.find(cluster1) != used_big_clusters.end()) continue;
             //     // cluster1->Calc_pca();
-            //     pca_ratio = cluster1->get_pca_value(1) / cluster1->get_pca_value(0);
+            //     pca_ratio = cluster1->get_pca().values.at(1) / cluster1->get_pca().values.at(0);
             //     small_cluster_length = cluster1->get_length();
             // }
             // make sure cluster1 is the longer one
             if (!(cluster1->get_length() > cluster2->get_length())) std::swap(cluster1, cluster2);
             if (used_big_clusters.find(cluster2) != used_big_clusters.end()) continue;
-            pca_ratio = cluster2->get_pca_value(1) / cluster2->get_pca_value(0);
+            pca_ratio = cluster2->get_pca().values.at(1) / cluster2->get_pca().values.at(0);
             small_cluster_length = cluster2->get_length();
 
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
@@ -367,7 +367,7 @@ static void clustering_isolated(
                 if (flag_merge) {
                     to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
 
-                    // std::cout << "BB: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                    // std::cout << "BB: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center) << " " << cluster2->get_pca().center) << std::endl;
 
                     if (cluster1->get_length() < cluster2->get_length()) {
                         used_big_clusters.insert(cluster1);
@@ -526,7 +526,7 @@ static void clustering_isolated(
     //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
     //          Cluster* cluster = live_clusters.at(iclus);
     //          auto& scope = cluster->get_default_scope();
-    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center) << std::endl;
     //      }
     //    }
 

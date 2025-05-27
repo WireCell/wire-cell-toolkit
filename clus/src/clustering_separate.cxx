@@ -129,8 +129,8 @@ static void clustering_separate(
                     }
                 }
 
-                geo_point_t main_dir(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(),
-                                     cluster->get_pca_axis(0).z());
+                geo_point_t main_dir(cluster->get_pca().axis.at(0).x(), cluster->get_pca().axis.at(0).y(),
+                                     cluster->get_pca().axis.at(0).z());
 
                 if (flag_top) {
                     if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 16 ||
@@ -141,14 +141,14 @@ static void clustering_separate(
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 65 &&
                             cluster->get_length() > 360 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 45 &&
-                            cluster->get_pca_value(1) > 0.75 * cluster->get_pca_value(0) ||
+                            cluster->get_pca().values.at(1) > 0.75 * cluster->get_pca().values.at(0) ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
-                            cluster->get_pca_value(1) > 0.55 * cluster->get_pca_value(0)) {
+                            cluster->get_pca().values.at(1) > 0.55 * cluster->get_pca().values.at(0)) {
                         flag_proceed = true;
                     }
                     else {
                         if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
-                            cluster->get_pca_value(1) > 0.2 * cluster->get_pca_value(0)) {
+                            cluster->get_pca().values.at(1) > 0.2 * cluster->get_pca().values.at(0)) {
                             // std::vector<Cluster *> temp_sep_clusters = Separate_2(cluster, 10 * units::cm);
                             const auto b2id = Separate_2(cluster, scope, 10 * units::cm);
                             std::set<int> ids;
@@ -175,7 +175,7 @@ static void clustering_separate(
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 35 &&
                             cluster->get_length() > 330 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 30 &&
-                            cluster->get_pca_value(1) > 0.55 * cluster->get_pca_value(0)) {
+                            cluster->get_pca().values.at(1) > 0.55 * cluster->get_pca().values.at(0)) {
                         flag_proceed = true;
                     }
                 }
@@ -389,7 +389,7 @@ static void clustering_separate(
 //     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
 //         Cluster* cluster = live_clusters.at(iclus);
 //         auto& scope = cluster->get_default_scope();
-//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center << std::endl;
 //     }
 //   }
 
@@ -405,9 +405,9 @@ static void clustering_separate(
 bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length)
 {
     // get the main axis
-    geo_point_t dir1(cluster->get_pca_axis(0).x(), cluster->get_pca_axis(0).y(), cluster->get_pca_axis(0).z());
-    geo_point_t dir2(cluster->get_pca_axis(1).x(), cluster->get_pca_axis(1).y(), cluster->get_pca_axis(1).z());
-    geo_point_t dir3(cluster->get_pca_axis(2).x(), cluster->get_pca_axis(2).y(), cluster->get_pca_axis(2).z());
+    geo_point_t dir1(cluster->get_pca().axis.at(0).x(), cluster->get_pca().axis.at(0).y(), cluster->get_pca().axis.at(0).z());
+    geo_point_t dir2(cluster->get_pca().axis.at(1).x(), cluster->get_pca().axis.at(1).y(), cluster->get_pca().axis.at(1).z());
+    geo_point_t dir3(cluster->get_pca().axis.at(2).x(), cluster->get_pca().axis.at(2).y(), cluster->get_pca().axis.at(2).z());
 
     double angle1 = fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
@@ -416,8 +416,8 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
     double temp_angle1 = asin(fabs(points.first.x() - points.second.x()) / length) / 3.1415926 * 180.;
 
     double angle2 = fabs(dir3.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
-    double ratio1 = cluster->get_pca_value(1) / cluster->get_pca_value(0);
-    double ratio2 = cluster->get_pca_value(2) / cluster->get_pca_value(0);
+    double ratio1 = cluster->get_pca().values.at(1) / cluster->get_pca().values.at(0);
+    double ratio2 = cluster->get_pca().values.at(2) / cluster->get_pca().values.at(0);
 
     // std::cout << ratio1 << " " <<  pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2)  << " "  << ratio1 << " " << pow(10, exp(1.38115 - 1.19312 * pow(temp_angle1, 1. / 3.)) - 2.2) << " " << ratio2 << " " << pow(10, exp(1.38115 - 1.19312 * pow(angle2, 1. / 3.)) - 2.2) << " " << ratio1 << " " << angle1 << " " << angle2 << std::endl;
     
@@ -1015,13 +1015,13 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
 
     // std::cout << "Test: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << std::endl;
 
-    geo_point_t cluster_center = cluster->get_center();
-    geo_point_t main_dir = cluster->get_pca_axis(0);
-    geo_point_t second_dir = cluster->get_pca_axis(1);
+    geo_point_t cluster_center = cluster->get_pca().center;
+    geo_point_t main_dir = cluster->get_pca().axis.at(0);
+    geo_point_t second_dir = cluster->get_pca().axis.at(1);
     
 
     // special case, if one of the cosmic is very close to the beam direction
-    if (cluster->get_pca_value(1) > 0.08 * cluster->get_pca_value(0) &&
+    if (cluster->get_pca().values.at(1) > 0.08 * cluster->get_pca().values.at(0) &&
         fabs(main_dir.angle(dir_beam) - 3.1415926 / 2.) > 75 / 180. * 3.1415926 &&
         fabs(second_dir.angle(dir_cosmic) - 3.1415926 / 2.) > 60 / 180. * 3.1415926) {
         main_dir = second_dir;
@@ -1566,14 +1566,14 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
             Cluster *cluster1 = saved_clusters.at(i);
             if (cluster1->get_length() < 5 * units::cm) continue;
             // ToyPointCloud *cloud1 = cluster1->get_point_cloud();
-            geo_point_t dir1(cluster1->get_pca_axis(0).x(), cluster1->get_pca_axis(0).y(),
-                             cluster1->get_pca_axis(0).z());
+            geo_point_t dir1(cluster1->get_pca().axis.at(0).x(), cluster1->get_pca().axis.at(0).y(),
+                             cluster1->get_pca().axis.at(0).z());
             for (size_t j = 0; j != to_be_merged_clusters.size(); j++) {
                 Cluster *cluster2 = to_be_merged_clusters.at(j);
                 if (cluster2->get_length() < 10 * units::cm) continue;
                 // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
-                geo_point_t dir2(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                 cluster2->get_pca_axis(0).z());
+                geo_point_t dir2(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                 cluster2->get_pca().axis.at(0).z());
                 std::tuple<int, int, double> temp_dis = cluster1->get_closest_points(*cluster2);
                 if (std::get<2>(temp_dis) < 15 * units::cm &&
                     fabs(dir1.angle(dir2) - 3.1415926 / 2.) / 3.1415926 * 180 > 75) {

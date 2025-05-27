@@ -140,6 +140,10 @@ namespace WireCell::Clus::Facade {
                                 const double dis_cut =  5*units::cm);
 
 
+    // Calculate PCA direction for a set of points around a center point
+    geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points);
+
+
 }  // namespace WireCell::Clus::Facade
 
 #endif

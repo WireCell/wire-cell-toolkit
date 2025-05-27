@@ -26,9 +26,9 @@ static std::pair<size_t, size_t> skeleton_points_hilo(const Cluster& cluster)
     size_t highest_index = 0;
     size_t lowest_index = 0;
 
-    geo_point_t main_dir = cluster.get_pca_axis(0);
+    geo_point_t main_dir = cluster.get_pca().axis.at(0);
     main_dir = main_dir.norm();
-    geo_point_t center = cluster.get_center();
+    geo_point_t center = cluster.get_pca().center;
     geo_point_t temp_pt(highest_wcp.x() - center.x(), highest_wcp.y() - center.y(), highest_wcp.z() - center.z());
     double highest_value = temp_pt.dot(main_dir);
     double lowest_value = highest_value;
@@ -774,7 +774,7 @@ static void clustering_deghost(
 //     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
 //         Cluster* cluster = live_clusters.at(iclus);
 //         auto& scope = cluster->get_default_scope();
-//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center << std::endl;
 //     }
 //   }
 

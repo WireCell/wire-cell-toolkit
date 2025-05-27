@@ -312,11 +312,11 @@ TEST_CASE("clustering prototype pca")
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
 
-    geo_point_t center = pcc.get_center();
+    geo_point_t center = pcc.get_pca().center;
     debug("center: {} {} {}", center.x(), center.y(), center.z());
     for (size_t ind=0; ind<3; ++ind) {
-        auto axis = pcc.get_pca_axis(ind);
-        auto val = pcc.get_pca_value(ind);
+        auto axis = pcc.get_pca().axis.at(ind);
+        auto val = pcc.get_pca().values.at(ind);
         debug("pca{}: {} {} {} {}", ind, axis.x(), axis.y(), axis.z(), val);
     }
 }

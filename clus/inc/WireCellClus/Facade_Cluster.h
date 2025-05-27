@@ -41,7 +41,7 @@ namespace WireCell::Clus::Facade {
         // return raw pc information ...
         void set_default_scope(const Tree::Scope& scope);
         const Tree::Scope& get_default_scope() const {return m_default_scope;}
-        const Tree::Scope& get_raw_scope() const {return scope_3d_raw;}
+        const Tree::Scope& get_raw_scope() const {return m_scope_3d_raw;}
 
         // set, get scope filter ...
         void set_scope_filter(const Tree::Scope& scope, bool flag=true);
@@ -107,7 +107,7 @@ namespace WireCell::Clus::Facade {
         /// TODO: currently not cached, can cache it if needed
         template <typename T>
         const std::vector<T> points_property(const std::string& key) const
-        {   const auto fpc = sv<T>(scope_3d_raw).flat_pc("3d", {key});
+        {   const auto fpc = sv<T>(m_scope_3d_raw).flat_pc("3d", {key});
             const auto arr = fpc.get(key);
             if (!arr) {
                 raise<RuntimeError>("Cluster::points_property: no such array: %s", key);
@@ -132,7 +132,9 @@ namespace WireCell::Clus::Facade {
         using kd3d_t = sv3d_t::nfkd_t;
         const kd3d_t& kd3d() const;
         const kd3d_t& kd() const;
+    private:
         const kd3d_t& kd3d_raw() const;
+    public:
         const kd3d_t& kd_raw() const;
 
         using kd_results_t = kd3d_t::results_type;
@@ -411,11 +413,9 @@ namespace WireCell::Clus::Facade {
         std::vector<geo_point_t> get_hull() const;
 
         // Return PCA calculated on blob children sample points
+        // PCA has attributes: {center,axis,values}
         using PCA = ClusterCache::PCA;
         PCA& get_pca() const;
-        geo_point_t get_center() const; // PCA center
-        geo_vector_t get_pca_axis(int axis) const;
-        double get_pca_value(int axis) const;
 
         // start slice index (tick number) to blob facade pointer can be
         // duplicated, example usage:
@@ -424,9 +424,6 @@ namespace WireCell::Clus::Facade {
         using time_blob_map_t = ClusterCache::time_blob_map_t;
         const time_blob_map_t& time_blob_map() const;
    
-        // Calculate PCA direction for a set of points around a center point
-        geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points) const;
-
         /// @brief Determine if a cluster may be separated due to crossing the boundary.
         /// @return connected components array or empty if separation is not warranted.
         std::vector<int>
@@ -496,12 +493,12 @@ namespace WireCell::Clus::Facade {
             {"scope_3d_raw", {"3d", {"x", "y", "z"}}}
         };
         // FIXME: shoud we remove this in the future?
-        const Tree::Scope& scope_3d_raw = m_scopes.at("scope_3d_raw");
-        const Tree::Scope scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
-        std::string scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
-        Tree::Scope m_default_scope = scope_3d_raw;
-        std::map<size_t, bool> m_map_scope_filter={{scope_3d_raw.hash(), true}};
-        std::map<size_t, std::string> m_map_scope_transform={{scope_3d_raw.hash(), "Unity"}};
+        const Tree::Scope& m_scope_3d_raw = m_scopes.at("scope_3d_raw");
+        const Tree::Scope m_scope_wire_index = {"3d", {"uwire_index", "vwire_index", "wwire_index"}};
+        std::string m_scope2ds_prefix[3] = {"2dp0", "2dp1", "2dp2"};
+        Tree::Scope m_default_scope = m_scope_3d_raw;
+        std::map<size_t, bool> m_map_scope_filter={{m_scope_3d_raw.hash(), true}};
+        std::map<size_t, std::string> m_map_scope_transform={{m_scope_3d_raw.hash(), "Unity"}};
 
         const graph_type* get_graph(const std::string& name) const;
         using graph_ptr = ClusterCache::graph_ptr;

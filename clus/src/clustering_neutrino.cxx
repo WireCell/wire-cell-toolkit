@@ -337,8 +337,8 @@ static void clustering_neutrino(
             // can not be the same
             if (cluster2 == cluster1) continue;
             if (cluster2->get_length() > 150 * units::cm) {
-                geo_point_t dir1(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                 cluster2->get_pca_axis(0).z());
+                geo_point_t dir1(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                 cluster2->get_pca().axis.at(0).z());
                 if (fabs(dir1.angle(vertical_dir) - 3.1415926 / 2.) / 3.1415926 * 180. > 80) continue;
             }
             // cluster2->Create_point_cloud();
@@ -351,9 +351,9 @@ static void clustering_neutrino(
 
             if (cluster_cloud_map.find(cluster1) == cluster_cloud_map.end()) {
                 // cluster1->Calc_PCA();
-                geo_point_t center = cluster1->get_center();
-                geo_point_t main_dir(cluster1->get_pca_axis(0).x(), cluster1->get_pca_axis(0).y(),
-                                     cluster1->get_pca_axis(0).z());
+                geo_point_t center = cluster1->get_pca().center;
+                geo_point_t main_dir(cluster1->get_pca().axis.at(0).x(), cluster1->get_pca().axis.at(0).y(),
+                                     cluster1->get_pca().axis.at(0).z());
                 main_dir = main_dir.norm();
 
                 // ToyPointCloud *cloud1_ext = new ToyPointCloud(angle_u, angle_v, angle_w);
@@ -382,7 +382,7 @@ static void clustering_neutrino(
 
                 if (cluster1->nnearby(extreme_pts.first, 15 * units::cm) <= 75 && cluster1->npoints() > 75 ||
                     cluster1->nnearby(extreme_pts.second, 15 * units::cm) <= 75 && cluster1->npoints() > 75 ||
-                    cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0) &&
+                    cluster1->get_pca().values.at(1) > 0.022 * cluster1->get_pca().values.at(0) &&
                         cluster1->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
                     const double orig_cluster_length = cluster1->get_length();
@@ -410,9 +410,9 @@ static void clustering_neutrino(
                     }
 
                     temp_extreme_pts = largest_cluster->get_two_extreme_points();
-                    center = largest_cluster->get_center();
-                    main_dir.set(largest_cluster->get_pca_axis(0).x(), largest_cluster->get_pca_axis(0).y(),
-                                 largest_cluster->get_pca_axis(0).z());
+                    center = largest_cluster->get_pca().center;
+                    main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
+                                 largest_cluster->get_pca().axis.at(0).z());
                     num_clusters = sep_clusters.size();
                     // largest_cluster->Create_point_cloud();
 
@@ -453,14 +453,14 @@ static void clustering_neutrino(
                 if (cluster1->nnearby(extreme_pts.first, 15 * units::cm) <= 75 &&
                         cluster1->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0))
+                        cluster1->get_pca().values.at(1) > 0.022 * cluster1->get_pca().values.at(0))
                     flag_add1 = false;
 
                 bool flag_add2 = true;
                 if (cluster1->nnearby(extreme_pts.second, 15 * units::cm) <= 75 &&
                         cluster1->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0))
+                        cluster1->get_pca().values.at(1) > 0.022 * cluster1->get_pca().values.at(0))
                     flag_add2 = false;
 
                 for (size_t j = 0; j != 150; j++) {
@@ -536,9 +536,9 @@ static void clustering_neutrino(
 
             if (cluster_cloud_map.find(cluster2) == cluster_cloud_map.end()) {
                 // cluster2->Calc_PCA();
-                geo_point_t center = cluster2->get_center();
-                geo_point_t main_dir(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                     cluster2->get_pca_axis(0).z());
+                geo_point_t center = cluster2->get_pca().center;
+                geo_point_t main_dir(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                     cluster2->get_pca().axis.at(0).z());
                 main_dir = main_dir.norm();
 
                 // ToyPointCloud *cloud2_ext = new ToyPointCloud(angle_u, angle_v, angle_w);
@@ -567,7 +567,7 @@ static void clustering_neutrino(
 
                 if (cluster2->nnearby(extreme_pts.first, 15 * units::cm) <= 75 && cluster2->npoints() > 75 ||
                     cluster2->nnearby(extreme_pts.second, 15 * units::cm) <= 75 && cluster2->npoints() > 75 ||
-                    cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0) &&
+                    cluster2->get_pca().values.at(1) > 0.022 * cluster2->get_pca().values.at(0) &&
                         cluster2->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
                     // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
@@ -593,9 +593,9 @@ static void clustering_neutrino(
                         }
                     }
                     temp_extreme_pts = largest_cluster->get_two_extreme_points();
-                    center = largest_cluster->get_center();
-                    main_dir.set(largest_cluster->get_pca_axis(0).x(), largest_cluster->get_pca_axis(0).y(),
-                                 largest_cluster->get_pca_axis(0).z());
+                    center = largest_cluster->get_pca().center;
+                    main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
+                                 largest_cluster->get_pca().axis.at(0).z());
                     num_clusters = sep_clusters.size();
 
                     // largest_cluster->Create_point_cloud();
@@ -637,13 +637,13 @@ static void clustering_neutrino(
                 if (cluster2->nnearby(extreme_pts.first, 15 * units::cm) <= 75 &&
                         cluster2->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0))
+                        cluster2->get_pca().values.at(1) > 0.022 * cluster2->get_pca().values.at(0))
                     flag_add1 = false;
                 bool flag_add2 = true;
                 if (cluster2->nnearby(extreme_pts.second, 15 * units::cm) <= 75 &&
                         cluster2->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0))
+                        cluster2->get_pca().values.at(1) > 0.022 * cluster2->get_pca().values.at(0))
                     flag_add2 = false;
 
                 // std::cout << flag_add1 << " " << flag_add2 << " " << dir1.x() << " " << dir1.y() << " " <<
@@ -778,7 +778,7 @@ static void clustering_neutrino(
                     }
 
                     if (cluster1->get_length() > 25 * units::cm &&
-                        cluster1->get_pca_value(1) < 0.0015 * cluster1->get_pca_value(0)) {
+                        cluster1->get_pca().values.at(1) < 0.0015 * cluster1->get_pca().values.at(0)) {
                         flag_merge = false;
 
                         if (dis < 0.5 * units::cm && dis1 < 1.5 * units::cm && dis2 < 1.5 * units::cm)
@@ -788,7 +788,7 @@ static void clustering_neutrino(
                         if (cluster2->get_length() < 30 * units::cm) {
                             flag_merge = true;
                             if (cluster1->get_length() > 15 * units::cm &&
-                                cluster1->get_pca_value(1) < 0.012 * cluster1->get_pca_value(0)) {
+                                cluster1->get_pca().values.at(1) < 0.012 * cluster1->get_pca().values.at(0)) {
                                 if (dis1 > std::max(2.5 * units::cm, dis2 * sin(7.5 / 180. * 3.1415926)))
                                     flag_merge = false;
                             }
@@ -809,7 +809,7 @@ static void clustering_neutrino(
                             }
 
                             if (cluster1->get_length() > 15 * units::cm &&
-                                cluster1->get_pca_value(1) < 0.012 * cluster1->get_pca_value(0)) {
+                                cluster1->get_pca().values.at(1) < 0.012 * cluster1->get_pca().values.at(0)) {
                                 if (dis1 > std::max(2.5 * units::cm, dis2 * sin(7.5 / 180. * 3.1415926)))
                                     flag_merge = false;
                             }
@@ -826,15 +826,15 @@ static void clustering_neutrino(
                             }
 
                             if (cluster1->get_length() > 15 * units::cm &&
-                                cluster1->get_pca_value(1) < 0.012 * cluster1->get_pca_value(0)) {
+                                cluster1->get_pca().values.at(1) < 0.012 * cluster1->get_pca().values.at(0)) {
                                 if (dis1 > std::max(3.5 * units::cm, dis2 * sin(7.5 / 180. * 3.1415926)))
                                     flag_merge = false;
                             }
 
                             if (flag_merge && cluster2->get_length() > 200 * units::cm && dis2 < 12 * units::cm &&
-                                cluster2->get_pca_value(1) < 0.0015 * cluster2->get_pca_value(0)) {
-                                geo_point_t cluster2_dir(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                                         cluster2->get_pca_axis(0).z());
+                                cluster2->get_pca().values.at(1) < 0.0015 * cluster2->get_pca().values.at(0)) {
+                                geo_point_t cluster2_dir(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                                         cluster2->get_pca().axis.at(0).z());
                                 if (fabs(cluster2_dir.angle(vertical_dir) / 3.1415926 * 180. - 3.1415926 / 2.) /
                                             3.1415926 * 180. >
                                         45 &&
@@ -849,7 +849,7 @@ static void clustering_neutrino(
                     if (cluster_close_cluster_map[cluster1].second < 1.2 * units::cm &&
                         cluster_close_cluster_map[cluster1].first != cluster2 &&
                         cluster_close_cluster_map[cluster1].first->get_length() > 60 * units::cm &&
-                        cluster1->get_pca_value(1) > 0.012 * cluster1->get_pca_value(0) && dis1 > 0.6 * units::cm) {
+                        cluster1->get_pca().values.at(1) > 0.012 * cluster1->get_pca().values.at(0) && dis1 > 0.6 * units::cm) {
                         flag_merge = false;
                     }
 
@@ -859,15 +859,15 @@ static void clustering_neutrino(
 
                     if (flag_merge && cluster1->get_length() > 150 * units::cm &&
                         cluster2->get_length() > 150 * units::cm &&
-                        (cluster1->get_pca_value(1) < 0.03 * cluster1->get_pca_value(0) ||
-                         cluster2->get_pca_value(1) < 0.03 * cluster2->get_pca_value(0))) {
+                        (cluster1->get_pca().values.at(1) < 0.03 * cluster1->get_pca().values.at(0) ||
+                         cluster2->get_pca().values.at(1) < 0.03 * cluster2->get_pca().values.at(0))) {
                         // protect against two long tracks ...
                         // cluster1->Calc_PCA();
                         // cluster2->Calc_PCA();
-                        geo_point_t temp_dir1(cluster1->get_pca_axis(0).x(), cluster1->get_pca_axis(0).y(),
-                                              cluster1->get_pca_axis(0).z());
-                        geo_point_t temp_dir2(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                              cluster2->get_pca_axis(0).z());
+                        geo_point_t temp_dir1(cluster1->get_pca().axis.at(0).x(), cluster1->get_pca().axis.at(0).y(),
+                                              cluster1->get_pca().axis.at(0).z());
+                        geo_point_t temp_dir2(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                              cluster2->get_pca().axis.at(0).z());
                         if (fabs(temp_dir1.angle(temp_dir2) - 3.1415926 / 2.) < 60 / 180. * 3.1415926)
                             flag_merge = false;
                     }
@@ -877,7 +877,7 @@ static void clustering_neutrino(
                 // if(flag_merge) 
                 //     std::cout << dis1 / units::cm << " " << dis2 / units::cm << " " << dis / units::cm << " "
                 //               << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
-                //               << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                //               << flag_merge << " " << merge_type << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
 
                 if (dis < 1.8 * units::cm && cluster1->get_length() < 75 * units::cm &&
                     cluster2->get_length() < 75 * units::cm &&
@@ -915,8 +915,8 @@ static void clustering_neutrino(
                          cluster2->get_length() > 30 * units::cm && cluster1->get_length() > 30 * units::cm) {
                     // cluster1->Calc_PCA();
                     // cluster2->Calc_PCA();
-                    if (cluster1->get_pca_value(1) > 0.0015 * cluster1->get_pca_value(0) &&
-                        cluster2->get_pca_value(1) > 0.0015 * cluster2->get_pca_value(0)) {
+                    if (cluster1->get_pca().values.at(1) > 0.0015 * cluster1->get_pca().values.at(0) &&
+                        cluster2->get_pca().values.at(1) > 0.0015 * cluster2->get_pca().values.at(0)) {
                         flag_merge = true;
                         merge_type = 3;
                     }
@@ -960,7 +960,7 @@ static void clustering_neutrino(
         //  if(flag_merge ) 
         //             std::cout 
         //                       << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
-        //                       << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+        //                       << flag_merge << " " << merge_type << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
 
         }
     }
@@ -980,7 +980,7 @@ static void clustering_neutrino(
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
     }
     for (auto [cluster1, cluster2] : to_be_merged_pairs) {
-        // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+        // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
         boost::add_edge(ilive2desc[map_cluster_index[cluster1]],
                         ilive2desc[map_cluster_index[cluster2]], g);
     }
@@ -994,7 +994,7 @@ static void clustering_neutrino(
     //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
     //          Cluster* cluster = live_clusters.at(iclus);
     //          auto& scope = cluster->get_default_scope();
-    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_center() << std::endl;
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center << std::endl;
     //      }
     //    }
 
