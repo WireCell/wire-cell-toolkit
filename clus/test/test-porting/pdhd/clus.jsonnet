@@ -360,7 +360,7 @@ local clus_per_apa (
 local clus_all_apa (
     anodes,
     dump = true,
-    ) = {
+) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -374,6 +374,29 @@ local clus_all_apa (
 
     local dv = detector_volumes(anodes),
     local pcts = pctransforms(dv),
+    
+    local retiler = {
+        type: "RetileCluster",
+        name: "all",
+        data: {
+            // Haiwang really needs to fix https://github.com/HaiwangYu/wcp-porting-img/issues/7 so I can avoid this ungodly mess
+            samplers: [{apa : 0, face : 0, name: "BlobSampler:apa0-0"},
+                       {apa : 0, face : 1, name: "BlobSampler:apa0-1"},
+                       {apa : 1, face : 0, name: "BlobSampler:apa1-0"},
+                       {apa : 1, face : 1, name: "BlobSampler:apa1-1"},
+                       {apa : 2, face : 0, name: "BlobSampler:apa2-0"},
+                       {apa : 2, face : 1, name: "BlobSampler:apa2-1"},
+                       {apa : 3, face : 0, name: "BlobSampler:apa3-0"},
+                       {apa : 3, face : 1, name: "BlobSampler:apa3-1"}
+                      ], 
+            anodes: [wc.tn(a) for a in anodes],
+            cut_time_low: 3*wc.us,
+            cut_time_high: 5*wc.us,
+            detector_volumes: wc.tn(dv),
+            pc_transforms: wc.tn(pcts)
+        },
+        uses: anodes + [pcts,dv]
+    },
 
     local mabc_cmeths_all = [
         // {type: "ClusteringExamineXBoundary", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)}},
@@ -388,23 +411,16 @@ local clus_all_apa (
         {type: "ClusteringNeutrino", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
         {type: "ClusteringIsolated", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
         {type: "ClusteringExamineBundles", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords, pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringRetile", name:"all",  data:{
-            samplers: [{apa : 0, face : 0, name: "BlobSampler:apa0-0"},
-                       {apa : 0, face : 1, name: "BlobSampler:apa0-1"},
-                       {apa : 1, face : 0, name: "BlobSampler:apa1-0"},
-                       {apa : 1, face : 1, name: "BlobSampler:apa1-1"},
-                       {apa : 2, face : 0, name: "BlobSampler:apa2-0"},
-                       {apa : 2, face : 1, name: "BlobSampler:apa2-1"},
-                       {apa : 3, face : 0, name: "BlobSampler:apa3-0"},
-                       {apa : 3, face : 1, name: "BlobSampler:apa3-1"}
-                      ], 
-            anodes: [wc.tn(a) for a in anodes],
-            cut_time_low: 3*wc.us,
-            cut_time_high: 5*wc.us,
-            detector_volumes: wc.tn(dv),
-            pc_name: "3d",
-            coords: common_corr_coords,
-            pc_transforms: wc.tn(pcts)}},
+        { // Haiwang really needs to fix https://github.com/HaiwangYu/wcp-porting-img/issues/7 so I can avoid this ungodly mess
+            type: "ClusteringRetile",
+            name:"all",
+            data:{
+                pc_name: "3d",
+                coords: common_corr_coords,
+                retiler: wc.tn(retiler),
+            },
+            uses: [retiler]
+        },
     ],
 
     local mabc = g.pnode({

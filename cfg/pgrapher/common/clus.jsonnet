@@ -59,6 +59,10 @@ local wc = import "wirecell.jsonnet";
         local pcts_cfg = {pc_transforms: pcts_tn},
         local scope_cfg = {pc_name: pc_name, coords: coords},
 
+        // Use "parent" inside of a function to call sibling functions.
+        local parent = self,
+
+
         test(name="") :: {
             type: "ClusteringTest",
             name: prefix+name,
@@ -203,20 +207,36 @@ local wc = import "wirecell.jsonnet";
             uses: [pc_transforms],
         },
 
-        // Use the sampler() function to provide properly formed elements to the
-        // array-of-object argument "samplers".
-        retile(name="", anodes=[], samplers=[], cut_time_low=-1e9, cut_time_high=1e9) :: {
+        // This configures RetileCluster, a per-cluster helper for
+        // ClusteringRetile as well as others.  Use the sampler() function to
+        // provide properly formed elements to the array-of-object argument
+        // "samplers".
+        retiler(name="", anodes=[], samplers=[], cut_time_low=-1e9, cut_time_high=1e9) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
-            type: "ClusteringRetile",
+            type: "RetileCluster",
             name: prefix+name,
             data: {
                 cut_time_low: cut_time_low,
                 cut_time_high: cut_time_high,
                 anodes: wc.tns(anodes),
                 samplers: sampler_cfgs,
-            } + dv_cfg + pcts_cfg + scope_cfg,
+            } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
+        },
+
+        // Use the sampler() function to provide properly formed elements to the
+        // array-of-object argument "samplers".
+        retile(name="", anodes=[], samplers=[], cut_time_low=-1e9, cut_time_high=1e9) :: {
+            local sampler_objs = [s.sobj for s in samplers],
+            local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
+            local rc = parent.retiler(name, anodes, samplers, cut_time_low, cut_time_high),
+            type: "ClusteringRetile",
+            name: prefix+name,
+            data: {
+                retiler: wc.tn(rc),
+            } + scope_cfg,
+            uses: [rc],
         },
 
 
