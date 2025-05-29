@@ -1,6 +1,7 @@
 local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import 'pgrapher/common/funcs.jsonnet';
+local clus = import "pgrapher/common/clus.jsonnet";
 
 
 local time_offset = -250 * wc.us;
@@ -101,6 +102,74 @@ local pctransforms(dv) = {
     uses: [dv]
 };
 
+// WARNING: wcp-porting-img had the two blob samplers (live and dead) with the
+// same name!  These two functions make them distinct.  But in order to
+// reproduce the results, we use just bs_face().  Once things are working, the
+// code below should delete bs_face() and use one of bs_{live,dead}_face().
+
+
+// Note, the "sampler" must be unique to the "sampling".
+local bs_live_face(apa, face) = {
+    type: "BlobSampler",
+    name: "live-%s-%d"%[apa, face],
+    data: {
+        drift_speed: drift_speed,
+        time_offset: time_offset,
+        strategy: [
+            // "center",
+            // "corner",
+            // "edge",
+            // "bounds",
+            "stepped",
+            // {name:"grid", step:1, planes:[0,1]},
+            // {name:"grid", step:1, planes:[1,2]},
+            // {name:"grid", step:1, planes:[2,0]},
+            // {name:"grid", step:2, planes:[0,1]},
+            // {name:"grid", step:2, planes:[1,2]},
+            // {name:"grid", step:2, planes:[2,0]},
+        ],
+        // extra: [".*"] // want all the extra
+        extra: [".*wire_index", "wpid"]
+    }
+};
+local bs_dead_face(apa, face) = {
+    type: "BlobSampler",
+    name: "dead-%s-%d"%[apa, face],
+    data: {
+        strategy: [
+            "center",
+        ],
+        extra: [".*"] // want all the extra
+    }
+};
+
+local bs_face(apa, face) = {
+    type: "BlobSampler",
+    name: "apa%s-%d"%[apa, face],
+    data: {
+        drift_speed: drift_speed,
+        time_offset: time_offset,
+        strategy: [
+            // "center",
+            // "corner",
+            // "edge",
+            // "bounds",
+            "stepped",
+            // {name:"grid", step:1, planes:[0,1]},
+            // {name:"grid", step:1, planes:[1,2]},
+            // {name:"grid", step:1, planes:[2,0]},
+            // {name:"grid", step:2, planes:[0,1]},
+            // {name:"grid", step:2, planes:[1,2]},
+            // {name:"grid", step:2, planes:[2,0]},
+        ],
+        // extra: [".*"] // want all the extra
+        extra: [".*wire_index", "wpid"]
+    }
+};
+
+
+
+
 local clus_per_face (
     anode,
     face,
@@ -110,40 +179,6 @@ local clus_per_face (
 
     local dv = detector_volumes([anode], face),
     local pcts = pctransforms(dv),
-
-    // Note, the "sampler" must be unique to the "sampling".
-    local bs_live = {
-        type: "BlobSampler",
-        name: "%s-%d"%[anode.name, face],
-        data: {
-            drift_speed: drift_speed,
-            time_offset: time_offset,
-            strategy: [
-                // "center",
-                // "corner",
-                // "edge",
-                // "bounds",
-                "stepped",
-                // {name:"grid", step:1, planes:[0,1]},
-                // {name:"grid", step:1, planes:[1,2]},
-                // {name:"grid", step:1, planes:[2,0]},
-                // {name:"grid", step:2, planes:[0,1]},
-                // {name:"grid", step:2, planes:[1,2]},
-                // {name:"grid", step:2, planes:[2,0]},
-            ],
-            // extra: [".*"] // want all the extra
-            extra: [".*wire_index", "wpid"] //
-            // extra: [] //
-        }},
-    local bs_dead = {
-        type: "BlobSampler",
-        name: "%s-%d"%[anode.name, face],
-        data: {
-            strategy: [
-                "center",
-            ],
-            extra: [".*"] // want all the extra
-        }},
 
 
     local cluster_scope_filter_live = g.pnode({
@@ -162,13 +197,19 @@ local clus_per_face (
         }
     }, nin=1, nout=1, uses=[]),
 
+    // local bsl = bs_live_face(anode.name, face),
+    // local bsd = bs_dead_face(anode.name, face),
+
+    local bsl = bs_face(anode.data.ident, face),
+    local bsd = bs_face(anode.data.ident, face),
+
     local ptb = g.pnode({
         type: "PointTreeBuilding",
         name: "%s-%d"%[anode.name, face],
         data:  {
             samplers: {
-                "3d": wc.tn(bs_live),
-                "dead": wc.tn(bs_dead),
+                "3d": wc.tn(bsl),
+                "dead": wc.tn(bsd),
             },
             multiplicity: 2,
             tags: ["live", "dead"],
@@ -176,7 +217,7 @@ local clus_per_face (
             face: face,
             detector_volumes: wc.tn(dv),
         }
-    }, nin=2, nout=1, uses=[bs_live, bs_dead, dv]),
+    }, nin=2, nout=1, uses=[bsl, bsd, dv]),
 
     local cluster2pct = g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
@@ -190,21 +231,24 @@ local clus_per_face (
     // local cluster2pct = ptb,
 
     local face_name = "%s-%d"%[anode.name, face],
-    local mabc_cmeths_face = [
-        // {type: "ClusteringCTPointcloud", name:face_name, data:{detector_volumes:  wc.tn(dv), pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringLiveDead", name:face_name, data:{dead_live_overlap_offset: 2, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringExtend", name:face_name, data:{flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringRegular", name:face_name+"-one", data:{length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringRegular", name:face_name+"_two", data:{length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringParallelProlong", name:face_name, data:{length_cut: 35*wc.cm, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringClose", name:face_name, data:{length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringExtendLoop", name:face_name, data:{num_try: 3, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        {type: "ClusteringSeparate", name:face_name, data:{use_ctpc: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringConnect1", name:face_name, data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}},
-        // {type: "ClusteringIsolated", name:face_name, data:detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords}}, // hack for now ...
-        // {type: "ClusteringRetile", name:face_name, data:{
-        // samplers: [{apa : anode.data.ident, face : face, name: wc.tn(bs_live)}], 
-        // anodes: [wc.tn(anode)], cut_time_low: 3*wc.us, cut_time_high: 5*wc.us, detector_volumes: wc.tn(dv), pc_transforms: wc.tn(pcts)}},
+
+    local cm = clus.clustering_methods(prefix=face_name,
+                                       detector_volumes=dv,
+                                       pc_transforms=pcts,
+                                       coords=common_coords),
+    local cm_pipeline = [
+        // cm.ctpointcloud(),
+        cm.live_dead(dead_live_overlap_offset=2),
+        cm.extend(flag=4, length_cut=60*wc.cm, num_try=0, length_2_cut=15*wc.cm, num_dead_try=1),
+        cm.regular(name="-one", length_cut=60*wc.cm, flag_enable_extend=false),
+        cm.regular(name="_two", length_cut=30*wc.cm, flag_enable_extend=true),
+        cm.parallel_prolong(length_cut=35*wc.cm),
+        cm.close(length_cut=1.2*wc.cm),
+        cm.extend_loop(num_try=3),
+        cm.separate(use_ctpc=true),
+        cm.connect1(),
+        // cm.isolated(),
+        // cm.retile(cut_time_low=3*wc.us, cut_time_high=5*wc.us, anodes=[anode], samplers=[clus.sampler(bsl, apa=anode.data.ident, face=face)]),
     ],
 
     local mabc = g.pnode({
@@ -238,10 +282,9 @@ local clus_per_face (
                     individual: true            // Output individual APA/Face
                 }
             ],
-            pipeline: [wc.tn(cmeth) for cmeth in mabc_cmeths_face],
-            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
+            pipeline: wc.tns(cm_pipeline),
         }
-    }, nin=1, nout=1, uses=[dv, anode, pcts]+mabc_cmeths_face),
+    }, nin=1, nout=1, uses=[dv, anode, pcts]+cm_pipeline),
 
     local sink = g.pnode({
         type: "TensorFileSink",
@@ -297,9 +340,13 @@ local clus_per_apa (
     local dv = detector_volumes([anode]),
     local pcts = pctransforms(dv),
 
-    local mabc_cmeths_anode = [
-        {type: "ClusteringDeghost", name:anode.name, data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringProtectOverclustering", name:anode.name, data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)}},
+    local cm = clus.clustering_methods(prefix=anode.name,
+                                       detector_volumes=dv,
+                                       pc_transforms=pcts,
+                                       coords=common_coords),
+    local cm_pipeline = [
+        cm.deghost(),
+        cm.protect_overclustering(),
     ],
 
     local mabc = g.pnode({
@@ -322,10 +369,9 @@ local clus_per_apa (
             save_deadarea: true,
             anodes: [wc.tn(anode)],
             detector_volumes: wc.tn(dv),
-            pipeline: [wc.tn(cmeth) for cmeth in mabc_cmeths_anode],
-            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
+            pipeline: wc.tns(cm_pipeline),
         }
-    }, nin=1, nout=1, uses=[anode, dv, pcts]+mabc_cmeths_anode),
+    }, nin=1, nout=1, uses=[anode, dv, pcts]+cm_pipeline),
 
     local sink = g.pnode({
         type: "TensorFileSink",
@@ -360,7 +406,7 @@ local clus_per_apa (
 local clus_all_apa (
     anodes,
     dump = true,
-) = {
+    ) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -374,53 +420,46 @@ local clus_all_apa (
 
     local dv = detector_volumes(anodes),
     local pcts = pctransforms(dv),
-    
-    local retiler = {
-        type: "RetileCluster",
-        name: "all",
-        data: {
-            // Haiwang really needs to fix https://github.com/HaiwangYu/wcp-porting-img/issues/7 so I can avoid this ungodly mess
-            samplers: [{apa : 0, face : 0, name: "BlobSampler:apa0-0"},
-                       {apa : 0, face : 1, name: "BlobSampler:apa0-1"},
-                       {apa : 1, face : 0, name: "BlobSampler:apa1-0"},
-                       {apa : 1, face : 1, name: "BlobSampler:apa1-1"},
-                       {apa : 2, face : 0, name: "BlobSampler:apa2-0"},
-                       {apa : 2, face : 1, name: "BlobSampler:apa2-1"},
-                       {apa : 3, face : 0, name: "BlobSampler:apa3-0"},
-                       {apa : 3, face : 1, name: "BlobSampler:apa3-1"}
-                      ], 
-            anodes: [wc.tn(a) for a in anodes],
-            cut_time_low: 3*wc.us,
-            cut_time_high: 5*wc.us,
-            detector_volumes: wc.tn(dv),
-            pc_transforms: wc.tn(pcts)
-        },
-        uses: anodes + [pcts,dv]
-    },
 
-    local mabc_cmeths_all = [
-        // {type: "ClusteringExamineXBoundary", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_coords, pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringSwitchScope", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: ["x", "y", "z"], correction_name: "T0Correction", pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringExtend", name:"all", data:{flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringRegular", name:"all1", data:{length_cut: 60*wc.cm, flag_enable_extend: false, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringRegular", name:"all2", data:{length_cut: 30*wc.cm, flag_enable_extend: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringParallelProlong", name:"all", data:{length_cut: 35*wc.cm, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringClose", name:"all", data:{length_cut: 1.2*wc.cm, pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringExtendLoop", name:"all", data:{num_try: 3, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringSeparate", name:"all", data:{use_ctpc: true, detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords, pc_transforms: wc.tn(pcts)}},
-        {type: "ClusteringNeutrino", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringIsolated", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords}},
-        {type: "ClusteringExamineBundles", name:"all", data:{detector_volumes: wc.tn(dv), pc_name: "3d", coords: common_corr_coords, pc_transforms: wc.tn(pcts)}},
-        { // Haiwang really needs to fix https://github.com/HaiwangYu/wcp-porting-img/issues/7 so I can avoid this ungodly mess
-            type: "ClusteringRetile",
-            name:"all",
-            data:{
-                pc_name: "3d",
-                coords: common_corr_coords,
-                retiler: wc.tn(retiler),
-            },
-            uses: [retiler]
-        },
+
+    local cm_old = clus.clustering_methods(prefix="all",
+                                           detector_volumes=dv,
+                                           pc_transforms=pcts,
+                                           coords=common_coords),
+
+
+    local cm = clus.clustering_methods(prefix="all",
+                                       detector_volumes=dv,
+                                       pc_transforms=pcts,
+                                       coords=common_corr_coords),
+        
+    local cm_pipeline = [
+        // cm_old.examine_x_boundary(),
+        cm_old.switch_scope(),
+
+        cm.extend(flag=4, length_cut=60*wc.cm, num_try=0, length_2_cut=15*wc.cm, num_dead_try= 1),
+        cm.regular(name="1", length_cut=60*wc.cm, flag_enable_extend=false),
+        cm.regular(name="2", length_cut=30*wc.cm, flag_enable_extend=true),
+        cm.parallel_prolong(length_cut=35*wc.cm),
+        cm.close(length_cut=1.2*wc.cm),
+        cm.extend_loop(num_try=3),
+        cm.separate(use_ctpc=true),
+        cm.neutrino(),
+        cm.isolated(),
+        cm.examine_bundles(),
+        cm.retile(cut_time_low=3*wc.us,
+                  cut_time_high=5*wc.us,
+                  anodes=anodes, 
+                  samplers=[
+                      clus.sampler(bs_face(0,0), apa=0, face=0),
+                      clus.sampler(bs_face(0,1), apa=0, face=1),
+                      clus.sampler(bs_face(1,0), apa=1, face=0),
+                      clus.sampler(bs_face(1,1), apa=1, face=1),
+                      clus.sampler(bs_face(2,0), apa=2, face=0),
+                      clus.sampler(bs_face(2,1), apa=2, face=1),
+                      clus.sampler(bs_face(3,0), apa=3, face=0),
+                      clus.sampler(bs_face(3,1), apa=3, face=1),
+                  ]),
     ],
 
     local mabc = g.pnode({
@@ -443,6 +482,14 @@ local clus_all_apa (
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             bee_points_sets: [  // New configuration for multiple bee points sets
+            //    {
+            //        name: "img",                // Name of the bee points set
+            //        detector: "protodunehd",         // Detector name
+            //        algorithm: "img",           // Algorithm identifier
+            //        pcname: "3d",           // Which scope to use
+            //        coords: ["x", "y", "z"],    // Coordinates to use
+            //        individual: false           // Whether to output as a whole or individual APA/Face
+            //    },
             {
                     name: "clustering",         // Name of the bee points set
                     detector: "protodunehd",         // Detector name
@@ -452,10 +499,9 @@ local clus_all_apa (
                     individual: false            // Output individual APA/Face
                 }
             ],
-            pipeline: [wc.tn(cmeth) for cmeth in mabc_cmeths_all],
-            cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
+            pipeline: wc.tns(cm_pipeline),
         },
-    }, nin=1, nout=1, uses=anodes+[dv, pcts]+mabc_cmeths_all),
+    }, nin=1, nout=1, uses=anodes+[dv, pcts]+cm_pipeline),
 
     local sink = g.pnode({
         type: "TensorFileSink",
