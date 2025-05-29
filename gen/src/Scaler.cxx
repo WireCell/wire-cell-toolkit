@@ -25,9 +25,13 @@ using namespace WireCell;
 Gen::Scaler::Scaler()
   : Aux::Logger("Scaler", "gen")
   , yzmap_scale_filename("Empty")
-  , bin_width(0.0)
-  , tpc_width(0.0)
-  , bin_height(0.0)
+  , bin_width(0.0*units::cm)
+  , tpc_width(0.0*units::mm)
+  , bin_height(0.0*units::cm)
+  , n_ybin(31)
+  , n_zbin(180)
+  , yoffset(180*units::cm)
+  , zoffset(900*units::cm)
   , anode_name("Empty")
   , plane(0)
 {
@@ -43,6 +47,10 @@ WireCell::Configuration Gen::Scaler::default_configuration() const
   cfg["bin_width"]      = bin_width;
   cfg["tpc_width"]      = tpc_width;
   cfg["bin_height"]     = bin_height;
+  cfg["n_ybin"]     = n_ybin;
+  cfg["n_zbin"]     = n_zbin;
+  cfg["yoffset"]     = yoffset;
+  cfg["zoffset"]     = zoffset;
   cfg["anode"]          = anode_name;
   cfg["plane"]          = plane;
   return cfg;
@@ -82,10 +90,10 @@ void Gen::Scaler::configure(const WireCell::Configuration& cfg)
 
   jmap = WireCell::Persist::load(filename);
 
-  yzmap.resize(180);
-  for(int binz = 0; binz < 180; binz++){
-    yzmap[binz].resize(31);
-    for(int biny = 0; biny < 31; biny++){
+  yzmap.resize(n_zbin);
+  for(int binz = 0; binz < n_zbin; binz++){
+    yzmap[binz].resize(n_ybin);
+    for(int biny = 0; biny < n_ybin; biny++){
       yzmap[binz][biny] = jmap[anode_name][std::to_string(plane)][binz][biny].asDouble();
     }
   }
@@ -117,10 +125,8 @@ bool Gen::Scaler::operator()(const input_pointer& depo, output_queue& outq)
     }
   }
 
-  double depo_y = depo->pos().y()*units::mm;
-  double depo_z = depo->pos().z()*units::mm;
-  double yoffset = 180*units::cm;
-  double zoffset = 900*units::cm;
+  double depo_y = depo->pos().y();
+  double depo_z = depo->pos().z();
 
   int depo_bin_y = std::floor((depo_y+yoffset)/bin_height);
   int depo_bin_z = std::floor((depo_z+zoffset)/bin_width);
@@ -133,12 +139,12 @@ bool Gen::Scaler::operator()(const input_pointer& depo, output_queue& outq)
     depo_bin_z = 0;
   }
 
-  if(depo_bin_y > 31){
-    depo_bin_y = 31;
+  if(depo_bin_y > n_ybin){
+    depo_bin_y = n_ybin;
   }
 
-  if(depo_bin_z > 180){
-    depo_bin_z = 180;
+  if(depo_bin_z > n_zbin){
+    depo_bin_z = n_zbin;
   }
 
   double scale = yzmap[depo_bin_z][depo_bin_y];
