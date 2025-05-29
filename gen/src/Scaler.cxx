@@ -30,8 +30,8 @@ Gen::Scaler::Scaler()
   , bin_height(0.0*units::cm)
   , n_ybin(31)
   , n_zbin(180)
-  , yoffset(180*units::cm)
-  , zoffset(900*units::cm)
+  , yoffset(180*units::cm)// ymin is -180 in ICARUS
+  , zoffset(900*units::cm)// zmin is -900 in ICARUS
   , anode_name("Empty")
   , plane(0)
 {
