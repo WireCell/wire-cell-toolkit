@@ -63,6 +63,14 @@ local wc = import "wirecell.jsonnet";
         local parent = self,
 
 
+        pointed(name="", groupings=["live"]) :: {
+            type: "ClusteringPointed",
+            name: prefix+name,
+            data: {
+                groupings: groupings,
+            },
+        },
+        
         test(name="") :: {
             type: "ClusteringTest",
             name: prefix+name,

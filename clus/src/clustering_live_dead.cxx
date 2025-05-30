@@ -41,8 +41,14 @@ public:
     virtual void visit(Ensemble& ensemble) const {
         using spdlog::debug;
 
-        auto& live_grouping = *ensemble.with_name("live").at(0);
         auto& dead_grouping = *ensemble.with_name("dead").at(0);
+
+        if (dead_grouping.nchildren() == 0) {
+            // No dead, no live dead.  *taps temple*
+            return;
+        }
+
+        auto& live_grouping = *ensemble.with_name("live").at(0);
 
 
         // {
@@ -113,13 +119,13 @@ public:
             }
         }
 
-
-        if (dead_live_cluster_mapping.empty()) {
-            std::cerr
-                << "WARNING: clustering_live: empty dead live cluster mapping,"
-                << " ndead=" << dead_clusters.size()
-                << " nlive=" << live_clusters.size() << std::endl;
-        }
+        /// Does this really need to be announced?
+        // if (dead_live_cluster_mapping.empty()) {
+        //     std::cerr
+        //         << "WARNING: clustering_live: empty dead live cluster mapping,"
+        //         << " ndead=" << dead_clusters.size()
+        //         << " nlive=" << live_clusters.size() << std::endl;
+        // }
 
         // prepare a graph ...
         typedef cluster_connectivity_graph_t Graph;

@@ -172,7 +172,7 @@ struct BlobSampler::Sampler : public Aux::Logger
     // coordinates.
     double time2drift(double time) const
     {
-        const Pimpos* colpimpos = pimpos(2);
+        // const Pimpos* colpimpos = pimpos(2);
         const double drift = (time + cc.time_offset)*cc.drift_speed;
         double xorig = plane_x(2); // colpimpos->origin()[0];
         /// TODO: how to determine xsign?
@@ -719,21 +719,22 @@ struct Stepped : public BlobSampler::Sampler
         //     std::cout << "DEBUG strip " << strip.layer << " " << strip.bounds.first << " " << strip.bounds.second << std::endl;
         // }
 
+        // This returns the number of wire regions covered by the strip s.
         auto swidth = [](const Strip& s) -> int {
             return s.bounds.second - s.bounds.first;
         };
 
-        // XQ update this part of code to match WCP
+        // Find the strip with largest coverage.
         Strip smax = strips[li[0]]; int max_id = li[0];
-        Strip smin = strips[li[1]]; int min_id = li[1];
-        Strip smid = strips[li[2]]; /*int mid_id = li[2];*/
-
         if (swidth(strips[li[1]]) > swidth(smax)){
             smax = strips[li[1]]; max_id = li[1];
         }
         if(swidth(strips[li[2]]) > swidth(smax)){
             smax = strips[li[2]]; max_id = li[2];
         }
+
+        // Find the strip with least coverage.
+        Strip smin = strips[li[1]]; int min_id = li[1];
         if (swidth(strips[li[0]]) < swidth(smin)){
             smin = strips[li[0]]; min_id = li[0];
         }
@@ -741,6 +742,8 @@ struct Stepped : public BlobSampler::Sampler
             smin = strips[li[2]]; min_id = li[2];
         }
 
+        // Find the other strip.
+        Strip smid = strips[li[2]]; /*int mid_id = li[2];*/
         for (int i = li[0];i!=li[2]+1;i++){
             if (i != max_id && i != min_id){
                 smid = strips[i];        
@@ -748,23 +751,53 @@ struct Stepped : public BlobSampler::Sampler
             }
         }
         
+        // Step sizes for the min/max directions.
         int nmin = std::max(min_step_size, max_step_fraction*swidth(smin));
         int nmax = std::max(min_step_size, max_step_fraction*swidth(smax));
 
         std::vector<Point> points;
 
         //XQ: is the order of 0 vs. 1 correct for the wire center???
+        //
+        // BV: this gives a diagonal vector from the crossing point of the
+        // 0-rays to the crossing point of the 0-wires (0-wire = half-way from
+        // 0-ray to 1-ray, half-way assuming offset is default 0.5).
+        //
+        //        /(0-ray) 
+        //       / /(0-wire)  
+        //      +-+-+ b
+        //     /   /
+        //    / c +-------(0-wire)
+        //   /   /
+        //  +---+----(0-ray)
+        //  a
+        // 
+        // if "a" is the crossing of two 0-rays and "b" is the crossing of two
+        // 1-rays, "adjust is the vector "ac" which is coincident with the
+        // crossing of the 0-wires.
         const Vector adjust = offset * (
             coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}) -
             coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}));
 
-        const double pitch_adjust = offset * (coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) - coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer) ); 
+        // This gives a relative pitch distance measured in the "mid" view that
+        // is half the distance between crossing point of the 0-rays and the
+        // 1-rays in the other two views.  In general, this is NOT the same as
+        // the magnitude of "adjust" / "ac" vector above as that diagonal of the
+        // min/max parallelogram is not necessarily parallel to the pitch
+        // direction in the third, "mid" view.  The two directions are
+        // accidentally coincident for symmetric wire patterns like in
+        // MicroBooNE.
+        const double pitch_adjust = offset * (
+            coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) -
+            coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer) ); 
+
         // log->debug("offset={} adjust={},{},{}", offset, adjust.x(), adjust.y(), adjust.z());
 
         std::set<decltype(smin.bounds.first)> min_wires_set;
         std::set<decltype(smin.bounds.first)> max_wires_set;
 
-        //XQ: is this the right way of adding the last wire?        
+        // Load up wires for the min/max dimensions including first, along each
+        // step size and last wire.
         for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) { 
             min_wires_set.insert(gmin);
         }
@@ -774,39 +807,53 @@ struct Stepped : public BlobSampler::Sampler
         }
         max_wires_set.insert(smax.bounds.second-1);
 
-        // std::cout << min_wires_set.size() << " " << max_wires_set.size() << " " << smin.bounds.first << " " << smin.bounds.second << " " << smax.bounds.first << " " << smax.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second << " " << smin.layer << " " << smax.layer <<  " " << smid.layer << std::endl;
-
+        // size_t npre_missed=0;
+        // size_t nrel_missed=0;
         for (auto it_gmin = min_wires_set.begin(); it_gmin != min_wires_set.end(); it_gmin++){
-//        for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) {
             coordinate_t cmin{smin.layer, *it_gmin};
-           for (auto it_gmax = max_wires_set.begin(); it_gmax != max_wires_set.end(); it_gmax++){
-           // for (auto gmax=smax.bounds.first; gmax < smax.bounds.second; gmax += nmax) {
+            for (auto it_gmax = max_wires_set.begin(); it_gmax != max_wires_set.end(); it_gmax++){
                 coordinate_t cmax{smax.layer, *it_gmax};
 
-                // adjust wire center ...                 
-                const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust;
-                // XQ: how was the closest wire is found, if the pitch is exactly at the middle between two wires?
-                const double pitch_relative = coords.pitch_relative(pitch, smid.layer); 
+                // Added by hyu, dunno why
                 const double ploc0 = coords.pitch_location(cmin, cmax, 0);
                 const double prel0 = coords.pitch_relative(ploc0, 0);
                 const double ploc1 = coords.pitch_location(cmin, cmax, 1);
                 const double prel1 = coords.pitch_relative(ploc1, 1);
                 if (prel0 > 1 or prel0 < 0 or prel1 > 1 or prel1 < 0) {
-                    // std::cout << "yuhw: " << " ploc0 " << ploc0 << " prel0 " << prel0 << " " << "ploc1 " << ploc1 << " prel1 " << prel1 << std::endl;
+                    // ++npre_missed;
                     continue;
                 }
-//                auto gmid = coords.pitch_index(pitch, smid.layer);
- //               if (smid.in(gmid)) {
-                // if (smax.bounds.first==1006 && smax.bounds.second==1011)
-                //     std::cout << smax.bounds.first << " " << smax.bounds.second << " " << smin.bounds.first << " " << smin.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second 
-                //         << " " << *it_gmax << " " << *it_gmin << " " << pitch << " " << pitch_relative << " " << pitch_adjust << " " << max_id << " " << min_id << " " << mid_id << std::endl;
-                // if (smid.bounds.first == 707) std::cout << pitch_relative << std::endl;
+
+                // This is the mid-view pitch of the crossings of the two *wires* associated with cmin/cmax *rays*.
+                const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust;
+
+                // This is the location from the mid view 0-ray to the point of
+                // the wire-crossing measured in units of mid view pitches.
+                const double pitch_relative = coords.pitch_relative(pitch, smid.layer); 
+
                 if (pitch_relative > smid.bounds.first - tolerance && pitch_relative < smid.bounds.second + tolerance){
                     const auto pt = coords.ray_crossing(cmin, cmax);
                     points.push_back(pt + adjust);
+                //     log->warn("Blob {} adding point {} prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
+                //               iblob->ident(), pt, pitch_relative, smid.bounds.first, smid.bounds.second, tolerance, offset, pitch_adjust, adjust);
+                // }
+                // else {
+                //     log->warn("Blob {} not adding point prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
+                //               iblob->ident(), pitch_relative, smid.bounds.first, smid.bounds.second, tolerance, offset, pitch_adjust, adjust);
+                //     ++nrel_missed;
                 }
             }
         }
+
+        // if (points.empty()) {
+        //     int ident = iblob->ident();
+        //     log->warn("Blob {} unsampled: minsiz={} maxsiz={} nwiresmin={} nwiresmax={} nrel={} npre={}.", 
+        //               ident, nmin, nmax, min_wires_set.size(), max_wires_set.size(), nrel_missed, npre_missed);
+        //     for (const auto& strip : strips) {
+        //         log->warn("Blob {} strip: {}", ident, strip);
+        //     }
+        // }
+
         intern(ds, points);
 
         // make aux dataset

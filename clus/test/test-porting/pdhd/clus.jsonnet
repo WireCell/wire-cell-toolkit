@@ -102,33 +102,15 @@ local pctransforms(dv) = {
     uses: [dv]
 };
 
-// WARNING: wcp-porting-img had the two blob samplers (live and dead) with the
-// same name!  These two functions make them distinct.  But in order to
-// reproduce the results, we use just bs_face().  Once things are working, the
-// code below should delete bs_face() and use one of bs_{live,dead}_face().
 
 
-// Note, the "sampler" must be unique to the "sampling".
 local bs_live_face(apa, face) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
         drift_speed: drift_speed,
         time_offset: time_offset,
-        strategy: [
-            // "center",
-            // "corner",
-            // "edge",
-            // "bounds",
-            "stepped",
-            // {name:"grid", step:1, planes:[0,1]},
-            // {name:"grid", step:1, planes:[1,2]},
-            // {name:"grid", step:1, planes:[2,0]},
-            // {name:"grid", step:2, planes:[0,1]},
-            // {name:"grid", step:2, planes:[1,2]},
-            // {name:"grid", step:2, planes:[2,0]},
-        ],
-        // extra: [".*"] // want all the extra
+        strategy: ["stepped"],
         extra: [".*wire_index", "wpid"]
     }
 };
@@ -136,38 +118,12 @@ local bs_dead_face(apa, face) = {
     type: "BlobSampler",
     name: "dead-%s-%d"%[apa, face],
     data: {
-        strategy: [
-            "center",
-        ],
+        strategy: ["center"],
         extra: [".*"] // want all the extra
     }
 };
-
-local bs_face(apa, face) = {
-    type: "BlobSampler",
-    name: "apa%s-%d"%[apa, face],
-    data: {
-        drift_speed: drift_speed,
-        time_offset: time_offset,
-        strategy: [
-            // "center",
-            // "corner",
-            // "edge",
-            // "bounds",
-            "stepped",
-            // {name:"grid", step:1, planes:[0,1]},
-            // {name:"grid", step:1, planes:[1,2]},
-            // {name:"grid", step:1, planes:[2,0]},
-            // {name:"grid", step:2, planes:[0,1]},
-            // {name:"grid", step:2, planes:[1,2]},
-            // {name:"grid", step:2, planes:[2,0]},
-        ],
-        // extra: [".*"] // want all the extra
-        extra: [".*wire_index", "wpid"]
-    }
-};
-
-
+// The factory used to give blob samplers to ClusteringRetile ("rt").
+local bs_rt_face = bs_live_face;
 
 
 local clus_per_face (
@@ -197,11 +153,8 @@ local clus_per_face (
         }
     }, nin=1, nout=1, uses=[]),
 
-    // local bsl = bs_live_face(anode.name, face),
-    // local bsd = bs_dead_face(anode.name, face),
-
-    local bsl = bs_face(anode.data.ident, face),
-    local bsd = bs_face(anode.data.ident, face),
+    local bsl = bs_live_face(anode.name, face),
+    local bsd = bs_dead_face(anode.name, face),
 
     local ptb = g.pnode({
         type: "PointTreeBuilding",
@@ -237,6 +190,7 @@ local clus_per_face (
                                        pc_transforms=pcts,
                                        coords=common_coords),
     local cm_pipeline = [
+        cm.pointed(),
         // cm.ctpointcloud(),
         cm.live_dead(dead_live_overlap_offset=2),
         cm.extend(flag=4, length_cut=60*wc.cm, num_try=0, length_2_cut=15*wc.cm, num_dead_try=1),
@@ -451,14 +405,14 @@ local clus_all_apa (
                   cut_time_high=5*wc.us,
                   anodes=anodes, 
                   samplers=[
-                      clus.sampler(bs_face(0,0), apa=0, face=0),
-                      clus.sampler(bs_face(0,1), apa=0, face=1),
-                      clus.sampler(bs_face(1,0), apa=1, face=0),
-                      clus.sampler(bs_face(1,1), apa=1, face=1),
-                      clus.sampler(bs_face(2,0), apa=2, face=0),
-                      clus.sampler(bs_face(2,1), apa=2, face=1),
-                      clus.sampler(bs_face(3,0), apa=3, face=0),
-                      clus.sampler(bs_face(3,1), apa=3, face=1),
+                      clus.sampler(bs_rt_face(0,0), apa=0, face=0),
+                      clus.sampler(bs_rt_face(0,1), apa=0, face=1),
+                      clus.sampler(bs_rt_face(1,0), apa=1, face=0),
+                      clus.sampler(bs_rt_face(1,1), apa=1, face=1),
+                      clus.sampler(bs_rt_face(2,0), apa=2, face=0),
+                      clus.sampler(bs_rt_face(2,1), apa=2, face=1),
+                      clus.sampler(bs_rt_face(3,0), apa=3, face=0),
+                      clus.sampler(bs_rt_face(3,1), apa=3, face=1),
                   ]),
     ],
 

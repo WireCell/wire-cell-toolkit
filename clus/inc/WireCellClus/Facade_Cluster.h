@@ -359,48 +359,48 @@ namespace WireCell::Clus::Facade {
 
 
         ///
-        /// Graphs
-        ///
-        /// A few graph-related methods are provided.  They are lazy and cache
-        /// graphs and results internally on the cluster.  Several kinds of the
-        /// same type of graph are possible (basic, ctpc, overclustering
-        /// protected, etc).
-        ///
-        using graph_type = ClusterCache::graph_type;
-
-        ///
         /// Blob-level connected components
         /// 
         /// Return a connected components array that is aligned with the blob
         /// node children list.  Each element gives a "group number" identifying
-        /// a connected subgraph in which the corresponding blob resides.
-        /// Connection is through the "overclustering protection" point graph.
-        /// The special group number -1 indicates the corresponding blob does
-        /// not contribute points to the graph.
+        /// a connected subgraph in which the corresponding blob resides.  The
+        /// special group number -1 indicates the corresponding blob does not
+        /// contribute points to the graph.
         ///
-        /// This method used to be called "examine_graph()".
+        /// The "relaxed" graph (ne' "overclustering protection") is used.  See
+        /// graph_algorithms() family of methods.
         ///
-        /// Construct and cache graph
+        /// Note, this method used to be called "examine_graph()".
+        ///
         std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
-        /// Actual algorithm on existing graph.
-        std::vector<int> connected_blobs(const graph_type& graph) const;
         
         ///
-        /// Shortest path handling.
+        /// Graph algorithms hold a graph and are cached
         ///
-        // Get the "basic" form for shortest paths calculation.
+        /// Get a graph algorithms by its "flavor" and throw KeyError if not
+        /// found.
+        /// 
+        /// Note, as a special case, the default graph flavor "basic" can and
+        /// will be produced on the fly.
         const Graphs::Weighted::GraphAlgorithms& 
-        shortest_paths_graph() const;
-        // Get the "ctpc" form for shortest paths calculation.
+        graph_algorithms(const std::string& flavor = "basic") const;
+
+        /// Get and construct if needed a GA for a graph of a known flavor and
+        /// that uses detector information in its construction.  Known flavors
+        /// include:
+        /// 
+        /// - "ctpc" :: likely used for Djikstra's shortest paths
+        /// - "relaxed" :: likely used for connected blobs
+        /// 
+        /// If the flavor is not in this known set, KeyError is
+        /// thrown.
+        ///
+        /// Note, "relaxed" used to be known as "overclustering protection").
         const Graphs::Weighted::GraphAlgorithms& 
-        shortest_paths_graph(IDetectorVolumes::pointer dv, 
-                             IPCTransformSet::pointer pcts) const;
-        // Kitchen sink to select which type based on use_ctps value.  When
-        // false, dv and pcts are ignored.
-        const Graphs::Weighted::GraphAlgorithms& 
-        shortest_paths_graph(IDetectorVolumes::pointer dv, 
-                             IPCTransformSet::pointer pcts,
-                             bool use_ctpc) const;
+        graph_algorithms(const std::string& flavor,
+                         IDetectorVolumes::pointer dv, 
+                         IPCTransformSet::pointer pcts) const;
+
 
 
         // Return 3D points for given indices in the 3d PC.
@@ -502,10 +502,6 @@ namespace WireCell::Clus::Facade {
         Tree::Scope m_default_scope = m_scope_3d_raw;
         std::map<size_t, bool> m_map_scope_filter={{m_scope_3d_raw.hash(), true}};
         std::map<size_t, std::string> m_map_scope_transform={{m_scope_3d_raw.hash(), "Unity"}};
-
-        const graph_type* get_graph(const std::string& name) const;
-        using graph_ptr = ClusterCache::graph_ptr;
-        const graph_type* set_graph(const std::string& name, graph_ptr&& gptr) const;
 
 
        protected:

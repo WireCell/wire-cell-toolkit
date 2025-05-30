@@ -1,5 +1,6 @@
 #include "WireCellClus/Graphs.h"
 
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Graphs;
@@ -37,7 +38,7 @@ Weighted::ShortestPaths::path(size_t destination) const
 Weighted::GraphAlgorithms::GraphAlgorithms(GraphPtr&& graph) : m_graph(std::move(graph)) {}
 
 const Weighted::ShortestPaths&
-Weighted::GraphAlgorithms::paths(size_t source) const
+Weighted::GraphAlgorithms::shortest_paths(size_t source) const
 {
     auto it = m_sps.find(source);
     if (it != m_sps.end()) {
@@ -69,9 +70,20 @@ Weighted::GraphAlgorithms::paths(size_t source) const
 }
 
 const std::vector<size_t>&
-Weighted::GraphAlgorithms::path(size_t source, size_t destination) const
+Weighted::GraphAlgorithms::shortest_path(size_t source, size_t destination) const
 {
-    return paths(source).path(destination);
+    return shortest_paths(source).path(destination);
 }
+
+const std::vector<size_t>&
+Weighted::GraphAlgorithms::connected_components() const
+{
+    if (m_cc.empty()) {
+        m_cc.resize(boost::num_vertices(*m_graph));
+        boost::connected_components(*m_graph, &m_cc[0]);
+    }
+    return m_cc;
+}
+
 
 

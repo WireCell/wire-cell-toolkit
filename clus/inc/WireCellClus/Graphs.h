@@ -49,25 +49,25 @@ namespace WireCell::Clus::Graphs {
 
         // Bind some graph algorithms to a graph, with caching..
         class GraphAlgorithms {
-            GraphPtr m_graph;
+            GraphPtr m_graph;   // we do not expose this to assure it is forever const
 
             // Lazy calculate dijkstra shortest path results.
             mutable std::unordered_map<size_t, ShortestPaths> m_sps;
-            mutable std::vector<int> m_cc;
+            mutable std::vector<size_t> m_cc;
 
         public:
             GraphAlgorithms(GraphPtr&& graph);
         
             /// Return the intermediate result that gives access to the shortest
             /// paths from the source vertex all possible destination vertices.
-            const ShortestPaths& paths(size_t source) const;
+            const ShortestPaths& shortest_paths(size_t source) const;
         
             /// Return the unique vertices vertices along the shortest path from
             /// source vertex to destination vertex, inclusive.
-            const std::vector<size_t>& path(size_t source, size_t destination) const;
+            const std::vector<size_t>& shortest_path(size_t source, size_t destination) const;
 
             /// Return a "CC" array giving connected component subgraphs.
-            const std::vector<int>& connected_components() const;
+            const std::vector<size_t>& connected_components() const;
 
         };
 

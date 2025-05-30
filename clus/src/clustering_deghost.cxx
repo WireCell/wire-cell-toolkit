@@ -58,7 +58,12 @@ static std::vector<size_t> get_path_wcps(const Cluster& cluster,
                                          bool use_ctpc)
 {
     auto [hi, lo] = skeleton_points_hilo(cluster);
-    return cluster.shortest_paths_graph(dv, pcts, use_ctpc).path(hi, lo);
+    if (use_ctpc) {
+        return cluster.graph_algorithms("ctpc", dv, pcts).shortest_path(hi, lo);
+    }
+    else {
+        return cluster.graph_algorithms().shortest_path(hi, lo);
+    }
 }
 
 

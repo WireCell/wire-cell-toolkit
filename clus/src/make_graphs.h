@@ -26,8 +26,8 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
 
-    // closely + overclustering protection
-    Weighted::GraphPtr make_graph_overclustering_protection(
+    // closely + relaxed (overclustering protection)
+    Weighted::GraphPtr make_graph_relaxed(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);

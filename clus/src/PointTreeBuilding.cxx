@@ -178,6 +178,7 @@ namespace {
     // - make_corner_dataset
 }
 
+
 Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
 
     using int_t = Facade::int_t;
@@ -187,6 +188,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     auto clusters = get_geom_clusters(gr);
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
+    size_t nskipped = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
     auto& sampler = m_samplers.at("3d");
     for (auto& [cluster_id, vdescs] : clusters) {
@@ -200,8 +202,16 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             named_pointclouds_t pcs;
             /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
             auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
+
             if (pc3d.get("x")->size_major() == 0) {
-                log->debug("blob {} has no points", iblob->ident());
+                // See Issue #425 and the mitigation of using ClusteringPointed.
+
+                // log->debug("skipping live blob {} with no points: {}", iblob->ident(), iblob->shape());
+                // for (const auto& strip : iblob->shape().strips()) {
+                //     log->debug("skipping live blob {} strip: {}", iblob->ident(), strip);
+                // }
+
+                ++nskipped;
                 continue;
             }
             auto pc2dp0 = make2dds(pc3d, angle_u);
@@ -216,7 +226,7 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             pcs.emplace("3d", pc3d);
             const Point center = calc_blob_center(pcs["3d"]);
             auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
-            int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
+            int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0]; // If you get a segfault here, you probably used a live blob sampler besides "stepped".  See Issue #426 for details of the trap you fell into.
             int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
             int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
             int_t min_wire_type = aux.get("min_wire_type")->elements<int_t>()[0];
@@ -231,7 +241,10 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
         }
     }
     
-    log->debug("sampled {} live blobs to tree with {} children", nblobs, root->nchildren());
+    if (nskipped) {
+        log->debug("skipped {} live blobs.  You may want to follow up with a ClusteringPointed in an MABC.  See Issue #425", nskipped);
+    }
+    log->debug("sampled {} live blobs in {} clusters", nblobs, root->nchildren());
     return root;
 }
 

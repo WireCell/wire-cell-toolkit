@@ -39,12 +39,12 @@ Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_ctpc(
     return graph;
 }
 
-Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_overclustering_protection(
+Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_relaxed(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts) 
 {
     auto graph = make_graph_closely(cluster);
-    connect_graph_overclustering_protection(cluster, dv, pcts, *graph);
+    connect_graph_relaxed(cluster, dv, pcts, *graph);
     return graph;
 }

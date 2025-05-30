@@ -17,6 +17,7 @@
 #include <boost/graph/filtered_graph.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
+#include <boost/graph/connected_components.hpp>
 
 #ifdef __clang__
 #  if defined(__has_warning)

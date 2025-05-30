@@ -6,9 +6,6 @@
 #include "WireCellUtil/Array.h"
 
 #include <boost/container_hash/hash.hpp>
-#include <boost/graph/connected_components.hpp>
-#include <boost/graph/prim_minimum_spanning_tree.hpp>
-#include <boost/graph/dijkstra_shortest_paths.hpp>
 
 #include "WireCellUtil/Logging.h"
 
@@ -1812,60 +1809,6 @@ std::vector<int> Cluster::get_blob_indices(const Blob* blob) const
     return mmi[blob];
 }
 
-
-
-const Cluster::graph_type* Cluster::set_graph(const std::string& name, Cluster::graph_ptr&& gptr) const
-{
-    const auto* ret = gptr.get();
-    cache().graphs[name] = std::move(gptr);
-    return ret;
-}
-
-const Cluster::graph_type* Cluster::get_graph(const std::string& name) const 
-{
-    auto& graphs = cache().graphs;
-    auto it = graphs.find(name);
-    if (it == graphs.end()) {
-        return nullptr;
-    }
-    return it->second.get();
-}
-
-
-
-// ne' examine_graph
-std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const 
-{
-    const std::string graph_name = "connected_blobs";
-    const auto* graph = get_graph(graph_name);
-    if (!graph) {
-        graph = set_graph(graph_name, make_graph_overclustering_protection(*this, dv, pcts));
-    }
-    return connected_blobs(*graph);
-}
-
-std::vector<int> Cluster::connected_blobs(const graph_type& graph) const
-{
-    // Find connected components
-    std::vector<int> component(num_vertices(graph));
-    // const int num_components =
-    connected_components(graph, &component[0]);
-
-    // Create mapping from blob indices to component groups
-    std::vector<int> b2groupid(nchildren(), -1);
-    
-    // For each point in the graph
-    for (size_t i = 0; i < component.size(); ++i) {
-        // Get the blob index for this point
-        const int bind = kd3d().major_index(i);
-        // Map the blob to its component
-        b2groupid.at(bind) = component[i];
-    }
-
-    return b2groupid;
-}
-
-
 std::vector<geo_point_t> Cluster::indices_to_points(const std::vector<size_t>& path_indices) const 
 {
     std::vector<geo_point_t> points;
@@ -1993,7 +1936,9 @@ Cluster::PCA& Cluster::get_pca() const
     const auto& coords = this->get_default_scope().coords;
 
     pcaptr = std::make_unique<PCA>();
-    pcaptr->center.set(0, 0, 0);
+    pcaptr->axis.resize(3);
+    pcaptr->values.resize(3,0);
+
     int nsum = 0;
     for (const Blob* blob : children()) {
         for (const geo_point_t& p : blob->points(pcname, coords)) {
@@ -2002,15 +1947,9 @@ Cluster::PCA& Cluster::get_pca() const
         }
     }
 
+    // Not enough points to perform PCA.
     if (nsum < 3) {
         return *pcaptr;
-    }
-
-    pcaptr->axis.resize(3);
-    pcaptr->values.resize(3,0);
-
-    for (int i = 0; i != 3; i++) {
-        pcaptr->axis[i].set(0, 0, 0);
     }
 
     pcaptr->center /= nsum;
@@ -2381,41 +2320,77 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 
 
 
-const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph() const
+const Weighted::GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor) const
 {
-    const char* name = "basic";
-    auto& spgraphs = this->cache().spgraphs;
-    auto it = spgraphs.find(name);
-    if (it != spgraphs.end()) {
+    auto& galgs = this->cache().galgs;
+    auto it = galgs.find(flavor);
+    if (it != galgs.end()) {
         return it->second;
     }
-    auto got = spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_basic(*this)));
-    return got.first->second;
+
+    // We failed to find the flavor, but we there are some flavors we know how
+    // to construct on the fly:
+
+    if (flavor == "basic") {
+        auto got = galgs.emplace(flavor, Weighted::GraphAlgorithms(make_graph_basic(*this)));
+        return got.first->second;
+    }
+
+    // We did our best....
+    raise<KeyError>("unknown graph flavor " + flavor);
+    std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
 
-const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
-                                                                      IPCTransformSet::pointer pcts) const
+const Weighted::GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor,
+                                                                   IDetectorVolumes::pointer dv, 
+                                                                   IPCTransformSet::pointer pcts) const
 {
-    const char* name = "ctpc";
-    auto& spgraphs = this->cache().spgraphs;
-    auto it = spgraphs.find(name);
-    if (it != spgraphs.end()) {
+    auto& galgs = this->cache().galgs;
+    auto it = galgs.find(flavor);
+    if (it != galgs.end()) {
         return it->second;
     }
-    auto got = spgraphs.emplace(name, Weighted::GraphAlgorithms(make_graph_ctpc(*this, dv, pcts)));
-    return got.first->second;
-}
 
-const Weighted::GraphAlgorithms& Facade::Cluster::shortest_paths_graph(IDetectorVolumes::pointer dv, 
-                                                                      IPCTransformSet::pointer pcts,
-                                                                      bool use_ctpc) const
-{
-    if (use_ctpc) {
-        return this->shortest_paths_graph(dv, pcts);
+    // Factory of known graph flavors relying on detector info:
+
+    if (flavor == "ctpc") {
+        auto got = galgs.emplace(flavor, Weighted::GraphAlgorithms(make_graph_ctpc(*this, dv, pcts)));
+        return got.first->second;
     }
-    return this->shortest_paths_graph();
+
+    if (flavor == "relaxed") {
+        auto got = galgs.emplace(flavor, Weighted::GraphAlgorithms(make_graph_relaxed(*this, dv, pcts)));
+        return got.first->second;
+    }
+
+    // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
+    // wants a flavor that we can make implicitly.
+    return graph_algorithms(flavor);
 }
 
+
+
+
+
+// ne' examine_graph
+std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const 
+{
+    const auto& ga = graph_algorithms("relaxed", dv, pcts);
+    const auto& component = ga.connected_components();
+
+    // Create mapping from blob indices to component groups
+    std::vector<int> b2groupid(nchildren(), -1);
+    
+    // For each point in the graph
+    for (size_t i = 0; i < component.size(); ++i) {
+        // Get the blob index for this point
+        const int bind = kd3d().major_index(i);
+        // Map the blob to its component
+        b2groupid.at(bind) = (int)component[i];
+    }
+
+    return b2groupid;
+}
 
 
 // Local Variables:

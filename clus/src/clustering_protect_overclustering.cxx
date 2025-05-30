@@ -6,8 +6,7 @@
 
 #include "WireCellUtil/NamedFactory.h"
 
-#include <boost/graph/connected_components.hpp>
-#include <boost/graph/prim_minimum_spanning_tree.hpp>
+#include "WireCellUtil/Graph.h"
 
 class ClusteringProtectOverclustering;
 WIRECELL_FACTORY(ClusteringProtectOverclustering, ClusteringProtectOverclustering,

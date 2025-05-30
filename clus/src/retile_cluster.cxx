@@ -149,10 +149,7 @@ private:
         // std::cerr << "retile: hilo: " << pair_points.first << " " << pair_points.second << std::endl;
         int high_idx = cluster->get_closest_point_index(pair_points.first);
         int low_idx = cluster->get_closest_point_index(pair_points.second);
-        // cluster->dijkstra_shortest_paths(m_dv, m_pcts, high_idx, false);
-        // cluster->cal_shortest_path(low_idx);
-        return cluster->shortest_paths_graph().path(high_idx, low_idx);
-
+        return cluster->graph_algorithms().shortest_path(high_idx, low_idx);
     }
 };                              // RetileCluster
 

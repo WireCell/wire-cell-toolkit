@@ -979,7 +979,8 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
                                                      std::vector<geo_point_t> &independent_points,
                                                      double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, const IPCTransformSet::pointer pcts, const Tree::Scope& scope)
 {
-    
+    const std::string graph_flavor = use_ctpc ? "relaxed" : "basic";
+
     auto* grouping = cluster->grouping();
 
     auto gwpids = grouping->wpids();
@@ -1223,10 +1224,7 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
         }
     }
   
-    // cluster->dijkstra_shortest_paths(dv, pcts, start_wcpoint_idx, use_ctpc);
-    // cluster->cal_shortest_path(end_wcpoint_idx);
-    // const auto& path_wcps = cluster->get_path_wcps();
-    const auto& path_wcps = cluster->shortest_paths_graph(dv, pcts, use_ctpc).path(start_wcpoint_idx, end_wcpoint_idx);
+    const auto& path_wcps = cluster->graph_algorithms(graph_flavor, dv, pcts).shortest_path(start_wcpoint_idx, end_wcpoint_idx);
 
 
     std::vector<bool> flag_u_pts, flag_v_pts, flag_w_pts;

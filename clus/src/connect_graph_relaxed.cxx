@@ -11,7 +11,7 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Graphs;
 using namespace WireCell::Clus::Facade;
 
-void Graphs::connect_graph_overclustering_protection(
+void Graphs::connect_graph_relaxed(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts,
