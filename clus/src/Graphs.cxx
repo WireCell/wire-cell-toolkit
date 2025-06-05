@@ -35,38 +35,101 @@ Weighted::ShortestPaths::path(size_t destination) const
     return path;
 }
 
-Weighted::GraphAlgorithms::GraphAlgorithms(GraphPtr&& graph) : m_graph(std::move(graph)) {}
+// Weighted::GraphAlgorithms::GraphAlgorithms(GraphPtr&& graph) : m_graph(std::move(graph)) {}
+
+Weighted::GraphAlgorithms::GraphAlgorithms(GraphPtr&& graph, size_t max_cache_size) 
+    : m_graph(std::move(graph)), m_max_cache_size(max_cache_size) 
+{
+    if (m_max_cache_size == 0) {
+        m_max_cache_size = 1; // Ensure at least 1 entry can be cached
+    }
+}
+
+void Weighted::GraphAlgorithms::update_cache_access(size_t source) const
+{
+    auto it = m_sps.find(source);
+    if (it != m_sps.end()) {
+        // Move to front of access order list (most recently used)
+        m_access_order.erase(it->second.first);
+        m_access_order.push_front(source);
+        it->second.first = m_access_order.begin();
+    }
+}
+
+void Weighted::GraphAlgorithms::evict_oldest_if_needed() const
+{
+    while (m_sps.size() >= m_max_cache_size) {
+        // Remove least recently used (back of list)
+        size_t oldest = m_access_order.back();
+        m_access_order.pop_back();
+        m_sps.erase(oldest);
+    }
+}
+
+// const Weighted::ShortestPaths&
+// Weighted::GraphAlgorithms::shortest_paths(size_t source) const
+// {
+//     auto it = m_sps.find(source);
+//     if (it != m_sps.end()) {
+//         return it->second;
+//     }
+
+//     const size_t nvtx = boost::num_vertices(*m_graph);
+//     std::vector<size_t> predecessors(nvtx); 
+//     std::vector<Weighted::dijkstra_distance_type> distances(nvtx); // ignore
+
+//     const auto& param = weight_map(get(boost::edge_weight, *m_graph))
+// 				   .predecessor_map(&predecessors[0])
+// 				   .distance_map(&distances[0]);
+//     boost::dijkstra_shortest_paths(*m_graph, source, param);
+
+//     auto got = m_sps.emplace(source, Weighted::ShortestPaths(source, predecessors));
+
+//     // {
+//     //     const auto& p = predecessors;
+//     //     const auto& d = distances;
+//     //     const size_t n = nvtx;
+
+//     //     for (size_t ind = 0; ind<n; ++ind) {
+//     //         std::cerr << "dijk: [" << ind << "/" << n << "] " << " s:" << source << " p:" << p[ind] << " d:" << d[ind] << "\n";
+//     //     }
+//     // }
+
+//     return got.first->second;
+// }
 
 const Weighted::ShortestPaths&
 Weighted::GraphAlgorithms::shortest_paths(size_t source) const
 {
     auto it = m_sps.find(source);
     if (it != m_sps.end()) {
-        return it->second;
+        // Cache hit - update access order
+        update_cache_access(source);
+        return it->second.second;
     }
 
+    // Cache miss - need to evict if cache is full
+    evict_oldest_if_needed();
+
+    // Calculate shortest paths using Dijkstra
     const size_t nvtx = boost::num_vertices(*m_graph);
     std::vector<size_t> predecessors(nvtx); 
-    std::vector<Weighted::dijkstra_distance_type> distances(nvtx); // ignore
+    std::vector<Weighted::dijkstra_distance_type> distances(nvtx);
 
     const auto& param = weight_map(get(boost::edge_weight, *m_graph))
-				   .predecessor_map(&predecessors[0])
-				   .distance_map(&distances[0]);
+                       .predecessor_map(&predecessors[0])
+                       .distance_map(&distances[0]);
     boost::dijkstra_shortest_paths(*m_graph, source, param);
 
-    auto got = m_sps.emplace(source, Weighted::ShortestPaths(source, predecessors));
+    // Add to front of access order list
+    m_access_order.push_front(source);
+    
+    // Insert into cache with iterator to list position
+    auto result = m_sps.emplace(source, 
+        std::make_pair(m_access_order.begin(), 
+                      Weighted::ShortestPaths(source, predecessors)));
 
-    // {
-    //     const auto& p = predecessors;
-    //     const auto& d = distances;
-    //     const size_t n = nvtx;
-
-    //     for (size_t ind = 0; ind<n; ++ind) {
-    //         std::cerr << "dijk: [" << ind << "/" << n << "] " << " s:" << source << " p:" << p[ind] << " d:" << d[ind] << "\n";
-    //     }
-    // }
-
-    return got.first->second;
+    return result.first->second.second;
 }
 
 const std::vector<size_t>&
@@ -86,4 +149,8 @@ Weighted::GraphAlgorithms::connected_components() const
 }
 
 
-
+void Weighted::GraphAlgorithms::clear_cache() const
+{
+    m_sps.clear();
+    m_access_order.clear();
+}
