@@ -382,6 +382,8 @@ namespace WireCell::PointCloud::Tree {
 
         void fill_cache();
         void fill_cache() const;
+        // Available for ScopedView<T> to implement to invalidate typed portion of the class.
+        virtual void invalidate() {}
 
         Scope m_scope;
         nodes_t m_nodes;        // eager
@@ -472,7 +474,9 @@ namespace WireCell::PointCloud::Tree {
             return def;
         }
 
-
+        virtual void invalidate() {
+            m_nfkd.reset();
+        }
 
       private:
 
