@@ -96,13 +96,6 @@ static void clustering_examine_x_boundary(
             // Perform separation
             auto scope_transform = cluster->get_scope_transform(scope);
             auto id2clusters = live_grouping.separate(cluster, b2groupid, true);
-            // Apply the scope filter settings to all new clusters
-            for (auto& [id, new_cluster] : id2clusters) {
-                new_cluster->set_default_scope(scope);
-                new_cluster->set_scope_filter(scope, true);
-                new_cluster->set_scope_transform(scope, scope_transform);
-            }
-
             assert(cluster == nullptr);
 
 

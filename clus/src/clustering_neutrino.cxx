@@ -392,12 +392,6 @@ static void clustering_neutrino(
                     auto scope_transform = cluster1->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
 
-                    // Apply the scope filter settings to all new clusters
-                    for (auto& [id, new_cluster] : sep_clusters) {
-                        new_cluster->set_default_scope(scope);
-                        new_cluster->set_scope_filter(scope, true);
-                        new_cluster->set_scope_transform(scope, scope_transform);
-                    }
 
                     assert(cluster1 != nullptr);
                     Cluster *largest_cluster = 0;
@@ -575,13 +569,6 @@ static void clustering_neutrino(
                     const auto b2id = Separate_2(cluster2, scope, 2.5 * units::cm);
                     auto scope_transform = cluster2->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
-                    
-                    // Apply the scope filter settings to all new clusters
-                    for (auto& [id, new_cluster] : sep_clusters) {
-                        new_cluster->set_default_scope(scope);
-                        new_cluster->set_scope_filter(scope, true);
-                        new_cluster->set_scope_transform(scope, scope_transform);
-                    }
 
                     assert(cluster2 != nullptr);
                     Cluster *largest_cluster = 0;
