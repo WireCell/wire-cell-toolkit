@@ -382,6 +382,8 @@ namespace WireCell::PointCloud::Tree {
 
         void fill_cache();
         void fill_cache() const;
+        // Available for ScopedView<T> to implement to invalidate typed portion of the class.
+        virtual void invalidate() {}
 
         Scope m_scope;
         nodes_t m_nodes;        // eager
@@ -423,12 +425,20 @@ namespace WireCell::PointCloud::Tree {
             if (force) {
                 m_nfkd = nullptr;
             }
+
             if (m_nfkd) { return *m_nfkd; }
 
             const auto& s = scope();
-            m_nfkd = std::make_unique<nfkd_t>(s.coords.size());
 
-            for (auto& sel : selections()) {
+            // A little tricky order of operations here.  This invalidates the kd:
+            const auto& sels = selections();
+
+            // NOW we can make and use it without triggering invalidate().
+            m_nfkd = std::make_unique<nfkd_t>(s.coords.size());
+            assert(m_nfkd);
+            
+            for (auto& sel : sels) {
+                assert(m_nfkd);
                 m_nfkd->append(*sel);
             }
             return *m_nfkd;
@@ -472,7 +482,9 @@ namespace WireCell::PointCloud::Tree {
             return def;
         }
 
-
+        virtual void invalidate() {
+            m_nfkd = nullptr;
+        }
 
       private:
 

@@ -51,12 +51,31 @@ namespace WireCell::Clus::Graphs {
         class GraphAlgorithms {
             GraphPtr m_graph;   // we do not expose this to assure it is forever const
 
+            // LRU cache configuration
+            static constexpr size_t DEFAULT_MAX_CACHE_SIZE = 50;  // Adjust as needed
+            size_t m_max_cache_size;
+            
+            // LRU cache implementation for shortest paths
+            // List maintains access order (most recently used at front)
+            mutable std::list<size_t> m_access_order;
+
+            // Map from source to {list_iterator, ShortestPaths}
+            mutable std::unordered_map<size_t, 
+                std::pair<std::list<size_t>::iterator, ShortestPaths>> m_sps;
+
             // Lazy calculate dijkstra shortest path results.
-            mutable std::unordered_map<size_t, ShortestPaths> m_sps;
+            // mutable std::unordered_map<size_t, ShortestPaths> m_sps;
+
             mutable std::vector<size_t> m_cc;
 
+            // Helper method to update LRU cache
+            void update_cache_access(size_t source) const;
+            void evict_oldest_if_needed() const;
+
         public:
-            GraphAlgorithms(GraphPtr&& graph);
+            GraphAlgorithms(GraphPtr&& graph, size_t max_cache_size = DEFAULT_MAX_CACHE_SIZE);
+
+            // GraphAlgorithms(GraphPtr&& graph);
         
             /// Return the intermediate result that gives access to the shortest
             /// paths from the source vertex all possible destination vertices.
@@ -69,6 +88,12 @@ namespace WireCell::Clus::Graphs {
             /// Return a "CC" array giving connected component subgraphs.
             const std::vector<size_t>& connected_components() const;
 
+            /// Get current cache size and maximum cache size
+            size_t cache_size() const { return m_sps.size(); }
+            size_t max_cache_size() const { return m_max_cache_size; }
+            
+            /// Clear the shortest paths cache
+            void clear_cache() const;
         };
 
     }

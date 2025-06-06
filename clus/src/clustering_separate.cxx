@@ -324,13 +324,6 @@ static void clustering_separate(
                                 auto scope_transform = final_sep_cluster->get_scope_transform(scope);
                                 auto final_sep_clusters = live_grouping.separate(final_sep_cluster,b2id,true); 
                                  
-                                // Apply the scope filter settings to all new clusters
-                                for (auto& [id, new_cluster] : final_sep_clusters) {
-                                    new_cluster->set_scope_filter(scope, true);
-                                    new_cluster->set_default_scope(scope);
-                                    new_cluster->set_scope_transform(scope,scope_transform);
-                                }
-
                                 assert(final_sep_cluster == nullptr);
                      
                             }
@@ -367,12 +360,6 @@ static void clustering_separate(
                         const auto b2id = Separate_2(final_sep_cluster, scope);
                         auto scope_transform = final_sep_cluster->get_scope_transform(scope);
                         auto final_sep_clusters = live_grouping.separate(final_sep_cluster, b2id, true);
-                        // Apply the scope filter settings to all new clusters
-                        for (auto& [id, new_cluster] : final_sep_clusters) {
-                            new_cluster->set_scope_filter(scope, true);
-                            new_cluster->set_default_scope(scope);
-                            new_cluster->set_scope_transform(scope, scope_transform);
-                        }
                         assert(final_sep_cluster == nullptr);
                         cluster2 = final_sep_cluster = sep_clusters[1] = nullptr;
 
@@ -1441,12 +1428,6 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
     }
     auto scope_transform = cluster->get_scope_transform(scope);
     auto clusters_step0 = grouping->separate(cluster, b2groupid, true);
-    // Apply the scope filter settings to all new clusters
-    for (auto& [id, new_cluster] : clusters_step0) {
-        new_cluster->set_scope_filter(scope, true);
-        new_cluster->set_default_scope(scope);
-        new_cluster->set_scope_transform(scope, scope_transform);
-    }
     assert(cluster == nullptr);
 
 
@@ -1456,12 +1437,6 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
         // other_clusters = Separate_2(clusters_step0[1], 5 * units::cm);
         const auto b2id = Separate_2(clusters_step0[1], scope, 5 * units::cm);
         auto other_clusters1 = grouping->separate(clusters_step0[1],b2id, true); // the cluster is now nullptr
-        // Apply the scope filter settings to all new clusters
-        for (auto& [id, new_cluster] : other_clusters1) {
-            new_cluster->set_default_scope(scope);
-            new_cluster->set_scope_filter(scope, true);
-            new_cluster->set_scope_transform(scope, scope_transform);
-        }
         assert(clusters_step0[1] == nullptr);
 
         for (auto it = other_clusters1.begin(); it != other_clusters1.end(); it++) {
@@ -1502,6 +1477,8 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
             auto scope = clusters_step0[0]->get_default_scope();
             auto scope_transform = clusters_step0[0]->get_scope_transform(scope);
 
+            // std::cout << "Xin1:  " << clusters_step0[0]->npoints() << " " << clusters_step0[0]->kd3d().npoints()  << " " << clusters_step0[0]->sv().nodes().size() << " " << clusters_step0[0]->sv().npoints() << std::endl;
+                        
             for (auto temp_cluster : temp_merge_clusters) {
                 other_clusters.erase(find(other_clusters.begin(),other_clusters.end(),temp_cluster));
                 clusters_step0[0]->take_children(*temp_cluster, true);
@@ -1511,6 +1488,9 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
             clusters_step0[0]->set_default_scope(scope);
             clusters_step0[0]->set_scope_filter(scope, true);
             clusters_step0[0]->set_scope_transform(scope, scope_transform);
+
+            // std::cout << "Xin2:  " << clusters_step0[0]->npoints() << " " << clusters_step0[0]->kd3d().npoints()  << " " << clusters_step0[0]->sv().nodes().size() << " " << clusters_step0[0]->sv().npoints() << std::endl;
+
 
             final_clusters.push_back(clusters_step0[0]);
         }
@@ -1595,8 +1575,7 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
             cluster2.take_children(*to_be_merged_clusters[i], true);
             grouping->destroy_child(to_be_merged_clusters[i]);
             assert(to_be_merged_clusters[i] == nullptr);
-        }
-        
+        }        
         
         to_be_merged_clusters.clear();
 

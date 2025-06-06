@@ -103,8 +103,11 @@ void Tree::ScopedBase::fill_cache() const
 
 void Tree::ScopedBase::fill_cache()
 {
-    // is this reliable???
+    // This leaves open a possible bug where the user adds and removes the same
+    // number of nodes.  In that case, the old cache will be kept.
     if (m_node_count == m_nodes.size()) return;
+
+    invalidate();               // propagate to subclass
 
     m_node_count = 0;
     m_pcs.clear();
