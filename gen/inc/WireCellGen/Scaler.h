@@ -36,11 +36,18 @@ namespace WireCell {
       double bin_width;
       double tpc_width;
       double bin_height;
+      int n_ybin;
+      int n_zbin;
+      double yoffset;
+      double zoffset;
       int plane;
       std::string anode_name;
+      std::string yzmap_scale_filename;
       //Json::Value map = Json::arrayValue;
       //Json::arrayValue map;
       Json::Value jmap;
+
+      std::vector<std::vector<double>> yzmap;
 
 
     };  // Scaler
