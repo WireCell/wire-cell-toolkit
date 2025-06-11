@@ -15,8 +15,8 @@
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IDetectorVolumes.h"
 
+#include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
-
 
 namespace WireCell::Clus::Facade {
     class Cluster;
@@ -45,7 +45,8 @@ namespace WireCell::Clus::Facade {
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
     // nodes that are related in some way.
-    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>, public Mixin<Grouping, GroupingCache> {
+    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>,
+                     public Mixins::Cached<Grouping, GroupingCache> {
 
         std::map<int, IAnodePlane::pointer> m_anodes;
         IDetectorVolumes::pointer m_dv{nullptr};
@@ -56,7 +57,7 @@ namespace WireCell::Clus::Facade {
 
        public:
 
-        Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
+        Grouping() : Mixins::Cached<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
         /// Incrementally set the ident number on clusters in children-order.
         ///
@@ -204,7 +205,7 @@ namespace WireCell::Clus::Facade {
             int min_time, int max_time, int min_ch, int max_ch, const int apa, 
             const int face, const int pind) const;
 
-        // We override this from Mixin in order to inject propagation of the
+        // We override this from Mixins::Cached in order to inject propagation of the
         // utter garbage handling of dead_winds.  If someone fixes that, this
         // method may be removed.  #381.
         virtual void clear_cache() const;

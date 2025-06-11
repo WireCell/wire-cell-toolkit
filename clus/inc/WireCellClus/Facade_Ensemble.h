@@ -1,6 +1,7 @@
 #ifndef WIRECELLCLUS_FACADE_ENSEMBLE
 #define WIRECELLCLUS_FACADE_ENSEMBLE
 
+#include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
 #include "WireCellUtil/PointTree.h"
@@ -29,11 +30,11 @@ namespace WireCell::Clus::Facade {
      * up the to user to avoid or utilize this feature.
      *
      */
-    class Ensemble : public NaryTree::FacadeParent<Grouping, points_t>,
-                     public Mixin<Ensemble, EnsembleCache> {
+    class Ensemble : public NaryTree::FacadeParent<Grouping, points_t>
+                   , public Mixins::Cached<Ensemble, EnsembleCache> {
     public:
 
-        Ensemble() : Mixin<Ensemble, EnsembleCache>(*this, "ensemble_scalar") {}
+        Ensemble() : Mixins::Cached<Ensemble, EnsembleCache>(*this, "ensemble_scalar") {}
         virtual ~Ensemble() {}
 
         /// Return false if no child Groupings have the name, else true.

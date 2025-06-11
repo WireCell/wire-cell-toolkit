@@ -645,7 +645,7 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
 
 void Grouping::clear_cache() const
 {
-    this->Mixin<Grouping, GroupingCache>::clear_cache();
+    this->Mixins::Cached<Grouping, GroupingCache>::clear_cache();
 
 
     // This is utterly broken.  #381.

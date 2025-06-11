@@ -15,6 +15,7 @@ using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 #include "WireCellUtil/Logging.h"
 using spdlog::debug;
 
+
 // int global_counter_get_closest_wcpoint = 0;
 
 // #define __DEBUG__

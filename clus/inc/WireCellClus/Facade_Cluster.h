@@ -15,7 +15,7 @@
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IDetectorVolumes.h"
 
-#include "WireCellClus/Facade_Util.h"
+#include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_ClusterCache.h"
 #include "WireCellClus/IPCTransform.h"
@@ -32,10 +32,12 @@ namespace WireCell::Clus::Facade {
     class Grouping;
 
     // Give a node "Cluster" semantics.  A cluster node's children are blob nodes.
-    class Cluster : public NaryTree::FacadeParent<Blob, points_t>, public Mixin<Cluster, ClusterCache> {
-
-       public:
-        Cluster() : Mixin<Cluster, ClusterCache>(*this, "cluster_scalar") {}
+    class Cluster : public NaryTree::FacadeParent<Blob, points_t>
+                  , public Mixins::Cached<Cluster, ClusterCache>
+                  , public Mixins::Graphs
+    {
+      public:
+        Cluster() : Mixins::Cached<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
 
         // return raw pc information ...
@@ -382,7 +384,7 @@ namespace WireCell::Clus::Facade {
         /// 
         /// Note, as a special case, the default graph flavor "basic" can and
         /// will be produced on the fly.
-        const Graphs::Weighted::GraphAlgorithms& 
+        const WireCell::Clus::Graphs::Weighted::GraphAlgorithms& 
         graph_algorithms(const std::string& flavor = "basic") const;
 
         /// Get and construct if needed a GA for a graph of a known flavor and
@@ -396,7 +398,7 @@ namespace WireCell::Clus::Facade {
         /// thrown.
         ///
         /// Note, "relaxed" used to be known as "overclustering protection").
-        const Graphs::Weighted::GraphAlgorithms& 
+        const WireCell::Clus::Graphs::Weighted::GraphAlgorithms& 
         graph_algorithms(const std::string& flavor,
                          IDetectorVolumes::pointer dv, 
                          IPCTransformSet::pointer pcts) const;

@@ -15,6 +15,7 @@
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/WirePlaneId.h"
 
+#include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
 namespace WireCell::Clus::Facade {
@@ -47,9 +48,11 @@ namespace WireCell::Clus::Facade {
 
 
     /// Give a node "Blob" semantics
-    class Blob : public NaryTree::Facade<points_t>, public Mixin<Blob, BlobCache> {
-       public:
-        Blob() : Mixin<Blob, BlobCache>(*this, "scalar") {}
+    class Blob : public NaryTree::Facade<points_t>
+               , public Mixins::Cached<Blob, BlobCache>
+    {
+      public:
+        Blob() : Mixins::Cached<Blob, BlobCache>(*this, "scalar") {}
         virtual ~Blob() {}
 
         // Return the cluster to which this blob is a child.  May be nullptr.
