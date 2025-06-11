@@ -128,6 +128,12 @@ void clustering_connect1(
             cluster->set_default_scope(scope);
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
+        // debug ... 
+        // {
+        //     const size_t num_points = cluster->npoints();
+        //     const size_t kd_num_points = cluster->kd3d().npoints();
+        //     std::cout << "Xin: " << num_points << " " << kd_num_points << std::endl;
+        // }
         global_point_cloud->add_points(make_points_cluster(cluster, wpid_params));
     }
     // sort the clusters length ...

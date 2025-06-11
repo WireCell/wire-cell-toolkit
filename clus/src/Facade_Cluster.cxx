@@ -79,11 +79,14 @@ void Cluster::set_default_scope(const Tree::Scope& scope)
                    // It clears all cache.  This side-effect is needed even if
                    // the default scope is unchanged.
 
+    
+
     // The PCA cache is only thing that directly depends on scope but it is not
     // enough to just clear that...
     // cache().pca.reset();
     // ... as connect_graph_closely() still breaks.
     // For now, we leave the mystery unsolved.
+
 }
 
 void Cluster::set_scope_filter(const Tree::Scope& scope, bool flag)

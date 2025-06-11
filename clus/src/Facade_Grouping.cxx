@@ -138,9 +138,15 @@ std::map<int, Cluster*> Grouping::separate(
     bool notify_value)
 {
     const int ident = cluster->ident();
-    auto ret = this->NaryTree::FacadeParent<Cluster, points_t>::separate(cluster, groups, remove, notify_value);
+    auto ret = this->NaryTree::FacadeParent<Cluster, points_t>::separate(cluster, groups, false, notify_value);
     for (auto& [_, c] : ret) {
         c->set_ident(ident);
+        c->from(*cluster);
+    }
+
+    if(remove){
+        // Remove the original cluster from the grouping.
+        this->destroy_child(cluster, notify_value);
     }
     return ret;    
 }

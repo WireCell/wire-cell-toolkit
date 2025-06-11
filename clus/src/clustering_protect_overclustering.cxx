@@ -797,12 +797,6 @@ static std::map<int, Cluster *> Separate_overclustering(
                 }
                 auto scope_name = cluster->get_scope_transform(scope);
                 auto id2clusters = grouping->separate(cluster, b2groupid, true); 
-                // Apply the scope filter settings to all new clusters
-                for (auto& [id, new_cluster] : id2clusters) {
-                    new_cluster->set_default_scope(scope);
-                    new_cluster->set_scope_filter(scope, true);
-                    new_cluster->set_scope_transform(scope, scope_name);
-                }
                 return id2clusters;
             }
         }

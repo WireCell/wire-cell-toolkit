@@ -693,19 +693,20 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
     // origi_cluster still have the original main cluster ... 
     // debug_cluster(orig_cluster, "Start:");
 
+    // std::cout << "Xin1:  " << orig_cluster->get_scope_filter(scope) << " " << orig_cluster->get_default_scope() << " " << orig_cluster->get_scope_transform(scope) << std::endl;
+
     auto splits = m_grouping->separate(orig_cluster, cc_vec);
     // debug_cluster(orig_cluster, "Mid:");
 
-    // Apply the scope filter settings to all new clusters
-    for (auto& [id, new_cluster] : splits) {
-        new_cluster->set_scope_filter(scope, true);
-        new_cluster->set_default_scope(scope);
-        new_cluster->set_scope_transform(scope,scope_transform);
-    }
-    orig_cluster->set_scope_filter(scope, true);
-    orig_cluster->set_default_scope(scope);
-    orig_cluster->set_scope_transform(scope,scope_transform);
+    // std::cout << "Xin2:  " << orig_cluster->get_scope_filter(scope) << " " << orig_cluster->get_default_scope() << " " << orig_cluster->get_scope_transform(scope)<< std::endl;
+
+
+    // orig_cluster->set_scope_filter(scope, true);
+    orig_cluster->set_default_scope(scope); // need this to clear cache ... 
+    // orig_cluster->set_scope_transform(scope,scope_transform);
                 
+    // std::cout << "Xin:  " << orig_cluster->get_scope_filter(scope) << " " << orig_cluster->get_default_scope() << " " << orig_cluster->get_scope_transform(scope)<< std::endl;
+
     std::map<int, Cluster*> map_id_cluster = splits;
     map_id_cluster[-1] = orig_cluster;
 
@@ -847,9 +848,7 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
             // Get the new scope with corrected points
             const auto correction_scope = shad_cluster.get_scope(correction_name);
             // // Set this as the default scope for viewing
-            shad_cluster.set_default_scope(correction_scope);
-            shad_cluster.set_scope_transform(correction_scope, correction_name);
-            shad_cluster.set_scope_filter(scope, true);
+            shad_cluster.from(*cluster); // copy state from original cluster
             // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 

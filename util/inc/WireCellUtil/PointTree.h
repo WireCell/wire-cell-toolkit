@@ -425,6 +425,7 @@ namespace WireCell::PointCloud::Tree {
             if (force) {
                 m_nfkd = nullptr;
             }
+
             if (m_nfkd) { return *m_nfkd; }
 
             const auto& s = scope();
