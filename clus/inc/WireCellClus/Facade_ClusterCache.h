@@ -49,10 +49,6 @@ namespace WireCell::Clus::Facade {
         // Depends on DEFAULT SCOPE
         std::unique_ptr<PCA> pca;
 
-        // Cluster makes its own graphs for the purpose of calculating shortest
-        // paths.  This is the lazy cache.  For now, the key string is either
-        // "basic" or "ctpc" to distinguish the type of graph.
-        std::map<std::string, Graphs::Weighted::GraphAlgorithms> galgs;
 
         // Wire plane IDs by point (3d scoped view) index. Depends on the RAW SCOPE.
         std::vector<int> point_wpids;

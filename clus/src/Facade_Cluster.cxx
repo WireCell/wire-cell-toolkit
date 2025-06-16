@@ -24,7 +24,7 @@ using namespace WireCell::Clus::Facade;
 // using WireCell::PointCloud::Dataset;
 using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 // using WireCell::PointCloud::Tree::named_pointclouds_t;
-
+using WireCell::Clus::Graphs::Weighted::GraphAlgorithms;
 
 using spdlog::debug;
 
@@ -2323,19 +2323,25 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 
 
 
-const Weighted::GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor) const
+const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor) const
 {
-    auto& galgs = this->cache().galgs;
-    auto it = galgs.find(flavor);
-    if (it != galgs.end()) {
-        return it->second;
+    auto it = m_galgs.find(flavor);
+    if (it != m_galgs.end()) {
+        return it->second;      // we have it already
     }
 
-    // We failed to find the flavor, but we there are some flavors we know how
-    // to construct on the fly:
+    if (this->has_graph(flavor)) {    // if graph exists, make the GA
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(get_graph(flavor)));
+        return got.first->second;
+    }
+        
+    // We failed to find an existing graph of the given flavor, but we there are
+    // some flavors we know how to construct on the fly:
 
     if (flavor == "basic") {
-        auto got = galgs.emplace(flavor, Weighted::GraphAlgorithms(make_graph_basic(*this)));
+        // we are caching, so const cast is "okay".
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }
 
@@ -2344,25 +2350,26 @@ const Weighted::GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::st
     std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
 
-const Weighted::GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor,
+const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor,
                                                                    IDetectorVolumes::pointer dv, 
                                                                    IPCTransformSet::pointer pcts) const
 {
-    auto& galgs = this->cache().galgs;
-    auto it = galgs.find(flavor);
-    if (it != galgs.end()) {
+    auto it = m_galgs.find(flavor);
+    if (it != m_galgs.end()) {
         return it->second;
     }
 
     // Factory of known graph flavors relying on detector info:
 
     if (flavor == "ctpc") {
-        auto got = galgs.emplace(flavor, Weighted::GraphAlgorithms(make_graph_ctpc(*this, dv, pcts)));
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }
 
     if (flavor == "relaxed") {
-        auto got = galgs.emplace(flavor, Weighted::GraphAlgorithms(make_graph_relaxed(*this, dv, pcts)));
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }
 

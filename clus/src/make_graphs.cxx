@@ -12,39 +12,39 @@ using namespace WireCell::Clus::Facade;
 using namespace WireCell::Clus::Graphs;
 
 
-Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_closely(
+Weighted::Graph WireCell::Clus::Graphs::make_graph_closely(
     const Cluster& cluster) 
 {
-    auto graph = std::make_unique<Weighted::Graph>(cluster.npoints());
-    connect_graph_closely(cluster, *graph);
+    Weighted::Graph graph(cluster.npoints());
+    connect_graph_closely(cluster, graph);
     return graph;
 }
 
-Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_basic(
+Weighted::Graph WireCell::Clus::Graphs::make_graph_basic(
     const Cluster& cluster) 
 {
     auto graph = make_graph_closely(cluster);
-    connect_graph(cluster, *graph);
+    connect_graph(cluster, graph);
     return graph;
 }
 
-Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_ctpc(
+Weighted::Graph WireCell::Clus::Graphs::make_graph_ctpc(
     const Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts) 
 {
     auto graph = make_graph_closely(cluster);
-    connect_graph_ctpc(cluster, dv, pcts, *graph);
-    connect_graph(cluster, *graph);
+    connect_graph_ctpc(cluster, dv, pcts, graph);
+    connect_graph(cluster, graph);
     return graph;
 }
 
-Weighted::GraphPtr WireCell::Clus::Graphs::make_graph_relaxed(
+Weighted::Graph WireCell::Clus::Graphs::make_graph_relaxed(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv, 
     IPCTransformSet::pointer pcts) 
 {
     auto graph = make_graph_closely(cluster);
-    connect_graph_relaxed(cluster, dv, pcts, *graph);
+    connect_graph_relaxed(cluster, dv, pcts, graph);
     return graph;
 }

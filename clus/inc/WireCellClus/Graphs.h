@@ -26,8 +26,6 @@ namespace WireCell::Clus::Graphs {
             boost::property<boost::edge_weight_t, float> 
             >;
     
-        using GraphPtr = std::unique_ptr<Graph>;
-
         /// Embody all possible shortest paths from a given source index.
         class ShortestPaths {
         
@@ -49,7 +47,7 @@ namespace WireCell::Clus::Graphs {
 
         // Bind some graph algorithms to a graph, with caching..
         class GraphAlgorithms {
-            GraphPtr m_graph;   // we do not expose this to assure it is forever const
+            const Graph& m_graph;
 
             // LRU cache configuration
             static constexpr size_t DEFAULT_MAX_CACHE_SIZE = 50;  // Adjust as needed
@@ -73,9 +71,8 @@ namespace WireCell::Clus::Graphs {
             void evict_oldest_if_needed() const;
 
         public:
-            GraphAlgorithms(GraphPtr&& graph, size_t max_cache_size = DEFAULT_MAX_CACHE_SIZE);
+            GraphAlgorithms(const Graph& graph, size_t max_cache_size = DEFAULT_MAX_CACHE_SIZE);
 
-            // GraphAlgorithms(GraphPtr&& graph);
         
             /// Return the intermediate result that gives access to the shortest
             /// paths from the source vertex all possible destination vertices.
@@ -94,7 +91,9 @@ namespace WireCell::Clus::Graphs {
             
             /// Clear the shortest paths cache
             void clear_cache() const;
+
         };
+
 
     }
 

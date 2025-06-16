@@ -13,21 +13,21 @@ namespace WireCell::Clus::Graphs {
     // functions.
 
     // just closely connected.
-    Weighted::GraphPtr make_graph_closely(
+    Weighted::Graph make_graph_closely(
         const Facade::Cluster& cluster);
 
     // closely + basic connection
-    Weighted::GraphPtr make_graph_basic(
+    Weighted::Graph make_graph_basic(
         const Facade::Cluster& cluster);
 
     // closely + ctpc connection
-    Weighted::GraphPtr make_graph_ctpc(
+    Weighted::Graph make_graph_ctpc(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
 
     // closely + relaxed (overclustering protection)
-    Weighted::GraphPtr make_graph_relaxed(
+    Weighted::Graph make_graph_relaxed(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);

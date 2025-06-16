@@ -404,7 +404,6 @@ namespace WireCell::Clus::Facade {
                          IPCTransformSet::pointer pcts) const;
 
 
-
         // Return 3D points for given indices in the 3d PC.
         std::vector<geo_point_t> indices_to_points(const std::vector<size_t>& path_indices) const;
 
@@ -505,6 +504,9 @@ namespace WireCell::Clus::Facade {
         std::map<size_t, bool> m_map_scope_filter={{m_scope_3d_raw.hash(), true}};
         std::map<size_t, std::string> m_map_scope_transform={{m_scope_3d_raw.hash(), "Unity"}};
 
+        // We handle graph algorithms special as the GA's use graphs that are
+        // held in their own cache in the Mixins::Graphs base.
+        mutable std::map<std::string, WireCell::Clus::Graphs::Weighted::GraphAlgorithms> m_galgs;
 
        protected:
 

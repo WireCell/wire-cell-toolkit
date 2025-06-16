@@ -34,7 +34,7 @@ WireCell::Clus::Facade::process_groupings_helper(
         // Separate clusters
         auto scope_transform = mutable_cluster->get_scope_transform(mutable_cluster->get_default_scope());
         auto& scope = mutable_cluster->get_default_scope();
-        bool flag = mutable_cluster->get_scope_filter(scope);
+        mutable_cluster->get_scope_filter(scope);
         auto orig_splits = original.separate(mutable_cluster, cc_vec);
        
 

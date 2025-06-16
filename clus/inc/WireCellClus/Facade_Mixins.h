@@ -346,6 +346,9 @@ namespace WireCell::Clus::Facade::Mixins {
         using graph_type = WireCell::Clus::Graphs::Weighted::Graph;
         using graph_store_type = std::map<std::string, graph_type>;
 
+        /** Return true if named graph exists. */
+        bool has_graph(const std::string& name) const;
+
         /** Return known graphs.
 
             This is only available as const.  User may use it to test for

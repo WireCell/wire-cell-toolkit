@@ -2,6 +2,11 @@
 
 using namespace WireCell::Clus::Facade;
 
+bool Mixins::Graphs::has_graph(const std::string& name) const
+{
+    return m_graph_store.find(name) != m_graph_store.end();
+}
+
 Mixins::Graphs::graph_type& Mixins::Graphs::make_graph(const std::string& name, size_t nvertices)
 {
     m_graph_store[name] = graph_type(nvertices);
