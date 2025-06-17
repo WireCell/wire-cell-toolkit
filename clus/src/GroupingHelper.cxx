@@ -45,7 +45,7 @@ WireCell::Clus::Facade::process_groupings_helper(
         // Create a non-const pointer for separate()
         Cluster* mutable_shad_cluster = shad_cluster;
         // Separate clusters
-        flag = mutable_shad_cluster->get_scope_filter(scope);
+        mutable_shad_cluster->get_scope_filter(scope);
         auto shad_splits = shadow.separate(mutable_shad_cluster, shad_cc_vec);
        
 
