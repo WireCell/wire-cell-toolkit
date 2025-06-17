@@ -2,6 +2,7 @@
 
 #include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/Graphs.h"
+#include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
 
@@ -17,8 +18,9 @@ WIRECELL_FACTORY(CreateSteinerGraph, CreateSteinerGraph,
 
 using namespace WireCell;
 using WireCell::Clus::Facade::Ensemble;
-using WireCell::Clus::Facade::Cluster;
 using WireCell::Clus::Facade::Grouping;
+using WireCell::Clus::Facade::Cluster;
+using WireCell::Clus::Facade::Blob;
 using graph_type = WireCell::Clus::Graphs::Weighted::Graph;
 using namespace WireCell::PointCloud::Tree; // Points, Scope, etc
 
@@ -61,8 +63,33 @@ static graph_type get_graph(const Cluster& cluster, const std::string& flavor)
     return copy;
 }
 
-static void establish_same_blob_steiner_edges(graph_type& new_graph, const Cluster& cluster /*,...*/)
+static void establish_same_blob_steiner_edges_type1(graph_type& graph, const Cluster& cluster,
+                                                    bool disable_dead_mix_cell=true/*,...*/);
+static void establish_same_blob_steiner_edges_type1(graph_type& graph, const Cluster& cluster,
+                                                    bool disable_dead_mix_cell/*,...*/)
 {
+    // "flag==1" type
+}
+
+static void establish_same_blob_steiner_edges_type2(graph_type& graph, const Cluster& cluster,
+                                                    bool disable_dead_mix_cell=true/*,...*/);
+static void establish_same_blob_steiner_edges_type2(graph_type& graph, const Cluster& cluster,
+                                                    bool disable_dead_mix_cell/*,...*/)
+{
+    // "flag==2" type
+}
+
+static void establish_same_blob_steiner_edges(graph_type& graph, const Cluster& cluster,
+                                              bool disable_dead_mix_cell=true, int flag=1/*,...*/);
+static void establish_same_blob_steiner_edges(graph_type& graph, const Cluster& cluster,
+                                              bool disable_dead_mix_cell, int flag/*,...*/)
+{
+    if (flag==1) {
+        establish_same_blob_steiner_edges_type1(graph, cluster, disable_dead_mix_cell);
+    }
+    else {
+        establish_same_blob_steiner_edges_type2(graph, cluster, disable_dead_mix_cell);
+    }
 }
 
 static void improve_cluster(Cluster& new_cluster, const Cluster& orig_cluster /*,...*/)
@@ -78,7 +105,7 @@ static void improve_cluster_2(Cluster& new_cluster, const Cluster& orig_cluster
                               /* , int nrebin, int frame_length, double unit_dis,...*/)
 {
     auto graph = get_graph(orig_cluster, "ctpc");
-    establish_same_blob_steiner_edges(graph, new_cluster /*,...*/);
+    establish_same_blob_steiner_edges(graph, new_cluster/*,...*/);
 
     // QUESTION: in WCP we have:
     // pr3dcluster->dijkstra_shortest_paths(wcps1.first);
@@ -98,8 +125,9 @@ static void improve_cluster_2(Cluster& new_cluster, const Cluster& orig_cluster
 
 
 
-static void calc_sampling_points(Cluster& new_cluster /*, ...*/)
+static void calc_sampling_points(const Cluster& cluster /*, ...*/)
 {
+    // FIXME for BV: replace this with generic point sampling
 }
 
 // Fixme: I don't want to return a copy, but for now, that's the mock up.
@@ -108,9 +136,84 @@ static PointCloud::Dataset get_point_cloud(const Cluster& cluster)
     return PointCloud::Dataset {};
 }
 
-static graph_type create_steiner_tree(Cluster& new_cluster, PointCloud::Dataset& point_cloud_steiner /*,...*/)
+// A set of graph vertices
+using graph_vertex_set = std::set<size_t>;
+
+using blob_vertex_map = std::map<const Blob*, graph_vertex_set>;
+static blob_vertex_map form_cell_points_map(const Cluster& cluster)
 {
-    return graph_type{};
+    blob_vertex_map cell_point_indices_map;
+    // 1. get "point_cloud"
+    // ...
+
+    // 2. Loop over children
+    for (const auto* blob : cluster.children()) {
+        graph_vertex_set wcps; // = point_cloud->get_blob_indices(*blob);
+        for (const auto& vtx : wcps) {
+            Point pt; // = cloud.pts[vtx];  FIXME: how to get cloud?
+            cell_point_indices_map[blob].insert(vtx); // FIXME: is the WCPointCloud::WCPoint::index same as graph vertex aka point index?
+        }
+    }
+    return cell_point_indices_map;
+    
+}
+static graph_vertex_set find_peak_point_indices(std::vector<const Blob*> blobs, bool disable_dead_mix_cell)
+{
+    graph_vertex_set ppi;
+
+    // FIXME: BIG CODE BLOCK TO FILL IN
+
+    return ppi;
+}
+static graph_vertex_set find_steiner_terminals(const Cluster& cluster, bool disable_dead_mix_cell=true);
+static graph_vertex_set find_steiner_terminals(const Cluster& cluster, bool disable_dead_mix_cell)
+{
+    graph_vertex_set steiner_terminals;
+    
+    auto cell_points_map = form_cell_points_map(cluster);
+
+    for (const auto* blob : cluster.children()) {
+        std::vector<const Blob*> temp_blobs = { blob };
+        auto st = find_peak_point_indices(temp_blobs, disable_dead_mix_cell);
+        steiner_terminals.insert(st.begin(), st.end());
+    }
+
+    return steiner_terminals;
+}
+
+static graph_type create_steiner_tree(Cluster& cluster, PointCloud::Dataset& point_cloud_steiner,
+                                      const std::vector<bool>& flag_steiner_terminal,
+                                      bool disable_dead_mix_cell=true/*,...*/);
+static graph_type create_steiner_tree(Cluster& cluster, PointCloud::Dataset& point_cloud_steiner,
+                                      const std::vector<bool>& flag_steiner_terminal,
+                                      bool disable_dead_mix_cell/*,...*/)
+{
+    auto steiner_terminals = find_steiner_terminals(cluster, disable_dead_mix_cell);
+
+    // 1. Make a point cloud
+
+    // 2. Organize blobs
+
+    graph_vertex_set indices_to_be_removal;
+    // 3. Find indices to remove
+    // BIG CODE BLOCK
+
+    // Do the removal
+    for (const auto& doomed : indices_to_be_removal) {
+        steiner_terminals.erase(doomed);
+    }
+
+    // 4. Figure out extreme points.
+
+    // 5. form the tree ....
+    // BIG CODE BLOCK
+
+    // 6. fill the graph ...
+    graph_type graph_steiner(flag_steiner_terminal.size());
+    // Loop over unique_edges found above.
+    
+
+    return graph_steiner;
 }
 
 static graph_type create_steiner_graph(const Cluster& orig_cluster /*,...*/)
@@ -142,8 +245,10 @@ static graph_type create_steiner_graph(const Cluster& orig_cluster /*,...*/)
     // Replaces WCP's Create_steiner_tree
     // steiner tree with some basic cuts ...
     PointCloud::Dataset point_cloud_steiner;
+    std::vector<bool> flag_steiner_terminal; // FIXME: get this from somewhere
     // fixme: needs some more input
-    auto graph_steiner = create_steiner_tree(new_cluster, point_cloud_steiner /*,...*/);
+    auto graph_steiner = create_steiner_tree(new_cluster, point_cloud_steiner,
+                                             flag_steiner_terminal/*,...*/);
     auto orig_graph = get_graph(orig_cluster, "...");
     establish_same_blob_steiner_edges(orig_graph, orig_cluster  /*,...*/);
 
