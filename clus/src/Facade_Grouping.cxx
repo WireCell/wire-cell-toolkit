@@ -110,6 +110,7 @@ void Facade::Grouping::from(const Grouping& other)
     m_dv = other.m_dv;
 }
 
+
 void Facade::Grouping::enumerate_idents(const std::string& sort_order, int id)
 {
     if (sort_order.empty() or sort_order == "none") {

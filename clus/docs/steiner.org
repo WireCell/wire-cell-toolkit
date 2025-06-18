@@ -1,0 +1,51 @@
+#+title: Info related to porting of Steiner-related WCP code
+
+* Links
+
+- Meta issue https://github.com/WireCell/wire-cell-toolkit/issues/431
+
+* Guidance
+
+** Code organization
+
+- All Steiner-related header and source code is in ~clus/src/~ and so is "private" to the sub-package.
+
+- All Steiner-related code is in the ~WireCell::Clus::Steiner::~ namespace.
+
+- ~CreateSteinerGraph~ in ~CreateSteinerGraph.{h,cxx}~ is the "ensemble visitor" that is to be added to an MABC pipeline.
+
+- ~Steiner::Grapher~ in ~SteinerGrapher.{h,cxx}~ is a class that "wraps" one ~Cluster~.  It is kind of a "facade of a facade".  This class is intended to represent the Steiner-related parts of ~PR3DCluster~.  As such it is okay to load it up with whatever per-Cluster auxiliary information and methods that are needed.  It is also given a ~Config~ struct that holds any required "service" components (eg, sampler, detector volumes).  The main duty of the ~Grapher~ is to return a graph from its ~create_steiner_graph()~ method.  The ~CreateSteinerGraph::visit()~ is responsible to make a ~Grapher~, call it and dispatch the resulting graph.
+
+
+** Making a fresh Cluster
+
+There are cases in WCP where a ~PR3DCluster~ must be made from scratch.  In WCT, a
+~Cluster~ is a facade over an underlying node (and a ~Grapher~ is yet another
+layer).  It is the node that is memory managed and owns the facade.  We thus
+must keep the node alive while we use its ~Cluster~ (or its ~Grapher~).  For an
+isolated case (no parent ~Grouping~) we may do:
+
+#+begin_src c++
+  Points::node_t new_cluster_node;
+  Cluster& new_cluster = new_cluster_node.value.facade<Cluster>();
+#+end_src
+
+Everything is destroyed when ~new_cluster_node~ goes out of scope.  Alternatively,
+if we want to make the new ~Cluster~ on an existing ~GRouping~ we can do:
+
+#+begin_src c++
+  Grouping& grouping;             // we get somehwere
+  Cluster& cluster = grouping.make_child();
+#+end_src
+
+
+** Cloning a cluster
+
+I expect we will need to clone one cluster from another.  That's TBD.
+
+* Questions
+
+- Can ~calc_sampling_points()~ be replaced with some "clone" method to make a copy
+  of an existing Cluster PC tree?
+
+  
