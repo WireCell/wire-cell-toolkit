@@ -66,7 +66,7 @@ class RetileCluster : public IConfigurable, public IPCTreeMutate, private Clus::
 
     // Cache
     mutable Grouping* m_grouping = nullptr;
-    mutable std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> m_wpid_params;
+    mutable std::map<WirePlaneId , std::vector<double> > m_wpid_angles;
 
 public:
 
@@ -102,6 +102,7 @@ private:
     std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
     std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
+
 
     // Remaining steps are done in the operator() directly.
 
@@ -171,6 +172,8 @@ namespace WRG = WireCell::RayGrid;
 // }
 
 
+
+
 // Now can handle all APA/Faces 
 void RetileCluster::configure(const WireCell::Configuration& cfg)
 {
@@ -234,31 +237,19 @@ Facade::Cluster* RetileCluster::reinitialize(Points::node_type& node) const
     }
     m_grouping = cluster->grouping();
 
-    m_wpid_params.clear();
+    m_wpid_angles.clear();
     for (const auto& gwpid : m_grouping->wpids()) {
+        // gwpids are "all" type - no specific layer so we must remake per-layer wpids
         int apa = gwpid.apa();
         int face = gwpid.face();
-
-        // Create wpids for all three planes with this APA and face
-        WirePlaneId wpid_u(kUlayer, face, apa);
-        WirePlaneId wpid_v(kVlayer, face, apa);
-        WirePlaneId wpid_w(kWlayer, face, apa);
-            
-        // Get drift direction based on face orientation
-        int face_dirx = m_dv->face_dirx(wpid_u);
-        geo_point_t drift_dir(face_dirx, 0, 0);
-            
-        // Get wire directions for all planes
-        Vector wire_dir_u = m_dv->wire_direction(wpid_u);
-        Vector wire_dir_v = m_dv->wire_direction(wpid_v);
-        Vector wire_dir_w = m_dv->wire_direction(wpid_w);
-            
-        // Calculate angles
-        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
-        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
-        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
-
-        m_wpid_params[gwpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+        std::vector<double> angles(3);
+        for (size_t ind=0; ind<3; ++ind) {
+            // iplane2layer is in WirePlaneId.h
+            WirePlaneId wpid(iplane2layer[ind], face, apa);
+            Vector wire_dir = m_dv->wire_direction(wpid);
+            angles[ind] = std::atan2(wire_dir.z(), wire_dir.y());
+        }
+        m_wpid_angles[gwpid] = angles;
     }
     return cluster;
 }
@@ -735,9 +726,7 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
         for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
             int apa = it->apa();
             int face = it->face();
-            auto [drift_dir, angle_u, angle_v, angle_w] = m_wpid_params.at(*it);
-            // std::cout << "Test: " << apa << " " << face << " " << angle_u << " " << angle_v << " " << angle_w << std::endl;
-            drift_dir.clear();      // to stop build compiler warning about unused var.
+            const auto& angles = m_wpid_angles.at(*it);
 
             // Step 1.
             std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
@@ -759,11 +748,13 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
 
             // Steps 4-6.
             auto niblobs = shad_iblobs.size();
-            // Forgive me (and small-f fixme), but this is now the 3rd generation of
-            // copy-paste.  Gen 2 is in UbooneClusterSource.  OG is in
-            // PointTreeBuilding.  The reason for the copy-pastes is insufficient
-            // factoring of the de-factor standard sampling code in PointTreeBuilding.
-            // Over time, it is almost guaranteed these copy-pastes become out-of-sync. 
+
+            // This is the 3rd generation of copy-paste for sampling.  Gen 2 is
+            // in UbooneClusterSource.  OG is in PointTreeBuilding.  The reason
+            // for the copy-pastes is insufficient attentino to proper code
+            // factoring starting in PointTreeBuilding.  Over time, it is almost
+            // guaranteed these copy-pastes become out-of-sync.  A 4th copy is
+            // likely found in the steiner-related area.
 
             for (size_t bind=0; bind<niblobs; ++bind) {
                 if (!m_samplers.at(apa).at(face)) {
@@ -771,57 +762,17 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
                     continue;
                 }
                 const IBlob::pointer iblob = shad_iblobs[bind];
+                auto sampler = m_samplers.at(apa).at(face);
+                const double tick = 500*units::ns;
 
-                // Sample the iblob, make a new blob node.
-                PointCloud::Tree::named_pointclouds_t pcs;
+                auto pcs = Aux::sample_live(sampler, iblob, angles, tick, bind);
+                /// DO NOT EXTEND FURTHER! see #426, #430
 
-                auto [pc3d, aux] = m_samplers.at(apa).at(face)->sample_blob(iblob, bind);
-                            
-                // how to sample points ... 
-                // std::cerr << "retile: " << pc3d.size() << " " << aux.size()
-                //           << " " << pc3d.get("x")->size_major()
-                //           << " " << pc3d.get("y")->size_major()
-                //           << " " << pc3d.get("z")->size_major() << std::endl;
-                // const auto& arr_x1 = pc3d.get("x")->elements<Point::coordinate_t>();
-
-                /// These seem unused and bring in yet more copy-paste code
-                // pcs.emplace("2dp0", WireCell::Aux::make2dds(pc3d, angle_u));
-                // pcs.emplace("2dp1", WireCell::Aux::make2dds(pc3d, angle_v));
-                // pcs.emplace("2dp2", WireCell::Aux::make2dds(pc3d, angle_w));
-                auto pc2dp0 = WireCell::Aux::make2dds(pc3d, angle_u);
-                auto pc2dp1 = WireCell::Aux::make2dds(pc3d, angle_v);
-                auto pc2dp2 = WireCell::Aux::make2dds(pc3d, angle_w);
-                pc3d.add("2dp0_x", *pc2dp0.get("x"));
-                pc3d.add("2dp0_y", *pc2dp0.get("y"));
-                pc3d.add("2dp1_x", *pc2dp1.get("x"));
-                pc3d.add("2dp1_y", *pc2dp1.get("y"));
-                pc3d.add("2dp2_x", *pc2dp2.get("x"));
-                pc3d.add("2dp2_y", *pc2dp2.get("y"));
-                pcs.emplace("3d", pc3d);
-                // std::cout << pcs["3d"].get("x")->size_major() << " " << pcs["3d"].get("y")->size_major() << " " << pcs["3d"].get("z")->size_major() << std::endl;
-                // const auto& arr_x = pcs["3d"].get("x")->elements<Point::coordinate_t>();
-                // std::cout << arr_x.size() << " " << arr_x1.size() << std::endl;
-                // std::cout << iblob->shape() << std::endl;
-                if (pc3d.get("x")->size_major() > 0){
-                    const Point center = WireCell::Aux::calc_blob_center(pcs["3d"]);
-                    auto scalar_ds = WireCell::Aux::make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), 500*units::ns);
-                    int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-                    int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-                    int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-                    int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-                    scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-                    scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-                    scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-                    scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-                    pcs.emplace("scalar", std::move(scalar_ds));
-
-                    shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
-
-                    // SPDLOG_WARN("retile: blob {} has {} points", iblob->ident(), pc3d.size());
+                if (pcs.empty()) {
+                    SPDLOG_DEBUG("retile: skipping blob {} with no points", iblob->ident());
+                    continue;
                 }
-                else{
-                    SPDLOG_WARN("retile: blob {} has no points", iblob->ident());
-                }
+                shad_cluster.node()->insert(Tree::Points(std::move(pcs)));
             }
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
             // std::cout << "Test: " << shad_cluster.npoints() << " " << " " << shad_cluster.nchildren() << std::endl;
@@ -871,3 +822,5 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
     // Send merged cluster node to caller.
     return shad_node.remove(shad_node.children().front());
 }
+
+

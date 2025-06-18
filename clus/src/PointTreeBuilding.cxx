@@ -179,9 +179,9 @@ namespace {
 }
 
 
-Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
+Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const std::vector<double>& angles) const
+{
 
-    using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
@@ -198,45 +198,16 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
             if (code != 'b') {
                 continue;
             }
+
             const IBlob::pointer iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
-            named_pointclouds_t pcs;
-            /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
-            auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
 
-            if (pc3d.get("x")->size_major() == 0) {
-                // See Issue #425 and the mitigation of using ClusteringPointed.
+            auto pcs = Aux::sample_live(sampler, iblob, angles, tick, nblobs);
+            /// DO NOT EXTEND FURTHER! see #426, #430
 
-                // log->debug("skipping live blob {} with no points: {}", iblob->ident(), iblob->shape());
-                // for (const auto& strip : iblob->shape().strips()) {
-                //     log->debug("skipping live blob {} strip: {}", iblob->ident(), strip);
-                // }
-
-                ++nskipped;
+            if (pcs.empty()) {
                 continue;
             }
-            auto pc2dp0 = make2dds(pc3d, angle_u);
-            auto pc2dp1 = make2dds(pc3d, angle_v);
-            auto pc2dp2 = make2dds(pc3d, angle_w);
-            pc3d.add("2dp0_x", *pc2dp0.get("x"));
-            pc3d.add("2dp0_y", *pc2dp0.get("y"));
-            pc3d.add("2dp1_x", *pc2dp1.get("x"));
-            pc3d.add("2dp1_y", *pc2dp1.get("y"));
-            pc3d.add("2dp2_x", *pc2dp2.get("x"));
-            pc3d.add("2dp2_y", *pc2dp2.get("y"));
-            pcs.emplace("3d", pc3d);
-            const Point center = calc_blob_center(pcs["3d"]);
-            auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
-            int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0]; // If you get a segfault here, you probably used a live blob sampler besides "stepped".  See Issue #426 for details of the trap you fell into.
-            int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
-            int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
-            int_t min_wire_type = aux.get("min_wire_type")->elements<int_t>()[0];
-            scalar_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
-            scalar_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
-            scalar_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
-            scalar_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
-            pcs.emplace("scalar", std::move(scalar_ds));
             cnode->insert(Points(std::move(pcs)));
-
             ++nblobs;
         }
     }
@@ -249,7 +220,6 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
 }
 
 Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointer icluster, const double tick) const {
-    using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
@@ -257,10 +227,6 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
-    // if (m_samplers.find("dead") == m_samplers.end()) {
-    //     raise<ValueError>("m_samplers must have \"dead\" sampler");
-    // }
-    // auto& sampler = m_samplers.at("dead");
     for (auto& [cluster_id, vdescs] : clusters) {
         auto cnode = root->insert(std::make_unique<Points::node_t>());
         for (const auto& vdesc : vdescs) {
@@ -268,25 +234,13 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             if (code != 'b') {
                 continue;
             }
+            
             auto iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
-            named_pointclouds_t pcs;
-            auto scalar_ds = make_scalar_dataset(iblob, {0,0,0}, 0, tick);
-            scalar_ds.add("max_wire_interval", Array({(int_t)-1}));
-            scalar_ds.add("min_wire_interval", Array({(int_t)-1}));
-            scalar_ds.add("max_wire_type", Array({(int_t)-1}));
-            scalar_ds.add("min_wire_type", Array({(int_t)-1}));
-            pcs.emplace("scalar", scalar_ds);
-            pcs.emplace("corner", make_corner_dataset(iblob));
-            // for (const auto& [name, pc] : pcs) {
-            //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());
-            // }
-            cnode->insert(Points(std::move(pcs)));
+            cnode->insert(Points(Aux::sample_dead(iblob, tick)));
+            // DO NOT EXTEND THIS.  see #430.
+            
             ++nblobs;
         }
-        /// DEBUGONLY
-        // if (nblobs > 1) {
-        //     break;
-        // }
     }
     
     log->debug("sampled {} dead blobs to tree with {} children", nblobs, root->nchildren());
@@ -304,17 +258,6 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     auto grouping = root->value.facade<Facade::Grouping>();
     const auto& proj_centers = grouping->proj_centers();
     const auto& pitch_mags = grouping->pitch_mags();
-    /// DEBUGONLY: remove these prints after debugging
-    // for(const auto& [face, mags] : pitch_mags) {
-    //     for(const auto& [pind, mag] : mags) {
-    //         log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
-    //     }
-    // }
-    // for (const auto& [face, centers] : proj_centers) {
-    //     for(const auto& [pind, center] : centers) {
-    //         log->debug("face {} pind {} center {}", face, pind, center);
-    //     }
-    // }
 
     Facade::mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
     Facade::mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
@@ -518,27 +461,19 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
 
     // const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
 
-    // // Create wpids for all three planes with this APA and face
-    WirePlaneId wpid_u(kUlayer, m_face, m_anode->ident());
-    WirePlaneId wpid_v(kVlayer, m_face, m_anode->ident());
-    WirePlaneId wpid_w(kWlayer, m_face, m_anode->ident());
-
-    // Get wire directions for all planes
-    Vector wire_dir_u = m_dv->wire_direction(wpid_u);
-    Vector wire_dir_v = m_dv->wire_direction(wpid_v);
-    Vector wire_dir_w = m_dv->wire_direction(wpid_w);
-
-    // Calculate angles
-    double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
-    double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
-    double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+    // fixme: this replicates functionality in pimpos.
+    std::vector<double> angles(3);
+    for (size_t ind=0; ind<3; ++ind) {
+        const auto layer = iplane2layer[ind]; // in WirePlaneId.h
+        WirePlaneId wpid(layer, m_face, m_anode->ident());
+        Vector wire_dir = m_dv->wire_direction(wpid);
+        angles[ind] = std::atan2(wire_dir.z(), wire_dir.y());
+    }
 
     WirePlaneId wpid_all(kAllLayers, m_face, m_anode->ident());
     double tick = get_tick(wpid_all);
 
-    // std::cout <<"Test: " << tp_json["angle_u"].asDouble() << " " <<  tp_json["angle_v"].asDouble() << " " << tp_json["angle_w"].asDouble() << " " << angle_u << " " << angle_v << " " << angle_w << " " << tp_json["tick"].asDouble() << " " << tick << std::endl;
-
-    Points::node_ptr root_live = sample_live(iclus_live, tick, angle_u, angle_v, angle_w);
+    Points::node_ptr root_live = sample_live(iclus_live, tick, angles);
     auto grouping = root_live->value.facade<Facade::Grouping>();
     grouping->set_anodes({m_anode});
     // grouping->set_params(tp_json);

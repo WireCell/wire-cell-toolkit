@@ -49,7 +49,12 @@ namespace WireCell::PointCloud {
         */
         using mutable_array_ptr = std::shared_ptr<Array>;
 
+        /// Add the named array to the dataset via copy.  The array must have a
+        /// size_major matching that of existing arrays in the dataset.
         void add(const std::string& name, const Array& arr);
+
+        /// Add the named array to the dataset via move.  The array must have a
+        /// size_major matching that of existing arrays in the dataset.
         void add(const std::string& name, Array&& arr);
 
         // Remove all arrays and become empty. 

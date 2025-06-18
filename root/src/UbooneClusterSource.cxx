@@ -89,9 +89,12 @@ void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
     m_time_offset = get(cfg, "time_offset", m_time_offset);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
 
-    m_angle_u = get(cfg, "angle_u", m_angle_u);
-    m_angle_v = get(cfg, "angle_v", m_angle_v);
-    m_angle_w = get(cfg, "angle_w", m_angle_w);
+    
+    m_angles = {
+        get(cfg, "angle_u", m_angles[0]),
+        get(cfg, "angle_v", m_angles[1]),
+        get(cfg, "angle_w", m_angles[2])
+    };
 }
 
 WireCell::Configuration Root::UbooneClusterSource::default_configuration() const
@@ -201,8 +204,6 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
                           niblobs, nublobs);
     }
 
-    //std::cout << "Test: " << niblobs << " " << nublobs << std::endl;
-
     const double tick = 500*units::ns;
     size_t n3dpoints_total = 0;
     for (size_t bind=0; bind<niblobs; ++bind) {
@@ -225,43 +226,23 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
             continue;
         }
 
-        named_pointclouds_t pcs;
         if (trees.is_live()) {
-            auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
-            n3dpoints_total += pc3d.size_major();
-            auto pc2dp0 = make2dds(pc3d, m_angle_u);
-            auto pc2dp1 = make2dds(pc3d, m_angle_v);
-            auto pc2dp2 = make2dds(pc3d, m_angle_w);
-            pc3d.add("2dp0_x", *pc2dp0.get("x"));
-            pc3d.add("2dp0_y", *pc2dp0.get("y"));
-            pc3d.add("2dp1_x", *pc2dp1.get("x"));
-            pc3d.add("2dp1_y", *pc2dp1.get("y"));
-            pc3d.add("2dp2_x", *pc2dp2.get("x"));
-            pc3d.add("2dp2_y", *pc2dp2.get("y"));
-            pcs.emplace("3d", pc3d);
-            const Point center = calc_blob_center(pcs["3d"]);
-            auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
-            int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-            int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-            int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-            int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-            scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-            scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-            scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-            scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-            pcs.emplace("scalar", std::move(scalar_ds));
+
+            auto pcs = Aux::sample_live(m_sampler, iblob, m_angles, tick, bind);
+            /// DO NOT EXTEND FURTHER! see #426, #430
+
+            if (pcs.empty()) {
+                SPDLOG_DEBUG("retile: skipping blob {} with no points", iblob->ident());
+                continue;
+            }
+
+            cnode->insert(Points(std::move(pcs)));
         }
         else { // dead
-            auto scalar_ds = make_scalar_dataset(iblob, {0,0,0}, 0, tick);
-            scalar_ds.add("max_wire_interval", Array({(int)-1}));
-            scalar_ds.add("min_wire_interval", Array({(int)-1}));
-            scalar_ds.add("max_wire_type", Array({(int)-1}));
-            scalar_ds.add("min_wire_type", Array({(int)-1}));
-            pcs.emplace("scalar", scalar_ds);
-            pcs.emplace("corner", make_corner_dataset(iblob));
 
+            cnode->insert(Points(Aux::sample_dead(iblob, tick)));
+            /// DO NOT EXTEND FURTHER! see #426, #430
         }
-        cnode->insert(Points(std::move(pcs)));
     }
     log->debug("sampled {} points over {} blobs", n3dpoints_total, niblobs);
     

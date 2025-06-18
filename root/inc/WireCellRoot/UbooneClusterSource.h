@@ -124,9 +124,7 @@ namespace WireCell::Root {
         double m_drift_speed{1.101 * units::mm / units::us};
         double m_time_offset{-1600 * units::us + 6 * units::mm/(1.101 * units::mm / units::us)};
 
-        double m_angle_u{1.0472};  // 60 degrees
-        double m_angle_v{-1.0472}; // -60 degrees
-        double m_angle_w{0.0};
+        std::vector<double> m_angles{1.0472/*60 degrees*/, -1.0472/*-60 degrees*/, 0.0};
     };
 }
 

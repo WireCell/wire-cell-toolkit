@@ -388,10 +388,6 @@ struct BlobSampler::Sampler : public Aux::Logger
 std::tuple<PointCloud::Dataset, PointCloud::Dataset> BlobSampler::sample_blob(const IBlob::pointer& iblob,
                                              int blob_index)
 {
-    if (!iblob) {
-        THROW(ValueError() << errmsg{"can not sample null blob"});
-    }
-
     PointCloud::Dataset ret_main;
     PointCloud::Dataset ret_aux;
     // size_t points_added = 0;

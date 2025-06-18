@@ -3,24 +3,92 @@
 using namespace WireCell;
 using WireCell::PointCloud::Dataset;
 using WireCell::PointCloud::Array;
-WireCell::PointCloud::Dataset
-Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
-                         const int npoints, const double tick)
+
+
+PointCloud::Tree::named_pointclouds_t
+Aux::sample_live(const IBlobSampler::pointer& sampler, const IBlob::pointer& iblob,
+                 const std::vector<double>& angles, const double tick, int ident)
 {
-    Dataset ds;
+    PointCloud::Tree::named_pointclouds_t pcs;
+
+    if (ident<0) ident = iblob->ident();
+
+    auto [pc3d, aux] = sampler->sample_blob(iblob, ident);
+    if (pc3d.size_major() == 0) {
+        return pcs;
+    }
+    fill_2dpcs(pc3d, angles);
+
+    Dataset scalar;
+    fill_scalar_blob(scalar, *iblob, tick);
+    fill_scalar_aux(scalar, aux);
+    fill_scalar_center(scalar, pc3d);
+
+    pcs.emplace("scalar", std::move(scalar));
+    pcs.emplace("3d", std::move(pc3d));
+
+    return pcs;
+}
+
+PointCloud::Tree::named_pointclouds_t Aux::sample_dead(const IBlob::pointer& iblob, const double tick)
+{
+    PointCloud::Tree::named_pointclouds_t pcs;
+    Dataset scalar;
+    Aux::fill_scalar_blob(scalar, *iblob, tick);
+    Aux::fill_scalar_aux(scalar);
+    Aux::fill_scalar_center(scalar);
+
+    pcs.emplace("scalar", scalar);
+    pcs.emplace("corner", make_corner_dataset(*iblob));
+
+    return pcs;
+}
+
+
+void Aux::fill_2dpcs(PointCloud::Dataset& pc, const std::vector<double>& angles, const std::string& pattern)
+{
+    const size_t npoints = pc.size_major();
+    if (! npoints) {
+        return;
+    }
+
+    const auto x = pc.get("x")->elements<double>();
+    const auto y = pc.get("y")->elements<double>();
+    const auto z = pc.get("z")->elements<double>();
+
+    std::vector<double> x2d(npoints);
+    std::vector<double> y2d(npoints);
+
+    for (size_t ind=0; ind<angles.size(); ++ind) {
+        const double angle = angles[ind];
+
+        for (size_t ind=0; ind<npoints; ++ind) {
+            const auto& xx = x[ind];
+            const auto& yy = y[ind];
+            const auto& zz = z[ind];
+            x2d[ind] = xx;
+            y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+        }
+        const auto xname = String::format(pattern, ind, 'x');
+        const auto yname = String::format(pattern, ind, 'y');
+        pc.add(xname, Array(x2d));
+        pc.add(yname, Array(y2d));
+    }
+}
+
+
+void Aux::fill_scalar_blob(PointCloud::Dataset& scalar, const IBlob& iblob, const double tick)
+{
     // Warning, these types must match consumers.  In particular, PointTreeBuilding.
-    ds.add("charge", Array({(double)iblob->value()}));
-    WirePlaneId wpid(kAllLayers, iblob->face()->which(), iblob->face()->anode());
-    ds.add("wpid",Array({(int)wpid.ident()}));
-    ds.add("center_x", Array({(double)center.x()}));
-    ds.add("center_y", Array({(double)center.y()}));
-    ds.add("center_z", Array({(double)center.z()}));
-    ds.add("npoints", Array({(int)npoints}));
-    const auto& islice = iblob->slice();
+    scalar.add("charge", Array({(double)iblob.value()}));
+    WirePlaneId wpid(kAllLayers, iblob.face()->which(), iblob.face()->anode());
+    scalar.add("wpid",Array({(int)wpid.ident()}));
+
+    const auto& islice = iblob.slice();
     // fixme: possible risk of roundoff error + truncation makes _min == _max?
-    ds.add("slice_index_min", Array({(int)(islice->start()/tick)})); // unit: tick
-    ds.add("slice_index_max", Array({(int)((islice->start()+islice->span())/tick)}));
-    const auto& shape = iblob->shape();
+    scalar.add("slice_index_min", Array({(int)(islice->start()/tick)})); // unit: tick
+    scalar.add("slice_index_max", Array({(int)((islice->start()+islice->span())/tick)}));
+    const auto& shape = iblob.shape();
     const auto& strips = shape.strips();
     /// ASSUMPTION: is this always true?
     std::unordered_map<RayGrid::layer_index_t, std::string> layer_names = {
@@ -32,41 +100,62 @@ Aux::make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
         if(layer_names.find(strip.layer) == layer_names.end()) {
             continue;
         }
-        ds.add(layer_names[strip.layer]+"_wire_index_min", Array({(int)strip.bounds.first}));
-        ds.add(layer_names[strip.layer]+"_wire_index_max", Array({(int)strip.bounds.second}));
+        scalar.add(layer_names[strip.layer]+"_wire_index_min", Array({(int)strip.bounds.first}));
+        scalar.add(layer_names[strip.layer]+"_wire_index_max", Array({(int)strip.bounds.second}));
     }
-    return ds;
 }
-
-WireCell::PointCloud::Dataset Aux::make2dds (const Dataset& ds3d, const double angle) {
-    Dataset ds;
-    const auto& x = ds3d.get("x")->elements<double>();
-    const auto& y = ds3d.get("y")->elements<double>();
-    const auto& z = ds3d.get("z")->elements<double>();
-    std::vector<double> x2d(x.size());
-    std::vector<double> y2d(y.size());
-    for (size_t ind=0; ind<x.size(); ++ind) {
-        const auto& xx = x[ind];
-        const auto& yy = y[ind];
-        const auto& zz = z[ind];
-        x2d[ind] = xx;
-        y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+void Aux::fill_scalar_center(PointCloud::Dataset& scalar)
+{
+    scalar.add("center_x", Array({0.0}));
+    scalar.add("center_y", Array({0.0}));
+    scalar.add("center_z", Array({0.0}));
+    scalar.add("npoints", Array({0}));
+}
+void Aux::fill_scalar_center(PointCloud::Dataset& scalar, const PointCloud::Dataset& pc3d)
+{
+    const size_t npoints = pc3d.size_major();
+    if (!npoints) {
+        fill_scalar_center(scalar);
+        return;
     }
-    ds.add("x", Array(x2d));
-    ds.add("y", Array(y2d));
-    return ds;
+    const Point center = WireCell::Aux::calc_blob_center(pc3d);
+    scalar.add("center_x", Array({center.x()}));
+    scalar.add("center_y", Array({center.y()}));
+    scalar.add("center_z", Array({center.z()}));
+    scalar.add("npoints", Array({(int)npoints}));
+}
+void Aux::fill_scalar_aux(PointCloud::Dataset& scalar, const PointCloud::Dataset& aux)
+{
+    if (aux.empty()) {
+        raise<ValueError>("empty 'aux' PC.  you probably fell victim to issue #426");
+    }
+    const std::vector<std::string> auxnames = {
+        "max_wire_interval", "min_wire_interval", "max_wire_type", "min_wire_type",
+    };
+    for (const auto& auxname : auxnames) {
+        scalar.add(auxname, *aux.get(auxname));
+    }
+}
+void Aux::fill_scalar_aux(PointCloud::Dataset& scalar)
+{
+    const std::vector<std::string> auxnames = {
+        "max_wire_interval", "min_wire_interval", "max_wire_type", "min_wire_type",
+    };
+    for (const auto& auxname : auxnames) {
+        scalar.add(auxname, Array({0}));
+    }
 }
 
 // Calculate the average position of a point cloud tree.
 Point Aux::calc_blob_center(const Dataset& ds)
 {
-    const auto& arr_x = ds.get("x")->elements<Point::coordinate_t>();
-    const auto& arr_y = ds.get("y")->elements<Point::coordinate_t>();
-    const auto& arr_z = ds.get("z")->elements<Point::coordinate_t>();
-    const size_t len = arr_x.size();
+    const size_t len = ds.size_major();
     if(len == 0) {
-        raise<ValueError>("empty point cloud");
+        raise<ValueError>("calc_blob_center: empty point cloud has no center");
     }
+    const auto arr_x = ds.get("x")->elements<Point::coordinate_t>();
+    const auto arr_y = ds.get("y")->elements<Point::coordinate_t>();
+    const auto arr_z = ds.get("z")->elements<Point::coordinate_t>();
     Point ret(0,0,0);
     for (size_t ind=0; ind<len; ++ind) {
         ret += Point(arr_x[ind], arr_y[ind], arr_z[ind]);
@@ -78,14 +167,14 @@ Point Aux::calc_blob_center(const Dataset& ds)
 
 
 /// extract corners
-Dataset Aux::make_corner_dataset(const IBlob::pointer iblob)
+Dataset Aux::make_corner_dataset(const IBlob& iblob)
 {
     using float_t = double;
 
     Dataset ds;
-    const auto& shape = iblob->shape();
+    const auto& shape = iblob.shape();
     const auto& crossings = shape.corners();
-    const auto& anodeface = iblob->face();
+    const auto& anodeface = iblob.face();
     const auto& coords = anodeface->raygrid();
 
     // ray center

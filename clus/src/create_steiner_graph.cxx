@@ -127,7 +127,7 @@ static void improve_cluster_2(Cluster& new_cluster, const Cluster& orig_cluster
 
 static void calc_sampling_points(const Cluster& cluster /*, ...*/)
 {
-    // FIXME for BV: replace this with generic point sampling
+    // FIXME.  This gets into YET ANOTHER duplicating of sampling....
 }
 
 // Fixme: I don't want to return a copy, but for now, that's the mock up.

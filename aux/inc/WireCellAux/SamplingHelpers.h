@@ -2,24 +2,65 @@
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
+
 #include "WireCellIface/IBlob.h"
+#include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IBlobSet.h"
+
+#include <vector>
 
 namespace WireCell::Aux {
 
+    /** Return a "sampling" of a live blob.
 
-    // Some crufty stuff used in PointTreeBuilding and UbooneClusterSource.
-    PointCloud::Dataset
-    make_scalar_dataset(const IBlob::pointer iblob, const Point& center,
-                        const int npoints = 0, const double tick_span = 0.5*units::us);
+        These roll up the relevant fill_*() methods for "live" blobs.
 
-    PointCloud::Dataset make2dds(const PointCloud::Dataset& ds3d, const double angle);
+        If ident<0 will use iblob.ident().
+
+        An empty set of PCs is returned if there are no sample points.
+     */
+    PointCloud::Tree::named_pointclouds_t
+    sample_live(const IBlobSampler::pointer& sampler, const IBlob::pointer& blob,
+                const std::vector<double>& angles,
+                const double tick=500*units::ns, int ident=-1);
+
+    /** Return a "sampling" of a dead blob.
+
+        These roll up the relevant fill_*() methods for "dead" blobs.
+    */
+    PointCloud::Tree::named_pointclouds_t
+    sample_dead(const IBlob::pointer& blob, const double tick=500*units::ns);
+
+
+    /** Add per-plane 2D point cloud arrays to the given pc that represent the
+     * plane coordinates derived from the "x", "y" and "z" arrays in the given
+     * "pc".  The "pattern" argument is used to name the arrays of the 2D PCs.
+     * The default is likely best kept as-is unless there is some custom needs.
+     * The first argument to the string interpolation on pattern is the index
+     * that runs over the angles (ie, plane index).  The second argument is the
+     * 2D coordinate character ('x' or 'y').
+     */
+    void fill_2dpcs(PointCloud::Dataset& pc, 
+                    const std::vector<double>& angles,
+                    const std::string& pattern="2dp%1%_%2%");
+    
+
+    /// Fill various types of per-blob "scalar" info.
+    void fill_scalar_blob(PointCloud::Dataset& scalar, const IBlob& iblob, const double tick=500*units::ns);
+    /// Fill "center" related items with values
+    void fill_scalar_center(PointCloud::Dataset& scalar, const PointCloud::Dataset& pc3d);
+    /// As above but fill with zeros.
+    void fill_scalar_center(PointCloud::Dataset& scalar);
+    /// Transfer "aux" values.  See #426.
+    void fill_scalar_aux(PointCloud::Dataset& scalar, const PointCloud::Dataset& aux);
+    /// As above but fill with zeros
+    void fill_scalar_aux(PointCloud::Dataset& scalar);
 
     // Calculate the average position of a point cloud tree.
     WireCell::Point calc_blob_center(const PointCloud::Dataset& ds);
 
     // Calculate a dataset of blob corners
-    PointCloud::Dataset make_corner_dataset(const IBlob::pointer iblob);
+    PointCloud::Dataset make_corner_dataset(const IBlob& iblob);
 
 
 

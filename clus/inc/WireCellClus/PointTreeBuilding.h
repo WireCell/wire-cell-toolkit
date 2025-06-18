@@ -35,7 +35,7 @@ namespace WireCell::Clus {
       private:
         // sampling for live/dead
         using node_ptr = WireCell::PointCloud::Tree::Points::node_ptr;
-        node_ptr sample_live(const WireCell::ICluster::pointer cluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const;
+        node_ptr sample_live(const WireCell::ICluster::pointer cluster, const double tick, const std::vector<double>& angles) const;
         node_ptr sample_dead(const WireCell::ICluster::pointer cluster, const double tick) const;
         // add CT point cloud to the root/Grouping
         void add_ctpc(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
@@ -59,9 +59,6 @@ namespace WireCell::Clus {
         // double m_drift_speed {1.101*units::millimeter/units::us};
         // double m_time_offset {-1600 * units::us};
         double m_dead_threshold {1e10};
-        // double m_angle_u {1.0472}; // 60 degrees
-        // double m_angle_v {-1.0472}; // -60 degrees
-        // double m_angle_w {0}; // 0 degrees
 
         // the anode to be processed
         IAnodePlane::pointer m_anode;
