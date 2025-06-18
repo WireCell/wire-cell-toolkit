@@ -16,6 +16,47 @@
 
 - ~Steiner::Grapher~ in ~SteinerGrapher.{h,cxx}~ is a class that "wraps" one ~Cluster~.  It is kind of a "facade of a facade".  This class is intended to represent the Steiner-related parts of ~PR3DCluster~.  As such it is okay to load it up with whatever per-Cluster auxiliary information and methods that are needed.  It is also given a ~Config~ struct that holds any required "service" components (eg, sampler, detector volumes).  The main duty of the ~Grapher~ is to return a graph from its ~create_steiner_graph()~ method.  The ~CreateSteinerGraph::visit()~ is responsible to make a ~Grapher~, call it and dispatch the resulting graph.
 
+* Developing
+
+Xin, I think you will hack mostly on ~SteinerGrapher.{h,cxx}~ and
+~SteinerFunctions.{h,cxx}~.  Feel free to fill these up.  In particular, the
+arguments to the existing methods and functions are definitely incomplete.  If
+these ~Steiner*.{h,cxx}~ files become uncomfortably large, feel free to make more
+~.cxx~ files.  Specifically do not add more ~.h~ files that have actual code as was
+done in WCP.  
+
+Please come back to me whenever something has no obvious solution or if if you
+feel something needs to be added to the outer layers (eg ~CreateSteinerGraph~ or
+outside ~clus/~).
+
+
+* How tos
+
+** Graphs on a Cluster
+
+~Cluster~ can hold graphs in a generic way by a *name*.  See the ~Graphs~ base class
+in [[file:../inc/WireCellClus/Facade_Mixins.h]].  You may construct a graph outside
+of ~Cluster~ and give it to ~Cluster~ by name and later retrieve it by name.
+
+~Cluster~ also yields ~GraphAlgorithms~ by calling one of the variants of the
+~Cluster::graph_algorithms()~ methods.  The underlying graph will be constructed
+if it does not yet exist.  It uses *reserved names*:
+
+- basic :: equivalent to WCP's ~Create_graph()~ with no args.
+- ctpc :: the graph used by  WCP's (and WCT's) Dijikstra's shortests paths. 
+- relaxed :: the graph used by WCP's examine graph (WCT's connected blobs).
+
+After creating one of these graphs by calling ~Cluster::graph_algorithms()~ you
+can also get the underlying graph by name.  Likewise, if you set a graph with a
+reserved name and then later call ~Cluster::graph_algorithms()~, it will use your
+graph.  Otherwise, you are free to add and retrieve graphs with any name you
+like.
+
+Graphs are merely held by the ~Cluster~ and are not part of the ~Cluster~ cache.
+There is no (or not yet any) explicit connection between a graph and an
+associated point cloud.  For now, it is up to the user to coordinate that
+association.
+
 
 ** Making a fresh Cluster
 
@@ -39,9 +80,6 @@ if we want to make the new ~Cluster~ on an existing ~GRouping~ we can do:
 #+end_src
 
 
-** Cloning a cluster
-
-I expect we will need to clone one cluster from another.  That's TBD.
 
 * Questions
 

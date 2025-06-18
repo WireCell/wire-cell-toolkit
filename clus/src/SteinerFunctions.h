@@ -22,6 +22,8 @@ namespace WireCell::Clus::Steiner {
     void improve_grapher(Grapher& grapher/*,...*/);
     void improve_grapher(Grapher& grapher, Grapher& other_grapher/*,...*/);
 
+
 }
+
 
 #endif 

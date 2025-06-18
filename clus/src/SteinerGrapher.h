@@ -11,9 +11,13 @@
 
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/Facade_Blob.h"
 
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IDetectorVolumes.h"
+
+#include <set>
+#include <map>
 
 namespace WireCell::Clus::Steiner {
 
@@ -37,21 +41,47 @@ namespace WireCell::Clus::Steiner {
         const Facade::Cluster& cluster() const { return m_cluster; }
         Config config() const { return m_config; }
 
+        ///
+        ///  Types
+        ///
+        
         /// This is top-level interface which is called in the visit() loop.  It
         /// is expected to create and add to our cluster using the given
         /// graph_name a "steiner graph" of C++ type:
         using graph_type = WireCell::Clus::Graphs::Weighted::Graph;
 
+        /// A type that holds a set of graph vertices.  A vertex (descriptor) IS an index.
+        using graph_vertex_set = std::set<size_t>;
+
+        /// A type that maps blobs to graph vertices
+        using blob_vertex_map = std::map<const Facade::Blob*, graph_vertex_set>;
+
+
+        ///
+        ///  The main entry method
+        ///
+
         /// Create and return a steiner graph for the cluster.
         graph_type create_steiner_graph();
 
 
-        /// Some intermediate methods.
+        ///
+        ///  Intermediate methods
+        ///
 
         /// Populate blob PCs with sampled points.  This was a free function in
-        /// WCP but we make it a method to make use of the Config.
+        /// WCP but we make it a method to make use of the Config.  NOTE: this
+        /// may be better replaced with a method that clones a cluster from an
+        /// existing, already sampled cluster.
         void calc_sampling_points(/*, ...*/);
 
+        graph_vertex_set find_peak_point_indices(bool disable_dead_mix_cell);
+        blob_vertex_map form_cell_points_map();
+        graph_vertex_set find_steiner_terminals(bool disable_dead_mix_cell=true);
+        void establish_same_blob_steiner_edges(graph_type& graph, 
+                                               bool disable_dead_mix_cell=true, int flag=1);
+    
+        graph_type create_steiner_tree(/*what type for point_cloud_steiner?*/);
 
     private:
         // The Grapher "wraps" a Cluster.  As the Cluster is a *facade* of an
