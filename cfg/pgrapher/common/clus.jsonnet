@@ -62,6 +62,13 @@ local wc = import "wirecell.jsonnet";
         // Use "parent" inside of a function to call sibling functions.
         local parent = self,
 
+        tagger_flag_transfer(name="", enable_debug=false) :: {
+            type: "ClusteringTaggerFlagTransfer",
+            name: prefix+name,
+            data: {
+                enable_debug: enable_debug,
+            },
+        },
 
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",

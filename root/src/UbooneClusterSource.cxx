@@ -174,6 +174,8 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         auto& spc = cnode->value.local_pcs()["cluster_scalar"];
         spc.add("flash", Array({(int)-1}));
         spc.add("ident", Array({cid}));
+
+        apply_tagger_flags(cnode, cid);
     }
 
     int ident = -1;
@@ -290,3 +292,87 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
     return true;
 }
 
+void Root::UbooneClusterSource::apply_tagger_flags(WireCell::PointCloud::Tree::Points::node_t* cnode, int cluster_id) const
+{
+    if (!m_files || !m_files->trees) {
+        return;
+    }
+
+    const auto& trees = *m_files->trees;
+    
+    if (!trees.is_live()) {
+        return;
+    }
+
+    // Store tagger flag information in point cloud for later transfer to flags
+    auto& tagger_pc = cnode->value.local_pcs()["tagger_info"];
+    
+    // Check beam flash coincidence
+    bool beam_flash_coincident = trees.is_beam_flash_coincident(cluster_id);
+    
+    if (beam_flash_coincident) {
+        // Store that this cluster should have beam_flash flag
+        tagger_pc.add("has_beam_flash", PointCloud::Array({1}));
+        
+        // Get event type and extract individual flags
+        int event_type = trees.get_event_type(cluster_id);
+        double cluster_length = trees.get_cluster_length(cluster_id);
+        
+        // Extract flags from event_type using bit operations
+        int flag_tgm = (event_type >> 3) & 1U;
+        int flag_low_energy = (event_type >> 4) & 1U;
+        int flag_lm = (event_type >> 1) & 1U;
+        int flag_fully_contained = (event_type >> 2) & 1U;
+        int flag_stm = (event_type >> 5) & 1U;
+        int flag_full_detector_dead = (event_type >> 6) & 1U;
+        
+        // // Store all flags in a single array to avoid potential point cloud issues
+        // std::cout << "Xin: Adding flags array for cluster " << cluster_id << std::endl;
+        // std::vector<int> flag_values = {flag_tgm, flag_low_energy, flag_lm, flag_fully_contained, flag_stm, flag_full_detector_dead};
+        // tagger_pc.add("tagger_flags", PointCloud::Array(flag_values));
+        
+        // Also store individual flags for backward compatibility
+        tagger_pc.add("has_tgm", PointCloud::Array({flag_tgm}));
+        tagger_pc.add("has_low_energy", PointCloud::Array({flag_low_energy}));
+        tagger_pc.add("has_light_mismatch", PointCloud::Array({flag_lm}));
+        tagger_pc.add("has_fully_contained", PointCloud::Array({flag_fully_contained}));
+        tagger_pc.add("has_short_track_muon", PointCloud::Array({flag_stm}));
+        tagger_pc.add("has_full_detector_dead", PointCloud::Array({flag_full_detector_dead}));
+        // std::cout << "Xin: Added all flags for cluster " << cluster_id << std::endl;
+        
+        // Store metadata
+        // tagger_pc.add("event_type", PointCloud::Array({event_type}));
+        // tagger_pc.add("cluster_length", PointCloud::Array({cluster_length}));
+        
+        // Debug: List all keys we just added
+        // std::cout << "Xin: Final tagger_pc keys for cluster " << cluster_id << ": ";
+        // for (const auto& key : tagger_pc.keys()) {
+        //     std::cout << key << " ";
+        // }
+        // std::cout << std::endl;
+        
+        log->debug("Stored tagger flag data for cluster {}: beam_flash=1, event_type={}", 
+                   cluster_id, event_type);
+
+        // std::cout << "Xin: Cluster " << cluster_id 
+        //           << " has beam flash coincident with event type: " << event_type 
+        //           << ", cluster length: " << cluster_length << " " << flag_tgm << " " << flag_low_energy << " " << flag_lm << " " << flag_fully_contained << " " << flag_stm << " " << flag_full_detector_dead << std::endl;
+    } else {
+        // Store that this cluster should NOT have beam_flash flag
+        tagger_pc.add("has_beam_flash", PointCloud::Array({0}));
+
+        // Also store individual flags for backward compatibility
+        tagger_pc.add("has_tgm", PointCloud::Array({0}));
+        tagger_pc.add("has_low_energy", PointCloud::Array({0}));
+        tagger_pc.add("has_light_mismatch", PointCloud::Array({0}));
+        tagger_pc.add("has_fully_contained", PointCloud::Array({0}));
+        tagger_pc.add("has_short_track_muon", PointCloud::Array({0}));
+        tagger_pc.add("has_full_detector_dead", PointCloud::Array({0}));
+        
+        // Store metadata
+        // tagger_pc.add("event_type", PointCloud::Array({0}));
+        // tagger_pc.add("cluster_length", PointCloud::Array({0}));
+
+        log->debug("Cluster {} not beam coincident", cluster_id);
+    }
+}

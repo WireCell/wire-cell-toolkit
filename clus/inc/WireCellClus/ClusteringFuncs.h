@@ -43,6 +43,27 @@ namespace WireCell::Clus::Facade {
         /// cluster.
         inline const std::string live_dead = "live_dead";
 
+        /// Indicates the cluster has a flash coincident with beam timing
+        inline const std::string beam_flash = "beam_flash";
+        
+        /// Indicates the cluster is tagged as through-going muon (TGM)
+        inline const std::string tgm = "tgm";
+        
+        /// Indicates the cluster is tagged as low energy
+        inline const std::string low_energy = "low_energy";
+        
+        /// Indicates the cluster is tagged as light mismatch (LM)
+        inline const std::string light_mismatch = "light_mismatch";
+        
+        /// Indicates the cluster is tagged as fully contained
+        inline const std::string fully_contained = "fully_contained";
+        
+        /// Indicates the cluster is tagged as short track muon (STM)
+        inline const std::string short_track_muon = "short_track_muon";
+        
+        /// Indicates the cluster has full detector dead region
+        inline const std::string full_detector_dead = "full_detector_dead";
+
     }
 
     struct ClusterLess {

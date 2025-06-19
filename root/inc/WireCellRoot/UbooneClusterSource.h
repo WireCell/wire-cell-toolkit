@@ -34,6 +34,7 @@
 #include "WireCellIface/IBlobTensoring.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellUtil/PointTree.h"
 
 
 namespace WireCell::Root {
@@ -125,6 +126,8 @@ namespace WireCell::Root {
         double m_time_offset{-1600 * units::us + 6 * units::mm/(1.101 * units::mm / units::us)};
 
         std::vector<double> m_angles{1.0472/*60 degrees*/, -1.0472/*-60 degrees*/, 0.0};
+
+        void apply_tagger_flags(WireCell::PointCloud::Tree::Points::node_t* cnode, int cluster_id) const;
     };
 }
 
