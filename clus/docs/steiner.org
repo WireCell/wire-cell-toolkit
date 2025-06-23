@@ -80,7 +80,22 @@ and/or edges.
 As it is only a "view" the original graph must be kept alive and the filtered
 graph vertices exactly match their corresponding vertices in the original.
 
-A filtered graph can be converted in to a "real" graph with:
+WARNING the ~boost::num_edges()~ and ~boost:num_vertices()~ called on a filtered
+graph will return the counts of the underlying graph.  However, iterating over
+edges (or vertices) is subject to the filter.
+
+#+begin_src c++
+  #include "WireCellUtil/GraphTools.h"
+  using WireCell::GraphTools::edge_range;
+  // ...
+  size_t nedges=0;
+  for (const auto& edge : edge_range(filtered_graph)) {
+      ++nedges;
+  }
+#+end_src
+
+
+A filtered graph can be converted in to a fully "real" graph with:
 
 #+begin_src c++
   filtered_graph_type view = my_filter(graph);

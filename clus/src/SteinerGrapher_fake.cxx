@@ -43,6 +43,8 @@ Steiner::Grapher::graph_type Steiner::Grapher::fake_steiner_graph()
         // just showing how to do it.
 
         // Graph is now: 2--0--1.
+        log->debug("dummy graph with {} vertices and {} edges",
+                   boost::num_vertices(dummy), boost::num_edges(dummy));
 
         // The graph is also available for use with a graph algorithms class.
         auto& dummy_ga = m_cluster.graph_algorithms("dummy");
@@ -52,13 +54,15 @@ Steiner::Grapher::graph_type Steiner::Grapher::fake_steiner_graph()
 
         // We can get a filtered graph with a subset of edges:
         auto filtered_with_e0 = dummy_ga.reduce(to_filter);
+        log->debug("filtered with e0 graph with {} vertices and {} edges",
+                   boost::num_vertices(filtered_with_e0), boost::num_edges(filtered_with_e0));
+
 
         // Or which excludes the set:
         auto filtered_without_e0 = dummy_ga.reduce(to_filter, false);
+        log->debug("filtered without e0 graph with {} vertices and {} edges",
+                   boost::num_vertices(filtered_without_e0), boost::num_edges(filtered_without_e0));
 
-        // Both reduced graphs lose one edge and thus one vertex
-        assert (boost::num_vertices(filtered_with_e0) == 2);
-        assert (boost::num_vertices(filtered_without_e0) == 2);
 
         // The filtered graph relies on the underlying graph to be kept around.
         // It also keeps the vertex descriptors / indices of the original graph.

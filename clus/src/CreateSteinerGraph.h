@@ -15,6 +15,7 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Ensemble.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
 
 #include "WireCellAux/Logger.h"
 
@@ -23,9 +24,11 @@
 #include "WireCellUtil/NamedFactory.h"
 
 
+
 namespace WireCell::Clus::Steiner {
 
-    class CreateSteinerGraph : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor {
+    class CreateSteinerGraph : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor,
+                               private Clus::NeedDV, private Clus::NeedPCTS{
         std::string m_grouping_name{"live"};
         std::string m_graph_name{"steiner"};
         bool m_replace{true};

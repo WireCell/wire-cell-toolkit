@@ -31,9 +31,10 @@ namespace WireCell::Clus::Steiner {
         // This holds various "global" and const info sources.  See
         // CreateSteinerGraph for an example of how it is provided.
         struct Config {
-            IBlobSampler::pointer sampler;
             IDetectorVolumes::pointer dv;
             WireCell::Clus::IPCTransformSet::pointer pcts;
+            /// do we even need samplers?
+            // std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> samplers;
         };
         Log::logptr_t log;
 

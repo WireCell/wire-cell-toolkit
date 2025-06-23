@@ -27,10 +27,31 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     m_grouping_name = get(cfg, "grouping", m_grouping_name);
     m_graph_name = get(cfg, "graph", m_graph_name);
     m_replace = get(cfg, "replace", m_replace);
-    m_grapher_config.sampler = Factory::find_tn<IBlobSampler>(cfg["blob_sampler"].asString());
-    m_grapher_config.dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
-    m_grapher_config.pcts = Factory::find_tn<WireCell::Clus::IPCTransformSet>(cfg["pc_transforms"].asString());
+
+    NeedDV::configure(cfg);
+    NeedPCTS::configure(cfg);
+
+    m_grapher_config.dv = m_dv;
+    m_grapher_config.pcts = m_pcts;
+
+    /// Do we even need samplers?
+    // m_grapher_config.samplers.clear()
+    // if (cfg.isMember("samplers") && cfg["samplers"].isArray()) {
+    //     // Process array of samplers
+    //     for (const auto& sampler_cfg : cfg["samplers"]) {
+    //         int apa = sampler_cfg["apa"].asInt();
+    //         int face = sampler_cfg["face"].asInt();
+    //         std::string sampler_name = sampler_cfg["name"].asString();
+            
+    //         if (sampler_name.empty()) {
+    //             raise<ValueError>("RetileCluster requires an IBlobSampler name for APA %d face %d", apa, face);
+    //         }
+    //         auto sampler_ptr = Factory::find_tn<IBlobSampler>(sampler_name);
+    //         m_grapher_config.samplers[apa][face] = sampler_ptr;
+    //     }
+    // }
 }
+
 Configuration Steiner::CreateSteinerGraph::default_configuration() const
 {
     Configuration cfg;

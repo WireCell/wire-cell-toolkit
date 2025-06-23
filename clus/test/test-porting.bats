@@ -40,11 +40,11 @@ do_prep () {
     cd $name
 }
 
-@test "porting qlport" {
-    local name=qlport
+do_qlport_like () {
+    local name=$1
     do_prep $name
 
-    local url="$raw_url/$name/rootfiles/nuselEval_5384_130_6501.root"
+    local url="$raw_url/qlport/rootfiles/nuselEval_5384_130_6501.root"
 
     local dat="$(download_file "$url")"
     local cfg="$(relative_path test-porting/$name/main.jsonnet)"
@@ -65,10 +65,18 @@ do_prep () {
                      -A kind=both -A infiles=$dat -A beezip=$bee $cfg > $log 2>&1" 
     do_log_digest $log $dat
 
-    for zip in qlport.zip
+    for zip in $name.zip
     do
         file_larger_than $zip 22
     done
+}
+
+@test "porting qlport" {
+    do_qlport_like "qlport"
+}
+
+@test "porting steiner" {
+    do_qlport_like "steiner"
 }
 
 

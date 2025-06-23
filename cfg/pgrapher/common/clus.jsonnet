@@ -254,7 +254,16 @@ local wc = import "wirecell.jsonnet";
             uses: [rc],
         },
 
-
+        // Run steiner-relate on clusters in grouping, saving graph to them of the given name.
+        steiner(name="", grouping="live", graph="steiner") :: {
+            type: "CreateSteinerGraph",
+            name: prefix+name,
+            data: {
+                grouping: grouping,
+                graph: graph,
+            } + dv_cfg + pcts_cfg,
+            uses: [detector_volumes, pc_transforms]
+        },
     }, // clustering_methods(),
 
     /// Use this function to provide the elements of retile's "samplers"
