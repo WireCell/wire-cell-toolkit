@@ -6,6 +6,7 @@
 
 #include <map>
 #include <string>
+#include <functional>
 
 namespace WireCell::Clus::Graphs {
 
@@ -18,14 +19,27 @@ namespace WireCell::Clus::Graphs {
          */
 
         using dijkstra_distance_type = double;
+        using edge_weight_type = double;
         using Graph = boost::adjacency_list<
             boost::vecS,        // vertices
             boost::vecS,        // edges
             boost::undirectedS, // edge direction (none)
             boost::property<boost::vertex_index_t, size_t>,
-            boost::property<boost::edge_weight_t, float> 
+            boost::property<boost::edge_weight_t, edge_weight_type> 
             >;
+        using graph_type = Graph;
+        using vertex_type = boost::graph_traits<Graph>::vertex_descriptor;
+        using edge_type = boost::graph_traits<Graph>::edge_descriptor;
+
+        // A set of unique vertices or edges;
+        using vertex_set = std::set<vertex_type>;
+        using edge_set = std::set<edge_type>;
     
+        // Filtered graphs and their predicates.
+        using vertex_predicate = std::function<bool(vertex_type)>;
+        using edge_predicate = std::function<bool(edge_type)>;
+        using filtered_graph_type = boost::filtered_graph<graph_type, edge_predicate, vertex_predicate>;
+
         /// Embody all possible shortest paths from a given source index.
         class ShortestPaths {
         
@@ -91,6 +105,22 @@ namespace WireCell::Clus::Graphs {
             
             /// Clear the shortest paths cache
             void clear_cache() const;
+
+            /// Return a graph view filtered on the set of vertices.  If accept
+            /// is true (default) the graph only has vertices in the set.  If
+            /// false, it has vertices in the original graph that are not in the
+            /// set.  The vertex descriptors (indices) of the returned graph are
+            /// the same as the original graph.  Use boost::copy_graph() to make
+            /// a new graph with compactified vertices.
+            filtered_graph_type reduce(const vertex_set& vertices, bool accept = true) const;
+
+            /// As reduce(vertex_set) but filter on edges.
+            filtered_graph_type reduce(const edge_set& edge, bool accept = true) const;
+            
+            /// Return a graph view filtered on edge weights.  If accept is true
+            /// (default) edges with weights greater or equal to threshold will
+            /// be kept and others removed and vice versa if accept is false.
+            filtered_graph_type weight_threshold(edge_weight_type threshold, bool accept = true) const;
 
         };
 

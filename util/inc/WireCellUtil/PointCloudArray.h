@@ -198,6 +198,11 @@ namespace WireCell::PointCloud {
         Array slice(size_t position, size_t count, bool share);
         /// The slice holds a copy.
         Array slice(size_t position, size_t count) const;
+        /// The slice holds values at specific positions.
+        Array slice(const std::vector<size_t>& positions) const;
+
+        /// The number of bytes of each major element.
+        size_t jump_size() const;
 
         template<typename ElementType, size_t NumDims>
         void check_dims() const {
@@ -282,7 +287,7 @@ namespace WireCell::PointCloud {
 
         /// Return an Array like this one but filled with zeros to
         /// given number of elements along major axis.
-        Array zeros_like(size_t nmaj);
+        Array zeros_like(size_t nmaj) const;
 
         /// Append a flat array of bytes.  The number of bytes must be
         /// consistent with the element size and the existing shape.

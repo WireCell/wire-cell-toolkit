@@ -96,6 +96,19 @@ namespace WireCell::PointCloud {
          */
         Dataset subset(const name_list_t& names) const;
 
+        /** Return a subset by indices and names.
+
+            If any requested name is not provided by this dataset or an index is
+            out of bounds then an empty collection is returned.
+
+            If names is empty then all arrays are considered.
+           
+            The order of points in the returned Dataset is aligned with the
+            order of indices.
+         */
+
+        Dataset subset(const std::vector<size_t>& indices, name_list_t names={}) const;
+
         /** Return named array or nullptr if not found.
 
             Even in non-const case, the array pointer is merely lent.
@@ -114,8 +127,7 @@ namespace WireCell::PointCloud {
         // typed tuple of array elements given their common index.
 
         /// Return the sorted names of the arrays in this.
-        using keys_t = std::vector<std::string>;
-        keys_t keys() const;
+        name_list_t keys() const;
         bool has(const std::string& key) const;
 
         /// Return a Dataset with same name and type of arrays as this

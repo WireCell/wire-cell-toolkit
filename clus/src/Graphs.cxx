@@ -120,3 +120,28 @@ void Weighted::GraphAlgorithms::clear_cache() const
     m_sps.clear();
     m_access_order.clear();
 }
+
+
+Weighted::filtered_graph_type Weighted::GraphAlgorithms::reduce(const vertex_set& vertices, bool accept) const
+{
+    auto filter = [&](vertex_type vtx) {
+        return accept == (vertices.find(vtx) != vertices.end());
+    };
+    return Weighted::filtered_graph_type(m_graph, boost::keep_all(), filter);
+}
+
+Weighted::filtered_graph_type Weighted::GraphAlgorithms::reduce(const edge_set& edges, bool accept) const
+{
+    auto filter = [&](edge_type edge) {
+        return accept == (edges.find(edge) != edges.end());
+    };
+    return Weighted::filtered_graph_type(m_graph, filter, boost::keep_all());
+}
+Weighted::filtered_graph_type Weighted::GraphAlgorithms::weight_threshold(double threshold, bool accept) const
+{
+    auto weight_map = get(boost::edge_weight, m_graph);
+    auto filter = [&](edge_type edge) {
+        return accept == (get(weight_map, edge) >= threshold);
+    };
+    return Weighted::filtered_graph_type(m_graph, filter, boost::keep_all());
+}

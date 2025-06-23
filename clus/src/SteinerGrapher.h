@@ -12,9 +12,12 @@
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Blob.h"
+#include "WireCellClus/IPCTransform.h"
 
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IDetectorVolumes.h"
+
+#include "WireCellUtil/Logging.h"
 
 #include <set>
 #include <map>
@@ -30,35 +33,67 @@ namespace WireCell::Clus::Steiner {
         struct Config {
             IBlobSampler::pointer sampler;
             IDetectorVolumes::pointer dv;
+            WireCell::Clus::IPCTransformSet::pointer pcts;
         };
+        Log::logptr_t log;
 
         /// Construct with an existing cluster facade.  Caller must assure the
         /// underlying cluster node is kept live.
-        Grapher(Facade::Cluster& cluster, const Config& cfg);
+        Grapher(Facade::Cluster& cluster, const Config& cfg, Log::logptr_t log);
         Grapher() = delete;
-
-        Facade::Cluster& cluster() { return m_cluster; }
-        const Facade::Cluster& cluster() const { return m_cluster; }
-        Config config() const { return m_config; }
 
         ///
         ///  Types
         ///
         
-        /// This is top-level interface which is called in the visit() loop.  It
-        /// is expected to create and add to our cluster using the given
-        /// graph_name a "steiner graph" of C++ type:
-        using graph_type = WireCell::Clus::Graphs::Weighted::Graph;
-
-        /// A type that holds a set of graph vertices.  A vertex (descriptor) IS an index.
-        using graph_vertex_set = std::set<size_t>;
+        /// Forward some types from Graphs.h
+        using graph_type = WireCell::Clus::Graphs::Weighted::graph_type;
+        using vertex_type = WireCell::Clus::Graphs::Weighted::vertex_type;
+        using edge_type = WireCell::Clus::Graphs::Weighted::edge_type;
+        using vertex_set = WireCell::Clus::Graphs::Weighted::vertex_set;
+        using edge_set = WireCell::Clus::Graphs::Weighted::edge_set;
 
         /// A type that maps blobs to graph vertices
-        using blob_vertex_map = std::map<const Facade::Blob*, graph_vertex_set>;
+        using blob_vertex_map = std::map<const Facade::Blob*, vertex_set>;
 
 
         ///
-        ///  The main entry method
+        /// Basic data accessors.
+        ///
+        
+        Facade::Cluster& cluster() { return m_cluster; }
+        const Facade::Cluster& cluster() const { return m_cluster; }
+        Config config() const { return m_config; }
+
+
+        ///
+        /// Helper methods - these are general purpose, primitive.
+        /// 
+
+        ///  Get a graph, possibly making it on the fly if flavor is one of the
+        ///  3 reserved names.
+        graph_type& get_graph(const std::string& flavor = "basic");
+        const graph_type& get_graph(const std::string& flavor = "basic") const ;
+        
+        /// Return a PC held by the cluster node of the given name.  If it does
+        /// not exist, one is derived from the default scoped view, saved to
+        /// that name, and returned.
+        PointCloud::Dataset& get_point_cloud(const std::string& name = "steiner");
+
+        /// Store a point cloud by std::move()
+        void put_point_cloud(PointCloud::Dataset&& pc, const std::string& name = "steiner");
+        /// Store a point cloud by copy
+        void put_point_cloud(const PointCloud::Dataset& pc, const std::string& name = "steiner");
+
+
+        ///
+        /// Temporary algorithm to show how to do some things.
+        ///
+        graph_type fake_steiner_graph();        
+
+
+        ///
+        ///  The real main entry method
         ///
 
         /// Create and return a steiner graph for the cluster.
@@ -66,7 +101,7 @@ namespace WireCell::Clus::Steiner {
 
 
         ///
-        ///  Intermediate methods
+        ///  Intermediate algorithm methods
         ///
 
         /// Populate blob PCs with sampled points.  This was a free function in
@@ -75,13 +110,15 @@ namespace WireCell::Clus::Steiner {
         /// existing, already sampled cluster.
         void calc_sampling_points(/*, ...*/);
 
-        graph_vertex_set find_peak_point_indices(bool disable_dead_mix_cell);
+        vertex_set find_peak_point_indices(bool disable_dead_mix_cell);
         blob_vertex_map form_cell_points_map();
-        graph_vertex_set find_steiner_terminals(bool disable_dead_mix_cell=true);
+        vertex_set find_steiner_terminals(bool disable_dead_mix_cell=true);
         void establish_same_blob_steiner_edges(graph_type& graph, 
                                                bool disable_dead_mix_cell=true, int flag=1);
     
         graph_type create_steiner_tree(/*what type for point_cloud_steiner?*/);
+
+
 
     private:
         // The Grapher "wraps" a Cluster.  As the Cluster is a *facade* of an

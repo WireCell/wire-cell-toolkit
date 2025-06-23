@@ -85,6 +85,12 @@ void check_b_slice(const Array& b)
 
     // flattened
     auto ba = b.elements<ElementType>();
+    auto shape = b.shape();
+    debug("b array type {} slice size is {}, size_major is {}, {} dims:",
+          b.dtype(), ba.size(), b.size_major(), shape.size());
+    for (auto dim : shape) {
+        debug("\tb dim: {}", dim);
+    }
     CHECK(ba.size() == 1*2*4);
     CHECK(ba[0] == 8);
     CHECK(ba[1] == 9);
@@ -117,10 +123,16 @@ void check_b_slice(const Array& b)
 TEST_CASE("point cloud slice")
 {
     Array aa({1.0, 2.0, 3.0});
+    CHECK(aa.jump_size() == 8);
     auto aas = aa.slice(1,1);
     check_a_slice(aas);
     CHECK(aas.dtype() == aa.dtype());
     
+    {
+        auto az2 = aa.zeros_like(2);
+        CHECK(az2.size_major() == 2);
+        CHECK(az2.elements<double>().size() == 2);
+    }
 
     // major
     // axis
@@ -135,9 +147,24 @@ TEST_CASE("point cloud slice")
     std::vector<int> counts(24);
     std::iota(counts.begin(), counts.end(), 0);
     Array bb(counts, shape, false);
-    auto bbs = bb.slice(1,1);
-    check_b_slice(bbs);
-    CHECK(bbs.dtype() == bb.dtype());
+    CHECK(bb.jump_size() == sizeof(int)*2*4);
+    {
+        auto bz2 = bb.zeros_like(2);
+        CHECK(bz2.size_major() == 2);
+        CHECK(bz2.elements<int>().size() == 2*2*4);
+    }
+
+    {
+        auto bbs = bb.slice(1,1); // chunk slice
+        check_b_slice(bbs);
+        CHECK(bbs.dtype() == bb.dtype());
+    }
+    {
+        std::vector<size_t> slc = {1};
+        auto bbs = bb.slice(slc); // indices slice
+        check_b_slice(bbs);
+        CHECK(bbs.dtype() == bb.dtype());
+    }
 
     Dataset ds({
             {"a", aa},

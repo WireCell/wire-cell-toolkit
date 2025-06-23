@@ -16,6 +16,8 @@
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Ensemble.h"
 
+#include "WireCellAux/Logger.h"
+
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
@@ -23,7 +25,7 @@
 
 namespace WireCell::Clus::Steiner {
 
-    class CreateSteinerGraph : public IConfigurable, public Clus::IEnsembleVisitor {
+    class CreateSteinerGraph : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor {
         std::string m_grouping_name{"live"};
         std::string m_graph_name{"steiner"};
         bool m_replace{true};
@@ -32,6 +34,9 @@ namespace WireCell::Clus::Steiner {
 
 
     public:
+        CreateSteinerGraph();
+        virtual ~CreateSteinerGraph();
+
         // IConfigurable 
         virtual void configure(const WireCell::Configuration& cfg);
         virtual Configuration default_configuration() const;

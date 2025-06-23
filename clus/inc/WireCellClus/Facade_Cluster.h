@@ -376,6 +376,18 @@ namespace WireCell::Clus::Facade {
         ///
         std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
         
+        /// Return graph of given flavor or try to make it if it does not exist.
+        /// See graph_algorithms() for flavors that can be made.
+        const graph_type& find_graph(const std::string& flavor = "basic") const;
+        graph_type& find_graph(const std::string& flavor = "basic");
+        const graph_type& find_graph(const std::string& flavor,
+                                     IDetectorVolumes::pointer dv, 
+                                     IPCTransformSet::pointer pcts) const;
+        graph_type& find_graph(const std::string& flavor,
+                               IDetectorVolumes::pointer dv, 
+                               IPCTransformSet::pointer pcts);
+
+
         ///
         /// Graph algorithms hold a graph and are cached
         ///
