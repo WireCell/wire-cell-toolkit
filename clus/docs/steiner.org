@@ -30,7 +30,7 @@ feel something needs to be added to the outer layers (eg ~CreateSteinerGraph~ or
 outside ~clus/~).
 
 
-* How tos
+* Howtos
 
 ** Graphs on a Cluster
 
@@ -124,9 +124,15 @@ if we want to make the new ~Cluster~ on an existing ~GRouping~ we can do:
 
 
 
-* Questions
+* PAAL
 
-- Can ~calc_sampling_points()~ be replaced with some "clone" method to make a copy
-  of an existing Cluster PC tree?
+WCP interned a copy of all of PAAL but only used a tiny portion:
 
-  
+#+begin_src c++
+  struct less{};
+  class nearest_recorder;
+  nearest_recorder make_nearest_recorder();
+#+end_src
+
+These bits are copied into ~clus/src/PAAL.h~.  The ~SteinerGrapher_fake.cxx~
+includes some code to exercise compiling this code.

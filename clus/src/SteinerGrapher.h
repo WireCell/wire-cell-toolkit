@@ -52,6 +52,7 @@ namespace WireCell::Clus::Steiner {
         using edge_type = WireCell::Clus::Graphs::Weighted::edge_type;
         using vertex_set = WireCell::Clus::Graphs::Weighted::vertex_set;
         using edge_set = WireCell::Clus::Graphs::Weighted::edge_set;
+        using edge_weight_type = WireCell::Clus::Graphs::Weighted::edge_weight_type;
 
         /// A type that maps blobs to graph vertices
         using blob_vertex_map = std::map<const Facade::Blob*, vertex_set>;
