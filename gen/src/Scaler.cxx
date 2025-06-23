@@ -24,7 +24,6 @@ using namespace WireCell;
 
 Gen::Scaler::Scaler()
   : Aux::Logger("Scaler", "gen")
-  , yzmap_scale_filename("Empty")
   , bin_width(0.0*units::cm)
   , tpc_width(0.0*units::mm)
   , bin_height(0.0*units::cm)
@@ -32,8 +31,9 @@ Gen::Scaler::Scaler()
   , n_zbin(180)
   , yoffset(180*units::cm)// ymin is -180 in ICARUS
   , zoffset(900*units::cm)// zmin is -900 in ICARUS
-  , anode_name("Empty")
   , plane(0)
+  , anode_name("Empty")
+  , yzmap_scale_filename("Empty")
 {
 }
 
