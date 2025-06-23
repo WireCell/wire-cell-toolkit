@@ -214,7 +214,7 @@ static intrange_t make_intrange(int beg, size_t siz)
 static intrange_t union_intrange(intrange_t const& r1, intrange_t const& r2)
 {
     return std::make_pair(std::min(r1.first, r2.first),
-                          std::min(r1.second, r2.second));
+                          std::max(r1.second, r2.second));
 }
 
 // Accumulate in a dense way.
