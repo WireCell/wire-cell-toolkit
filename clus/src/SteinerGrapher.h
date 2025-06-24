@@ -16,6 +16,7 @@
 
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IPCTreeMutate.h"
 
 #include "WireCellUtil/Logging.h"
 
@@ -33,6 +34,7 @@ namespace WireCell::Clus::Steiner {
         struct Config {
             IDetectorVolumes::pointer dv;
             WireCell::Clus::IPCTransformSet::pointer pcts;
+            IPCTreeMutate::pointer retile;
             /// do we even need samplers?
             // std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> samplers;
         };
@@ -42,6 +44,10 @@ namespace WireCell::Clus::Steiner {
         /// underlying cluster node is kept live.
         Grapher(Facade::Cluster& cluster, const Config& cfg, Log::logptr_t log);
         Grapher() = delete;
+
+        /// Construct a Grapher with some cluster and take the rest of what we
+        /// need from the other grapher.
+        Grapher(Facade::Cluster& cluster, const Grapher& other);
 
         ///
         ///  Types
@@ -72,20 +78,45 @@ namespace WireCell::Clus::Steiner {
         /// Helper methods - these are general purpose, primitive.
         /// 
 
+        ///
+        /// Some special graph access.  See also Facade::Mixins::Graphs in
+        /// Facade_Mixins.h for more graph acessors.
+        /// 
+
         ///  Get a graph, possibly making it on the fly if flavor is one of the
         ///  3 reserved names.
         graph_type& get_graph(const std::string& flavor = "basic");
         const graph_type& get_graph(const std::string& flavor = "basic") const ;
         
-        /// Return a PC held by the cluster node of the given name.  If it does
-        /// not exist, one is derived from the default scoped view, saved to
-        /// that name, and returned.
-        PointCloud::Dataset& get_point_cloud(const std::string& name = "steiner");
+        /// Remove the flavor of graph from the other Grapher and move it to
+        /// this one.  Give a non-empty value for "our_flavor" to store the
+        /// transferred graph under a different name.
+        void transfer_graph(Grapher& other,
+                            const std::string& flavor = "basic",
+                            std::string our_flavor = "");
 
-        /// Store a point cloud by std::move()
-        void put_point_cloud(PointCloud::Dataset&& pc, const std::string& name = "steiner");
-        /// Store a point cloud by copy
-        void put_point_cloud(const PointCloud::Dataset& pc, const std::string& name = "steiner");
+
+        ///
+        /// Some special PC access.
+        ///
+        
+        /// Return a PC with the given name from our cluster node's local PCs.
+        /// If it does not exist, one is derived from the default scoped view,
+        /// saved to the given name, and a reference is returned.
+        PointCloud::Dataset& get_point_cloud(const std::string& name = "default");
+
+        /// Store a point cloud by std::move() in our cluster's local PCs.
+        void put_point_cloud(PointCloud::Dataset&& pc, const std::string& name = "default");
+
+        /// Store a point cloud by copy in our cluster's local PCs.
+        void put_point_cloud(const PointCloud::Dataset& pc, const std::string& name = "default");
+
+        /// Remove the named point cloud from the other Grapher and move it to
+        /// this one.  Give a non-empty value for "our_name" to store the
+        /// transferred PC under a different name.
+        void transfer_pc(Grapher& other,
+                         const std::string& name = "default",
+                         const std::string& our_name = "");
 
 
         ///

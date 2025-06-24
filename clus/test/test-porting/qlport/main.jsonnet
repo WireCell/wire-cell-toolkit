@@ -285,11 +285,12 @@ local ub = {
     MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, live_sampler=$.bs_live) :: 
         local cm = clus.clustering_methods(detector_volumes=detector_volumes,
                                            pc_transforms=pctransforms);
+        local retiler = cm.retiler(anodes=anodes, 
+                                   samplers=[clus.sampler(live_sampler, apa=0, face=0)],
+                                   cut_time_low=3*wc.us, cut_time_high=5*wc.us);
         local cm_pipeline = [
             cm.examine_bundles(),
-            cm.retile(cut_time_low=3*wc.us, cut_time_high=5*wc.us,
-                      anodes=anodes,
-                      samplers=[clus.sampler(live_sampler, apa=0, face=0)]),
+            cm.retile(retiler=retiler),
         ];
         pg.pnode({
         type: "MultiAlgBlobClustering",

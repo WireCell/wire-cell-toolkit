@@ -242,27 +242,28 @@ local wc = import "wirecell.jsonnet";
 
         // Use the sampler() function to provide properly formed elements to the
         // array-of-object argument "samplers".
-        retile(name="", anodes=[], samplers=[], cut_time_low=-1e9, cut_time_high=1e9) :: {
-            local sampler_objs = [s.sobj for s in samplers],
-            local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
-            local rc = parent.retiler(name, anodes, samplers, cut_time_low, cut_time_high),
+        retile(name="", retiler) :: {
+            // local sampler_objs = [s.sobj for s in samplers],
+            // local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
+            // local rc = parent.retiler(name, anodes, samplers, cut_time_low, cut_time_high),
             type: "ClusteringRetile",
             name: prefix+name,
             data: {
-                retiler: wc.tn(rc),
+                retiler: wc.tn(retiler),
             } + scope_cfg,
-            uses: [rc],
+            uses: [retiler],
         },
 
-        // Run steiner-relate on clusters in grouping, saving graph to them of the given name.
-        steiner(name="", grouping="live", graph="steiner") :: {
+        // Run steiner-related on clusters in grouping, saving graph to them of the given name.
+        steiner(name="", retiler, grouping="live", graph="steiner") :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
                 grouping: grouping,
                 graph: graph,
+                retiler: wc.tn(retiler),
             } + dv_cfg + pcts_cfg,
-            uses: [detector_volumes, pc_transforms]
+            uses: [detector_volumes, pc_transforms, retiler]
         },
     }, // clustering_methods(),
 

@@ -202,7 +202,6 @@ local clus_per_face (
         cm.separate(use_ctpc=true),
         cm.connect1(),
         // cm.isolated(),
-        // cm.retile(cut_time_low=3*wc.us, cut_time_high=5*wc.us, anodes=[anode], samplers=[clus.sampler(bsl, apa=anode.data.ident, face=face)]),
     ],
 
     local mabc = g.pnode({
@@ -387,6 +386,19 @@ local clus_all_apa (
                                        pc_transforms=pcts,
                                        coords=common_corr_coords),
         
+    local retiler = cm.retiler(anodes=anodes, 
+                               cut_time_low=3*wc.us,
+                               cut_time_high=5*wc.us,
+                               samplers=[
+                                   clus.sampler(bs_rt_face(0,0), apa=0, face=0),
+                                   clus.sampler(bs_rt_face(0,1), apa=0, face=1),
+                                   clus.sampler(bs_rt_face(1,0), apa=1, face=0),
+                                   clus.sampler(bs_rt_face(1,1), apa=1, face=1),
+                                   clus.sampler(bs_rt_face(2,0), apa=2, face=0),
+                                   clus.sampler(bs_rt_face(2,1), apa=2, face=1),
+                                   clus.sampler(bs_rt_face(3,0), apa=3, face=0),
+                                   clus.sampler(bs_rt_face(3,1), apa=3, face=1),
+                               ]),
     local cm_pipeline = [
         // cm_old.examine_x_boundary(),
         cm_old.switch_scope(),
@@ -401,19 +413,7 @@ local clus_all_apa (
         cm.neutrino(),
         cm.isolated(),
         cm.examine_bundles(),
-        cm.retile(cut_time_low=3*wc.us,
-                  cut_time_high=5*wc.us,
-                  anodes=anodes, 
-                  samplers=[
-                      clus.sampler(bs_rt_face(0,0), apa=0, face=0),
-                      clus.sampler(bs_rt_face(0,1), apa=0, face=1),
-                      clus.sampler(bs_rt_face(1,0), apa=1, face=0),
-                      clus.sampler(bs_rt_face(1,1), apa=1, face=1),
-                      clus.sampler(bs_rt_face(2,0), apa=2, face=0),
-                      clus.sampler(bs_rt_face(2,1), apa=2, face=1),
-                      clus.sampler(bs_rt_face(3,0), apa=3, face=0),
-                      clus.sampler(bs_rt_face(3,1), apa=3, face=1),
-                  ]),
+        cm.retile(retiler=retiler),
     ],
 
     local mabc = g.pnode({

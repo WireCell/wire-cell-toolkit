@@ -33,23 +33,8 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
 
     m_grapher_config.dv = m_dv;
     m_grapher_config.pcts = m_pcts;
-
-    /// Do we even need samplers?
-    // m_grapher_config.samplers.clear()
-    // if (cfg.isMember("samplers") && cfg["samplers"].isArray()) {
-    //     // Process array of samplers
-    //     for (const auto& sampler_cfg : cfg["samplers"]) {
-    //         int apa = sampler_cfg["apa"].asInt();
-    //         int face = sampler_cfg["face"].asInt();
-    //         std::string sampler_name = sampler_cfg["name"].asString();
-            
-    //         if (sampler_name.empty()) {
-    //             raise<ValueError>("RetileCluster requires an IBlobSampler name for APA %d face %d", apa, face);
-    //         }
-    //         auto sampler_ptr = Factory::find_tn<IBlobSampler>(sampler_name);
-    //         m_grapher_config.samplers[apa][face] = sampler_ptr;
-    //     }
-    // }
+    const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
+    m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
 
 Configuration Steiner::CreateSteinerGraph::default_configuration() const
