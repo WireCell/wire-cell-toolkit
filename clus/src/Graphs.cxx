@@ -1,4 +1,5 @@
 #include "WireCellClus/Graphs.h"
+#include "PAAL.h"
 
 
 using namespace WireCell;
@@ -33,6 +34,42 @@ Weighted::ShortestPaths::path(size_t destination) const
     std::reverse(path.begin(), path.end());
 
     return path;
+}
+
+Weighted::Voronoi Weighted::voronoi(const Weighted::graph_type& graph,
+                                    const std::vector<Weighted::vertex_type>& terminals)
+{
+    Voronoi result;
+    const size_t npoints = boost::num_vertices(graph);
+    auto index = get(boost::vertex_index, graph);
+
+    result.terminal.resize(npoints); // nearest_terminal
+    auto nearest_terminal_map = boost::make_iterator_property_map(result.terminal.begin(), index);
+    for (auto terminal : terminals) {
+        nearest_terminal_map[terminal] = terminal;
+    }
+
+    auto edge_weight = get(boost::edge_weight, graph);
+
+    result.distance.resize(npoints);
+    auto distance_map = boost::make_iterator_property_map(result.distance.begin(), index);
+
+    result.last_edge.resize(npoints);
+    auto last_edge = boost::make_iterator_property_map(result.last_edge.begin(), index);
+
+    boost::dijkstra_shortest_paths(
+        graph, terminals.begin(), terminals.end(),
+        boost::dummy_property_map(),
+        distance_map,
+        edge_weight,
+        index,
+        PAAL::less(),
+        boost::closed_plus<edge_weight_type>(),
+        std::numeric_limits<edge_weight_type>::max(), 0,
+        boost::make_dijkstra_visitor(
+            PAAL::make_nearest_recorder(
+                nearest_terminal_map, last_edge, boost::on_edge_relaxed{})));
+    return result;
 }
 
 Weighted::GraphAlgorithms::GraphAlgorithms(const Graph& graph, size_t max_cache_size) 

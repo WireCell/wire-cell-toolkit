@@ -6,6 +6,7 @@
 
 using namespace WireCell::Clus::Graphs::Weighted;
 using WireCell::GraphTools::edge_range;
+using WireCell::GraphTools::vertex_range;
 using spdlog::debug;
 
 // static
@@ -69,4 +70,31 @@ TEST_CASE("clus graphs")
     CHECK (boost::num_edges(filtered_with_e0) == 2);
     auto filtered_without_e0 = reduce_edges(graph, to_filter, false);
     CHECK (boost::num_edges(filtered_without_e0) == 2);
+}
+
+TEST_CASE("clus graphs voronoi")
+{
+    graph_type graph(10);
+    boost::add_edge(0, 1, 1.0, graph);
+    boost::add_edge(0, 2, 1.0, graph);
+    boost::add_edge(1, 2, 1.0, graph);
+    boost::add_edge(0, 3, 0.1, graph);
+    boost::add_edge(1, 4, 0.1, graph);
+    boost::add_edge(2, 5, 0.1, graph);
+    boost::add_edge(5, 6, 0.2, graph);
+    boost::add_edge(6, 7, 0.2, graph);
+    boost::add_edge(7, 8, 0.2, graph);
+    boost::add_edge(8, 9, 0.2, graph); // 8-2 is 0.7
+    boost::add_edge(9, 0, 1.0, graph); // 9-2 is 0.9
+    
+    std::vector<vertex_type> terminals = {0,1,2};
+    auto vor = voronoi(graph, terminals);
+    for (auto vtx : vertex_range(graph)) {
+        debug("{}: terminal={} distance={} last_edge=({} -> {})",
+              vtx,
+              vor.terminal[vtx],
+              vor.distance[vtx],
+              boost::source(vor.last_edge[vtx], graph),
+              boost::target(vor.last_edge[vtx], graph));
+    }
 }

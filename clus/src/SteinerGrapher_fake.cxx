@@ -1,11 +1,13 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/GraphTools.h"
+#include "WireCellClus/Graphs.h"
 #include "SteinerGrapher.h"
 #include "PAAL.h"               // eventually, subsume int GraphAlgorithms! 
 
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
+using WireCell::Clus::Graphs::Weighted::voronoi;
 using WireCell::GraphTools::vertex_range;
 using WireCell::GraphTools::edge_range;
 
@@ -134,39 +136,9 @@ Steiner::Grapher::graph_type Steiner::Grapher::fake_steiner_graph()
         boost::add_edge(0, 1, graph);
         boost::add_edge(0, 2, graph);
 
-        // This is "ported" from void PR3DCluster::recover_steiner_graph() with
-        // very little understanding of what it is doing.  Again, just to check
-        // compilation.
-
-        // It is not clear that this is needed since vertex descriptor == vertex index.
-        auto index = get(boost::vertex_index, graph);
-
         std::vector<vertex_type> terminals = {1,2};
-        std::vector<vertex_type> nearest_terminal(npoints);
-        auto nearest_terminal_map = boost::make_iterator_property_map(nearest_terminal.begin(), index);
-        for (auto terminal : terminals) {
-            nearest_terminal_map[terminal] = terminal;
-        }
 
-        /// This is a highly suspect line of code from WCP:
-        // auto edge_weight = boost::choose_pmap(boost::get_param(boost::no_named_parameters(), boost::edge_weight), graph, boost::edge_weight);
-        // Let's try something a bit less baroque.
-        auto edge_weight = get(boost::edge_weight, graph);
-
-        std::vector<edge_weight_type> distance(npoints);
-        auto distance_map = boost::make_iterator_property_map(distance.begin(), index);
-
-        std::vector<edge_type> vpred(npoints);
-        auto last_edge = boost::make_iterator_property_map(vpred.begin(), index);
-
-        boost::dijkstra_shortest_paths(
-            graph, terminals.begin(), terminals.end(), boost::dummy_property_map(),
-            distance_map, edge_weight, index, PAAL::less(),
-            boost::closed_plus<edge_weight_type>(),
-            std::numeric_limits<edge_weight_type>::max(), 0,
-            boost::make_dijkstra_visitor(
-                PAAL::make_nearest_recorder(
-                    nearest_terminal_map, last_edge, boost::on_edge_relaxed{})));
+        auto vor = voronoi(graph, terminals);
     }
 
 

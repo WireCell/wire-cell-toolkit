@@ -40,6 +40,34 @@ namespace WireCell::Clus::Graphs {
         using edge_predicate = std::function<bool(edge_type)>;
         using filtered_graph_type = boost::filtered_graph<graph_type, edge_predicate, vertex_predicate>;
 
+        /// Results of a "discrete Voronoi tessellation" formed on the graph
+        /// given with each Voronoi cell defined by one in a set of select
+        /// "terminal" vertices.
+        struct Voronoi {
+
+            // A "map" from each graph vertex (index) to its nearest "terminal"
+            // vertex.  terminal[v] == v for v in the set of terminal vertices.
+            std::vector<vertex_type> terminal;
+
+            // A "map" from each graph vertex (index) to the distance along the
+            // path to its nearest "terminal".  distance[v] == 0.0 for v in the
+            // set of terminal vertices.
+            std::vector<edge_weight_type> distance;
+
+            // A "map" from each graph vertex (index) to the edge into that
+            // vertex from the vertex neighbor (the edge "source") that is
+            // directly upstream in the walk from closest terminal to the
+            // original vertex.  If the source is the nearest terminal for the
+            // original vertex then the backwards walk is complete.  Otherwise,
+            // the last_edge for the neighbor provides the next neighbor, etc.
+            // Note, the value last_edge[v] for any v in the set of terminals is
+            // not defined.  (You probably get 0's for both vertices).
+            std::vector<edge_type> last_edge;
+
+        };
+
+        Voronoi voronoi(const graph_type& graph, const std::vector<vertex_type>& terminals);
+
         /// Embody all possible shortest paths from a given source index.
         class ShortestPaths {
         
