@@ -2623,6 +2623,239 @@ std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTrans
 }
 
 
+std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* reference_cluster) const
+{
+    std::vector<std::vector<geo_point_t>> out_vec_wcps;
+    
+    if (npoints() == 0) {
+        return out_vec_wcps;
+    }
+    
+    // Create list of valid point indices based on spatial filtering
+    // This directly corresponds to prototype's all_indices creation
+    std::vector<size_t> valid_indices;
+    
+    if (reference_cluster == nullptr) {
+        // No filtering - use all points (equivalent to old_time_mcells_map==0)
+        for (size_t i = 0; i < npoints(); ++i) {
+            valid_indices.push_back(i);
+        }
+    } else {
+        // Get reference cluster's time_blob_map (equivalent to old_time_mcells_map)
+        const auto& ref_time_blob_map = reference_cluster->time_blob_map();
+        
+        // Filter points based on spatial relationship with reference cluster
+        // This implements the exact same logic as prototype's old_time_mcells_map filtering
+        for (size_t i = 0; i < npoints(); ++i) {
+            if (is_point_spatially_related_to_time_blobs(i, ref_time_blob_map)) {
+                valid_indices.push_back(i);
+            }
+        }
+    }
+    
+    if (valid_indices.empty()) {
+        return out_vec_wcps;
+    }
+    
+    // Get main axis and ensure consistent direction (y>0)
+    // Equivalent to prototype's Calc_PCA() and get_PCA_axis(0)
+    geo_point_t main_axis = get_pca().axis.at(0);
+    if (main_axis.y() < 0) {
+        main_axis = main_axis * -1;
+    }
+    
+    // Find 8 extreme points: 2 along main axis + 6 along coordinate axes
+    // Equivalent to prototype's wcps[8] array
+    geo_point_t extreme_points[8];
+    
+    // Initialize with first valid point
+    // Equivalent to prototype: wcps[i] = cloud.pts[all_indices.at(0)]
+    for (int i = 0; i < 8; i++) {
+        extreme_points[i] = point3d(valid_indices[0]);
+    }
+    
+    // Initialize projection values for main axis extremes
+    double high_value = extreme_points[0].dot(main_axis);
+    double low_value = high_value;
+    
+    // Scan through all valid points to find extremes
+    // Equivalent to prototype's scanning loop through all_indices
+    for (size_t idx : valid_indices) {
+        geo_point_t current_point = point3d(idx);
+        
+        // Main axis extremes (along PCA axis)
+        double main_projection = current_point.dot(main_axis);
+        if (main_projection > high_value) {
+            extreme_points[0] = current_point;  // high along main axis
+            high_value = main_projection;
+        }
+        if (main_projection < low_value) {
+            extreme_points[1] = current_point;  // low along main axis
+            low_value = main_projection;
+        }
+        
+        // Coordinate axis extremes (same as prototype)
+        // Y-axis extremes (top/bottom)
+        if (current_point.y() > extreme_points[2].y()) {
+            extreme_points[2] = current_point;  // highest Y
+        }
+        if (current_point.y() < extreme_points[3].y()) {
+            extreme_points[3] = current_point;  // lowest Y
+        }
+        
+        // Z-axis extremes (front/back)
+        if (current_point.z() > extreme_points[4].z()) {
+            extreme_points[4] = current_point;  // furthest Z
+        }
+        if (current_point.z() < extreme_points[5].z()) {
+            extreme_points[5] = current_point;  // nearest Z
+        }
+        
+        // X-axis extremes (earliest/latest)
+        if (current_point.x() > extreme_points[6].x()) {
+            extreme_points[6] = current_point;  // latest X
+        }
+        if (current_point.x() < extreme_points[7].x()) {
+            extreme_points[7] = current_point;  // earliest X
+        }
+    }
+    
+    // Group the extreme points into result vectors
+    // Following the prototype's grouping strategy exactly
+    
+    // First extreme along the main axis
+    std::vector<geo_point_t> main_axis_high;
+    main_axis_high.push_back(extreme_points[0]);
+    out_vec_wcps.push_back(main_axis_high);
+    
+    // Second extreme along the main axis  
+    std::vector<geo_point_t> main_axis_low;
+    main_axis_low.push_back(extreme_points[1]);
+    out_vec_wcps.push_back(main_axis_low);
+    
+    // Add other extremes if they are significantly different from main axis extremes
+    // This prevents duplicate points in the output (same as prototype logic)
+    const double min_separation = 5.0 * units::cm;  // Minimum distance to be considered distinct
+    
+    for (int i = 2; i < 8; i++) {
+        bool is_distinct = true;
+        
+        // Check if this extreme is too close to already added points
+        for (const auto& added_group : out_vec_wcps) {
+            for (const auto& added_point : added_group) {
+                double distance = (extreme_points[i] - added_point).magnitude();
+                if (distance < min_separation) {
+                    is_distinct = false;
+                    break;
+                }
+            }
+            if (!is_distinct) break;
+        }
+        
+        // If distinct enough, add as a new extreme group
+        if (is_distinct) {
+            std::vector<geo_point_t> coord_extreme;
+            coord_extreme.push_back(extreme_points[i]);
+            out_vec_wcps.push_back(coord_extreme);
+        }
+    }
+    
+    return out_vec_wcps;
+}
+
+bool Cluster::is_point_spatially_related_to_time_blobs(
+    size_t point_index, 
+    const time_blob_map_t& ref_time_blob_map) const
+{
+    // Get current point's time slice information
+    // Equivalent to: int time_slice = cloud.pts[i].mcell->GetTimeSlice();
+    const Blob* current_blob = blob_with_point(point_index);
+    int current_time_slice = current_blob->slice_index_min();
+    
+    // Check current time slice and ±1 time slices (like Steiner version)
+    for (int time_offset = -1; time_offset <= 1; ++time_offset) {
+        int check_time_slice = current_time_slice + time_offset;
+        
+        // This is the exact prototype logic:
+        // if (old_time_mcells_map->find(time_slice)!=old_time_mcells_map->end())
+        auto time_it = ref_time_blob_map.find(check_time_slice);
+        if (time_it != ref_time_blob_map.end()) {
+            
+            // Iterate through apa/face maps in this time slice
+            // time_blob_map_t is std::map<int, std::map<int, std::map<int, BlobSet>>>
+            // Structure: apa -> face -> time -> blobset
+            for (const auto& face_pair : time_it->second) {
+                for (const auto& time_pair : face_pair.second) {
+                    // Now iterate through blobs in the BlobSet
+                    for (const Blob* ref_blob : time_pair.second) {
+                        
+                        // Method 1: Fast blob overlap check (equivalent to mcell->Overlap_fast())
+                        if (current_blob->overlap_fast(*ref_blob, 1)) {
+                            return true;  // Equivalent to flag_add = true; break;
+                        }
+                        
+                        // Method 2: Detailed wire range checking (prototype's exact logic)
+                        if (check_wire_ranges_match(point_index, ref_blob)) {
+                            return true;  // Equivalent to flag_add = true; break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return false;  // Equivalent to flag_add remains false
+}
+
+bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const
+{
+    try {
+        // Get current point's wire indices (equivalent to cloud.pts[i].index_u, index_v, index_w)
+        int current_wire_u = wire_index(point_index, 0);  // U plane
+        int current_wire_v = wire_index(point_index, 1);  // V plane  
+        int current_wire_w = wire_index(point_index, 2);  // W plane
+        
+        // Get reference blob's wire ranges
+        // Equivalent to: 
+        // int u1_low_index = mcell->get_uwires().front()->index();
+        // int u1_high_index = mcell->get_uwires().back()->index();
+        // Using individual wire range methods instead of get_wire_ranges()
+        int u_min = ref_blob->u_wire_index_min();
+        int u_max = ref_blob->u_wire_index_max();
+        int v_min = ref_blob->v_wire_index_min();
+        int v_max = ref_blob->v_wire_index_max();
+        int w_min = ref_blob->w_wire_index_min();
+        int w_max = ref_blob->w_wire_index_max();
+        
+        // Extract U, V, W wire ranges from reference blob
+        // Add ±1 tolerance (Steiner version) to the wire ranges
+        u_min = u_min - 1;
+        u_max = u_max + 1;
+        v_min = v_min - 1;
+        v_max = v_max + 1;
+        w_min = w_min - 1;
+        w_max = w_max + 1;
+        
+        // Check if current point's wire indices fall within ALL THREE ranges
+        // This is the exact prototype condition:
+        // if (cloud.pts[i].index_u <= u1_high_index && cloud.pts[i].index_u >= u1_low_index &&
+        //     cloud.pts[i].index_v <= v1_high_index && cloud.pts[i].index_v >= v1_low_index &&
+        //     cloud.pts[i].index_w <= w1_high_index && cloud.pts[i].index_w >= w1_low_index)
+        if (current_wire_u >= u_min && current_wire_u <= u_max &&
+            current_wire_v >= v_min && current_wire_v <= v_max &&
+            current_wire_w >= w_min && current_wire_w <= w_max) {
+            return true;  // Equivalent to flag_add = true; break;
+        }
+        
+    } catch (...) {
+        // If wire information is not available, continue
+    }
+    
+    return false;
+}
+
+
+
 
 
 // Local Variables:

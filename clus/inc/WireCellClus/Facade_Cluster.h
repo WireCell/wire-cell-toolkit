@@ -342,6 +342,12 @@ namespace WireCell::Clus::Facade {
         /// to be more in line with the overall point cloud.
         void adjust_wcpoints_parallel(size_t& start_idx, size_t& end_idx) const;
         
+        /// Get extreme points from the cluster, optionally filtered by spatial relationship to a reference cluster
+        /// @param reference_cluster Optional reference cluster for spatial filtering (corresponds to old_time_mcells_map in prototype)
+        /// @return Vector of vectors, each containing extreme points in different categories
+        /// Returns extreme points along main axis, and other significant extremes along coordinate axes
+        std::vector<std::vector<geo_point_t>> get_extreme_wcps(
+            const Cluster* reference_cluster = nullptr) const;
 
         /// section for 2D PC
 
@@ -565,6 +571,22 @@ namespace WireCell::Clus::Facade {
         // We handle graph algorithms special as the GA's use graphs that are
         // held in their own cache in the Mixins::Graphs base.
         mutable std::map<std::string, WireCell::Clus::Graphs::Weighted::GraphAlgorithms> m_galgs;
+
+        /// Helper function to check if a point is spatially related to a reference cluster using time_blob_map
+        /// Implements the same filtering logic as prototype's old_time_mcells_map checking
+        /// @param point_index Index of point in current cluster
+        /// @param ref_time_blob_map Reference cluster's time-indexed blob map
+        /// @return True if point's wire indices fall within reference cluster's spatial regions
+        bool is_point_spatially_related_to_time_blobs(
+            size_t point_index, 
+            const time_blob_map_t& ref_time_blob_map) const;
+
+        /// Helper function to check wire range overlap between a point and a reference blob
+        /// @param point_index Index of point in current cluster
+        /// @param ref_blob Reference blob to check against
+        /// @return True if point's wire indices fall within reference blob's wire ranges
+        bool check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const;
+
 
        protected:
 
