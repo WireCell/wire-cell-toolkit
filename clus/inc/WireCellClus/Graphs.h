@@ -64,6 +64,12 @@ namespace WireCell::Clus::Graphs {
             // not defined.  (You probably get 0's for both vertices).
             std::vector<edge_type> last_edge;
 
+            // Return the path of vertices FROM a given vertex TO its nearest
+            // terminal.  This simply walks last_edge as described above.  The
+            // result is undefined if the graph other than the one used to make
+            // this Voronoi struct.
+            std::vector<vertex_type> path(vertex_type vtx, const graph_type& graph) const;
+
         };
 
         Voronoi voronoi(const graph_type& graph, const std::vector<vertex_type>& terminals);

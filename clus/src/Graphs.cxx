@@ -36,6 +36,21 @@ Weighted::ShortestPaths::path(size_t destination) const
     return path;
 }
 
+std::vector<Weighted::vertex_type> Weighted::Voronoi::path(Weighted::vertex_type vtx,
+                                                           const Weighted::graph_type& graph) const
+{
+    std::vector<Weighted::vertex_type> ret;
+    const vertex_type myterm = terminal[vtx];
+    while (true) {
+        ret.push_back(vtx);
+        if (myterm == vtx) {
+            break;
+        }
+        vtx = boost::source(last_edge[vtx], graph);
+    }
+    return ret;
+}
+
 Weighted::Voronoi Weighted::voronoi(const Weighted::graph_type& graph,
                                     const std::vector<Weighted::vertex_type>& terminals)
 {

@@ -4,6 +4,8 @@
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
 
+#include <sstream>
+
 using namespace WireCell::Clus::Graphs::Weighted;
 using WireCell::GraphTools::edge_range;
 using WireCell::GraphTools::vertex_range;
@@ -85,16 +87,29 @@ TEST_CASE("clus graphs voronoi")
     boost::add_edge(6, 7, 0.2, graph);
     boost::add_edge(7, 8, 0.2, graph);
     boost::add_edge(8, 9, 0.2, graph); // 8-2 is 0.7
-    boost::add_edge(9, 0, 1.0, graph); // 9-2 is 0.9
+    boost::add_edge(9, 0, 0.8, graph); // 9-2 is 0.9
     
     std::vector<vertex_type> terminals = {0,1,2};
     auto vor = voronoi(graph, terminals);
     for (auto vtx : vertex_range(graph)) {
-        debug("{}: terminal={} distance={} last_edge=({} -> {})",
+        auto path = vor.path(vtx, graph);
+        std::stringstream ss;
+        for (auto p : path) {
+            ss << " " << p;
+        }
+        debug("{}: terminal={} distance={} last_edge=({} -> {}), path:{}",
               vtx,
               vor.terminal[vtx],
               vor.distance[vtx],
               boost::source(vor.last_edge[vtx], graph),
-              boost::target(vor.last_edge[vtx], graph));
+              boost::target(vor.last_edge[vtx], graph),
+              ss.str()
+            );
     }
+    std::stringstream dotss;
+    boost::write_graphviz(dotss, graph,
+                          boost::make_label_writer(boost::get(boost::vertex_index, graph)),
+                          boost::make_label_writer(boost::get(boost::edge_weight, graph)));
+    
+    debug("Copy-past next lines to graph.dot and run dot -Tpng -o graph.png graph.dot\n{}", dotss.str());
 }
