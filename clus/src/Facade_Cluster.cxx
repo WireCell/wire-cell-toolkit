@@ -833,6 +833,7 @@ int Cluster::wire_index(size_t point_index, int plane) const {
         default: 
             raise<ValueError>("Invalid plane index: %d (must be 0, 1, or 2)", plane);
     }
+    std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
 
 double Cluster::charge_value(size_t point_index, int plane) const {
@@ -860,6 +861,7 @@ double Cluster::charge_value(size_t point_index, int plane) const {
         default:
             raise<ValueError>("Invalid plane index: %d (must be 0, 1, or 2)", plane);
     }
+    std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
 
 double Cluster::charge_uncertainty(size_t point_index, int plane) const {
@@ -887,6 +889,7 @@ double Cluster::charge_uncertainty(size_t point_index, int plane) const {
         default:
             raise<ValueError>("Invalid plane index: %d (must be 0, 1, or 2)", plane);
     }
+    std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
 
 bool Cluster::is_wire_dead(size_t point_index, int plane, double dead_threshold) const {
@@ -2637,7 +2640,7 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
     
     if (reference_cluster == nullptr) {
         // No filtering - use all points (equivalent to old_time_mcells_map==0)
-        for (size_t i = 0; i < npoints(); ++i) {
+        for (int i = 0; i < npoints(); ++i) {
             valid_indices.push_back(i);
         }
     } else {
@@ -2646,7 +2649,7 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
         
         // Filter points based on spatial relationship with reference cluster
         // This implements the exact same logic as prototype's old_time_mcells_map filtering
-        for (size_t i = 0; i < npoints(); ++i) {
+        for (int i = 0; i < npoints(); ++i) {
             if (is_point_spatially_related_to_time_blobs(i, ref_time_blob_map)) {
                 valid_indices.push_back(i);
             }
