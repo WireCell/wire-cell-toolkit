@@ -11,13 +11,6 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_graph()
 }
 
 
-void Steiner::Grapher::calc_sampling_points(/*, ...*/)
-{
-    raise<LogicError>("not implemented yet");
-
-    // Xin, this either needs access to IBlobs in order to sample from scratch
-    // or it needs to take points from previously sampled clusters.
-}
 
 
 

@@ -137,11 +137,6 @@ namespace WireCell::Clus::Steiner {
         ///  Intermediate algorithm methods
         ///
 
-        /// Populate blob PCs with sampled points.  This was a free function in
-        /// WCP but we make it a method to make use of the Config.  NOTE: this
-        /// may be better replaced with a method that clones a cluster from an
-        /// existing, already sampled cluster.
-        void calc_sampling_points(/*, ...*/);
 
         vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, 
                                    bool disable_dead_mix_cell = true);
