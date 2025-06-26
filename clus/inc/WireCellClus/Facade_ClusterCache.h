@@ -55,6 +55,21 @@ namespace WireCell::Clus::Facade {
 
         // Wire plane IDs by blob (child node) index. Depends on the DEFAULT SCOPE.
         std::vector<WireCell::WirePlaneId> blob_wpids;
+
+        // Wire indices by point index (3 vectors for u,v,w)
+        std::vector<int> point_u_wire_indices;
+        std::vector<int> point_v_wire_indices; 
+        std::vector<int> point_w_wire_indices;
+        
+        // Charge values by point index (3 vectors for u,v,w)
+        std::vector<double> point_u_charges;
+        std::vector<double> point_v_charges;
+        std::vector<double> point_w_charges;
+        
+        // Charge uncertainties by point index (3 vectors for u,v,w) 
+        std::vector<double> point_u_charge_uncs;
+        std::vector<double> point_v_charge_uncs;
+        std::vector<double> point_w_charge_uncs;
     };
 
 }

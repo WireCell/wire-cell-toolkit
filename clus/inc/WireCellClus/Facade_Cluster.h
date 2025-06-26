@@ -187,6 +187,52 @@ namespace WireCell::Clus::Facade {
         // return WirePlaneId for an index ...
         WirePlaneId wire_plane_id(size_t point_index) const;
 
+        /// Get wire indices for a specific point index and plane
+        /// @param point_index Global point index in cluster
+        /// @param plane Plane index (0=U, 1=V, 2=W)
+        /// @return Wire index for the specified plane
+        int wire_index(size_t point_index, int plane) const;
+        
+        /// Get charge value for a specific point index and plane
+        /// @param point_index Global point index in cluster  
+        /// @param plane Plane index (0=U, 1=V, 2=W)
+        /// @return Charge value for the specified plane
+        double charge_value(size_t point_index, int plane) const;
+        
+        /// Get charge uncertainty for a specific point index and plane
+        /// @param point_index Global point index in cluster
+        /// @param plane Plane index (0=U, 1=V, 2=W) 
+        /// @return Charge uncertainty for the specified plane
+        double charge_uncertainty(size_t point_index, int plane) const;
+        
+        /// Check if wire is dead for a specific point index and plane
+        /// @param point_index Global point index in cluster
+        /// @param plane Plane index (0=U, 1=V, 2=W)
+        /// @param dead_threshold Uncertainty threshold for dead wire detection
+        /// @return True if wire is considered dead
+        bool is_wire_dead(size_t point_index, int plane, double dead_threshold = 1e10) const;
+
+         /// Calculate charge for a Wire-Cell point using prototype algorithm
+        /// @param point_index Global point index in cluster
+        /// @param charge_cut Minimum charge threshold (default: 0.0)
+        /// @param disable_dead_mix_cell Enable dead wire handling (default: false)  
+        /// @return Pair of (all_planes_good, calculated_charge)
+        std::pair<bool, double> calc_charge_wcp(
+            size_t point_index,
+            double charge_cut = 0.0,
+            bool disable_dead_mix_cell = false) const;
+
+        /// Convenience overload that takes a 3D point
+        /// @param point 3D point coordinates
+        /// @param charge_cut Minimum charge threshold (default: 0.0)
+        /// @param disable_dead_mix_cell Enable dead wire handling (default: false)
+        /// @return Pair of (all_planes_good, calculated_charge)
+        std::pair<bool, double> calc_charge_wcp(
+            const geo_point_t& point,
+            double charge_cut = 0.0,
+            bool disable_dead_mix_cell = false) const;    
+
+
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.
         using points_type = kd3d_t::points_type;
         // Return points in a scope in point order.  If no scope is given, use default_scope.

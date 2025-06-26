@@ -808,6 +808,178 @@ WirePlaneId Cluster::wire_plane_id(size_t point_index) const {
     return WirePlaneId(wpids[point_index]);
 }
 
+int Cluster::wire_index(size_t point_index, int plane) const {
+    auto& cache_ref = cache();
+    
+    switch(plane) {
+        case 0: {
+            if (cache_ref.point_u_wire_indices.empty()) {
+                cache_ref.point_u_wire_indices = points_property<int>("u_wire_index");
+            }
+            return cache_ref.point_u_wire_indices[point_index];
+        }
+        case 1: {
+            if (cache_ref.point_v_wire_indices.empty()) {
+                cache_ref.point_v_wire_indices = points_property<int>("v_wire_index");
+            }
+            return cache_ref.point_v_wire_indices[point_index];
+        }
+        case 2: {
+            if (cache_ref.point_w_wire_indices.empty()) {
+                cache_ref.point_w_wire_indices = points_property<int>("w_wire_index");
+            }
+            return cache_ref.point_w_wire_indices[point_index];
+        }
+        default: 
+            raise<ValueError>("Invalid plane index: %d (must be 0, 1, or 2)", plane);
+    }
+}
+
+double Cluster::charge_value(size_t point_index, int plane) const {
+    auto& cache_ref = cache();
+    
+    switch(plane) {
+        case 0: {
+            if (cache_ref.point_u_charges.empty()) {
+                cache_ref.point_u_charges = points_property<double>("u_charge_val");
+            }
+            return cache_ref.point_u_charges[point_index];
+        }
+        case 1: {
+            if (cache_ref.point_v_charges.empty()) {
+                cache_ref.point_v_charges = points_property<double>("v_charge_val");
+            }
+            return cache_ref.point_v_charges[point_index];
+        }
+        case 2: {
+            if (cache_ref.point_w_charges.empty()) {
+                cache_ref.point_w_charges = points_property<double>("w_charge_val");
+            }
+            return cache_ref.point_w_charges[point_index];
+        }
+        default:
+            raise<ValueError>("Invalid plane index: %d (must be 0, 1, or 2)", plane);
+    }
+}
+
+double Cluster::charge_uncertainty(size_t point_index, int plane) const {
+    auto& cache_ref = cache();
+    
+    switch(plane) {
+        case 0: {
+            if (cache_ref.point_u_charge_uncs.empty()) {
+                cache_ref.point_u_charge_uncs = points_property<double>("u_charge_unc");
+            }
+            return cache_ref.point_u_charge_uncs[point_index];
+        }
+        case 1: {
+            if (cache_ref.point_v_charge_uncs.empty()) {
+                cache_ref.point_v_charge_uncs = points_property<double>("v_charge_unc");
+            }
+            return cache_ref.point_v_charge_uncs[point_index];
+        }
+        case 2: {
+            if (cache_ref.point_w_charge_uncs.empty()) {
+                cache_ref.point_w_charge_uncs = points_property<double>("w_charge_unc");
+            }
+            return cache_ref.point_w_charge_uncs[point_index];
+        }
+        default:
+            raise<ValueError>("Invalid plane index: %d (must be 0, 1, or 2)", plane);
+    }
+}
+
+bool Cluster::is_wire_dead(size_t point_index, int plane, double dead_threshold) const {
+    return charge_uncertainty(point_index, plane) > dead_threshold;
+}
+
+std::pair<bool, double> Cluster::calc_charge_wcp(
+    size_t point_index,
+    double charge_cut,
+    bool disable_dead_mix_cell) const {
+    
+    const double dead_threshold = 1e10; // Same as PointTreeBuilding
+    
+    double charge = 0;
+    int ncharge = 0;
+    
+    // Get exact charges for u,v,w wires using cached data
+    double charge_u = charge_value(point_index, 0);
+    double charge_v = charge_value(point_index, 1);
+    double charge_w = charge_value(point_index, 2);
+    
+    // Check for dead wires
+    bool is_dead_u = is_wire_dead(point_index, 0, dead_threshold);
+    bool is_dead_v = is_wire_dead(point_index, 1, dead_threshold);
+    bool is_dead_w = is_wire_dead(point_index, 2, dead_threshold);
+    
+    bool flag_charge_u = false;
+    bool flag_charge_v = false;
+    bool flag_charge_w = false;
+
+    // Initial flag setting based on charge threshold
+    if (charge_u > charge_cut) flag_charge_u = true;
+    if (charge_v > charge_cut) flag_charge_v = true;
+    if (charge_w > charge_cut) flag_charge_w = true;
+    
+    if (disable_dead_mix_cell) {
+        // Add all charges first
+        charge += charge_u * charge_u; ncharge++;
+        charge += charge_v * charge_v; ncharge++;
+        charge += charge_w * charge_w; ncharge++;
+        
+        // Deal with bad planes - subtract dead wire contributions
+        if (is_dead_u) {
+            flag_charge_u = true;
+            charge -= charge_u * charge_u; ncharge--;
+        }
+        if (is_dead_v) {
+            flag_charge_v = true;
+            charge -= charge_v * charge_v; ncharge--;
+        }
+        if (is_dead_w) {
+            flag_charge_w = true;
+            charge -= charge_w * charge_w; ncharge--;
+        }
+    } else {
+        // Only use non-zero charges
+        if (charge_u == 0) flag_charge_u = true;
+        if (charge_v == 0) flag_charge_v = true;
+        if (charge_w == 0) flag_charge_w = true;
+
+        if (charge_u != 0) {
+            charge += charge_u * charge_u; ncharge++;
+        }
+        if (charge_v != 0) {
+            charge += charge_v * charge_v; ncharge++;
+        }
+        if (charge_w != 0) {
+            charge += charge_w * charge_w; ncharge++;
+        }
+    }
+    
+    // Require more than one plane to be good 
+    if (ncharge > 1) {
+        charge = sqrt(charge / ncharge);
+    } else {
+        charge = 0;
+    }
+    
+    return std::make_pair(flag_charge_u && flag_charge_v && flag_charge_w, charge);
+}
+
+// Convenience overload for 3D points
+std::pair<bool, double> Cluster::calc_charge_wcp(
+    const geo_point_t& point,
+    double charge_cut,
+    bool disable_dead_mix_cell) const {
+    
+    size_t point_index = get_closest_point_index(point);
+    return calc_charge_wcp(point_index, charge_cut, disable_dead_mix_cell);
+}
+
+
+
 int Cluster::npoints() const
 {
     auto& n = cache().npoints;
@@ -2449,6 +2621,8 @@ std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTrans
 
     return b2groupid;
 }
+
+
 
 
 // Local Variables:
