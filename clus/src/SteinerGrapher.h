@@ -143,9 +143,12 @@ namespace WireCell::Clus::Steiner {
         /// existing, already sampled cluster.
         void calc_sampling_points(/*, ...*/);
 
-        vertex_set find_peak_point_indices(bool disable_dead_mix_cell);
+        vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, 
+                                   bool disable_dead_mix_cell = true);
+
         blob_vertex_map form_cell_points_map();
         vertex_set find_steiner_terminals(bool disable_dead_mix_cell=true);
+
         void establish_same_blob_steiner_edges(graph_type& graph, 
                                                bool disable_dead_mix_cell=true, int flag=1);
     
