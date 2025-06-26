@@ -1,3 +1,4 @@
+#include "WireCellUtil/GraphTools.h"
 #include "WireCellClus/Graphs.h"
 #include "PAAL.h"
 
@@ -5,6 +6,7 @@
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Graphs;
+using WireCell::GraphTools::edge_range;
 
 Weighted::ShortestPaths::ShortestPaths(size_t source, const std::vector<size_t> predecessors)
     : m_source(source)
@@ -49,6 +51,82 @@ std::vector<Weighted::vertex_type> Weighted::Voronoi::path(Weighted::vertex_type
         vtx = boost::source(last_edge[vtx], graph);
     }
     return ret;
+}
+
+Weighted::vertex_pair Weighted::make_vertex_pair(Weighted::vertex_type a, Weighted::vertex_type b)
+{
+    if (a<b) {
+        return std::make_pair(a,b);
+    }
+    return std::make_pair(b,a);
+}
+
+
+Weighted::graph_type Weighted::Voronoi::steiner_graph(const graph_type& graph) const
+{
+    struct TerminalPath {
+        double path_distance;
+        vertex_pair seed_vp;
+    };
+    auto edge_weight = get(boost::edge_weight, graph);
+    std::map<vertex_pair, double> fine_distances;
+
+    // Find the shortest path between terminals along graph paths.
+    std::map<vertex_pair, TerminalPath> shortest_paths;
+    for (auto fine_edge : edge_range(graph)) {
+        const vertex_type fine_tail = boost::source(fine_edge, graph);
+        const vertex_type fine_head = boost::target(fine_edge, graph);
+
+        const vertex_pair fine_vp = make_vertex_pair(fine_tail, fine_head);
+
+        const double fine_distance = edge_weight[fine_edge];
+        fine_distances[fine_vp] = fine_distance; // for later by vertex pair
+
+        const vertex_type term_tail = terminal[fine_tail];
+        const vertex_type term_head = terminal[fine_head];
+        if (term_tail == term_head) {
+            continue;
+        }
+
+        const vertex_pair term_vp = make_vertex_pair(term_tail, term_head);
+        const double term_distance = distance[fine_tail] + fine_distance + distance[fine_head];
+
+        auto it = shortest_paths.find(term_vp);
+        if (it == shortest_paths.end()) {
+            shortest_paths.emplace(term_vp, TerminalPath{term_distance, fine_vp});
+            continue;
+        }
+        if (it->second.path_distance <= term_distance) {
+            continue;
+        }
+        it->second.seed_vp = fine_vp;
+        it->second.path_distance = term_distance;
+    }
+
+    // Find unique edges on all voronoi paths from the vertices of the seed edge
+    // to each of their nearest terminals.
+    std::set<vertex_pair> fine_edges;
+    for (const auto& [term_vp, term_path] : shortest_paths) {
+        const auto& vp = term_path.seed_vp;
+        fine_edges.insert(vp);
+        auto [tail, head] = vp;
+        for (auto vtx : {tail, head}) {
+            auto p = path(vtx, graph);
+            for (size_t step = 1; step<p.size(); ++step) {
+                fine_edges.insert(make_vertex_pair(vtx, p[step]));
+                vtx = p[step];
+            }
+        }
+    }
+
+    // Bundle results in graph and return
+    graph_type sg(boost::num_vertices(graph));
+    for (const auto& vp : fine_edges) {
+        double distance = fine_distances[vp];
+        auto [tail, head] = vp;
+        boost::add_edge(tail, head, distance, sg);
+    }
+    return sg;
 }
 
 Weighted::Voronoi Weighted::voronoi(const Weighted::graph_type& graph,

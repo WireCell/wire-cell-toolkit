@@ -5,6 +5,7 @@
 #include "WireCellUtil/Logging.h"
 
 #include <sstream>
+#include <fstream>
 
 using namespace WireCell::Clus::Graphs::Weighted;
 using WireCell::GraphTools::edge_range;
@@ -74,11 +75,20 @@ TEST_CASE("clus graphs")
     CHECK (boost::num_edges(filtered_without_e0) == 2);
 }
 
+void dump_graph(const std::string& filename, const graph_type& graph)
+{
+    debug("dumping graph to graphviz dot file: {}", filename);
+    std::ofstream fp(filename);
+    boost::write_graphviz(fp, graph,
+                          boost::make_label_writer(boost::get(boost::vertex_index, graph)),
+                          boost::make_label_writer(boost::get(boost::edge_weight, graph)));
+}
+
 TEST_CASE("clus graphs voronoi")
 {
     graph_type graph(10);
     boost::add_edge(0, 1, 1.0, graph);
-    boost::add_edge(0, 2, 1.0, graph);
+    boost::add_edge(0, 2, 2.0, graph);
     boost::add_edge(1, 2, 1.0, graph);
     boost::add_edge(0, 3, 0.1, graph);
     boost::add_edge(1, 4, 0.1, graph);
@@ -88,6 +98,8 @@ TEST_CASE("clus graphs voronoi")
     boost::add_edge(7, 8, 0.2, graph);
     boost::add_edge(8, 9, 0.2, graph); // 8-2 is 0.7
     boost::add_edge(9, 0, 0.8, graph); // 9-2 is 0.9
+    dump_graph("doctest-graphs-voronoi-graph.dot", graph);
+
     
     std::vector<vertex_type> terminals = {0,1,2};
     auto vor = voronoi(graph, terminals);
@@ -106,10 +118,7 @@ TEST_CASE("clus graphs voronoi")
               ss.str()
             );
     }
-    std::stringstream dotss;
-    boost::write_graphviz(dotss, graph,
-                          boost::make_label_writer(boost::get(boost::vertex_index, graph)),
-                          boost::make_label_writer(boost::get(boost::edge_weight, graph)));
-    
-    debug("Copy-past next lines to graph.dot and run dot -Tpng -o graph.png graph.dot\n{}", dotss.str());
+    auto sg = vor.steiner_graph(graph);
+    dump_graph("doctest-graphs-steiner-graph.dot", sg);
+
 }

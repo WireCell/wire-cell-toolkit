@@ -31,6 +31,15 @@ namespace WireCell::Clus::Graphs {
         using vertex_type = boost::graph_traits<Graph>::vertex_descriptor;
         using edge_type = boost::graph_traits<Graph>::edge_descriptor;
 
+        // A quasi-edge type that simply records a pair of vertices.  Unlike
+        // edge_type, the edge_pair_type is not dependent on the graph.  Use
+        // make_vertex_pair() to assure an order.
+        using vertex_pair = std::pair<vertex_type, vertex_type>;
+
+        /// Return a vertex pair with the smaller of {a,b} first.
+        vertex_pair make_vertex_pair(vertex_type a, vertex_type b);
+
+
         // A set of unique vertices or edges;
         using vertex_set = std::set<vertex_type>;
         using edge_set = std::set<edge_type>;
@@ -45,32 +54,45 @@ namespace WireCell::Clus::Graphs {
         /// "terminal" vertices.
         struct Voronoi {
 
-            // A "map" from each graph vertex (index) to its nearest "terminal"
-            // vertex.  terminal[v] == v for v in the set of terminal vertices.
+            /// A "map" from each graph vertex (index) to its nearest "terminal"
+            /// vertex.  terminal[v] == v for v in the set of terminal vertices.
             std::vector<vertex_type> terminal;
 
-            // A "map" from each graph vertex (index) to the distance along the
-            // path to its nearest "terminal".  distance[v] == 0.0 for v in the
-            // set of terminal vertices.
+            /// A "map" from each graph vertex (index) to the distance along the
+            /// path to its nearest "terminal".  distance[v] == 0.0 for v in the
+            /// set of terminal vertices.
             std::vector<edge_weight_type> distance;
 
-            // A "map" from each graph vertex (index) to the edge into that
-            // vertex from the vertex neighbor (the edge "source") that is
-            // directly upstream in the walk from closest terminal to the
-            // original vertex.  If the source is the nearest terminal for the
-            // original vertex then the backwards walk is complete.  Otherwise,
-            // the last_edge for the neighbor provides the next neighbor, etc.
-            // Note, the value last_edge[v] for any v in the set of terminals is
-            // not defined.  (You probably get 0's for both vertices).
+            /// A "map" from each graph vertex (index) to the edge into that
+            /// vertex from the vertex neighbor (the edge "source") that is
+            /// directly upstream in the walk from closest terminal to the
+            /// original vertex.  If the source is the nearest terminal for the
+            /// original vertex then the backwards walk is complete.  Otherwise,
+            /// the last_edge for the neighbor provides the next neighbor, etc.
+            /// Note, the value last_edge[v] for any v in the set of terminals is
+            /// not defined.  (You probably get 0's for both vertices).
             std::vector<edge_type> last_edge;
 
-            // Return the path of vertices FROM a given vertex TO its nearest
-            // terminal.  This simply walks last_edge as described above.  The
-            // result is undefined if the graph other than the one used to make
-            // this Voronoi struct.
+            
+            //
+            // fixme: maybe these methods are better moved as free functions.
+            // Note, "graph" must be same as what was used to create this
+            // struct.
+            //
+
+            /// Return the path of vertices FROM a given vertex TO its nearest
+            /// terminal.  This simply walks last_edge as described above.  The
+            /// result is undefined if the graph other than the one used to make
+            /// this Voronoi struct.
             std::vector<vertex_type> path(vertex_type vtx, const graph_type& graph) const;
 
+            /// Return a Steiner graph (not tree).  This graph has all the
+            /// vertices of the original graph but only the edges from the
+            /// original graph which are on the shortest path between terminal
+            /// vertices.  
+            graph_type steiner_graph(const graph_type& graph) const;
         };
+
 
         Voronoi voronoi(const graph_type& graph, const std::vector<vertex_type>& terminals);
 
