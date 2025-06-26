@@ -2599,7 +2599,46 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
 }
 
 
+// These methods implement the cache management functionality
 
+void Facade::Cluster::clear_graph_algorithms_cache(const std::string& graph_name)
+{
+    auto it = m_galgs.find(graph_name);
+    if (it != m_galgs.end()) {
+        it->second.clear_cache();
+        auto log = Log::logger("clus");
+        log->debug("Cleared cache for GraphAlgorithms '{}'", graph_name);
+    }
+}
+
+void Facade::Cluster::remove_graph_algorithms(const std::string& graph_name)
+{
+    auto it = m_galgs.find(graph_name);
+    if (it != m_galgs.end()) {
+        m_galgs.erase(it);
+        auto log = Log::logger("clus");
+        log->debug("Removed GraphAlgorithms '{}'", graph_name);
+    }
+}
+
+void Facade::Cluster::clear_all_graph_algorithms_caches()
+{
+    for (auto& [name, ga] : m_galgs) {
+        ga.clear_cache();
+    }
+    auto log = Log::logger("clus");
+    log->debug("Cleared all GraphAlgorithms caches");
+}
+
+std::vector<std::string> Facade::Cluster::get_cached_graph_algorithms() const
+{
+    std::vector<std::string> names;
+    names.reserve(m_galgs.size());
+    for (const auto& [name, ga] : m_galgs) {
+        names.push_back(name);
+    }
+    return names;
+}
 
 
 // ne' examine_graph

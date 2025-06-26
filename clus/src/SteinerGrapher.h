@@ -149,9 +149,18 @@ namespace WireCell::Clus::Steiner {
         blob_vertex_map form_cell_points_map();
         vertex_set find_steiner_terminals(bool disable_dead_mix_cell=true);
 
-        void establish_same_blob_steiner_edges(graph_type& graph, 
+        /// Establish edges between points in the same blob (mcell) with weighted connectivity
+        /// This modifies the given graph and tracks added edges for later removal
+        /// Uses find_steiner_terminals() to determine edge weights:
+        /// - Both terminals: distance * 0.8
+        /// - One terminal: distance * 0.9
+        /// - Neither terminal: no edge added
+        void establish_same_blob_steiner_edges(const std::string& graph_name, 
                                                bool disable_dead_mix_cell=true, int flag=1);
     
+         /// Remove previously added same-blob Steiner edges
+        void remove_same_blob_steiner_edges(const std::string& graph_name);
+
         graph_type create_steiner_tree(/*what type for point_cloud_steiner?*/);
 
 
@@ -168,6 +177,24 @@ namespace WireCell::Clus::Steiner {
 
 
         // XIN: add any more data and methods you need here.  
+         /// Track edges added by each graph modification operation
+        /// Maps graph name to set of edges added to that graph
+        std::map<std::string, edge_set> m_added_edges_by_graph;
+
+        /// Helper to invalidate GraphAlgorithms cache for a specific graph
+        void invalidate_graph_algorithms_cache(const std::string& graph_name);
+
+        /// Helper to store added edges for later removal
+        void store_added_edges(const std::string& graph_name, const edge_set& edges);
+
+        /// Helper to check if two vertices (points) belong to the same blob
+        bool same_blob(vertex_type v1, vertex_type v2) const;
+
+        /// Helper to calculate distance between two vertices
+        double calculate_distance(vertex_type v1, vertex_type v2) const;
+
+        /// Helper to get blob for a given vertex (point index)
+        const Facade::Blob* get_blob_for_vertex(vertex_type vertex) const;
 
     };
 
