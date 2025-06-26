@@ -38,17 +38,19 @@ Weighted::ShortestPaths::path(size_t destination) const
     return path;
 }
 
-std::vector<Weighted::vertex_type> Weighted::Voronoi::path(Weighted::vertex_type vtx,
-                                                           const Weighted::graph_type& graph) const
+std::vector<Weighted::vertex_type> Weighted::terminal_path(
+    const Weighted::graph_type& graph,
+    const Weighted::Voronoi& vor,
+    Weighted::vertex_type vtx)
 {
     std::vector<Weighted::vertex_type> ret;
-    const vertex_type myterm = terminal[vtx];
+    const vertex_type myterm = vor.terminal[vtx];
     while (true) {
         ret.push_back(vtx);
         if (myterm == vtx) {
             break;
         }
-        vtx = boost::source(last_edge[vtx], graph);
+        vtx = boost::source(vor.last_edge[vtx], graph);
     }
     return ret;
 }
@@ -62,7 +64,7 @@ Weighted::vertex_pair Weighted::make_vertex_pair(Weighted::vertex_type a, Weight
 }
 
 
-Weighted::graph_type Weighted::Voronoi::steiner_graph(const graph_type& graph) const
+Weighted::graph_type Weighted::steiner_graph(const graph_type& graph, const Voronoi& vor)
 {
     struct TerminalPath {
         double path_distance;
@@ -82,14 +84,14 @@ Weighted::graph_type Weighted::Voronoi::steiner_graph(const graph_type& graph) c
         const double fine_distance = edge_weight[fine_edge];
         fine_distances[fine_vp] = fine_distance; // for later by vertex pair
 
-        const vertex_type term_tail = terminal[fine_tail];
-        const vertex_type term_head = terminal[fine_head];
+        const vertex_type term_tail = vor.terminal[fine_tail];
+        const vertex_type term_head = vor.terminal[fine_head];
         if (term_tail == term_head) {
             continue;
         }
 
         const vertex_pair term_vp = make_vertex_pair(term_tail, term_head);
-        const double term_distance = distance[fine_tail] + fine_distance + distance[fine_head];
+        const double term_distance = vor.distance[fine_tail] + fine_distance + vor.distance[fine_head];
 
         auto it = shortest_paths.find(term_vp);
         if (it == shortest_paths.end()) {
@@ -111,7 +113,7 @@ Weighted::graph_type Weighted::Voronoi::steiner_graph(const graph_type& graph) c
         fine_edges.insert(vp);
         auto [tail, head] = vp;
         for (auto vtx : {tail, head}) {
-            auto p = path(vtx, graph);
+            auto p = terminal_path(graph, vor, vtx);
             for (size_t step = 1; step<p.size(); ++step) {
                 fine_edges.insert(make_vertex_pair(vtx, p[step]));
                 vtx = p[step];

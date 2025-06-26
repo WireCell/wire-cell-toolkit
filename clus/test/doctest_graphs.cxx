@@ -104,7 +104,7 @@ TEST_CASE("clus graphs voronoi")
     std::vector<vertex_type> terminals = {0,1,2};
     auto vor = voronoi(graph, terminals);
     for (auto vtx : vertex_range(graph)) {
-        auto path = vor.path(vtx, graph);
+        auto path = terminal_path(graph, vor, vtx);
         std::stringstream ss;
         for (auto p : path) {
             ss << " " << p;
@@ -118,7 +118,7 @@ TEST_CASE("clus graphs voronoi")
               ss.str()
             );
     }
-    auto sg = vor.steiner_graph(graph);
+    auto sg = steiner_graph(graph, vor);
     dump_graph("doctest-graphs-steiner-graph.dot", sg);
 
 }
