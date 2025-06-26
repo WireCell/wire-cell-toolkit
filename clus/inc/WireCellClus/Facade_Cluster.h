@@ -451,6 +451,8 @@ namespace WireCell::Clus::Facade {
         const WireCell::Clus::Graphs::Weighted::GraphAlgorithms& 
         graph_algorithms(const std::string& flavor = "basic") const;
 
+
+
         /// Get and construct if needed a GA for a graph of a known flavor and
         /// that uses detector information in its construction.  Known flavors
         /// include:
@@ -466,6 +468,21 @@ namespace WireCell::Clus::Facade {
         graph_algorithms(const std::string& flavor,
                          IDetectorVolumes::pointer dv, 
                          IPCTransformSet::pointer pcts) const;
+
+
+        /// Graph algorithm cache management methods for Steiner operations
+
+        /// Clear the cache for a specific GraphAlgorithms instance
+        void clear_graph_algorithms_cache(const std::string& graph_name);
+
+        /// Remove a GraphAlgorithms instance entirely (will be recreated on next access)
+        void remove_graph_algorithms(const std::string& graph_name);
+
+        /// Clear all GraphAlgorithms caches
+        void clear_all_graph_algorithms_caches();
+
+        /// Get information about cached GraphAlgorithms
+        std::vector<std::string> get_cached_graph_algorithms() const;
 
 
         // Return 3D points for given indices in the 3d PC.

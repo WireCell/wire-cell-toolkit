@@ -22,13 +22,6 @@ void Steiner::Grapher::calc_sampling_points(/*, ...*/)
 
 
 
-
-void Steiner::Grapher::establish_same_blob_steiner_edges(graph_type& graph, bool disable_dead_mix_cell, int flag)
-{
-    raise<LogicError>("not implemented yet");
-
-}
-
 Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(/*what type for point_cloud_steiner?*/)
 {
     Steiner::Grapher::graph_type graph_steiner;
@@ -268,4 +261,188 @@ Steiner::Grapher::blob_vertex_map Steiner::Grapher::form_cell_points_map()
     }
     
     return cell_points;
+}
+
+void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& graph_name, 
+                                                        bool disable_dead_mix_cell, int flag)
+{
+    if (!m_cluster.has_graph(graph_name)) {
+        log->error("Graph '{}' does not exist in cluster", graph_name);
+        return;
+    }
+
+    auto& graph = m_cluster.get_graph(graph_name);
+    edge_set added_edges;
+
+    // Step 1: Find Steiner terminals using the existing implementation
+    vertex_set steiner_terminals = find_steiner_terminals(disable_dead_mix_cell);
+    
+    log->debug("Found {} Steiner terminals for same-blob edge establishment", steiner_terminals.size());
+
+    // Step 2: Get the blob-to-points mapping (equivalent to map_mcell_all_indices in prototype)
+    auto cell_points_map = form_cell_points_map();
+    
+    if (cell_points_map.empty()) {
+        log->warn("No blob-to-points mapping available for Steiner edge establishment");
+        return;
+    }
+
+    log->debug("Processing {} blobs for same-blob edges", cell_points_map.size());
+
+    // Step 3: For each blob, add edges between all pairs of points (following prototype logic)
+    for (const auto& [blob, point_indices] : cell_points_map) {
+        if (point_indices.size() < 2) {
+            continue; // Need at least 2 points to make edges
+        }
+
+        // // Skip dead cells if requested
+        // if (disable_dead_mix_cell && blob->is_dead()) {
+        //     continue;
+        // }
+
+        log->debug("Processing blob with {} points", point_indices.size());
+
+        // Convert set to vector for easier iteration
+        std::vector<vertex_type> points_vec(point_indices.begin(), point_indices.end());
+
+        // Add edges between all pairs of points in the same blob (following prototype)
+        for (size_t i = 0; i < points_vec.size(); ++i) {
+            vertex_type index1 = points_vec[i];
+            bool flag_index1 = (steiner_terminals.find(index1) != steiner_terminals.end());
+            
+            for (size_t j = i + 1; j < points_vec.size(); ++j) {
+                vertex_type index2 = points_vec[j];
+                bool flag_index2 = (steiner_terminals.find(index2) != steiner_terminals.end());
+
+                // Calculate base distance between points
+                double distance = calculate_distance(index1, index2);
+                
+                // Determine edge weight based on terminal status (following prototype logic)
+                double edge_weight = 0.0;
+                bool add_edge = false;
+                
+                if (flag_index1 && flag_index2) {
+                    // Both are steiner terminals: weight = distance * 0.8
+                    edge_weight = distance * 0.8;
+                    add_edge = true;
+                } else if (flag_index1 || flag_index2) {
+                    // One is steiner terminal: weight = distance * 0.9  
+                    edge_weight = distance * 0.9;
+                    add_edge = true;
+                }
+                // If neither is a steiner terminal, don't add edge (add_edge stays false)
+
+                if (add_edge) {
+                    // Add edge with calculated weight
+                    auto [edge, success] = boost::add_edge(index1, index2, edge_weight, graph);
+                    if (success) {
+                        added_edges.insert(edge);
+                        log->debug("Added same-blob edge: {} -- {} (distance: {:.3f} cm, weight: {:.3f}, terminals: {}/{})", 
+                                  index1, index2, distance / units::cm, edge_weight / units::cm,
+                                  flag_index1 ? "T" : "N", flag_index2 ? "T" : "N");
+                    }
+                }
+            }
+        }
+    }
+
+    // Store the added edges for later removal
+    store_added_edges(graph_name, added_edges);
+
+    // Invalidate any cached GraphAlgorithms that use this graph
+    invalidate_graph_algorithms_cache(graph_name);
+
+    log->info("Added {} same-blob edges to graph '{}' from {} total points ({} steiner terminals)", 
+             added_edges.size(), graph_name, 
+             std::accumulate(cell_points_map.begin(), cell_points_map.end(), 0,
+                           [](int sum, const auto& pair) { return sum + pair.second.size(); }),
+             steiner_terminals.size());
+}
+
+
+void Steiner::Grapher::remove_same_blob_steiner_edges(const std::string& graph_name)
+{
+    if (!m_cluster.has_graph(graph_name)) {
+        log->warn("Graph '{}' does not exist, cannot remove edges", graph_name);
+        return;
+    }
+
+    auto it = m_added_edges_by_graph.find(graph_name);
+    if (it == m_added_edges_by_graph.end() || it->second.empty()) {
+        log->debug("No edges to remove for graph '{}'", graph_name);
+        return;
+    }
+
+    auto& graph = m_cluster.get_graph(graph_name);
+    const auto& edges_to_remove = it->second;
+    size_t removed_count = 0;
+
+    // Remove the edges
+    for (const auto& edge : edges_to_remove) {
+        boost::remove_edge(edge, graph);
+        ++removed_count;
+    }
+
+    // Clear the tracking for this graph
+    it->second.clear();
+
+    // Invalidate any cached GraphAlgorithms that use this graph
+    invalidate_graph_algorithms_cache(graph_name);
+
+    log->info("Removed {} same-blob Steiner edges from graph '{}'", removed_count, graph_name);
+}
+
+void Steiner::Grapher::invalidate_graph_algorithms_cache(const std::string& graph_name)
+{
+    // Use the new public method we'll add to Cluster
+    m_cluster.clear_graph_algorithms_cache(graph_name);
+}
+
+void Steiner::Grapher::store_added_edges(const std::string& graph_name, const edge_set& edges)
+{
+    // Add to existing set if graph already has tracked edges
+    auto& tracked_edges = m_added_edges_by_graph[graph_name];
+    tracked_edges.insert(edges.begin(), edges.end());
+}
+
+bool Steiner::Grapher::same_blob(vertex_type v1, vertex_type v2) const
+{
+    const auto* blob1 = get_blob_for_vertex(v1);
+    const auto* blob2 = get_blob_for_vertex(v2);
+    return (blob1 && blob2 && blob1 == blob2);
+}
+
+double Steiner::Grapher::calculate_distance(vertex_type v1, vertex_type v2) const
+{
+     // Use cluster's point3d method to get 3D coordinates  
+    // This is the standard way to access point coordinates in the toolkit
+    auto point1 = m_cluster.point3d(v1);
+    auto point2 = m_cluster.point3d(v2);
+    
+    // Calculate Euclidean distance
+    double dx = point2.x() - point1.x();
+    double dy = point2.y() - point1.y();
+    double dz = point2.z() - point1.z();
+    
+    return std::sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+const Facade::Blob* Steiner::Grapher::get_blob_for_vertex(vertex_type vertex) const
+{
+    const auto& sv = m_cluster.sv3d();
+    const auto& nodes = sv.nodes();
+    const auto& skd = sv.kd();
+    
+    if (vertex >= skd.npoints()) {
+        return nullptr;
+    }
+    
+    const auto& majs = skd.major_indices();
+    size_t blob_idx = majs[vertex];
+    
+    if (blob_idx >= nodes.size()) {
+        return nullptr;
+    }
+    
+    return nodes[blob_idx]->value.facade<Blob>();
 }
