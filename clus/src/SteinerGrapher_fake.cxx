@@ -139,6 +139,7 @@ Steiner::Grapher::graph_type Steiner::Grapher::fake_steiner_graph()
         std::vector<vertex_type> terminals = {1,2};
 
         auto vor = voronoi(graph, terminals);
+        auto sg = steiner_graph(graph, vor);
     }
 
 
