@@ -156,7 +156,14 @@ namespace WireCell::Clus::Steiner {
          /// Remove previously added same-blob Steiner edges
         void remove_same_blob_steiner_edges(const std::string& graph_name);
 
-        graph_type create_steiner_tree(/*what type for point_cloud_steiner?*/);
+        /// Create Steiner tree with optional reference cluster and path constraints
+        /// This is the main entry point equivalent to prototype's Create_steiner_tree
+        graph_type create_steiner_tree(
+            const Facade::Cluster* reference_cluster = nullptr,
+            const std::vector<size_t>& path_point_indices = {},
+            bool disable_dead_mix_cell = true,
+            const std::string& steiner_pc_name = "steiner_subset"
+        );
 
 
 
@@ -191,6 +198,62 @@ namespace WireCell::Clus::Steiner {
         /// Helper to get blob for a given vertex (point index)
         const Facade::Blob* get_blob_for_vertex(vertex_type vertex) const;
 
+
+        // additional helper functions 
+
+        /// Filter steiner terminals based on spatial relationship with reference cluster
+        vertex_set filter_by_reference_cluster(
+            const vertex_set& terminals,
+            const Facade::Cluster* reference_cluster
+        ) const;
+
+        /// Filter steiner terminals based on path constraints
+        vertex_set filter_by_path_constraints(
+            const vertex_set& terminals,
+            const std::vector<size_t>& path_point_indices
+        ) const;
+
+        /// Get extreme points considering reference cluster constraints
+        vertex_set get_extreme_points_for_reference(
+            const Facade::Cluster* reference_cluster
+        ) const;
+
+        /// Create interpolated point cloud from path indices
+        PointCloud::Dataset create_path_point_cloud(
+            const std::vector<size_t>& path_indices
+        ) const;
+
+        /// Create subset point cloud containing only steiner points
+        PointCloud::Dataset create_steiner_subset_pc(
+            const vertex_set& steiner_indices
+        ) const;
+
+        /// Check if a point is spatially related to reference cluster's time-blob mapping
+        bool is_point_spatially_related_to_reference(
+            size_t point_idx,
+            const Facade::Cluster::time_blob_map_t& ref_time_blob_map
+        ) const;
+
+        /// Calculate closest distance from point to path point cloud
+        double calculate_closest_distance_3d(
+            const Point& point,
+            const PointCloud::Dataset& path_pc
+        ) const;
+
+        /// Calculate closest 2D distances (u,v,w projections) from point to path
+        std::array<double, 3> calculate_closest_distances_2d(
+            const Point& point,
+            const PointCloud::Dataset& path_pc
+        ) const;
+
+        /// Convert vector of points to PointCloud Dataset
+        PointCloud::Dataset points_to_dataset(const std::vector<Point>& points) const;
+
+
+        // temporary ...
+        bool is_point_near_blob(const Point& point, const Facade::Blob* blob) const;
+
+        size_t find_closest_vertex_to_point(const Point& point) const;
     };
 
 

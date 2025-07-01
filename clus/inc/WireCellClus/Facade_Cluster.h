@@ -571,6 +571,15 @@ namespace WireCell::Clus::Facade {
         // Return a flash.  If there is none, it will hold default values.
         Flash get_flash() const;
 
+        /// Helper function to check if a point is spatially related to a reference cluster using time_blob_map
+        /// Implements the same filtering logic as prototype's old_time_mcells_map checking
+        /// @param point_index Index of point in current cluster
+        /// @param ref_time_blob_map Reference cluster's time-indexed blob map
+        /// @return True if point's wire indices fall within reference cluster's spatial regions
+        bool is_point_spatially_related_to_time_blobs(
+            size_t point_index, 
+            const time_blob_map_t& ref_time_blob_map) const;
+
        private:
 
         // default scope for all points with raw x,y,z as coordinates
@@ -589,14 +598,7 @@ namespace WireCell::Clus::Facade {
         // held in their own cache in the Mixins::Graphs base.
         mutable std::map<std::string, WireCell::Clus::Graphs::Weighted::GraphAlgorithms> m_galgs;
 
-        /// Helper function to check if a point is spatially related to a reference cluster using time_blob_map
-        /// Implements the same filtering logic as prototype's old_time_mcells_map checking
-        /// @param point_index Index of point in current cluster
-        /// @param ref_time_blob_map Reference cluster's time-indexed blob map
-        /// @return True if point's wire indices fall within reference cluster's spatial regions
-        bool is_point_spatially_related_to_time_blobs(
-            size_t point_index, 
-            const time_blob_map_t& ref_time_blob_map) const;
+        
 
         /// Helper function to check wire range overlap between a point and a reference blob
         /// @param point_index Index of point in current cluster
