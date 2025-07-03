@@ -157,6 +157,24 @@ void Cluster::from(const Cluster& other)
 {
     this->default_scope_from(other);
     this->flags_from(other);
+    
+    // Copy scalar data from cluster_scalar point cloud
+    const auto& other_lpcs = other.value().local_pcs();
+    auto it = other_lpcs.find("cluster_scalar");
+    if (it != other_lpcs.end()) {
+        const auto& other_scalar_pc = it->second;
+        auto& this_lpcs = this->value().local_pcs();
+        auto& this_scalar_pc = this_lpcs["cluster_scalar"];
+        
+        // Copy all arrays from the other cluster's scalar data
+        for (const auto& key : other_scalar_pc.keys()) {
+            auto arr = other_scalar_pc.get(key);
+            auto arr1 = this_scalar_pc.get(key);
+            if (arr && !arr1) {
+                this_scalar_pc.add(key, *arr);
+            }
+        }
+    }
 }
 
 

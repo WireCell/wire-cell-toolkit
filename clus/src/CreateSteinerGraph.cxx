@@ -81,14 +81,15 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
                 // auto scope_transform = cluster->get_scope_transform(scope);
                 // // // origi_cluster still have the original main cluster ... 
                 // // std::cout << "Start: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
-                // auto splits = grouping.separate(cluster, cc_vec);
+                auto splits = grouping.separate(cluster, cc_vec);
 
-                // // Apply the scope filter settings to all new clusters
-                // for (auto& [id, new_cluster] : splits) {
-                //     new_cluster->set_scope_filter(scope, true);
-                //     new_cluster->set_default_scope(scope);
-                //     new_cluster->set_scope_transform(scope,scope_transform);
-                // }
+                // Apply the scope filter settings to all new clusters
+                for (auto& [id, new_cluster] : splits) {
+                    std::cout << "Xin: " << new_cluster->ident() << " " << new_cluster->kd_blobs().size() << " " << new_cluster->nchildren() << " " << id << std::endl;
+                    //     new_cluster->set_scope_filter(scope, true);
+                    //     new_cluster->set_default_scope(scope);
+                    //     new_cluster->set_scope_transform(scope,scope_transform);
+                }
 
             }
                       
