@@ -168,20 +168,36 @@ namespace WireCell::Root {
 
             virtual const std::vector<int>& cluster_ids() const
             {
+                // load the parent cluster_ids ...
                 return *parent_cluster_id_vec;
-                // return *cluster_id_vec;
             }
+
+            const std::vector<int>& parent_cluster_ids() const
+            {
+                return *parent_cluster_id_vec;  // Access parent/main cluster IDs
+            }
+
+            const std::vector<int>& individual_cluster_ids() const
+            {
+                return *cluster_id_vec;  // Access individual cluster IDs
+            }
+
 
             void set_addresses(TTree& tree) {
                 // tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
                 // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
                 // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
                 // not directly used in T_match tree
-                if (tree.GetBranch("parent_cluster_id"))
-                    tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec); 
-                else
-                    tree.SetBranchAddress("cluster_id", &parent_cluster_id_vec); 
                 Blob::set_addresses(tree);
+
+                if (tree.GetBranch("parent_cluster_id")) {
+                    tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec);
+                } else {
+                    // Fallback: if no parent_cluster_id branch, copy cluster_id to parent_cluster_id
+                    // This maintains backward compatibility
+                    parent_cluster_id_vec = cluster_id_vec;
+                }
+
                 tree.SetBranchAddress("q", &q_vec);
                 tree.SetBranchAddress("time_slice", &time_slice_vec);
             }

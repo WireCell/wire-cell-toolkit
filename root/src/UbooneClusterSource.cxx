@@ -231,6 +231,8 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         if (trees.is_live()) {
 
             auto pcs = Aux::sample_live(m_sampler, iblob, m_angles, tick, bind);
+
+            
             /// DO NOT EXTEND FURTHER! see #426, #430
 
             if (pcs.empty()) {
@@ -248,6 +250,40 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
     }
     log->debug("sampled {} points over {} blobs", n3dpoints_total, niblobs);
     
+    // Process individual cluster IDs for live data
+    if (trees.is_live()) {
+        const auto& individual_cluster_ids = trees.live.individual_cluster_ids();
+        
+        // Create isolated arrays for each cluster
+        for (const auto& [cid, cnode] : cnodes) {
+            auto& lpc = cnode->value.local_pcs();
+            auto& pc = lpc["perblob"];
+            
+            std::vector<int> cluster_cc2;
+            
+            // Find blobs belonging to this cluster and assign group IDs
+            for (size_t bind = 0; bind < niblobs; ++bind) {
+                const int index = iblobs[bind]->ident();
+                const int blob_cluster_id = blob_cluster_ids[index];
+                
+                if (blob_cluster_id == cid) {
+                    const int individual_cluster_id = individual_cluster_ids[index];
+                    
+                    if (individual_cluster_id == cid) {
+                        cluster_cc2.push_back(-1);  // Main cluster
+                    } else {
+                        cluster_cc2.push_back(individual_cluster_id);  // Sub-cluster
+                    }
+                }
+            }
+            
+            // Add the isolated array to the cluster's PCTree
+            if (!cluster_cc2.empty()) {
+                PointCloud::Array::shape_t shape = {cluster_cc2.size()};
+                pc.add("isolated", PointCloud::Array(cluster_cc2, shape, false));
+            }
+        }
+    }
 
     size_t nmatch=0;
     if (trees.is_live()) { 
