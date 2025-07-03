@@ -83,7 +83,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 
          // Apply the scope filter settings to all new clusters
         for (auto& [id, new_cluster] : splits) {
-                // Store the split/group ID as a scalar
+            // Store the split/group ID as a scalar
             new_cluster->set_scalar<int>("split_id", id);
             // Optionally also store the original parent's ident
             new_cluster->set_scalar<int>("parent_ident", cluster->ident());
