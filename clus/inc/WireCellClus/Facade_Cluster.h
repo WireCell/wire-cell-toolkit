@@ -221,8 +221,8 @@ namespace WireCell::Clus::Facade {
         /// @return Pair of (all_planes_good, calculated_charge)
         std::pair<bool, double> calc_charge_wcp(
             size_t point_index,
-            double charge_cut = 0.0,
-            bool disable_dead_mix_cell = false) const;
+            double charge_cut = 4000.0,
+            bool disable_dead_mix_cell = true) const;
 
         /// Convenience overload that takes a 3D point
         /// @param point 3D point coordinates
@@ -231,8 +231,8 @@ namespace WireCell::Clus::Facade {
         /// @return Pair of (all_planes_good, calculated_charge)
         std::pair<bool, double> calc_charge_wcp(
             const geo_point_t& point,
-            double charge_cut = 0.0,
-            bool disable_dead_mix_cell = false) const;    
+            double charge_cut = 4000.0,
+            bool disable_dead_mix_cell = true) const;    
 
 
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.

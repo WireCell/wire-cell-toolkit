@@ -110,6 +110,7 @@ struct BlobSampler::Sampler : public Aux::Logger
             std::string lsuffix = letter + suffix;
             if (samp.is_extra(lsuffix)) {
                 ds.add(samp.cc.prefix+lsuffix, Array(vals));
+                // std::cout << "test: " << samp.cc.prefix << " " << lsuffix << " " << vals.size() << std::endl;
             }
         }
     };
@@ -310,7 +311,11 @@ struct BlobSampler::Sampler : public Aux::Logger
                 wire_coord[ipt] = xwp[1];
                 const double pitch = xwp[2];
                 pitch_coord[ipt] = pitch;
-                int wind = pimpos->closest(pitch).first;
+
+                // auto temp = pimpos->closest(pitch);
+                int wind =  pimpos->closest(pitch + 0.1*units::mm).first; // shift to the higher wires in case of a tie ... 
+                // std::cout << temp.second << " " << wind << " " << temp1.second << " " << temp1.first << std::endl;
+                
                 if (wind < 0) {
                     log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
                     log->error("Negative wire index: {}, will segfault soon", wind);

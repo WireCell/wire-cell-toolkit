@@ -832,19 +832,19 @@ int Cluster::wire_index(size_t point_index, int plane) const {
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_wire_indices.empty()) {
-                cache_ref.point_u_wire_indices = points_property<int>("u_wire_index");
+                cache_ref.point_u_wire_indices = points_property<int>("uwire_index");
             }
             return cache_ref.point_u_wire_indices[point_index];
         }
         case 1: {
             if (cache_ref.point_v_wire_indices.empty()) {
-                cache_ref.point_v_wire_indices = points_property<int>("v_wire_index");
+                cache_ref.point_v_wire_indices = points_property<int>("vwire_index");
             }
             return cache_ref.point_v_wire_indices[point_index];
         }
         case 2: {
             if (cache_ref.point_w_wire_indices.empty()) {
-                cache_ref.point_w_wire_indices = points_property<int>("w_wire_index");
+                cache_ref.point_w_wire_indices = points_property<int>("wwire_index");
             }
             return cache_ref.point_w_wire_indices[point_index];
         }
@@ -860,19 +860,20 @@ double Cluster::charge_value(size_t point_index, int plane) const {
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_charges.empty()) {
-                cache_ref.point_u_charges = points_property<double>("u_charge_val");
+                cache_ref.point_u_charges = points_property<double>("ucharge_val");
+                //std::cout << "Xin4: " << cache_ref.point_u_charges.empty() << std::endl;
             }
             return cache_ref.point_u_charges[point_index];
         }
         case 1: {
             if (cache_ref.point_v_charges.empty()) {
-                cache_ref.point_v_charges = points_property<double>("v_charge_val");
+                cache_ref.point_v_charges = points_property<double>("vcharge_val");
             }
             return cache_ref.point_v_charges[point_index];
         }
         case 2: {
             if (cache_ref.point_w_charges.empty()) {
-                cache_ref.point_w_charges = points_property<double>("w_charge_val");
+                cache_ref.point_w_charges = points_property<double>("wcharge_val");
             }
             return cache_ref.point_w_charges[point_index];
         }
@@ -888,19 +889,19 @@ double Cluster::charge_uncertainty(size_t point_index, int plane) const {
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_charge_uncs.empty()) {
-                cache_ref.point_u_charge_uncs = points_property<double>("u_charge_unc");
+                cache_ref.point_u_charge_uncs = points_property<double>("ucharge_unc");
             }
             return cache_ref.point_u_charge_uncs[point_index];
         }
         case 1: {
             if (cache_ref.point_v_charge_uncs.empty()) {
-                cache_ref.point_v_charge_uncs = points_property<double>("v_charge_unc");
+                cache_ref.point_v_charge_uncs = points_property<double>("vcharge_unc");
             }
             return cache_ref.point_v_charge_uncs[point_index];
         }
         case 2: {
             if (cache_ref.point_w_charge_uncs.empty()) {
-                cache_ref.point_w_charge_uncs = points_property<double>("w_charge_unc");
+                cache_ref.point_w_charge_uncs = points_property<double>("wcharge_unc");
             }
             return cache_ref.point_w_charge_uncs[point_index];
         }
@@ -934,6 +935,10 @@ std::pair<bool, double> Cluster::calc_charge_wcp(
     bool is_dead_v = is_wire_dead(point_index, 1, dead_threshold);
     bool is_dead_w = is_wire_dead(point_index, 2, dead_threshold);
     
+    // int wire_index_u = wire_index(point_index, 0);
+    // int wire_index_v = wire_index(point_index, 1);
+    // int wire_index_w = wire_index(point_index, 2);
+
     bool flag_charge_u = false;
     bool flag_charge_v = false;
     bool flag_charge_w = false;
@@ -943,6 +948,8 @@ std::pair<bool, double> Cluster::calc_charge_wcp(
     if (charge_v > charge_cut) flag_charge_v = true;
     if (charge_w > charge_cut) flag_charge_w = true;
     
+        // std::cout << "Charge values: " << wire_index_u << " " << wire_index_v << " " << wire_index_w << " " << charge_u << ", " << charge_v << ", " << charge_w << " " << is_dead_u << " " << is_dead_v << " " << is_dead_w << " " << flag_charge_u << " " << flag_charge_v << " " << flag_charge_w << std::endl;
+
     if (disable_dead_mix_cell) {
         // Add all charges first
         charge += charge_u * charge_u; ncharge++;

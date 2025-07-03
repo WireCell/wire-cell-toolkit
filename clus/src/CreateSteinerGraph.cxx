@@ -96,12 +96,22 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         Steiner::Grapher sg(*cluster, m_grapher_config, log);
         bool already = cluster->has_graph(m_graph_name);
         if (already || m_replace) {
+            auto cell_points_map = sg.form_cell_points_map();
+            std::cout << "Xin2: " << cell_points_map.size() << std::endl;
+            for (const auto& [cell, points] : cell_points_map) {
+                std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
+                for (const auto& point : points) {
+                    auto info = cluster->calc_charge_wcp(point);
+                    std::cout << "Xin2 Point: " << point << " " << info.first << " " << info.second << std::endl;
+                }
+            }
 
-                   
+            //    auto gr = sg.create_steiner_graph();
+           // Do we do any tests, eg on num_vertices()?
+           //cluster->give_graph(m_graph_name, std::move(gr));
         }
 
-            //auto gr = sg.create_steiner_graph();
-            // Do we do any tests, eg on num_vertices()?
-            //cluster->give_graph(m_graph_name, std::move(gr));
+            
+            
     }
 }

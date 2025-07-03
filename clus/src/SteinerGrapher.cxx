@@ -15,8 +15,6 @@ using namespace WireCell::Clus::Facade;
 
 Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_graph()
 {
-    //  auto cell_points_map = form_cell_points_map();
-    // std::cout << "Xin: " << " " << cell_points_map.size() << std::endl;
 
     return fake_steiner_graph(); // see SteinerGrapher_face.cxx
 }
