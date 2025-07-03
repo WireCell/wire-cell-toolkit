@@ -40,6 +40,8 @@ namespace WireCell::Clus::Facade {
         Cluster() : Mixins::Cached<Cluster, ClusterCache>(*this, "cluster_scalar") {}
         virtual ~Cluster() {}
 
+        void invalidate_cache() {clear_cache();}
+
         // return raw pc information ...
         void set_default_scope(const Tree::Scope& scope);
         const Tree::Scope& get_default_scope() const {return m_default_scope;}

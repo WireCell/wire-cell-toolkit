@@ -58,44 +58,47 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 {
     auto& grouping = *ensemble.with_name(m_grouping_name).at(0);
     
-    
-   
-   
+    // Container to hold clusters after the initial filter
+    std::vector<Cluster*> filtered_clusters;
+
     for (auto* cluster : grouping.children()) {
-        Steiner::Grapher sg(*cluster, m_grapher_config, log);
+        if (cluster->get_flag(Flags::beam_flash)){
+            filtered_clusters.push_back(cluster);
+
+
+        }
+    }
+
+   
+    for (auto* cluster : filtered_clusters) {
+        // separate the clusters into separated pieces ...
+        auto cc =cluster->get_pcarray("isolated", "perblob");
+        // convert span to vector
+        std::vector<int> cc_vec(cc.begin(), cc.end());
+        // std::cout << "Xin: " << cluster->ident() << " " << cc_vec.size() << std::endl;
+        std::cout << "Xin: " << cluster->get_flash().time()/units::us << " " << cluster->nchildren() << " " << cluster->npoints() <<  " " << std::endl;
         
+        if (cc_vec.size() < 2) continue;
+        auto splits = grouping.separate(cluster, cc_vec);
+
+         // Apply the scope filter settings to all new clusters
+        for (auto& [id, new_cluster] : splits) {
+                // Store the split/group ID as a scalar
+            new_cluster->set_scalar<int>("split_id", id);
+            // Optionally also store the original parent's ident
+            new_cluster->set_scalar<int>("parent_ident", cluster->ident());
+            std::cout << "Xin1: " << new_cluster->get_flash().time()/units::us << " " << new_cluster->nchildren() << " " << new_cluster->npoints() <<  " " << std::endl;
+        }
+
+        std::cout << "Xin1: " << cluster->get_flash().time()/units::us << " " << cluster->nchildren() << " " << cluster->npoints() <<  " " << std::endl;
+
+
+        Steiner::Grapher sg(*cluster, m_grapher_config, log);
         bool already = cluster->has_graph(m_graph_name);
         if (already || m_replace) {
 
-            if (cluster->get_flag(Flags::beam_flash)){
-                // separate the clusters into separated pieces ...
-
-                auto cc =cluster->get_pcarray("isolated", "perblob");
-                // convert span to vector
-                std::vector<int> cc_vec(cc.begin(), cc.end());
-                std::cout << "Xin: " << cluster->ident() << " " << cc_vec.size() << std::endl;
-                std::cout << "Xin: " << cluster->get_flash().time()/units::us << " " << cluster->nchildren() << " " << cluster->npoints() <<  " " << std::endl;
-                
-                // if (cc_vec.size() < 2) continue;
-                // auto scope = cluster->get_default_scope();
-                // auto scope_transform = cluster->get_scope_transform(scope);
-                // // // origi_cluster still have the original main cluster ... 
-                // // std::cout << "Start: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
-                auto splits = grouping.separate(cluster, cc_vec);
-
-                // Apply the scope filter settings to all new clusters
-                for (auto& [id, new_cluster] : splits) {
-                    std::cout << "Xin: " << new_cluster->ident() << " " << new_cluster->kd_blobs().size() << " " << new_cluster->nchildren() << " " << id << std::endl;
-                    //     new_cluster->set_scope_filter(scope, true);
-                    //     new_cluster->set_default_scope(scope);
-                    //     new_cluster->set_scope_transform(scope,scope_transform);
-                }
-
-            }
-                      
+                   
         }
-
-        
 
             //auto gr = sg.create_steiner_graph();
             // Do we do any tests, eg on num_vertices()?

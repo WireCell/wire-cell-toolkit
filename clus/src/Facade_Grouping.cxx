@@ -140,6 +140,12 @@ std::map<int, Cluster*> Grouping::separate(
 {
     const int ident = cluster->ident();
     auto ret = this->NaryTree::FacadeParent<Cluster, points_t>::separate(cluster, groups, false, notify_value);
+
+    // Clear cache of original cluster after separation
+    if (!remove) {
+        cluster->invalidate_cache();
+    }
+
     for (auto& [_, c] : ret) {
         c->set_ident(ident);
         c->from(*cluster);
