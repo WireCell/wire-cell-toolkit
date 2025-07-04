@@ -2533,6 +2533,9 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(const std::string& flav
     if (flavor == "basic") {
         return this->give_graph(flavor, make_graph_basic(*this));
     }
+    if (flavor == "basic_pid"){
+        return this->give_graph(flavor, make_graph_basic_pid(*this));
+    }
 
     // We did our best....
     raise<KeyError>("unknown graph flavor " + flavor);
@@ -2558,11 +2561,11 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     // Factory of known graph flavors relying on detector info:
 
     if (flavor == "ctpc") {
-        return this->give_graph(flavor, make_graph_basic(*this));
+        return this->give_graph(flavor, make_graph_ctpc(*this, dv, pcts));
     }
 
     if (flavor == "relaxed") {
-        return this->give_graph(flavor, make_graph_basic(*this));
+        return this->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
     }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
@@ -2589,6 +2592,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
     if (flavor == "basic") {
         // we are caching, so const cast is "okay".
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "basic_pid") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic_pid(*this));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }

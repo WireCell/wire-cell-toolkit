@@ -16,8 +16,16 @@ namespace WireCell::Clus::Graphs {
     Weighted::Graph make_graph_closely(
         const Facade::Cluster& cluster);
 
+    // just closely connected.
+    Weighted::Graph make_graph_closely_pid(
+        const Facade::Cluster& cluster);
+
     // closely + basic connection
     Weighted::Graph make_graph_basic(
+        const Facade::Cluster& cluster);
+
+    // closely_pid + basic connection
+    Weighted::Graph make_graph_basic_pid(
         const Facade::Cluster& cluster);
 
     // closely + ctpc connection

@@ -20,8 +20,10 @@ namespace WireCell::Clus::Graphs {
                             Weighted::Graph& graph);
 
     void connect_graph_closely(const Facade::Cluster& cluster,
-                               Weighted::Graph& graph);
+                               Weighted::Graph& graph, int num_neighbors = 5);
 
+    void connect_graph_closely_pid(const Facade::Cluster& cluster,
+                                   Weighted::Graph& graph);                           
 
     // ne' overclustering protection
     void connect_graph_relaxed(

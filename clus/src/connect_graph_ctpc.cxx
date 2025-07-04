@@ -251,7 +251,9 @@ void Graphs::connect_graph_ctpc(
                 int index1 = j;
                 int index2 = k;
                 if (std::get<0>(index_index_dis[j][k]) >= 0) {
-                    add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+                    if (!boost::edge(index1, index2, temp_graph).second) {
+                        add_edge(index1, index2, std::get<2>(index_index_dis[j][k]), temp_graph);
+                    }
                 }
             }
         }
@@ -269,10 +271,12 @@ void Graphs::connect_graph_ctpc(
                 int index1 = j;
                 int index2 = k;
                 if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                if (!boost::edge(index1, index2, temp_graph).second) {
                     add_edge(
                         index1, index2,
                         std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])),
                         temp_graph);
+                    }
                 }
             }
         }
@@ -298,7 +302,9 @@ void Graphs::connect_graph_ctpc(
                 else {
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
-                /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                if (!boost::edge(gind1, gind2, graph).second) {
+                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                }
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -312,7 +318,9 @@ void Graphs::connect_graph_ctpc(
                     else {
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
-                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                    if (!boost::edge(gind1, gind2, graph).second) {
+                        /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                    }
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -324,7 +332,9 @@ void Graphs::connect_graph_ctpc(
                     else {
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
-                    /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                    if (!boost::edge(gind1, gind2, graph).second) {
+                        /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                    }
                 }
             }
 

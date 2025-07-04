@@ -20,11 +20,27 @@ Weighted::Graph WireCell::Clus::Graphs::make_graph_closely(
     return graph;
 }
 
+Weighted::Graph WireCell::Clus::Graphs::make_graph_closely_pid(
+    const Cluster& cluster) 
+{
+    Weighted::Graph graph(cluster.npoints());
+    connect_graph_closely_pid(cluster, graph);
+    return graph;
+}
+
 Weighted::Graph WireCell::Clus::Graphs::make_graph_basic(
     const Cluster& cluster) 
 {
     auto graph = make_graph_closely(cluster);
     connect_graph(cluster, graph);
+    return graph;
+}
+
+Weighted::Graph WireCell::Clus::Graphs::make_graph_basic_pid(
+    const Cluster& cluster) 
+{
+    auto graph = make_graph_closely_pid(cluster);
+    // connect_graph(cluster, graph);
     return graph;
 }
 
