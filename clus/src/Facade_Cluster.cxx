@@ -3006,14 +3006,14 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
         bool is_distinct = true;
         
         // Check if this extreme is too close to already added points
-        for (const auto& added_group : out_vec_wcps) {
-            for (const auto& added_point : added_group) {
-                double distance = (extreme_points[i] - added_point).magnitude();
-                if (distance < min_separation) {
-                    is_distinct = false;
-                    break;
-                }
+        for (auto& added_group : out_vec_wcps) {
+            double distance = (extreme_points[i] - added_group[0]).magnitude();
+            if (distance < min_separation) {
+                added_group.push_back(extreme_points[i]);  // Add to existing group
+                is_distinct = false;
+                break;
             }
+            
             if (!is_distinct) break;
         }
         
@@ -3027,42 +3027,32 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
     
     return out_vec_wcps;
 }
-
+// Updated is_point_spatially_related_to_time_blobs to match prototype exactly
 bool Cluster::is_point_spatially_related_to_time_blobs(
     size_t point_index, 
-    const time_blob_map_t& ref_time_blob_map) const
-{
+    const time_blob_map_t& ref_time_blob_map) const {
+    
     // Get current point's time slice information
     // Equivalent to: int time_slice = cloud.pts[i].mcell->GetTimeSlice();
     const Blob* current_blob = blob_with_point(point_index);
     int current_time_slice = current_blob->slice_index_min();
     
-    // Check current time slice and ±1 time slices (like Steiner version)
-    for (int time_offset = -1; time_offset <= 1; ++time_offset) {
-        int check_time_slice = current_time_slice + time_offset;
+    // Check ONLY current time slice (exact prototype logic, no ±1 offset)
+    // This is the exact prototype logic:
+    // if (old_time_mcells_map->find(time_slice)!=old_time_mcells_map->end())
+    auto time_it = ref_time_blob_map.find(current_time_slice);
+    if (time_it != ref_time_blob_map.end()) {
         
-        // This is the exact prototype logic:
-        // if (old_time_mcells_map->find(time_slice)!=old_time_mcells_map->end())
-        auto time_it = ref_time_blob_map.find(check_time_slice);
-        if (time_it != ref_time_blob_map.end()) {
-            
-            // Iterate through apa/face maps in this time slice
-            // time_blob_map_t is std::map<int, std::map<int, std::map<int, BlobSet>>>
-            // Structure: apa -> face -> time -> blobset
-            for (const auto& face_pair : time_it->second) {
-                for (const auto& time_pair : face_pair.second) {
-                    // Now iterate through blobs in the BlobSet
-                    for (const Blob* ref_blob : time_pair.second) {
-                        
-                        // Method 1: Fast blob overlap check (equivalent to mcell->Overlap_fast())
-                        if (current_blob->overlap_fast(*ref_blob, 1)) {
-                            return true;  // Equivalent to flag_add = true; break;
-                        }
-                        
-                        // Method 2: Detailed wire range checking (prototype's exact logic)
-                        if (check_wire_ranges_match(point_index, ref_blob)) {
-                            return true;  // Equivalent to flag_add = true; break;
-                        }
+        // Iterate through apa/face maps in this time slice
+        // time_blob_map_t is std::map<int, std::map<int, std::map<int, BlobSet>>>
+        // Structure: apa -> face -> time -> blobset
+        for (const auto& face_pair : time_it->second) {
+            for (const auto& time_pair : face_pair.second) {
+                // Now iterate through blobs in the BlobSet
+                for (const Blob* ref_blob : time_pair.second) {
+                    
+                    if (check_wire_ranges_match(point_index, ref_blob)) {
+                        return true;  // Equivalent to flag_add = true; break;
                     }
                 }
             }
@@ -3072,6 +3062,7 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
     return false;  // Equivalent to flag_add remains false
 }
 
+// Updated check_wire_ranges_match to match prototype exactly  
 bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const
 {
     try {
@@ -3080,11 +3071,10 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
         int current_wire_v = wire_index(point_index, 1);  // V plane  
         int current_wire_w = wire_index(point_index, 2);  // W plane
         
-        // Get reference blob's wire ranges
+        // Get reference blob's wire ranges (exact prototype logic, no tolerance)
         // Equivalent to: 
         // int u1_low_index = mcell->get_uwires().front()->index();
         // int u1_high_index = mcell->get_uwires().back()->index();
-        // Using individual wire range methods instead of get_wire_ranges()
         int u_min = ref_blob->u_wire_index_min();
         int u_max = ref_blob->u_wire_index_max();
         int v_min = ref_blob->v_wire_index_min();
@@ -3092,14 +3082,8 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
         int w_min = ref_blob->w_wire_index_min();
         int w_max = ref_blob->w_wire_index_max();
         
-        // Extract U, V, W wire ranges from reference blob
-        // Add ±1 tolerance (Steiner version) to the wire ranges
-        u_min = u_min - 1;
-        u_max = u_max + 1;
-        v_min = v_min - 1;
-        v_max = v_max + 1;
-        w_min = w_min - 1;
-        w_max = w_max + 1;
+        // NO tolerance added - use exact wire ranges like prototype
+        // Removed: u_min = u_min - 1; u_max = u_max + 1; etc.
         
         // Check if current point's wire indices fall within ALL THREE ranges
         // This is the exact prototype condition:

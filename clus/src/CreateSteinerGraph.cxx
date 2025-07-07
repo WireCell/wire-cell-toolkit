@@ -102,16 +102,28 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
             
 
-            for (const auto& [cell, points] : cell_points_map) {
-                // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
-                // for (const auto& point : points) {
-                    // auto info = cluster->calc_charge_wcp(point);
-                    // std::cout << "Xin2 Point: " << point << " " << info.first << " " << info.second << std::endl;
-                // }
-                std::vector<const Blob*> single_blob = {cell};
-                auto blob_peaks = sg.find_peak_point_indices(single_blob, "basic_pid", true);
-                std::cout << "Xin2: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min()  << "  " << points.size() << "  " << blob_peaks.size() <<std::endl;
+            // for (const auto& [cell, points] : cell_points_map) {
+            //     // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
+            //     // for (const auto& point : points) {
+            //         // auto info = cluster->calc_charge_wcp(point);
+            //         // std::cout << "Xin2 Point: " << point << " " << info.first << " " << info.second << std::endl;
+            //     // }
+            //     std::vector<const Blob*> single_blob = {cell};
+            //     auto blob_peaks = sg.find_peak_point_indices(single_blob, "basic_pid", true);
+            //     std::cout << "Xin2: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min()  << "  " << points.size() << "  " << blob_peaks.size() <<std::endl;
 
+            // }
+            auto steiner_terminals = sg.find_steiner_terminals("basic_pid");
+            std::cout << "Xin3: " << steiner_terminals.size() << std::endl;
+            auto extrem_points = cluster->get_extreme_wcps();
+            std::cout << "Xin4: " << extrem_points.size() << std::endl;
+            for (const auto& pts : extrem_points) {
+                for (const auto& pt : pts) {
+                    std::cout << "Extreme point: ("
+                              << pt.x() << ", "
+                              << pt.y() << ", "
+                              << pt.z() << ")" << std::endl;
+                }
             }
 
             //    auto gr = sg.create_steiner_graph();
