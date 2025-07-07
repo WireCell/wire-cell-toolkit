@@ -24,6 +24,13 @@ namespace WireCell::Clus::Graphs {
                             Clus::IPCTransformSet::pointer pcts,
                             Weighted::Graph& graph);
 
+    void connect_graph_ctpc_with_reference(
+        const Facade::Cluster& cluster,
+        const Facade::Cluster& ref_cluster,
+        IDetectorVolumes::pointer dv,
+        Clus::IPCTransformSet::pointer pcts,
+        Weighted::Graph& graph);
+
     void connect_graph_closely(const Facade::Cluster& cluster,
                                Weighted::Graph& graph, int num_neighbors = 5);
 

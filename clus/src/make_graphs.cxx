@@ -59,6 +59,23 @@ Weighted::Graph WireCell::Clus::Graphs::make_graph_ctpc(
     return graph;
 }
 
+Weighted::Graph WireCell::Clus::Graphs::make_graph_ctpc_pid(
+        const Cluster& cluster,
+        const Cluster& ref_cluster,
+        IDetectorVolumes::pointer dv, 
+        IPCTransformSet::pointer pcts)
+{
+    // Start with close connections
+    auto graph = make_graph_closely_pid(cluster);
+    
+    // Add CTPC connections with reference filtering
+    connect_graph_ctpc_with_reference(cluster, ref_cluster, dv, pcts, graph);
+    connect_graph_with_reference(cluster, ref_cluster, graph);
+
+    return graph;
+}
+
+
 Weighted::Graph WireCell::Clus::Graphs::make_graph_relaxed(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv, 
