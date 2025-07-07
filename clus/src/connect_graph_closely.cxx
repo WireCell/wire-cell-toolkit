@@ -845,7 +845,7 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
             if (!boost::edge(pind1, pind2, graph).second) {
                 auto edge_result = add_edge(pind1, pind2, distance, graph);
 
-                std::cout << "Adding edge " << pind1 << " " << pind2 << " " << distance << " " << edge_result.second << std::endl;
+                // std::cout << "Adding edge " << pind1 << " " << pind2 << " " << distance << " " << edge_result.second << std::endl;
 
 
                 if (edge_result.second) {

@@ -14,6 +14,11 @@ namespace WireCell::Clus::Graphs {
     void connect_graph(const Facade::Cluster& cluster, 
                        Weighted::Graph& graph);
 
+    void connect_graph_with_reference(
+        const Facade::Cluster& cluster,
+        const Facade::Cluster& ref_cluster,
+        Weighted::Graph& graph);
+
     void connect_graph_ctpc(const Facade::Cluster& cluster,
                             IDetectorVolumes::pointer dv,
                             Clus::IPCTransformSet::pointer pcts,
@@ -32,7 +37,7 @@ namespace WireCell::Clus::Graphs {
         IPCTransformSet::pointer pcts,
         Weighted::Graph& graph);
 
-
+    bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 }
     
 #endif

@@ -84,6 +84,48 @@ namespace WireCell::Clus::Facade {
                                               const std::string &correction_name);
 
 
+        /// Check if a point index is excluded from graph operations
+        /// @param point_index Global point index in cluster
+        /// @return True if point should be excluded from calculations
+        bool is_point_excluded(size_t point_index) const {
+            const auto& excluded = cache().excluded_points;
+            return excluded.find(point_index) != excluded.end();
+        }
+
+        /// Get all non-excluded point indices
+        /// @return Vector of valid point indices for calculations
+        std::vector<size_t> get_valid_point_indices() const {
+            std::vector<size_t> valid_indices;
+            const auto& excluded = cache().excluded_points;
+            
+            for (size_t i = 0; i < npoints(); ++i) {
+                if (excluded.find(i) == excluded.end()) {
+                    valid_indices.push_back(i);
+                }
+            }
+            return valid_indices;
+        }
+
+        /// Get excluded points information
+        /// @return Set of excluded point indices
+        const std::set<size_t>& get_excluded_points() const {
+            return cache().excluded_points;
+        }
+
+        /// Clear excluded points (useful for testing or manual control)
+        void clear_excluded_points() {
+            auto& cache_ref = const_cast<ClusterCache&>(cache());
+            cache_ref.excluded_points.clear();
+        }
+
+        /// Set excluded points manually (useful for testing)
+        void set_excluded_points(const std::set<size_t>& excluded) {
+            auto& cache_ref = const_cast<ClusterCache&>(cache());
+            cache_ref.excluded_points = excluded;
+        }
+
+
+
         /// Return the grouping to which this cluster is a child.  May be nullptr.
         Grouping* grouping();
         const Grouping* grouping() const;
@@ -290,6 +332,9 @@ namespace WireCell::Clus::Facade {
 
         // Return the number of points in the k-d tree
         int npoints() const;
+
+        // Safely check if the cluster is valid (m_node is non-null)
+        bool is_valid() const { return this->m_node != nullptr; }
 
         // Number of points according to sum of Blob::nbpoints()
         // WCP: int get_num_points()

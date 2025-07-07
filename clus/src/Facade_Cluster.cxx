@@ -1780,11 +1780,15 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_highest_lowest_points(size_t ax
     const size_t npoints = points[0].size();
 
     geo_point_t lowest_point, highest_point;
+    bool initialized = false;
 
     for (size_t ind = 0; ind < npoints; ++ind) {
+        if (is_point_excluded(ind)) continue;
+
         geo_point_t pt(points[0][ind], points[1][ind], points[2][ind]);
-        if (!ind) {
+        if (!initialized) {
             lowest_point = highest_point = pt;
+            initialized = true;
             continue;
         }
         if (pt[axis] > highest_point[axis]) {
@@ -1811,33 +1815,42 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_front_back_points() const
 
 std::pair<geo_point_t, geo_point_t> Cluster::get_main_axis_points() const
 {
-    // Get first point as initial values
-    geo_point_t highest_point = point3d(0);
-    geo_point_t lowest_point = point3d(0);
-
-    // Get main axis and ensure consistent direction (y>0)
-    geo_point_t main_axis = get_pca().axis.at(0); 
+   // Get main axis and ensure consistent direction (y>0)
+    geo_point_t main_axis = get_pca().axis.at(0);
     if (main_axis.y() < 0) {
         main_axis = main_axis * -1;
     }
-
-    // Initialize extreme values using projections of first point
-    double high_value = highest_point.dot(main_axis);
-    double low_value = high_value;
-
+    
+    geo_point_t highest_point, lowest_point;
+    double high_value, low_value;
+    bool initialized = false;
+    
     // Loop through all points to find extremes along main axis
-    for (int i = 1; i < npoints(); i++) {
+    for (int i = 0; i < npoints(); i++) {
+        if (is_point_excluded(i)) continue;
+        
         geo_point_t current = point3d(i);
         double value = current.dot(main_axis);
         
+        if (!initialized) {
+            highest_point = lowest_point = current;
+            high_value = low_value = value;
+            initialized = true;
+            continue;
+        }
+        
         if (value > high_value) {
             highest_point = current;
-            high_value = value; 
+            high_value = value;
         }
         if (value < low_value) {
             lowest_point = current;
             low_value = value;
         }
+    }
+
+    if (!initialized) {
+        throw std::runtime_error("No valid points available for get_main_axis_points");
     }
 
     return std::make_pair(highest_point, lowest_point);
@@ -1846,18 +1859,36 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_main_axis_points() const
 std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
 {
     geo_point_t extreme_wcp[6];
-    for (int i = 0; i != 6; i++) {
-        extreme_wcp[i] = point3d(0);
+     bool initialized = false;
+    
+    // Find extreme points in each coordinate direction
+    for (int i = 0; i < npoints(); i++) {
+        if (is_point_excluded(i)) continue;
+        
+        geo_point_t current = point3d(i);
+        
+        if (!initialized) {
+            // Initialize all extremes to first valid point
+            for (int j = 0; j < 6; j++) {
+                extreme_wcp[j] = current;
+            }
+            initialized = true;
+            continue;
+        }
+        
+        // Check for new extremes
+        if (current.y() > extreme_wcp[0].y()) extreme_wcp[0] = current;
+        if (current.y() < extreme_wcp[1].y()) extreme_wcp[1] = current;
+        
+        if (current.x() > extreme_wcp[2].x()) extreme_wcp[2] = current;
+        if (current.x() < extreme_wcp[3].x()) extreme_wcp[3] = current;
+        
+        if (current.z() > extreme_wcp[4].z()) extreme_wcp[4] = current;
+        if (current.z() < extreme_wcp[5].z()) extreme_wcp[5] = current;
     }
-    for (int i = 1; i < npoints(); i++) {
-        if (point3d(i).y() > extreme_wcp[0].y()) extreme_wcp[0] = point3d(i);
-        if (point3d(i).y() < extreme_wcp[1].y()) extreme_wcp[1] = point3d(i);
 
-        if (point3d(i).x() > extreme_wcp[2].x()) extreme_wcp[2] = point3d(i);
-        if (point3d(i).x() < extreme_wcp[3].x()) extreme_wcp[3] = point3d(i);
-
-        if (point3d(i).z() > extreme_wcp[4].z()) extreme_wcp[4] = point3d(i);
-        if (point3d(i).z() < extreme_wcp[5].z()) extreme_wcp[5] = point3d(i);
+     if (!initialized) {
+        throw std::runtime_error("No valid points available for get_two_extreme_points");
     }
 
     double max_dis = -1;
@@ -2743,57 +2774,78 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
     // Find 8 extreme points: 2 along main axis + 6 along coordinate axes
     // Equivalent to prototype's wcps[8] array
     geo_point_t extreme_points[8];
+    std::vector<double> extreme_values(8);  // Track the extreme values for comparison
+    bool initialized = false;
     
-    // Initialize with first valid point
-    // Equivalent to prototype: wcps[i] = cloud.pts[all_indices.at(0)]
-    for (int i = 0; i < 8; i++) {
-        extreme_points[i] = point3d(valid_indices[0]);
-    }
-    
-    // Initialize projection values for main axis extremes
-    double high_value = extreme_points[0].dot(main_axis);
-    double low_value = high_value;
+
     
     // Scan through all valid points to find extremes
     // Equivalent to prototype's scanning loop through all_indices
     for (size_t idx : valid_indices) {
+        if (is_point_excluded(idx)) continue;
+
         geo_point_t current_point = point3d(idx);
+
+         if (!initialized) {
+            // Initialize all extreme points to the first valid point
+            for (int i = 0; i < 8; ++i) {
+                extreme_points[i] = current_point;
+            }
+            
+            // Initialize extreme values
+            extreme_values[0] = extreme_values[1] = current_point.dot(main_axis);  // main axis projections
+            extreme_values[2] = extreme_values[3] = current_point.y();            // Y values
+            extreme_values[4] = extreme_values[5] = current_point.z();            // Z values  
+            extreme_values[6] = extreme_values[7] = current_point.x();            // X values
+            
+            initialized = true;
+            continue;
+        }
         
         // Main axis extremes (along PCA axis)
         double main_projection = current_point.dot(main_axis);
-        if (main_projection > high_value) {
+        if (main_projection > extreme_values[0]) {
             extreme_points[0] = current_point;  // high along main axis
-            high_value = main_projection;
+            extreme_values[0] = main_projection;
         }
-        if (main_projection < low_value) {
+        if (main_projection < extreme_values[1]) {
             extreme_points[1] = current_point;  // low along main axis
-            low_value = main_projection;
+            extreme_values[1] = main_projection;
         }
         
-        // Coordinate axis extremes (same as prototype)
         // Y-axis extremes (top/bottom)
-        if (current_point.y() > extreme_points[2].y()) {
+        if (current_point.y() > extreme_values[2]) {
             extreme_points[2] = current_point;  // highest Y
+            extreme_values[2] = current_point.y();
         }
-        if (current_point.y() < extreme_points[3].y()) {
+        if (current_point.y() < extreme_values[3]) {
             extreme_points[3] = current_point;  // lowest Y
+            extreme_values[3] = current_point.y();
         }
         
         // Z-axis extremes (front/back)
-        if (current_point.z() > extreme_points[4].z()) {
+        if (current_point.z() > extreme_values[4]) {
             extreme_points[4] = current_point;  // furthest Z
+            extreme_values[4] = current_point.z();
         }
-        if (current_point.z() < extreme_points[5].z()) {
+        if (current_point.z() < extreme_values[5]) {
             extreme_points[5] = current_point;  // nearest Z
+            extreme_values[5] = current_point.z();
         }
         
         // X-axis extremes (earliest/latest)
-        if (current_point.x() > extreme_points[6].x()) {
+        if (current_point.x() > extreme_values[6]) {
             extreme_points[6] = current_point;  // latest X
+            extreme_values[6] = current_point.x();
         }
-        if (current_point.x() < extreme_points[7].x()) {
+        if (current_point.x() < extreme_values[7]) {
             extreme_points[7] = current_point;  // earliest X
+            extreme_values[7] = current_point.x();
         }
+    }
+
+    if (!initialized) {
+        return std::vector<std::vector<geo_point_t>>();  // No valid points found
     }
     
     // Group the extreme points into result vectors

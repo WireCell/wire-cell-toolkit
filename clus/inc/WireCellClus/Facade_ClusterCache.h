@@ -70,6 +70,9 @@ namespace WireCell::Clus::Facade {
         std::vector<double> point_u_charge_uncs;
         std::vector<double> point_v_charge_uncs;
         std::vector<double> point_w_charge_uncs;
+
+        // Set of point indices excluded during graph operations (equivalent to prototype's excluded_points)
+        std::set<size_t> excluded_points;
     };
 
 }

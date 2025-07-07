@@ -36,11 +36,15 @@ Weighted::Graph WireCell::Clus::Graphs::make_graph_basic(
     return graph;
 }
 
+
 Weighted::Graph WireCell::Clus::Graphs::make_graph_basic_pid(
-    const Cluster& cluster) 
+    const Cluster& cluster,
+    const Cluster& ref_cluster) 
 {
     auto graph = make_graph_closely_pid(cluster);
-    // connect_graph(cluster, graph);
+    
+    connect_graph_with_reference(cluster, ref_cluster, graph);
+    
     return graph;
 }
 
