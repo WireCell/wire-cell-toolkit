@@ -2567,11 +2567,34 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(const std::string& flav
     if (flavor == "basic_pid"){
         return this->give_graph(flavor, make_graph_basic_pid(*this));
     }
-
     // We did our best....
     raise<KeyError>("unknown graph flavor " + flavor);
     std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
+
+
+const Facade::Cluster::graph_type& Facade::Cluster::find_graph(const std::string& flavor, const Cluster& ref_cluster) const
+{
+    return const_cast<const graph_type&>(const_cast<Cluster*>(this)->find_graph(flavor, ref_cluster));
+}
+
+Facade::Cluster::graph_type& Facade::Cluster::find_graph(const std::string& flavor, const Cluster& ref_cluster)
+{
+    if (this->has_graph(flavor)) {
+        return get_graph(flavor);
+    }
+    if (flavor == "basic") {
+        return this->give_graph(flavor, make_graph_basic(*this));
+    }
+    if (flavor == "basic_pid"){
+        return this->give_graph(flavor, make_graph_basic_pid(*this, ref_cluster));
+    }
+    // We did our best....
+    raise<KeyError>("unknown graph flavor " + flavor);
+    std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
+}
+
+
 const Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     const std::string& flavor,
     IDetectorVolumes::pointer dv, 
@@ -2594,6 +2617,9 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     if (flavor == "ctpc") {
         return this->give_graph(flavor, make_graph_ctpc(*this, dv, pcts));
     }
+    if (flavor == "ctpc_pid") {
+        return this->give_graph(flavor, make_graph_ctpc_pid(*this, Cluster{},dv, pcts));
+    }
 
     if (flavor == "relaxed") {
         return this->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
@@ -2603,6 +2629,43 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     // wants a flavor that we can make implicitly.
     return find_graph(flavor);
 }
+
+
+const Facade::Cluster::graph_type& Facade::Cluster::find_graph(
+    const std::string& flavor,
+    const Cluster& ref_cluster,
+    IDetectorVolumes::pointer dv, 
+    IPCTransformSet::pointer pcts) const
+{
+    return const_cast<const graph_type&>(const_cast<Cluster*>(this)->find_graph(flavor, ref_cluster, dv, pcts));
+}
+
+Facade::Cluster::graph_type& Facade::Cluster::find_graph(
+    const std::string& flavor,
+    const Cluster& ref_cluster,
+    IDetectorVolumes::pointer dv, 
+    IPCTransformSet::pointer pcts)
+{
+    if (this->has_graph(flavor)) {
+        return get_graph(flavor);
+    }
+
+    // Factory of known graph flavors relying on detector info:
+     if (flavor == "ctpc") {
+        return this->give_graph(flavor, make_graph_ctpc(*this, dv, pcts));
+    }
+    if (flavor == "ctpc_pid") {
+        return this->give_graph(flavor, make_graph_ctpc_pid(*this, ref_cluster, dv, pcts));
+    }
+    if (flavor == "relaxed") {
+        return this->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
+    }
+
+    // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
+    // wants a flavor that we can make implicitly.
+    return find_graph(flavor);
+}
+
 
 
 const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor) const
@@ -2638,6 +2701,39 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
     std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
 }
 
+const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor, const Cluster& ref_cluster) const
+{
+    auto it = m_galgs.find(flavor);
+    if (it != m_galgs.end()) {
+        return it->second;      // we have it already
+    }
+
+    if (this->has_graph(flavor)) {    // if graph exists, make the GA
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(get_graph(flavor)));
+        return got.first->second;
+    }
+        
+    // We failed to find an existing graph of the given flavor, but we there are
+    // some flavors we know how to construct on the fly:
+
+    if (flavor == "basic") {
+        // we are caching, so const cast is "okay".
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "basic_pid") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic_pid(*this, ref_cluster));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    // We did our best....
+    raise<KeyError>("unknown graph flavor " + flavor);
+    std::terminate(); // this is here mostly to quell compiler warnings about not returning a value.
+}
+
 const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor,
                                                                    IDetectorVolumes::pointer dv, 
                                                                    IPCTransformSet::pointer pcts) const
@@ -2650,13 +2746,54 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
     // Factory of known graph flavors relying on detector info:
 
     if (flavor == "ctpc") {
-        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "ctpc_pid") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc_pid(*this, Cluster{}, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }
 
     if (flavor == "relaxed") {
-        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic(*this));
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
+    // wants a flavor that we can make implicitly.
+    return graph_algorithms(flavor);
+}
+
+const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flavor,
+    const Cluster& ref_cluster,
+                                                                   IDetectorVolumes::pointer dv, 
+                                                                   IPCTransformSet::pointer pcts) const
+{
+    auto it = m_galgs.find(flavor);
+    if (it != m_galgs.end()) {
+        return it->second;
+    }
+
+    // Factory of known graph flavors relying on detector info:
+
+    if (flavor == "ctpc") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "ctpc_pid") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc_pid(*this, ref_cluster, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "relaxed") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }

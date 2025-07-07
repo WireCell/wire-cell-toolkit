@@ -441,17 +441,7 @@ void Graphs::connect_graph_ctpc_with_reference(
     // Store excluded points in cluster cache (matches prototype's excluded_points)
     const_cast<Cluster&>(cluster).set_excluded_points(excluded_points);
 
-    /// DEBUGONLY:
-    if (0) {
-        for (size_t i = 0; i != num; i++) {
-            std::cout << *pt_clouds.at(i) << std::endl;
-            std::cout << "global indices: ";
-            for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
-                std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
-            }
-            std::cout << std::endl;
-        }
-    }
+
 
     // Initialize distance metric containers (same structure as baseline)
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(

@@ -966,7 +966,7 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
                                                      std::vector<geo_point_t> &independent_points,
                                                      double length, geo_point_t dir_cosmic, geo_point_t dir_beam, const IDetectorVolumes::pointer dv, const IPCTransformSet::pointer pcts, const Tree::Scope& scope)
 {
-    const std::string graph_flavor = use_ctpc ? "relaxed" : "basic";
+    const std::string graph_flavor = use_ctpc ? "ctpc" : "basic";
 
     auto* grouping = cluster->grouping();
 

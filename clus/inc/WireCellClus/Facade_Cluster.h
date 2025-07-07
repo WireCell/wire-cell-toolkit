@@ -479,10 +479,23 @@ namespace WireCell::Clus::Facade {
         /// See graph_algorithms() for flavors that can be made.
         const graph_type& find_graph(const std::string& flavor = "basic") const;
         graph_type& find_graph(const std::string& flavor = "basic");
+
+        const graph_type& find_graph(const std::string& flavor, const Cluster& ref_cluster) const;
+        graph_type& find_graph(const std::string& flavor, const Cluster& ref_cluster);
+
         const graph_type& find_graph(const std::string& flavor,
                                      IDetectorVolumes::pointer dv, 
                                      IPCTransformSet::pointer pcts) const;
         graph_type& find_graph(const std::string& flavor,
+                               IDetectorVolumes::pointer dv, 
+                               IPCTransformSet::pointer pcts);
+
+        const graph_type& find_graph(const std::string& flavor,
+                                    const Cluster& ref_cluster,
+                                     IDetectorVolumes::pointer dv, 
+                                     IPCTransformSet::pointer pcts) const;
+        graph_type& find_graph(const std::string& flavor,
+                                const Cluster& ref_cluster,
                                IDetectorVolumes::pointer dv, 
                                IPCTransformSet::pointer pcts);
 
@@ -498,7 +511,8 @@ namespace WireCell::Clus::Facade {
         const WireCell::Clus::Graphs::Weighted::GraphAlgorithms& 
         graph_algorithms(const std::string& flavor = "basic") const;
 
-
+        const WireCell::Clus::Graphs::Weighted::GraphAlgorithms& 
+        graph_algorithms(const std::string& flavor, const Cluster& ref_cluster) const;
 
         /// Get and construct if needed a GA for a graph of a known flavor and
         /// that uses detector information in its construction.  Known flavors
@@ -515,6 +529,13 @@ namespace WireCell::Clus::Facade {
         graph_algorithms(const std::string& flavor,
                          IDetectorVolumes::pointer dv, 
                          IPCTransformSet::pointer pcts) const;
+
+        const WireCell::Clus::Graphs::Weighted::GraphAlgorithms& 
+        graph_algorithms(const std::string& flavor,
+                         const Cluster& ref_cluster,
+                         IDetectorVolumes::pointer dv, 
+                         IPCTransformSet::pointer pcts) const;
+                         
 
 
         /// Graph algorithm cache management methods for Steiner operations

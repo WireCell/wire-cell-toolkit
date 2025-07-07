@@ -138,11 +138,11 @@ namespace WireCell::Clus::Steiner {
         ///
 
 
-        vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, 
-                                   bool disable_dead_mix_cell = true);
+        vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, const std::string& graph_name,
+                                   bool disable_dead_mix_cell = true, int nlevel = 1);
 
         blob_vertex_map form_cell_points_map();
-        vertex_set find_steiner_terminals(bool disable_dead_mix_cell=true);
+        vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell=true);
 
         /// Establish edges between points in the same blob (mcell) with weighted connectivity
         /// This modifies the given graph and tracks added edges for later removal
@@ -161,6 +161,7 @@ namespace WireCell::Clus::Steiner {
         graph_type create_steiner_tree(
             const Facade::Cluster* reference_cluster = nullptr,
             const std::vector<size_t>& path_point_indices = {},
+            const std::string& graph_name = "basic_pid",
             bool disable_dead_mix_cell = true,
             const std::string& steiner_pc_name = "steiner_subset"
         );

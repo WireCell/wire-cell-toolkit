@@ -23,6 +23,7 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_graph()
 Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
     const Facade::Cluster* reference_cluster,
     const std::vector<size_t>& path_point_indices,
+    const std::string& graph_name,
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
@@ -30,7 +31,7 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
                (reference_cluster ? "provided" : "null"), path_point_indices.size());
 
     // Phase 1: Find initial steiner terminals
-    vertex_set steiner_terminals = find_steiner_terminals(disable_dead_mix_cell);
+    vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
     log->debug("create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
 
     if (steiner_terminals.empty()) {
@@ -393,8 +394,8 @@ bool Steiner::Grapher::is_point_near_blob(const Point& point, const Facade::Blob
 
 // Overloaded version for specific blobs (equivalent to prototype's mcells parameter)
 Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
-    const std::vector<const Facade::Blob*>& target_blobs, 
-    bool disable_dead_mix_cell)
+    const std::vector<const Facade::Blob*>& target_blobs, const std::string& graph_name,
+    bool disable_dead_mix_cell, int nlevel)
 {
     vertex_set peak_points;
     
@@ -428,7 +429,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
     const double charge_threshold = 4000.0;
     
     for (size_t point_idx : all_indices) {
-        auto [charge_quality, charge] = m_cluster.calc_charge_wcp(point_idx, 0.0, disable_dead_mix_cell);
+        auto [charge_quality, charge] = m_cluster.calc_charge_wcp(point_idx, charge_threshold, disable_dead_mix_cell);
         
         map_index_charge[point_idx] = charge;
         
@@ -437,122 +438,165 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
         }
     }
     
+    // std::cout << "Xin2: candidates_set size: " << candidates_set.size() << std::endl;
+
     if (candidates_set.empty()) {
         return peak_points;
     }
     
-    // Convert candidates to vector for graph operations
-    std::vector<size_t> vec_peak_indices;
-    vec_peak_indices.reserve(candidates_set.size());
-    for (const auto& [charge, point_idx] : candidates_set) {
-        vec_peak_indices.push_back(point_idx);
-    }
+   // Get access to the underlying boost graph
+    // NOTE: This assumes there's a way to get the graph - you'll need to implement
+    // get_graph() method or similar in your Cluster interface
+    const auto& graph = m_cluster.get_graph(graph_name); // You need to implement this
     
-    // Find connected components among peak candidates
-    // Note: This is a simplified version - the prototype uses boost::connected_components
-    // but we need to adapt this to work with the toolkit's graph structure
+    std::set<size_t> peak_indices;
+    std::set<size_t> non_peak_indices;
     
-    std::vector<int> component(vec_peak_indices.size());
-    
-    // For now, implement a simple connected components algorithm
-    // Each point starts as its own component
-    std::iota(component.begin(), component.end(), 0);
-    
-    // Check adjacency in the graph and merge components
-    // This is a simplified version - you may need to adapt based on the actual graph structure
-    for (size_t i = 0; i < vec_peak_indices.size(); ++i) {
-        for (size_t j = i + 1; j < vec_peak_indices.size(); ++j) {
-            size_t idx1 = vec_peak_indices[i];
-            size_t idx2 = vec_peak_indices[j];
+    // Core algorithm from prototype: process candidates in order of decreasing charge
+    for (const auto& [current_charge, current_index] : candidates_set) {
+        
+        // Find all vertices within nlevel hops using graph traversal (prototype logic)
+        std::set<size_t> total_vertices_found;
+        total_vertices_found.insert(current_index);
+        
+        // Breadth-first exploration for nlevel steps
+        std::set<size_t> vertices_to_be_examined;
+        vertices_to_be_examined.insert(current_index);
+        
+        for (int level = 0; level < nlevel; ++level) {
+            std::set<size_t> vertices_saved_for_next;
             
-            // Check if points are connected in graph
-            // Note: This needs to be adapted to your specific graph representation
-            // For now, use spatial proximity as a simple heuristic
-            auto p1 = m_cluster.point3d(idx1);
-            auto p2 = m_cluster.point3d(idx2);
-            double distance = sqrt(pow(p1.x() - p2.x(), 2) + 
-                                 pow(p1.y() - p2.y(), 2) + 
-                                 pow(p1.z() - p2.z(), 2));
-            
-            const double connection_threshold = 3.0; // Adjust as needed
-            if (distance < connection_threshold) {
-                // Merge components
-                int comp1 = component[i];
-                int comp2 = component[j];
-                if (comp1 != comp2) {
-                    // Replace all comp2 with comp1
-                    for (size_t k = 0; k < component.size(); ++k) {
-                        if (component[k] == comp2) {
-                            component[k] = comp1;
-                        }
+            for (size_t temp_current_index : vertices_to_be_examined) {
+                // Get adjacent vertices using boost graph interface
+                auto [neighbors_begin, neighbors_end] = boost::adjacent_vertices(temp_current_index, graph);
+                
+                for (auto neighbor_it = neighbors_begin; neighbor_it != neighbors_end; ++neighbor_it) {
+                    size_t neighbor_index = *neighbor_it;
+                    
+                    if (total_vertices_found.find(neighbor_index) == total_vertices_found.end()) {
+                        total_vertices_found.insert(neighbor_index);
+                        vertices_saved_for_next.insert(neighbor_index);
                     }
                 }
+            }
+            vertices_to_be_examined = vertices_saved_for_next;
+        }
+        total_vertices_found.erase(current_index);
+        
+        // Peak selection logic (following prototype)
+        if (peak_indices.empty()) {
+            // First candidate becomes a peak
+            peak_indices.insert(current_index);
+            
+            // Mark neighbors with lower charge as non-peaks
+            for (size_t neighbor_idx : total_vertices_found) {
+                if (map_index_charge.find(neighbor_idx) == map_index_charge.end()) continue;
+                
+                if (current_charge > map_index_charge[neighbor_idx]) {
+                    non_peak_indices.insert(neighbor_idx);
+                }
+            }
+        } else {
+            // Skip if already classified
+            if (peak_indices.find(current_index) != peak_indices.end() ||
+                non_peak_indices.find(current_index) != non_peak_indices.end()) {
+                continue;
+            }
+            
+            bool flag_insert = true;
+            
+            // Check against neighbors
+            for (size_t neighbor_idx : total_vertices_found) {
+                if (map_index_charge.find(neighbor_idx) == map_index_charge.end()) continue;
+                
+                if (current_charge > map_index_charge[neighbor_idx]) {
+                    non_peak_indices.insert(neighbor_idx);
+                } else if (current_charge < map_index_charge[neighbor_idx]) {
+                    flag_insert = false;
+                    break;
+                }
+            }
+            
+            if (flag_insert) {
+                peak_indices.insert(current_index);
             }
         }
     }
     
-    // Find unique components
-    std::set<int> unique_components(component.begin(), component.end());
-    int num_components = unique_components.size();
-    
-    if (num_components == 0) {
-        return peak_points;
-    }
-    
-    // For each component, find the point closest to center of mass
-    std::vector<double> min_dis(num_components, 1e9);
-    std::vector<size_t> min_index(num_components, 0);
-    std::vector<int> ncounts(num_components, 0);
-    std::vector<WireCell::Point> centers(num_components, WireCell::Point(0, 0, 0));
-    
-    // Map component IDs to array indices
-    std::map<int, int> comp_to_idx;
-    int idx = 0;
-    for (int comp : unique_components) {
-        comp_to_idx[comp] = idx++;
-    }
-    
-    // Calculate center of mass for each component
-    for (size_t i = 0; i < component.size(); ++i) {
-        int comp_idx = comp_to_idx[component[i]];
-        ncounts[comp_idx]++;
+    // Connected components analysis to merge nearby peaks (prototype logic)
+    if (peak_indices.size() > 1) {
+        std::vector<size_t> vec_peak_indices(peak_indices.begin(), peak_indices.end());
+        peak_indices.clear();
         
-        auto point = m_cluster.point3d(vec_peak_indices[i]);
-        centers[comp_idx] = centers[comp_idx] + WireCell::Vector(point.x(), point.y(), point.z());
-    }
-    
-    // Average the positions
-    for (int i = 0; i < num_components; ++i) {
-        if (ncounts[i] > 0) {
-            centers[i] = centers[i] * (1.0 / ncounts[i]);
+        const size_t N = vec_peak_indices.size();
+        
+        // Create temporary graph for peak connectivity
+        boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
+            boost::no_property, boost::property<boost::edge_weight_t, double>>
+            temp_graph(N);
+        
+        // Check connectivity in original graph and replicate in temp graph
+        for (size_t j = 0; j < N; ++j) {
+            for (size_t k = 0; k < N; ++k) {
+                size_t index1 = j;
+                size_t index2 = k;
+                
+                // Check if corresponding vertices are connected in original graph
+                if (boost::edge(vec_peak_indices[index1], vec_peak_indices[index2], graph).second) {
+                    boost::add_edge(index1, index2, temp_graph);
+                }
+            }
+        }
+        
+        // Find connected components
+        std::vector<int> component(boost::num_vertices(temp_graph));
+        const int num = boost::connected_components(temp_graph, &component[0]);
+        
+        // For each component, find the point closest to center of mass
+        std::vector<double> min_dis(num, 1e9);
+        std::vector<WireCell::Point> points(num, WireCell::Point(0, 0, 0));
+        std::vector<size_t> min_index(num, 0);
+        std::vector<int> ncounts(num, 0);
+        
+        // Calculate center of mass for each component
+        for (size_t i = 0; i < component.size(); ++i) {
+            ncounts[component[i]]++;
+            auto point = m_cluster.point3d(vec_peak_indices[i]);
+            points[component[i]] = points[component[i]] + WireCell::Vector(point.x(), point.y(), point.z());
+        }
+        
+        // Average the positions
+        for (int i = 0; i < num; ++i) {
+            if (ncounts[i] > 0) {
+                points[i] = points[i] * (1.0 / ncounts[i]);
+            }
+        }
+        
+        // Find closest point to center for each component
+        for (size_t i = 0; i < component.size(); ++i) {
+            auto point = m_cluster.point3d(vec_peak_indices[i]);
+            
+            double dis = pow(points[component[i]].x() - point.x(), 2) +
+                        pow(points[component[i]].y() - point.y(), 2) +
+                        pow(points[component[i]].z() - point.z(), 2);
+            
+            if (dis < min_dis[component[i]]) {
+                min_dis[component[i]] = dis;
+                min_index[component[i]] = vec_peak_indices[i];
+            }
+        }
+        
+        // Add the representative points to the result
+        for (int i = 0; i < num; ++i) {
+            peak_indices.insert(min_index[i]);
         }
     }
     
-    // Find closest point to center for each component
-    for (size_t i = 0; i < component.size(); ++i) {
-        int comp_idx = comp_to_idx[component[i]];
-        auto point = m_cluster.point3d(vec_peak_indices[i]);
-        
-        double dis = pow(centers[comp_idx].x() - point.x(), 2) +
-                    pow(centers[comp_idx].y() - point.y(), 2) +
-                    pow(centers[comp_idx].z() - point.z(), 2);
-        
-        if (dis < min_dis[comp_idx]) {
-            min_dis[comp_idx] = dis;
-            min_index[comp_idx] = vec_peak_indices[i];
-        }
-    }
-    
-    // Add the representative points to the result
-    for (int i = 0; i < num_components; ++i) {
-        peak_points.insert(min_index[i]);
-    }
-    
-    return peak_points;
+    return peak_indices;
 }
 
 
-Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(bool disable_dead_mix_cell)
+Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell)
 {
     vertex_set steiner_terminals;
     
@@ -569,7 +613,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(bool disab
         std::vector<const Blob*> single_blob = {blob};
         
         // Find peak points for this specific blob
-        auto blob_peaks = find_peak_point_indices(single_blob, disable_dead_mix_cell);
+        auto blob_peaks = find_peak_point_indices(single_blob, graph_name, disable_dead_mix_cell);
         
         // Add to overall steiner terminals set
         steiner_terminals.insert(blob_peaks.begin(), blob_peaks.end());
@@ -636,7 +680,7 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
     edge_set added_edges;
 
     // Step 1: Find Steiner terminals using the existing implementation
-    vertex_set steiner_terminals = find_steiner_terminals(disable_dead_mix_cell);
+    vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
     
     log->debug("Found {} Steiner terminals for same-blob edge establishment", steiner_terminals.size());
 
