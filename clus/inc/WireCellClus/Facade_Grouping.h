@@ -41,6 +41,21 @@ namespace WireCell::Clus::Facade {
         std::map<int, std::map<int, int> > map_drift_dir;
         std::map<int, std::map<int, int> > map_nticks_per_slice;
         std::map<int, std::map<int, std::map<int, IChannel::vector> > > map_plane_channels;
+
+        // Simple wire data cache organized by APA/face
+        struct WireDataCache {
+            // [plane][time_slice][wire_index] -> (charge, uncertainty)
+            std::array<std::unordered_map<int, std::unordered_map<int, std::pair<double, double> >>, 3> charge_data;
+            
+            // [plane][wire_index] -> (start_x_position, end_x_position)
+            std::array<std::map<int, std::pair<double, double>>, 3> dead_wires;
+            
+            // Track which planes have been cached
+            std::array<bool, 3> cached = {false, false, false};
+        };
+        
+        // [apa][face] -> WireDataCache
+        mutable std::unordered_map<int, std::unordered_map<int, WireDataCache>> wire_caches;
     };
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
@@ -124,19 +139,24 @@ namespace WireCell::Clus::Facade {
         std::set<WireCell::WirePlaneId> wpids() const { return cache().cluster_wpids; }
         std::set<WireCell::WirePlaneId> dv_wpids() const { return cache().dv_wpids; }
 
-        const std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > >& all_dead_winds() const {
-            // this is added in order that we may dump it in json_summary() for debugging.
-            return m_dead_winds;
-        }
+        // const std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > >& all_dead_winds() const {
+        //     // this is added in order that we may dump it in json_summary() for debugging.
+        //     return m_dead_winds;
+        // }
 
-        // FIXME: need to remove apa=0
-        std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const
-        {
-            // make one if not exist
-            return m_dead_winds[apa][face][pind];
+        // // FIXME: need to remove apa=0
+        // std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const
+        // {
+        //     // make one if not exist
+        //     return m_dead_winds[apa][face][pind];
 
-            // This is utter garbage.  #381.
-        }
+        //     // This is utter garbage.  #381.
+        // }
+
+        const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& all_dead_winds() const;
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const;
+        
+
         using sv2d_t = Tree::ScopedView<float_t>;
         using kd2d_t = sv2d_t::nfkd_t;
         using kd_results_t = kd2d_t::results_type;
@@ -205,6 +225,14 @@ namespace WireCell::Clus::Facade {
             int min_time, int max_time, int min_ch, int max_ch, const int apa, 
             const int face, const int pind) const;
 
+        // Get wire charge and uncertainty for specific wire/time
+        std::pair<double, double> get_wire_charge(int apa, int face, int plane, 
+                                                int wire_index, int time_slice) const;
+        
+        // Check if a wire is dead at a specific time
+        bool is_wire_dead(int apa, int face, int plane, 
+                        int wire_index, int time_slice) const;
+
         // We override this from Mixins::Cached in order to inject propagation of the
         // utter garbage handling of dead_winds.  If someone fixes that, this
         // method may be removed.  #381.
@@ -213,7 +241,10 @@ namespace WireCell::Clus::Facade {
       private:
 
         // This "cache" is utterly abused.  Someone else fix it.  #381.
-        mutable std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > > m_dead_winds;
+        // mutable std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > > m_dead_winds;
+
+        // Build cache for a specific APA/face/plane
+        void build_wire_cache(int apa, int face, int plane) const;
 
        protected:
         // Receive notification when this facade is created on a node. #381.

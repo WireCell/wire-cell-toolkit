@@ -396,6 +396,11 @@ namespace WireCell::Clus::Facade {
         std::vector<std::vector<geo_point_t>> get_extreme_wcps(
             const Cluster* reference_cluster = nullptr) const;
 
+        std::pair<geo_point_t, geo_point_t> get_two_boundary_wcps(
+        int flag = 0,  // this is for regular point cloud ...
+        bool flag_cosmic = false) const;
+
+
         /// section for 2D PC
 
         // Get the scoped view for the "3d" point cloud (x,y,z)

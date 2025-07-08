@@ -99,6 +99,13 @@ namespace WireCell::Clus::Facade {
         // Check facade consistency
         bool sanity(Log::logptr_t log = nullptr) const;
 
+        // charge information, access cluster --> grouping, and use CTPC cache to access these information ... 
+        double estimate_blob_total_charge() const;
+        double estimate_minimum_charge() const;
+        double get_wire_charge(const WireCell::WirePlaneId& wpid, const int_t wire_index) const;
+        double get_wire_charge_error(const WireCell::WirePlaneId& wpid, const int_t wire_index) const;
+        //
+
        private:
         // moved to cache
 

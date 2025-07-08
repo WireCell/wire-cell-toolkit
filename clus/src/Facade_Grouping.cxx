@@ -74,19 +74,19 @@ static std::tuple<int, int, int> parse_dead_winds(const std::string& ds_name) {
 
 void Grouping::on_construct(node_type* node)
 {
-    this->NaryTree::Facade<points_t>::on_construct(node);
-    const auto& lpcs = m_node->value.local_pcs();
-    for (const auto& [name, pc_dead_winds] : lpcs) {
-        if (name.find("dead_winds") != std::string::npos) {
-            const auto& xbeg = pc_dead_winds.get("xbeg")->elements<float_t>();
-            const auto& xend = pc_dead_winds.get("xend")->elements<float_t>();
-            const auto& wind = pc_dead_winds.get("wind")->elements<int_t>();
-            auto [apa, face, plane] = parse_dead_winds(name);
-            for (size_t i = 0; i < xbeg.size(); ++i) {
-                m_dead_winds[apa][face][plane][wind[i]] = {xbeg[i], xend[i]};
-            }
-        }
-    }
+    // this->NaryTree::Facade<points_t>::on_construct(node);
+    // const auto& lpcs = m_node->value.local_pcs();
+    // for (const auto& [name, pc_dead_winds] : lpcs) {
+    //     if (name.find("dead_winds") != std::string::npos) {
+    //         const auto& xbeg = pc_dead_winds.get("xbeg")->elements<float_t>();
+    //         const auto& xend = pc_dead_winds.get("xend")->elements<float_t>();
+    //         const auto& wind = pc_dead_winds.get("wind")->elements<int_t>();
+    //         auto [apa, face, plane] = parse_dead_winds(name);
+    //         for (size_t i = 0; i < xbeg.size(); ++i) {
+    //             m_dead_winds[apa][face][plane][wind[i]] = {xbeg[i], xend[i]};
+    //         }
+    //     }
+    // }
 
     // for (const int face : faces) {
     //     for (const int plane : planes) {
@@ -655,14 +655,164 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
 }
 
 
+void Grouping::build_wire_cache(int apa, int face, int plane) const {
+    auto& gc = this->cache();
+    auto& cache = gc.wire_caches[apa][face];
+
+    if (cache.cached[plane]) return; // Already built
+
+    // Build charge cache from CTPC data
+    std::vector<std::string> plane_names = {"U", "V", "W"};
+    const std::string ctpc_name = String::format("ctpc_a%df%dp%d", apa, face, plane_names[plane]);
+
+    const auto& local_pcs = m_node->value.local_pcs();
+    if (local_pcs.find(ctpc_name) != local_pcs.end()) {
+        const auto& ctpc = local_pcs.at(ctpc_name);
+        const auto& slice_indices = ctpc.get("slice_index")->elements<int_t>();
+        const auto& wire_indices = ctpc.get("wind")->elements<int_t>();
+        const auto& charges = ctpc.get("charge")->elements<float_t>();
+        const auto& charge_errs = ctpc.get("charge_err")->elements<float_t>();
+        
+        // Populate charge cache
+        for (size_t i = 0; i < slice_indices.size(); ++i) {
+            int time_slice = slice_indices[i];
+            int wire_index = wire_indices[i];
+            double charge = charges[i];
+            double uncertainty = charge_errs[i];
+            
+            cache.charge_data[plane][time_slice][wire_index] = {charge, uncertainty};
+        }
+    }
+
+    // Build dead wires cache from dead_winds data using x positions
+    std::vector<std::string> plane_chars = {"u", "v", "w"};
+    const std::string dead_name = String::format("dead_winds_a%df%dp%c", apa, face, plane_chars[plane][0]);
+    
+    if (local_pcs.find(dead_name) != local_pcs.end()) {
+        const auto& dead_winds = local_pcs.at(dead_name);
+        const auto& xbeg = dead_winds.get("xbeg")->elements<float_t>();
+        const auto& xend = dead_winds.get("xend")->elements<float_t>();
+        const auto& wind = dead_winds.get("wind")->elements<int_t>();
+        
+        // Populate dead wires cache with x positions
+        for (size_t i = 0; i < xbeg.size(); ++i) {
+            int wire_index = wind[i];
+            double start_x = xbeg[i];
+            double end_x = xend[i];
+            cache.dead_wires[plane][wire_index] = {start_x, end_x};
+        }
+    }
+    
+    cache.cached[plane] = true;
+}
+
+std::pair<double, double> Grouping::get_wire_charge(int apa, int face, int plane, 
+                                                   int wire_index, int time_slice) const {
+    // Ensure cache is built for this APA/face/plane
+    build_wire_cache(apa, face, plane);
+    
+    auto& gc = this->cache();
+    const auto& cache = gc.wire_caches[apa][face];
+    
+    // Look up charge data
+    auto time_it = cache.charge_data[plane].find(time_slice);
+    if (time_it == cache.charge_data[plane].end()) {
+        return {0.0, 0.0}; // No data for this time slice
+    }
+    
+    auto wire_it = time_it->second.find(wire_index);
+    if (wire_it == time_it->second.end()) {
+        return {0.0, 0.0}; // No data for this wire
+    }
+    
+    return wire_it->second;
+}
+
+bool Grouping::is_wire_dead(int apa, int face, int plane, 
+                           int wire_index, int time_slice) const {
+    // Ensure cache is built for this APA/face/plane
+    build_wire_cache(apa, face, plane);
+    
+    auto& gc = this->cache();
+    const auto& cache = gc.wire_caches[apa][face];
+    
+    // Look up dead wire x position range
+    auto wire_it = cache.dead_wires[plane].find(wire_index);
+    if (wire_it == cache.dead_wires[plane].end()) {
+        return false; // No dead x range for this wire
+    }
+    
+    // Convert time_slice to x position
+    double time_offset = gc.map_time_offset.at(apa).at(face);
+    double drift_speed = gc.map_drift_speed.at(apa).at(face);
+    double tick = gc.map_tick.at(apa).at(face);
+    auto iface = m_anodes.at(apa)->faces()[face];
+    
+    double time = time_slice * tick;
+    double x_position = time2drift(iface, time_offset, drift_speed, time);
+    
+    // Check if x position falls within dead wire range
+    const auto& [start_x, end_x] = wire_it->second;
+    return (x_position >= start_x && x_position <= end_x);
+}
+
+
+const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& Grouping::all_dead_winds() const {
+    // Since we can't return a reference to a temporary, we need a static/member variable
+    // Option 1: Use a mutable member to cache the reconstructed data
+    static thread_local std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>> reconstructed_dead_winds;
+    reconstructed_dead_winds.clear();
+    
+    // Get all known APA/face combinations from existing cache data
+    auto& gc = this->cache();
+    
+    // First, build cache for all known APA/face/plane combinations
+    // We can get these from cluster_wpids or dv_wpids
+    for (const auto& wpid : gc.cluster_wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        int plane = wpid.index();
+        if (plane < 3) { // Skip kAllLayers
+            build_wire_cache(apa, face, plane);
+        }
+    }
+    
+    // Now reconstruct the old format from cached data
+    for (const auto& [apa, face_map] : gc.wire_caches) {
+        for (const auto& [face, cache] : face_map) {
+            for (int plane = 0; plane < 3; ++plane) {
+                if (cache.cached[plane]) {
+                    // Convert unordered_map to map for compatibility
+                    for (const auto& [wire_idx, wire_range] : cache.dead_wires[plane]) {
+                        reconstructed_dead_winds[apa][face][plane][wire_idx] = wire_range;
+                    }
+                }
+            }
+        }
+    }
+    
+    return reconstructed_dead_winds;
+}
+
+// Updated get_dead_winds() function
+std::map<int, std::pair<double, double>>& Grouping::get_dead_winds(const int apa, const int face, const int pind) const {
+    // Build cache for this specific APA/face/plane
+    build_wire_cache(apa, face, pind);
+    
+    auto& gc = this->cache();
+    auto& cache = gc.wire_caches[apa][face];
+    
+    // Return reference to the cached dead wires for this plane
+    return cache.dead_wires[pind];
+}
+
 
 void Grouping::clear_cache() const
 {
     this->Mixins::Cached<Grouping, GroupingCache>::clear_cache();
 
-
     // This is utterly broken.  #381.
-    m_dead_winds.clear(); 
+    // m_dead_winds.clear(); 
 
 }
 
