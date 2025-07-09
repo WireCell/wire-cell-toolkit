@@ -3103,6 +3103,323 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
     return false;
 }
 
+std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(int flag, bool flag_cosmic) const 
+{
+    // Early exit for single point
+    if (npoints() <= 1) {
+        geo_point_t single_point = point3d(0);
+        return std::make_pair(single_point, single_point);
+    }
+    
+    // Get PCA info
+    const auto& pca = get_pca();
+    geo_vector_t main_axis = pca.axis.at(0);
+    geo_vector_t second_axis = pca.axis.at(1);
+    
+    // Array to store 14 extreme points and their corresponding point indices
+    geo_point_t extreme_points[14];
+    int extreme_point_indices[14];
+    double extreme_values[14];
+    bool initialized = false;
+    
+    // Find extreme points
+    for (int i = 0; i < npoints(); i++) {
+        // Skip excluded points
+        if (is_point_excluded(i)) continue;
+        
+        // Get blob and check charge threshold
+        const Blob* blob = blob_with_point(i);
+        if (blob->estimate_total_charge() < 1500) continue;
+        
+        geo_point_t current_point = point3d(i);
+        
+        if (!initialized) {
+            // Initialize all extremes to first valid point
+            for (int j = 0; j < 14; j++) {
+                extreme_points[j] = current_point;
+                extreme_point_indices[j] = i;
+            }
+            // Initialize projection values
+            extreme_values[0] = extreme_values[1] = current_point.dot(main_axis);
+            extreme_values[2] = extreme_values[3] = current_point.dot(second_axis);
+            // Initialize coordinate values
+            extreme_values[4] = extreme_values[5] = current_point.x();
+            extreme_values[6] = extreme_values[7] = current_point.y();
+            extreme_values[8] = extreme_values[9] = current_point.z();
+            // Initialize wire index values
+            extreme_values[10] = extreme_values[11] = wire_index(i, 0); // U
+            extreme_values[12] = extreme_values[13] = wire_index(i, 1); // V
+            
+            initialized = true;
+            continue;
+        }
+        
+        // Main axis projections
+        double main_proj = current_point.dot(main_axis);
+        if (main_proj > extreme_values[0]) {
+            extreme_values[0] = main_proj;
+            extreme_points[0] = current_point;
+            extreme_point_indices[0] = i;
+        }
+        if (main_proj < extreme_values[1]) {
+            extreme_values[1] = main_proj;
+            extreme_points[1] = current_point;
+            extreme_point_indices[1] = i;
+        }
+        
+        // Second axis projections
+        double second_proj = current_point.dot(second_axis);
+        if (second_proj > extreme_values[2]) {
+            extreme_values[2] = second_proj;
+            extreme_points[2] = current_point;
+            extreme_point_indices[2] = i;
+        }
+        if (second_proj < extreme_values[3]) {
+            extreme_values[3] = second_proj;
+            extreme_points[3] = current_point;
+            extreme_point_indices[3] = i;
+        }
+        
+        // X extremes (early/late)
+        if (current_point.x() > extreme_values[4]) {
+            extreme_values[4] = current_point.x();
+            extreme_points[4] = current_point;
+            extreme_point_indices[4] = i;
+        }
+        if (current_point.x() < extreme_values[5]) {
+            extreme_values[5] = current_point.x();
+            extreme_points[5] = current_point;
+            extreme_point_indices[5] = i;
+        }
+        
+        // Y extremes (top/bottom)
+        if (current_point.y() > extreme_values[6]) {
+            extreme_values[6] = current_point.y();
+            extreme_points[6] = current_point;
+            extreme_point_indices[6] = i;
+        }
+        if (current_point.y() < extreme_values[7]) {
+            extreme_values[7] = current_point.y();
+            extreme_points[7] = current_point;
+            extreme_point_indices[7] = i;
+        }
+        
+        // Z extremes (left/right)
+        if (current_point.z() > extreme_values[8]) {
+            extreme_values[8] = current_point.z();
+            extreme_points[8] = current_point;
+            extreme_point_indices[8] = i;
+        }
+        if (current_point.z() < extreme_values[9]) {
+            extreme_values[9] = current_point.z();
+            extreme_points[9] = current_point;
+            extreme_point_indices[9] = i;
+        }
+        
+        // U wire index extremes
+        int u_wire = wire_index(i, 0);
+        if (u_wire > extreme_values[10]) {
+            extreme_values[10] = u_wire;
+            extreme_points[10] = current_point;
+            extreme_point_indices[10] = i;
+        }
+        if (u_wire < extreme_values[11]) {
+            extreme_values[11] = u_wire;
+            extreme_points[11] = current_point;
+            extreme_point_indices[11] = i;
+        }
+        
+        // V wire index extremes
+        int v_wire = wire_index(i, 1);
+        if (v_wire > extreme_values[12]) {
+            extreme_values[12] = v_wire;
+            extreme_points[12] = current_point;
+            extreme_point_indices[12] = i;
+        }
+        if (v_wire < extreme_values[13]) {
+            extreme_values[13] = v_wire;
+            extreme_points[13] = current_point;
+            extreme_point_indices[13] = i;
+        }
+    }
+    
+    if (!initialized) {
+        // Fallback to first two points if no valid points found
+        geo_point_t p1 = point3d(0);
+        geo_point_t p2 = npoints() > 1 ? point3d(1) : p1;
+        return std::make_pair(p1, p2);
+    }
+    
+    // Get live channel sets for each plane
+    std::set<int> live_u_index = get_live_wire_indices(0);
+    std::set<int> live_v_index = get_live_wire_indices(1);
+    std::set<int> live_w_index = get_live_wire_indices(2);
+    
+    // Calculate constants for distance normalization
+    const Grouping* grouping = this->grouping();
+    auto wpid = children().front()->wpid(); // Get wpid from first blob
+    
+    auto nticks_map = grouping->get_nticks_per_slice();
+    auto drift_speed_map = grouping->get_drift_speed();
+    auto tick_map = grouping->get_tick();
+    
+    double nrebin = nticks_map[wpid.apa()][wpid.face()];
+    double drift_speed = drift_speed_map[wpid.apa()][wpid.face()];
+    double tick = tick_map[wpid.apa()][wpid.face()];
+    double distance_norm = nrebin * tick * drift_speed;
+    
+    // Start with main axis extremes as initial boundary
+    std::pair<geo_point_t, geo_point_t> boundary_points = 
+        std::make_pair(extreme_points[0], extreme_points[1]);
+    
+    double boundary_value = calculate_boundary_metric(
+        extreme_point_indices[0], extreme_point_indices[1],
+        live_u_index, live_v_index, live_w_index,
+        distance_norm, flag_cosmic);
+    
+    // Test all pairs of extreme points
+    for (int i = 0; i < 14; i++) {
+        for (int j = i + 1; j < 14; j++) {
+            double value = calculate_boundary_metric(
+                extreme_point_indices[i], extreme_point_indices[j],
+                live_u_index, live_v_index, live_w_index,
+                distance_norm, flag_cosmic);
+            
+            if (value > boundary_value) {
+                boundary_value = value;
+                if (extreme_points[i].y() > extreme_points[j].y()) {
+                    boundary_points.first = extreme_points[i];
+                    boundary_points.second = extreme_points[j];
+                } else {
+                    boundary_points.first = extreme_points[j];
+                    boundary_points.second = extreme_points[i];
+                }
+            }
+        }
+    }
+    
+    // Ensure first point has higher Y coordinate
+    if (boundary_points.first.y() < boundary_points.second.y()) {
+        std::swap(boundary_points.first, boundary_points.second);
+    }
+    
+    return boundary_points;
+}
+
+// Helper function to get live wire indices for a given plane
+std::set<int> Cluster::get_live_wire_indices(int plane) const
+{
+    std::set<int> live_indices;
+    
+    for (const Blob* blob : children()) {
+        const Grouping* grouping = this->grouping();
+        auto wpid = blob->wpid();
+        int time_slice = blob->slice_index_min();
+        
+        int wire_min, wire_max;
+        switch (plane) {
+            case 0: // U plane
+                wire_min = blob->u_wire_index_min();
+                wire_max = blob->u_wire_index_max();
+                break;
+            case 1: // V plane
+                wire_min = blob->v_wire_index_min();
+                wire_max = blob->v_wire_index_max();
+                break;
+            case 2: // W plane
+                wire_min = blob->w_wire_index_min();
+                wire_max = blob->w_wire_index_max();
+                break;
+            default:
+                continue;
+        }
+        
+        // Check for bad planes using charge error threshold
+        bool plane_is_bad = false;
+        int dead_wire_count = 0;
+        int total_wire_count = wire_max - wire_min;
+        
+        for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
+            if (grouping->is_wire_dead(wpid.apa(), wpid.face(), plane, wire_index, time_slice) ||
+                blob->get_wire_charge_error(plane, wire_index) > 1e10) {
+                dead_wire_count++;
+            }
+        }
+        
+        // If more than half the wires are dead, consider the plane bad
+        if (dead_wire_count > total_wire_count / 2) {
+            plane_is_bad = true;
+        }
+        
+        if (!plane_is_bad) {
+            for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
+                if (!grouping->is_wire_dead(wpid.apa(), wpid.face(), plane, wire_index, time_slice)) {
+                    live_indices.insert(wire_index);
+                }
+            }
+        }
+    }
+    
+    return live_indices;
+}
+
+// Helper function to count live channels between two wire indices
+int Cluster::count_live_channels_between(int wire_min, int wire_max, const std::set<int>& live_indices) const
+{
+    int count = 0;
+    for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
+        if (live_indices.find(wire_index) != live_indices.end()) {
+            count++;
+        }
+    }
+    return count;
+}
+
+// Helper function to calculate boundary metric between two points
+double Cluster::calculate_boundary_metric(
+    int point_idx1, int point_idx2,
+    const std::set<int>& live_u_index,
+    const std::set<int>& live_v_index, 
+    const std::set<int>& live_w_index,
+    double distance_norm, bool flag_cosmic) const
+{
+    geo_point_t p1 = point3d(point_idx1);
+    geo_point_t p2 = point3d(point_idx2);
+    
+    // Get wire indices for both points
+    int p1_u = wire_index(point_idx1, 0);
+    int p1_v = wire_index(point_idx1, 1);
+    int p1_w = wire_index(point_idx1, 2);
+    
+    int p2_u = wire_index(point_idx2, 0);
+    int p2_v = wire_index(point_idx2, 1);  
+    int p2_w = wire_index(point_idx2, 2);
+    
+    // Count live channels between points
+    int ncount_live_u = count_live_channels_between(
+        std::min(p1_u, p2_u), std::max(p1_u, p2_u), live_u_index);
+    int ncount_live_v = count_live_channels_between(
+        std::min(p1_v, p2_v), std::max(p1_v, p2_v), live_v_index);
+    int ncount_live_w = count_live_channels_between(
+        std::min(p1_w, p2_w), std::max(p1_w, p2_w), live_w_index);
+    
+    // Calculate boundary metric
+    double value;
+    if (flag_cosmic) {
+        value = fabs(p1.x() - p2.x()) / units::mm
+            + fabs(p1_u - p2_u) * 1.0 + ncount_live_u * 1.0
+            + fabs(p1_v - p2_v) * 1.0 + ncount_live_v * 1.0
+            + fabs(p1_w - p2_w) * 1.0 + ncount_live_w * 1.0
+            + sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2)) / units::mm;
+    } else {
+        value = fabs(p1.x() - p2.x()) / distance_norm
+            + fabs(p1_u - p2_u) * 0.0 + ncount_live_u * 1.0
+            + fabs(p1_v - p2_v) * 0.0 + ncount_live_v * 1.0
+            + fabs(p1_w - p2_w) * 0.0 + ncount_live_w * 1.0;
+    }
+    
+    return value;
+}
 
 
 

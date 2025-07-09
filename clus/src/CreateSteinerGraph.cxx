@@ -97,10 +97,16 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         bool already = cluster->has_graph(m_graph_name);
         if (already || m_replace) {
             auto cell_points_map = sg.form_cell_points_map();
-            auto graph = sg.get_graph("basic_pid");
+            auto& graph = sg.get_graph("basic_pid");
 
             std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
             
+            sg.establish_same_blob_steiner_edges("basic_pid", true);
+
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+            sg.remove_same_blob_steiner_edges("basic_pid");
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+
 
             // for (const auto& [cell, points] : cell_points_map) {
             //     // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
@@ -126,16 +132,24 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             //     }
             // }
 
-            for (const auto& [cell, points] : cell_points_map) {
-                auto total_charge = cell->estimate_blob_total_charge();
-                auto min_charge = cell->estimate_minimum_charge();
+            // auto extreme_boundary_points = cluster->get_two_boundary_wcps(1);
+            // std::cout << "Xin3: " << extreme_boundary_points.first.x() << " " 
+            //           << extreme_boundary_points.first.y() << " " 
+            //           << extreme_boundary_points.first.z() << " | "
+            //           << extreme_boundary_points.second.x() << " " 
+            //           << extreme_boundary_points.second.y() << " " 
+            //           << extreme_boundary_points.second.z() << std::endl;
 
-                std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() 
-                          << " has " << points.size() << " points, total charge: " << total_charge 
-                          << ", min charge: " << min_charge << " " << cell->get_wire_charge(0, cell->u_wire_index_min()) << " " << cell->get_wire_charge_error(0, cell->u_wire_index_min()) 
-                          << std::endl;
-                // cell->check_dead_wire_consistency();
-            }
+            // for (const auto& [cell, points] : cell_points_map) {
+            //     auto total_charge = cell->estimate_total_charge();
+            //     auto min_charge = cell->estimate_minimum_charge();
+
+            //     std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() 
+            //               << " has " << points.size() << " points, total charge: " << total_charge 
+            //               << ", min charge: " << min_charge << " " << cell->get_wire_charge(0, cell->u_wire_index_min()) << " " << cell->get_wire_charge_error(0, cell->u_wire_index_min()) 
+            //               << std::endl;
+            //     // cell->check_dead_wire_consistency();
+            // }
 
             //  std::cout << grouping.get_dead_winds1(0,0,0).size() << " " << grouping.get_dead_winds(0,0,0).size() << " " << grouping.get_dead_winds1(0,0,1).size() << " " << grouping.get_dead_winds(0,0,1).size() << " " << grouping.get_dead_winds1(0,0,2).size() << " " << grouping.get_dead_winds(0,0,2).size() << std::endl;
 

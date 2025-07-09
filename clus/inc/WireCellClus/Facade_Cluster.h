@@ -679,6 +679,34 @@ namespace WireCell::Clus::Facade {
         /// @return True if point's wire indices fall within reference blob's wire ranges
         bool check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const;
 
+        /// @brief Get live wire indices for a given plane across all blobs in cluster
+        /// @param plane Wire plane index (0=U, 1=V, 2=W)
+        /// @return Set of live wire indices for the specified plane
+        std::set<int> get_live_wire_indices(int plane) const;
+        
+        /// @brief Count live channels between two wire indices
+        /// @param wire_min Minimum wire index
+        /// @param wire_max Maximum wire index  
+        /// @param live_indices Set of all live wire indices
+        /// @return Number of live channels in the range
+        int count_live_channels_between(int wire_min, int wire_max, const std::set<int>& live_indices) const;
+        
+        /// @brief Calculate boundary metric between two points
+        /// @param point_idx1 Index of first point
+        /// @param point_idx2 Index of second point
+        /// @param live_u_index Set of live U wire indices
+        /// @param live_v_index Set of live V wire indices
+        /// @param live_w_index Set of live W wire indices
+        /// @param distance_norm Distance normalization factor
+        /// @param flag_cosmic Use cosmic ray optimized metric
+        /// @return Boundary metric value
+        double calculate_boundary_metric(
+            int point_idx1, int point_idx2,
+            const std::set<int>& live_u_index,
+            const std::set<int>& live_v_index, 
+            const std::set<int>& live_w_index,
+            double distance_norm, bool flag_cosmic) const;
+
 
        protected:
 
