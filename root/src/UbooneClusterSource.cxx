@@ -182,6 +182,108 @@ void Root::UbooneClusterSource::extract_dead(
 using SimpleSlicePtr = std::shared_ptr<Aux::SimpleSlice>;
 using SliceMap = std::map<int, SimpleSlicePtr>;
 
+// // Fill slices and blobs from "live" blob sets.  This will produce new slices
+// // according to the ROOT data and new blobs same as old blobs that refer to
+// // corresponding new slices.  Output vectors are not cleared prior to filling.
+// void Root::UbooneClusterSource::extract_live(
+//     const IBlobSet::vector& blobsets,
+//     ISlice::vector& out_slices,
+//     IBlob::vector& out_blobs) const
+// {
+//     // Temporarily hold slices by their time slice id so we can look up later as
+//     // we patch in new slices to old blobs.
+//     SliceMap by_tid;
+
+//     // Get representative frame.  Note, this is likely a trace-free frame
+//     // manufactured by one of several upstream UbooneBlobSource's.  In
+//     // principle, right here we could replace it with a fully fleshed one built
+//     // from ROOT data.  But, it's a fully fleshed activity we currently seek to
+//     // keep we keep it as-is.
+//     auto iframe = blobsets[0]->slice()->frame(); 
+
+//     // WARNING: the code to fill the activity is ALMOST an exact copy-paste from
+//     // UbooneBlobSource.
+
+//     // Make all new slices, initially with no activity.
+//     const int n_slices_span = m_files->trees->nslices_span();
+//     const int nrebin = m_files->trees->header.nrebin;
+//     const double span = nrebin * m_tick;
+
+//     // Intermediate mutable version.
+//     std::vector<SimpleSlicePtr> slices(n_slices_span);
+//     for (int tsid = 0; tsid<n_slices_span; ++tsid) {
+//         auto sslice = std::make_shared<SimpleSlice>(iframe, tsid, tsid*span, span);
+//         slices[tsid] = sslice;
+//         // log->debug("simple slice: ident:{}, time:{}, span:{}, frame:{}",
+//         //            tsid, tsid*span, span, iframe->ident());
+//     }
+
+//     // Now fill in activity
+//     const auto& act = m_files->trees->activity; // abbrev
+//     const auto& tids = act.timesliceId;
+//     const int n_slices_data = m_files->trees->nslices_data();
+//     for (int sind=0; sind<n_slices_data; ++sind) {
+
+//         int tsid = tids->at(sind); // time slice ID
+
+//         const auto& q = act.raw_charge->at(sind);
+//         const auto& dq = act.raw_charge_err->at(sind);
+//         const auto& chans = act.timesliceChannel->at(sind);
+//         const size_t nchans = chans.size();
+        
+//         auto& sslice = slices[tsid];
+//         if (!sslice) {
+//             raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+//         }
+//         auto& activity = sslice->activity();
+
+//         // Fill in known channel measures in this time slice.
+//         for (size_t cind=0; cind<nchans; ++cind) {
+//             const int chid = chans[cind];
+//             auto ichan = get_channel(chid);
+//             activity[ichan] = ISlice::value_t(q[cind], dq[cind]);
+//         }
+
+//         // Fill in known dead channels in this time slice
+//         for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
+//             auto ichan = get_channel(ch);
+//             // If slice overlaps with any of the bin ranges.
+//             for (const auto& tt : brl) {
+//                 if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
+//                 activity[ichan] = m_bodge;
+//             }
+//         }
+
+//     }
+//     out_slices.insert(out_slices.end(), slices.begin(), slices.end());
+
+
+
+
+
+//     // Now freshen the blobs with new slice and everything else copied from old.
+//     for (auto blobset : blobsets) {
+//         int tsid = blobset->ident(); // UbooneBlobSource must continue to follow this convention.
+//         for (auto old_blob : blobset->blobs()) {
+
+//             auto sslice = out_slices[tsid];
+//             if (!sslice) {
+//                 raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+//             }
+
+//             out_blobs.push_back(
+//                 std::make_shared<SimpleBlob>(
+//                     old_blob->ident(),
+//                     old_blob->value(),
+//                     old_blob->uncertainty(),
+//                     old_blob->shape(),
+//                     sslice,
+//                     old_blob->face()));
+//         }
+//     }
+// }
+
+
 // Fill slices and blobs from "live" blob sets.  This will produce new slices
 // according to the ROOT data and new blobs same as old blobs that refer to
 // corresponding new slices.  Output vectors are not cleared prior to filling.
@@ -204,56 +306,171 @@ void Root::UbooneClusterSource::extract_live(
     // WARNING: the code to fill the activity is ALMOST an exact copy-paste from
     // UbooneBlobSource.
 
-    // Make all new slices, initially with no activity.
+    // Get dimensions for slice creation
     const int n_slices_span = m_files->trees->nslices_span();
     const int nrebin = m_files->trees->header.nrebin;
     const double span = nrebin * m_tick;
 
-    // Intermediate mutable version.
-    std::vector<SimpleSlicePtr> slices(n_slices_span);
-    for (int tsid = 0; tsid<n_slices_span; ++tsid) {
-        auto sslice = std::make_shared<SimpleSlice>(iframe, tsid, tsid*span, span);
-        slices[tsid] = sslice;
-        // log->debug("simple slice: ident:{}, time:{}, span:{}, frame:{}",
-        //            tsid, tsid*span, span, iframe->ident());
-    }
-
-    // Now fill in activity
+    // =================================================================
+    // STEP 1: Load the activity map
+    // =================================================================
+    
+    // Create activity maps for each time slice
+    std::vector<ISlice::map_t> slice_activities(n_slices_span);
+    
+    // Fill initial activity from ROOT data
     const auto& act = m_files->trees->activity; // abbrev
     const auto& tids = act.timesliceId;
     const int n_slices_data = m_files->trees->nslices_data();
-    for (int sind=0; sind<n_slices_data; ++sind) {
-
+    
+    for (int sind = 0; sind < n_slices_data; ++sind) {
         int tsid = tids->at(sind); // time slice ID
+        if (tsid >= n_slices_span) continue;
 
         const auto& q = act.raw_charge->at(sind);
         const auto& dq = act.raw_charge_err->at(sind);
         const auto& chans = act.timesliceChannel->at(sind);
         const size_t nchans = chans.size();
         
-        auto& sslice = slices[tsid];
-        if (!sslice) {
-            raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
-        }
-        auto& activity = sslice->activity();
+        auto& activity = slice_activities[tsid];
 
         // Fill in known channel measures in this time slice.
-        for (size_t cind=0; cind<nchans; ++cind) {
+        for (size_t cind = 0; cind < nchans; ++cind) {
             const int chid = chans[cind];
             auto ichan = get_channel(chid);
-            activity[ichan] = ISlice::value_t(q[cind], dq[cind]);
+            if (ichan) {
+                activity[ichan] = ISlice::value_t(q[cind], dq[cind]);
+            }
         }
+    }
 
-        // Fill in known dead channels in this time slice
-        for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
-            auto ichan = get_channel(ch);
+    // =================================================================
+    // STEP 2: Modify activity map based on bad channels (bad_ch)
+    // =================================================================
+    
+    // Fill in known dead channels in all time slices
+    for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
+        auto ichan = get_channel(ch);
+        if (!ichan) continue;
+        
+        // Check each time slice to see if it overlaps with any of the bin ranges
+        for (int tsid = 0; tsid < n_slices_span; ++tsid) {
+            auto& activity = slice_activities[tsid];
+            
             // If slice overlaps with any of the bin ranges.
             for (const auto& tt : brl) {
                 if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
                 activity[ichan] = m_bodge;
+                break; // No need to check other ranges for this slice
             }
         }
     }
+
+    // =================================================================
+    // STEP 3: Modify activity map based on TC and TDC flag information
+    // =================================================================
+    
+    // Process TC (live) data flag information
+    const auto& live_data = m_files->trees->live;
+    const size_t n_live_blobs = live_data.cluster_id_vec->size();
+    
+    int num_wires[3]={0,2400,4800};
+
+    for (size_t bind = 0; bind < n_live_blobs; ++bind) {
+        const int tsid = live_data.time_slice_vec->at(bind);
+        
+        // Skip if time slice is out of range
+        if (tsid >= n_slices_span) continue;
+        
+        auto& activity = slice_activities[tsid];
+        
+        // Check each plane flag - 0 means the plane is dead for this blob
+        const std::vector<int> flags = {
+            live_data.flag_u_vec->at(bind),
+            live_data.flag_v_vec->at(bind), 
+            live_data.flag_w_vec->at(bind)
+        };
+        const std::vector<std::vector<int>> wire_indices = {
+            live_data.wire_index_u_vec->at(bind),
+            live_data.wire_index_v_vec->at(bind),
+            live_data.wire_index_w_vec->at(bind)
+        };
+        
+        for (int plane = 0; plane < 3; ++plane) {
+            if (flags[plane] == 0) { // This plane is dead for this blob
+                // Mark all wires in this plane for this blob as bad
+                for (int wire_idx : wire_indices[plane]) {
+                    auto ichan = get_channel(wire_idx + num_wires[plane]);
+                    if (ichan) {
+                        // if (activity[ichan].uncertainty() < 1e10)
+                            // std::cout << "TC: " << tsid << " " << wire_idx << " " << plane << " " << activity[ichan] << std::endl;
+                        activity[ichan] = m_bodge; // Set to (0, 1e12)
+                    }
+                }
+            }
+        }
+    }
+
+    // Process TDC (dead) data flag information if available
+    if (m_files->trees->dead.cluster_id_vec != nullptr) {
+        const auto& dead_data = m_files->trees->dead;
+        const size_t n_dead_blobs = dead_data.cluster_id_vec->size();
+        
+        for (size_t bind = 0; bind < n_dead_blobs; ++bind) {
+            const auto& time_slices = dead_data.time_slices_vec->at(bind);
+            
+            // TDC has multiple time slices per blob
+            for (int tsid : time_slices) {
+                if (tsid >= n_slices_span) continue;
+                
+                auto& activity = slice_activities[tsid];
+                
+                // Same flag processing as live data
+                const std::vector<int> flags = {
+                    dead_data.flag_u_vec->at(bind),
+                    dead_data.flag_v_vec->at(bind),
+                    dead_data.flag_w_vec->at(bind)
+                };
+                const std::vector<std::vector<int>> wire_indices = {
+                    dead_data.wire_index_u_vec->at(bind),
+                    dead_data.wire_index_v_vec->at(bind),
+                    dead_data.wire_index_w_vec->at(bind)
+                };
+                
+                for (int plane = 0; plane < 3; ++plane) {
+                    if (flags[plane] == 0) { // This plane is dead for this blob
+                        for (int wire_idx : wire_indices[plane]) {
+                            auto ichan = get_channel(wire_idx + num_wires[plane]);
+                            if (ichan) {
+                                // if (activity[ichan].uncertainty() < 1e10)
+                                //    std::cout << "TDC: " << activity[ichan] << std::endl;
+                                activity[ichan] = m_bodge; // Set to (0, 1e12)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =================================================================
+    // STEP 4: Form slices with finalized activity maps
+    // =================================================================
+    
+    // Intermediate mutable version.
+    std::vector<SimpleSlicePtr> slices(n_slices_span);
+    for (int tsid = 0; tsid < n_slices_span; ++tsid) {
+        auto sslice = std::make_shared<SimpleSlice>(iframe, tsid, tsid*span, span);
+        
+        // Copy the prepared activity map into the slice
+        auto& slice_activity = sslice->activity();
+        slice_activity = slice_activities[tsid];  // Copy the prepared activity map
+        
+        slices[tsid] = sslice;
+        // log->debug("simple slice: ident:{}, time:{}, span:{}, frame:{}",
+        //            tsid, tsid*span, span, iframe->ident());
+    }
+    
     out_slices.insert(out_slices.end(), slices.begin(), slices.end());
 
     // Now freshen the blobs with new slice and everything else copied from old.
@@ -277,7 +494,6 @@ void Root::UbooneClusterSource::extract_live(
         }
     }
 }
-
 
 bool Root::UbooneClusterSource::flush(output_queue& outq)
 {
