@@ -3090,9 +3090,9 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
         // if (cloud.pts[i].index_u <= u1_high_index && cloud.pts[i].index_u >= u1_low_index &&
         //     cloud.pts[i].index_v <= v1_high_index && cloud.pts[i].index_v >= v1_low_index &&
         //     cloud.pts[i].index_w <= w1_high_index && cloud.pts[i].index_w >= w1_low_index)
-        if (current_wire_u >= u_min && current_wire_u <= u_max &&
-            current_wire_v >= v_min && current_wire_v <= v_max &&
-            current_wire_w >= w_min && current_wire_w <= w_max) {
+        if (current_wire_u >= u_min && current_wire_u < u_max &&
+            current_wire_v >= v_min && current_wire_v < v_max &&
+            current_wire_w >= w_min && current_wire_w < w_max) {
             return true;  // Equivalent to flag_add = true; break;
         }
         
