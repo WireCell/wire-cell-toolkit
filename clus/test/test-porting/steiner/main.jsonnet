@@ -119,13 +119,14 @@ local ub = {
         name: sampler.name,
         data: {
             input: fname,       // file name or list
+            anode: wc.tn(anode),
             datapath: datapath + '/' + kind, // see issue #375
             sampler: wc.tn(sampler),
             kind: kind,
         } + if optical then {
             light: "light", flash: "flash", flashlight: "flashlight"
         } else {}
-    }, nin=1, nout=1, uses=[sampler]),
+    }, nin=1, nout=1, uses=[sampler, anode]),
         
     TensorSetFanin(multiplicity=2, tensor_order=[0,1]) :: pg.pnode({
         type: 'TensorSetFanin',

@@ -22,6 +22,11 @@
    "flashlight" to the grouping node and adds a "flash ID" index into "flash"
    array to the cluster nodes in a scalar PC.
 
+   For live case it will make the CTPC.  It does this by ignoring the activity
+   from the slices from the input blobs and instead goes back to the
+   corresponding entries in the ROOT tree.  This allows slices that may lack any
+   blob to still be represented in the CTPC.
+
  */
 
 #ifndef WIRECELLROOT_UBOONECLUSTERSETSOURCE
@@ -31,11 +36,12 @@
 
 #include "WireCellAux/Logger.h"
 
+#include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IBlobTensoring.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IConfigurable.h"
-#include "WireCellUtil/PointTree.h"
 
+#include "WireCellUtil/PointTree.h"
 
 namespace WireCell::Root {
 
@@ -54,6 +60,15 @@ namespace WireCell::Root {
         virtual bool operator()(const WireCell::IBlobSet::pointer& in, output_queue& outq);
 
     private:
+
+        /** Configuration: anode
+
+            Name the IAnodePlane component describing microboone.
+
+            Required for looking up WCT channels given WCP wire indices (which
+            for MB are identical to WCT wire-in-plane numbers).
+        */
+        IAnodePlane::pointer m_anode;
 
         /** Configuration: "input" (required)
 
@@ -110,6 +125,28 @@ namespace WireCell::Root {
         std::string m_datapath = "pointtrees/%d/uboone";
 
 
+        /** Configuration: "keep_slices" (default false)
+
+            If true, the original slices shared by the IBlobs in the live case
+            are left untouched.
+
+            Otherwise, the ISlices are replaced with "fresh" ones (re)loaded
+            from the ROOT file.  This may result in some ISlices in the output
+            ICluster that are not connected to any IBlob.
+        */
+
+    private: // methods
+
+        IChannel::pointer get_channel(int chanid) const;
+
+        void extract_live(const IBlobSet::vector& blobsets,
+                          ISlice::vector& out_slices, IBlob::vector& out_blobs) const;
+        void extract_dead(const IBlobSet::vector& blobsets,
+                          ISlice::vector& out_slices, IBlob::vector& out_blobs) const;
+        void apply_tagger_flags(WireCell::PointCloud::Tree::Points::node_t* cnode, int cluster_id) const;
+
+    private: // data
+
         // for logging
         size_t m_calls{0};
 
@@ -127,7 +164,13 @@ namespace WireCell::Root {
 
         std::vector<double> m_angles{1.0472/*60 degrees*/, -1.0472/*-60 degrees*/, 0.0};
 
-        void apply_tagger_flags(WireCell::PointCloud::Tree::Points::node_t* cnode, int cluster_id) const;
+    private: // Constants.
+
+        // The microboone sample period.
+        const double m_tick{0.5 * units::us};
+        // The value and uncertainty to mark "dead" measures
+        const ISlice::value_t m_bodge{0, 1e12};
+
     };
 }
 

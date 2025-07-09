@@ -222,7 +222,7 @@ Dataset Aux::make_corner_dataset(const IBlob& iblob)
     return ds;
 }
 
-double Aux::time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
+double Aux::time2drift(IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed, double time) {
     // std::cout << "time2drift: " << time << " " << time_offset << " " << drift_speed << std::endl;
     // const Pimpos* colpimpos = anodeface->planes()[2]->pimpos();
     double xsign = anodeface->dirx();
@@ -235,9 +235,11 @@ double Aux::time2drift(const IAnodeFace::pointer anodeface, const double time_of
 
 template <typename T>
 using mapfp_t = std::unordered_map<int, std::unordered_map<int, T>>;
-void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlobSet::vector ibsv,
-                   const IAnodeFace::pointer iface, const int face, const double time_offset, const double drift_speed,
-                   const double tick, const double dead_threshold)
+void Aux::add_ctpc(
+    PointCloud::Tree::Points::node_t& root,
+    const WireCell::ISlice::vector& slices,
+    IAnodeFace::pointer iface, const int face, const double time_offset, const double drift_speed,
+    const double tick, const double dead_threshold)
 {
     mapfp_t<std::vector<double>> ds_x, ds_y, ds_charge, ds_charge_err;
     mapfp_t<std::vector<int>> ds_cident, ds_wind, ds_slice_index;
@@ -256,50 +258,48 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
     }
 
     size_t nslices = 0;
-    for (const auto& ibs : ibsv) {
-        const auto& slice = ibs->slice();
-        {
-            // auto& slice = std::get<slice_t>(cgnode.ptr);
-            ++nslices;
-            const auto slice_index = slice->start()/tick;
-            const auto& activity = slice->activity();
-            for (const auto& [ichan, charge] : activity) {
-                if(charge.uncertainty() > dead_threshold) {
-                    // if (charge.value() >0)
-                    // std::cout << "Test: dead_threshold " << dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
-                    continue;
-                } 
-                const auto& cident = ichan->ident();
-                const auto& wires = ichan->wires();
-                for (const auto& wire : wires) {
-                    const auto& wind = wire->index();
-                    const auto& plane = wire->planeid().index();
-                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {}", slice_index, cident, charge, wind, plane, wire->planeid().face());
-                    // const auto& face = wire->planeid().face();
-                    // const auto& face = m_face;
-                    /// FIXME: is this the way to get face?
+    for (auto slice : slices) {
+        // auto& slice = std::get<slice_t>(cgnode.ptr);
+        ++nslices;
+        const auto slice_index = slice->start()/tick;
+        const auto& activity = slice->activity();
+        for (const auto& [ichan, charge] : activity) {
+            if(charge.uncertainty() > dead_threshold) {
+                // if (charge.value() >0)
+                // std::cout << "Test: dead_threshold " << dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
+                continue;
+            } 
+            const auto& cident = ichan->ident();
+            const auto& wires = ichan->wires();
+            for (const auto& wire : wires) {
+                const auto& wind = wire->index();
+                const auto& plane = wire->planeid().index();
+                // log->debug("slice {} chan {} charge {} wind {} plane {} face {}", slice_index, cident, charge, wind, plane, wire->planeid().face());
+                // const auto& face = wire->planeid().face();
+                // const auto& face = m_face;
+                /// FIXME: is this the way to get face?
 
 //                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
 
-                    const auto& x = time2drift(iface, time_offset, drift_speed, slice->start());
-                    const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
+                const auto& x = time2drift(iface, time_offset, drift_speed, slice->start());
+                const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
 
-                    // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
-                    //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
-                    //                wind, plane, face, x, y);
-                    // }
-                    ds_x[face][plane].push_back(x);
-                    ds_y[face][plane].push_back(y);
-                    ds_charge[face][plane].push_back(charge.value());
-                    ds_charge_err[face][plane].push_back(charge.uncertainty());
-                    ds_cident[face][plane].push_back(cident);
-                    ds_wind[face][plane].push_back(wind);
-                    ds_slice_index[face][plane].push_back(slice_index);
-                }
+                // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
+                //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
+                //                wind, plane, face, x, y);
+                // }
+                ds_x[face][plane].push_back(x);
+                ds_y[face][plane].push_back(y);
+                ds_charge[face][plane].push_back(charge.value());
+                ds_charge_err[face][plane].push_back(charge.uncertainty());
+                ds_cident[face][plane].push_back(cident);
+                ds_wind[face][plane].push_back(wind);
+                ds_slice_index[face][plane].push_back(slice_index);
             }
-            // log->debug("ds_x.size() {}", ds_x.size());
         }
-    }
+        // log->debug("ds_x.size() {}", ds_x.size());
+    } // loop over slices
+
     // log->debug("got {} slices", nslices);
     std::vector<std::string> plane_names = {"U", "V", "W"};
 
@@ -334,8 +334,10 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
     // }
 }
 
-void Aux::add_dead_winds(PointCloud::Tree::Points::node_t& root, const IBlobSet::vector ibsv,
-    const IAnodeFace::pointer iface, const int face ,
+void Aux::add_dead_winds(
+    PointCloud::Tree::Points::node_t& root,
+    const ISlice::vector& slices, 
+    IAnodeFace::pointer iface, const int face ,
     const double time_offset ,
     const double drift_speed ,
     const double tick, const double dead_threshold){
@@ -349,34 +351,31 @@ void Aux::add_dead_winds(PointCloud::Tree::Points::node_t& root, const IBlobSet:
 
     const int apa = iface->anode();
 
-    for (const auto& ibs : ibsv) {
-        const auto& slice = ibs->slice();
-        {
-            // const auto& slice_index = slice->start()/tick;
-            const auto& activity = slice->activity();
-            for (const auto& [ichan, charge] : activity) {
-                // std::cout << "Test: dead_threshold " << dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan->ident() << " " << slice->start() << std::endl;
+    for (auto slice : slices) {
+        // const auto& slice_index = slice->start()/tick;
+        const auto& activity = slice->activity();
+        for (const auto& [ichan, charge] : activity) {
+            // std::cout << "Test: dead_threshold " << dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan->ident() << " " << slice->start() << std::endl;
 
-                if(charge.uncertainty() < dead_threshold) continue;
-                const auto& wires = ichan->wires();
-                for (const auto& wire : wires) {
-                    const auto& wind = wire->index();
-                    const auto& plane = wire->planeid().index();
-                    //                     const auto& x = time2drift(iface, time_offset, drift_speed, slice->start());
-                    const auto& xbeg = time2drift(iface, time_offset, drift_speed, slice->start());
-                    const auto& xend = time2drift(iface, time_offset, drift_speed, slice->start() + slice->span());
+            if(charge.uncertainty() < dead_threshold) continue;
+            const auto& wires = ichan->wires();
+            for (const auto& wire : wires) {
+                const auto& wind = wire->index();
+                const auto& plane = wire->planeid().index();
+                //                     const auto& x = time2drift(iface, time_offset, drift_speed, slice->start());
+                const auto& xbeg = time2drift(iface, time_offset, drift_speed, slice->start());
+                const auto& xend = time2drift(iface, time_offset, drift_speed, slice->start() + slice->span());
 
-                    auto& dead_winds = map_dead_winds[std::make_pair(face, plane)];
-                    if (dead_winds.find(wind) == dead_winds.end()) {
-                        dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
-                    } else {
-                        const auto& [xbeg_now, xend_now] = dead_winds[wind];
-                        dead_winds[wind] = {std::min(std::min(xbeg,xend)-0.1*units::cm, xbeg_now), std::max(std::max(xbeg,xend) + 0.1*units::cm, xend_now)};
-                    }
-                    faces.insert(face);
-                    planes.insert(plane);
-
+                auto& dead_winds = map_dead_winds[std::make_pair(face, plane)];
+                if (dead_winds.find(wind) == dead_winds.end()) {
+                    dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
+                } else {
+                    const auto& [xbeg_now, xend_now] = dead_winds[wind];
+                    dead_winds[wind] = {std::min(std::min(xbeg,xend)-0.1*units::cm, xbeg_now), std::max(std::max(xbeg,xend) + 0.1*units::cm, xend_now)};
                 }
+                faces.insert(face);
+                planes.insert(plane);
+
             }
         }
     }

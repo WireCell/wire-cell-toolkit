@@ -1,6 +1,8 @@
 #include "WireCellRoot/UbooneClusterSource.h"
 #include "WireCellAux/SamplingHelpers.h"
 #include "WireCellAux/TensorDMpointtree.h"
+#include "WireCellAux/SimpleBlob.h"
+#include "WireCellAux/SimpleSlice.h"
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
@@ -40,6 +42,9 @@ Root::UbooneClusterSource::~UbooneClusterSource()
 
 void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
 {
+    auto anode_tn = get<std::string>(cfg, "anode", "AnodePlane");
+    m_anode = Factory::find_tn<IAnodePlane>(anode_tn);
+
     auto check_file = [](const auto& jstr) -> std::string {
         auto got = Persist::resolve(jstr.asString());
         if (got.empty()) {
@@ -147,10 +152,136 @@ bool Root::UbooneClusterSource::operator()(const IBlobSet::pointer& in, output_q
     return true;
 }
 
+IChannel::pointer Root::UbooneClusterSource::get_channel(int chanid) const
+{
+    auto ich = m_anode->channel(chanid);
+    if (!ich) {
+        log->error("No channel for ID {}, segfault to follow", chanid);
+    }
+    return ich;
+}
+
+
+// Fill slices and blobs from "dead" blob sets.  This simply extracts the blob
+// and slice pointers from each blob set.  Output vectors are not cleared prior
+// to filling.
+void Root::UbooneClusterSource::extract_dead(
+    const IBlobSet::vector& blobsets,
+    ISlice::vector& out_slices,
+    IBlob::vector& out_blobs) const
+{
+    for (const auto& ibs : blobsets) {
+        const auto& fresh = ibs->blobs();
+        out_blobs.insert(out_blobs.end(), fresh.begin(), fresh.end());
+        out_slices.push_back(ibs->slice());
+    }
+}
+
+
+// Map from time slice ID.  This MUST be used same as in UbooneBlobSource.
+using SimpleSlicePtr = std::shared_ptr<Aux::SimpleSlice>;
+using SliceMap = std::map<int, SimpleSlicePtr>;
+
+// Fill slices and blobs from "live" blob sets.  This will produce new slices
+// according to the ROOT data and new blobs same as old blobs that refer to
+// corresponding new slices.  Output vectors are not cleared prior to filling.
+void Root::UbooneClusterSource::extract_live(
+    const IBlobSet::vector& blobsets,
+    ISlice::vector& out_slices,
+    IBlob::vector& out_blobs) const
+{
+    // Temporarily hold slices by their time slice id so we can look up later as
+    // we patch in new slices to old blobs.
+    SliceMap by_tid;
+
+    // Get representative frame.  Note, this is likely a trace-free frame
+    // manufactured by one of several upstream UbooneBlobSource's.  In
+    // principle, right here we could replace it with a fully fleshed one built
+    // from ROOT data.  But, it's a fully fleshed activity we currently seek to
+    // keep we keep it as-is.
+    auto iframe = blobsets[0]->slice()->frame(); 
+
+    // WARNING: the code to fill the activity is ALMOST an exact copy-paste from
+    // UbooneBlobSource.
+
+    // Make all new slices, initially with no activity.
+    const int n_slices_span = m_files->trees->nslices_span();
+    const int nrebin = m_files->trees->header.nrebin;
+    const double span = nrebin * m_tick;
+
+    // Intermediate mutable version.
+    std::vector<SimpleSlicePtr> slices(n_slices_span);
+    for (int tsid = 0; tsid<n_slices_span; ++tsid) {
+        auto sslice = std::make_shared<SimpleSlice>(iframe, tsid, tsid*span, span);
+        slices[tsid] = sslice;
+        // log->debug("simple slice: ident:{}, time:{}, span:{}, frame:{}",
+        //            tsid, tsid*span, span, iframe->ident());
+    }
+
+    // Now fill in activity
+    const auto& act = m_files->trees->activity; // abbrev
+    const auto& tids = act.timesliceId;
+    const int n_slices_data = m_files->trees->nslices_data();
+    for (int sind=0; sind<n_slices_data; ++sind) {
+
+        int tsid = tids->at(sind); // time slice ID
+
+        const auto& q = act.raw_charge->at(sind);
+        const auto& dq = act.raw_charge_err->at(sind);
+        const auto& chans = act.timesliceChannel->at(sind);
+        const size_t nchans = chans.size();
+        
+        auto& sslice = slices[tsid];
+        if (!sslice) {
+            raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+        }
+        auto& activity = sslice->activity();
+
+        // Fill in known channel measures in this time slice.
+        for (size_t cind=0; cind<nchans; ++cind) {
+            const int chid = chans[cind];
+            auto ichan = get_channel(chid);
+            activity[ichan] = ISlice::value_t(q[cind], dq[cind]);
+        }
+
+        // Fill in known dead channels in this time slice
+        for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
+            auto ichan = get_channel(ch);
+            // If slice overlaps with any of the bin ranges.
+            for (const auto& tt : brl) {
+                if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
+                activity[ichan] = m_bodge;
+            }
+        }
+    }
+    out_slices.insert(out_slices.end(), slices.begin(), slices.end());
+
+    // Now freshen the blobs with new slice and everything else copied from old.
+    for (auto blobset : blobsets) {
+        int tsid = blobset->ident(); // UbooneBlobSource must continue to follow this convention.
+        for (auto old_blob : blobset->blobs()) {
+
+            auto sslice = out_slices[tsid];
+            if (!sslice) {
+                raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+            }
+
+            out_blobs.push_back(
+                std::make_shared<SimpleBlob>(
+                    old_blob->ident(),
+                    old_blob->value(),
+                    old_blob->uncertainty(),
+                    old_blob->shape(),
+                    sslice,
+                    old_blob->face()));
+        }
+    }
+}
+
 
 bool Root::UbooneClusterSource::flush(output_queue& outq)
 {
-    bool load_ok = m_files->next();
+    const bool load_ok = m_files->next();
     if (!load_ok) {
         log->error("failed to load uboone cluster event at call {}", m_calls);
         return false;
@@ -178,27 +309,27 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         apply_tagger_flags(cnode, cid);
     }
 
-    int ident = -1;
-
-
-    // Collect all the IBlobs from all cached IBlobSets
-    std::vector<IBlob::pointer> iblobs;
-    IAnodeFace::pointer iface = nullptr;
-    for (const auto& ibs : m_cache) {
-        if (ident < 0) {
-            ident = ibs->slice()->frame()->ident();
-            log->debug("using ident {} from first blob set frame", ident);
-        }
-        // use the first iface we find
-        if (!iface && ibs->blobs().size()) {
-            iface = ibs->blobs().front()->face();
-        }
-        const auto& fresh = ibs->blobs();
-        iblobs.insert(iblobs.end(), fresh.begin(), fresh.end());
+    // First, collect all the IBlobs and ISlices from all cached IBlobSets
+    IBlob::vector iblobs;
+    ISlice::vector islices;
+    if (trees.is_live()) {
+        extract_live(m_cache, islices, iblobs);
+    }
+    else {
+        extract_dead(m_cache, islices, iblobs);
     }
 
-    size_t nublobs = blob_cluster_ids.size();
-    size_t niblobs = iblobs.size();
+    const int ident = islices[0]->frame()->ident();
+    IAnodeFace::pointer iface = iblobs[0]->face();
+    log->debug("is_live:{}, extracted {} slices, {} blobs from {} blob sets from frame ident {} face ident {} at call {}",
+               trees.is_live(),
+               
+               islices.size(), iblobs.size(), m_cache.size(), ident, iface->ident(), m_calls);
+
+    m_cache.clear();
+
+    const size_t nublobs = blob_cluster_ids.size();
+    const size_t niblobs = iblobs.size();
 
     log->debug("blobs: ub={} ib={} in {} clusters", nublobs, niblobs, cnodes.size());
     if (nublobs != niblobs) {
@@ -206,8 +337,10 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
                           niblobs, nublobs);
     }
 
+    // Next dispatch the collected IBlobs and ISlices
+
+    // First, dispatch the IBlobs
     const double tick = 500*units::ns;
-    size_t n3dpoints_total = 0;
     for (size_t bind=0; bind<niblobs; ++bind) {
         const IBlob::pointer iblob = iblobs[bind];
 
@@ -248,7 +381,6 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
             /// DO NOT EXTEND FURTHER! see #426, #430
         }
     }
-    log->debug("sampled {} points over {} blobs", n3dpoints_total, niblobs);
     
     // Process individual cluster IDs for live data
     if (trees.is_live()) {
@@ -285,6 +417,7 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         }
     }
 
+    // Add "flash"
     size_t nmatch=0;
     if (trees.is_live()) { 
         if (!m_light_name.empty()) {
@@ -306,24 +439,28 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         }
     }
 
-    std::string datapath = m_datapath;
-    if (datapath.find("%") != std::string::npos) {
-        datapath = String::format(datapath, ident);
+    // Dispatch the ISlices
+    if (trees.is_live()){
+        Aux::add_ctpc(root, islices, iface, 0, m_time_offset, m_drift_speed);
+        Aux::add_dead_winds(root, islices, iface, 0, m_time_offset, m_drift_speed);
     }
 
-    if (trees.is_live()){
-        Aux::add_ctpc(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
-        Aux::add_dead_winds(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
-    }
-    m_cache.clear();
 
     for (const auto& [name, pc] : root.value.local_pcs()) {
         log->debug("contains point cloud {} size_major {}", name, pc.size_major());
     }
-    auto tens = as_tensors(root, datapath);
 
+    // Serialize to tensors
+    std::string datapath = m_datapath;
+    if (datapath.find("%") != std::string::npos) {
+        datapath = String::format(datapath, ident);
+    }
+    auto tens = as_tensors(root, datapath);
     log->debug("made pc-tree ncluster={} nblob={} nmatch={} in {} tensors at {} with ident {} in call {}",
                cnodes.size(), niblobs, nmatch, tens.size(), datapath, ident, m_calls);
+    // for (auto& ten : tens) {
+    //     log->debug("{}", ten->metadata()["datapath"]);
+    // }
 
     auto out = as_tensorset(tens, ident);
     outq.push_back(out);
@@ -354,7 +491,7 @@ void Root::UbooneClusterSource::apply_tagger_flags(WireCell::PointCloud::Tree::P
         
         // Get event type and extract individual flags
         int event_type = trees.get_event_type(cluster_id);
-        double cluster_length = trees.get_cluster_length(cluster_id);
+        // double cluster_length = trees.get_cluster_length(cluster_id);
         
         // Extract flags from event_type using bit operations
         int flag_tgm = (event_type >> 3) & 1U;

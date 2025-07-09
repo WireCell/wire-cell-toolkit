@@ -64,21 +64,23 @@ namespace WireCell::Aux {
 
 
 
-    double time2drift(const IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
+    double time2drift(IAnodeFace::pointer anodeface, const double time_offset, const double drift_speed,
                       double time);
 
-    void add_ctpc(PointCloud::Tree::Points::node_t& root, const IBlobSet::vector ibsv,
-                  const IAnodeFace::pointer iface, const int face = 0,
+    void add_ctpc(PointCloud::Tree::Points::node_t& root,
+                  const ISlice::vector& slices,
+                  IAnodeFace::pointer iface, const int face = 0,
                   const double time_offset = -1600 * units::us + 6 * units::mm / (1.101 * units::mm / units::us),
                   const double drift_speed = 1.101 * units::mm / units::us,
                   const double tick = 0.5 * units::us,
                   const double dead_threshold = 1e10);
 
-    void add_dead_winds(PointCloud::Tree::Points::node_t& root, const IBlobSet::vector ibsv,
-                    const IAnodeFace::pointer iface, const int face = 0,
-                    const double time_offset = -1600 * units::us + 6 * units::mm / (1.101 * units::mm / units::us),
-                    const double drift_speed = 1.101 * units::mm / units::us,
-                    const double tick = 0.5 * units::us,
-                    const double dead_threshold = 1e10
+    void add_dead_winds(PointCloud::Tree::Points::node_t& root,
+                        const ISlice::vector& slices,
+                        IAnodeFace::pointer iface, const int face = 0,
+                        const double time_offset = -1600 * units::us + 6 * units::mm / (1.101 * units::mm / units::us),
+                        const double drift_speed = 1.101 * units::mm / units::us,
+                        const double tick = 0.5 * units::us,
+                        const double dead_threshold = 1e10
     );
 }
