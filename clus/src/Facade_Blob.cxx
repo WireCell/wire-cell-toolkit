@@ -315,7 +315,7 @@ bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
 }
 
 
-double Blob::estimate_blob_total_charge() const {
+double Blob::estimate_total_charge() const {
     const Cluster* cluster_ptr = this->cluster();
     if (!cluster_ptr) {
         return 0.0;
