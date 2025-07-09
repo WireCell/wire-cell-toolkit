@@ -144,8 +144,8 @@ namespace WireCell::Clus::Facade {
         //     return m_dead_winds;
         // }
 
-        // // FIXME: need to remove apa=0
-        // std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const
+        // FIXME: need to remove apa=0
+        // std::map<int, std::pair<double, double>>& get_dead_winds1(const int apa, const int face, const int pind) const
         // {
         //     // make one if not exist
         //     return m_dead_winds[apa][face][pind];

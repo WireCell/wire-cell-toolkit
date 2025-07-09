@@ -1,5 +1,6 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/Facade_Grouping.h"
 #include <boost/container_hash/hash.hpp>
 
 using namespace WireCell;
@@ -151,6 +152,53 @@ bool Blob::overlap_fast(const Blob& b, const int offset) const
     return true;
 }
 
+
+// void Blob::check_dead_wire_consistency() const{
+//     auto grouping = cluster()->grouping();
+
+//     // Find apa and face for this blob
+//     int apa = wpid().apa();
+//     int face = wpid().face();
+
+   
+//     // Loop over time slices and wire indices
+//     // for (int slice = slice_index_min(); slice < slice_index_max(); slice += 4) {
+//     //     for (int plane = 0; plane < 3; ++plane) {
+//     //         int wire_min = 0, wire_max = 0;
+//     //         if (plane == 0) {
+//     //             wire_min = u_wire_index_min();
+//     //             wire_max = u_wire_index_max();
+//     //         } else if (plane == 1) {
+//     //             wire_min = v_wire_index_min();
+//     //             wire_max = v_wire_index_max();
+//     //         } else if (plane == 2) {
+//     //             wire_min = w_wire_index_min();
+//     //             wire_max = w_wire_index_max();
+//     //         }
+//     //         for (int wire = wire_min; wire < wire_max; ++wire) {
+//     //              bool is_dead =  grouping->is_wire_dead(apa, face, plane, wire, slice);
+//     //              auto charge_pair = grouping->get_wire_charge(apa, face, plane, wire, slice);
+
+//     //             //  if (is_dead == 1) std::cout << "apa: " << apa << ", face: " << face
+//     //             //         << ", slice: " << slice << ", plane: " << plane
+//     //             //         << ", wire: " << wire
+//     //             //         << ", is_dead: " << is_dead
+//     //             //         << ", charge: (" << charge_pair.first
+//     //             //         << ", " << charge_pair.second << ")" << std::endl;
+//     //             //  std::cout << "APA: " << apa << ", Face: " << face
+//     //             //        << ", Slice: " << slice << ", Plane: " << plane
+//     //             //        << ", Wire: " << wire
+//     //             //        << ", Is Dead: " << is_dead
+//     //             //        << ", Charge: (" << charge_pair.first
+//     //             //        << ", " << charge_pair.second << ")" << std::endl;
+//     //             // You can add your logic here for each (slice, plane, wire)
+//     //             // Example: LogDebug("apa=" << apa << " face=" << face << " slice=" << slice << " plane=" << plane << " wire=" << wire);
+//     //         }
+//     //     }
+//     // }
+
+// }
+
 geo_point_t Blob::center_pos() const
 {
     return {cache().center_x, cache().center_y, cache().center_z};
@@ -265,6 +313,7 @@ bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
     // future bug.
     return a < b;
 }
+
 
 
 

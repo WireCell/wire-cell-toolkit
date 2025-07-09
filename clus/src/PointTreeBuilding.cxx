@@ -275,6 +275,10 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
                     continue;
                 } 
+                // std::cout << "Test: live " << " m_dead_threshold " << m_dead_threshold
+                //           << " charge.uncertainty() " << charge.uncertainty()
+                //           << " " << charge.value() << " " << ichan->ident()
+                //           << " " << slice->start() << std::endl;
                 const auto& cident = ichan->ident();
                 const auto& wires = ichan->wires();
                 for (const auto& wire : wires) {
@@ -347,6 +351,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
         // const auto& slice_index = slice->start()/m_tick;
         const auto& activity = slice->activity();
         for (const auto& [ichan, charge] : activity) {
+            // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan->ident() << " " << slice->start() << std::endl;
             if(charge.uncertainty() < m_dead_threshold) continue;
             // log->debug("m_dead_threshold {} charge.uncertainty() {}", m_dead_threshold, charge.uncertainty());
             // const auto& cident = ichan->ident();

@@ -301,6 +301,8 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
         }
     }
     // log->debug("got {} slices", nslices);
+    std::vector<std::string> plane_names = {"U", "V", "W"};
+
 
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {
@@ -321,7 +323,7 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
             ds.add("cident", Array(ds_cident[face][plane]));
             ds.add("wind", Array(ds_wind[face][plane]));
             ds.add("slice_index", Array(ds_slice_index[face][plane]));
-            const std::string ds_name = String::format("ctpc_f%dp%d", face, plane);
+            const std::string ds_name = String::format("ctpc_a%df%dp%d", 0, face, plane_names[plane]);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root.value.local_pcs().emplace(ds_name, ds);
             // log->debug("added point cloud {} with {} points", ds_name, x.size());
@@ -353,6 +355,8 @@ void Aux::add_dead_winds(PointCloud::Tree::Points::node_t& root, const IBlobSet:
             // const auto& slice_index = slice->start()/tick;
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
+                // std::cout << "Test: dead_threshold " << dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan->ident() << " " << slice->start() << std::endl;
+
                 if(charge.uncertainty() < dead_threshold) continue;
                 const auto& wires = ichan->wires();
                 for (const auto& wire : wires) {

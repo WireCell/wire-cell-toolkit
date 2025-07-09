@@ -113,18 +113,25 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             //     std::cout << "Xin2: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min()  << "  " << points.size() << "  " << blob_peaks.size() <<std::endl;
 
             // }
-            auto steiner_terminals = sg.find_steiner_terminals("basic_pid");
-            std::cout << "Xin3: " << steiner_terminals.size() << std::endl;
-            auto extrem_points = cluster->get_extreme_wcps();
-            std::cout << "Xin4: " << extrem_points.size() << std::endl;
-            for (const auto& pts : extrem_points) {
-                for (const auto& pt : pts) {
-                    std::cout << "Extreme point: ("
-                              << pt.x() << ", "
-                              << pt.y() << ", "
-                              << pt.z() << ")" << std::endl;
-                }
+            // auto steiner_terminals = sg.find_steiner_terminals("basic_pid");
+            // std::cout << "Xin3: " << steiner_terminals.size() << std::endl;
+            // auto extrem_points = cluster->get_extreme_wcps();
+            // std::cout << "Xin4: " << extrem_points.size() << std::endl;
+            // for (const auto& pts : extrem_points) {
+            //     for (const auto& pt : pts) {
+            //         std::cout << "Extreme point: ("
+            //                   << pt.x() << ", "
+            //                   << pt.y() << ", "
+            //                   << pt.z() << ")" << std::endl;
+            //     }
+            // }
+
+            for (const auto& [cell, points] : cell_points_map) {
+                // cell->check_dead_wire_consistency();
             }
+
+            //  std::cout << grouping.get_dead_winds1(0,0,0).size() << " " << grouping.get_dead_winds(0,0,0).size() << " " << grouping.get_dead_winds1(0,0,1).size() << " " << grouping.get_dead_winds(0,0,1).size() << " " << grouping.get_dead_winds1(0,0,2).size() << " " << grouping.get_dead_winds(0,0,2).size() << std::endl;
+
 
             //    auto gr = sg.create_steiner_graph();
            // Do we do any tests, eg on num_vertices()?

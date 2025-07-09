@@ -330,12 +330,23 @@ struct BlobSampler::Sampler : public Aux::Logger
                 channel_attach[ipt] = p_chi2i[channel_ident[ipt]];
                 auto ich = channels[channel_attach[ipt]];
 
+                
+
                 auto ait = activity.find(ich);
                 if (ait != activity.end()) {
                     auto act = ait->second;
                     charge_val[ipt] = act.value();
                     charge_unc[ipt] = act.uncertainty();
                 }
+
+                // std::cout << "Test: wire_index " << wire_index[ipt]
+                //           << " pitch_coord " << pitch_coord[ipt]
+                //           << " wire_coord " << wire_coord[ipt]
+                //           << " channel_ident " << channel_ident[ipt]
+                //           << " channel_attach " << channel_attach[ipt]
+                //           << " charge_val " << charge_val[ipt]
+                //           << " charge_unc " << charge_unc[ipt] 
+                //           << std::endl;
             }
 
             nv("wire_index", wire_index);

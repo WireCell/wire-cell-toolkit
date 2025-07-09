@@ -74,9 +74,12 @@ static std::tuple<int, int, int> parse_dead_winds(const std::string& ds_name) {
 
 void Grouping::on_construct(node_type* node)
 {
-    // this->NaryTree::Facade<points_t>::on_construct(node);
+    this->NaryTree::Facade<points_t>::on_construct(node);
+
+
     // const auto& lpcs = m_node->value.local_pcs();
     // for (const auto& [name, pc_dead_winds] : lpcs) {
+    //     // std::cout << "Grouping::on_construct: name=" << name << std::endl;
     //     if (name.find("dead_winds") != std::string::npos) {
     //         const auto& xbeg = pc_dead_winds.get("xbeg")->elements<float_t>();
     //         const auto& xend = pc_dead_winds.get("xend")->elements<float_t>();
@@ -85,6 +88,8 @@ void Grouping::on_construct(node_type* node)
     //         for (size_t i = 0; i < xbeg.size(); ++i) {
     //             m_dead_winds[apa][face][plane][wind[i]] = {xbeg[i], xend[i]};
     //         }
+    //         // std::cout << "Xin on construct " << nchildren() << " " << apa << " " << face << " " << plane << " "
+    //         //           << xbeg.size() << " " << xend.size() << " " << wind.size() << std::endl;
     //     }
     // }
 
@@ -631,6 +636,10 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
     // Get the point cloud for this face/plane
     std::vector<std::string> plane_names = {"U", "V", "W"};
     const std::string ds_name = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
+
+    // std::cout << "Xin1: " << apa << " " << face << " " << ds_name << std::endl;
+           
+
     // const std::string ds_name = String::format("ctpc_f%dp%d", face, pind);
     if (m_node->value.local_pcs().find(ds_name) == m_node->value.local_pcs().end()) {
         return map_time_ch_charge; // Return empty if dataset not found
@@ -641,6 +650,9 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
     const auto& wind = ctpc.get("wind")->elements<int_t>();
     const auto& charge = ctpc.get("charge")->elements<float_t>();
     const auto& charge_err = ctpc.get("charge_err")->elements<float_t>();
+
+    // std::cout << "Xin1: " << slice_index.size() << " " << wind.size() << " " 
+            // << charge.size() << " " << charge_err.size() << std::endl;
 
     // Fill the map for points within the specified window
     for (size_t i = 0; i < slice_index.size(); ++i) {
@@ -665,6 +677,8 @@ void Grouping::build_wire_cache(int apa, int face, int plane) const {
     std::vector<std::string> plane_names = {"U", "V", "W"};
     const std::string ctpc_name = String::format("ctpc_a%df%dp%d", apa, face, plane_names[plane]);
 
+    // std::cout << "Xin: " << apa << " " << face << " " << plane << " " << ctpc_name << std::endl;
+
     const auto& local_pcs = m_node->value.local_pcs();
     if (local_pcs.find(ctpc_name) != local_pcs.end()) {
         const auto& ctpc = local_pcs.at(ctpc_name);
@@ -673,6 +687,8 @@ void Grouping::build_wire_cache(int apa, int face, int plane) const {
         const auto& charges = ctpc.get("charge")->elements<float_t>();
         const auto& charge_errs = ctpc.get("charge_err")->elements<float_t>();
         
+        // std::cout << "Xin: " << slice_indices.size() << " " << wire_indices.size() << " " << charges.size() << " " << charge_errs.size() << std::endl;
+
         // Populate charge cache
         for (size_t i = 0; i < slice_indices.size(); ++i) {
             int time_slice = slice_indices[i];
@@ -685,8 +701,8 @@ void Grouping::build_wire_cache(int apa, int face, int plane) const {
     }
 
     // Build dead wires cache from dead_winds data using x positions
-    std::vector<std::string> plane_chars = {"u", "v", "w"};
-    const std::string dead_name = String::format("dead_winds_a%df%dp%c", apa, face, plane_chars[plane][0]);
+    std::vector<std::string> plane_chars = {"U", "V", "W"};
+    const std::string dead_name = String::format("dead_winds_a%df%dp%d", apa, face, plane_chars[plane]);
     
     if (local_pcs.find(dead_name) != local_pcs.end()) {
         const auto& dead_winds = local_pcs.at(dead_name);
@@ -694,6 +710,9 @@ void Grouping::build_wire_cache(int apa, int face, int plane) const {
         const auto& xend = dead_winds.get("xend")->elements<float_t>();
         const auto& wind = dead_winds.get("wind")->elements<int_t>();
         
+
+        // std::cout << "Xin: " << dead_name << " " << xbeg.size() << " " << xend.size() << " " << wind.size() << std::endl;
+
         // Populate dead wires cache with x positions
         for (size_t i = 0; i < xbeg.size(); ++i) {
             int wire_index = wind[i];
@@ -717,12 +736,12 @@ std::pair<double, double> Grouping::get_wire_charge(int apa, int face, int plane
     // Look up charge data
     auto time_it = cache.charge_data[plane].find(time_slice);
     if (time_it == cache.charge_data[plane].end()) {
-        return {0.0, 0.0}; // No data for this time slice
+        return {0.0, 1e12}; // No data for this time slice
     }
     
     auto wire_it = time_it->second.find(wire_index);
     if (wire_it == time_it->second.end()) {
-        return {0.0, 0.0}; // No data for this wire
+        return {0.0, 1e12}; // No data for this wire
     }
     
     return wire_it->second;
@@ -736,11 +755,16 @@ bool Grouping::is_wire_dead(int apa, int face, int plane,
     auto& gc = this->cache();
     const auto& cache = gc.wire_caches[apa][face];
     
+    
+
+
     // Look up dead wire x position range
     auto wire_it = cache.dead_wires[plane].find(wire_index);
     if (wire_it == cache.dead_wires[plane].end()) {
         return false; // No dead x range for this wire
     }
+
+    // std::cout << "apa: " << apa << " face: " << face << " plane: " << plane  << " wire_index: " << wire_index << " time_slice: " << time_slice << " " << cache.dead_wires[plane].size() << " " << cache.dead_wires[plane].begin()->first << " " << cache.dead_wires[plane].rbegin()->first << std::endl;
     
     // Convert time_slice to x position
     double time_offset = gc.map_time_offset.at(apa).at(face);
@@ -751,6 +775,13 @@ bool Grouping::is_wire_dead(int apa, int face, int plane,
     double time = time_slice * tick;
     double x_position = time2drift(iface, time_offset, drift_speed, time);
     
+    // std::cout << "Wire dead check: apa=" << apa << ", face=" << face 
+    //           << ", plane=" << plane << ", wire_index=" << wire_index 
+    //           << ", time_slice=" << time_slice 
+    //           << ", x_position=" << x_position 
+    //           << ", range=(" << wire_it->second.first 
+    //           << ", " << wire_it->second.second << ")" << std::endl;
+
     // Check if x position falls within dead wire range
     const auto& [start_x, end_x] = wire_it->second;
     return (x_position >= start_x && x_position <= end_x);

@@ -104,6 +104,7 @@ namespace WireCell::Clus::Facade {
         double estimate_minimum_charge() const;
         double get_wire_charge(const WireCell::WirePlaneId& wpid, const int_t wire_index) const;
         double get_wire_charge_error(const WireCell::WirePlaneId& wpid, const int_t wire_index) const;
+        // void check_dead_wire_consistency() const;
         //
 
        private:
