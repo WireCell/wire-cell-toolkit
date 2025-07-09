@@ -315,6 +315,207 @@ bool Facade::blob_less(const Facade::Blob* a, const Facade::Blob* b)
 }
 
 
+double Blob::estimate_blob_total_charge() const {
+    const Cluster* cluster_ptr = this->cluster();
+    if (!cluster_ptr) {
+        return 0.0;
+    }
+    const Grouping* grouping = cluster_ptr->grouping();
+    if (!grouping) {
+        return 0.0;
+    }
+    
+    double total_charge = 0.0;
+    int valid_plane_count = 0;
+    
+    const auto wpid_val = wpid();
+    const int apa = wpid_val.apa();
+    const int face = wpid_val.face();
+    
+    // Process each plane (U=0, V=1, W=2)
+    for (int plane = 0; plane < 3; plane++) {
+        double plane_charge = 0.0;
+        bool plane_has_data = false;
+        
+        // Get wire ranges for this plane
+        int wire_min, wire_max;
+        switch (plane) {
+            case 0: // U plane
+                wire_min = u_wire_index_min();
+                wire_max = u_wire_index_max();
+                break;
+            case 1: // V plane
+                wire_min = v_wire_index_min();
+                wire_max = v_wire_index_max();
+                break;
+            case 2: // W plane
+                wire_min = w_wire_index_min();
+                wire_max = w_wire_index_max();
+                break;
+            default:
+                continue;
+        }
+        
+        // Check if this plane has valid wire ranges
+        if (wire_min >= wire_max) {
+            continue;
+        }
+        
+        // Iterate through time slices for this blob
+        int time_slice = slice_index_min(); 
+        int num_dead_wire = 0;
+        // Iterate through wires in this plane
+        for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
+            // Check if wire is dead
+            if (grouping->is_wire_dead(apa, face, plane, wire_index, time_slice)) {
+                num_dead_wire++;
+            }
+
+            // Get wire charge
+            auto charge_pair = grouping->get_wire_charge(apa, face, plane, wire_index, time_slice);
+            double charge = charge_pair.first;            
+            if (charge > 0) { // Only count positive charges
+                plane_charge += charge;
+                plane_has_data = true;
+            }
+        }
+        if (num_dead_wire > 1 || num_dead_wire == wire_max - wire_min) plane_has_data = false;
+        
+        if (plane_has_data) {
+            total_charge += plane_charge;
+            valid_plane_count++;
+        }
+    }
+    
+    // Average across valid planes (equivalent to prototype's division by count)
+    if (valid_plane_count > 0) {
+        total_charge /= valid_plane_count;
+    }
+    
+    return total_charge;
+}
+
+double Blob::estimate_minimum_charge() const {
+    const Cluster* cluster_ptr = this->cluster();
+    if (!cluster_ptr) {
+        return 1e9;
+    }
+    
+    const Grouping* grouping = cluster_ptr->grouping();
+    if (!grouping) {
+        return 1e9;
+    }
+    
+    double min_charge = 1e9;
+    const auto wpid_val = wpid();
+    const int apa = wpid_val.apa();
+    const int face = wpid_val.face();
+    
+    // Process each plane (U=0, V=1, W=2)
+    for (int plane = 0; plane < 3; plane++) {
+        double plane_charge = 0.0;
+        bool plane_has_data = false;
+        
+        // Get wire ranges for this plane
+        int wire_min, wire_max;
+        switch (plane) {
+            case 0: // U plane
+                wire_min = u_wire_index_min();
+                wire_max = u_wire_index_max();
+                break;
+            case 1: // V plane
+                wire_min = v_wire_index_min();
+                wire_max = v_wire_index_max();
+                break;
+            case 2: // W plane
+                wire_min = w_wire_index_min();
+                wire_max = w_wire_index_max();
+                break;
+            default:
+                continue;
+        }
+        
+        // Check if this plane has valid wire ranges
+        if (wire_min >= wire_max) {
+            continue; // Skip this plane (equivalent to bad_planes check)
+        }
+        
+        // Iterate through time slices for this blob
+        int time_slice = slice_index_min(); 
+        int num_dead_wire = 0;
+        // Iterate through wires in this plane
+        for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
+            // Check if wire is dead (equivalent to bad_planes check)
+            if (grouping->is_wire_dead(apa, face, plane, wire_index, time_slice)) {
+                num_dead_wire++;
+            }
+            
+            // Get wire charge
+            auto charge_pair = grouping->get_wire_charge(apa, face, plane, wire_index, time_slice);
+            double charge = charge_pair.first;
+            
+            if (charge > 0) { // Only count positive charges
+                plane_charge += charge;
+                plane_has_data = true;
+            }
+        }
+        if (num_dead_wire > 1 || num_dead_wire == wire_max - wire_min) plane_has_data = false;
+        
+        
+        // Update minimum charge if this plane has data
+        if (plane_has_data && plane_charge < min_charge) {
+            min_charge = plane_charge;
+        }
+    }
+    
+    return min_charge;
+}
+
+double Blob::get_wire_charge(int plane, const int_t wire_index) const {
+    const Cluster* cluster_ptr = this->cluster();
+    if (!cluster_ptr) {
+        return 0.0;
+    }
+    
+    const Grouping* grouping = cluster_ptr->grouping();
+    if (!grouping) {
+        return 0.0;
+    }
+    
+    const auto wpid_val = wpid();
+    const int apa = wpid_val.apa();
+    const int face = wpid_val.face();
+
+    // Get charge for the middle time slice of this blob as representative
+    const int time_slice = slice_index_min();
+    
+    auto charge_pair = grouping->get_wire_charge(apa, face, plane, wire_index, time_slice);
+    return charge_pair.first;
+}
+
+double Blob::get_wire_charge_error(int plane, const int_t wire_index) const {
+    const Cluster* cluster_ptr = this->cluster();
+    if (!cluster_ptr) {
+        return 1e12; // Large error indicates no data
+    }
+    
+    const Grouping* grouping = cluster_ptr->grouping();
+    if (!grouping) {
+        return 1e12; // Large error indicates no data
+    }
+    
+    const auto wpid_val = wpid();
+    const int apa = wpid_val.apa();
+    const int face = wpid_val.face();
+    
+    // Get charge error for the middle time slice of this blob as representative
+    const int time_slice = slice_index_min();
+    
+    auto charge_pair = grouping->get_wire_charge(apa, face, plane, wire_index, time_slice);
+    return charge_pair.second;
+}
+
+
 
 
 void Facade::sort_blobs(std::vector<const Blob*>& blobs) { std::sort(blobs.rbegin(), blobs.rend(), blob_less); }

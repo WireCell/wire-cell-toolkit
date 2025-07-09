@@ -127,6 +127,13 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             // }
 
             for (const auto& [cell, points] : cell_points_map) {
+                auto total_charge = cell->estimate_blob_total_charge();
+                auto min_charge = cell->estimate_minimum_charge();
+
+                std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() 
+                          << " has " << points.size() << " points, total charge: " << total_charge 
+                          << ", min charge: " << min_charge << " " << cell->get_wire_charge(0, cell->u_wire_index_min()) << " " << cell->get_wire_charge_error(0, cell->u_wire_index_min()) 
+                          << std::endl;
                 // cell->check_dead_wire_consistency();
             }
 

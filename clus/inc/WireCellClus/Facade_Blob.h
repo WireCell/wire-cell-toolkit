@@ -102,8 +102,8 @@ namespace WireCell::Clus::Facade {
         // charge information, access cluster --> grouping, and use CTPC cache to access these information ... 
         double estimate_blob_total_charge() const;
         double estimate_minimum_charge() const;
-        double get_wire_charge(const WireCell::WirePlaneId& wpid, const int_t wire_index) const;
-        double get_wire_charge_error(const WireCell::WirePlaneId& wpid, const int_t wire_index) const;
+        double get_wire_charge(int plane, const int_t wire_index) const;
+        double get_wire_charge_error(int plane, const int_t wire_index) const;
         // void check_dead_wire_consistency() const;
         //
 
