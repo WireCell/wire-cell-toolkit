@@ -166,7 +166,8 @@ namespace WireCell::Clus::Steiner {
             const std::string& steiner_pc_name = "steiner_subset"
         );
 
-
+        const vertex_set& get_steiner_terminals() const { return m_steiner_terminals; }
+        vertex_set& get_steiner_terminals() { return m_steiner_terminals; }
 
     private:
         // The Grapher "wraps" a Cluster.  As the Cluster is a *facade* of an
@@ -229,6 +230,9 @@ namespace WireCell::Clus::Steiner {
             const vertex_set& steiner_indices
         ) const;
 
+        vertex_set m_steiner_terminals;
+
+
         /// Check if a point is spatially related to reference cluster's time-blob mapping
         bool is_point_spatially_related_to_reference(
             size_t point_idx,
@@ -249,6 +253,7 @@ namespace WireCell::Clus::Steiner {
 
         /// Convert vector of points to PointCloud Dataset
         PointCloud::Dataset points_to_dataset(const std::vector<Point>& points) const;
+
 
 
         // temporary ...

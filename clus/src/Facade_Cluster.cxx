@@ -3035,28 +3035,40 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
     // Get current point's time slice information
     // Equivalent to: int time_slice = cloud.pts[i].mcell->GetTimeSlice();
     const Blob* current_blob = blob_with_point(point_index);
+    auto wpid = current_blob->wpid();
+    auto apa = wpid.apa();
+    auto face = wpid.face();
     int current_time_slice = current_blob->slice_index_min();
     
     // Check ONLY current time slice (exact prototype logic, no ±1 offset)
     // This is the exact prototype logic:
     // if (old_time_mcells_map->find(time_slice)!=old_time_mcells_map->end())
-    auto time_it = ref_time_blob_map.find(current_time_slice);
-    if (time_it != ref_time_blob_map.end()) {
+    //  tbm[wpid.apa()][wpid.face()][blob->slice_index_min()].insert(blob);
         
+    auto apa_it = ref_time_blob_map.find(apa);
+    if (apa_it == ref_time_blob_map.end()) return false;
+
+    auto face_it = apa_it->second.find(face);
+    if (face_it == apa_it->second.end()) return false;
+
+    auto time_it = face_it->second.find(current_time_slice);
+    if (time_it != face_it->second.end()) {
+
         // Iterate through apa/face maps in this time slice
         // time_blob_map_t is std::map<int, std::map<int, std::map<int, BlobSet>>>
         // Structure: apa -> face -> time -> blobset
-        for (const auto& face_pair : time_it->second) {
-            for (const auto& time_pair : face_pair.second) {
-                // Now iterate through blobs in the BlobSet
-                for (const Blob* ref_blob : time_pair.second) {
-                    
-                    if (check_wire_ranges_match(point_index, ref_blob)) {
-                        return true;  // Equivalent to flag_add = true; break;
-                    }
-                }
+        // Now iterate through blobs in the BlobSet
+        for (const Blob* ref_blob : time_it->second) {
+            
+                //  std::cout << "Test: " << point_index << " " << ref_blob->u_wire_index_min() << " " << ref_blob->u_wire_index_max() << " "
+                //         << ref_blob->v_wire_index_min() << " " << ref_blob->v_wire_index_max() << " "
+                //         << ref_blob->w_wire_index_min() << " " << ref_blob->w_wire_index_max() << std::endl;
+
+            if (check_wire_ranges_match(point_index, ref_blob)) {
+                return true;  // Equivalent to flag_add = true; break;
             }
         }
+            
     }
     
     return false;  // Equivalent to flag_add remains false

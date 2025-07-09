@@ -34,6 +34,8 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
     log->debug("create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
 
+    std::cout << "Test1: " << steiner_terminals.size() << std::endl;
+
     if (steiner_terminals.empty()) {
         log->warn("create_steiner_tree: no steiner terminals found, returning empty graph");
         return graph_type(0);
@@ -47,6 +49,9 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
                    original_size.size(), steiner_terminals.size());
     }
 
+    std::cout << "Test2: " << steiner_terminals.size() << std::endl;
+
+
     // Phase 3: Apply path-based filtering if path is provided
     if (!path_point_indices.empty()) {
         vertex_set pre_path_size = steiner_terminals;
@@ -55,16 +60,25 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
                    pre_path_size.size(), steiner_terminals.size());
     }
 
+    std::cout << "Test3: " << steiner_terminals.size() << std::endl;
+
+
     // Phase 4: Add extreme points
     vertex_set extreme_points = get_extreme_points_for_reference(reference_cluster);
     steiner_terminals.insert(extreme_points.begin(), extreme_points.end());
     log->debug("create_steiner_tree: added {} extreme points, total terminals: {}", 
                extreme_points.size(), steiner_terminals.size());
 
+    std::cout << "Test4: " << steiner_terminals.size() << std::endl;
+
+
     if (steiner_terminals.empty()) {
         log->warn("create_steiner_tree: no terminals remain after filtering, returning empty graph");
         return graph_type(0);
     }
+
+    m_steiner_terminals = steiner_terminals; // Store for later access
+
 
     // Phase 5: Create subset point cloud for steiner points
     auto steiner_pc = create_steiner_subset_pc(steiner_terminals);
@@ -72,8 +86,8 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
     log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
 
     // Phase 6: Build Steiner tree on the subset
-    const auto& base_graph = get_graph("basic");
-    auto& graph_algo = m_cluster.graph_algorithms("basic");
+    const auto& base_graph = get_graph(graph_name);
+    auto& graph_algo = m_cluster.graph_algorithms(graph_name);
 
     // Create filtered graph with only steiner vertices
     auto filtered_graph = graph_algo.reduce(steiner_terminals);
@@ -110,7 +124,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_reference_cluster(
     vertex_set filtered_terminals;
     
     // Get reference cluster's time-blob mapping
-    const auto& ref_time_blob_map = reference_cluster->time_blob_map();
+    const auto& ref_time_blob_map = reference_cluster->time_blob_map(); // this one has the time blob map ...
     
     if (ref_time_blob_map.empty()) {
         log->debug("filter_by_reference_cluster: reference cluster has empty time_blob_map");
@@ -119,6 +133,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_reference_cluster(
 
     // Filter terminals based on spatial relationship with reference cluster
     for (auto terminal_idx : terminals) {
+        //std::cout << "Test: " << terminal_idx << " " << ref_time_blob_map.size() << std::endl;
         if (is_point_spatially_related_to_reference(terminal_idx, ref_time_blob_map)) {
             filtered_terminals.insert(terminal_idx);
         }
