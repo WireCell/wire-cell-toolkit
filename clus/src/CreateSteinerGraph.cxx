@@ -97,10 +97,16 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         bool already = cluster->has_graph(m_graph_name);
         if (already || m_replace) {
             auto cell_points_map = sg.form_cell_points_map();
-            auto graph = sg.get_graph("basic_pid");
+            auto& graph = sg.get_graph("basic_pid");
 
             std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
             
+            sg.establish_same_blob_steiner_edges("basic_pid", true);
+
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+            sg.remove_same_blob_steiner_edges("basic_pid");
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+
 
             // for (const auto& [cell, points] : cell_points_map) {
             //     // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
@@ -126,13 +132,13 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             //     }
             // }
 
-            auto extreme_boundary_points = cluster->get_two_boundary_wcps(1);
-            std::cout << "Xin3: " << extreme_boundary_points.first.x() << " " 
-                      << extreme_boundary_points.first.y() << " " 
-                      << extreme_boundary_points.first.z() << " | "
-                      << extreme_boundary_points.second.x() << " " 
-                      << extreme_boundary_points.second.y() << " " 
-                      << extreme_boundary_points.second.z() << std::endl;
+            // auto extreme_boundary_points = cluster->get_two_boundary_wcps(1);
+            // std::cout << "Xin3: " << extreme_boundary_points.first.x() << " " 
+            //           << extreme_boundary_points.first.y() << " " 
+            //           << extreme_boundary_points.first.z() << " | "
+            //           << extreme_boundary_points.second.x() << " " 
+            //           << extreme_boundary_points.second.y() << " " 
+            //           << extreme_boundary_points.second.z() << std::endl;
 
             // for (const auto& [cell, points] : cell_points_map) {
             //     auto total_charge = cell->estimate_total_charge();

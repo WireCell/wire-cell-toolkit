@@ -151,7 +151,7 @@ namespace WireCell::Clus::Steiner {
         /// - One terminal: distance * 0.9
         /// - Neither terminal: no edge added
         void establish_same_blob_steiner_edges(const std::string& graph_name, 
-                                               bool disable_dead_mix_cell=true, int flag=1);
+                                               bool disable_dead_mix_cell=true);
     
          /// Remove previously added same-blob Steiner edges
         void remove_same_blob_steiner_edges(const std::string& graph_name);

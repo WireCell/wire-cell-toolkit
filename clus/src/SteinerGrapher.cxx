@@ -669,7 +669,7 @@ Steiner::Grapher::blob_vertex_map Steiner::Grapher::form_cell_points_map()
 }
 
 void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& graph_name, 
-                                                        bool disable_dead_mix_cell, int flag)
+                                                        bool disable_dead_mix_cell)
 {
     if (!m_cluster.has_graph(graph_name)) {
         log->error("Graph '{}' does not exist in cluster", graph_name);
@@ -693,6 +693,9 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
     }
 
     log->debug("Processing {} blobs for same-blob edges", cell_points_map.size());
+
+    std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+
 
     // Step 3: For each blob, add edges between all pairs of points (following prototype logic)
     for (const auto& [blob, point_indices] : cell_points_map) {
@@ -739,17 +742,22 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
 
                 if (add_edge) {
                     // Add edge with calculated weight
-                    auto [edge, success] = boost::add_edge(index1, index2, edge_weight, graph);
-                    if (success) {
-                        added_edges.insert(edge);
-                        log->debug("Added same-blob edge: {} -- {} (distance: {:.3f} cm, weight: {:.3f}, terminals: {}/{})", 
-                                  index1, index2, distance / units::cm, edge_weight / units::cm,
-                                  flag_index1 ? "T" : "N", flag_index2 ? "T" : "N");
+                    if (!boost::edge(index1, index2, graph).second) {
+                        auto [edge, success] = boost::add_edge(index1, index2, edge_weight, graph);
+                        if (success) {
+                            added_edges.insert(edge);
+                            log->debug("Added same-blob edge: {} -- {} (distance: {:.3f} cm, weight: {:.3f}, terminals: {}/{})", 
+                                    index1, index2, distance / units::cm, edge_weight / units::cm,
+                                    flag_index1 ? "T" : "N", flag_index2 ? "T" : "N");
+                        }
                     }
                 }
             }
         }
     }
+
+    std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+
 
     // Store the added edges for later removal
     store_added_edges(graph_name, added_edges);
