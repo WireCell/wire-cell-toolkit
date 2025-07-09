@@ -393,7 +393,7 @@ void Root::UbooneBlobSource::load_dead()
 
 
             slice = std::make_shared<SimpleSlice>(iframe, tsid, start, span);
-            // dummy_activity(slice->activity()); // why run this ???
+            dummy_activity(slice->activity()); 
             slices[tsid] = slice;
             blobsets[tsid] = bset = std::make_shared<SimpleBlobSet>(tsid, slice);
         }
