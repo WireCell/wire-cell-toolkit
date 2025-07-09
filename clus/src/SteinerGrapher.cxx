@@ -694,7 +694,7 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
 
     log->debug("Processing {} blobs for same-blob edges", cell_points_map.size());
 
-    std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+    // std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
 
 
     // Step 3: For each blob, add edges between all pairs of points (following prototype logic)
@@ -756,7 +756,7 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
         }
     }
 
-    std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+    // std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
 
 
     // Store the added edges for later removal
@@ -765,11 +765,11 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
     // Invalidate any cached GraphAlgorithms that use this graph
     invalidate_graph_algorithms_cache(graph_name);
 
-    log->info("Added {} same-blob edges to graph '{}' from {} total points ({} steiner terminals)", 
-             added_edges.size(), graph_name, 
-             std::accumulate(cell_points_map.begin(), cell_points_map.end(), 0,
-                           [](int sum, const auto& pair) { return sum + pair.second.size(); }),
-             steiner_terminals.size());
+    // log->info("Added {} same-blob edges to graph '{}' from {} total points ({} steiner terminals)", 
+    //          added_edges.size(), graph_name, 
+    //          std::accumulate(cell_points_map.begin(), cell_points_map.end(), 0,
+    //                        [](int sum, const auto& pair) { return sum + pair.second.size(); }),
+    //          steiner_terminals.size());
 }
 
 
@@ -802,7 +802,7 @@ void Steiner::Grapher::remove_same_blob_steiner_edges(const std::string& graph_n
     // Invalidate any cached GraphAlgorithms that use this graph
     invalidate_graph_algorithms_cache(graph_name);
 
-    log->info("Removed {} same-blob Steiner edges from graph '{}'", removed_count, graph_name);
+    // log->info("Removed {} same-blob Steiner edges from graph '{}'", removed_count, graph_name);
 }
 
 void Steiner::Grapher::invalidate_graph_algorithms_cache(const std::string& graph_name)
