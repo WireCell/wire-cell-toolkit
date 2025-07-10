@@ -93,6 +93,18 @@ namespace WireCell::Clus::Graphs {
         /// vertices.  
         graph_type steiner_graph(const graph_type& graph, const Voronoi& vor);
 
+
+        /// Structure to hold charge calculation parameters (from prototype)
+        struct ChargeWeightingConfig {
+            double Q0 = 10000.0;        // constant term from prototype
+            double factor1 = 0.8;       // weighting factor 1 from prototype  
+            double factor2 = 0.4;       // weighting factor 2 from prototype
+            bool enable_weighting = true; // whether to apply charge weighting
+        };
+
+       
+
+
         /// Construct the "discrete graph Voronoi tessellation".
         Voronoi voronoi(const graph_type& graph, const std::vector<vertex_type>& terminals);
 

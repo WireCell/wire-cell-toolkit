@@ -77,36 +77,38 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
         return graph_type(0);
     }
 
-    m_steiner_terminals = steiner_terminals; // Store for later access
-
-
-    // // Phase 5: Create subset point cloud for steiner points
-    // auto steiner_pc = create_steiner_subset_pc(steiner_terminals);
-    // put_point_cloud(std::move(steiner_pc), steiner_pc_name);
-    // log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
-
-    // Phase 6: Build Steiner tree on the subset
     const auto& base_graph = get_graph(graph_name);
-    auto& graph_algo = m_cluster.graph_algorithms(graph_name);
 
-    // // Create filtered graph with only steiner vertices
-    // auto filtered_graph = graph_algo.reduce(steiner_terminals);
+   const auto& original_pc = get_point_cloud("default");
     
-    // // Convert filtered graph to proper graph type using boost::copy_graph
-    // graph_type steiner_graph_input;
-    // boost::copy_graph(filtered_graph, steiner_graph_input);
+    // Configure charge weighting to match prototype values
+    Graphs::Weighted::ChargeWeightingConfig charge_config;
+    charge_config.Q0 = 10000.0;           // From prototype
+    charge_config.factor1 = 0.8;          // From prototype  
+    charge_config.factor2 = 0.4;          // From prototype
+    charge_config.enable_weighting = true; // Enable charge weighting
     
-    // Convert terminal set to vector for algorithms
-    std::vector<vertex_type> terminal_vector(steiner_terminals.begin(), steiner_terminals.end());
+    // Use the enhanced approach with cluster reference for charge calculation
+    auto steiner_result = Graphs::Weighted::create_enhanced_steiner_graph(
+        base_graph, steiner_terminals, original_pc, m_cluster, charge_config);
+    
+    // Phase 6: Store results for later access
+    m_flag_steiner_terminal = steiner_result.flag_steiner_terminal;
+    m_old_to_new_index = steiner_result.old_to_new_index;
+    m_new_to_old_index = steiner_result.new_to_old_index;
+    
+    // Store the subset point cloud
+    if (!steiner_pc_name.empty()) {
+        put_point_cloud(std::move(steiner_result.point_cloud), steiner_pc_name);
+        log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
+    }
+    
+    log->debug("create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges", 
+               boost::num_vertices(steiner_result.graph), boost::num_vertices(base_graph),
+               boost::num_edges(steiner_result.graph));
 
-    // Apply Voronoi tessellation and create Steiner graph
-    auto vor = Graphs::Weighted::voronoi(base_graph, terminal_vector);
-    auto steiner_result = Graphs::Weighted::steiner_graph(base_graph, vor);
+    return steiner_result.graph;
 
-    log->debug("create_steiner_tree: created steiner graph with {} vertices, {} edges", 
-               boost::num_vertices(steiner_result), boost::num_edges(steiner_result));
-
-    return steiner_result;
 }
 
 // ========================================
@@ -250,19 +252,19 @@ PointCloud::Dataset Steiner::Grapher::create_path_point_cloud(
     return points_to_dataset(interpolated_points);
 }
 
-PointCloud::Dataset Steiner::Grapher::create_steiner_subset_pc(
-    const vertex_set& steiner_indices) const
-{
-    // Get the original point cloud from the cluster's scoped view
-    const auto& sv = m_cluster.sv3d();
-    const auto original_pc = sv.flat_pc("3d");
+// PointCloud::Dataset Steiner::Grapher::create_steiner_subset_pc(
+//     const vertex_set& steiner_indices) const
+// {
+//     // Get the original point cloud from the cluster's scoped view
+//     const auto& sv = m_cluster.sv3d();
+//     const auto original_pc = sv.flat_pc("3d");
     
-    // Convert set to vector for subset operation
-    std::vector<size_t> indices_vector(steiner_indices.begin(), steiner_indices.end());
+//     // Convert set to vector for subset operation
+//     std::vector<size_t> indices_vector(steiner_indices.begin(), steiner_indices.end());
     
-    // Create subset point cloud containing only steiner points
-    return original_pc.subset(indices_vector);
-}
+//     // Create subset point cloud containing only steiner points
+//     return original_pc.subset(indices_vector);
+// }
 
 bool Steiner::Grapher::is_point_spatially_related_to_reference(
     size_t point_idx,
@@ -365,45 +367,17 @@ PointCloud::Dataset Steiner::Grapher::points_to_dataset(const std::vector<Point>
     return dataset;
 }
 
-// ========================================
-// Additional Helper Methods (to be implemented)
-// ========================================
 
 // These methods need cluster-specific implementation:
-
 size_t Steiner::Grapher::find_closest_vertex_to_point(const Point& point) const
 {
     // Find the vertex index closest to the given 3D point
-    double min_distance = std::numeric_limits<double>::max();
-    size_t closest_idx = SIZE_MAX;
-    
-    for (size_t i = 0; i < m_cluster.npoints(); ++i) {
-        Point vertex_point = m_cluster.point3d(i);
-        double distance = (point - vertex_point).magnitude();
-        if (distance < min_distance) {
-            min_distance = distance;
-            closest_idx = i;
-        }
-    }
+    // check scope ???
+    auto closest_idx = m_cluster.get_closest_point_index(point);
     
     return closest_idx;
 }
 
-bool Steiner::Grapher::is_point_near_blob(const Point& point, const Facade::Blob* blob) const
-{
-    if (!blob) return false;
-    
-    // Check if point is within blob's spatial extent
-    // This is an approximation - you may need to implement more sophisticated logic
-    Point blob_center = blob->center_pos();
-    double distance = (point - blob_center).magnitude();
-    double blob_radius = 1*units::cm ;//blob->extent();  // or some characteristic size
-    
-    // Use tolerance similar to prototype's wire index ranges
-    const double spatial_tolerance = 2.0 * units::cm;
-    
-    return distance <= (blob_radius + spatial_tolerance);
-}
 
 
 
@@ -873,4 +847,211 @@ const Facade::Blob* Steiner::Grapher::get_blob_for_vertex(vertex_type vertex) co
     }
     
     return nodes[blob_idx]->value.facade<Blob>();
+}
+
+
+
+namespace WireCell::Clus::Graphs::Weighted{
+
+
+double calculate_charge_weighted_distance(
+    double geometric_distance,
+    double charge_source,
+    double charge_target, 
+    const ChargeWeightingConfig& config)
+{
+    if (!config.enable_weighting) {
+        return geometric_distance;
+    }
+    
+    // Apply prototype charge weighting formula
+    double weight_factor = config.factor1 + config.factor2 * 
+        (0.5 * config.Q0 / (charge_source + config.Q0) + 
+         0.5 * config.Q0 / (charge_target + config.Q0));
+    
+    return geometric_distance * weight_factor;
+}
+
+std::map<Weighted::vertex_type, double> calculate_vertex_charges(
+    const vertex_set& vertices, 
+    const PointCloud::Dataset& pc,
+    const WireCell::Clus::Facade::Cluster& cluster,
+    double charge_cut = 4000.0,
+    bool disable_dead_mix_cell = true)
+{
+   std::map<vertex_type, double> charges;
+    
+    if (pc.size_major() == 0) {
+        return charges;
+    }
+    
+    // Calculate charge for each vertex using the existing cluster method
+    for (auto vtx : vertices) {
+        if (vtx < pc.size_major()) {
+            // Use the existing calc_charge_wcp method from Facade::Cluster
+            auto charge_result = cluster.calc_charge_wcp(vtx, charge_cut, disable_dead_mix_cell);
+            charges[vtx] = charge_result.second;
+        }
+    }
+    
+    return charges;
+}
+
+// Updated enhanced steiner graph function to use the new charge calculation
+Weighted::EnhancedSteinerResult create_enhanced_steiner_graph(
+    const graph_type& base_graph,
+    const vertex_set& terminal_vertices,
+    const PointCloud::Dataset& original_pc,
+    const WireCell::Clus::Facade::Cluster& cluster,  // Added cluster parameter
+    const ChargeWeightingConfig& charge_config, 
+    bool disable_dead_mix_cell)
+{
+    EnhancedSteinerResult result;
+    
+    // Step 1: Create Voronoi tessellation
+    std::vector<vertex_type> terminal_vector(terminal_vertices.begin(), terminal_vertices.end());
+    auto vor = voronoi(base_graph, terminal_vector);
+    
+    // Step 2: Find all vertices in Steiner paths (same as before)
+    auto edge_weight = get(boost::edge_weight, base_graph);
+    std::map<vertex_pair, double> fine_distances;
+    std::map<vertex_pair, double> terminal_distances;
+    vertex_set selected_vertices;
+    std::vector<edge_type> steiner_edges_original;
+    
+    // Find shortest paths between terminals and collect all path vertices
+    auto [edge_iter, edge_end] = boost::edges(base_graph);
+    for (auto fine_edge : boost::make_iterator_range(edge_iter, edge_end)) {
+        const vertex_type fine_tail = boost::source(fine_edge, base_graph);
+        const vertex_type fine_head = boost::target(fine_edge, base_graph);
+        const vertex_pair fine_vp = make_vertex_pair(fine_tail, fine_head);
+        const double fine_distance = edge_weight[fine_edge];
+        
+        fine_distances[fine_vp] = fine_distance;
+        
+        const vertex_type term_tail = vor.terminal[fine_tail];
+        const vertex_type term_head = vor.terminal[fine_head];
+        if (term_tail == term_head) {
+            continue;
+        }
+        
+        const vertex_pair term_vp = make_vertex_pair(term_tail, term_head);
+        const double term_distance = vor.distance[fine_tail] + fine_distance + vor.distance[fine_head];
+        
+        // Track best path between each terminal pair
+        if (terminal_distances.find(term_vp) == terminal_distances.end() || 
+            term_distance < terminal_distances[term_vp]) {
+            terminal_distances[term_vp] = term_distance;
+            // Remove old edges for this terminal pair
+            steiner_edges_original.erase(
+                std::remove_if(steiner_edges_original.begin(), steiner_edges_original.end(),
+                    [&](const edge_type& e) {
+                        vertex_type s = boost::source(e, base_graph);
+                        vertex_type t = boost::target(e, base_graph);
+                        vertex_pair e_term_vp = make_vertex_pair(vor.terminal[s], vor.terminal[t]);
+                        return e_term_vp == term_vp;
+                    }),
+                steiner_edges_original.end());
+            steiner_edges_original.push_back(fine_edge);
+        }
+    }
+    
+    // Step 3: Collect all vertices on the selected edges (matches prototype unique_edges logic)
+    for (auto edge : steiner_edges_original) {
+        vertex_type source_vtx = boost::source(edge, base_graph);
+        vertex_type target_vtx = boost::target(edge, base_graph);
+        
+        selected_vertices.insert(source_vtx);
+        selected_vertices.insert(target_vtx);
+        
+        // Add all vertices on paths from edge endpoints to their nearest terminals
+        // This matches the prototype logic for walking back to terminals
+        for (auto vtx : {source_vtx, target_vtx}) {
+            vertex_type current_vtx = vtx;
+            while (vor.terminal[current_vtx] != current_vtx) {
+                // Follow the path back to terminal using last_edge
+                auto path_edge = vor.last_edge[current_vtx];
+                current_vtx = boost::source(path_edge, base_graph);
+                selected_vertices.insert(current_vtx);
+            }
+        }
+    }
+    
+    // Step 4: Create index mappings (matching prototype map_old_new_indices)
+    std::vector<vertex_type> selected_vector(selected_vertices.begin(), selected_vertices.end());
+    for (size_t i = 0; i < selected_vector.size(); ++i) {
+        result.old_to_new_index[selected_vector[i]] = i;
+        result.new_to_old_index[i] = selected_vector[i];
+    }
+    
+    // Step 5: Create flag_steiner_terminal (matching prototype logic)
+    result.flag_steiner_terminal.resize(selected_vector.size());
+    for (size_t i = 0; i < selected_vector.size(); ++i) {
+        vertex_type old_idx = selected_vector[i];
+        result.flag_steiner_terminal[i] = (terminal_vertices.find(old_idx) != terminal_vertices.end());
+    }
+    
+    // Step 6: Calculate charges for vertices using the existing cluster method
+    if (original_pc.size_major() > 0 && charge_config.enable_weighting) {
+        result.vertex_charges = calculate_vertex_charges(
+            selected_vertices, 
+            original_pc, 
+            cluster,
+            4000.0,  // charge_cut from prototype 
+            disable_dead_mix_cell     // disable_dead_mix_cell from prototype
+        );
+    }
+    
+    // Step 7: Create subset point cloud
+    if (original_pc.size_major() > 0) {
+        std::vector<size_t> subset_indices(selected_vertices.begin(), selected_vertices.end());
+        result.point_cloud = original_pc.subset(subset_indices);
+    }
+    
+    // Step 8: Create reduced graph with charge-weighted edges (matching prototype)
+    result.graph = graph_type(selected_vector.size());
+    
+    std::cout << "Check: " << steiner_edges_original.size() << std::endl;
+
+    for (auto edge : steiner_edges_original) {
+        vertex_type old_source = boost::source(edge, base_graph);
+        vertex_type old_target = boost::target(edge, base_graph);
+        
+        // Skip if vertices not in selected set
+        if (result.old_to_new_index.find(old_source) == result.old_to_new_index.end() ||
+            result.old_to_new_index.find(old_target) == result.old_to_new_index.end()) {
+            continue;
+        }
+        
+        vertex_type new_source = result.old_to_new_index[old_source];
+        vertex_type new_target = result.old_to_new_index[old_target];
+        
+        double geometric_distance = edge_weight[edge];
+        
+        // Apply charge weighting if enabled (exact prototype formula)
+        double final_distance = geometric_distance;
+        if (charge_config.enable_weighting && !result.vertex_charges.empty()) {
+            double charge_source = result.vertex_charges.count(old_source) ? 
+                                  result.vertex_charges[old_source] : 0.0;
+            double charge_target = result.vertex_charges.count(old_target) ? 
+                                  result.vertex_charges[old_target] : 0.0;
+            
+            // Prototype formula: dis * (factor1 + factor2 * (0.5*Q0/(Qs+Q0) + 0.5*Q0/(Qt+Q0)))
+            double Q0 = charge_config.Q0;
+            double factor1 = charge_config.factor1;
+            double factor2 = charge_config.factor2;
+            
+            double weight_factor = factor1 + factor2 * 
+                (0.5 * Q0 / (charge_source + Q0) + 0.5 * Q0 / (charge_target + Q0));
+            
+            final_distance = geometric_distance * weight_factor;
+        }
+        
+        boost::add_edge(new_source, new_target, final_distance, result.graph);
+    }
+    
+    result.steiner_terminal_indices = terminal_vertices;
+    return result;
+}
+
 }

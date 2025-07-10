@@ -112,7 +112,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             auto steiner_graph = sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", true, "steiner_pc");
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
 
-            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major() << " " << sg.get_steiner_terminals().size() << std::endl;
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  << std::endl;
 
             // for (const auto& [cell, points] : cell_points_map) {
             //     // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;

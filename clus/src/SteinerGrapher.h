@@ -166,8 +166,48 @@ namespace WireCell::Clus::Steiner {
             const std::string& steiner_pc_name = "steiner_subset"
         );
 
-        const vertex_set& get_steiner_terminals() const { return m_steiner_terminals; }
-        vertex_set& get_steiner_terminals() { return m_steiner_terminals; }
+
+        /// Get the flag indicating which vertices in the steiner graph are terminals
+        const std::vector<bool>& get_flag_steiner_terminal() const { 
+            return m_flag_steiner_terminal; 
+        }
+        
+        /// Get mapping from original to new vertex indices
+        const std::map<vertex_type, vertex_type>& get_old_to_new_mapping() const { 
+            return m_old_to_new_index; 
+        }
+        
+        /// Get mapping from new to original vertex indices  
+        const std::map<vertex_type, vertex_type>& get_new_to_old_mapping() const { 
+            return m_new_to_old_index; 
+        }
+        
+        /// Check if a vertex in the steiner graph is a terminal
+        bool is_steiner_terminal(vertex_type steiner_vertex) const {
+            if (steiner_vertex >= m_flag_steiner_terminal.size()) {
+                return false;
+            }
+            return m_flag_steiner_terminal[steiner_vertex];
+        }
+        
+        /// Get original vertex index from steiner graph vertex index
+        vertex_type get_original_vertex(vertex_type steiner_vertex) const {
+            auto it = m_new_to_old_index.find(steiner_vertex);
+            if (it != m_new_to_old_index.end()) {
+                return it->second;
+            }
+            return SIZE_MAX; // Invalid index
+        }
+        
+        /// Get steiner graph vertex index from original vertex index  
+        vertex_type get_steiner_vertex(vertex_type original_vertex) const {
+            auto it = m_old_to_new_index.find(original_vertex);
+            if (it != m_old_to_new_index.end()) {
+                return it->second;
+            }
+            return SIZE_MAX; // Invalid index
+        }
+
 
     private:
         // The Grapher "wraps" a Cluster.  As the Cluster is a *facade* of an
@@ -225,13 +265,6 @@ namespace WireCell::Clus::Steiner {
             const std::vector<size_t>& path_indices
         ) const;
 
-        /// Create subset point cloud containing only steiner points
-        PointCloud::Dataset create_steiner_subset_pc(
-            const vertex_set& steiner_indices
-        ) const;
-
-        vertex_set m_steiner_terminals;
-
 
         /// Check if a point is spatially related to reference cluster's time-blob mapping
         bool is_point_spatially_related_to_reference(
@@ -257,12 +290,70 @@ namespace WireCell::Clus::Steiner {
 
 
         // temporary ...
-        bool is_point_near_blob(const Point& point, const Facade::Blob* blob) const;
-
         size_t find_closest_vertex_to_point(const Point& point) const;
+
+        /// Create steiner subset point cloud with proper wire indices
+        /// (matches prototype point_cloud_steiner creation)
+        PointCloud::Dataset create_steiner_subset_pc_with_indices(
+            const vertex_set& steiner_indices) const;
+
+        /// Flag indicating which vertices in the reduced steiner graph are actual terminals
+        /// vs. intermediate Steiner points (matches prototype flag_steiner_terminal)
+        std::vector<bool> m_flag_steiner_terminal;
+        
+        /// Mapping from original graph vertex indices to reduced steiner graph indices
+        /// (matches prototype map_old_new_indices)
+        std::map<vertex_type, vertex_type> m_old_to_new_index;
+        
+        /// Mapping from reduced steiner graph indices to original graph indices  
+        /// (matches prototype map_new_old_indices)
+        std::map<vertex_type, vertex_type> m_new_to_old_index;
+        
+        /// Set of vertices that are steiner graph terminals (for edge creation logic)
+        vertex_set m_steiner_graph_terminal_indices;
     };
 
 
 }
+
+namespace WireCell::Clus::Graphs::Weighted {
+        /// Calculate charge-weighted distance between two vertices
+        /// (matches prototype edge weighting logic)
+        double calculate_charge_weighted_distance(
+            double geometric_distance,
+            double charge_source,
+            double charge_target, 
+            const ChargeWeightingConfig& config = ChargeWeightingConfig{});
+
+        /// Calculate vertex charges using cluster facade method
+        std::map<vertex_type, double> calculate_vertex_charges(
+            const vertex_set& vertices, 
+            const PointCloud::Dataset& pc,
+            const WireCell::Clus::Facade::Cluster& cluster,
+            double charge_cut,
+            bool disable_dead_mix_cell);
+
+        /// Enhanced steiner graph creation with full prototype functionality
+        struct EnhancedSteinerResult {
+            graph_type graph;                                    // reduced vertex graph
+            PointCloud::Dataset point_cloud;                     // subset point cloud  
+            std::vector<bool> flag_steiner_terminal;             // terminal flags
+            std::map<vertex_type, vertex_type> old_to_new_index; // index mappings
+            std::map<vertex_type, vertex_type> new_to_old_index; // reverse mappings
+            vertex_set steiner_terminal_indices;                 // original terminal set
+            std::map<vertex_type, double> vertex_charges;        // calculated charges
+        };
+
+        /// Create steiner graph with full prototype matching functionality
+        EnhancedSteinerResult create_enhanced_steiner_graph(
+            const graph_type& base_graph,
+            const vertex_set& terminal_vertices,
+            const PointCloud::Dataset& original_pc,
+            const WireCell::Clus::Facade::Cluster& cluster,
+            const ChargeWeightingConfig& charge_config = ChargeWeightingConfig{},
+            bool disable_dead_mix_cell = true
+        );
+}
+
 
 #endif

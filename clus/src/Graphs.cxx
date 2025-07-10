@@ -131,6 +131,13 @@ Weighted::graph_type Weighted::steiner_graph(const graph_type& graph, const Voro
     return sg;
 }
 
+
+
+
+
+
+
+
 Weighted::Voronoi Weighted::voronoi(const Weighted::graph_type& graph,
                                     const std::vector<Weighted::vertex_type>& terminals)
 {
