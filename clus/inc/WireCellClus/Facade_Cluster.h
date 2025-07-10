@@ -266,15 +266,6 @@ namespace WireCell::Clus::Facade {
             double charge_cut = 4000.0,
             bool disable_dead_mix_cell = true) const;
 
-        /// Convenience overload that takes a 3D point
-        /// @param point 3D point coordinates
-        /// @param charge_cut Minimum charge threshold (default: 0.0)
-        /// @param disable_dead_mix_cell Enable dead wire handling (default: false)
-        /// @return Pair of (all_planes_good, calculated_charge)
-        std::pair<bool, double> calc_charge_wcp(
-            const geo_point_t& point,
-            double charge_cut = 4000.0,
-            bool disable_dead_mix_cell = true) const;    
 
 
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.

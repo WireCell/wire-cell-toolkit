@@ -930,10 +930,7 @@ std::pair<bool, double> Cluster::calc_charge_wcp(
     double charge_v = charge_value(point_index, 1);
     double charge_w = charge_value(point_index, 2);
     
-    // Check for dead wires
-    bool is_dead_u = is_wire_dead(point_index, 0, dead_threshold);
-    bool is_dead_v = is_wire_dead(point_index, 1, dead_threshold);
-    bool is_dead_w = is_wire_dead(point_index, 2, dead_threshold);
+   
     
     // int wire_index_u = wire_index(point_index, 0);
     // int wire_index_v = wire_index(point_index, 1);
@@ -955,6 +952,11 @@ std::pair<bool, double> Cluster::calc_charge_wcp(
         charge += charge_u * charge_u; ncharge++;
         charge += charge_v * charge_v; ncharge++;
         charge += charge_w * charge_w; ncharge++;
+
+         // Check for dead wires
+        bool is_dead_u = is_wire_dead(point_index, 0, dead_threshold);
+        bool is_dead_v = is_wire_dead(point_index, 1, dead_threshold);
+        bool is_dead_w = is_wire_dead(point_index, 2, dead_threshold);
         
         // Deal with bad planes - subtract dead wire contributions
         if (is_dead_u) {
@@ -996,15 +998,6 @@ std::pair<bool, double> Cluster::calc_charge_wcp(
     return std::make_pair(flag_charge_u && flag_charge_v && flag_charge_w, charge);
 }
 
-// Convenience overload for 3D points
-std::pair<bool, double> Cluster::calc_charge_wcp(
-    const geo_point_t& point,
-    double charge_cut,
-    bool disable_dead_mix_cell) const {
-    
-    size_t point_index = get_closest_point_index(point);
-    return calc_charge_wcp(point_index, charge_cut, disable_dead_mix_cell);
-}
 
 
 
