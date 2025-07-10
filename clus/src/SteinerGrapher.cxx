@@ -80,28 +80,28 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
     m_steiner_terminals = steiner_terminals; // Store for later access
 
 
-    // Phase 5: Create subset point cloud for steiner points
-    auto steiner_pc = create_steiner_subset_pc(steiner_terminals);
-    put_point_cloud(std::move(steiner_pc), steiner_pc_name);
-    log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
+    // // Phase 5: Create subset point cloud for steiner points
+    // auto steiner_pc = create_steiner_subset_pc(steiner_terminals);
+    // put_point_cloud(std::move(steiner_pc), steiner_pc_name);
+    // log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
 
     // Phase 6: Build Steiner tree on the subset
     const auto& base_graph = get_graph(graph_name);
     auto& graph_algo = m_cluster.graph_algorithms(graph_name);
 
-    // Create filtered graph with only steiner vertices
-    auto filtered_graph = graph_algo.reduce(steiner_terminals);
+    // // Create filtered graph with only steiner vertices
+    // auto filtered_graph = graph_algo.reduce(steiner_terminals);
     
-    // Convert filtered graph to proper graph type using boost::copy_graph
-    graph_type steiner_graph_input;
-    boost::copy_graph(filtered_graph, steiner_graph_input);
+    // // Convert filtered graph to proper graph type using boost::copy_graph
+    // graph_type steiner_graph_input;
+    // boost::copy_graph(filtered_graph, steiner_graph_input);
     
     // Convert terminal set to vector for algorithms
     std::vector<vertex_type> terminal_vector(steiner_terminals.begin(), steiner_terminals.end());
 
     // Apply Voronoi tessellation and create Steiner graph
-    auto vor = Graphs::Weighted::voronoi(steiner_graph_input, terminal_vector);
-    auto steiner_result = Graphs::Weighted::steiner_graph(steiner_graph_input, vor);
+    auto vor = Graphs::Weighted::voronoi(base_graph, terminal_vector);
+    auto steiner_result = Graphs::Weighted::steiner_graph(base_graph, vor);
 
     log->debug("create_steiner_tree: created steiner graph with {} vertices, {} edges", 
                boost::num_vertices(steiner_result), boost::num_edges(steiner_result));

@@ -99,7 +99,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             auto cell_points_map = sg.form_cell_points_map();
             auto& graph = sg.get_graph("basic_pid");
 
-            // std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
             
             // sg.establish_same_blob_steiner_edges("basic_pid", true);
 
