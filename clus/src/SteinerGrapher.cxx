@@ -4,6 +4,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellClus/Graphs.h"
+#include "WireCellClus/DynamicPointCloud.h"
 #include <algorithm>
 #include <set>
 #include <map>
@@ -21,8 +22,8 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_graph()
 
 
 Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
-    const Facade::Cluster* reference_cluster,
-    const std::vector<size_t>& path_point_indices,
+    const Facade::Cluster* reference_cluster, // may not be the same as m_cluster
+    const std::vector<size_t>& path_point_indices, // of m_cluster
     const std::string& graph_name,
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
@@ -152,8 +153,50 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
         return terminals;
     }
 
-    // Create path point cloud for distance calculations
-    auto path_pc = create_path_point_cloud(path_point_indices);
+    std::vector<WireCell::WirePlaneId> wpids_vec = m_cluster.wpids_blob();
+    std::set<WireCell::WirePlaneId> wpids_set(wpids_vec.begin(), wpids_vec.end());
+    std::vector<WireCell::WirePlaneId> wpids(wpids_set.begin(), wpids_set.end());
+
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+
+    // Access the detector volumes from the config
+    IDetectorVolumes::pointer dv = m_config.dv;
+
+    
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    }
+    
+    auto path_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
+    const double step_dis = 0.6 * units::cm;
+
+    path_point_cloud->add_points(make_points_cluster_skeleton(&m_cluster, dv, wpid_params, path_point_indices, false, step_dis)); // check path_indices & m_cluster
+
+    // std::cout << path_point_cloud->get_points().size() << " points in path point cloud" << std::endl;
+
+   
     
     vertex_set filtered_terminals;
     
@@ -163,19 +206,29 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
 
     for (auto terminal_idx : terminals) {
         Point point = m_cluster.point3d(terminal_idx);
-        
+        auto wpid = m_cluster.wpid(terminal_idx);
+
         // Calculate distances similar to prototype's logic
-        double dis_3d = calculate_closest_distance_3d(point, path_pc);
-        auto dis_2d = calculate_closest_distances_2d(point, path_pc);
+
+        auto result_3d = path_point_cloud->kd3d().knn(1, point);
+        double dis_3d = sqrt(result_3d[0].second);
+
+        auto dis_2d_u =   path_point_cloud->get_closest_2d_point_info(point, 0, wpid.face(), wpid.apa());
+        auto dis_2d_v =   path_point_cloud->get_closest_2d_point_info(point, 1, wpid.face(), wpid.apa());
+        auto dis_2d_w =   path_point_cloud->get_closest_2d_point_info(point, 2, wpid.face(), wpid.apa());
+
+        double dis_2d[3]={std::get<0>(dis_2d_u), std::get<0>(dis_2d_v), std::get<0>(dis_2d_w)};
+
         
         // Apply prototype's filtering logic:
         // Remove if close in 2D projections but far in 3D
         bool close_in_2d = (dis_2d[0] < distance_2d_threshold && dis_2d[1] < distance_2d_threshold) ||
                           (dis_2d[0] < distance_2d_threshold && dis_2d[2] < distance_2d_threshold) ||
                           (dis_2d[1] < distance_2d_threshold && dis_2d[2] < distance_2d_threshold);
-        
         bool should_remove = close_in_2d && (dis_3d > distance_3d_threshold);
         
+        // std::cout << "Test1: " << point << " " << dis_3d << " " << dis_2d[0] << " " << dis_2d[1] << " " << dis_2d[2] << std::endl;
+
         if (!should_remove) {
             filtered_terminals.insert(terminal_idx);
         }
@@ -216,55 +269,9 @@ Steiner::Grapher::vertex_set Steiner::Grapher::get_extreme_points_for_reference(
     return extreme_points;
 }
 
-PointCloud::Dataset Steiner::Grapher::create_path_point_cloud(
-    const std::vector<size_t>& path_indices) const
-{
-    if (path_indices.empty()) {
-        return PointCloud::Dataset();
-    }
 
-    const double step_dis = 0.6 * units::cm;
-    std::vector<Point> interpolated_points;
-    std::vector<double> x_coords, y_coords, z_coords;
-    
-    Point prev_point = m_cluster.point3d(path_indices[0]);
-    interpolated_points.push_back(prev_point);
 
-    for (size_t i = 1; i < path_indices.size(); ++i) {
-        Point current_point = m_cluster.point3d(path_indices[i]);
-        double distance = (current_point - prev_point).magnitude();
-        
-        if (distance <= step_dis) {
-            interpolated_points.push_back(current_point);
-        } else {
-            // Interpolate points at step_dis intervals (matching prototype logic)
-            int num_steps = static_cast<int>(distance / step_dis);
-            for (int step = 1; step <= num_steps; ++step) {
-                double fraction = static_cast<double>(step) / num_steps;
-                Point interpolated = prev_point + (current_point - prev_point) * fraction;
-                interpolated_points.push_back(interpolated);
-            }
-            interpolated_points.push_back(current_point);
-        }
-        prev_point = current_point;
-    }
 
-    return points_to_dataset(interpolated_points);
-}
-
-// PointCloud::Dataset Steiner::Grapher::create_steiner_subset_pc(
-//     const vertex_set& steiner_indices) const
-// {
-//     // Get the original point cloud from the cluster's scoped view
-//     const auto& sv = m_cluster.sv3d();
-//     const auto original_pc = sv.flat_pc("3d");
-    
-//     // Convert set to vector for subset operation
-//     std::vector<size_t> indices_vector(steiner_indices.begin(), steiner_indices.end());
-    
-//     // Create subset point cloud containing only steiner points
-//     return original_pc.subset(indices_vector);
-// }
 
 bool Steiner::Grapher::is_point_spatially_related_to_reference(
     size_t point_idx,
@@ -273,98 +280,6 @@ bool Steiner::Grapher::is_point_spatially_related_to_reference(
     // Delegate to the cluster's existing method which implements the proper logic
     // for checking spatial relationships with the complex time_blob_map structure
     return m_cluster.is_point_spatially_related_to_time_blobs(point_idx, ref_time_blob_map, true);
-}
-
-double Steiner::Grapher::calculate_closest_distance_3d(
-    const Point& point,
-    const PointCloud::Dataset& path_pc) const
-{
-    if (path_pc.size_major() == 0) {
-        return std::numeric_limits<double>::max();
-    }
-
-    const auto& x_coords = path_pc.get("x")->elements<double>();
-    const auto& y_coords = path_pc.get("y")->elements<double>();
-    const auto& z_coords = path_pc.get("z")->elements<double>();
-
-    double min_distance = std::numeric_limits<double>::max();
-    
-    for (size_t i = 0; i < x_coords.size(); ++i) {
-        Point path_point(x_coords[i], y_coords[i], z_coords[i]);
-        double distance = (point - path_point).magnitude();
-        min_distance = std::min(min_distance, distance);
-    }
-
-    return min_distance;
-}
-
-std::array<double, 3> Steiner::Grapher::calculate_closest_distances_2d(
-    const Point& point,
-    const PointCloud::Dataset& path_pc) const
-{ // hardcoded ...
-    std::array<double, 3> min_distances = {
-        std::numeric_limits<double>::max(),
-        std::numeric_limits<double>::max(),
-        std::numeric_limits<double>::max()
-    };
-
-    if (path_pc.size_major() == 0) {
-        return min_distances;
-    }
-
-    const auto& x_coords = path_pc.get("x")->elements<double>();
-    const auto& y_coords = path_pc.get("y")->elements<double>();
-    const auto& z_coords = path_pc.get("z")->elements<double>();
-
-    // Calculate wire plane angles (approximation)
-    const double angle_u = 1.047;  // ~60 degrees
-    const double angle_v = -1.047; // ~-60 degrees  
-    const double angle_w = 0.0;    // 0 degrees
-
-    for (size_t i = 0; i < x_coords.size(); ++i) {
-        Point path_point(x_coords[i], y_coords[i], z_coords[i]);
-        
-        // U projection distance
-        double u_proj_point = std::cos(angle_u) * point.z() - std::sin(angle_u) * point.y();
-        double u_proj_path = std::cos(angle_u) * path_point.z() - std::sin(angle_u) * path_point.y();
-        double u_distance = std::abs(u_proj_point - u_proj_path);
-        min_distances[0] = std::min(min_distances[0], u_distance);
-        
-        // V projection distance
-        double v_proj_point = std::cos(angle_v) * point.z() - std::sin(angle_v) * point.y();
-        double v_proj_path = std::cos(angle_v) * path_point.z() - std::sin(angle_v) * path_point.y();
-        double v_distance = std::abs(v_proj_point - v_proj_path);
-        min_distances[1] = std::min(min_distances[1], v_distance);
-        
-        // W projection distance
-        double w_proj_point = std::cos(angle_w) * point.z() - std::sin(angle_w) * point.y();
-        double w_proj_path = std::cos(angle_w) * path_point.z() - std::sin(angle_w) * path_point.y();
-        double w_distance = std::abs(w_proj_point - w_proj_path);
-        min_distances[2] = std::min(min_distances[2], w_distance);
-    }
-
-    return min_distances;
-}
-
-PointCloud::Dataset Steiner::Grapher::points_to_dataset(const std::vector<Point>& points) const
-{
-    std::vector<double> x_coords, y_coords, z_coords;
-    x_coords.reserve(points.size());
-    y_coords.reserve(points.size());
-    z_coords.reserve(points.size());
-
-    for (const auto& point : points) {
-        x_coords.push_back(point.x());
-        y_coords.push_back(point.y());
-        z_coords.push_back(point.z());
-    }
-
-    PointCloud::Dataset dataset;
-    dataset.add("x", PointCloud::Array(x_coords));
-    dataset.add("y", PointCloud::Array(y_coords));
-    dataset.add("z", PointCloud::Array(z_coords));
-
-    return dataset;
 }
 
 
@@ -377,7 +292,6 @@ size_t Steiner::Grapher::find_closest_vertex_to_point(const Point& point) const
     
     return closest_idx;
 }
-
 
 
 

@@ -122,6 +122,10 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             std::cout << "Xin3: " << first_index << " " << second_index << std::endl;
             std::vector<size_t> path_point_indices = cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
             std::cout << "Xin3: " << path_point_indices.size() << std::endl;
+            // for (const auto& idx : path_point_indices) {
+            //     auto point = cluster->point3d(idx);
+            //     std::cout << "Xin4: " << point.x() << " " << point.y() << " " << point.z() << std::endl;
+            // }
 
             auto steiner_graph = sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", true, "steiner_pc");
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");

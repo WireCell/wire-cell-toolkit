@@ -260,32 +260,12 @@ namespace WireCell::Clus::Steiner {
             const Facade::Cluster* reference_cluster
         ) const;
 
-        /// Create interpolated point cloud from path indices
-        PointCloud::Dataset create_path_point_cloud(
-            const std::vector<size_t>& path_indices
-        ) const;
-
 
         /// Check if a point is spatially related to reference cluster's time-blob mapping
         bool is_point_spatially_related_to_reference(
             size_t point_idx,
             const Facade::Cluster::time_blob_map_t& ref_time_blob_map
         ) const;
-
-        /// Calculate closest distance from point to path point cloud
-        double calculate_closest_distance_3d(
-            const Point& point,
-            const PointCloud::Dataset& path_pc
-        ) const;
-
-        /// Calculate closest 2D distances (u,v,w projections) from point to path
-        std::array<double, 3> calculate_closest_distances_2d(
-            const Point& point,
-            const PointCloud::Dataset& path_pc
-        ) const;
-
-        /// Convert vector of points to PointCloud Dataset
-        PointCloud::Dataset points_to_dataset(const std::vector<Point>& points) const;
 
 
 

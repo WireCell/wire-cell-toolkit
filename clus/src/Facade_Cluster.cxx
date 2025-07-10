@@ -3154,7 +3154,11 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(int flag, boo
 
 
     // find all the wpids ...
-    auto wpids = wpids_blob();
+    // Get unique wpids from wpids_blob()
+    std::vector<WireCell::WirePlaneId> wpids_vec = wpids_blob();
+    std::set<WireCell::WirePlaneId> wpids_set(wpids_vec.begin(), wpids_vec.end());
+    std::vector<WireCell::WirePlaneId> wpids(wpids_set.begin(), wpids_set.end());
+
     for (auto& wpid : wpids) {
         auto apa = wpid.apa();
         auto face = wpid.face();
