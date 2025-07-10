@@ -912,112 +912,132 @@ Weighted::EnhancedSteinerResult create_enhanced_steiner_graph(
     std::vector<vertex_type> terminal_vector(terminal_vertices.begin(), terminal_vertices.end());
     auto vor = voronoi(base_graph, terminal_vector);
     
-    // Step 2: Find all vertices in Steiner paths (same as before)
+    // Step 2: Build complete terminal distance map (matches prototype map_saved_edge)
     auto edge_weight = get(boost::edge_weight, base_graph);
-    std::map<vertex_pair, double> fine_distances;
-    std::map<vertex_pair, double> terminal_distances;
-    vertex_set selected_vertices;
-    std::vector<edge_type> steiner_edges_original;
+    std::map<vertex_pair, std::pair<double, edge_type>> map_saved_edge;
+    std::vector<edge_type> all_terminal_connecting_edges;
     
-    // Find shortest paths between terminals and collect all path vertices
+    // Find best edges between all terminal pairs (matches prototype logic exactly)
     auto [edge_iter, edge_end] = boost::edges(base_graph);
     for (auto fine_edge : boost::make_iterator_range(edge_iter, edge_end)) {
         const vertex_type fine_tail = boost::source(fine_edge, base_graph);
         const vertex_type fine_head = boost::target(fine_edge, base_graph);
-        const vertex_pair fine_vp = make_vertex_pair(fine_tail, fine_head);
         const double fine_distance = edge_weight[fine_edge];
-        
-        fine_distances[fine_vp] = fine_distance;
         
         const vertex_type term_tail = vor.terminal[fine_tail];
         const vertex_type term_head = vor.terminal[fine_head];
+        
+        // Skip edges within same terminal region
         if (term_tail == term_head) {
             continue;
         }
         
+        // Calculate total distance: path_to_terminal + edge + path_to_terminal
+        const double total_distance = vor.distance[fine_tail] + fine_distance + vor.distance[fine_head];
         const vertex_pair term_vp = make_vertex_pair(term_tail, term_head);
-        const double term_distance = vor.distance[fine_tail] + fine_distance + vor.distance[fine_head];
         
-        // Track best path between each terminal pair
-        if (terminal_distances.find(term_vp) == terminal_distances.end() || 
-            term_distance < terminal_distances[term_vp]) {
-            terminal_distances[term_vp] = term_distance;
-            // Remove old edges for this terminal pair
-            steiner_edges_original.erase(
-                std::remove_if(steiner_edges_original.begin(), steiner_edges_original.end(),
-                    [&](const edge_type& e) {
-                        vertex_type s = boost::source(e, base_graph);
-                        vertex_type t = boost::target(e, base_graph);
-                        vertex_pair e_term_vp = make_vertex_pair(vor.terminal[s], vor.terminal[t]);
-                        return e_term_vp == term_vp;
-                    }),
-                steiner_edges_original.end());
-            steiner_edges_original.push_back(fine_edge);
+        // Check if this is the best edge for this terminal pair (matches prototype logic)
+        auto it = map_saved_edge.find(term_vp);
+        if (it == map_saved_edge.end()) {
+            // Try reverse pair
+            vertex_pair reverse_vp = make_vertex_pair(term_head, term_tail);
+            auto reverse_it = map_saved_edge.find(reverse_vp);
+            if (reverse_it == map_saved_edge.end()) {
+                // First edge for this terminal pair
+                map_saved_edge[term_vp] = std::make_pair(total_distance, fine_edge);
+            } else if (total_distance < reverse_it->second.first) {
+                // Better than existing reverse pair
+                map_saved_edge.erase(reverse_it);
+                map_saved_edge[term_vp] = std::make_pair(total_distance, fine_edge);
+            }
+        } else if (total_distance < it->second.first) {
+            // Better than existing edge for this pair
+            it->second = std::make_pair(total_distance, fine_edge);
         }
     }
     
-    // Step 3: Collect all vertices on the selected edges (matches prototype unique_edges logic)
-    for (auto edge : steiner_edges_original) {
-        vertex_type source_vtx = boost::source(edge, base_graph);
-        vertex_type target_vtx = boost::target(edge, base_graph);
+    // Step 3: Extract all selected terminal connecting edges (matches prototype terminal_edge)
+    for (const auto& [term_pair, edge_info] : map_saved_edge) {
+        all_terminal_connecting_edges.push_back(edge_info.second);
+    }
+    
+    // std::cout << "Terminal connecting edges: " << total.size() << std::endl;
+    
+    // Step 4: Build complete edge set by including all paths (matches prototype unique_edges logic)
+    vertex_set selected_vertices;
+    std::vector<edge_type> tree_edges;
+    
+    // For each terminal connecting edge, include it and all edges on paths back to terminals
+    for (auto edge : all_terminal_connecting_edges) {
+        // Add the direct connecting edge
+        tree_edges.push_back(edge);
         
-        selected_vertices.insert(source_vtx);
-        selected_vertices.insert(target_vtx);
-        
-        // Add all vertices on paths from edge endpoints to their nearest terminals
-        // This matches the prototype logic for walking back to terminals
-        for (auto vtx : {source_vtx, target_vtx}) {
-            vertex_type current_vtx = vtx;
+        // Add all edges on paths from edge endpoints back to their terminals
+        // This matches the prototype's vpred walking logic exactly
+        for (auto endpoint : {boost::source(edge, base_graph), boost::target(edge, base_graph)}) {
+            vertex_type current_vtx = endpoint;
+            
+            // Walk back to terminal, adding all edges on the path
             while (vor.terminal[current_vtx] != current_vtx) {
-                // Follow the path back to terminal using last_edge
                 auto path_edge = vor.last_edge[current_vtx];
+                tree_edges.push_back(path_edge);
                 current_vtx = boost::source(path_edge, base_graph);
-                selected_vertices.insert(current_vtx);
             }
         }
     }
     
-    // Step 4: Create index mappings (matching prototype map_old_new_indices)
+    // Step 5: Remove duplicates and collect all vertices (matches prototype boost::unique logic)
+    std::sort(tree_edges.begin(), tree_edges.end());
+    tree_edges.erase(std::unique(tree_edges.begin(), tree_edges.end()), tree_edges.end());
+    
+    // std::cout << "Total unique edges in tree: " << tree_edges.size() << std::endl;
+    
+    // Collect all vertices from the unique edges
+    for (auto edge : tree_edges) {
+        selected_vertices.insert(boost::source(edge, base_graph));
+        selected_vertices.insert(boost::target(edge, base_graph));
+    }
+    
+    // Step 6: Create index mappings (same as before)
     std::vector<vertex_type> selected_vector(selected_vertices.begin(), selected_vertices.end());
     for (size_t i = 0; i < selected_vector.size(); ++i) {
         result.old_to_new_index[selected_vector[i]] = i;
         result.new_to_old_index[i] = selected_vector[i];
     }
     
-    // Step 5: Create flag_steiner_terminal (matching prototype logic)
+    // Step 7: Create flag_steiner_terminal (same as before)
     result.flag_steiner_terminal.resize(selected_vector.size());
     for (size_t i = 0; i < selected_vector.size(); ++i) {
         vertex_type old_idx = selected_vector[i];
         result.flag_steiner_terminal[i] = (terminal_vertices.find(old_idx) != terminal_vertices.end());
     }
     
-    // Step 6: Calculate charges for vertices using the existing cluster method
+    // Step 8: Calculate charges for vertices (same as before)
     if (original_pc.size_major() > 0 && charge_config.enable_weighting) {
         result.vertex_charges = calculate_vertex_charges(
             selected_vertices, 
             original_pc, 
             cluster,
             4000.0,  // charge_cut from prototype 
-            disable_dead_mix_cell     // disable_dead_mix_cell from prototype
+            disable_dead_mix_cell
         );
     }
     
-    // Step 7: Create subset point cloud
+    // Step 9: Create subset point cloud (same as before)
     if (original_pc.size_major() > 0) {
         std::vector<size_t> subset_indices(selected_vertices.begin(), selected_vertices.end());
         result.point_cloud = original_pc.subset(subset_indices);
     }
     
-    // Step 8: Create reduced graph with charge-weighted edges (matching prototype)
+    // Step 10: Create reduced graph with ALL unique edges (this is the key fix)
     result.graph = graph_type(selected_vector.size());
     
-    std::cout << "Check: " << steiner_edges_original.size() << std::endl;
-
-    for (auto edge : steiner_edges_original) {
+    // Add ALL edges from tree_edges, not just the terminal connecting ones
+    for (auto edge : tree_edges) {
         vertex_type old_source = boost::source(edge, base_graph);
         vertex_type old_target = boost::target(edge, base_graph);
         
-        // Skip if vertices not in selected set
+        // These should all be in selected set by construction, but check anyway
         if (result.old_to_new_index.find(old_source) == result.old_to_new_index.end() ||
             result.old_to_new_index.find(old_target) == result.old_to_new_index.end()) {
             continue;
@@ -1049,6 +1069,9 @@ Weighted::EnhancedSteinerResult create_enhanced_steiner_graph(
         
         boost::add_edge(new_source, new_target, final_distance, result.graph);
     }
+    
+    // std::cout << "Final graph - vertices: " << boost::num_vertices(result.graph) 
+    //           << ", edges: " << boost::num_edges(result.graph) << std::endl;
     
     result.steiner_terminal_indices = terminal_vertices;
     return result;

@@ -111,8 +111,28 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             std::vector<size_t> path_point_indices;
             auto steiner_graph = sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", true, "steiner_pc");
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+            auto& flag_terminals = sg.get_flag_steiner_terminal();
+            size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
+            const auto& new_to_old = sg.get_new_to_old_mapping();
 
-            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  << std::endl;
+            std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;
+
+            auto edge_weight_map = get(boost::edge_weight, steiner_graph);
+            for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
+                auto edge = *edge_it.first;
+                auto src = boost::source(edge, steiner_graph);
+                auto tgt = boost::target(edge, steiner_graph);
+
+                // Use the new-to-old mapping to get original vertex IDs
+                
+                auto src_id = new_to_old.at(src);
+                auto tgt_id = new_to_old.at(tgt);
+
+                // Get the edge weight using the proper accessor
+                auto weight = edge_weight_map[edge];
+
+                std::cout << "Edge from vertex " << cluster->point3d(src_id) << " to " << cluster->point3d(tgt_id) << " with weight " << weight << " " << flag_terminals[src] << " " << flag_terminals[tgt] << std::endl;
+            }
 
             // for (const auto& [cell, points] : cell_points_map) {
             //     // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
