@@ -2884,7 +2884,7 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
         // Filter points based on spatial relationship with reference cluster
         // This implements the exact same logic as prototype's old_time_mcells_map filtering
         for (int i = 0; i < npoints(); ++i) {
-            if (is_point_spatially_related_to_time_blobs(i, ref_time_blob_map)) {
+            if (is_point_spatially_related_to_time_blobs(i, ref_time_blob_map, false)) {
                 valid_indices.push_back(i);
             }
         }
@@ -3023,7 +3023,9 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
 // Updated is_point_spatially_related_to_time_blobs to match prototype exactly
 bool Cluster::is_point_spatially_related_to_time_blobs(
     size_t point_index, 
-    const time_blob_map_t& ref_time_blob_map) const {
+    const time_blob_map_t& ref_time_blob_map,
+    bool flag_nearby_timeslice
+) const {
     
     // Get current point's time slice information
     // Equivalent to: int time_slice = cloud.pts[i].mcell->GetTimeSlice();
@@ -3060,8 +3062,25 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
             if (check_wire_ranges_match(point_index, ref_blob)) {
                 return true;  // Equivalent to flag_add = true; break;
             }
+        }            
+    }
+
+    if (flag_nearby_timeslice) {
+        // Check adjacent time slices (±1) if flag_nearby_timeslice is true
+        // Equivalent to: if (old_time_mcells_map->find(time_slice-1)!=old_time_mcells_map->end())
+        // and old_time_mcells_map->find(time_slice+1)!=old_time_mcells_map->end()
+        
+        for (int offset : {-1, 1}) {
+            int adjacent_time_slice = current_time_slice + offset;
+            auto time_it_adj = face_it->second.find(adjacent_time_slice);
+            if (time_it_adj != face_it->second.end()) {
+                for (const Blob* ref_blob : time_it_adj->second) {
+                    if (check_wire_ranges_match(point_index, ref_blob)) {
+                        return true;  // Equivalent to flag_add = true; break;
+                    }
+                }
+            }
         }
-            
     }
     
     return false;  // Equivalent to flag_add remains false
@@ -3108,6 +3127,9 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
     return false;
 }
 
+
+
+
 std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(int flag, bool flag_cosmic) const 
 {
     // Early exit for single point
@@ -3121,22 +3143,56 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(int flag, boo
     geo_vector_t main_axis = pca.axis.at(0);
     geo_vector_t second_axis = pca.axis.at(1);
     
-    // Array to store 14 extreme points and their corresponding point indices
-    geo_point_t extreme_points[14];
-    int extreme_point_indices[14];
-    double extreme_values[14];
-    bool initialized = false;
+
+    // Use maps to store 14 extreme points, their indices, and values for each (apa, face) pair
+    using ApaFace = std::pair<int, int>; // apa, face
+    std::map<ApaFace, std::array<geo_point_t, 14>> extreme_points_map;
+    std::map<ApaFace, std::array<int, 14>> extreme_point_indices_map;
+    std::map<ApaFace, std::array<double, 14>> extreme_values_map;
+    std::map<ApaFace, bool> initialized_map;
+    std::map<ApaFace, std::pair<geo_point_t, geo_point_t>> boundary_points_map;
+
+
+    // find all the wpids ...
+    auto wpids = wpids_blob();
+    for (auto& wpid : wpids) {
+        auto apa = wpid.apa();
+        auto face = wpid.face();
+
+        auto key = std::make_pair(apa, face);
+        if (extreme_points_map.find(key) == extreme_points_map.end()) {
+            extreme_points_map[key] = {};
+            extreme_point_indices_map[key] = {};
+            extreme_values_map[key] = {};
+            initialized_map[key] = false;
+        }
+    }
+
+   
+
+
     
     // Find extreme points
     for (int i = 0; i < npoints(); i++) {
-        // Skip excluded points
-        if (is_point_excluded(i)) continue;
+         // Skip excluded points
+         if (is_point_excluded(i)) continue;
         
         // Get blob and check charge threshold
         const Blob* blob = blob_with_point(i);
         if (blob->estimate_total_charge() < 1500) continue;
-        
+        auto wpid = blob->wpid();
+        auto apa = wpid.apa();
+        auto face = wpid.face();
+        auto key = std::make_pair(apa, face);
+
         geo_point_t current_point = point3d(i);
+        
+        auto& extreme_points = extreme_points_map[key];
+        auto& extreme_point_indices = extreme_point_indices_map[key];
+        auto& extreme_values = extreme_values_map[key];
+        bool& initialized = initialized_map[key];
+
+        // Now you can use wpid, apa, face, and the per-(apa,face) arrays for this point.
         
         if (!initialized) {
             // Initialize all extremes to first valid point
@@ -3248,78 +3304,116 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(int flag, boo
         }
     }
     
-    if (!initialized) {
-        // Fallback to first two points if no valid points found
-        geo_point_t p1 = point3d(0);
-        geo_point_t p2 = npoints() > 1 ? point3d(1) : p1;
-        return std::make_pair(p1, p2);
-    }
-    
     // Get live channel sets for each plane
-    std::set<int> live_u_index = get_live_wire_indices(0);
-    std::set<int> live_v_index = get_live_wire_indices(1);
-    std::set<int> live_w_index = get_live_wire_indices(2);
-    
+    auto live_u_index_map = get_live_wire_indices(0);
+    auto live_v_index_map = get_live_wire_indices(1);
+    auto live_w_index_map = get_live_wire_indices(2);
+
+
+
     // Calculate constants for distance normalization
     const Grouping* grouping = this->grouping();
-    auto wpid = children().front()->wpid(); // Get wpid from first blob
-    
     auto nticks_map = grouping->get_nticks_per_slice();
     auto drift_speed_map = grouping->get_drift_speed();
     auto tick_map = grouping->get_tick();
-    
-    double nrebin = nticks_map[wpid.apa()][wpid.face()];
-    double drift_speed = drift_speed_map[wpid.apa()][wpid.face()];
-    double tick = tick_map[wpid.apa()][wpid.face()];
-    double distance_norm = nrebin * tick * drift_speed;
-    
-    // Start with main axis extremes as initial boundary
-    std::pair<geo_point_t, geo_point_t> boundary_points = 
-        std::make_pair(extreme_points[0], extreme_points[1]);
-    
-    double boundary_value = calculate_boundary_metric(
+
+
+    for (auto & [key, extreme_points] : extreme_points_map) {
+        auto apa = key.first;
+        auto face = key.second;
+
+        double nrebin = nticks_map[apa][face];
+        double drift_speed = drift_speed_map[apa][face];
+        double tick = tick_map[apa][face];
+        double distance_norm = nrebin * tick * drift_speed;
+
+        auto& extreme_point_indices = extreme_point_indices_map[key];
+        auto& extreme_values = extreme_values_map[key];
+        bool& initialized = initialized_map[key];
+
+        auto& live_u_index = live_u_index_map[key];
+        auto& live_v_index = live_v_index_map[key];
+        auto& live_w_index = live_w_index_map[key];
+
+        boundary_points_map[key] = std::make_pair(extreme_points[0], extreme_points[1]);
+        auto& boundary_points = boundary_points_map[key];
+
+        double boundary_value = calculate_boundary_metric(
         extreme_point_indices[0], extreme_point_indices[1],
         live_u_index, live_v_index, live_w_index,
         distance_norm, flag_cosmic);
-    
-    // Test all pairs of extreme points
-    for (int i = 0; i < 14; i++) {
-        for (int j = i + 1; j < 14; j++) {
-            double value = calculate_boundary_metric(
-                extreme_point_indices[i], extreme_point_indices[j],
-                live_u_index, live_v_index, live_w_index,
-                distance_norm, flag_cosmic);
-            
-            if (value > boundary_value) {
-                boundary_value = value;
-                if (extreme_points[i].y() > extreme_points[j].y()) {
-                    boundary_points.first = extreme_points[i];
-                    boundary_points.second = extreme_points[j];
-                } else {
-                    boundary_points.first = extreme_points[j];
-                    boundary_points.second = extreme_points[i];
+
+        // Test all pairs of extreme points
+        for (int i = 0; i < 14; i++) {
+            for (int j = i + 1; j < 14; j++) {
+                double value = calculate_boundary_metric(
+                    extreme_point_indices[i], extreme_point_indices[j],
+                    live_u_index, live_v_index, live_w_index,
+                    distance_norm, flag_cosmic);
+                
+                if (value > boundary_value) {
+                    boundary_value = value;
+                    if (extreme_points[i].y() > extreme_points[j].y()) {
+                        boundary_points.first = extreme_points[i];
+                        boundary_points.second = extreme_points[j];
+                    } else {
+                        boundary_points.first = extreme_points[j];
+                        boundary_points.second = extreme_points[i];
+                    }
                 }
+            }
+        }
+        
+       
+
+    }
+
+    // Collect all points, avoiding duplicates
+    std::vector<geo_point_t> all_points;
+    for (const auto& entry : boundary_points_map) {
+        all_points.push_back(entry.second.first);
+        all_points.push_back(entry.second.second);
+    }
+
+    double max_dist_sq = -1;
+    geo_point_t best_p1, best_p2;
+    
+    // Compare all pairs
+    for (size_t i = 0; i < all_points.size(); ++i) {
+        for (size_t j = i + 1; j < all_points.size(); ++j) {
+            double dist_sq = (all_points[i] - all_points[j]).magnitude2();
+            if (dist_sq > max_dist_sq) {
+                max_dist_sq = dist_sq;
+                best_p1 = all_points[i];
+                best_p2 = all_points[j];
             }
         }
     }
     
-    // Ensure first point has higher Y coordinate
-    if (boundary_points.first.y() < boundary_points.second.y()) {
-        std::swap(boundary_points.first, boundary_points.second);
+    if (best_p1.y() < best_p2.y()) {
+        std::swap(best_p1, best_p2);
     }
+
+    return {best_p1, best_p2};
     
-    return boundary_points;
 }
 
+
+
+
 // Helper function to get live wire indices for a given plane
-std::set<int> Cluster::get_live_wire_indices(int plane) const
+std::map<std::pair<int, int>, std::set<int>> Cluster::get_live_wire_indices(int plane) const
 {
-    std::set<int> live_indices;
+    using ApaFace = std::pair<int, int>; // apa, face
+    std::map<ApaFace, std::set<int>> apa_face_live_indices;
     
     for (const Blob* blob : children()) {
         const Grouping* grouping = this->grouping();
         auto wpid = blob->wpid();
         int time_slice = blob->slice_index_min();
+        
+        // Create ApaFace key for this blob
+        ApaFace apa_face_key = std::make_pair(wpid.apa(), wpid.face());
         
         int wire_min, wire_max;
         switch (plane) {
@@ -3359,16 +3453,16 @@ std::set<int> Cluster::get_live_wire_indices(int plane) const
         if (!plane_is_bad) {
             for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
                 if (!grouping->is_wire_dead(wpid.apa(), wpid.face(), plane, wire_index, time_slice)) {
-                    live_indices.insert(wire_index);
+                    apa_face_live_indices[apa_face_key].insert(wire_index);
                 }
             }
         }
     }
     
-    return live_indices;
+    return apa_face_live_indices;
 }
 
-// Helper function to count live channels between two wire indices
+// Helper function to count live channels between two wire indices (assuming everything are already with one APA/face)
 int Cluster::count_live_channels_between(int wire_min, int wire_max, const std::set<int>& live_indices) const
 {
     int count = 0;
@@ -3380,7 +3474,7 @@ int Cluster::count_live_channels_between(int wire_min, int wire_max, const std::
     return count;
 }
 
-// Helper function to calculate boundary metric between two points
+// Helper function to calculate boundary metric between two points (assuming everything are already with one APA/face)
 double Cluster::calculate_boundary_metric(
     int point_idx1, int point_idx2,
     const std::set<int>& live_u_index,

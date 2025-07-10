@@ -642,7 +642,9 @@ namespace WireCell::Clus::Facade {
         /// @return True if point's wire indices fall within reference cluster's spatial regions
         bool is_point_spatially_related_to_time_blobs(
             size_t point_index, 
-            const time_blob_map_t& ref_time_blob_map) const;
+            const time_blob_map_t& ref_time_blob_map,
+            bool flag_nearby_timeslice
+       ) const;
 
        private:
 
@@ -670,10 +672,10 @@ namespace WireCell::Clus::Facade {
         /// @return True if point's wire indices fall within reference blob's wire ranges
         bool check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const;
 
-        /// @brief Get live wire indices for a given plane across all blobs in cluster
+        /// @brief Get live wire indices for a given plane across all blobs in cluster, grouped by (apa, face)
         /// @param plane Wire plane index (0=U, 1=V, 2=W)
-        /// @return Set of live wire indices for the specified plane
-        std::set<int> get_live_wire_indices(int plane) const;
+        /// @return Map from (apa, face) pairs to sets of live wire indices for the specified plane
+        std::map<std::pair<int, int>, std::set<int>> get_live_wire_indices(int plane) const;
         
         /// @brief Count live channels between two wire indices
         /// @param wire_min Minimum wire index

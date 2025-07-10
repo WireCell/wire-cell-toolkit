@@ -272,7 +272,7 @@ bool Steiner::Grapher::is_point_spatially_related_to_reference(
 {
     // Delegate to the cluster's existing method which implements the proper logic
     // for checking spatial relationships with the complex time_blob_map structure
-    return m_cluster.is_point_spatially_related_to_time_blobs(point_idx, ref_time_blob_map);
+    return m_cluster.is_point_spatially_related_to_time_blobs(point_idx, ref_time_blob_map, true);
 }
 
 double Steiner::Grapher::calculate_closest_distance_3d(
@@ -301,7 +301,7 @@ double Steiner::Grapher::calculate_closest_distance_3d(
 std::array<double, 3> Steiner::Grapher::calculate_closest_distances_2d(
     const Point& point,
     const PointCloud::Dataset& path_pc) const
-{
+{ // hardcoded ...
     std::array<double, 3> min_distances = {
         std::numeric_limits<double>::max(),
         std::numeric_limits<double>::max(),
@@ -618,7 +618,7 @@ Steiner::Grapher::blob_vertex_map Steiner::Grapher::form_cell_points_map()
     blob_vertex_map cell_points;
     
     // Get the 3D scoped view with x,y,z coordinates
-    const auto& sv = m_cluster.sv3d();   // This is default scoped view with 3D coordinates ... 
+    const auto& sv = m_cluster.sv3d();   // This is default scoped view with 3D coordinates ...  based on index, can connect to raw then 2D ...
     const auto& nodes = sv.nodes();   // These are the blob nodes
     const auto& skd = sv.kd();        // K-d tree with point data
     
@@ -691,11 +691,6 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
         if (point_indices.size() < 2) {
             continue; // Need at least 2 points to make edges
         }
-
-        // // Skip dead cells if requested
-        // if (disable_dead_mix_cell && blob->is_dead()) {
-        //     continue;
-        // }
 
         log->debug("Processing blob with {} points", point_indices.size());
 

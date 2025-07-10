@@ -108,7 +108,21 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             // std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
 
             // Test Steiner_Graph ...
-            std::vector<size_t> path_point_indices;
+            
+
+            auto pair_points = cluster->get_two_boundary_wcps();
+            std::cout << "Xin3: " << pair_points.first.x() << " " 
+                    << pair_points.first.y() << " " 
+                    << pair_points.first.z() << " | "
+                    << pair_points.second.x() << " " 
+                    << pair_points.second.y() << " " 
+                    << pair_points.second.z() << std::endl;
+            auto first_index  =   cluster->get_closest_point_index(pair_points.first);
+            auto second_index =   cluster->get_closest_point_index(pair_points.second);
+            std::cout << "Xin3: " << first_index << " " << second_index << std::endl;
+            std::vector<size_t> path_point_indices = cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
+            std::cout << "Xin3: " << path_point_indices.size() << std::endl;
+
             auto steiner_graph = sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", true, "steiner_pc");
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
             auto& flag_terminals = sg.get_flag_steiner_terminal();
@@ -117,22 +131,22 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 
             std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;
 
-            auto edge_weight_map = get(boost::edge_weight, steiner_graph);
-            for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
-                auto edge = *edge_it.first;
-                auto src = boost::source(edge, steiner_graph);
-                auto tgt = boost::target(edge, steiner_graph);
+            // auto edge_weight_map = get(boost::edge_weight, steiner_graph);
+            // for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
+            //     auto edge = *edge_it.first;
+            //     auto src = boost::source(edge, steiner_graph);
+            //     auto tgt = boost::target(edge, steiner_graph);
 
-                // Use the new-to-old mapping to get original vertex IDs
+            //     // Use the new-to-old mapping to get original vertex IDs
                 
-                auto src_id = new_to_old.at(src);
-                auto tgt_id = new_to_old.at(tgt);
+            //     auto src_id = new_to_old.at(src);
+            //     auto tgt_id = new_to_old.at(tgt);
 
-                // Get the edge weight using the proper accessor
-                auto weight = edge_weight_map[edge];
+            //     // Get the edge weight using the proper accessor
+            //     auto weight = edge_weight_map[edge];
 
-                std::cout << "Edge from vertex " << cluster->point3d(src_id) << " to " << cluster->point3d(tgt_id) << " with weight " << weight << " " << flag_terminals[src] << " " << flag_terminals[tgt] << std::endl;
-            }
+            //     std::cout << "Edge from vertex " << cluster->point3d(src_id) << " to " << cluster->point3d(tgt_id) << " with weight " << weight << " " << flag_terminals[src] << " " << flag_terminals[tgt] << std::endl;
+            // }
 
             // for (const auto& [cell, points] : cell_points_map) {
             //     // std::cout << "Xin2 Cell: " << cell->slice_index_min() << " " << cell->u_wire_index_min() << " " << cell->v_wire_index_min() << " " << cell->w_wire_index_min() << " has " << points.size() << " points." << std::endl;
