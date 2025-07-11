@@ -3617,6 +3617,116 @@ double Cluster::calculate_boundary_metric(
 }
 
 
+void Cluster::build_steiner_kd_cache(const std::string& steiner_pc_name) const 
+{
+    // Get the steiner point cloud
+    if (!has_pc(steiner_pc_name)) {
+        raise<RuntimeError>("Steiner point cloud '%s' not found", steiner_pc_name);
+    }
+    
+    auto& steiner_pc = get_pc(steiner_pc_name);
+    auto& cache_ref = const_cast<ClusterCache&>(cache());
+    
+    // Create a MultiQuery from the dataset - this builds the k-d tree internally
+    // Note: const_cast is needed because MultiQuery constructor requires non-const reference
+    // but query operations don't modify the dataset
+    cache_ref.steiner_kd = std::make_unique<KDTree::MultiQuery>(const_cast<PointCloud::Dataset&>(steiner_pc));
+    
+    // Get a 3D query object for x,y,z coordinates and cache it
+    cache_ref.steiner_query3d = cache_ref.steiner_kd->get<double>({"x", "y", "z"});
+    
+    // Cache the name and mark as built
+    cache_ref.cached_steiner_pc_name = steiner_pc_name;
+    cache_ref.steiner_kd_built = true;
+}
+
+void Cluster::ensure_steiner_kd_cache(const std::string& steiner_pc_name) const 
+{
+    const auto& cache_ref = cache();
+    
+    // Check if cache is valid for this steiner_pc_name
+    if (cache_ref.steiner_kd_built && cache_ref.steiner_kd && cache_ref.steiner_query3d && 
+        cache_ref.cached_steiner_pc_name == steiner_pc_name) {
+        return; // Cache is valid
+    }
+    
+    // Rebuild the cache
+    build_steiner_kd_cache(steiner_pc_name);
+}
+
+Cluster::steiner_kd_results_t Cluster::kd_steiner_radius(double radius_not_squared, 
+                                                        const geo_point_t& query_point,
+                                                        const std::string& steiner_pc_name) const 
+{
+    ensure_steiner_kd_cache(steiner_pc_name);
+    
+    const auto& cache_ref = cache();
+    
+    // Convert geo_point_t to std::vector<double> for the query
+    std::vector<double> query_vec = {query_point.x(), query_point.y(), query_point.z()};
+    
+    // Perform radius query using cached query3d (note: radius expects squared radius)
+    auto kd_results = cache_ref.steiner_query3d->radius(radius_not_squared * radius_not_squared, query_vec);
+    
+    // Convert Results<double> to std::vector<std::pair<size_t, double>>
+    steiner_kd_results_t results;
+    results.reserve(kd_results.index.size());
+    for (size_t i = 0; i < kd_results.index.size(); ++i) {
+        results.emplace_back(kd_results.index[i], kd_results.distance[i]);
+    }
+    
+    return results;
+}
+
+Cluster::steiner_kd_results_t Cluster::kd_steiner_knn(int nnearest, 
+                                                     const geo_point_t& query_point,
+                                                     const std::string& steiner_pc_name) const 
+{
+    ensure_steiner_kd_cache(steiner_pc_name);
+    
+    const auto& cache_ref = cache();
+    
+    // Convert geo_point_t to std::vector<double> for the query
+    std::vector<double> query_vec = {query_point.x(), query_point.y(), query_point.z()};
+    
+    // Perform k-NN query using cached query3d
+    auto kd_results = cache_ref.steiner_query3d->knn(nnearest, query_vec);
+    
+    // Convert Results<double> to std::vector<std::pair<size_t, double>>
+    steiner_kd_results_t results;
+    results.reserve(kd_results.index.size());
+    for (size_t i = 0; i < kd_results.index.size(); ++i) {
+        results.emplace_back(kd_results.index[i], kd_results.distance[i]);
+    }
+    
+    return results;
+}
+
+std::vector<geo_point_t> Cluster::kd_steiner_points(const steiner_kd_results_t& res,
+                                                   const std::string& steiner_pc_name) const 
+{
+    if (!has_pc(steiner_pc_name)) {
+        raise<RuntimeError>("Steiner point cloud '%s' not found", steiner_pc_name);
+    }
+    
+    auto& steiner_pc = get_pc(steiner_pc_name);
+    auto x_array = steiner_pc.get("x");
+    auto y_array = steiner_pc.get("y"); 
+    auto z_array = steiner_pc.get("z");
+    
+    std::vector<geo_point_t> points;
+    points.reserve(res.size());
+    
+    for (const auto& [index, distance] : res) {
+        double x = x_array->element<double>(index);
+        double y = y_array->element<double>(index);
+        double z = z_array->element<double>(index);
+        points.emplace_back(x, y, z);
+    }
+    
+    return points;
+}
+
 
 
 // Local Variables:

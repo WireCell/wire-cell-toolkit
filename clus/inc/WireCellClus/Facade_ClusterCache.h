@@ -73,6 +73,12 @@ namespace WireCell::Clus::Facade {
 
         // Set of point indices excluded during graph operations (equivalent to prototype's excluded_points)
         std::set<size_t> excluded_points;
+
+        // Steiner point cloud k-d tree cache
+        mutable std::unique_ptr<KDTree::MultiQuery> steiner_kd;
+        mutable decltype(std::declval<KDTree::MultiQuery>().get<double>(std::vector<std::string>{})) steiner_query3d;
+        mutable std::string cached_steiner_pc_name;
+        mutable bool steiner_kd_built{false};
     };
 
 }

@@ -37,7 +37,7 @@ namespace WireCell::Clus::Facade {
                   , public Mixins::Graphs
     {
       public:
-        Cluster() : Mixins::Cached<Cluster, ClusterCache>(*this, "cluster_scalar") {}
+        Cluster() : Mixins::Cached<Cluster, ClusterCache>(*this, "cluster_scalar"){}
         virtual ~Cluster() {}
 
         void invalidate_cache() {clear_cache();}
@@ -188,6 +188,20 @@ namespace WireCell::Clus::Facade {
 
     public:
 
+        // Steiner point cloud k-d tree queries
+        using steiner_kd_results_t = std::vector<std::pair<size_t, double>>;
+
+        steiner_kd_results_t kd_steiner_radius(double radius_not_squared, const geo_point_t& query_point, 
+                                            const std::string& steiner_pc_name = "steiner_pc") const;
+        steiner_kd_results_t kd_steiner_knn(int nnearest, const geo_point_t& query_point,
+                                        const std::string& steiner_pc_name = "steiner_pc") const;
+
+        // Helper method to get steiner points from results
+        std::vector<geo_point_t> kd_steiner_points(const steiner_kd_results_t& res, 
+                                                const std::string& steiner_pc_name = "steiner_pc") const;
+
+        // Method to explicitly build the steiner k-d tree cache
+        void build_steiner_kd_cache(const std::string& steiner_pc_name = "steiner_pc") const;
 
         using kd_results_t = kd3d_t::results_type;
         // Perform a k-d tree radius query.  This radius is linear distance
@@ -700,6 +714,9 @@ namespace WireCell::Clus::Facade {
             const std::set<int>& live_w_index,
             double distance_norm, bool flag_cosmic) const;
 
+
+       // Helper to ensure steiner k-d tree cache is valid
+       void ensure_steiner_kd_cache(const std::string& steiner_pc_name) const;
 
        protected:
 
