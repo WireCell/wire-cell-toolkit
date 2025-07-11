@@ -158,10 +158,11 @@ namespace WireCell::Clus::Steiner {
 
         /// Create Steiner tree with optional reference cluster and path constraints
         /// This is the main entry point equivalent to prototype's Create_steiner_tree
-        graph_type create_steiner_tree(
+        void create_steiner_tree(
             const Facade::Cluster* reference_cluster = nullptr,
             const std::vector<size_t>& path_point_indices = {},
             const std::string& graph_name = "basic_pid",
+            const std::string& steiner_graph_name = "steiner_graph",
             bool disable_dead_mix_cell = true,
             const std::string& steiner_pc_name = "steiner_subset"
         );

@@ -21,10 +21,11 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_graph()
 }
 
 
-Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
+void Steiner::Grapher::create_steiner_tree(
     const Facade::Cluster* reference_cluster, // may not be the same as m_cluster
     const std::vector<size_t>& path_point_indices, // of m_cluster
     const std::string& graph_name,
+    const std::string& steiner_graph_name,
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
@@ -39,7 +40,7 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
 
     if (steiner_terminals.empty()) {
         log->warn("create_steiner_tree: no steiner terminals found, returning empty graph");
-        return graph_type(0);
+        return;
     }
 
     // Phase 2: Apply reference cluster spatial filtering
@@ -75,7 +76,7 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
 
     if (steiner_terminals.empty()) {
         log->warn("create_steiner_tree: no terminals remain after filtering, returning empty graph");
-        return graph_type(0);
+        return;
     }
 
     const auto& base_graph = get_graph(graph_name);
@@ -110,12 +111,17 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
         put_point_cloud(std::move(steiner_result.point_cloud), steiner_pc_name);
         log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
     }
+
+    // can I do this to store the graph ???
+    m_cluster.give_graph(steiner_graph_name, std::move(steiner_result.graph));
+
     
     log->debug("create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges", 
                boost::num_vertices(steiner_result.graph), boost::num_vertices(base_graph),
                boost::num_edges(steiner_result.graph));
 
-    return steiner_result.graph;
+
+    // return steiner_result.graph;
 
 }
 

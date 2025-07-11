@@ -127,13 +127,15 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             //     std::cout << "Xin4: " << point.x() << " " << point.y() << " " << point.z() << std::endl;
             // }
 
-            auto steiner_graph = sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", true, "steiner_pc");
+            sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", "steiner_graph", true, "steiner_pc");
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+            const auto& steiner_graph = sg.get_graph("steiner_graph");
             auto& flag_terminals = sg.get_flag_steiner_terminal();
             size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
             const auto& new_to_old = sg.get_new_to_old_mapping();
 
             std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;
+            // store the steiner graph ...
 
             // auto edge_weight_map = get(boost::edge_weight, steiner_graph);
             // for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
