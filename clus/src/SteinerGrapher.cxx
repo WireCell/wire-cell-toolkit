@@ -81,7 +81,7 @@ void Steiner::Grapher::create_steiner_tree(
 
     const auto& base_graph = get_graph(graph_name);
 
-   const auto& original_pc = get_point_cloud("default");
+   const auto& original_pc = get_point_cloud("default"); // default pc ...
     
     // Configure charge weighting to match prototype values
     Graphs::Weighted::ChargeWeightingConfig charge_config;

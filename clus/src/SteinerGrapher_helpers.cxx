@@ -36,7 +36,6 @@ PointCloud::Dataset& Steiner::Grapher::get_point_cloud(const std::string& name)
 
     // Fixme? configure the scope?  for now, the default.
     const auto& sv = m_cluster.sv();
-
     put_point_cloud(sv.flat_coords(), name);
 
     // Note, if more than the x,y,z coordinates are needed we would replace
