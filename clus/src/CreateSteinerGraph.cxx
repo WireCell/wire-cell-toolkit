@@ -139,6 +139,10 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             auto pair_idx = cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
             std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << std::endl;
 
+            auto kd_results = cluster->kd_steiner_knn(1, pair_points.first);
+            auto kd_points = cluster->kd_steiner_points(kd_results);
+            std::cout << "Xin4: " << kd_points.size() << " " << *kd_points.begin() << std::endl;
+
             // auto edge_weight_map = get(boost::edge_weight, steiner_graph);
             // for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
             //     auto edge = *edge_it.first;
