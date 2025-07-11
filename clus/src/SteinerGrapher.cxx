@@ -92,7 +92,14 @@ Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_tree(
     // Use the enhanced approach with cluster reference for charge calculation
     auto steiner_result = Graphs::Weighted::create_enhanced_steiner_graph(
         base_graph, steiner_terminals, original_pc, m_cluster, charge_config);
-    
+
+    // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
+
+    // just run this once the steiner graph is created
+    Graphs::Weighted::establish_same_blob_steiner_edges_steiner_graph(steiner_result, m_cluster);
+
+    // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
+
     // Phase 6: Store results for later access
     m_flag_steiner_terminal = steiner_result.flag_steiner_terminal;
     m_old_to_new_index = steiner_result.old_to_new_index;
@@ -806,15 +813,68 @@ std::map<Weighted::vertex_type, double> calculate_vertex_charges(
     return charges;
 }
 
+void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& result, const WireCell::Clus::Facade::Cluster& cluster) {
+    using blob_vertex_map = std::map<const Facade::Blob*, std::set<size_t>>;
+    blob_vertex_map cell_points_map;
+    
+    // Get the 3D scoped view to access blob information
+    const auto& sv = cluster.sv3d();
+    const auto& nodes = sv.nodes();
+    const auto& skd = sv.kd();
+    const auto& majs = skd.major_indices();
+    
+    // Loop over all (old_index, new_index) pairs in the mapping
+    for (const auto& [old_index, new_index] : result.old_to_new_index) {
+        // Get the blob for this vertex using the same logic as get_blob_for_vertex
+        size_t blob_idx = majs[old_index];
+        const auto* blob = nodes[blob_idx]->value.facade<Facade::Blob>();
+        cell_points_map[blob].insert(new_index);
+    }
+
+    // Get 3D coordinates from the subset point cloud
+    const auto& x_arr = result.point_cloud.get("x")->elements<double>();
+    const auto& y_arr = result.point_cloud.get("y")->elements<double>();
+    const auto& z_arr = result.point_cloud.get("z")->elements<double>();
+
+    for (const auto& [blob, point_indices] : cell_points_map) {
+        // Convert set to vector for easier iteration
+        std::vector<vertex_type> points_vec(point_indices.begin(), point_indices.end());
+
+        // Add edges between all pairs of points in the same blob
+        for (size_t i = 0; i < points_vec.size(); ++i) {
+            vertex_type index1 = points_vec[i];
+            Point point1(x_arr[index1], y_arr[index1], z_arr[index1]);
+            for (size_t j = i + 1; j < points_vec.size(); ++j) {
+                vertex_type index2 = points_vec[j];
+                Point point2(x_arr[index2], y_arr[index2], z_arr[index2]);
+                
+                if (result.flag_steiner_terminal[index1] || result.flag_steiner_terminal[index2]){
+                    // Calculate base distance between points
+                    double distance = (point1-point2).magnitude();
+                
+                    // Add edge with calculated weight
+                    if (!boost::edge(index1, index2, result.graph).second) {
+                        auto [edge, success] = boost::add_edge(index1, index2, distance, result.graph);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 // Updated enhanced steiner graph function to use the new charge calculation
-Weighted::EnhancedSteinerResult create_enhanced_steiner_graph(
-    const graph_type& base_graph,
-    const vertex_set& terminal_vertices,
-    const PointCloud::Dataset& original_pc,
-    const WireCell::Clus::Facade::Cluster& cluster,  // Added cluster parameter
-    const ChargeWeightingConfig& charge_config, 
-    bool disable_dead_mix_cell)
+EnhancedSteinerResult create_enhanced_steiner_graph(
+            const graph_type& base_graph,
+            const vertex_set& terminal_vertices,
+            const PointCloud::Dataset& original_pc,
+            const WireCell::Clus::Facade::Cluster& cluster, // Added cluster parameter
+            const ChargeWeightingConfig& charge_config,
+            bool disable_dead_mix_cell
+        )
 {
+    using namespace WireCell::Clus::Graphs::Weighted;
+    
     EnhancedSteinerResult result;
     
     // Step 1: Create Voronoi tessellation
@@ -975,8 +1035,10 @@ Weighted::EnhancedSteinerResult create_enhanced_steiner_graph(
             
             final_distance = geometric_distance * weight_factor;
         }
-        
-        boost::add_edge(new_source, new_target, final_distance, result.graph);
+        if (!boost::edge(new_source, new_target, result.graph).second) {
+            // Add the edge with the final weighted distance
+            boost::add_edge(new_source, new_target, final_distance, result.graph);
+        }
     }
     
     // std::cout << "Final graph - vertices: " << boost::num_vertices(result.graph) 

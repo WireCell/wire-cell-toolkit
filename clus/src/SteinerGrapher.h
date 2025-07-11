@@ -333,6 +333,9 @@ namespace WireCell::Clus::Graphs::Weighted {
             const ChargeWeightingConfig& charge_config = ChargeWeightingConfig{},
             bool disable_dead_mix_cell = true
         );
+
+        void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& result, 
+            const WireCell::Clus::Facade::Cluster& cluster);
 }
 
 
