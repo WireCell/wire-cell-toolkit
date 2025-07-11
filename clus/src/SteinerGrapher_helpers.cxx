@@ -36,11 +36,13 @@ PointCloud::Dataset& Steiner::Grapher::get_point_cloud(const std::string& name)
 
     // Fixme? configure the scope?  for now, the default.
     const auto& sv = m_cluster.sv();
-    put_point_cloud(sv.flat_coords(), name);
+    const auto& scope = m_cluster.get_default_scope();
+    // put_point_cloud(sv.flat_coords(), name);
+    put_point_cloud(sv.flat_pc(scope.pcname, {scope.coords.at(0),scope.coords.at(1),scope.coords.at(2),"wpid"}),name);
 
     // Note, if more than the x,y,z coordinates are needed we would replace
     // flat_coords() with something like:
-    // sv.flat_pc("3d", {"x","y","z","charge"})
+    // sv.flat_pc("3d", {"x","y","z","wpid","uwire_index", "vwire_index", "wwire_index");
 
     // Return the in-place reference
     return m_cluster.get_pc(name);

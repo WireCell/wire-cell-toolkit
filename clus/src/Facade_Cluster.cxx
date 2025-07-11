@@ -3702,7 +3702,7 @@ Cluster::steiner_kd_results_t Cluster::kd_steiner_knn(int nnearest,
     return results;
 }
 
-std::vector<geo_point_t> Cluster::kd_steiner_points(const steiner_kd_results_t& res,
+std::vector<std::pair<geo_point_t, WirePlaneId>> Cluster::kd_steiner_points(const steiner_kd_results_t& res,
                                                    const std::string& steiner_pc_name) const 
 {
     if (!has_pc(steiner_pc_name)) {
@@ -3710,18 +3710,22 @@ std::vector<geo_point_t> Cluster::kd_steiner_points(const steiner_kd_results_t& 
     }
     
     auto& steiner_pc = get_pc(steiner_pc_name);
-    auto x_array = steiner_pc.get("x");
-    auto y_array = steiner_pc.get("y"); 
-    auto z_array = steiner_pc.get("z");
-    
-    std::vector<geo_point_t> points;
+    const auto& scope = get_default_scope();
+    auto x_array = steiner_pc.get(scope.coords.at(0));
+    auto y_array = steiner_pc.get(scope.coords.at(1));
+    auto z_array = steiner_pc.get(scope.coords.at(2));
+
+    auto wpid_array = steiner_pc.get("wpid");
+
+    std::vector<std::pair<geo_point_t, WirePlaneId>> points;
     points.reserve(res.size());
     
     for (const auto& [index, distance] : res) {
         double x = x_array->element<double>(index);
         double y = y_array->element<double>(index);
         double z = z_array->element<double>(index);
-        points.emplace_back(x, y, z);
+        auto wpid = wpid_array->element<WirePlaneId>(index);
+        points.emplace_back(geo_point_t{x, y, z}, wpid);
     }
     
     return points;

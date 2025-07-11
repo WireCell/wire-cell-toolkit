@@ -197,7 +197,7 @@ namespace WireCell::Clus::Facade {
                                         const std::string& steiner_pc_name = "steiner_pc") const;
 
         // Helper method to get steiner points from results
-        std::vector<geo_point_t> kd_steiner_points(const steiner_kd_results_t& res, 
+        std::vector<std::pair<geo_point_t, WirePlaneId> > kd_steiner_points(const steiner_kd_results_t& res, 
                                                 const std::string& steiner_pc_name = "steiner_pc") const;
 
         // Method to explicitly build the steiner k-d tree cache
