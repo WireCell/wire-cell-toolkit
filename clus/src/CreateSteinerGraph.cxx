@@ -135,7 +135,9 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             const auto& new_to_old = sg.get_new_to_old_mapping();
 
             std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;
-            // store the steiner graph ...
+            
+            auto pair_idx = cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+            std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << std::endl;
 
             // auto edge_weight_map = get(boost::edge_weight, steiner_graph);
             // for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {

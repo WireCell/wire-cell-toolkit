@@ -3128,9 +3128,101 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
 }
 
 
+std::pair<int, int> Cluster::get_two_boundary_steiner_graph_idx(const std::string& steiner_graph_name, const std::string& steiner_pc_name, bool flag_cosmic) const{
+    // run the reugular two boundary points ...
+    auto pair_points = get_two_boundary_wcps(flag_cosmic);
+    
+    
+    if (!has_pc(steiner_pc_name)) {
+        throw std::runtime_error("Steiner point cloud not found");
+    }
+    auto& steiner_pc = get_pc(steiner_pc_name);
+
+    // 1. Form vector from pair_points
+    geo_vector_t boundary_vector = pair_points.second - pair_points.first;
+    
+
+    // std::cout << pair_points.first << " " << pair_points.second << std::endl;
+
+    // Normalize the vector to ensure consistent projection calculations
+    if (boundary_vector.magnitude() > 0) {
+        boundary_vector = boundary_vector.norm();
+    } else {
+        // If points are identical, return first two points or handle error
+        return std::make_pair(0, std::min(1, (int)steiner_pc.size() - 1));
+    }
+
+    // 2. Loop over all points in steiner_pc and find the two points 
+    //    that are furthest along the boundary vector
+    double max_projection = -std::numeric_limits<double>::infinity();
+    double min_projection = std::numeric_limits<double>::infinity();
+    int max_idx = -1;
+    int min_idx = -1;
+
+    // Get coordinate arrays from the point cloud
+    const auto& x_coords = steiner_pc.get("x")->elements<double>();
+    const auto& y_coords = steiner_pc.get("y")->elements<double>(); 
+    const auto& z_coords = steiner_pc.get("z")->elements<double>();
 
 
-std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(int flag, bool flag_cosmic) const 
+    for (size_t i = 0; i < x_coords.size(); ++i) {
+        // Create point from steiner point cloud
+        geo_point_t steiner_point(x_coords[i], y_coords[i], z_coords[i]);
+        
+        // Project point onto the boundary vector direction
+        // Use first boundary point as reference origin
+        geo_vector_t point_vector = steiner_point - pair_points.first;
+        double projection = point_vector.dot(boundary_vector);
+        
+        // Track extremes
+        if (projection > max_projection) {
+            max_projection = projection;
+            max_idx = static_cast<int>(i);
+        }
+        if (projection < min_projection) {
+            min_projection = projection;
+            min_idx = static_cast<int>(i);
+        }
+    }
+
+    // 3. Return indices of the two extreme points
+    if (max_idx == -1 || min_idx == -1) {
+        throw std::runtime_error("Could not find valid points in Steiner point cloud");
+    }
+
+    return std::make_pair(min_idx, max_idx);
+
+
+    // if (!has_graph(steiner_graph_name)) {
+    //     throw std::runtime_error("Steiner graph not found");
+    // }
+    // auto& graph_steiner = get_graph(steiner_graph_name);
+
+    // // Create a MultiQuery from the dataset - this builds the k-d tree internally
+    // // Note: const_cast is needed because MultiQuery constructor requires non-const reference
+    // // but query operations don't modify the dataset
+    // KDTree::MultiQuery steiner_kd(const_cast<PointCloud::Dataset&>(steiner_pc));
+
+    // // Get a 3D query object for x,y,z coordinates
+    // auto query3d = steiner_kd.get<double>({"x", "y", "z"});
+    
+    // // Convert geo_point_t to std::vector<double> for the query
+    // std::vector<double> query_point1 = {pair_points.first.x(), pair_points.first.y(), pair_points.first.z()};
+    // std::vector<double> query_point2 = {pair_points.second.x(), pair_points.second.y(), pair_points.second.z()};
+    
+    // auto p1 = query3d->knn(1, query_point1);
+    // auto p2 = query3d->knn(1, query_point2);
+    
+    // // Map boundary points to their indices
+    // std::map<int, int> boundary_indices;
+    // boundary_indices[0] = steiner_pc->add_point(pair_points.first);
+    // boundary_indices[1] = steiner_pc->add_point(pair_points.second);
+
+    // return boundary_indices;
+}
+
+
+std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cosmic) const 
 {
     // Early exit for single point
     if (npoints() <= 1) {

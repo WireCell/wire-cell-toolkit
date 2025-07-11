@@ -164,7 +164,7 @@ namespace WireCell::Clus::Steiner {
             const std::string& graph_name = "basic_pid",
             const std::string& steiner_graph_name = "steiner_graph",
             bool disable_dead_mix_cell = true,
-            const std::string& steiner_pc_name = "steiner_subset"
+            const std::string& steiner_pc_name = "steiner_pc"
         );
 
 

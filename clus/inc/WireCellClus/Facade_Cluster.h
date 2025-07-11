@@ -388,9 +388,9 @@ namespace WireCell::Clus::Facade {
             const Cluster* reference_cluster = nullptr) const;
 
         std::pair<geo_point_t, geo_point_t> get_two_boundary_wcps(
-        int flag = 0,  // this is for regular point cloud ...
         bool flag_cosmic = false) const;
 
+        std::pair<int, int> get_two_boundary_steiner_graph_idx(const std::string& steiner_graph_name = "steiner_graph", const std::string& steiner_pc_name = "steiner_pc", bool flag_cosmic = false) const; // return idx for steiner tree
 
         /// section for 2D PC
 
