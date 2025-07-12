@@ -93,6 +93,12 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         std::cout << "Xin1: " << cluster->get_flash().time()/units::us << " " << cluster->nchildren() << " " << cluster->npoints() <<  " " << std::endl;
 
 
+        // Brett, how to call mutate_b here ??? configuration 
+        if (m_grapher_config.retile) {
+            // Call the mutate function with the appropriate configuration
+            auto mutated_node = m_grapher_config.retile->mutate(*cluster->node());
+        }
+
         Steiner::Grapher sg(*cluster, m_grapher_config, log);
         bool already = cluster->has_graph(m_graph_name);
         if (already || m_replace) {

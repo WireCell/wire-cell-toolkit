@@ -254,6 +254,52 @@ local wc = import "wirecell.jsonnet";
             uses: [retiler],
         },
 
+             improve_cluster_1(name="", anodes=[], samplers=[]) :: {
+            local sampler_objs = [s.sobj for s in samplers],
+            local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
+            type: "ImproveCluster_1",
+            name: prefix+name,
+            data: {
+                anodes: wc.tns(anodes),
+                samplers: sampler_cfgs,
+            } + dv_cfg + pcts_cfg,
+            uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
+        },
+
+        // This configures ImproveCluster_2, which inherits from ImproveCluster_1
+        // and adds advanced Steiner tree improvements.
+        improve_cluster_2(name="", anodes=[], samplers=[]) :: {
+            local sampler_objs = [s.sobj for s in samplers],
+            local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
+            type: "ImproveCluster_2",
+            name: prefix+name,
+            data: {
+                anodes: wc.tns(anodes),
+                samplers: sampler_cfgs,
+            } + dv_cfg + pcts_cfg,
+            uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
+        },
+
+        // Use an ImproveCluster_1 retiler for clustering retile operations
+        improve_retile_1(name="", improver) :: {
+            type: "ClusterImprove_1",
+            name: prefix+name,
+            data: {
+                retiler: wc.tn(improver),
+            } + scope_cfg,
+            uses: [improver],
+        },
+
+        // Use an ImproveCluster_2 retiler for clustering retile operations
+        improve_retile_2(name="", improver) :: {
+            type: "ClusterImprove_2",
+            name: prefix+name,
+            data: {
+                retiler: wc.tn(improver),
+            } + scope_cfg,
+            uses: [improver],
+        },
+
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
         steiner(name="", retiler, grouping="live", graph="steiner") :: {
             type: "CreateSteinerGraph",

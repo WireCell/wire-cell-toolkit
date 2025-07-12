@@ -13,146 +13,12 @@
 // 5) produces clusters such that the new blobs formed from an old cluster form a new "shadow" cluster.
 // 6) forms a PC-tree
 // 7) outputs the new grouping
-//
 
+#include "retile_cluster.h"  // Include the header instead of defining the class here
 
-#include "WireCellUtil/RayTiling.h"
-#include "WireCellUtil/RayHelpers.h"
-
-#include "WireCellIface/IBlob.h"
-#include "WireCellIface/IBlobSampler.h"
-#include "WireCellIface/IAnodeFace.h"
-#include "WireCellIface/IDetectorVolumes.h"
-#include "WireCellIface/IPCTreeMutate.h"
-
-#include "WireCellAux/PlaneTools.h"
-
-#include "WireCellClus/Facade_Grouping.h"
-#include "WireCellClus/Facade_Cluster.h"
-#include "WireCellClus/ClusteringFuncsMixins.h"
-
-
-#include "WireCellClus/IEnsembleVisitor.h"
-#include "WireCellClus/ClusteringFuncs.h"
-#include "WireCellClus/ClusteringFuncsMixins.h"
-
-#include "WireCellIface/IConfigurable.h"
-
-#include "WireCellUtil/NamedFactory.h"
-
-#include "WireCellAux/SimpleBlob.h"
-#include "WireCellAux/SamplingHelpers.h"
-
-#include "WireCellUtil/PointTree.h"
-
-#include "WireCellAux/SimpleSlice.h"
-#include "WireCellClus/GroupingHelper.h"
-
-
-
-#include <vector>
-
-class RetileCluster;
-WIRECELL_FACTORY(RetileCluster, RetileCluster,
+WIRECELL_FACTORY(RetileCluster, WireCell::Clus::RetileCluster,
                  WireCell::IConfigurable, WireCell::IPCTreeMutate)
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Clus::Facade;
-using namespace WireCell::PointCloud::Tree;
-
-
-class RetileCluster : public IConfigurable, public IPCTreeMutate, private Clus::NeedDV, private Clus::NeedPCTS {
-
-    // Cache
-    mutable Grouping* m_grouping = nullptr;
-    mutable std::map<WirePlaneId , std::vector<double> > m_wpid_angles;
-
-public:
-
-    RetileCluster() {}
-    virtual ~RetileCluster() {};
-
-    // IConfigurable API
-    void configure(const WireCell::Configuration& config);
-    virtual Configuration default_configuration() const {
-        Configuration cfg;
-        return cfg;
-    }
-
-    // IPCTreeMutate API
-    virtual std::unique_ptr<node_t> mutate(node_t& node) const;
-
-private:
-
-    // Step 0. Collect grouping info
-    Facade::Cluster* reinitialize(Points::node_type& node) const;
-
-    // Step 1. Build activities from blobs in a cluster.
-    void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
-
-
-    // Step 2. Modify activity to suit.
-    void hack_activity(const Cluster& cluster,
-                       std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures,
-                       const std::vector<size_t>& path_wcps,
-                       int apa, int face) const;
-
-    // Step 3. Form IBlobs from activities.
-    std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
-
-    std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
-
-
-    // Remaining steps are done in the operator() directly.
-
-    /** Configuration: "sampler" (required)
-
-        The type/name an IBlobSampler for producing the "3d" point cloud.
-
-        If not given, the retailed blob tree nodes will not have point clouds.
-    */
-    std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> m_samplers;
-
-    // fixme: this restricts the retiling to single-anode-face clusters.
-    // As such, it will likely freak out if fed clusters that have been
-    // stitched across anode faces.  Since tiling is inherently a per-face
-    // operation, this may be okay.
-    /** Configuration "face" (optional, default is 0)
-
-        The INDEX of the face in the anode's list of faces to use.
-    */
-    std::map<int, std::map<int, IAnodeFace::pointer>> m_face; // now apa/face --> m_face
-
-    /** Configuration "cut_time_low" (optional, default is -1e9)
-        Lower bound for time cut in nanoseconds
-    */
-    double m_cut_time_low;
-
-    /** Configuration "cut_time_high" (optional, default is 1e9)
-        Upper bound for time cut in nanoseconds
-    */
-    double m_cut_time_high;
-
-    std::map<int, std::map<int, std::vector<Aux::WirePlaneInfo>>> m_plane_infos;
-
-
-    /** Configuration "anode" (required)
-
-        The type/name of the anode.
-    */
-
-
-    // Wrap up getting the shortest path for the cluster high/low points.
-    const std::vector<size_t>& cluster_path_wcps(const Cluster* cluster) const {
-        // find the highest and lowest points
-        std::pair<geo_point_t, geo_point_t> pair_points = cluster->get_highest_lowest_points();
-        // std::cerr << "retile: hilo: " << pair_points.first << " " << pair_points.second << std::endl;
-        int high_idx = cluster->get_closest_point_index(pair_points.first);
-        int low_idx = cluster->get_closest_point_index(pair_points.second);
-        return cluster->graph_algorithms().shortest_path(high_idx, low_idx);
-    }
-};                              // RetileCluster
 
 
 
@@ -649,8 +515,6 @@ RetileCluster::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, i
    
     
 }
-
-
 
           
 Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
