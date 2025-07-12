@@ -41,10 +41,18 @@ namespace WireCell::Clus {
         // get the original cluster
         auto* orig_cluster = reinitialize(node);
 
-        std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
+        // std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
 
+        auto wpids = cluster->wpids_blob();
+        std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
+        for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
+            int apa = it->apa();
+            int face = it->face();
+            const auto& angles = m_wpid_angles.at(*it);
 
-        std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
+            std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
+
+        }
             // get_activity(*cluster, map_slices_measures, apa, face);
 
 
