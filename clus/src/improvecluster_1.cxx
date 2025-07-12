@@ -24,7 +24,6 @@ namespace WireCell::Clus {
         // Configure base class first
         RetileCluster::configure(cfg);
         
-       
     }
 
     Configuration ImproveCluster_1::default_configuration() const
@@ -39,6 +38,16 @@ namespace WireCell::Clus {
 
     std::unique_ptr<ImproveCluster_1::node_t> ImproveCluster_1::mutate(node_t& node) const
     {
+        // get the original cluster
+        auto* orig_cluster = reinitialize(node);
+
+        std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
+
+
+        std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
+            // get_activity(*cluster, map_slices_measures, apa, face);
+
+
         // First apply the base RetileCluster functionality
         // auto retiled_node = RetileCluster::mutate(node);
         auto retiled_node = std::unique_ptr<node_t>(nullptr);

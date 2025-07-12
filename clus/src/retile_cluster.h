@@ -67,9 +67,7 @@ namespace WireCell::Clus {
 
 class RetileCluster : public IConfigurable, public IPCTreeMutate, private Clus::NeedDV, private Clus::NeedPCTS {
 
-    // Cache
-    mutable Grouping* m_grouping = nullptr;
-    mutable std::map<WirePlaneId , std::vector<double> > m_wpid_angles;
+   
 
 public:
 
@@ -86,10 +84,18 @@ public:
     // IPCTreeMutate API
     virtual std::unique_ptr<node_t> mutate(node_t& node) const;
 
+protected:
+     // Step 0. Collect grouping info
+    Facade::Cluster* reinitialize(Points::node_type& node) const;
+
+     // Cache
+    mutable Grouping* m_grouping = nullptr;
+    mutable std::map<WirePlaneId , std::vector<double> > m_wpid_angles;
+
+
 private:
 
-    // Step 0. Collect grouping info
-    Facade::Cluster* reinitialize(Points::node_type& node) const;
+   
 
     // Step 1. Build activities from blobs in a cluster.
     void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
