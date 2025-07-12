@@ -65,7 +65,7 @@ namespace WireCell::Clus {
 
 
 
-class RetileCluster : public IConfigurable, public IPCTreeMutate, private Clus::NeedDV, private Clus::NeedPCTS {
+class RetileCluster : public IConfigurable, public IPCTreeMutate, protected Clus::NeedDV, protected Clus::NeedPCTS {
 
    
 
@@ -91,30 +91,7 @@ protected:
      // Cache
     mutable Grouping* m_grouping = nullptr;
     mutable std::map<WirePlaneId , std::vector<double> > m_wpid_angles;
-
-
-private:
-
-   
-
-    // Step 1. Build activities from blobs in a cluster.
-    void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
-
-
-    // Step 2. Modify activity to suit.
-    void hack_activity(const Cluster& cluster,
-                       std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures,
-                       const std::vector<size_t>& path_wcps,
-                       int apa, int face) const;
-
-    // Step 3. Form IBlobs from activities.
-    std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
-
-    std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
-
-
-    // Remaining steps are done in the operator() directly.
-
+    std::map<int, std::map<int, std::vector<Aux::WirePlaneInfo>>> m_plane_infos;
     /** Configuration: "sampler" (required)
 
         The type/name an IBlobSampler for producing the "3d" point cloud.
@@ -133,6 +110,34 @@ private:
     */
     std::map<int, std::map<int, IAnodeFace::pointer>> m_face; // now apa/face --> m_face
 
+    // Step 3. Form IBlobs from activities.
+    std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
+
+    // Step 1. Build activities from blobs in a cluster.
+    void get_activity(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
+
+
+    // Step 2. Modify activity to suit.
+    void hack_activity(const Cluster& cluster,
+                       std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures,
+                       const std::vector<size_t>& path_wcps,
+                       int apa, int face) const;
+
+private:
+
+   
+
+  
+
+    
+
+    std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
+
+
+    // Remaining steps are done in the operator() directly.
+
+   
+
     /** Configuration "cut_time_low" (optional, default is -1e9)
         Lower bound for time cut in nanoseconds
     */
@@ -143,7 +148,6 @@ private:
     */
     double m_cut_time_high;
 
-    std::map<int, std::map<int, std::vector<Aux::WirePlaneInfo>>> m_plane_infos;
 
 
     /** Configuration "anode" (required)

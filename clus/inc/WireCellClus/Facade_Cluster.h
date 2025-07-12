@@ -418,6 +418,7 @@ namespace WireCell::Clus::Facade {
 
         /// 
         std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int apa, const int face, const int plane) const;
+        
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 
@@ -599,8 +600,8 @@ namespace WireCell::Clus::Facade {
 
         // Return the number of unique wires or ticks.
         std::map<WirePlaneId, std::tuple<int, int, int, int> > get_uvwt_range() const;
-        std::tuple<int, int, int, int> get_uvwt_min() const;
-        std::tuple<int, int, int, int> get_uvwt_max() const;
+        std::tuple<int, int, int, int> get_uvwt_min(int apa = 0, int face = 0) const;
+        std::tuple<int, int, int, int> get_uvwt_max(int apa = 0, int face = 0) const;
 
 
         /// @brief to assess whether a given point (p_test) in a cluster is a vertex, or endpoint, based on asymmetry and occupancy criteria.

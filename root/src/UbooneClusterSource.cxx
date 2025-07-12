@@ -353,6 +353,7 @@ void Root::UbooneClusterSource::extract_live(
         auto ichan = get_channel(ch);
         if (!ichan) continue;
         
+
         // Check each time slice to see if it overlaps with any of the bin ranges
         for (int tsid = 0; tsid < n_slices_span; ++tsid) {
             auto& activity = slice_activities[tsid];
@@ -360,6 +361,9 @@ void Root::UbooneClusterSource::extract_live(
             // If slice overlaps with any of the bin ranges.
             for (const auto& tt : brl) {
                 if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
+
+                // if (ch == 955)         std::cout << "Test: " << tsid << " " << ch << " " << n_slices_span << " " << brl.front().first << " " << brl.front().second << std::endl;
+
                 activity[ichan] = m_bodge;
                 break; // No need to check other ranges for this slice
             }

@@ -28,15 +28,6 @@ namespace WCF = WireCell::Clus::Facade;
 // Nick name for less typing.
 namespace WRG = WireCell::RayGrid;
 
-// static void debug_cluster(WCF::Cluster* cluster, const std::string& ctx)
-// {
-//     std::cout << "Cluster: " << cluster->node()->value.as_string(false) << "\n";
-//     auto nblobs = cluster->kd_blobs().size();
-//     auto nchild = cluster->nchildren();
-//     if (nblobs == nchild) return;
-//     std::cout << ctx << " n kd_blobs=" << nblobs << " nchildren=" << nchild << "\n";
-// }
-
 
 
 
@@ -189,7 +180,7 @@ void RetileCluster::get_activity(const Cluster& cluster, std::map<std::pair<int,
         }
     }
 
-    // std::cout << "Test: Org: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
+    //  std::cout << "Test: Org: " << map_slices_measures.size() << " " << cluster.children().size() << std::endl;
 
 }
 
@@ -386,6 +377,10 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
     const auto& coords = m_face.at(apa).at(face)->raygrid();
     int blob_ident=0;
     int slice_ident = 0;
+
+    const double tick = m_grouping->get_tick().at(apa).at(face);
+
+
     for (auto it = map_slices_measures.begin(); it != map_slices_measures.end(); it++){
         // Do the actual tiling.
         WRG::activities_t activities = RayGrid::make_activities(m_face.at(apa).at(face)->raygrid(), it->second);
@@ -422,7 +417,7 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
             // }
 
             // 500 ns should be passed from outside?
-            ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*500*units::ns, (it->first.second - it->first.first)*500*units::ns);
+            ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*tick, (it->first.second - it->first.first)*tick);
 
             IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
                                                                  blob_error, bshape, slice, m_face.at(apa).at(face));
@@ -627,7 +622,7 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
                 }
                 const IBlob::pointer iblob = shad_iblobs[bind];
                 auto sampler = m_samplers.at(apa).at(face);
-                const double tick = 500*units::ns;
+                const double tick = m_grouping->get_tick().at(apa).at(face); //500*units::ns;
 
                 auto pcs = Aux::sample_live(sampler, iblob, angles, tick, bind);
                 /// DO NOT EXTEND FURTHER! see #426, #430

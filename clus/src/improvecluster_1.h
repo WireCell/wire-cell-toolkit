@@ -34,8 +34,13 @@ namespace WireCell::Clus {
         // IPCTreeMutate API - override to add Steiner tree improvements
         virtual std::unique_ptr<node_t> mutate(node_t& node) const override;
 
-    private:
+    protected:
+       void get_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>,std::vector<WireCell::RayGrid::measure_t>>& map_slices_measures, int apa, int face) const;
 
+       void hack_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, const std::vector<size_t>& path_wcps, int apa, int face) const;
+
+    private:
+ 
        
     };
 

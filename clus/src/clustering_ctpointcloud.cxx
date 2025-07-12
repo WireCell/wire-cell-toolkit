@@ -165,10 +165,10 @@ static void clustering_ctpointcloud(
 
     std::cout << "Test 2D Conversion " << point_u.first << " " << point_u.second << " " << point_v.first << " " << point_v.second << " "  << point_w.first << " " << point_w.second << std::endl;
 
-    auto dead_chs_u = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0,0);
-    auto dead_chs_v = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0,1);
-    auto dead_chs_w = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,4800,0,0,2);
-    std::cout << "Test Overlap dead chs: " << dead_chs_u.size() << " " << dead_chs_v.size() << " " << dead_chs_w.size() << std::endl;
+    // auto dead_chs_u = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0,0);
+    // auto dead_chs_v = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,2400,0,0,1);
+    // auto dead_chs_w = live_grouping.get_overlap_dead_chs(10*4,1000*4,0,4800,0,0,2);
+    // std::cout << "Test Overlap dead chs: " << dead_chs_u.size() << " " << dead_chs_v.size() << " " << dead_chs_w.size() << std::endl;
 
     std::cout << "Test all dead chs: " << live_grouping.get_all_dead_chs(0,0,0).size() + live_grouping.get_all_dead_chs(0,0,1).size() + live_grouping.get_all_dead_chs(0,0,2).size() << std::endl;
 

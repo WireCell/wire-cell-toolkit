@@ -1597,50 +1597,60 @@ geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double di
     return {sth * cos(phi), sth * sin(phi), cth};
 }
 
-std::tuple<int, int, int, int> Cluster::get_uvwt_min() const
+std::tuple<int, int, int, int> Cluster::get_uvwt_min(int apa, int face) const
 {
-    std::tuple<int, int, int, int> ret;
-    bool first = true;
+    std::set<int> u_set, v_set, w_set, t_set;
 
     for (const auto* blob : children()) {
-        const int u = blob->u_wire_index_min();
-        const int v = blob->v_wire_index_min();
-        const int w = blob->w_wire_index_min();
-        const int t = blob->slice_index_min();
-
-        if (first) {
-            ret = {u, v, w, t};
-            first = false;
-            continue;
+        auto wpid = blob->wpid();
+        if (wpid.apa() != apa || wpid.face() != face) {
+            continue; // skip blobs not in the specified APA and face
         }
-        get<0>(ret) = std::min(get<0>(ret), u);
-        get<1>(ret) = std::min(get<1>(ret), v);
-        get<2>(ret) = std::min(get<2>(ret), w);
-        get<3>(ret) = std::min(get<3>(ret), t);
+        
+        for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
+            u_set.insert(i);
+        }
+        for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
+            v_set.insert(i);
+        }
+        for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
+            w_set.insert(i);
+        }
+        for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
+            t_set.insert(i);
+        }
     }
+    
+    std::tuple<int, int, int, int> ret;
+    ret = { *u_set.begin(), *v_set.begin(), *w_set.begin(), *t_set.begin() };
     return ret;
 }
-std::tuple<int, int, int, int> Cluster::get_uvwt_max() const
+std::tuple<int, int, int, int> Cluster::get_uvwt_max(int apa, int face) const
 {
-    std::tuple<int, int, int, int> ret;
-    bool first = true;
+    std::set<int> u_set, v_set, w_set, t_set;
 
     for (const auto* blob : children()) {
-        const int u = blob->u_wire_index_max();
-        const int v = blob->v_wire_index_max();
-        const int w = blob->w_wire_index_max();
-        const int t = blob->slice_index_max();
-
-        if (first) {
-            ret = {u, v, w, t};
-            first = false;
-            continue;
+        auto wpid = blob->wpid();
+        if (wpid.apa() != apa || wpid.face() != face) {
+            continue; // skip blobs not in the specified APA and face
         }
-        get<0>(ret) = std::max(get<0>(ret), u);
-        get<1>(ret) = std::max(get<1>(ret), v);
-        get<2>(ret) = std::max(get<2>(ret), w);
-        get<3>(ret) = std::max(get<3>(ret), t);
+        
+        for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
+            u_set.insert(i);
+        }
+        for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
+            v_set.insert(i);
+        }
+        for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
+            w_set.insert(i);
+        }
+        for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
+            t_set.insert(i);
+        }
     }
+    
+    std::tuple<int, int, int, int> ret;
+    ret = { *u_set.rbegin(), *v_set.rbegin(), *w_set.rbegin(), *t_set.rbegin() };
     return ret;
 }
 

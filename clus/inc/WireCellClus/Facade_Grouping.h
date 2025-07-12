@@ -214,12 +214,12 @@ namespace WireCell::Clus::Facade {
         /// @param pind Plane index
         /// @param flag_ignore_time If true, ignore time window check
         /// @return Vector of pairs representing ranges of dead channels
-        std::vector<std::pair<int, int>> get_overlap_dead_chs(const int min_time, const int max_time, 
+        std::vector<std::pair<int, int> > get_overlap_dead_chs(const int min_time, const int max_time, 
             const int min_ch, const int max_ch, const int apa, const int face, const int pind, 
             const bool flag_ignore_time=false) const;
 
         // In Facade_Grouping.h, inside the Grouping class public section:
-        std::map<int, std::pair<int, int>> get_all_dead_chs(const int apa, const int face, const int pind, int expand = 12) const;
+        std::map<int, std::pair<int, int>> get_all_dead_chs(const int apa, const int face, const int pind, int expand = 0) const;
         // Get overlapping good channel charges in a time-channel window
         std::map<std::pair<int,int>, std::pair<double,double>> get_overlap_good_ch_charge(
             int min_time, int max_time, int min_ch, int max_ch, const int apa, 

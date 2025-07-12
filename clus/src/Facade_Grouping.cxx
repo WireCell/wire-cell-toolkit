@@ -537,67 +537,57 @@ size_t Grouping::get_num_points(const int apa, const int face, const int pind) c
     return sv.npoints();
 }
 
-std::vector<std::pair<int, int>> Facade::Grouping::get_overlap_dead_chs(const int min_time, const int max_time,
+std::vector<std::pair<int, int> > Facade::Grouping::get_overlap_dead_chs(const int min_time, const int max_time,
     const int min_ch, const int max_ch, const int apa, const int face, const int pind, const bool flag_ignore_time) const 
 {
-    if (m_anodes.size() == 0) {
-        raise<ValueError>("anode is null");
-    }
-    // const auto& params = get_params();
-    double time_offset = cache().map_time_offset.at(apa).at(face);
-    double drift_speed = cache().map_drift_speed.at(apa).at(face);
-    // double tick = cache().map_tick.at(apa).at(face);
-    
-    // Convert time to position
-    double min_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, min_time);
-    double max_xpos = time2drift(m_anodes.at(apa)->faces()[face], time_offset, drift_speed, max_time);
+    auto results = get_all_dead_chs(apa, face, pind);
+    std::set<int> overlap_results;
 
-    // Ensure min_xpos is actually less than max_xpos
-    if (min_xpos > max_xpos) {
-        std::swap(min_xpos, max_xpos);
-    }
+    for (auto& [ch, xrange] : results) {
+        int min_time_ch = xrange.first;
+        int max_time_ch = xrange.second;
 
-    std::set<int> dead_chs;
-    const auto& dead_winds = get_dead_winds(apa, face, pind);
-
-    // Find overlapping dead channels
-    for (const auto& [wind, xrange] : dead_winds) {
-        const int temp_ch = wind;
-        const double temp_min_xpos = xrange.first;
-        const double temp_max_xpos = xrange.second;
-
-        if (flag_ignore_time) {
-            if (temp_ch >= min_ch && temp_ch <= max_ch) {
-                dead_chs.insert(temp_ch);
-            }
+        // Check if the channel is within the specified range
+        if (ch < min_ch || ch >= max_ch) {
+            continue;
         }
-        else {
-            if (temp_ch >= min_ch && temp_ch <= max_ch &&
-                max_xpos >= temp_min_xpos && min_xpos <= temp_max_xpos) {
-                dead_chs.insert(temp_ch);
-            }
+
+        // Check if the time range overlaps with the specified time range
+        if (flag_ignore_time || (min_time_ch < max_time && max_time_ch > min_time)) {
+            // Adjust time range to be within the specified bounds
+            // int overlap_min = std::max(min_time, min_time_ch);
+            // int overlap_max = std::min(max_time, max_time_ch);
+            // if (flag_ignore_time) {
+            //     // If ignoring time, just use the channel range
+            //     overlap_min = min_time;
+            //     overlap_max = max_time;
+            // }
+            // overlap_results[ch] = std::make_pair(overlap_min, overlap_max);
+            overlap_results.insert(ch);  // Store the channel that overlaps
         }
     }
 
-    // Convert set of channels to ranges
-    std::vector<std::pair<int, int>> dead_ch_range;
-    for (const auto ch : dead_chs) {
-        if (dead_ch_range.empty()) {
-            dead_ch_range.push_back(std::make_pair(ch, ch));
-        }
-        else {
-            if (ch - dead_ch_range.back().second == 1) {
-                dead_ch_range.back().second = ch;
+    std::vector<std::pair<int, int>> overlap_ranges;
+    if (!overlap_results.empty()) {
+        int range_start = -1;
+        int prev_ch = -2;
+        for (int ch : overlap_results) {
+            if (range_start == -1) {
+                range_start = ch;
             }
-            else {
-                dead_ch_range.push_back(std::make_pair(ch, ch));
+            else if (ch != prev_ch + 1) {
+                overlap_ranges.emplace_back(range_start, prev_ch + 1);
+                range_start = ch;
             }
+            prev_ch = ch;
         }
+        overlap_ranges.emplace_back(range_start, prev_ch + 1);
     }
+    return overlap_ranges;
 
-    return dead_ch_range;
 }
 
+// channel -> [min_time, max_time)
 std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int apa, const int face, const int pind, int expand) const
 {
     std::map<int, std::pair<int, int>> results;
@@ -607,6 +597,8 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
     double time_offset = cache().map_time_offset.at(apa).at(face);
     double drift_speed = cache().map_drift_speed.at(apa).at(face);
 
+    double tick = cache().map_tick.at(apa).at(face);
+
     // Add entries for this face/plane's dead channels
     for (const auto& [wind, xrange] : dead_winds) {
         int temp_ch = wind;
@@ -615,13 +607,13 @@ std::map<int, std::pair<int, int>> Facade::Grouping::get_all_dead_chs(const int 
         int min_time = std::round(drift2time(m_anodes.at(apa)->faces()[face], 
                                            time_offset,
                                            drift_speed, 
-                                           xrange.first)) - expand;
+                                           xrange.first)/tick);
         int max_time = std::round(drift2time(m_anodes.at(apa)->faces()[face],
                                            time_offset,
                                            drift_speed,
-                                           xrange.second)) + expand;
+                                           xrange.second)/tick);
         
-        results[temp_ch] = std::make_pair(std::min(min_time, max_time), std::max(min_time, max_time));
+        results[temp_ch] = std::make_pair(std::min(min_time, max_time)-expand, std::max(min_time, max_time)+1+expand);
     }
     
     return results;
@@ -656,8 +648,8 @@ std::map<std::pair<int,int>, std::pair<double,double>> Facade::Grouping::get_ove
 
     // Fill the map for points within the specified window
     for (size_t i = 0; i < slice_index.size(); ++i) {
-        if (slice_index[i] >= min_time && slice_index[i] <= max_time &&
-            wind[i] >= min_ch && wind[i] <= max_ch) {
+        if (slice_index[i] >= min_time && slice_index[i] < max_time &&
+            wind[i] >= min_ch && wind[i] < max_ch) {
             map_time_ch_charge[std::make_pair(slice_index[i], wind[i])] = 
                 std::make_pair(charge[i], charge_err[i]);
         }
