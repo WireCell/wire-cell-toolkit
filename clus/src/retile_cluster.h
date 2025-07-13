@@ -98,6 +98,10 @@ protected:
 
         If not given, the retailed blob tree nodes will not have point clouds.
     */
+
+    bool m_verbose{false};
+
+    
     std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> m_samplers;
 
     // fixme: this restricts the retiling to single-anode-face clusters.
@@ -126,11 +130,6 @@ protected:
 private:
 
    
-
-  
-
-    
-
     std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
 
 

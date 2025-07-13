@@ -43,7 +43,7 @@ namespace WireCell::Clus {
                 if (sampler_name.empty()) {
                     raise<ValueError>("RetileCluster requires an IBlobSampler name for APA %d face %d", apa, face);
                 }
-                std::cout << "Test: " << apa << " " << face << " " << sampler_name << std::endl;
+                // std::cout << "Test: " << apa << " " << face << " " << sampler_name << std::endl;
                 auto sampler_ptr = Factory::find_tn<IBlobSampler>(sampler_name);
                 m_samplers[apa][face] = sampler_ptr;
             }
@@ -162,7 +162,7 @@ namespace WireCell::Clus {
             // Step 3.
             auto iblobs = make_iblobs(map_slices_measures, apa, face);
 
-            std::cout << "ImproveCluster_1: " << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
+            if (m_verbose) std::cout << "ImproveCluster_1: " << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
 
             auto niblobs = iblobs.size();
             
@@ -202,7 +202,7 @@ namespace WireCell::Clus {
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
 
             }
-            std::cout << "ImproveCluster_1: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
+            if (m_verbose) std::cout << "ImproveCluster_1: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
 
 
             // remove bad blobs ...
@@ -212,14 +212,14 @@ namespace WireCell::Clus {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
-            std::cout << "ImproveCluster_1: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
+            if (m_verbose) std::cout << "ImproveCluster_1: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
         }
 
 
         auto& default_scope = orig_cluster->get_default_scope();
         auto& raw_scope = orig_cluster->get_raw_scope();
 
-        std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
         if (default_scope.hash()!=raw_scope.hash()){
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
             // std::vector<int> filter_results = c

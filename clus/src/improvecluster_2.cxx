@@ -93,7 +93,7 @@ namespace WireCell::Clus {
         Steiner::Grapher orig_steiner_grapher(*orig_cluster, grapher_config, log);
         auto& orig_graph = orig_steiner_grapher.get_graph("basic_pid");
 
-        std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
 
         // Establish same blob steiner edges
         orig_steiner_grapher.establish_same_blob_steiner_edges("basic_pid", true);
@@ -104,26 +104,26 @@ namespace WireCell::Clus {
             auto second_index =   orig_cluster->get_closest_point_index(pair_points.second);
             orig_path_point_indices = orig_cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
         }
-        std::cout << "ImproveCluster_2 " << " Origi Shortest path indices: " << orig_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph)<< std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2 " << " Origi Shortest path indices: " << orig_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph)<< std::endl;
         
         orig_steiner_grapher.remove_same_blob_steiner_edges("basic_pid");
-        std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
 
 
 
         // Second, make a temp_cluster based on the original cluster via ImproveCluster_1
-        std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
         auto temp_node = ImproveCluster_1::mutate(node);
         auto temp_cluster_1 = temp_node->value.facade<Cluster>();
         auto& temp_cluster = m_grouping->make_child();
         temp_cluster.take_children(*temp_cluster_1);  // Move all blobs from improved cluster
         temp_cluster.from(*orig_cluster);
-        std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
         Steiner::Grapher temp_steiner_grapher(temp_cluster, grapher_config, log);
         auto& temp_graph = temp_steiner_grapher.get_graph("basic_pid");
-        std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
         temp_steiner_grapher.establish_same_blob_steiner_edges("basic_pid", false);
         std::vector<size_t> temp_path_point_indices;
         {  
@@ -132,9 +132,9 @@ namespace WireCell::Clus {
             auto second_index =   temp_cluster.get_closest_point_index(pair_points.second);
             temp_path_point_indices = temp_cluster.graph_algorithms("basic_pid").shortest_path(first_index, second_index);
         }
-        std::cout << "ImproveCluster_2 " << " Temp Shortest path indices: " << temp_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph)<< std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Shortest path indices: " << temp_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph)<< std::endl;
         temp_steiner_grapher.remove_same_blob_steiner_edges("basic_pid");
-        std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
 
 
         // star to construct a new cluster
@@ -163,7 +163,7 @@ namespace WireCell::Clus {
             // Step 3.
             auto iblobs = make_iblobs(map_slices_measures, apa, face);
 
-            std::cout << "ImproveCluster_2: new cluster " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
+            if (m_verbose) std::cout << "ImproveCluster_2: new cluster " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
 
             auto niblobs = iblobs.size();
             // start to sampling points 
@@ -201,7 +201,7 @@ namespace WireCell::Clus {
                 }
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
             }
-            std::cout << "ImproveCluster_2: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
+            if (m_verbose) std::cout << "ImproveCluster_2: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
 
             // remove bad blobs
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
@@ -210,19 +210,19 @@ namespace WireCell::Clus {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
-            std::cout << "ImproveCluster_2: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
+            if (m_verbose) std::cout << "ImproveCluster_2: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
         }
 
 
         // Remove this cluster from the grouping
         auto* temp_cluster_ptr = &temp_cluster;
         m_grouping->destroy_child(temp_cluster_ptr, true);
-        std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
         auto& default_scope = orig_cluster->get_default_scope();
         auto& raw_scope = orig_cluster->get_raw_scope();
 
-        std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        if (m_verbose) std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
         if (default_scope.hash()!=raw_scope.hash()){
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
             // std::vector<int> filter_results = c

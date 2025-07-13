@@ -77,6 +77,7 @@ void RetileCluster::configure(const WireCell::Configuration& cfg)
     // Add time cut configuration
     m_cut_time_low = get(cfg, "cut_time_low", -1e9);
     m_cut_time_high = get(cfg, "cut_time_high", 1e9);
+    m_verbose = get(cfg, "verbose", false);
 
 }
 

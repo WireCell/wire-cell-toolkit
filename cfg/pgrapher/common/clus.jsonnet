@@ -278,7 +278,7 @@ local wc = import "wirecell.jsonnet";
 
         // This configures ImproveCluster_2, which inherits from ImproveCluster_1
         // and adds advanced Steiner tree improvements.
-        improve_cluster_2(name="", anodes=[], samplers=[]) :: {
+        improve_cluster_2(name="", anodes=[], samplers=[], verbose=false) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_2",
@@ -286,9 +286,11 @@ local wc = import "wirecell.jsonnet";
             data: {
                 anodes: wc.tns(anodes),
                 samplers: sampler_cfgs,
+                verbose: verbose,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
         },
+        
 
         // Use an ImproveCluster_1 retiler for clustering retile operations
         improve_retile_1(name="", improver) :: {
