@@ -197,7 +197,7 @@ namespace WireCell::Clus::Facade {
                                         const std::string& steiner_pc_name = "steiner_pc") const;
 
         // Helper method to get steiner points from results
-        std::vector<std::pair<geo_point_t, WirePlaneId> > kd_steiner_points(const steiner_kd_results_t& res, 
+        std::vector<std::pair<geo_point_t, std::pair<WirePlaneId, int>>> kd_steiner_points(const steiner_kd_results_t& res, 
                                                 const std::string& steiner_pc_name = "steiner_pc") const;
 
         // Method to explicitly build the steiner k-d tree cache
@@ -418,7 +418,7 @@ namespace WireCell::Clus::Facade {
 
         /// 
         std::vector<size_t> get_closest_2d_index(const geo_point_t& p, const double search_radius, const int apa, const int face, const int plane) const;
-        
+
 
         std::vector<const Blob*> is_connected(const Cluster& c, const int offset) const;
 

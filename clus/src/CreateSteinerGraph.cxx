@@ -142,7 +142,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << " " << pair_points.first << std::endl;
             auto kd_results = main_cluster->kd_steiner_knn(1, pair_points.first);
             auto kd_points = main_cluster->kd_steiner_points(kd_results);
-            std::cout << "Xin4: " << kd_points.size() << " " << (*kd_points.begin()).first << " " << (*kd_points.begin()).second << std::endl;
+            std::cout << "Xin4: " << kd_points.size() << " " << (*kd_points.begin()).first << " " << (*kd_points.begin()).second.first << " " << (*kd_points.begin()).second.second << std::endl;
 
             // delete new cluster from grouping after usage ...
             auto* new_cluster_ptr = &new_cluster;

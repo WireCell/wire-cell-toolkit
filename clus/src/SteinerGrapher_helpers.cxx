@@ -37,6 +37,7 @@ PointCloud::Dataset& Steiner::Grapher::get_point_cloud(const std::string& name)
     // Fixme? configure the scope?  for now, the default.
     const auto& sv = m_cluster.sv();
     const auto& scope = m_cluster.get_default_scope();
+    
     // put_point_cloud(sv.flat_coords(), name);
     put_point_cloud(sv.flat_pc(scope.pcname, {scope.coords.at(0),scope.coords.at(1),scope.coords.at(2),"wpid"}),name);
 

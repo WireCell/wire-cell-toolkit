@@ -3702,8 +3702,8 @@ Cluster::steiner_kd_results_t Cluster::kd_steiner_knn(int nnearest,
     // Convert geo_point_t to std::vector<double> for the query
     std::vector<double> query_vec = {query_point.x(), query_point.y(), query_point.z()};
     
-    std::cout << "Performing k-NN query for " << nnearest << " nearest neighbors to point: "
-              << query_vec[0] << ", " << query_vec[1] << ", " << query_vec[2] << std::endl;
+    // std::cout << "Performing k-NN query for " << nnearest << " nearest neighbors to point: "
+    //           << query_vec[0] << ", " << query_vec[1] << ", " << query_vec[2] << std::endl;
 
     // Perform k-NN query using cached query3d
     auto kd_results = cache_ref.steiner_query3d->knn(nnearest, query_vec);
@@ -3718,7 +3718,7 @@ Cluster::steiner_kd_results_t Cluster::kd_steiner_knn(int nnearest,
     return results;
 }
 
-std::vector<std::pair<geo_point_t, WirePlaneId>> Cluster::kd_steiner_points(const steiner_kd_results_t& res,
+std::vector<std::pair<geo_point_t, std::pair<WirePlaneId, int> >> Cluster::kd_steiner_points(const steiner_kd_results_t& res,
                                                    const std::string& steiner_pc_name) const 
 {
     if (!has_pc(steiner_pc_name)) {
@@ -3732,16 +3732,21 @@ std::vector<std::pair<geo_point_t, WirePlaneId>> Cluster::kd_steiner_points(cons
     auto z_array = steiner_pc.get(scope.coords.at(2));
 
     auto wpid_array = steiner_pc.get("wpid");
+    auto flag_steiner_terminal_array = steiner_pc.get("flag_steiner_terminal");
 
-    std::vector<std::pair<geo_point_t, WirePlaneId>> points;
+    std::vector<std::pair<geo_point_t, std::pair<WirePlaneId, int> >> points;
     points.reserve(res.size());
-    
+
+    // std::cout << x_array->size_major() << " " << wpid_array->size_major() << " " << flag_steiner_terminal_array->size_major() << std::endl;
+
     for (const auto& [index, distance] : res) {
         double x = x_array->element<double>(index);
         double y = y_array->element<double>(index);
         double z = z_array->element<double>(index);
         auto wpid = wpid_array->element<WirePlaneId>(index);
-        points.emplace_back(geo_point_t{x, y, z}, wpid);
+        int flag_steiner_terminal = flag_steiner_terminal_array->element<int>(index);
+
+        points.emplace_back(geo_point_t{x, y, z}, std::make_pair(wpid, flag_steiner_terminal));
     }
     
     return points;
