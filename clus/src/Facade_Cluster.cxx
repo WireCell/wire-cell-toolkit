@@ -3169,10 +3169,12 @@ std::pair<int, int> Cluster::get_two_boundary_steiner_graph_idx(const std::strin
     int max_idx = -1;
     int min_idx = -1;
 
+    const auto& coords = get_default_scope().coords;
+
     // Get coordinate arrays from the point cloud
-    const auto& x_coords = steiner_pc.get("x")->elements<double>();
-    const auto& y_coords = steiner_pc.get("y")->elements<double>(); 
-    const auto& z_coords = steiner_pc.get("z")->elements<double>();
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>(); 
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
 
 
     for (size_t i = 0; i < x_coords.size(); ++i) {
@@ -3642,8 +3644,9 @@ void Cluster::build_steiner_kd_cache(const std::string& steiner_pc_name) const
     // but query operations don't modify the dataset
     cache_ref.steiner_kd = std::make_unique<KDTree::MultiQuery>(const_cast<PointCloud::Dataset&>(steiner_pc));
     
+    const auto& coords = get_default_scope().coords;
     // Get a 3D query object for x,y,z coordinates and cache it
-    cache_ref.steiner_query3d = cache_ref.steiner_kd->get<double>({"x", "y", "z"});
+    cache_ref.steiner_query3d = cache_ref.steiner_kd->get<double>(coords);
     
     // Cache the name and mark as built
     cache_ref.cached_steiner_pc_name = steiner_pc_name;
@@ -3699,6 +3702,9 @@ Cluster::steiner_kd_results_t Cluster::kd_steiner_knn(int nnearest,
     // Convert geo_point_t to std::vector<double> for the query
     std::vector<double> query_vec = {query_point.x(), query_point.y(), query_point.z()};
     
+    std::cout << "Performing k-NN query for " << nnearest << " nearest neighbors to point: "
+              << query_vec[0] << ", " << query_vec[1] << ", " << query_vec[2] << std::endl;
+
     // Perform k-NN query using cached query3d
     auto kd_results = cache_ref.steiner_query3d->knn(nnearest, query_vec);
     

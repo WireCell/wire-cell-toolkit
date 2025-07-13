@@ -92,6 +92,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             // create the new graph 
             new_cluster.find_graph("ctpc_ref_pid", *main_cluster, m_dv, m_pcts);
 
+
             Steiner::Grapher sg(new_cluster, m_grapher_config, log);
             auto& graph = sg.get_graph("ctpc_ref_pid");
             std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
@@ -131,7 +132,17 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
                       << boost::num_vertices(steiner_graph) << " vertices and "
                       << boost::num_edges(steiner_graph) << " edges." << " " << steiner_point_cloud.size() << " " << flag_terminals.size() << " " << num_true_terminals << std::endl;
 
-            
+            // pass the new_cluster's steiner_graph and stener_pc to the main cluster
+            Steiner::Grapher main_sg(*main_cluster, m_grapher_config, log);
+            main_sg.transfer_pc(sg, "steiner_pc", "steiner_pc");
+            main_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
+
+            // test ... 
+            auto pair_idx = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+            std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << " " << pair_points.first << std::endl;
+            auto kd_results = main_cluster->kd_steiner_knn(1, pair_points.first);
+            auto kd_points = main_cluster->kd_steiner_points(kd_results);
+            std::cout << "Xin4: " << kd_points.size() << " " << (*kd_points.begin()).first << " " << (*kd_points.begin()).second << std::endl;
 
             // delete new cluster from grouping after usage ...
             auto* new_cluster_ptr = &new_cluster;
@@ -142,21 +153,11 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     // for (auto* cluster : filtered_clusters) {
         // bool already = cluster->has_graph(m_graph_name);
         // if (already || m_replace) {
-        //     auto cell_points_map = sg.form_cell_points_map();
-        //     auto& graph = sg.get_graph("basic_pid");
      
-        //     
-        //     
         //     const auto& new_to_old = sg.get_new_to_old_mapping();
-
         //     std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;
             
-        //     auto pair_idx = cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
-        //     std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << std::endl;
-
-        //     auto kd_results = cluster->kd_steiner_knn(1, pair_points.first);
-        //     auto kd_points = cluster->kd_steiner_points(kd_results);
-        //     std::cout << "Xin4: " << kd_points.size() << " " << (*kd_points.begin()).first << " " << (*kd_points.begin()).second << std::endl;
+        //     
 
         //     // auto edge_weight_map = get(boost::edge_weight, steiner_graph);
         //     // for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
