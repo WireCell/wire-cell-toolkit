@@ -91,7 +91,7 @@ namespace WireCell::Clus {
         // Create the Steiner::Grapher instance
         auto log = Log::logger("improve_cluster_2 mutate");
         Steiner::Grapher orig_steiner_grapher(*orig_cluster, grapher_config, log);
-        auto& orig_graph = orig_steiner_grapher.get_graph("basic_pid");
+        auto& orig_graph = orig_steiner_grapher.get_graph("basic_pid"); // this is good for the original cluster
 
         if (m_verbose) std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
 
@@ -122,18 +122,23 @@ namespace WireCell::Clus {
         if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
         Steiner::Grapher temp_steiner_grapher(temp_cluster, grapher_config, log);
-        auto& temp_graph = temp_steiner_grapher.get_graph("basic_pid");
+        
+        // this requires CTPC and ref_point cloud of original cluster
+        auto& temp_graph = temp_cluster.find_graph("ctpc_ref_pid", *orig_cluster, m_dv, m_pcts);
+        //temp_steiner_grapher.get_graph("basic_pid"); 
+        
+
         if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
-        temp_steiner_grapher.establish_same_blob_steiner_edges("basic_pid", false);
+        temp_steiner_grapher.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
         std::vector<size_t> temp_path_point_indices;
         {  
             auto pair_points = temp_cluster.get_two_boundary_wcps();
             auto first_index  =   temp_cluster.get_closest_point_index(pair_points.first);
             auto second_index =   temp_cluster.get_closest_point_index(pair_points.second);
-            temp_path_point_indices = temp_cluster.graph_algorithms("basic_pid").shortest_path(first_index, second_index);
+            temp_path_point_indices = temp_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
         }
         if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Shortest path indices: " << temp_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph)<< std::endl;
-        temp_steiner_grapher.remove_same_blob_steiner_edges("basic_pid");
+        temp_steiner_grapher.remove_same_blob_steiner_edges("ctpc_ref_pid");
         if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
 
 
@@ -161,7 +166,7 @@ namespace WireCell::Clus {
             hack_activity_improved(temp_cluster, map_slices_measures, temp_path_point_indices, apa, face); // may need more args
 
             // Step 3.
-            auto iblobs = make_iblobs(map_slices_measures, apa, face);
+            auto iblobs = make_iblobs_improved(map_slices_measures, apa, face);
 
             if (m_verbose) std::cout << "ImproveCluster_2: new cluster " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
 

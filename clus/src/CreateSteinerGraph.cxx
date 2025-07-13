@@ -84,8 +84,9 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         if (m_grapher_config.retile) {
             // Call the mutate function with the appropriate configuration
             auto mutated_node = m_grapher_config.retile->mutate(*main_cluster->node());
-        }
 
+            
+        }
     }
    
     // for (auto* cluster : filtered_clusters) {

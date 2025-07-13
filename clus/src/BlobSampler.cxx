@@ -1008,14 +1008,25 @@ struct ChargeStepped : public BlobSampler::Sampler
 
         // Detect bad planes dynamically based on charge uncertainty
         std::vector<bool> plane_is_bad(3, false);
-        plane_is_bad[max_id - ndummy_index] = is_plane_bad(max_id, activity, iface);
-        plane_is_bad[min_id - ndummy_index] = is_plane_bad(min_id, activity, iface);
-        plane_is_bad[mid_id - ndummy_index] = is_plane_bad(mid_id, activity, iface);
+        if (disable_mix_dead_cell){
+            plane_is_bad[max_id - ndummy_index] = is_plane_bad(max_id, activity, iface);
+            plane_is_bad[min_id - ndummy_index] = is_plane_bad(min_id, activity, iface);
+            plane_is_bad[mid_id - ndummy_index] = is_plane_bad(mid_id, activity, iface);
+        }
+
+        
 
         // Adjust charge thresholds based on detected bad planes
         double thresh_max = plane_is_bad[max_id - ndummy_index] ? 0.0 : charge_threshold_max;
         double thresh_min = plane_is_bad[min_id - ndummy_index] ? 0.0 : charge_threshold_min;
         double thresh_other = plane_is_bad[mid_id - ndummy_index] ? 0.0 : charge_threshold_other;
+
+        // if (!disable_mix_dead_cell)
+        //     std::cout << islice->start()/islice->span()*4<< " " << (islice->start() + islice->span())/islice->span()*4 << " "
+        //               << strips[2].bounds.first << " " << strips[2].bounds.second << " "
+        //               << strips[3].bounds.first << " " << strips[3].bounds.second << " "
+        //               << strips[4].bounds.first << " " << strips[4].bounds.second << " " 
+        //               << thresh_max << " " << thresh_min << " " << thresh_other << " ";// << std::endl;
 
         // Create stepped wire sets (mandatory wires)
         std::set<decltype(smin.bounds.first)> min_wires_set;
@@ -1118,8 +1129,12 @@ struct ChargeStepped : public BlobSampler::Sampler
             
             bool flag_must2 = max_wires_set.find(*it_gmax) != max_wires_set.end();
             double charge2 = get_wire_charge(cmax, activity, iface, ndummy_index, flag_print);
+
+            // if (!disable_mix_dead_cell){
+            //    std::cout << "max: " << charge2 << " " << *it_gmax << std::endl;
+            // }
             
-            if (!flag_must2 && (charge2 < thresh_max) && (charge2 != 0 || disable_mix_dead_cell)) {
+            if ((!flag_must2) && (charge2 < thresh_max) && (charge2 != 0 || disable_mix_dead_cell)) {
                 continue;
             }
             // if (flag_print) {
@@ -1136,8 +1151,12 @@ struct ChargeStepped : public BlobSampler::Sampler
                 // Get charge for this wire
                 double charge1 = get_wire_charge(cmin, activity, iface, ndummy_index);
                 
+                // if(!disable_mix_dead_cell){
+                //     std::cout << "min: " << charge1 << " " << *it_gmin << std::endl;
+                // }
+
                 // Apply charge filtering for non-must wires
-                if (!flag_must1 && (charge1 < thresh_min) && (charge1 != 0 || disable_mix_dead_cell)) {
+                if ((!flag_must1) && (charge1 < thresh_min) && (charge1 != 0 || disable_mix_dead_cell)) {
                     continue;
                 }
                 // if (flag_print) {
@@ -1173,6 +1192,8 @@ struct ChargeStepped : public BlobSampler::Sampler
                         if ((charge2 < thresh_max && (charge2 != 0 || disable_mix_dead_cell)) || // 2 is max ...
                             (charge1 < thresh_min && (charge1 != 0 || disable_mix_dead_cell)) || // 1 is min ...
                             (charge3 < thresh_other && (charge3 != 0 || disable_mix_dead_cell))) {
+                       
+                        
                             continue;
                         }
                         
@@ -1194,6 +1215,8 @@ struct ChargeStepped : public BlobSampler::Sampler
                 }
             }
         }
+
+        // if (!disable_mix_dead_cell) std::cout << points.size() << std::endl;
 
         //de bug ...
         // if (wires_u.size() == 10 && wires_v.size() == 10 && wires_w.size() == 3) {
@@ -1259,8 +1282,15 @@ private:
             // Create coordinate for the wire
             coordinate_t coord{plane_layer, wire_index};
 
+           
+
             // Get the appropriate plane
             int plane_index = plane_layer - ndummy_index;
+
+            // if (flag_print) {
+            //     std::cout << "Plane check: " << plane_index << " " <<  (int)iface->planes().size() << std::endl;
+            // }
+
             if (plane_index < 0 || plane_index >= (int)iface->planes().size()) {
             return false;
             }
@@ -1268,6 +1298,10 @@ private:
             auto iplane = iface->planes()[plane_index];
             const IWire::vector& iwires = iplane->wires();
             const IChannel::vector& channels = iplane->channels();
+
+            // if (flag_print) {
+            //     std::cout << "Wire check: " << wire_index << " " << (int)iwires.size() << std::endl;
+            // }
 
             // Bounds check for wire index
             if (wire_index < 0 || wire_index >= (int)iwires.size()) {
@@ -1288,11 +1322,19 @@ private:
             }
             }
 
+            // if (flag_print){
+            //     std::cout << "Channel ident: " << channel_ident << " " << p_chi2i.size() << std::endl;
+            // }
+
             // Look up channel index using the cache
             auto chi2i_it = p_chi2i.find(channel_ident);
             if (chi2i_it == p_chi2i.end()) {
             return false;
             }
+
+            // if (flag_print) {
+            //     std::cout << "Found channel index: " << chi2i_it->second << " " << (int)channels.size() << std::endl;
+            // }
 
             int channel_attach = chi2i_it->second;
             if (channel_attach < 0 || channel_attach >= (int)channels.size()) {
@@ -1301,20 +1343,24 @@ private:
 
             auto ich = channels[channel_attach];
 
+            // if (flag_print){
+            //     std::cout << "Checking channel: " << ich << " " << activity.size() << std::endl;
+            // }
+
             // Look up charge in activity map and check uncertainty
             auto ait = activity.find(ich);
             if (ait != activity.end()) {
-            auto act = ait->second;
-            double uncertainty = act.uncertainty();
+                auto act = ait->second;
+                double uncertainty = act.uncertainty();
 
-            // if (flag_print) {
-            //     std::cout << "Checking wire " << wire_index << " in plane " << plane_layer 
-            //               << ": charge=" << act.value() << ", uncertainty=" << uncertainty 
-            //               << ", threshold=" << dead_threshold << std::endl;
-            // }
+                // if (flag_print) {
+                //     std::cout << "Checking wire " << wire_index << " in plane " << plane_layer 
+                //             << ": charge=" << act.value() << ", uncertainty=" << uncertainty 
+                //             << ", threshold=" << dead_threshold << std::endl;
+                // }
 
-            // Plane is considered bad if uncertainty exceeds threshold
-            return uncertainty > dead_threshold;
+                // Plane is considered bad if uncertainty exceeds threshold
+                return uncertainty > dead_threshold;
             }
 
             return false;

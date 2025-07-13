@@ -383,6 +383,9 @@ void Graphs::connect_graph_ctpc_with_reference(
             return a.min_vertex < b.min_vertex;
         });
 
+    std::cout << "Graph Creation using reference filtering: " << ref_cluster.nchildren() << " " << ref_cluster.npoints() << std::endl;
+
+
     if (num <= 1) return;
 
     // Initialize point cloud containers for each component
@@ -400,6 +403,8 @@ void Graphs::connect_graph_ctpc_with_reference(
     
     // Check if reference cluster is valid and not empty
     bool use_reference_filtering = (ref_cluster.is_valid() && ref_cluster.npoints() > 0);
+
+
     
     // REFERENCE FILTERING PHASE - equivalent to prototype's filtering logic
     for (size_t i = 0; i < component.size(); ++i) {

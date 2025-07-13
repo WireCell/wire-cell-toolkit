@@ -1,5 +1,5 @@
 
-    #include "improvecluster_1.h"
+#include "improvecluster_1.h"
 
 WIRECELL_FACTORY(ImproveCluster_1, WireCell::Clus::ImproveCluster_1,
                  WireCell::IConfigurable, WireCell::IPCTreeMutate)
@@ -128,7 +128,6 @@ namespace WireCell::Clus {
             // Step 2.
             // hack_activity_improved(*orig_cluster, map_slices_measures, path_wcps, apa, face); // may need more args
 
-
             // test ...
             // std::cout << "Test: Improved: " << map_slices_measures.size() << " " << orig_cluster->children().size() << std::endl;
             // for (const auto& [slice_key, measures] : map_slices_measures) {
@@ -160,7 +159,7 @@ namespace WireCell::Clus {
 
 
             // Step 3.
-            auto iblobs = make_iblobs(map_slices_measures, apa, face);
+            auto iblobs = make_iblobs_improved(map_slices_measures, apa, face);
 
             if (m_verbose) std::cout << "ImproveCluster_1: " << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
 
@@ -290,6 +289,13 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     std::map<std::pair<int,int>, std::pair<double,double>> map_v_tcc = grouping->get_overlap_good_ch_charge(min_time, max_time, min_vch, max_vch, apa, face, 1);
     std::map<std::pair<int,int>, std::pair<double,double>> map_w_tcc = grouping->get_overlap_good_ch_charge(min_time, max_time, min_wch, max_wch, apa, face, 2);
 
+
+    // for (const auto& [time_ch, charge_info] : map_u_tcc) {
+    //     std::cout << "U plane: time_slice=" << time_ch.first 
+    //               << ", ch=" << time_ch.second 
+    //               << ", charge=" << charge_info.first 
+    //               << ", error=" << charge_info.second << std::endl;
+    // }
 
     // //print out for debug ...
     // std::cout << min_time << " " << max_time << " "
@@ -455,7 +461,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
             double charge = 1e-3; // Default charge value
             auto it = map_u_tcc.find(std::make_pair(time_slice, ch));
             if (it != map_u_tcc.end()) {
-                charge = it->second.second; // Use the charge from the map
+                charge = it->second.first; // Use the charge from the map
             }
             m[ch] = charge;
         }
@@ -481,7 +487,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
             double charge = 1e-3; // Default charge value
             auto it = map_v_tcc.find(std::make_pair(time_slice, ch));
             if (it != map_v_tcc.end()) {
-                charge = it->second.second; // Use the charge from the map
+                charge = it->second.first; // Use the charge from the map
             }
             m[ch] = charge;
         }
@@ -505,7 +511,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
             double charge = 1e-3; // Default charge value
             auto it = map_w_tcc.find(std::make_pair(time_slice, ch));
             if (it != map_w_tcc.end()) {
-                charge = it->second.second; // Use the charge from the map
+                charge = it->second.first; // Use the charge from the map
             }
             m[ch] = charge;
         }
@@ -819,6 +825,106 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     }
     
     return blobs_to_remove;
+}
+
+std::vector<IBlob::pointer> ImproveCluster_1::make_iblobs_improved(std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, int apa, int face) const
+{
+    std::vector<IBlob::pointer> ret;
+
+    const auto& coords = m_face.at(apa).at(face)->raygrid();
+    int blob_ident=0;
+    int slice_ident = 0;
+
+    const double tick = m_grouping->get_tick().at(apa).at(face);
+
+
+    for (auto it = map_slices_measures.begin(); it != map_slices_measures.end(); it++){
+        // Do the actual tiling.
+        WRG::activities_t activities = RayGrid::make_activities(m_face.at(apa).at(face)->raygrid(), it->second);
+        auto bshapes = WRG::make_blobs(coords, activities);
+
+    
+        // {
+        //     std::cerr << "abc: "
+        //               << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+        //               << bshapes.size() << " " << activities.size() << " " << std::endl;
+        //     for (const auto& activity : activities) {
+        //         std::cerr <<"act: "
+        //                   << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+        //                   << activity.as_string() << std::endl;
+        //     }
+        // }
+
+        // Convert RayGrid blob shapes into IBlobs 
+        const float blob_value = 0.0;  // tiling doesn't consider particular charge
+        const float blob_error = 0.0;  // tiling doesn't consider particular charge
+    
+        // Convert measures to ISlice activity map
+        // Layers 2, 3, 4 correspond to U, V, W wire planes
+
+        IFrame::pointer sframe = nullptr;
+
+         // Create the slice with activity
+        auto sslice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*tick, (it->first.second - it->first.first)*tick);
+        // Copy the prepared activity map into the slice
+        auto& slice_activity = sslice->activity();
+
+        for (int plane_idx = 0; plane_idx < 3; ++plane_idx) {
+            const int layer = plane_idx + 2;
+            const auto& plane_measures = it->second[layer];
+            
+            // Get the wire plane for this face and plane
+            auto face_ptr = m_face.at(apa).at(face);
+            auto planes = face_ptr->planes();
+            if (plane_idx >= planes.size()) continue;
+            
+            auto wire_plane = planes[plane_idx];
+            const auto& channels = wire_plane->channels();
+            
+            // Map wire indices to channels and populate activity
+            for (size_t wire_idx = 0; wire_idx < plane_measures.size(); ++wire_idx) {
+                if (plane_measures[wire_idx] > 0.0) {
+                    // Find the channel corresponding to this wire index
+                    if (wire_idx < channels.size()) {
+                        auto ichan = channels[wire_idx];
+                        if (ichan) {
+                            // Set activity with value and zero uncertainty
+                            if (plane_measures[wire_idx]==1e-3){
+                                slice_activity[ichan] = ISlice::value_t(0.0, 1e12);
+                            } else {
+                                slice_activity[ichan] = ISlice::value_t(plane_measures[wire_idx], 0.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        for (const auto& bshape : bshapes) {
+
+            // {
+            //     std::cerr << "blob: "
+            //               << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+            //               << bshape << std::endl;
+            //     for (const auto& strip : bshape.strips()) {
+            //         std::cerr << "strip: "
+            //                   << " s:"<<slice_ident<<" b:"<<blob_ident << " "
+            //                   << strip << std::endl;
+            //     }
+            // }
+            // ISlice::pointer slice = sslice;
+
+            IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
+                                                                 blob_error, bshape, sslice, m_face.at(apa).at(face));
+            ret.push_back(iblob);
+
+        }
+    }
+
+    // std::cout << "Test: Blobs: " << ret.size() << std::endl;
+
+    return ret;
 }
 
 

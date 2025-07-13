@@ -403,8 +403,45 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
         const float blob_value = 0.0;  // tiling doesn't consider particular charge
         const float blob_error = 0.0;  // tiling doesn't consider particular charge
     
+        // Convert measures to ISlice activity map
+        // Layers 2, 3, 4 correspond to U, V, W wire planes
+
+        IFrame::pointer sframe = nullptr;
+
+         // Create the slice with activity
+        auto sslice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*tick, (it->first.second - it->first.first)*tick);
+        // Copy the prepared activity map into the slice
+        auto& slice_activity = sslice->activity();
+
+        for (int plane_idx = 0; plane_idx < 3; ++plane_idx) {
+            const int layer = plane_idx + 2;
+            const auto& plane_measures = it->second[layer];
+            
+            // Get the wire plane for this face and plane
+            auto face_ptr = m_face.at(apa).at(face);
+            auto planes = face_ptr->planes();
+            if (plane_idx >= planes.size()) continue;
+            
+            auto wire_plane = planes[plane_idx];
+            const auto& channels = wire_plane->channels();
+            
+            // Map wire indices to channels and populate activity
+            for (size_t wire_idx = 0; wire_idx < plane_measures.size(); ++wire_idx) {
+                if (plane_measures[wire_idx] > 0.0) {
+                    // Find the channel corresponding to this wire index
+                    if (wire_idx < channels.size()) {
+                        auto ichan = channels[wire_idx];
+                        if (ichan) {
+                            // Set activity with value and zero uncertainty
+                            slice_activity[ichan] = ISlice::value_t(plane_measures[wire_idx], 0.0);
+                        }
+                    }
+                }
+            }
+        }
+
+
         for (const auto& bshape : bshapes) {
-            IFrame::pointer sframe = nullptr;
 
             // {
             //     std::cerr << "blob: "
@@ -416,12 +453,10 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
             //                   << strip << std::endl;
             //     }
             // }
-
-            // 500 ns should be passed from outside?
-            ISlice::pointer slice = std::make_shared<Aux::SimpleSlice>(sframe, slice_ident++, it->first.first*tick, (it->first.second - it->first.first)*tick);
+            // ISlice::pointer slice = sslice;
 
             IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(blob_ident++, blob_value,
-                                                                 blob_error, bshape, slice, m_face.at(apa).at(face));
+                                                                 blob_error, bshape, sslice, m_face.at(apa).at(face));
             ret.push_back(iblob);
 
         }

@@ -2589,7 +2589,7 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(const std::string& flav
     if (flavor == "basic") {
         return this->give_graph(flavor, make_graph_basic(*this));
     }
-    if (flavor == "basic_pid"){
+    if (flavor == "basic_ref_pid"){
         return this->give_graph(flavor, make_graph_basic_pid(*this, ref_cluster));
     }
     // We did our best....
@@ -2657,7 +2657,7 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
      if (flavor == "ctpc") {
         return this->give_graph(flavor, make_graph_ctpc(*this, dv, pcts));
     }
-    if (flavor == "ctpc_pid") {
+    if (flavor == "ctpc_ref_pid") {
         return this->give_graph(flavor, make_graph_ctpc_pid(*this, ref_cluster, dv, pcts));
     }
     if (flavor == "relaxed") {
@@ -2726,7 +2726,7 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         return got.first->second;
     }
 
-    if (flavor == "basic_pid") {
+    if (flavor == "basic_ref_pid") {
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_basic_pid(*this, ref_cluster));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
@@ -2789,7 +2789,7 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         return got.first->second;
     }
 
-    if (flavor == "ctpc_pid") {
+    if (flavor == "ctpc_ref_pid") {
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc_pid(*this, ref_cluster, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
