@@ -86,6 +86,7 @@ namespace WireCell::Clus {
     {
         // get the original cluster
         auto* orig_cluster = reinitialize(node);
+        
 
         // std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
 
@@ -98,6 +99,7 @@ namespace WireCell::Clus {
         auto first_index  =   orig_cluster->get_closest_point_index(pair_points.first);
         auto second_index =   orig_cluster->get_closest_point_index(pair_points.second);
         std::vector<size_t> path_wcps = orig_cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
+
 
         // make a new node from the existing grouping
         auto& new_cluster = m_grouping->make_child(); // make a new cluster inside the existing grouping ...
@@ -202,42 +204,48 @@ namespace WireCell::Clus {
                 //         << std::endl;
 
                 if (pcs.empty()) {
-                    SPDLOG_DEBUG("retile: skipping blob {} with no points", iblob->ident());
+                    SPDLOG_DEBUG("ImproveCluster_1: skipping blob {} with no points", iblob->ident());
                     continue;
                 }
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
 
-
             }
-
+ 
 
             // remove bad blobs ...
-
-
-
+            int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
+            auto blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
+            for (const Blob* blob : blobs_to_remove) {
+                Blob& b = const_cast<Blob&>(*blob);
+                new_cluster.remove_child(b);
+            }
+            std::cout << "Xin5: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
         }
 
 
-        // First apply the base RetileCluster functionality
-        // auto retiled_node = RetileCluster::mutate(node);
-        auto retiled_node = std::unique_ptr<node_t>(nullptr);
+        auto& default_scope = orig_cluster->get_default_scope();
+        auto& raw_scope = orig_cluster->get_raw_scope();
 
-        if (!retiled_node) {
-            return nullptr;
+        std::cout << "Xin6: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        if (default_scope.hash()!=raw_scope.hash()){
+            auto correction_name = orig_cluster->get_scope_transform(default_scope);
+            // std::vector<int> filter_results = c
+            new_cluster.add_corrected_points(m_pcts, correction_name);
+            // Get the new scope with corrected points
+            const auto& correction_scope = new_cluster.get_scope(correction_name);
+            // Set this as the default scope for viewing
+            new_cluster.from(*orig_cluster); // copy state from original cluster
+            // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
-    
-        
-        // Get the cluster from the retiled node
-        auto cluster = retiled_node->value.facade<Cluster>();
-        if (!cluster) {
-            return retiled_node; // Return as-is if we can't get the cluster facade
-        }
-        
-        
-        
-        return retiled_node;
+
+        auto retiled_node = new_cluster.node();
+
+        // std::cout << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+
+        return m_grouping->remove_child(new_cluster);
     }
+
 
 
 
@@ -683,6 +691,141 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
     }
    
 
+}
+
+
+std::set<const WireCell::Clus::Facade::Blob*> 
+ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
+{
+     // Get time-organized maps of original and new blobs
+    const auto& orig_time_blob_map = cluster.time_blob_map().at(apa).at(face);
+    const auto& new_time_blob_map = shad_cluster.time_blob_map().at(apa).at(face);
+    
+    // Build index mappings for new blobs (similar to prototype's mcell indexing)
+    std::map<int, const Blob*> map_index_blob;
+    std::map<const Blob*, int> map_blob_index;
+    std::vector<const Blob*> all_new_blobs;
+    
+    int index = 0;
+    for (const auto& [time_slice, new_blobs] : new_time_blob_map) {
+        for (const Blob* blob : new_blobs) {
+            map_index_blob[index] = blob;
+            map_blob_index[blob] = index;
+            all_new_blobs.push_back(blob);
+            index++;
+        }
+    }
+    
+    // If no new blobs or only one blob, return empty set (no graph needed)
+    if (all_new_blobs.size() <= 1) {
+        return std::set<const Blob*>();
+    }
+    
+    // Create graph for new blobs - establish connectivity between adjacent time slices
+    const int N = all_new_blobs.size();
+    boost::adjacency_list<boost::setS, boost::vecS, boost::undirectedS,
+                         boost::no_property, boost::property<boost::edge_weight_t, double>>
+        temp_graph(N);
+    
+    // Build graph edges between blobs in adjacent time slices that overlap spatially
+    for (const auto& [time_slice, current_blobs] : new_time_blob_map) {
+        // Connect to next time slice
+        auto next_it = new_time_blob_map.find(time_slice + tick_span);
+        if (next_it != new_time_blob_map.end()) {
+            for (const Blob* blob1 : current_blobs) {
+                for (const Blob* blob2 : next_it->second) {
+                    int index1 = map_blob_index[blob1];
+                    int index2 = map_blob_index[blob2];
+                    
+                    // Add edge if blobs overlap spatially (similar to prototype's Overlap_fast)
+                    if (blob1->overlap_fast(*blob2, 1)) {
+                        add_edge(index1, index2, 1.0, temp_graph);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Find connected components (groups of spatially/temporally connected blobs)
+    std::vector<int> component(num_vertices(temp_graph));
+    const int num_components = connected_components(temp_graph, &component[0]);
+    
+    std::set<const Blob*> blobs_to_remove;
+    
+    // If we have multiple disconnected components, validate each component
+    if (num_components > 1) {
+        std::set<int> good_components;
+        
+        // Examine each connected component to determine if it's "good"
+        for (int i = 0; i < static_cast<int>(component.size()); ++i) {
+            int comp_id = component[i];
+            
+            // Skip if we've already validated this component
+            if (good_components.find(comp_id) != good_components.end()) {
+                continue;
+            }
+            
+            const Blob* blob = map_index_blob[i];
+            int time_slice = blob->slice_index_min(); // Get time slice for this blob
+            bool flag_good = false;
+            
+            // Check overlap with original blobs in previous time slice
+            if (!flag_good) {
+                auto prev_it = orig_time_blob_map.find(time_slice - tick_span);
+                if (prev_it != orig_time_blob_map.end()) {
+                    for (const Blob* orig_blob : prev_it->second) {
+                        if (blob->overlap_fast(*orig_blob, 1)) {
+                            flag_good = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Check overlap with original blobs in same time slice
+            if (!flag_good) {
+                auto same_it = orig_time_blob_map.find(time_slice);
+                if (same_it != orig_time_blob_map.end()) {
+                    for (const Blob* orig_blob : same_it->second) {
+                        if (blob->overlap_fast(*orig_blob, 1)) {
+                            flag_good = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Check overlap with original blobs in next time slice
+            if (!flag_good) {
+                auto next_it = orig_time_blob_map.find(time_slice + tick_span);
+                if (next_it != orig_time_blob_map.end()) {
+                    for (const Blob* orig_blob : next_it->second) {
+                        if (blob->overlap_fast(*orig_blob, 1)) {
+                            flag_good = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // If this component representative blob has good overlap, mark entire component as good
+            if (flag_good) {
+                good_components.insert(comp_id);
+            }
+        }
+        
+        // Collect blobs from bad components for removal
+        for (int i = 0; i < static_cast<int>(component.size()); ++i) {
+            int comp_id = component[i];
+            if (good_components.find(comp_id) == good_components.end()) {
+                // This component is not good, mark its blobs for removal
+                const Blob* blob = map_index_blob[i];
+                blobs_to_remove.insert(blob);
+            }
+        }
+    }
+    
+    return blobs_to_remove;
 }
 
 

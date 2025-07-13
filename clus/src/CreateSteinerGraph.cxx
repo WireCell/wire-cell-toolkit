@@ -76,7 +76,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         // convert span to vector
         std::vector<int> cc_vec(cc.begin(), cc.end());
         // std::cout << "Xin: " << cluster->ident() << " " << cc_vec.size() << std::endl;
-        std::cout << "Xin: " << cluster->get_flash().time()/units::us << " " << cluster->nchildren() << " " << cluster->npoints() <<  " " << std::endl;
+        std::cout << "Xin: " << cluster->get_flash().time()/units::us << " " << cluster->nchildren() << " " << cluster->npoints() <<  " " << cc_vec.size() << std::endl;
         
         if (cc_vec.size() < 2) continue;
         auto splits = grouping.separate(cluster, cc_vec);

@@ -39,6 +39,8 @@ namespace WireCell::Clus {
 
        void hack_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, const std::vector<size_t>& path_wcps, int apa, int face) const;
 
+       std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
+
     private:
  
        

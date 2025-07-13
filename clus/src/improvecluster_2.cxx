@@ -70,28 +70,38 @@ namespace WireCell::Clus {
 
     std::unique_ptr<ImproveCluster_2::node_t> ImproveCluster_2::mutate(node_t& node) const
     {
-        // First, apply the base class improvements (ImproveCluster_1)
+        // First, apply the base class improvements (ImproveCluster_1) 
         auto improved_node = ImproveCluster_1::mutate(node);
-
-                std::cout << "Improving cluster with advanced Steiner tree methods..." << std::endl;
-
 
         if (!improved_node) {
             return nullptr;
         }
-        
 
-       
-        
         // Get the cluster from the improved node
         auto cluster = improved_node->value.facade<Cluster>();
-        if (!cluster) {
-            return improved_node; // Return as-is if we can't get the cluster facade
-        }
+
+        std::cout << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+
+        // Move the improved cluster to m_grouping (reparent it)
+        auto& new_cluster = m_grouping->make_child();
+        new_cluster.take_children(*cluster);  // Move all blobs from improved cluster
+        new_cluster.from(*cluster);       
+        std::cout << "Test: " << m_grouping->children().size() << " " << new_cluster.grouping()->get_name() << std::endl;
+
+        // Remove this cluster from the grouping
+        auto* cluster_ptr = &new_cluster;
+        m_grouping->destroy_child(cluster_ptr, true);
+        std::cout << "Test: " << m_grouping->children().size() << " " << std::endl;
+
+        std::cout << "Improving cluster with advanced Steiner tree methods..." << std::endl;
+
+        // TODO: Add additional cluster improvements here
+        // Since we destroyed the original cluster, we might need to:
+        // 1. Create a new improved cluster, or
+        // 2. Return nullptr if the cluster should be removed
         
-     
-        
-        return improved_node;
+        // For now, return nullptr since the cluster has been destroyed
+        return nullptr;
     }
 
 } // namespace WireCell::Clus

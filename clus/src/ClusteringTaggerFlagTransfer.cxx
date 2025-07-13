@@ -106,7 +106,6 @@ private:
             }
         }
         // If not beam flash coincident, no additional flags are set
-
         // if (cluster.get_flag(Flags::beam_flash))
         // std::cout << "Xin: " << cluster.ident() << " has beam_flash: "
         //           << cluster.get_flag(Flags::beam_flash) << " " << should_set_flag("has_beam_flash") << ", tgm: "
