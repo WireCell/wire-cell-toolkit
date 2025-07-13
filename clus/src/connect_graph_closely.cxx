@@ -832,7 +832,7 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
             }
         }
     }
-    std::cout << closest_index.size() << " closest index entries created" << std::endl;
+    // std::cout << closest_index.size() << " closest index entries created" << std::endl;
 
     // Phase 4: Add the selected edges from closest_index map
     for (const auto& closest_pair : closest_index) {

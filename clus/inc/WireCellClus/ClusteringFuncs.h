@@ -64,6 +64,12 @@ namespace WireCell::Clus::Facade {
         /// Indicates the cluster has full detector dead region
         inline const std::string full_detector_dead = "full_detector_dead";
 
+        // main cluster
+        inline const std::string main_cluster = "main_cluster";
+
+        // associated cluster
+        inline const std::string associated_cluster = "associated_cluster"; 
+
     }
 
     struct ClusterLess {

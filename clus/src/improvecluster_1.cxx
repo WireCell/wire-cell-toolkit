@@ -93,24 +93,24 @@ namespace WireCell::Clus {
         auto wpids = orig_cluster->wpids_blob();
         std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
 
-        // Needed in hack_activity() but call it here to avoid call overhead.
-        // find the highest and lowest points
-        auto pair_points = orig_cluster->get_two_boundary_wcps();
-        auto first_index  =   orig_cluster->get_closest_point_index(pair_points.first);
-        auto second_index =   orig_cluster->get_closest_point_index(pair_points.second);
-        std::vector<size_t> path_wcps = orig_cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
+        // // Needed in hack_activity() but call it here to avoid call overhead.
+        // // find the highest and lowest points
+        // auto pair_points = orig_cluster->get_two_boundary_wcps();
+        // auto first_index  =   orig_cluster->get_closest_point_index(pair_points.first);
+        // auto second_index =   orig_cluster->get_closest_point_index(pair_points.second);
+        // std::vector<size_t> path_wcps = orig_cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
 
 
         // make a new node from the existing grouping
         auto& new_cluster = m_grouping->make_child(); // make a new cluster inside the existing grouping ...
 
 
-        std::cout << "Xin3: " << path_wcps.size() << " " << pair_points.first.x() << " " 
-                << pair_points.first.y() << " " 
-                << pair_points.first.z() << " | "
-                << pair_points.second.x() << " " 
-                << pair_points.second.y() << " " 
-                << pair_points.second.z() << std::endl;
+        // std::cout << "Xin3: " << path_wcps.size() << " " << pair_points.first.x() << " " 
+        //         << pair_points.first.y() << " " 
+        //         << pair_points.first.z() << " | "
+        //         << pair_points.second.x() << " " 
+        //         << pair_points.second.y() << " " 
+        //         << pair_points.second.z() << std::endl;
             
 
         for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
@@ -126,7 +126,7 @@ namespace WireCell::Clus {
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
 
             // Step 2.
-            hack_activity_improved(*orig_cluster, map_slices_measures, path_wcps, apa, face); // may need more args
+            // hack_activity_improved(*orig_cluster, map_slices_measures, path_wcps, apa, face); // may need more args
 
 
             // test ...
@@ -162,7 +162,7 @@ namespace WireCell::Clus {
             // Step 3.
             auto iblobs = make_iblobs(map_slices_measures, apa, face);
 
-            std::cout << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
+            std::cout << "ImproveCluster_1: " << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
 
             auto niblobs = iblobs.size();
             
@@ -219,14 +219,14 @@ namespace WireCell::Clus {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
-            std::cout << "Xin5: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
+            std::cout << "ImproveCluster_1: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
         }
 
 
         auto& default_scope = orig_cluster->get_default_scope();
         auto& raw_scope = orig_cluster->get_raw_scope();
 
-        std::cout << "Xin6: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
         if (default_scope.hash()!=raw_scope.hash()){
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
             // std::vector<int> filter_results = c

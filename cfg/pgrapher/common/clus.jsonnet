@@ -70,6 +70,16 @@ local wc = import "wirecell.jsonnet";
             },
         },
 
+        clustering_recovering_bundle(name="") :: {
+            type: "ClusteringRecoveringBundle",
+            name: prefix + name,
+            data: {
+                grouping: "live",           // Which grouping to process
+                array_name: "isolated",     // Array name for pcarray lookup  
+                pcarray_name: "perblob",    // PCArray name for blob separation
+            },
+        },
+
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",
             name: prefix+name,
