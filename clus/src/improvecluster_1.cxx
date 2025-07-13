@@ -43,7 +43,7 @@ namespace WireCell::Clus {
                 if (sampler_name.empty()) {
                     raise<ValueError>("RetileCluster requires an IBlobSampler name for APA %d face %d", apa, face);
                 }
-                // std::cout << "Test: " << apa << " " << face << " " << sampler_name << std::endl;
+                std::cout << "Test: " << apa << " " << face << " " << sampler_name << std::endl;
                 auto sampler_ptr = Factory::find_tn<IBlobSampler>(sampler_name);
                 m_samplers[apa][face] = sampler_ptr;
             }
@@ -167,7 +167,7 @@ namespace WireCell::Clus {
             auto niblobs = iblobs.size();
             
             // start to sampling points 
-
+            int npoints = 0;
             for (size_t bind=0; bind<niblobs; ++bind) {
           
                 const IBlob::pointer iblob = iblobs[bind];
@@ -177,10 +177,10 @@ namespace WireCell::Clus {
                 auto pcs = Aux::sample_live(sampler, iblob, angles, tick, bind);
                 // DO NOT EXTEND FURTHER! see #426, #430
 
-                // if (pcs["3d"].size()==0) continue; // no points ...
-                // // Access 3D coordinates
-                // auto pc3d = pcs["3d"];  // Get the 3D point cloud dataset
-                // auto x_coords = pc3d.get("x")->elements<double>();  // Get X coordinates
+                if (pcs["3d"].size()==0) continue; // no points ...
+                // Access 3D coordinates
+                auto pc3d = pcs["3d"];  // Get the 3D point cloud dataset
+                auto x_coords = pc3d.get("x")->elements<double>();  // Get X coordinates
                 // auto y_coords = pc3d.get("y")->elements<double>();  // Get Y coordinates  
                 // auto z_coords = pc3d.get("z")->elements<double>();  // Get Z coordinates
                 // auto ucharge_val = pc3d.get("ucharge_val")->elements<double>();  // Get U charge
@@ -190,19 +190,11 @@ namespace WireCell::Clus {
                 // auto vcharge_err = pc3d.get("vcharge_unc")->elements<double>();  // Get V charge error
                 // auto wcharge_err = pc3d.get("wcharge_unc")->elements<double>();  // Get W charge error
 
-                // std::cout << "Xin4: " << pcs.size() << " " 
-                //         << pcs["3d"].size() << " " 
-                //         << x_coords.size() << " " 
-                //         << y_coords.size() << " "
-                //         << z_coords.size() << " "
-                //         << ucharge_val.size() << " "
-                //         << vcharge_val.size() << " "
-                //         << wcharge_val.size() << " " 
-                //         << ucharge_err.size() << " " 
-                //         << vcharge_err.size() << " " 
-                //         << wcharge_err.size() << " " 
-                //         << std::endl;
+                // std::cout << "ImproveCluster_1 PCS: " << pcs.size() << " " 
+                //           << pcs["3d"].size() << " " 
+                //           << x_coords.size() << std::endl;     
 
+                npoints +=x_coords.size();
                 if (pcs.empty()) {
                     SPDLOG_DEBUG("ImproveCluster_1: skipping blob {} with no points", iblob->ident());
                     continue;
@@ -210,7 +202,8 @@ namespace WireCell::Clus {
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
 
             }
- 
+            std::cout << "ImproveCluster_1: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
+
 
             // remove bad blobs ...
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;

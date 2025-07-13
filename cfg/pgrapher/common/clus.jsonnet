@@ -264,7 +264,7 @@ local wc = import "wirecell.jsonnet";
             uses: [retiler],
         },
 
-             improve_cluster_1(name="", anodes=[], samplers=[]) :: {
+        improve_cluster_1(name="", anodes=[], samplers=[]) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_1",
