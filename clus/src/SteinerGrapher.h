@@ -120,17 +120,9 @@ namespace WireCell::Clus::Steiner {
 
 
         ///
-        /// Temporary algorithm to show how to do some things.
-        ///
-        graph_type fake_steiner_graph();        
-
-
-        ///
         ///  The real main entry method
         ///
 
-        /// Create and return a steiner graph for the cluster.
-        graph_type create_steiner_graph();
 
 
         ///

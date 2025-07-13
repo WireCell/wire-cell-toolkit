@@ -14,12 +14,6 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
-Steiner::Grapher::graph_type Steiner::Grapher::create_steiner_graph()
-{
-
-    return fake_steiner_graph(); // see SteinerGrapher_face.cxx
-}
-
 
 void Steiner::Grapher::create_steiner_tree(
     const Facade::Cluster* reference_cluster, // may not be the same as m_cluster
