@@ -82,54 +82,71 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 
     if (main_cluster != nullptr){
         if (m_grapher_config.retile) {
-            // Call the mutate function with the appropriate configuration
-            auto mutated_node = m_grapher_config.retile->mutate(*main_cluster->node());
+            // Call the mutate function with the appropriate configuration, create new cluster
+            auto new_node = m_grapher_config.retile->mutate(*main_cluster->node());
+            auto new_cluster_1 = new_node->value.facade<Cluster>();
+            auto& new_cluster = grouping.make_child();
+            new_cluster.take_children(*new_cluster_1);  // Move all blobs from improved cluster
+            new_cluster.from(*main_cluster);
+
+            // create the new graph 
+            new_cluster.find_graph("ctpc_ref_pid", *main_cluster, m_dv, m_pcts);
+
+            Steiner::Grapher sg(new_cluster, m_grapher_config, log);
+            auto& graph = sg.get_graph("ctpc_ref_pid");
+            std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
+                      << boost::num_vertices(graph) << " vertices and "
+                      << boost::num_edges(graph) << " edges." << std::endl;
+
+            sg.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
+            std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
+                      << boost::num_vertices(graph) << " vertices and "
+                      << boost::num_edges(graph) << " edges." << std::endl;
+            auto pair_points = new_cluster.get_two_boundary_wcps();
+            std::cout << "CreateSteinerGraph: " << pair_points.first.x() << " " 
+                    << pair_points.first.y() << " " 
+                    << pair_points.first.z() << " | "
+                    << pair_points.second.x() << " " 
+                    << pair_points.second.y() << " " 
+                    << pair_points.second.z() << std::endl;
+            auto first_index  =   new_cluster.get_closest_point_index(pair_points.first);
+            auto second_index =   new_cluster.get_closest_point_index(pair_points.second);
+            std::vector<size_t> path_point_indices = new_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
+            std::cout << "CreateSteinerGraph: " << first_index << " " << second_index << " # of points along path: " << path_point_indices.size() << std::endl;
+            
+            sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
+            std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
+                      << boost::num_vertices(graph) << " vertices and "
+                      << boost::num_edges(graph) << " edges." << std::endl;
+
+            // path_point_indices belong to new_cluster, on which sg is based
+            // main_cluster is a reference to filter points ...
+            sg.create_steiner_tree(main_cluster, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
+            const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+            const auto& steiner_graph = sg.get_graph("steiner_graph");
+            auto& flag_terminals = sg.get_flag_steiner_terminal();
+            size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
+
+            std::cout << "CreateSteinerGraph: " << "steiner_graph with " 
+                      << boost::num_vertices(steiner_graph) << " vertices and "
+                      << boost::num_edges(steiner_graph) << " edges." << " " << steiner_point_cloud.size() << " " << flag_terminals.size() << " " << num_true_terminals << std::endl;
 
             
+
+            // delete new cluster from grouping after usage ...
+            auto* new_cluster_ptr = &new_cluster;
+            grouping.destroy_child(new_cluster_ptr, true);
         }
-    }
+    } 
    
     // for (auto* cluster : filtered_clusters) {
-              
-        // Steiner::Grapher sg(*cluster, m_grapher_config, log);
         // bool already = cluster->has_graph(m_graph_name);
         // if (already || m_replace) {
         //     auto cell_points_map = sg.form_cell_points_map();
         //     auto& graph = sg.get_graph("basic_pid");
-
-        //     std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
-            
-        //     // sg.establish_same_blob_steiner_edges("basic_pid", true);
-
-        //     // std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
-        //     // sg.remove_same_blob_steiner_edges("basic_pid");
-        //     // std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
-
-        //     // Test Steiner_Graph ...
-            
-
-        //     auto pair_points = cluster->get_two_boundary_wcps();
-        //     std::cout << "Xin3: " << pair_points.first.x() << " " 
-        //             << pair_points.first.y() << " " 
-        //             << pair_points.first.z() << " | "
-        //             << pair_points.second.x() << " " 
-        //             << pair_points.second.y() << " " 
-        //             << pair_points.second.z() << std::endl;
-        //     auto first_index  =   cluster->get_closest_point_index(pair_points.first);
-        //     auto second_index =   cluster->get_closest_point_index(pair_points.second);
-        //     std::cout << "Xin3: " << first_index << " " << second_index << std::endl;
-        //     std::vector<size_t> path_point_indices = cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
-        //     std::cout << "Xin3: " << path_point_indices.size() << std::endl;
-        //     // for (const auto& idx : path_point_indices) {
-        //     //     auto point = cluster->point3d(idx);
-        //     //     std::cout << "Xin4: " << point.x() << " " << point.y() << " " << point.z() << std::endl;
-        //     // }
-
-        //     sg.create_steiner_tree(cluster, path_point_indices, "basic_pid", "steiner_graph", true, "steiner_pc");
-        //     const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
-        //     const auto& steiner_graph = sg.get_graph("steiner_graph");
-        //     auto& flag_terminals = sg.get_flag_steiner_terminal();
-        //     size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
+     
+        //     
+        //     
         //     const auto& new_to_old = sg.get_new_to_old_mapping();
 
         //     std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;

@@ -837,10 +837,14 @@ void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& resu
         cell_points_map[blob].insert(new_index);
     }
 
+    const auto& coords = cluster.get_default_scope().coords;
+
+    // std::cout << coords.at(0) << " " << coords.at(1) << " " << coords.at(2) << std::endl;
+
     // Get 3D coordinates from the subset point cloud
-    const auto& x_arr = result.point_cloud.get("x")->elements<double>();
-    const auto& y_arr = result.point_cloud.get("y")->elements<double>();
-    const auto& z_arr = result.point_cloud.get("z")->elements<double>();
+    const auto& x_arr = result.point_cloud.get(coords.at(0))->elements<double>();
+    const auto& y_arr = result.point_cloud.get(coords.at(1))->elements<double>();
+    const auto& z_arr = result.point_cloud.get(coords.at(2))->elements<double>();
 
     for (const auto& [blob, point_indices] : cell_points_map) {
         // Convert set to vector for easier iteration
