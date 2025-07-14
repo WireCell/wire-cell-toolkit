@@ -383,7 +383,7 @@ void Graphs::connect_graph_ctpc_with_reference(
             return a.min_vertex < b.min_vertex;
         });
 
-    std::cout << "Graph Creation using reference filtering: " << ref_cluster.nchildren() << " " << ref_cluster.npoints() << std::endl;
+    std::cout << "Graph Creation " << cluster.nchildren() << " " << cluster.npoints() << " using reference filtering: "  << ref_cluster.npoints() << std::endl;
 
 
     if (num <= 1) return;
