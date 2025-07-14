@@ -81,7 +81,25 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     std::cout << "CreateSteinerGraph: " << filtered_clusters.size() << " clusters with beam_flash flag." << " " << main_cluster->ident() << std::endl;
 
     if (main_cluster != nullptr){
-        if (m_grapher_config.retile) {
+        // // test steiner ...
+        // {
+        //     Steiner::Grapher sg(*main_cluster, m_grapher_config, log);
+        //     auto& graph = sg.get_graph("basic_pid"); // ensure basic_pid graph exists
+        //     std::cout << "CreateSteinerGraph: " << boost::num_vertices(graph) << " vertices " << boost::num_edges(graph) << " edges." << std::endl;
+        //     std::vector<size_t> path_point_indices ;
+        //     sg.create_steiner_tree(main_cluster, path_point_indices, "basic_pid", "steiner_graph", false, "steiner_pc");
+        //     const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+        //     const auto& steiner_graph = sg.get_graph("steiner_graph");
+        //     auto& flag_terminals = sg.get_flag_steiner_terminal();
+        //     size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
+
+        //     std::cout << "CreateSteinerGraph: " << "steiner_graph with " 
+        //               << boost::num_vertices(steiner_graph) << " vertices and "
+        //               << boost::num_edges(steiner_graph) << " edges." << " " << flag_terminals.size() << " " << num_true_terminals << std::endl;
+        // }
+
+
+        if (m_grapher_config.retile ) {
             // Call the mutate function with the appropriate configuration, create new cluster
             auto new_node = m_grapher_config.retile->mutate(*main_cluster->node());
             auto new_cluster_1 = new_node->value.facade<Cluster>();
@@ -156,17 +174,14 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
      
         //     const auto& new_to_old = sg.get_new_to_old_mapping();
         //     std::cout << "Xin2: " << cell_points_map.size() << " Graph vertices: " << boost::num_vertices(steiner_graph) << ", edges: " << boost::num_edges(steiner_graph) << " " << steiner_point_cloud.size_major()  <<  " " << num_true_terminals << std::endl;
-            
-        //     
+
 
         //     // auto edge_weight_map = get(boost::edge_weight, steiner_graph);
         //     // for (auto edge_it = boost::edges(steiner_graph); edge_it.first != edge_it.second; ++edge_it.first) {
         //     //     auto edge = *edge_it.first;
         //     //     auto src = boost::source(edge, steiner_graph);
         //     //     auto tgt = boost::target(edge, steiner_graph);
-
         //     //     // Use the new-to-old mapping to get original vertex IDs
-                
         //     //     auto src_id = new_to_old.at(src);
         //     //     auto tgt_id = new_to_old.at(tgt);
 
@@ -221,13 +236,5 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 
         //     //  std::cout << grouping.get_dead_winds1(0,0,0).size() << " " << grouping.get_dead_winds(0,0,0).size() << " " << grouping.get_dead_winds1(0,0,1).size() << " " << grouping.get_dead_winds(0,0,1).size() << " " << grouping.get_dead_winds1(0,0,2).size() << " " << grouping.get_dead_winds(0,0,2).size() << std::endl;
 
-
-        //     //    auto gr = sg.create_steiner_graph();
-        //    // Do we do any tests, eg on num_vertices()?
-        //    //cluster->give_graph(m_graph_name, std::move(gr));
-        // }
-
-            
-            
     // }
 }

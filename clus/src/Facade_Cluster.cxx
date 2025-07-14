@@ -3069,10 +3069,20 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
                 //         << ref_blob->v_wire_index_min() << " " << ref_blob->v_wire_index_max() << " "
                 //         << ref_blob->w_wire_index_min() << " " << ref_blob->w_wire_index_max() << std::endl;
 
+            // if (flag_nearby_timeslice)
+            //    std::cout << wire_index(point_index, 0) << " " << wire_index(point_index, 1) << " " << wire_index(point_index, 2) << " "
+            //              << ref_blob->u_wire_index_min() << " " << ref_blob->u_wire_index_max() << " "
+            //              << ref_blob->v_wire_index_min() << " " << ref_blob->v_wire_index_max() << " "
+            //              << ref_blob->w_wire_index_min() << " " << ref_blob->w_wire_index_max() << " " 
+            //              << check_wire_ranges_match(point_index, ref_blob) << std::endl;
+
+           
+
+
             if (check_wire_ranges_match(point_index, ref_blob)) {
                 return true;  // Equivalent to flag_add = true; break;
             }
-        }            
+        }
     }
 
     if (flag_nearby_timeslice) {
@@ -3092,7 +3102,11 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
             }
         }
     }
-    
+
+    // if (flag_nearby_timeslice) {
+    //     std::cout << "No match found " << wire_index(point_index, 0) << " " << wire_index(point_index, 1) << " " << wire_index(point_index, 2) << " " << std::endl;
+    // }
+
     return false;  // Equivalent to flag_add remains false
 }
 
@@ -3116,6 +3130,8 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
         int w_min = ref_blob->w_wire_index_min();
         int w_max = ref_blob->w_wire_index_max();
         
+
+
         // NO tolerance added - use exact wire ranges like prototype
         // Removed: u_min = u_min - 1; u_max = u_max + 1; etc.
         
