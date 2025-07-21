@@ -143,6 +143,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.pcname = get<std::string>(bps, "pcname", "3d");
             bpc.grouping = get<std::string>(bps, "grouping", "live");
             bpc.visitor = get<std::string>(bps, "visitor", "");
+            bpc.filter = get<int>(bps, "filter", 1); // 1 for on, 0 for off, -1 for inverse filter
             
             // Get coordinates
             if (bps.isMember("coords")) {
@@ -394,7 +395,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 auto it2 = it->second.find(face);
                 if (it2 != it->second.end()) {
                     for (const auto* cluster : grouping.children()) {
-                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords);
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter);
                     }
                 }
             }
@@ -403,7 +404,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords);
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter);
         }
     }
 }
@@ -412,7 +413,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 // Helper function to fill bee points from a single cluster
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     Bee::Points& bpts, const Cluster& cluster, 
-    const std::string& pcname, const std::vector<std::string>& coords)
+    const std::string& pcname, const std::vector<std::string>& coords, int filter)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
 
@@ -424,9 +425,20 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     
     auto filter_scope = cluster.get_scope_filter(scope);
 
-    // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << filter_scope << std::endl;
+    // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << scope << " " << filter_scope << std::endl;
 
-    if(filter_scope){
+    bool use_scope = true;
+    if (filter == 1) {
+        use_scope = filter_scope;
+    }
+    else if (filter == 0) {
+        use_scope = true; // ignore filter_scope, always true
+    }
+    else if (filter == -1) {
+        use_scope = !filter_scope;
+    }
+
+    if (use_scope) {
         // Access the points through the cluster's scoped view
         const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
         const auto& spcs = sv.pcs();
@@ -437,14 +449,13 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
 
         // std::cout << "Test: " << cluster.get_cluster_id() << " " << spcs.size() << std::endl;
 
-
         // For each scoped pointcloud (each corresponds to a blob)
         for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
             const auto& spc = spcs[spc_idx];
             auto x = spc.get().get(coords[0])->elements<double>();
             auto y = spc.get().get(coords[1])->elements<double>();
             auto z = spc.get().get(coords[2])->elements<double>();
-            
+
             // Get the blob associated with this spc
             // The node_with_major() function gets the node for this major index (blob)
             const auto* node = nodes[spc_idx];

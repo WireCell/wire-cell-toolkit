@@ -55,6 +55,7 @@ namespace WireCell::Clus {
             std::string visitor;   // if given, dump just after this visitor runs and any cluster ID enumeration
             std::vector<std::string> coords;
             bool individual;
+            int filter{1};// 1 for on, 0 for off, -1 for inverse filter  
         };
 
         // Vector to store configurations for multiple bee points sets
@@ -87,7 +88,8 @@ namespace WireCell::Clus {
         void fill_bee_points(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster, 
-            const std::string& pcname, const std::vector<std::string>& coords);
+            const std::string& pcname, const std::vector<std::string>& coords,
+            int filter);
 
         void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
         void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
