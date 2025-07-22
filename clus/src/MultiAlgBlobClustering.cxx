@@ -143,6 +143,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.pcname = get<std::string>(bps, "pcname", "3d");
             bpc.grouping = get<std::string>(bps, "grouping", "live");
             bpc.visitor = get<std::string>(bps, "visitor", "");
+            bpc.filter = get<int>(bps, "filter", 1); // 1 for on, 0 for off, -1 for inverse filter
             
             // Get coordinates
             if (bps.isMember("coords")) {
@@ -394,7 +395,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 auto it2 = it->second.find(face);
                 if (it2 != it->second.end()) {
                     for (const auto* cluster : grouping.children()) {
-                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords);
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter);
                     }
                 }
             }
@@ -403,7 +404,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords);
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter);
         }
     }
 }
@@ -412,67 +413,110 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 // Helper function to fill bee points from a single cluster
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     Bee::Points& bpts, const Cluster& cluster, 
-    const std::string& pcname, const std::vector<std::string>& coords)
+    const std::string& pcname, const std::vector<std::string>& coords, int filter)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
 
     // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
 
+    if (pcname == "steiner_pc"){
+        // Export Steiner points ... 
+        // std::cout << "Exporting Steiner points for cluster ID: " << clid << " " << cluster.nchildren() << std::endl;
 
-    // Get the scope
-    Scope scope = {pcname, coords};
-    
-    auto filter_scope = cluster.get_scope_filter(scope);
+        auto& steiner_pc = cluster.get_pc(pcname);
+        if (steiner_pc.empty()) {
+            return;
+        }
+        // Get coordinate arrays from the point cloud
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>(); 
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+        const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
 
-    // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << filter_scope << std::endl;
+         for (size_t i = 0; i < x_coords.size(); ++i) {
+            // Create point from steiner point cloud
+            Point vtx(x_coords[i], y_coords[i], z_coords[i]);
 
-    if(filter_scope){
-        // Access the points through the cluster's scoped view
-        const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
-        const auto& spcs = sv.pcs();
-        const auto& nodes = sv.nodes(); // Get the nodes in the scoped view
-
-        // Create a map to cache blob information to avoid recalculating for points in the same blob
-        std::unordered_map<const WireCell::Clus::Facade::Blob*, std::pair<double, size_t>> blob_info;
-
-        // std::cout << "Test: " << cluster.get_cluster_id() << " " << spcs.size() << std::endl;
-
-
-        // For each scoped pointcloud (each corresponds to a blob)
-        for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
-            const auto& spc = spcs[spc_idx];
-            auto x = spc.get().get(coords[0])->elements<double>();
-            auto y = spc.get().get(coords[1])->elements<double>();
-            auto z = spc.get().get(coords[2])->elements<double>();
+            // Get the point index from the default scope
+            auto point_index = cluster.get_closest_point_index(vtx);
             
-            // Get the blob associated with this spc
-            // The node_with_major() function gets the node for this major index (blob)
-            const auto* node = nodes[spc_idx];
-            const auto* blob = node->value.facade<WireCell::Clus::Facade::Blob>();
-            
-            // Calculate blob information if not already cached
-            if (blob_info.find(blob) == blob_info.end()) {
-                double blob_charge = blob->charge();
-                size_t blob_npoints = blob->npoints();
-                blob_info[blob] = {blob_charge, blob_npoints};
+            auto charge_result = cluster.calc_charge_wcp(point_index, 4000, true);
+            double point_charge = charge_result.second; // Extract the charge value from the pair
+
+            if (flag_steiner_terminal[i]) {
+                bpts.append(Point(x_coords[i], y_coords[i], z_coords[i]), point_charge, 1, 1);  // terminals  ... 
+            }else{
+                bpts.append(Point(x_coords[i], y_coords[i], z_coords[i]), point_charge, 0, 0); // non-terminals ...
             }
-            
-            // Get cached blob info
-            const auto& [blob_charge, blob_npoints] = blob_info[blob];
-            
-            // Calculate charge per point
-            double point_charge = 0.0;
-            if (blob_npoints > 0) {
-                point_charge = blob_charge / blob_npoints;
-            }
-            
-            const size_t size = x.size();
-            for (size_t ind = 0; ind < size; ++ind) {
-                // Use the calculated point_charge instead of the original charge
-                bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid, clid);
-            }
+         }
+
+
+    }else{
+        // Get the scope
+        Scope scope = {pcname, coords};
+        
+        auto filter_scope = cluster.get_scope_filter(scope);
+
+        // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << scope << " " << filter_scope << std::endl;
+
+        bool use_scope = true;
+        if (filter == 1) {
+            use_scope = filter_scope;
+        }
+        else if (filter == 0) {
+            use_scope = true; // ignore filter_scope, always true
+        }
+        else if (filter == -1) {
+            use_scope = !filter_scope;
         }
 
+        if (use_scope) {
+            // Access the points through the cluster's scoped view
+            const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
+            const auto& spcs = sv.pcs();
+            const auto& nodes = sv.nodes(); // Get the nodes in the scoped view
+
+            // Create a map to cache blob information to avoid recalculating for points in the same blob
+            std::unordered_map<const WireCell::Clus::Facade::Blob*, std::pair<double, size_t>> blob_info;
+
+            // std::cout << "Test: " << cluster.get_cluster_id() << " " << spcs.size() << std::endl;
+
+            // For each scoped pointcloud (each corresponds to a blob)
+            for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
+                const auto& spc = spcs[spc_idx];
+                auto x = spc.get().get(coords[0])->elements<double>();
+                auto y = spc.get().get(coords[1])->elements<double>();
+                auto z = spc.get().get(coords[2])->elements<double>();
+
+                // Get the blob associated with this spc
+                // The node_with_major() function gets the node for this major index (blob)
+                const auto* node = nodes[spc_idx];
+                const auto* blob = node->value.facade<WireCell::Clus::Facade::Blob>();
+                
+                // Calculate blob information if not already cached
+                if (blob_info.find(blob) == blob_info.end()) {
+                    double blob_charge = blob->charge();
+                    size_t blob_npoints = blob->npoints();
+                    blob_info[blob] = {blob_charge, blob_npoints};
+                }
+                
+                // Get cached blob info
+                const auto& [blob_charge, blob_npoints] = blob_info[blob];
+                
+                // Calculate charge per point
+                double point_charge = 0.0;
+                if (blob_npoints > 0) {
+                    point_charge = blob_charge / blob_npoints;
+                }
+                
+                const size_t size = x.size();
+                for (size_t ind = 0; ind < size; ++ind) {
+                    // Use the calculated point_charge instead of the original charge
+                    bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid, clid);
+                }
+            }
+
+        }
     }
 
 }
@@ -744,15 +788,15 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             grouping->enumerate_idents(m_clusters_id_order);
         }
 
-        for (const auto& config : m_bee_points_configs) {
-            if (config.name == "img") continue;
-            if (config.visitor != cmeth.name) continue;
-            auto gs = ensemble.with_name(config.grouping);
-            if (gs.empty()) {
-                continue;
-            }
-            fill_bee_points(config.name, *gs[0]);
-        }
+        // for (const auto& config : m_bee_points_configs) {
+        //     if (config.name == "img") continue;
+        //     if (config.visitor != cmeth.name) continue;
+        //     auto gs = ensemble.with_name(config.grouping);
+        //     if (gs.empty()) {
+        //         continue;
+        //     }
+        //     fill_bee_points(config.name, *gs[0]);
+        // }
     }
 
     //
