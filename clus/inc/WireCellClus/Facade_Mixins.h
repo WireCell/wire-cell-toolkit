@@ -310,7 +310,8 @@ namespace WireCell::Clus::Facade::Mixins {
 
             auto arr = pc.get(aname);
             if (arr) {
-                arr->template assign(vec.data(), shape, false);
+                //arr->template assign(vec.data(), shape, false);
+                arr->assign(vec.data(), shape, false);
             }
             else {
                 pc.add(aname, PointCloud::Array(vec, shape, false));
