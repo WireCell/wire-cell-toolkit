@@ -1,15 +1,17 @@
-#include <iostream>
-#include <set>
-#include <functional> // For std::function
+#include "WireCellUtil/Logging.h"
+
 
 // Boost Graph Library includes
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_utility.hpp> // For print_graph
 #include <boost/graph/filtered_graph.hpp> // For filtered_graph
 
-// Simple debug macro (replace with your actual debug system if more complex)
-#define debug(fmt, ...) \
-    do { fprintf(stderr, fmt "\n", ##__VA_ARGS__); } while (0)
+#include <iostream>
+#include <set>
+#include <functional> // For std::function
+
+
+using spdlog::debug;
 
 // --- Your Boost Graph Related Types ---
 using edge_weight_type = double;
@@ -40,7 +42,7 @@ filtered_graph_type reduce_edges(const graph_type& graph, const edge_set& edges,
     // This lambda will be called for each edge when iterating the filtered graph.
     auto filter = [&](edge_type edge) {
         // This debug statement will only print if the predicate is actually invoked.
-        debug("  [Predicate Call] Checking edge: %zu -- %zu",
+        debug("  [Predicate Call] Checking edge: {} -- {}",
               boost::source(edge, graph), boost::target(edge, graph));
         return accept == (edges.count(edge) > 0);
     };

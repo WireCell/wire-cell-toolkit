@@ -272,10 +272,14 @@ void MultiAlgBlobClustering::flush(int ident)
     // flush(m_bee_img, ident);
     // flush(m_bee_ld,  ident);
      // Flush all bee points sets
+
      for (auto& [name, apa_bpts] : m_bee_points) {
+         // C++17 can not use structured bindings in lambda capture list.
+         const std::string the_name = name;
+
         // Find the configuration for this name to check if it's individual
         auto it = std::find_if(m_bee_points_configs.begin(), m_bee_points_configs.end(),
-                              [&name](const BeePointsConfig& cfg) { return cfg.name == name; });
+                              [&the_name](const BeePointsConfig& cfg) { return cfg.name == the_name; });
         
         bool individual = (it != m_bee_points_configs.end()) ? it->individual : false;
         
