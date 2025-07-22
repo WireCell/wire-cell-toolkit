@@ -858,7 +858,7 @@ void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& resu
                 
                     // Add edge with calculated weight
                     if (!boost::edge(index1, index2, result.graph).second) {
-                        auto [edge, success] = boost::add_edge(index1, index2, distance, result.graph);
+                        boost::add_edge(index1, index2, distance, result.graph);
                     }
                 }
             }

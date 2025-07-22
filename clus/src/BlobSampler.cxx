@@ -1280,7 +1280,7 @@ private:
         // Lambda to check if a wire is bad based on uncertainty
         auto is_wire_bad = [&](int wire_index) -> bool {
             // Create coordinate for the wire
-            coordinate_t coord{plane_layer, wire_index};
+            // coordinate_t coord{plane_layer, wire_index};
 
            
 

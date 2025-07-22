@@ -3452,8 +3452,8 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cos
         double distance_norm = nrebin * tick * drift_speed;
 
         auto& extreme_point_indices = extreme_point_indices_map[key];
-        auto& extreme_values = extreme_values_map[key];
-        bool& initialized = initialized_map[key];
+        // auto& extreme_values = extreme_values_map[key];
+        // bool& initialized = initialized_map[key];
 
         auto& live_u_index = live_u_index_map[key];
         auto& live_v_index = live_v_index_map[key];

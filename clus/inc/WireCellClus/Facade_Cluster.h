@@ -98,7 +98,7 @@ namespace WireCell::Clus::Facade {
             std::vector<size_t> valid_indices;
             const auto& excluded = cache().excluded_points;
             
-            for (size_t i = 0; i < npoints(); ++i) {
+            for (int i = 0; i < npoints(); ++i) {
                 if (excluded.find(i) == excluded.end()) {
                     valid_indices.push_back(i);
                 }

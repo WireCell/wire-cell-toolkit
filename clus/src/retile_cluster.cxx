@@ -420,7 +420,7 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
             // Get the wire plane for this face and plane
             auto face_ptr = m_face.at(apa).at(face);
             auto planes = face_ptr->planes();
-            if (plane_idx >= planes.size()) continue;
+            if (plane_idx >= static_cast<int>(planes.size())) continue;
             
             auto wire_plane = planes[plane_idx];
             const auto& channels = wire_plane->channels();

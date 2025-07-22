@@ -110,12 +110,12 @@ void Graphs::connect_graph(const Cluster& cluster, Weighted::Graph& graph)
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
             if (std::get<2>(index_index_dis[j][k])<3*units::cm){
-	            index_index_dis_mst[j][k] = index_index_dis[j][k];
-	        }
+                index_index_dis_mst[j][k] = index_index_dis[j][k];
+            }
 
             if (num < 100)
-	        if (pt_clouds.at(j)->get_num_points()>100 && pt_clouds.at(k)->get_num_points()>100 &&
-	            (pt_clouds.at(j)->get_num_points()+pt_clouds.at(k)->get_num_points()) > 400){
+            if (pt_clouds.at(j)->get_num_points()>100 && pt_clouds.at(k)->get_num_points()>100 &&
+                (pt_clouds.at(j)->get_num_points()+pt_clouds.at(k)->get_num_points()) > 400){
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
             
@@ -265,7 +265,7 @@ void Graphs::connect_graph_with_reference(
     std::vector<std::vector<size_t>> pt_clouds_global_indices;
     
     // Initialize pt_clouds for each component (same as baseline)
-    for (const auto& comp : ordered_components) {
+    for (size_t comp_idx = 0; comp_idx < ordered_components.size(); ++comp_idx) {
         auto pt_cloud = std::make_shared<Simple3DPointCloud>();
         pt_clouds.push_back(pt_cloud);
         pt_clouds_global_indices.push_back(std::vector<size_t>());
@@ -362,12 +362,12 @@ void Graphs::connect_graph_with_reference(
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
             if (std::get<2>(index_index_dis[j][k])<3*units::cm){
-	            index_index_dis_mst[j][k] = index_index_dis[j][k];
-	        }
+                index_index_dis_mst[j][k] = index_index_dis[j][k];
+            }
 
             if (num < 100)
-	        if (pt_clouds.at(j)->get_num_points()>100 && pt_clouds.at(k)->get_num_points()>100 &&
-	            (pt_clouds.at(j)->get_num_points()+pt_clouds.at(k)->get_num_points()) > 400){
+            if (pt_clouds.at(j)->get_num_points()>100 && pt_clouds.at(k)->get_num_points()>100 &&
+                (pt_clouds.at(j)->get_num_points()+pt_clouds.at(k)->get_num_points()) > 400){
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
             

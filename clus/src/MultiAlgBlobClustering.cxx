@@ -437,6 +437,8 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
         const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
         const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
 
+        std::cout << "Steiner Test: " << x_coords.size() << " " << y_coords.size() << " " << z_coords.size() << std::endl;
+
          for (size_t i = 0; i < x_coords.size(); ++i) {
             // Create point from steiner point cloud
             Point vtx(x_coords[i], y_coords[i], z_coords[i]);

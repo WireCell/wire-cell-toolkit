@@ -223,15 +223,13 @@ namespace WireCell::Clus {
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
             // std::vector<int> filter_results = c
             new_cluster.add_corrected_points(m_pcts, correction_name);
-            // Get the new scope with corrected points
-            const auto& correction_scope = new_cluster.get_scope(correction_name);
             // Set this as the default scope for viewing
             new_cluster.from(*orig_cluster); // copy state from original cluster
             // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
 
-        auto retiled_node = new_cluster.node();
+        // auto retiled_node = new_cluster.node();
 
         // std::cout << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
@@ -309,7 +307,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     std::map<int, std::set<int>> v_time_chs; // V plane time-channel map  
     std::map<int, std::set<int>> w_time_chs; // W plane time-channel map
 
-    int tick_span;
+    int tick_span = 1;
 
     // Step 1: Fill maps according to existing blobs in cluster
     auto children = cluster.children();
@@ -876,7 +874,7 @@ std::vector<IBlob::pointer> ImproveCluster_1::make_iblobs_improved(std::map<std:
             // Get the wire plane for this face and plane
             auto face_ptr = m_face.at(apa).at(face);
             auto planes = face_ptr->planes();
-            if (plane_idx >= planes.size()) continue;
+            if (static_cast<size_t>(plane_idx) >= planes.size()) continue;
             
             auto wire_plane = planes[plane_idx];
             const auto& channels = wire_plane->channels();

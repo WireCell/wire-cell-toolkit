@@ -233,7 +233,7 @@ namespace WireCell::Clus {
             // std::vector<int> filter_results = c
             new_cluster.add_corrected_points(m_pcts, correction_name);
             // Get the new scope with corrected points
-            const auto& correction_scope = new_cluster.get_scope(correction_name);
+            // const auto& correction_scope = new_cluster.get_scope(correction_name);
             // Set this as the default scope for viewing
             new_cluster.from(*orig_cluster); // copy state from original cluster
             // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 

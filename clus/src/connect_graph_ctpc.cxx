@@ -392,7 +392,7 @@ void Graphs::connect_graph_ctpc_with_reference(
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
     std::vector<std::vector<size_t>> pt_clouds_global_indices;
     
-    for (const auto& comp : ordered_components) {
+    for (size_t i = 0; i < ordered_components.size(); ++i) {
         auto pt_cloud = std::make_shared<Simple3DPointCloud>();
         pt_clouds.push_back(pt_cloud);
         pt_clouds_global_indices.push_back(std::vector<size_t>());

@@ -52,25 +52,25 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 }
 
 
-static std::tuple<int, int, int> parse_dead_winds(const std::string& ds_name) {
-    int apa, face;
-    char plane;
-    // Use sscanf to extract the numbers and the plane letter.
-    // The format string must match the structure of ds_name.
-    if (std::sscanf(ds_name.c_str(), "dead_winds_a%df%dp%c", &apa, &face, &plane) != 3) {
-        throw std::runtime_error("Failed to parse string: " + ds_name);
-    }
-    // Convert the plane letter to an index.
-    int plane_index = -1;
-    switch (plane) {
-        case 'U': plane_index = 0; break;
-        case 'V': plane_index = 1; break;
-        case 'W': plane_index = 2; break;
-        default: 
-            throw std::runtime_error("Unexpected plane letter in: " + ds_name);
-    }
-    return std::make_tuple(apa, face, plane_index);
-}
+// static std::tuple<int, int, int> parse_dead_winds(const std::string& ds_name) {
+//     int apa, face;
+//     char plane;
+//     // Use sscanf to extract the numbers and the plane letter.
+//     // The format string must match the structure of ds_name.
+//     if (std::sscanf(ds_name.c_str(), "dead_winds_a%df%dp%c", &apa, &face, &plane) != 3) {
+//         throw std::runtime_error("Failed to parse string: " + ds_name);
+//     }
+//     // Convert the plane letter to an index.
+//     int plane_index = -1;
+//     switch (plane) {
+//         case 'U': plane_index = 0; break;
+//         case 'V': plane_index = 1; break;
+//         case 'W': plane_index = 2; break;
+//         default: 
+//             throw std::runtime_error("Unexpected plane letter in: " + ds_name);
+//     }
+//     return std::make_tuple(apa, face, plane_index);
+// }
 
 void Grouping::on_construct(node_type* node)
 {

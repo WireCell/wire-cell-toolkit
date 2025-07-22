@@ -335,7 +335,7 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
                         }
                         else {
                             closest_index[key].insert(std::make_pair(dis,pind2));
-                            if (closest_index[key].size()>max_num_nodes){
+                            if (closest_index[key].size() > static_cast<size_t>(max_num_nodes)) {
                                 auto it5 = closest_index[key].begin();
                                 for (int qx = 0; qx!=max_num_nodes;qx++){
                                     it5++;
@@ -436,7 +436,7 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
                         }
                         else {
                             closest_index[key].insert(std::make_pair(dis,pind2));
-                            if (closest_index[key].size()>max_num_nodes){
+                            if (closest_index[key].size() > static_cast<size_t>(max_num_nodes)) {
                                 auto it5 = closest_index[key].begin();
                                 for (int qx = 0; qx!=max_num_nodes;qx++){
                                     it5++;
