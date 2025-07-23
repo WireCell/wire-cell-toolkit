@@ -402,6 +402,7 @@ namespace WireCell::PointCloud::Tree {
     template<typename ElementType=double>
     class ScopedView : public ScopedBase {
       public:
+        using ScopedBase::append;
         
         //using nfkd_t = NFKDVec::Tree<ElementType>; // dynamic
         using nfkd_t = NFKDVec::Tree<ElementType, NFKDVec::IndexStatic>; // static

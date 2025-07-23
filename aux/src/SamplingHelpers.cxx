@@ -332,6 +332,8 @@ void Aux::add_ctpc(
     // for (const auto& [name, pc] : root->value.local_pcs()) {
     //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
     // }
+
+    (void)nslices; // unused, but useful for debugging
 }
 
 void Aux::add_dead_winds(

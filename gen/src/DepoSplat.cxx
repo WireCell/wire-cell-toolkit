@@ -371,7 +371,7 @@ ITrace::vector Gen::DepoSplat::process_face(IAnodeFace::pointer face, const IDep
         l->debug("DepoSplat: plane {} "
                  "dropped {} (time) and {} (pitch) from {} total",
                  iplane, t_dropped, p_dropped, depos.size());
-
+         (void)idepo;
     }
 
     // make output traces
@@ -382,5 +382,6 @@ ITrace::vector Gen::DepoSplat::process_face(IAnodeFace::pointer face, const IDep
         auto trace = std::make_shared<SimpleTrace>(chid, 0, chv);
         traces.push_back(trace);
     }
+   
     return traces;
 }

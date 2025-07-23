@@ -2330,7 +2330,7 @@ bool Cluster::judge_vertex(geo_point_t& p_test, IDetectorVolumes::pointer dv, co
 
     if ((num_pts.first + num_pts.second) == 0) return false;
 
-    double asy = fabs(num_pts.first - num_pts.second) / (num_pts.first + num_pts.second);
+    double asy = std::abs(num_pts.first - num_pts.second) / (num_pts.first + num_pts.second);
 
     if (asy > asy_cut) {
         return true;
@@ -3630,15 +3630,15 @@ double Cluster::calculate_boundary_metric(
     double value;
     if (flag_cosmic) {
         value = fabs(p1.x() - p2.x()) / units::mm
-            + fabs(p1_u - p2_u) * 1.0 + ncount_live_u * 1.0
-            + fabs(p1_v - p2_v) * 1.0 + ncount_live_v * 1.0
-            + fabs(p1_w - p2_w) * 1.0 + ncount_live_w * 1.0
+            + std::abs(p1_u - p2_u) * 1.0 + ncount_live_u * 1.0
+            + std::abs(p1_v - p2_v) * 1.0 + ncount_live_v * 1.0
+            + std::abs(p1_w - p2_w) * 1.0 + ncount_live_w * 1.0
             + sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2)) / units::mm;
     } else {
-        value = fabs(p1.x() - p2.x()) / distance_norm
-            + fabs(p1_u - p2_u) * 0.0 + ncount_live_u * 1.0
-            + fabs(p1_v - p2_v) * 0.0 + ncount_live_v * 1.0
-            + fabs(p1_w - p2_w) * 0.0 + ncount_live_w * 1.0;
+        value = std::abs(p1.x() - p2.x()) / distance_norm
+            + std::abs(p1_u - p2_u) * 0.0 + ncount_live_u * 1.0
+            + std::abs(p1_v - p2_v) * 0.0 + ncount_live_v * 1.0
+            + std::abs(p1_w - p2_w) * 0.0 + ncount_live_w * 1.0;
     }
     
     return value;

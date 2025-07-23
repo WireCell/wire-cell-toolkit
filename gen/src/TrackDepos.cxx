@@ -103,6 +103,7 @@ void Gen::TrackDepos::add_track(double time, const WireCell::Ray& ray, double ch
     // earliest first
     std::sort(m_depos.begin(), m_depos.end(), ascending_time);
     log->debug("depos: {} over {}mm", m_depos.size(), length / units::mm);
+    (void)count;  // unused, but useful for debugging
 }
 
 bool Gen::TrackDepos::operator()(output_pointer& out)

@@ -230,7 +230,7 @@ namespace WireCell::Clus {
         IDetectorVolumes::pointer m_dv;
 
         // the face to be processed
-        int m_face{0};
+        // int m_face{0};
 
         // the geometry helper
         // IClusGeomHelper::pointer m_geomhelper;

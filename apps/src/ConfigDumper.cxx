@@ -63,4 +63,5 @@ void ConfigDumper::execute()
     }
 
     Persist::dump(get<string>(m_cfg, "filename"), cm.all());
+    (void)nfailed; // unused, but useful for debugging
 }
