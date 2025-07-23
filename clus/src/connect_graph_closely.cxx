@@ -116,13 +116,13 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
             std::vector<std::set<int>*> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -293,13 +293,13 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
             std::vector<std::set<int>*> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -394,13 +394,13 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
             std::vector<std::set<int>*> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -469,6 +469,8 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
         }
 
     }
+
+    (void)num_edges; // suppress unused variable warning
 }
 
 using namespace WireCell::Clus::Facade;
@@ -862,4 +864,5 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
     
     // Debug output (similar to prototype)
     // std::cout << "PID Graph: " << num_edges << " edges added" << std::endl;
+    (void)num_edges; // suppress unused variable warning
 }

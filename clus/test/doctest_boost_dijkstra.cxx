@@ -26,10 +26,10 @@ TEST_CASE("standalone dijkstra") {
     Vertex v4 = boost::add_vertex(graph);
 
     // Add edges
-    boost::add_edge(v0, v1, TestEdgeProp{1}, graph).first;
-    boost::add_edge(v1, v4, TestEdgeProp{1}, graph).first;
-    boost::add_edge(v0, v2, TestEdgeProp{1}, graph).first;
-    boost::add_edge(v2, v4, TestEdgeProp{2}, graph).first;
+    boost::add_edge(v0, v1, TestEdgeProp{1}, graph);
+    boost::add_edge(v1, v4, TestEdgeProp{1}, graph);
+    boost::add_edge(v0, v2, TestEdgeProp{1}, graph);
+    boost::add_edge(v2, v4, TestEdgeProp{2}, graph);
 
     std::vector<Vertex> parents(boost::num_vertices(graph));
     std::vector<int> distances(boost::num_vertices(graph));

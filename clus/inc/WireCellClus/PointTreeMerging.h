@@ -51,7 +51,7 @@ namespace WireCell::Clus {
          *
          * If true, emit time/memory performance measures.  Default is false.
          */
-        bool m_perf{true};
+        //bool m_perf{true};
 
         // Count how many times we are called
         size_t m_count{0};

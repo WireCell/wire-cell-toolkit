@@ -675,6 +675,7 @@ struct Perf {
 
                 log->debug("\tgrouping \"{}\": {}, {} points and {} clusters with no points",
                            name, *grouping, npoints_total, nzero);
+                (void)count;
             }
 
             if (shallow) continue;

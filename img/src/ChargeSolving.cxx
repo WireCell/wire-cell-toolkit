@@ -132,6 +132,7 @@ void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
         // TODO remove this
         // std::cout << String::format("cent_time: %f next_con: %d, prev_con: %d, weight: %d", cent_time, next_con, prev_con, weight) << std::endl;
     }
+    (void)nblobs; // unused, but useful for debugging
     // TODO remove this
     // std::cout << String::format("nblobs: %d", nblobs) << std::endl;
 }

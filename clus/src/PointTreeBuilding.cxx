@@ -334,6 +334,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     // for (const auto& [name, pc] : root->value.local_pcs()) {
     //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
     // }
+    (void)nslices; // unused, but useful for debugging
 }
 
 void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {

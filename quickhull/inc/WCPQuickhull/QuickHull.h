@@ -68,7 +68,7 @@ namespace quickhull {
 	class QuickHull {
 		using vec3 = Vector3<FloatType>;
 		
-		static const FloatType Epsilon;
+		static constexpr FloatType Epsilon = FloatType(0.0000001);
 
 		FloatType m_epsilon, m_epsilonSquared, m_scale;
 		bool m_planar;
@@ -168,7 +168,7 @@ namespace quickhull {
 	
 	template<typename T>
 	std::unique_ptr<std::vector<IndexType>> QuickHull<T>::getIndexVectorFromPool() {
-		auto r = std::move(m_indexVectorPool.get());
+		auto r = m_indexVectorPool.get();
 		r->clear();
 		return r;
 	}

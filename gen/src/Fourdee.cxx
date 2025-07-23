@@ -471,4 +471,6 @@ void Gen::Fourdee::execute_old()
     }
 bail:  // what's this weird syntax?  What is this, BASIC?
     cerr << em.summary() << endl;
+
+(void)ndepos;
 }

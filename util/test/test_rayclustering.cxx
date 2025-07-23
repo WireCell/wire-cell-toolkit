@@ -218,6 +218,7 @@ struct Chirp {
             dumper(br, 10.0, 1.0, 1, ind);
             ++number;
         }
+        (void)number;
         number = 0;
         for (const auto ind : *sel2) {
             const auto& br = two[ind];
@@ -225,6 +226,7 @@ struct Chirp {
             ++number;
         }
 
+        // (void)number; // suppress unused variable warning if needed
         return;
     }
 };

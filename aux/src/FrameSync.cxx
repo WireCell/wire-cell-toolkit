@@ -72,6 +72,8 @@ void Aux::FrameSync::flush(input_queues& iqs, output_queues& oqs)
         // May have more behind the EOS
         return flush(iqs, oqs);
     }
+
+    (void)nempty; // suppress unused variable warning
 }
 
 bool Aux::FrameSync::operator()(input_queues& iqs, output_queues& oqs)

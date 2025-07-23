@@ -707,6 +707,7 @@ void Steiner::Grapher::remove_same_blob_steiner_edges(const std::string& graph_n
     // Invalidate any cached GraphAlgorithms that use this graph
     invalidate_graph_algorithms_cache(graph_name);
 
+    (void)removed_count;
     // log->info("Removed {} same-blob Steiner edges from graph '{}'", removed_count, graph_name);
 }
 

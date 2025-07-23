@@ -442,6 +442,7 @@ svggpp::xml_t WireCell::RaySvg::g_blob_corners(const Geom& geom, const RayGrid::
         }
     }
 
+    (void)count;
     return top;
 }
 

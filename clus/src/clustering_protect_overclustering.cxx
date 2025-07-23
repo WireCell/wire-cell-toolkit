@@ -137,13 +137,13 @@ static std::map<int, Cluster *> Separate_overclustering(
 
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -185,6 +185,7 @@ static std::map<int, Cluster *> Separate_overclustering(
         }
     }
 
+    (void)num_edges;
     //  std::cout << "Xin: " << num_edges << " " << N << std::endl;
 
     const auto &time_cells_set_map = cluster->time_blob_map();
@@ -296,13 +297,13 @@ static std::map<int, Cluster *> Separate_overclustering(
             std::vector<std::set<int> *> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -374,13 +375,13 @@ static std::map<int, Cluster *> Separate_overclustering(
             std::vector<std::set<int> *> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
