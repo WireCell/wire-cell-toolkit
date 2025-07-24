@@ -121,14 +121,8 @@ namespace WireCell {
             const auto res = m_kd.knn(3, pt);
 
             const Point a = m_kd.point3d(res[0].first);
-            const Point b = m_kd.point3d(res[1].first);
-            const Point c = m_kd.point3d(res[2].first);
 
-            const auto v0 = pt - a; // relative vector from a to test point
-            const auto v1 = b - a;  // relative vector in plane
-            const auto v2 = c - a;  // relative vector in plane
-            const auto norm = v1.cross(v2);
-            return norm.dot(v0) * (norm[m_axes[0]] < 0 ? -1.0 : 1.0);
+            return pt[m_axes[0]] - a[m_axes[0]];
         }
         virtual double location() const { return m_location; }
 
