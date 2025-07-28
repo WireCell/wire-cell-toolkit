@@ -724,13 +724,19 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
         const double center = map_proj_centers.at(face).at(pind);
         int wind = point2wind(point, angle, pitch, center);
         if (wind < 0) wind = 0;
-        size_t max_wind = grouping->get_plane_channels(apa, face, iplane2layer[pind]).size() - 1;
+        auto plane_ptr =iface->plane(pind);
+        const auto& wires_all = plane_ptr->wires();
+        size_t max_wind = wires_all.size();
+        // size_t max_wind = grouping->get_plane_channels(apa, face, iplane2layer[pind]).size() - 1;
         if ((size_t)wind > max_wind) wind = max_wind;
         // get channel ...
-        auto channel = grouping->get_plane_channel_wind(apa, face, iplane2layer[pind], wind);
+        auto wire = wires_all[wind];
+        int channel_number = wire->channel();
+        // auto channel = grouping->get_plane_channel_wind(apa, face, iplane2layer[pind], wind);
 
         // get all wires
-        auto wires = anode->wires(channel->ident());
+        // auto wires = anode->wires(channel->ident());
+        auto wires = anode->wires(channel_number);
         for (const auto &wire : wires) {
             auto wire_wpid = wire->planeid();
             // std::cout << "Test: " << map_time_offset.size() <<  " " << map_time_offset.begin()->first << " " << wire_wpid.face() << std::endl;
