@@ -1,3 +1,13 @@
+/** The PR trajectory graph.
+ *
+ * This makes use of boost subgraph to produce a tree of trajectories, each with
+ * its own view of the underlying total graph/trajectory.
+ *
+ * We try everywhere to say "graph node" (not "graph vertex") to avoid confusion
+ * with the face that each graph node holds a PR::Vertex.  A graph edge holds a
+ * PR::Segment.
+ */
+
 #ifndef WIRECELL_CLUS_PR_GRAPH
 #define WIRECELL_CLUS_PR_GRAPH
 
@@ -5,50 +15,94 @@
 #include "WireCellUtil/Graph.h"
 
 namespace WireCell::Clus::PR {
+
+    /// The headers for these classes include this file, so we just forward-declare.
     class Vertex;
     class Segment;
+    class Trajectory;
 
+    /// A graph node property bundle holds the shared pointer to PR::Vertex.
+    /// 
+    /// Note, PR::Vertex holds a descriptor for its graph node to allow
+    /// navigation between graph and object representations.
     using VertexPtr = std::shared_ptr<Vertex>;
-    using SegmentPtr = std::shared_ptr<Segment>;
-
-    // Where possible, we always use the term "node" inside the PR:: namespace
-    // to refer to the "graph vertex" so as to avoid ambiguity with the
-    // PR::Vertex class.
     struct NodeProperty {
-        VertexPtr vertex;
+        VertexPtr vertex;       // shared pointer
     };
+
+    /// A graph edge property bundle holds the shared pointer to PR::Segment.
+    ///
+    /// Note, PR::Segment holds a descriptor for its graph edge to allow
+    /// navigation between graph and object representations.
+    using SegmentPtr = std::shared_ptr<Segment>;
     struct EdgeProperty {
-        SegmentPtr segment;
+        SegmentPtr segment;     // shared pointer
+    };
+
+    /// A graph level property bundle holds a weak pointer to PR::Trajectory.
+    ///
+    /// Note, PR::Trajectory holds/owns its subgraph by value.  We must use a
+    /// weak pointer here to avoid an ownership cycle.  You must convert the
+    /// weak pointer to a shared pointer before use, and that shared pointer
+    /// will be nullptr if (somehow) the underlying PR::Trajectory has been
+    /// destroyed.  See get_trajectory(graph_type) helper in Trajectory.h.
+    using TrajectoryPtr = std::weak_ptr<Trajectory>;
+    struct GraphProperty {
+        TrajectoryPtr trajectory; // weak pointer
     };
     
-    /** The PR graph types.
+    /** Boost Graph Library: subgraph
      *
-     * These make use of BGL's "subgraph" type.  This is new usage for WCT so I
-     * give some brief "rules" before describign details of this particular graph:
+     * - A subgraph is a "view" of a particular subset or of vertices and edges
+     *   of an underlying graph.
      *
-     * - We only use the subgraph type, never the base graph type
+     * - Modifying a subgraph changes the underlying graph.
      *
-     * - We can make a subgraph from a subgraph
+     * - A change to the underlying graph is reflected in all subgraph views
+     *   that previously included any of the effected vertices and/or edges.
      *
-     * - A subgraph has a parent() method returning the subgraph it was derived
-     *   from.  A root() returns the utmost parent.  sg.children() return a pair
-     *   of iterators for child subgraphs of current subgraph sg.
+     * - The C++ "subgraph" type is templated on another "concrete" aka "base"
+     *   aka "underlying" BGL graph type.
      *
-     * - The subgraph and the root use different descriptors to refer to the
-     *   same node or edge.  Both see "dense" descriptor values, no gaps.
+     * - C++ object instances of the "subgraph" type are used.  Instances of the
+     *   underlying graph type do not participate in any subgraph functions.
      *
-     * - We may add node/edge to a subgraph using global descriptors.
+     * - A single instance, labeled here as "sg", is considered the "root"
+     *   subgraph and represents a complete view of the entire underlying graph.
      *
-     * - We get back from a subgraph (eg from add_vertex()) local descriptors.
+     * - Child sub-graphs of "sg" may be derived, labeled here as "sg0", "sg1", ...
      *
-     * - We use sg.local_to_global(local_desc) -> global_desc and vice versa
-     *   global_to_local() to convert both node and edge descriptors.
+     * - The "sg" instance is the "parent" of the "sgN" "children".
      *
-     * A primary feature of "subgraph" is that each subgraph (including parents)
-     * will , reflect any change made via any subgraph.  Thus a holder of the
-     * subgraph does not need to maintain/sync any other data structure to know
-     * "its" nodes/edges.  That is exactly what the subgraph is.
+     * - The children may be parents, thus we may create instances "sg00, sg01,
+     *   ..., sg10, sg11, ...".
      *
+     * - Together, the subgraph instances form a "subgraph tree".
+     *   
+     * - Every subgraph instance has "local descriptors".  These are "dense"
+     *   (counts, 0, 1, 2, ...)
+     *
+     * - Every subgraph maintains a map from its "local descriptors" to its
+     *   "global descriptors" which are identical to the subgraph's parent's
+     *   local descriptors.
+     *
+     * - A subgraph is always created as an empty view.
+     *
+     * - We add (add_vertex(), add_edge()) "global descriptors" to a subgraph
+     *   and "local descriptors" are returned.
+     *   
+     * - We may use local_to_global(local_desc) -> global_desc and vice versa
+     *   global_to_local() to convert descriptors.
+     *
+     * - A subgraph has parent() and root() methods for getting immediate and
+     *   ultimate parents, respectively.
+     *
+     * The primary feature of "subgraph" is that any change to the underlying
+     * graph via any subgraph will reflect into the view of ever subgraph.
+     *
+     */
+    // fixme: move the above blurb someplace more generic/prominent.
+    /**
      *
      * We now describe details about this particular (sub) graph type.
      * 
@@ -58,9 +112,7 @@ namespace WireCell::Clus::PR {
      * removing a descriptor invalidates it.  Removing a node descriptor
      * invalidates all associated edge descriptors.
      *
-     * The sets are ordered by descriptors and iterating on nodes or edges is
-     * supposed to be stable on rerunning of identical jobs (eg, no "sort on
-     * pointer problem" is expected).
+     * The setS vertex descriptor is void* so iteration order is NOT stable.
      *
      * Users should NOT use boost:: methods to add/remove nodes and edges and
      * instead use the provided wrappers.  The wrappers will manage the (global)
@@ -72,72 +124,37 @@ namespace WireCell::Clus::PR {
         boost::setS,            // edges
         boost::undirectedS,     // edge direction
         boost::property<boost::vertex_index_t, int, NodeProperty>,
-        boost::property<boost::edge_index_t, int, EdgeProperty>
+        boost::property<boost::edge_index_t, int, EdgeProperty>,
+        GraphProperty
         >;
 
     /// The (sub) graph type for PR.
     using graph_type = boost::subgraph<BaseGraph>;
+
+    /** You may use standard boost::add_vertex(), etc on the graph_type (as subgraph).
+     *
+     * However, you MUST obey the rules of boost subgraph.  Namely, you must
+     * pass "global" descriptors defined on the parent subgraph when operating
+     * on a child subgraph.  Any descriptor returned is a "local" descriptor
+     * defined in the context of the child subgraph.
+     *
+     * See Trajectory.h for equivalent functions in terms of PR:: types that
+     * will take care to handle the parent/child global/local rules.
+     */
+
+    /** Boost subgraph is (as of 1.85) broken when it comes to getting the graph
+     * bundle in the usual way.  This function provides a work-around.
+     */
+    GraphProperty& get_graph_bundle(graph_type& g);
+    const GraphProperty& get_graph_bundle(const graph_type& g);
+
 
     /// The node descriptor type
     using node_descriptor_type = boost::graph_traits<graph_type>::vertex_descriptor;
     /// The edge descriptor type
     using edge_descriptor_type = boost::graph_traits<graph_type>::edge_descriptor;
 
-    /** The graph mutation functions generally take pointers to PR::Vertex to
-     * indicate a node and PR::Segment to indicate an edge.  The descriptor held
-     * by these objects are ALWAYS GLOBAL.  A descriptor returned from a
-     * function is ALWAYS LOCAL.
-     */
-    
-    /** Add a vertex as a node in the graph.
-     *
-     * Return the node descriptor.
-     *
-     * If the (global) Vertex::descriptor is not invalid, the corresponding
-     * local descriptor is simply returned and the graph is not modified.
-     * Otherwise a new node is added to the graph, its global descriptor saved
-     * to the PR::Vertex and the local descriptor returned.
-     *
-     * User caution: the (global) Vertex descriptor is only checked for
-     * validity.  A user should not try to circumvent these functions as this
-     * may result in a valid descriptor that is not actually in the graph.
-     */
-    node_descriptor_type add_vertex(VertexPtr vertex, graph_type& graph);
-
-    /** Add a segment as an edge between two vertex nodes.
-     *
-     * Return the local node descriptor.
-     *
-     * The vertices will also be added if they are not yet in the graph.
-     * 
-     * See add_vertex() for other applicable commentary.
-     */    
-    edge_descriptor_type add_segment(VertexPtr vertex1,
-                                     VertexPtr vertex2,
-                                     SegmentPtr segment, graph_type& graph);
-    
-    /** Remove the vertex's node from the graph
-     *
-     * This will invalidate the vertex's descriptor and remove all the node's
-     * edges and invalidate their segment's descriptors.
-     *
-     * If vertex's descriptor is invalid, this is a no-op.  If vertex's
-     * descriptor is not in the graph, the graph is not modified and the
-     * vertex's descriptor is made invalid.
-     */
-    void remove_vertex(VertexPtr vertex, graph_type& graph);
-
-    /** Remove the segment's edge from the graph.
-     *
-     * The segment's descriptor will be set to invalid.  If already invalid,
-     * this function is a no-op.  If segment's descriptor is not in graph, the
-     * graph is not modified and the descriptor is invalidated.
-     */
-    void remove_segment(SegmentPtr segment, graph_type& graph);
-
-
-
-    /** Mixin for Vertex/Segment to manage the descriptor.
+    /** A mixin class for Vertex/Segment to manage their stored descriptor.
      */
     template <typename Descriptor>
     class Graphed {
