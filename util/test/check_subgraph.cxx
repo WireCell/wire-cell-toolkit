@@ -1,7 +1,9 @@
 #include <iostream>
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/subgraph.hpp>
+// #include <boost/graph/subgraph.hpp>
 #include <boost/graph/graph_utility.hpp>
+
+#include "WireCellUtil/Subgraph.h"
 
 // Define the bundled properties
 struct VertexProperties {

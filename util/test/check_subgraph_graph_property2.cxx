@@ -1,5 +1,7 @@
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/subgraph.hpp>
+// #include <boost/graph/subgraph.hpp>
+
+#include "WireCellUtil/Subgraph.h"
 #include <iostream>
 
 struct VertexBundle {
@@ -15,7 +17,7 @@ struct GraphBundle {
 };
 
 using BaseGraph = boost::adjacency_list<
-        boost::vecS, boost::vecS, boost::directedS,
+        boost::setS, boost::setS, boost::directedS,
         boost::property<boost::vertex_index_t, int, VertexBundle>,
         boost::property<boost::edge_index_t, int, EdgeBundle>,
         GraphBundle
@@ -74,14 +76,21 @@ int main() {
     sgb.description = "Child subgraph 1";
     std::cout << "Subgraph description: " << sgb.description << std::endl;
 
+    std::cout << "Subgraph description: " << sg.graph_bundle().description << std::endl;
+
     // Add vertices from main graph to subgraph (they are conceptually shared)
-    add_vertex(v1, sg);
-    add_vertex(v2, sg);
+    auto sv1 = add_vertex(v1, sg);
+    sg[sv1].name = "Subnode A";
+    auto sv2 = add_vertex(v2, sg);
+    auto se1 = add_edge(sv1, sv2, sg).first;
+    sg[se1].weight = 2.5;
 
     // Accessing bundled properties of vertices and edges within the subgraph
     // These are the same objects as in the main graph
-    std::cout << "Subgraph Vertex 1 name: " << sg[v1].name << std::endl;
-    std::cout << "Subgraph Edge 1 weight: " << sg[e1].weight << std::endl;
+    std::cout << "Subgraph Vertex 1 name: " << sg[sv1].name << std::endl;
+    std::cout << "Subgraph Edge 1 weight: " << sg[se1].weight << std::endl;
+    std::cout << "Graph Vertex 1 name: " << g[v1].name << std::endl;
+    std::cout << "Graph Edge 1 weight: " << g[e1].weight << std::endl;
 
 
     return 0;

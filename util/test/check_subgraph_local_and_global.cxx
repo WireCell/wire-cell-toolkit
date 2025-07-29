@@ -1,6 +1,8 @@
+#include "WireCellUtil/Subgraph.h"
+
 #include <iostream>
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/subgraph.hpp>
+// #include <boost/graph/subgraph.hpp>
 #include <boost/graph/graph_utility.hpp>
 #include <boost/graph/properties.hpp>
 
@@ -8,7 +10,7 @@
 struct VertexProperties { char name; };
 struct EdgeProperties { double weight; };
 using BaseGraph = boost::adjacency_list<
-    boost::vecS, boost::vecS, boost::undirectedS,
+    boost::setS, boost::set, boost::undirectedS,
     boost::property<boost::vertex_index_t, int, VertexProperties>,
     boost::property<boost::edge_index_t, int, EdgeProperties>
 >;
