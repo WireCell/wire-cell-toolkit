@@ -80,6 +80,14 @@ local wc = import "wirecell.jsonnet";
             },
         },
 
+        tagger_check_stm(name="") :: {
+            type: "TaggerCheckSTM",
+            name: prefix + name,
+            data: {
+                grouping: "live",           // Which grouping to process
+            },
+        },
+
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",
             name: prefix+name,

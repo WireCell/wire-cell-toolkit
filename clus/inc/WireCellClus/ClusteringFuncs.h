@@ -70,6 +70,8 @@ namespace WireCell::Clus::Facade {
         // associated cluster
         inline const std::string associated_cluster = "associated_cluster"; 
 
+        /// This flag is set by ClusteringTaggerCheckSTM algorithm when specific STM conditions are met
+        inline const std::string STM = "STM";
     }
 
     struct ClusterLess {
