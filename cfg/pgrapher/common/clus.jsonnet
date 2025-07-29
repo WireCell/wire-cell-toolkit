@@ -51,10 +51,13 @@ local wc = import "wirecell.jsonnet";
     ///    },
     /// }, nin=1, nout=1, uses=cm_objs + [...]); // include objects that MABC "uses" directly
 
-    clustering_methods(prefix="", detector_volumes=null, pc_transforms=null, pc_name="3d", coords=["x", "y", "z"] ) :: {
+    clustering_methods(prefix="", detector_volumes=null, pc_transforms=null, fiducial=null,
+                       pc_name="3d", coords=["x", "y", "z"] ) :: {
         // abbreviations covering commonalities across different Clustering* method components.
         local dv_tn = wc.tn(detector_volumes),
         local dv_cfg = {detector_volumes: dv_tn},
+        local fiducial_tn = wc.tn(fiducial),
+        local fiducial_cfg = { fiducial: fiducial_tn },
         local pcts_tn = wc.tn(pc_transforms),
         local pcts_cfg = {pc_transforms: pcts_tn},
         local scope_cfg = {pc_name: pc_name, coords: coords},
@@ -323,6 +326,18 @@ local wc = import "wirecell.jsonnet";
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms, retiler]
         },
+
+        // Add a "FiducialUtils" to a grouping.  
+        fiducialutils(name="", live_grouping="live", dead_grouping="dead", target_grouping="live") :: {
+            type: "MakeFiducialUtils",
+            name: prefix+name,
+            data: {
+                live: live_grouping,
+                dead: dead_grouping,
+                target: target_grouping,
+            } + dv_cfg + fiducial_cfg + pcts_cfg
+        },
+
     }, // clustering_methods(),
 
     /// Use this function to provide the elements of retile's "samplers"

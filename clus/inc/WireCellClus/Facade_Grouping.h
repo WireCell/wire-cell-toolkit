@@ -18,6 +18,12 @@
 #include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
+// forward declare
+namespace WireCell::Clus {
+    class FiducialUtils;
+    using FiducialUtilsPtr = std::shared_ptr<FiducialUtils>;
+}
+
 namespace WireCell::Clus::Facade {
     class Cluster;
     using namespace WireCell::PointCloud;
@@ -139,20 +145,6 @@ namespace WireCell::Clus::Facade {
         std::set<WireCell::WirePlaneId> wpids() const { return cache().cluster_wpids; }
         std::set<WireCell::WirePlaneId> dv_wpids() const { return cache().dv_wpids; }
 
-        // const std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > >& all_dead_winds() const {
-        //     // this is added in order that we may dump it in json_summary() for debugging.
-        //     return m_dead_winds;
-        // }
-
-        // FIXME: need to remove apa=0
-        // std::map<int, std::pair<double, double>>& get_dead_winds1(const int apa, const int face, const int pind) const
-        // {
-        //     // make one if not exist
-        //     return m_dead_winds[apa][face][pind];
-
-        //     // This is utter garbage.  #381.
-        // }
-
         const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& all_dead_winds() const;
         std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const;
         
@@ -238,15 +230,19 @@ namespace WireCell::Clus::Facade {
         // method may be removed.  #381.
         virtual void clear_cache() const;
 
+      public:
+        // The grouping is simply a bus to maybe hold this object.  See
+        // MakeFiducialUtils as an ensemble visitor to construct and add a
+        // FiducialUtils.
+        FiducialUtilsPtr get_fiducialutils() const { return m_fiducialutils; }
+        void set_fiducialutils(FiducialUtilsPtr fd) { m_fiducialutils = fd; }
       private:
-
-        // This "cache" is utterly abused.  Someone else fix it.  #381.
-        // mutable std::map< int, mapfp_t< std::map<int, std::pair<double, double>> > > m_dead_winds;
+        FiducialUtilsPtr m_fiducialutils;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;
 
-       protected:
+      protected:
         // Receive notification when this facade is created on a node. #381.
         virtual void on_construct(node_type* node);
 

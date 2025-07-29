@@ -79,6 +79,10 @@ do_qlport_like () {
     do_qlport_like "steiner"
 }
 
+@test "porting stm" {
+    do_qlport_like "stm"
+}
+
 
 @test "porting pdhd" {
 

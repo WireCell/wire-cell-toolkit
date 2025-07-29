@@ -7,6 +7,7 @@
 #include "WireCellClus/IPCTransform.h"
 
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 #include "WireCellUtil/Configuration.h"
 
 #include "WireCellUtil/PointTree.h"
@@ -20,6 +21,16 @@ namespace WireCell::Clus {
     // "detector_volumes" : string type/name of an IDetectorVolumes
     struct NeedDV {
         IDetectorVolumes::pointer m_dv;
+        void configure(const WireCell::Configuration &cfg);
+    };
+
+    // A mixin to get an IFiducial
+    // 
+    // Configuration:
+    //
+    // "fiducial" : string type/name of an IFiducial
+    struct NeedFiducial {
+        IFiducial::pointer m_fiducial;
         void configure(const WireCell::Configuration &cfg);
     };
 

@@ -11,6 +11,11 @@ void NeedDV:: configure(const WireCell::Configuration &cfg)
     m_dv = Factory::find_tn<IDetectorVolumes>(tn);
 }
 
+void NeedFiducial:: configure(const WireCell::Configuration &cfg)
+{
+    auto tn = get<std::string>(cfg, "fiducial", "DetectorVolumes");
+    m_fiducial = Factory::find_tn<IFiducial>(tn);
+}
 
 void NeedPCTS::configure(const WireCell::Configuration &cfg)
 {
