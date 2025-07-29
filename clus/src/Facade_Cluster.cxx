@@ -1622,7 +1622,11 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_min(int apa, int face) const
     }
     
     std::tuple<int, int, int, int> ret;
-    ret = { *u_set.begin(), *v_set.begin(), *w_set.begin(), *t_set.begin() };
+    if (!u_set.empty())
+        ret = { *u_set.begin(), *v_set.begin(), *w_set.begin(), *t_set.begin() };
+    else
+        ret = { -1, -1, -1, -1 };
+
     return ret;
 }
 std::tuple<int, int, int, int> Cluster::get_uvwt_max(int apa, int face) const
@@ -1650,7 +1654,10 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_max(int apa, int face) const
     }
     
     std::tuple<int, int, int, int> ret;
-    ret = { *u_set.rbegin(), *v_set.rbegin(), *w_set.rbegin(), *t_set.rbegin() };
+    if (!u_set.empty())
+        ret = { *u_set.rbegin(), *v_set.rbegin(), *w_set.rbegin(), *t_set.rbegin() };
+    else
+        ret = { -1, -1, -1, -1 };
     return ret;
 }
 
@@ -2446,30 +2453,30 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (na < nb) return true;
         if (nb < na) return false;
     }
-    {
-        auto ar = a->get_uvwt_min();
-        auto br = b->get_uvwt_min();
-        if (get<0>(ar) < get<0>(br)) return true;
-        if (get<0>(br) < get<0>(ar)) return false;
-        if (get<1>(ar) < get<1>(br)) return true;
-        if (get<1>(br) < get<1>(ar)) return false;
-        if (get<2>(ar) < get<2>(br)) return true;
-        if (get<2>(br) < get<2>(ar)) return false;
-        if (get<3>(ar) < get<3>(br)) return true;
-        if (get<3>(br) < get<3>(ar)) return false;
-    }
-    {
-        auto ar = a->get_uvwt_max();
-        auto br = b->get_uvwt_max();
-        if (get<0>(ar) < get<0>(br)) return true;
-        if (get<0>(br) < get<0>(ar)) return false;
-        if (get<1>(ar) < get<1>(br)) return true;
-        if (get<1>(br) < get<1>(ar)) return false;
-        if (get<2>(ar) < get<2>(br)) return true;
-        if (get<2>(br) < get<2>(ar)) return false;
-        if (get<3>(ar) < get<3>(br)) return true;
-        if (get<3>(br) < get<3>(ar)) return false;
-    }
+    // {
+    //     auto ar = a->get_uvwt_min();
+    //     auto br = b->get_uvwt_min();
+    //     if (get<0>(ar) < get<0>(br)) return true;
+    //     if (get<0>(br) < get<0>(ar)) return false;
+    //     if (get<1>(ar) < get<1>(br)) return true;
+    //     if (get<1>(br) < get<1>(ar)) return false;
+    //     if (get<2>(ar) < get<2>(br)) return true;
+    //     if (get<2>(br) < get<2>(ar)) return false;
+    //     if (get<3>(ar) < get<3>(br)) return true;
+    //     if (get<3>(br) < get<3>(ar)) return false;
+    // }
+    // {
+    //     auto ar = a->get_uvwt_max();
+    //     auto br = b->get_uvwt_max();
+    //     if (get<0>(ar) < get<0>(br)) return true;
+    //     if (get<0>(br) < get<0>(ar)) return false;
+    //     if (get<1>(ar) < get<1>(br)) return true;
+    //     if (get<1>(br) < get<1>(ar)) return false;
+    //     if (get<2>(ar) < get<2>(br)) return true;
+    //     if (get<2>(br) < get<2>(ar)) return false;
+    //     if (get<3>(ar) < get<3>(br)) return true;
+    //     if (get<3>(br) < get<3>(ar)) return false;
+    // }
     {
         auto ac = a->get_pca().center;
         auto bc = b->get_pca().center;
