@@ -1,8 +1,19 @@
-* Status / todo
+* Test job
 
-- [ ] FiducualUtils skeleton
-- [ ] Modify Grouping to allow storing a FiducualUtils
-- [ ] MakeFiducialUtils "ensemble visitor" to store a FiducualUtils on the "live" grouping.
+#+begin_example
+bats-debug -f steiner clus/test/test-porting.bats
+#+end_example
+
+This merely appends ~MakeFiducialUtils~ to MABC pipeline after the "steiner"
+related. 
+
+However, the recently completed "steiner" porting has left this broken.  It can
+be repeated with the N-1 test:
+
+#+begin_example
+bats-debug -f steiner clus/test/test-porting.bats
+#+end_example
+
 
 * Instructions for Xin
 
