@@ -236,12 +236,22 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             }
             
             auto iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
-            cnode->insert(Points(Aux::sample_dead(iblob, tick)));
+
+
+            auto pcs = Aux::sample_dead(iblob, tick); 
+            // std::cout << "Xin: " << "bad sampling points in dead " << " " << pcs.size() << std::endl;
+
+            if (pcs.empty()) {
+                continue;
+            }
+            cnode->insert(Points(std::move(pcs)));
             // DO NOT EXTEND THIS.  see #430.
             
             ++nblobs;
         }
     }
+
+    // std::cout << "Xin: " << "sampled " << nblobs << " dead blobs in " << root->nchildren() << " clusters" << std::endl;
     
     log->debug("sampled {} dead blobs to tree with {} children", nblobs, root->nchildren());
     return root;

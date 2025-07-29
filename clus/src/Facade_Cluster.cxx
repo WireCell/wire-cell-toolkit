@@ -2447,37 +2447,47 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (na < nb) return true;
         if (nb < na) return false;
     }
-    {
-        const int na = a->npoints();
-        const int nb = b->npoints();
-        if (na < nb) return true;
-        if (nb < na) return false;
+    
+    const int na = a->npoints();
+    const int nb = b->npoints();
+    if (na < nb) return true;
+    if (nb < na) return false;
+
+    // std::cout << "Cluster::cluster_less: na=" << na << " nb=" << nb << std::endl;
+    
+    auto wpids_a = a->wpids_blob();
+    auto wpids_b = b->wpids_blob();
+    std::set<WireCell::WirePlaneId> wpids_set;
+    wpids_set.insert(wpids_a.begin(), wpids_a.end());
+    wpids_set.insert(wpids_b.begin(), wpids_b.end());
+
+    for (const auto& wpid : wpids_set) {
+        auto ar = a->get_uvwt_min(wpid.apa(), wpid.face());
+        auto br = b->get_uvwt_min(wpid.apa(), wpid.face());
+        if (get<0>(ar) < get<0>(br)) return true;
+        if (get<0>(br) < get<0>(ar)) return false;
+        if (get<1>(ar) < get<1>(br)) return true;
+        if (get<1>(br) < get<1>(ar)) return false;
+        if (get<2>(ar) < get<2>(br)) return true;
+        if (get<2>(br) < get<2>(ar)) return false;
+        if (get<3>(ar) < get<3>(br)) return true;
+        if (get<3>(br) < get<3>(ar)) return false;
     }
-    // {
-    //     auto ar = a->get_uvwt_min();
-    //     auto br = b->get_uvwt_min();
-    //     if (get<0>(ar) < get<0>(br)) return true;
-    //     if (get<0>(br) < get<0>(ar)) return false;
-    //     if (get<1>(ar) < get<1>(br)) return true;
-    //     if (get<1>(br) < get<1>(ar)) return false;
-    //     if (get<2>(ar) < get<2>(br)) return true;
-    //     if (get<2>(br) < get<2>(ar)) return false;
-    //     if (get<3>(ar) < get<3>(br)) return true;
-    //     if (get<3>(br) < get<3>(ar)) return false;
-    // }
-    // {
-    //     auto ar = a->get_uvwt_max();
-    //     auto br = b->get_uvwt_max();
-    //     if (get<0>(ar) < get<0>(br)) return true;
-    //     if (get<0>(br) < get<0>(ar)) return false;
-    //     if (get<1>(ar) < get<1>(br)) return true;
-    //     if (get<1>(br) < get<1>(ar)) return false;
-    //     if (get<2>(ar) < get<2>(br)) return true;
-    //     if (get<2>(br) < get<2>(ar)) return false;
-    //     if (get<3>(ar) < get<3>(br)) return true;
-    //     if (get<3>(br) < get<3>(ar)) return false;
-    // }
-    {
+
+    for (const auto& wpid : wpids_set) {
+        auto ar = a->get_uvwt_max(wpid.apa(), wpid.face());
+        auto br = b->get_uvwt_max(wpid.apa(), wpid.face());
+        if (get<0>(ar) < get<0>(br)) return true;
+        if (get<0>(br) < get<0>(ar)) return false;
+        if (get<1>(ar) < get<1>(br)) return true;
+        if (get<1>(br) < get<1>(ar)) return false;
+        if (get<2>(ar) < get<2>(br)) return true;
+        if (get<2>(br) < get<2>(ar)) return false;
+        if (get<3>(ar) < get<3>(br)) return true;
+        if (get<3>(br) < get<3>(ar)) return false;
+    }
+
+    if (na !=0){
         auto ac = a->get_pca().center;
         auto bc = b->get_pca().center;
         if (ac[0] < bc[0]) return true;
