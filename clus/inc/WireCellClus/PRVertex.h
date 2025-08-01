@@ -2,14 +2,14 @@
 #define WIRECELL_CLUS_PR_VERTEX
 
 #include "WireCellClus/PRCommon.h"
-#include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Flagged.h"
+#include "WireCellClus/PRGraphType.h"
 
 namespace WireCell::Clus::PR {
 
     /** The flags used to categorize a Vertex
      *
-     * These are used in Vertex via the "Flagged" base class (in util).
+     * These are used in Vertex via the "Flagged" base class (from util).
      */ 
     enum class VertexFlags {
         /// The vertex has no particular category
@@ -21,25 +21,29 @@ namespace WireCell::Clus::PR {
 
     };
 
-    /** A Vertex represents a connection between segments in a larger trajectory.
-     *
-     * A Vertex has:
-     *
-     * - an associated 3D point as well as scalar "fit" information which
-     * includes a potentially different 3D point.
-     *
-     * - a set of possible FLAGS (see VertexFlags and Flagged base class)
-     *
-     * - an ID and the ID of an associated cluster (see Identities base class)
-     *
-     * - can live in a graph as a node (see Graphed base class).
-     * 
-     * A PR::Vertex is essentially the ProtoVertex of WCP.
+    /** A PR::Vertex instance represents a connection with one or more PR::Segment intances.
+     
+        A PR::Vertex has:
+     
+        - an associated 3D point as well as scalar "fit" information which
+          includes a potentially different 3D point.
+        
+        - a set of possible FLAGS (see VertexFlags and Flagged base class)
+     
+        - an individual ID and the ID of an associated cluster (see Identities
+          base class).  Note, the ID is not the same as the index for the
+          associated graph node.
+     
+        - an optional graph node descriptor (can be "graph_type::null_vertex()")
+      
+        A PR::Vertex must be constructed through `make_vertex()`.
+      
+        Note, a PR::Vertex is analogous to the ProtoVertex of WCP.
      */
     class Vertex
-    : public Flagged<VertexFlags> // can set flags
-    , public Identities              // hold id and cluster_id
-    , public Graphed<node_descriptor_type> // live in a graph
+        : public Flagged<VertexFlags> // can set flags
+        , public Identities           // hold id and cluster_id
+        , public Graphed<node_descriptor> // may live in a graph
     {
     public:        
 
@@ -75,6 +79,8 @@ namespace WireCell::Clus::PR {
         Fit m_fit;
 
     };
+
+    /// See PRGraph.h for related functions.
 }
 #endif
 

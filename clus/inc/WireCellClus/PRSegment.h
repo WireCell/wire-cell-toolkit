@@ -2,8 +2,8 @@
 #define WIRECELL_CLUS_PR_SEGMENT
 
 #include "WireCellClus/PRCommon.h"
-#include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Flagged.h"
+#include "WireCellClus/PRGraphType.h"
 
 namespace WireCell::Clus::PR {
 
@@ -31,48 +31,58 @@ namespace WireCell::Clus::PR {
      * A segment has:
      *
      * - a vector of associated 3D point and corresponding "fit" information
-     * which includes a potentially different 3D point.
+     *   which includes a potentially different 3D point.
      *
      * - a set of possible FLAGS (see SegmentFlags and Flagged base class)
      *
      * - an ID and the ID of an associated cluster (see Identities base class)
      *
-     * - can live in a graph as an edge (see Graphed base class).
+     * - a generic graph edge descriptor (see Graphed base class and PR::Vertex
+     *   commentary for more information on the nature this descriptor).
      * 
-     * A PR::Segment is essentially the ProtoSegment of WCP.
+     * Caution, although the points held by the segment should be ordered
+     * "along" the segment, the graph edge representing the segment is NOT
+     * ORDERED.  This means that the point in the vertex found at the `source()`
+     * node for the segments edge is not necessarily closest to the segment's
+     * first point.
+     *
+     * Note, a PR::Segment is essentially the ProtoSegment of WCP.
      */
     class Segment
-    : public Flagged<SegmentFlags>         // can set flags
-    , public Identities                    // hold id and cluster_id
-    , public Graphed<edge_descriptor_type> // live in a graph
+    : public Flagged<SegmentFlags> // can set flags
+    , public Identities            // hold id and cluster_id
+    , public Graphed<edge_descriptor> // may live in a graph
     {
     public:
 
+        // Getters
 
-        /// Getters
-
-        /** Return the fits for associated points.
-         *
-         * Note, check the kFit flag or the valid() on individual Fit value to
-         * determine if they are provide.
-         */
+        /// Get the const vector of fits.
         const std::vector<Fit>& fits() const { return m_fits; }
-        std::vector<Fit>& fits() { return m_fits; }
 
-        /// The "initial" point information.
+        /// Get the mutable vector of fits.
+        std::vector<Fit>& fits() { return m_fits; }
+        
+        /// Get the const original points.
         const std::vector<WCPoint>& wcpts() const { return m_wcpts; }
+
+        /// Get the mutable original points.
         std::vector<WCPoint>& wcpts() { return m_wcpts; }
 
-        /// The directional sign (was "flag_dir" in WCT).
+        /// Get the sign +1/0/-1 (was "flag_dir" in WCT).
         int dirsign() const { return m_dirsign; }
 
-        /// Base provides these getters:
+        // Base provides these getters:
         using Identities::ident;
         using Identities::cluster_id;
 
-        /// Chainable setters
+        // Chainable setters
 
-        Segment& wcpts(const std::vector<WCPoint>& wcpts) { m_wcpts = wcpts; return *this; }
+        /// Chainable setter of fits vector.
+        Segment& fits(const std::vector<Fit>& f) { m_fits = f; return *this; };
+        /// Chainable setter of original points vector.
+        Segment& wcpts(const std::vector<WCPoint>& pts) { m_wcpts = pts; return *this; }
+        /// Chainable setter of dirsign.
         Segment& dirsign(int dirsign) {
             if (dirsign == 0) m_dirsign = 0;
             else m_dirsign = dirsign > 0 ? 1 : -1;
@@ -80,8 +90,10 @@ namespace WireCell::Clus::PR {
         }
 
         // Override base so we return self type.
+
         /// Set our ident. 
         Segment& ident(int id) { Identities::ident(id); return *this; }
+
         /// Set ID of related cluster.
         Segment& cluster_id(int cid) { Identities::cluster_id(cid); return *this; }
         
