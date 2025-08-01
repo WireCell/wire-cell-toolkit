@@ -658,6 +658,7 @@ struct Perf {
         for (const auto* grouping : ensemble.children()) {
 
             {
+                auto name = grouping->get_name();
                 size_t npoints_total = 0;
                 size_t nzero = 0;
                 size_t count = 0;
@@ -669,9 +670,10 @@ struct Perf {
                     npoints_total += n;
                     // log->debug("loaded cluster {} with {} points out of {}", count, n, npoints_total);
                     ++count;
+                    // std::cout << "Xin: " << name << " loaded cluster " << count << " with " << n << "points and " << cluster->nchildren() << "blobs" << std::endl;
                 }
 
-                auto name = grouping->get_name();
+                
 
                 log->debug("\tgrouping \"{}\": {}, {} points and {} clusters with no points",
                            name, *grouping, npoints_total, nzero);

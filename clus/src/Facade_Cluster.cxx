@@ -1622,7 +1622,11 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_min(int apa, int face) const
     }
     
     std::tuple<int, int, int, int> ret;
-    ret = { *u_set.begin(), *v_set.begin(), *w_set.begin(), *t_set.begin() };
+    if (!u_set.empty())
+        ret = { *u_set.begin(), *v_set.begin(), *w_set.begin(), *t_set.begin() };
+    else
+        ret = { -1, -1, -1, -1 };
+
     return ret;
 }
 std::tuple<int, int, int, int> Cluster::get_uvwt_max(int apa, int face) const
@@ -1650,7 +1654,10 @@ std::tuple<int, int, int, int> Cluster::get_uvwt_max(int apa, int face) const
     }
     
     std::tuple<int, int, int, int> ret;
-    ret = { *u_set.rbegin(), *v_set.rbegin(), *w_set.rbegin(), *t_set.rbegin() };
+    if (!u_set.empty())
+        ret = { *u_set.rbegin(), *v_set.rbegin(), *w_set.rbegin(), *t_set.rbegin() };
+    else
+        ret = { -1, -1, -1, -1 };
     return ret;
 }
 
@@ -2440,15 +2447,23 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (na < nb) return true;
         if (nb < na) return false;
     }
-    {
-        const int na = a->npoints();
-        const int nb = b->npoints();
-        if (na < nb) return true;
-        if (nb < na) return false;
-    }
-    {
-        auto ar = a->get_uvwt_min();
-        auto br = b->get_uvwt_min();
+    
+    const int na = a->npoints();
+    const int nb = b->npoints();
+    if (na < nb) return true;
+    if (nb < na) return false;
+
+    // std::cout << "Cluster::cluster_less: na=" << na << " nb=" << nb << std::endl;
+    
+    auto wpids_a = a->wpids_blob();
+    auto wpids_b = b->wpids_blob();
+    std::set<WireCell::WirePlaneId> wpids_set;
+    wpids_set.insert(wpids_a.begin(), wpids_a.end());
+    wpids_set.insert(wpids_b.begin(), wpids_b.end());
+
+    for (const auto& wpid : wpids_set) {
+        auto ar = a->get_uvwt_min(wpid.apa(), wpid.face());
+        auto br = b->get_uvwt_min(wpid.apa(), wpid.face());
         if (get<0>(ar) < get<0>(br)) return true;
         if (get<0>(br) < get<0>(ar)) return false;
         if (get<1>(ar) < get<1>(br)) return true;
@@ -2458,9 +2473,10 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (get<3>(ar) < get<3>(br)) return true;
         if (get<3>(br) < get<3>(ar)) return false;
     }
-    {
-        auto ar = a->get_uvwt_max();
-        auto br = b->get_uvwt_max();
+
+    for (const auto& wpid : wpids_set) {
+        auto ar = a->get_uvwt_max(wpid.apa(), wpid.face());
+        auto br = b->get_uvwt_max(wpid.apa(), wpid.face());
         if (get<0>(ar) < get<0>(br)) return true;
         if (get<0>(br) < get<0>(ar)) return false;
         if (get<1>(ar) < get<1>(br)) return true;
@@ -2470,7 +2486,8 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         if (get<3>(ar) < get<3>(br)) return true;
         if (get<3>(br) < get<3>(ar)) return false;
     }
-    {
+
+    if (na !=0){
         auto ac = a->get_pca().center;
         auto bc = b->get_pca().center;
         if (ac[0] < bc[0]) return true;
