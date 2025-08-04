@@ -1,4 +1,4 @@
-#include "WireCellClus/PRSegmentOperations.h"
+#include "WireCellClus/PRSegmentFunctions.h"
 
 namespace WireCell::Clus::PR {
 

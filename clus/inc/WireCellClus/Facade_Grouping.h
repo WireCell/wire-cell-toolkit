@@ -250,8 +250,7 @@ namespace WireCell::Clus::Facade {
 
         virtual void fill_dv_cache(GroupingCache& cache) const;
 
-        virtual void fill_plane_channels_cache(GroupingCache& cache) const;
-        
+
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 

@@ -1,6 +1,8 @@
 #ifndef WIRECELL_UTIL_FLAGGED
 #define WIRECELL_UTIL_FLAGGED
 
+#include <cstddef>              // for size_t
+
 namespace WireCell {
 
           

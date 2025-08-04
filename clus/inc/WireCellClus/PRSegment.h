@@ -2,8 +2,8 @@
 #define WIRECELL_CLUS_PR_SEGMENT
 
 #include "WireCellClus/PRCommon.h"
-#include "WireCellUtil/Flagged.h"
 #include "WireCellClus/PRGraphType.h"
+#include "WireCellUtil/Flagged.h"
 
 namespace WireCell::Clus::PR {
 
@@ -12,7 +12,7 @@ namespace WireCell::Clus::PR {
      * These are used by the Segment class via its Flagged base (from util/).
      *
      */
-    enum SegmentFlags {
+    enum class SegmentFlags {
         /// The segment has no particular category.
         kUndefined = 0,
         /// The segment is part of a shower trajectory
@@ -25,6 +25,10 @@ namespace WireCell::Clus::PR {
         kFit = 1<<4,
     };
 
+
+    /// The segment caries two types of PCs each of which span 3d and 3 2D PCs
+    struct SegmentPointClouds {
+    };
 
     /** A segment represents a connection between vertices in a larger trajectory.
      *

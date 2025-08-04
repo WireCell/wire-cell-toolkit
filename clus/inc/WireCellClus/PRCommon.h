@@ -1,3 +1,8 @@
+/** Common types and functions for pattern recognition code.
+
+    This file must not depend on any (other) types in the WireCell::Clus::PR
+    namespace.
+ */
 #ifndef WIRECELL_CLUS_PR_COMMON
 #define WIRECELL_CLUS_PR_COMMON
 
@@ -192,6 +197,8 @@ namespace WireCell::Clus::PR {
         }
         return total_dist;
     }
+
+    
 
 }
 

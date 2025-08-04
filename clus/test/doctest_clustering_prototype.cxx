@@ -639,7 +639,7 @@ TEST_CASE("haiwang")
                 return false;
             }
             const auto& pc = it->second;
-            const auto& x = pc.get("x");
+            // const auto& x = pc.get("x");
             // const auto xv = x->elements<double>();
             const auto& wpid = pc.get("wpid");
             const auto wpidv = wpid->elements<int>();

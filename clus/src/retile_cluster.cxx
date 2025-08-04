@@ -470,8 +470,8 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
 std::set<const WireCell::Clus::Facade::Blob*> 
 RetileCluster::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
 {
-    const auto& wpids = cluster.grouping()->wpids();
-    const auto& shad_wpids = shad_cluster.grouping()->wpids();
+    // const auto& wpids = cluster.grouping()->wpids();
+    // const auto& shad_wpids = shad_cluster.grouping()->wpids();
     // if (wpids.size() > 1 || shad_wpids.size() > 1) {
     //     throw std::runtime_error("Live or Dead grouping must have exactly one wpid: wpids.size()=" + 
     //                  std::to_string(wpids.size()) + ", shad_wpids.size()=" + 

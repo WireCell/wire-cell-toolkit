@@ -116,6 +116,60 @@ namespace WireCell::Clus::PR {
     using edge_range = boost::iterator_range<edge_iterator>;
 
 
+    /** Provide a hash of edge descriptors.
+     *
+     * This is needed for unordered containers and boost does not provide.
+     */
+    struct EdgeDescriptorHash {
+        const Graph& g;
+        explicit EdgeDescriptorHash(const Graph& graph) : g(graph) {}
+
+        size_t operator()(const edge_descriptor& ed) const {
+            // Get the two endpoints of the edge using the graph object.
+            node_descriptor u = boost::source(ed, g);
+            node_descriptor v = boost::target(ed, g);
+
+            // To ensure the hash is symmetrical for an undirected graph,
+            // we sort the descriptors before hashing.
+            if (u > v) {
+                std::swap(u, v);
+            }
+
+            // Combine the hashes of the two vertex descriptors.
+            size_t seed = 0;
+            boost::hash_combine(seed, u);
+            boost::hash_combine(seed, v);
+            return seed;
+        }
+    };
+
+    /** Provide equality test of edge descriptors.
+     *
+     * This is needed for unordered containers and boost does not provide.
+     */
+    struct EdgeDescriptorEqual {
+        const Graph& g;
+        explicit EdgeDescriptorEqual(const Graph& graph) : g(graph) {}
+
+        bool operator()(const edge_descriptor& a, const edge_descriptor& b) const {
+            // Two edges are equal if their endpoints are equal.
+            // This is a robust check that is independent of the descriptor's internal value.
+            node_descriptor u1 = boost::source(a, g);
+            node_descriptor v1 = boost::target(a, g);
+            node_descriptor u2 = boost::source(b, g);
+            node_descriptor v2 = boost::target(b, g);
+
+            return (u1 == u2 && v1 == v2) || (u1 == v2 && v1 == u2);
+        }
+    };
+
+    /// An unordered set of node descriptors.
+    using node_unordered_set = std::unordered_set<node_descriptor>;
+
+    /// An unordered set of edge descriptors.
+    using edge_unordered_set = std::unordered_set<edge_descriptor, EdgeDescriptorHash, EdgeDescriptorEqual>;
+    
+
     /// Return a vector of node descriptors in native graph order.
     ///
     /// This order is based on pointer values.

@@ -1,7 +1,10 @@
 /** Define functions that can operate on a "trajectory" graph.
 
-    These functions should be preferred over equivalent functions in `boost::`
-    as they properly book-keep the node and edge indices.
+    Functions provided should be preferred over equivalent graph related
+    functions in `boost::` as the trajectory graph requires properly bookkeeping
+    when adding/removing nodes and/or edges.  It is undefined behavior if you
+    call `boost::` graph mutators and fail to follow the bookkeeping
+    conventions.
 
  */
 #ifndef WIRECELL_CLUS_PR_GRAPH

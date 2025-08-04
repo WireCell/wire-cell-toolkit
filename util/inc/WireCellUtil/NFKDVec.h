@@ -141,7 +141,7 @@ namespace WireCell::NFKDVec {
         // Number of blocks that have been appended.  Note, this is not
         // necessarily the value of the last element of major_indices.  Empty
         // blocks can be appended and they are counted but have no entries in
-        // the {major,minor_indices.
+        // the {major,minor}_indices.
         size_t nblocks() const {
             return m_nblocks;
         }
