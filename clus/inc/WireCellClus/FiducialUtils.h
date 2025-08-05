@@ -102,11 +102,6 @@ namespace WireCell::Clus {
         // start by clearing the InternalData via this default construction.
         struct InternalData {
 
-            // FIXME: this is just an initial place holder to show how the
-            // internal data is handled in the implementation.  Delete this
-            // "dummy" attribute once some "real" internal data is added.
-            size_t dummy{0};
-
             // save live grouping ...
             Facade::Grouping* live;
         };

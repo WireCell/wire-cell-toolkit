@@ -55,7 +55,7 @@ namespace WireCell::Clus {
     bool FiducialUtils::inside_fiducial_volume(const Point& p, 
                                                const std::vector<double>& tolerance_vec) const
     {
-        return m_internal.dummy%2 && tolerance_vec.empty();       // initial bogus query as place holder
+        return tolerance_vec.empty();       // initial bogus query as place holder
     }
 
 
@@ -122,7 +122,7 @@ namespace WireCell::Clus {
             while(inside_fiducial_volume(temp_p)){
                 num_points ++;
                 auto test_wpid = m_sd.dv->contained_by(temp_p);
-                if (test_wpid.apa() < 0 || test_wpid.face() < 0) {
+                if (test_wpid.apa() < 0 || test_wpid.face() < 0) { // not in true volume ...
                     num_points_dead ++;
                 }else{
                     // convert temp_p to raw point and find apa etc ...

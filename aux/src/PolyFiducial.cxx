@@ -127,9 +127,9 @@ public:
                 slab.bb(p2);
                 m_bb(slab.bb.bounds());
                 slab.a.push_back(p1[j]);
-                slab.b.push_back(p1[k]);
-                m_slabs.push_back(slab);
+                slab.b.push_back(p1[k]);               
             }
+            m_slabs.push_back(slab);
         }
     }
 
