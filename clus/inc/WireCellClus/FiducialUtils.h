@@ -73,13 +73,14 @@ namespace WireCell::Clus {
         bool inside_fiducial_volume(const Point& p, double offset_x=0,
                                     const std::vector<double>& tolerance_vec = {}) const;
 
-        bool inside_dead_region(const Point& p, const int apa, const int face) const;
+        // use live_grouping's CTPC information to do the check ...
+        bool inside_dead_region(const Point& p_raw, const int apa, const int face, const int minimal_views = 2) const;
 
         bool check_dead_volume(const Point& p, const Vector& dir,
-                               double step = 1.0*units::cm, double offset_x=0) const;
+                               double step = 1.0*units::cm) const;
 
         bool check_signal_processing(const Point& p, const Vector& dir,
-                                     double step = 1.0*units::cm, double offset_x=0) const;
+                                     double step = 1.0*units::cm) const;
 
         bool check_other_tracks(Facade::Cluster& main_cluster, double offset_x) const;
 

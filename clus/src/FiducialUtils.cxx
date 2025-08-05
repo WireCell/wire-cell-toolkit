@@ -31,10 +31,23 @@ namespace WireCell::Clus {
     // query methods
 
     
-    bool FiducialUtils::inside_dead_region(const Point& p, const int apa, const int face) const
+    bool FiducialUtils::inside_dead_region(const Point& p_raw, const int apa, const int face, const int minimal_views) const
     {
+         // Convert 3D point to time and wire indices
+        const auto [tind_u, wind_u] = m_internal.live->convert_3Dpoint_time_ch(p_raw, apa, face,  0);
+        const auto [tind_v, wind_v] = m_internal.live->convert_3Dpoint_time_ch(p_raw, apa, face,  1);
+        const auto [tind_w, wind_w] = m_internal.live->convert_3Dpoint_time_ch(p_raw, apa, face,  2);
+
+        int dead_view_count = 0;
         
-        //return m_internal.dummy%2;       // initial bogus query as place holder
+        // Check each plane (U=0, V=1, W=2)
+        // Check if this wire at this time is dead
+        if (m_internal.live->is_wire_dead(apa, face, 0, wind_u, tind_u)) dead_view_count++;
+        if (m_internal.live->is_wire_dead(apa, face, 1, wind_v, tind_v)) dead_view_count++;
+        if (m_internal.live->is_wire_dead(apa, face, 2, wind_w, tind_w)) dead_view_count++;
+
+        // Return true if number of dead views >= minimal_views
+        return dead_view_count >= minimal_views;
     }
 
 
@@ -46,23 +59,18 @@ namespace WireCell::Clus {
 
 
     bool FiducialUtils::check_dead_volume(const Point& p, const Vector& dir,
-                                          double step, double offset_x) const
+                                          double step) const
     {
-        return m_internal.dummy%2;       // initial bogus query as place holder
+        
     }
 
 
     bool FiducialUtils::check_signal_processing(const Point& p, const Vector& dir,
-                                                double step, double offset_x) const
+                                                double step) const
     {
-        return m_internal.dummy%2;       // initial bogus query as place holder
     }
 
 
-    bool FiducialUtils::check_other_tracks(Facade::Cluster& main_cluster, double offset_x) const
-    {
-        return m_internal.dummy%2;       // initial bogus query as place holder
-    }
-    
+   
     
 }

@@ -71,7 +71,7 @@ public:
         // Feed the dynamic data (live and dead groupings)
         fu->feed_dynamic(FiducialUtils::DynamicData{*live_grouping, *dead_grouping});
         
-        std::cout << "Test: " << fu->inside_fiducial_volume(Point(0,0,0)) << std::endl;
+        std::cout << "Test: " << fu->inside_dead_region(Point(0,0,0), 0, 0) << std::endl;
 
         live_grouping->set_fiducialutils(fu);
     }
