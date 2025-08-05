@@ -22,17 +22,19 @@ namespace WireCell::Clus {
         // and dynamic data (dd) as needed to by the query methods.
 
         // For now, we simply set our place holder "dummy" to some meaningless value.
-        m_internal.dummy = dd.live.nchildren() + dd.dead.nchildren();
-        
+        //m_internal.dummy = dd.live.nchildren() + dd.dead.nchildren();
+       
+        m_internal.live = const_cast<Facade::Grouping*>(&dd.live);
     }
 
 
     // query methods
 
     
-    bool FiducialUtils::inside_dead_region(const Point& p) const
+    bool FiducialUtils::inside_dead_region(const Point& p, const int apa, const int face) const
     {
-        return m_internal.dummy%2;       // initial bogus query as place holder
+        
+        //return m_internal.dummy%2;       // initial bogus query as place holder
     }
 
 

@@ -73,7 +73,7 @@ namespace WireCell::Clus {
         bool inside_fiducial_volume(const Point& p, double offset_x=0,
                                     const std::vector<double>& tolerance_vec = {}) const;
 
-        bool inside_dead_region(const Point& p) const;
+        bool inside_dead_region(const Point& p, const int apa, const int face) const;
 
         bool check_dead_volume(const Point& p, const Vector& dir,
                                double step = 1.0*units::cm, double offset_x=0) const;
@@ -108,6 +108,9 @@ namespace WireCell::Clus {
             // internal data is handled in the implementation.  Delete this
             // "dummy" attribute once some "real" internal data is added.
             size_t dummy{0};
+
+            // save live grouping ...
+            Facade::Grouping* live;
         };
         InternalData m_internal;
     };
