@@ -5,6 +5,10 @@
 #include "WireCellClus/PRGraphType.h"
 #include "WireCellUtil/Flagged.h"
 
+namespace WireCell::Clus::Facade {
+    class Cluster;
+}
+
 namespace WireCell::Clus::PR {
 
     /** The flags used to categorize a segment.
@@ -26,10 +30,6 @@ namespace WireCell::Clus::PR {
     };
 
 
-    /// The segment caries two types of PCs each of which span 3d and 3 2D PCs
-    struct SegmentPointClouds {
-    };
-
     /** A segment represents a connection between vertices in a larger trajectory.
      *
      * A segment has:
@@ -39,7 +39,9 @@ namespace WireCell::Clus::PR {
      *
      * - a set of possible FLAGS (see SegmentFlags and Flagged base class)
      *
-     * - an ID and the ID of an associated cluster (see Identities base class)
+     * - a bare pointer to a Facade::Cluster.  This may be nullptr.  And it can
+     *   be invalid if the user does something to destroy the cluster while this
+     *   object still lives.
      *
      * - a generic graph edge descriptor (see Graphed base class and PR::Vertex
      *   commentary for more information on the nature this descriptor).
@@ -48,13 +50,13 @@ namespace WireCell::Clus::PR {
      * "along" the segment, the graph edge representing the segment is NOT
      * ORDERED.  This means that the point in the vertex found at the `source()`
      * node for the segments edge is not necessarily closest to the segment's
-     * first point.
+     * first point.  See `find_endpoints()` for one way to resolve this
+     * directional ambiguity.
      *
      * Note, a PR::Segment is essentially the ProtoSegment of WCP.
      */
     class Segment
     : public Flagged<SegmentFlags> // can set flags
-    , public Identities            // hold id and cluster_id
     , public Graphed<edge_descriptor> // may live in a graph
     {
     public:
@@ -73,12 +75,14 @@ namespace WireCell::Clus::PR {
         /// Get the mutable original points.
         std::vector<WCPoint>& wcpts() { return m_wcpts; }
 
+        /// Get the associated cluster.  May be nullptr.  Assumes user keeps
+        /// cluster (ie, its n-ary tree node) alive.
+        const Facade::Cluster* cluster() const { return m_cluster; }
+        Facade::Cluster* cluster() { return m_cluster; }
+
         /// Get the sign +1/0/-1 (was "flag_dir" in WCT).
         int dirsign() const { return m_dirsign; }
 
-        // Base provides these getters:
-        using Identities::ident;
-        using Identities::cluster_id;
 
         // Chainable setters
 
@@ -92,15 +96,8 @@ namespace WireCell::Clus::PR {
             else m_dirsign = dirsign > 0 ? 1 : -1;
             return *this;
         }
+        Segment& cluster(Facade::Cluster* cptr) { m_cluster = cptr; return *this; }
 
-        // Override base so we return self type.
-
-        /// Set our ident. 
-        Segment& ident(int id) { Identities::ident(id); return *this; }
-
-        /// Set ID of related cluster.
-        Segment& cluster_id(int cid) { Identities::cluster_id(cid); return *this; }
-        
 
     private:
 
@@ -108,6 +105,9 @@ namespace WireCell::Clus::PR {
         std::vector<Fit> m_fits;
 
         int m_dirsign{0};
+
+        Facade::Cluster* m_cluster{nullptr};
+
 
         // Still must consider adding:
         // + pcloud_fit

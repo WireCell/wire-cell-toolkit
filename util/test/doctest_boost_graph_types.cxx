@@ -40,8 +40,6 @@ TEST_CASE("boost graph types")
     // static_assert(std::is_same_v<ss::vertex_descriptor, int>, 
     //               "Vertex descriptor should be int");
 
-    std::cerr << "Note, 'void*' for setS above does not mean iteration order is 'random' as it is the vertex *index* and not *descriptor* on which the order is determined and the index is integer and in insert order.\n";
-
 }
 
 struct NodeBundle {

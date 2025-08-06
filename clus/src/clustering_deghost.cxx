@@ -133,6 +133,10 @@ static void clustering_deghost(
     std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index; 
     std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index; 
 
+    // 
+    //  NOTE, most of this can be replaced by a couple of function calls from DetUtils.h
+    //
+
     for (const auto& wpid : wpids) {
         int apa = wpid.apa();
         int face = wpid.face();
@@ -176,6 +180,11 @@ static void clustering_deghost(
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
+
+    //
+    // NOTE: these (and above code) can be replaced with a single call to
+    // make_dynamicpointcloud(dv) from DetUtils.
+    //
 
     // auto global_point_cloud_legacy = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
     auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);

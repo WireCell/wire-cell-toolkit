@@ -74,31 +74,6 @@ namespace WireCell::Clus::PR {
         See also "Graphed" from PRGraph.h and "Flagged" from util.
      */
 
-    /** A class that mixes in Identities caries its own ID number and that of an
-       associated cluster.  A negative ID is considered invalid/undefined.
-    */
-    class Identities {
-    public:
-
-        /// Getters
-
-        /// The ID number for this vertex.
-        int ident() const { return m_ident; }
-
-        /// The ID of the associated cluster
-        int cluster_id() const { return m_cluster_id; }
-         
-        /// Chainable setters
-        Identities& ident(int id) { m_ident = id; return *this; }
-        Identities& cluster_id(int cid) { m_cluster_id = cid; return *this; }
-
-    private:
-
-        int m_ident{-1};
-        int m_cluster_id{-1};
-
-    };
-
     /// Transform an object-with-point to a point.
     template<typename OWP>
     Point owp_to_point(const OWP& owp) { return owp.point; };
