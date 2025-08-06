@@ -177,6 +177,15 @@ namespace WireCell::Clus::Facade {
                                 const Tree::Scope& scope,
                                 const double dis_cut =  5*units::cm);
 
+    // Function to compute wire plane parameters for clustering algorithms
+    void compute_wireplane_params(
+        const std::set<WirePlaneId>& wpids,
+        const IDetectorVolumes::pointer dv,
+        std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
+        std::map<WirePlaneId, std::pair<geo_point_t, double>>& wpid_U_dir,
+        std::map<WirePlaneId, std::pair<geo_point_t, double>>& wpid_V_dir,
+        std::map<WirePlaneId, std::pair<geo_point_t, double>>& wpid_W_dir,
+        std::set<int>& apas);
 
     // Calculate PCA direction for a set of points around a center point
     geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points);
