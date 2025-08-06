@@ -62,7 +62,44 @@ namespace WireCell::Clus {
          */
         std::map<int, IAnodePlane::pointer> get_all_anodes() const;
 
-        
+        /**
+         * Get channel number for a specific wire location
+         * Uses hybrid caching for optimal performance
+         * @param apa APA number
+         * @param face Face number (0 or 1)
+         * @param plane Plane index (0=U, 1=V, 2=W typically)  
+         * @param wire Wire index within the plane
+         * @return Channel number, or -1 if invalid
+         */
+        int get_channel_for_wire(int apa, int face, int plane, int wire) const;
+
+        /**
+         * Get all wires that belong to a specific channel
+         * @param apa APA number
+         * @param channel_number Channel identifier
+         * @return Vector of wire information (face, plane, wire_index)
+         */
+        std::vector<std::tuple<int, int, int>> get_wires_for_channel(int apa, int channel_number) const;
+
+        /**
+         * Clear all caches (useful for memory management)
+         */
+        void clear_cache() const;
+
+        /**
+         * Get cache statistics for monitoring/debugging
+         */
+        struct CacheStats {
+            size_t hot_planes_count;
+            size_t cold_entries_count;
+            size_t total_lookups;
+            size_t hot_hits;
+            size_t cold_hits;
+            double hit_rate() const { 
+                return total_lookups > 0 ? (double)(hot_hits + cold_hits) / total_lookups : 0.0; 
+            }
+        };
+        CacheStats get_cache_stats() const;
 
     private:
         FittingType m_fitting_type;
@@ -74,6 +111,32 @@ namespace WireCell::Clus {
         // input segment
         std::set<PR::Segment*> m_segments;
 
+        // =====================================================================
+        // HYBRID CACHE IMPLEMENTATION
+        // =====================================================================
+        
+        // Key types for caching
+        using PlaneKey = std::tuple<int, int, int>;    // (apa, face, plane)
+        using WireKey = std::tuple<int, int, int, int>; // (apa, face, plane, wire)
+        
+        // Hot cache: frequently accessed plane mappings (full plane cached)
+        mutable std::map<PlaneKey, std::vector<int>> m_hot_cache;
+        
+        // Cold cache: individual wire lookups
+        mutable std::map<WireKey, int> m_cold_cache;
+        
+        // Access frequency tracking
+        mutable std::map<PlaneKey, int> m_access_count;
+        
+        // Cache statistics
+        mutable CacheStats m_cache_stats = {0, 0, 0, 0, 0};
+        
+        // Configuration
+        static constexpr int HOT_THRESHOLD = 50; // Access count to promote to hot cache
+        
+        // Helper methods
+        void cache_entire_plane(int apa, int face, int plane) const;
+        int fetch_channel_from_anode(int apa, int face, int plane, int wire) const;
     };
 
 } // namespace WireCell::Clus
