@@ -3,6 +3,7 @@
 
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellClus/PRGraph.h"
 
 namespace WireCell::Clus {
 
@@ -25,24 +26,8 @@ namespace WireCell::Clus {
          * Constructor
          * @param fitting_type The type of fitting to perform (single or multiple tracks)
          */
-        explicit TrackFitting(FittingType fitting_type = FittingType::Single);
-        
+        explicit TrackFitting(FittingType fitting_type = FittingType::Single);   
         virtual ~TrackFitting() = default;
-
-        /**
-         * Perform track fitting on a single cluster
-         * @param cluster The cluster to perform track fitting on
-         * @return true if fitting was successful, false otherwise
-         */
-        bool fit_track(Facade::Cluster& cluster) const;
-
-        /**
-         * Perform track fitting on multiple clusters at once
-         * @param clusters Vector of clusters to perform track fitting on
-         * @return number of successfully fitted tracks
-         */
-        size_t fit_tracks(std::vector<Facade::Cluster*>& clusters) const;
-
 
         /**
          * Set the fitting type
@@ -56,9 +41,23 @@ namespace WireCell::Clus {
          */
         FittingType get_fitting_type() const { return m_fitting_type; }
 
+        // after the first round of track fitting, adjust the rough path ...
+        WireCell::Point adjust_rough_path(PR::Segment& segment);
+
+        // collect charge
+        void collect_charge(double dis_cut, double range_cut);
+
+
     private:
         FittingType m_fitting_type;
-       
+        
+        // cluster and grouping, CTPC is from m_grouping ...
+        Facade::Grouping* m_grouping{nullptr};
+        std::vector<Facade::Cluster*> m_clusters;
+
+        // input segment
+        std::vector<PR::Segment> m_segments;
+
     };
 
 } // namespace WireCell::Clus

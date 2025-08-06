@@ -568,7 +568,6 @@ private:
         // Optional: Print path info for debugging
         // std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
 
-        bool fitting_success = m_track_fitter.fit_track(cluster);
 
 
         // missing check other tracks ...
