@@ -73,6 +73,28 @@ public:
 private:
     std::string m_grouping_name{"live"};
 
+    std::vector<size_t> do_rough_path(const Cluster& cluster,geo_point_t& first_point, geo_point_t& last_point) const{
+         // 1. Get Steiner point cloud and graph
+        // const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        // const auto& steiner_graph = cluster.get_graph("steiner_graph");
+        
+        // 2. Find the closest point indices in the Steiner point cloud
+  
+        // Find closest indices in the steiner point cloud
+        auto first_knn_results = cluster.kd_steiner_knn(1, first_point, "steiner_pc");
+        auto last_knn_results = cluster.kd_steiner_knn(1, last_point, "steiner_pc");
+        
+        auto first_index = first_knn_results[0].first;  // Get the index from the first result
+        auto last_index = last_knn_results[0].first;   // Get the index from the first result
+ 
+        // 4. Use Steiner graph to find the shortest path
+        const std::vector<size_t>& path_indices = 
+            cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
+            
+        return path_indices;
+    }
+
+    
    
     /**
      * Check if a cluster meets the conditions for STM (Short Track Muon) tagging.
@@ -479,7 +501,17 @@ private:
             }
         }
 
-        // std::cout << first_wcp << " " << last_wcp << std::endl;
+
+        // std::cout << "STMTagger tracking " << first_wcp << " " << last_wcp << std::endl;
+
+        // temporary tracking implementation ...
+        auto path_indices = do_rough_path(cluster, first_wcp, last_wcp);
+        // Optional: Print path info for debugging
+        std::cout << "TaggerCheckSTM: Steiner path: " << path_indices.size() << " points from index " << first_wcp << " " << last_wcp << std::endl;
+
+
+        // missing check other tracks ...
+
 
         return false;
     }
