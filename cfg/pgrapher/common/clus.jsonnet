@@ -91,15 +91,6 @@ local wc = import "wirecell.jsonnet";
             },
         },
 
-        do_tracking(name="", fitting_type=["single"]) :: {
-            type: "TrackFitting",
-            name: prefix + name,
-            data: {
-                grouping: "live",           // Which grouping to process
-                fitting_type: fitting_type,
-            },
-        },
-
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",
             name: prefix+name,

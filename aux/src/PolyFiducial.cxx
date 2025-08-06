@@ -127,9 +127,9 @@ public:
                 slab.bb(p2);
                 m_bb(slab.bb.bounds());
                 slab.a.push_back(p1[j]);
-                slab.b.push_back(p1[k]);
-                m_slabs.push_back(slab);
+                slab.b.push_back(p1[k]);               
             }
+            m_slabs.push_back(slab);
         }
     }
 
@@ -139,7 +139,7 @@ public:
         if (! m_bb.inside(point)) return false;
 
         for (const auto& slab : m_slabs) {
-            if (slab.inside(point)) return true;
+            if (slab.inside(point, m_axis)) return true;
         }
         return false;
     }

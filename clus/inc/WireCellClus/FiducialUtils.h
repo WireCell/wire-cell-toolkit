@@ -70,18 +70,16 @@ namespace WireCell::Clus {
 
         // Query methods
 
-        bool inside_fiducial_volume(const Point& p, double offset_x=0,
+        bool inside_fiducial_volume(const Point& p,
                                     const std::vector<double>& tolerance_vec = {}) const;
 
-        bool inside_dead_region(const Point& p) const;
+        // use live_grouping's CTPC information to do the check ...
+        bool inside_dead_region(const Point& p_raw, const int apa, const int face, const int minimal_views = 2) const;
 
-        bool check_dead_volume(const Point& p, const Vector& dir,
-                               double step = 1.0*units::cm, double offset_x=0) const;
+        bool check_dead_volume(const Facade::Cluster& main_cluster, const Point& p, const Vector& dir, double step = 1.0*units::cm, const double cut_ratio = 0.81, const int cut_value = 4) const;
 
-        bool check_signal_processing(const Point& p, const Vector& dir,
-                                     double step = 1.0*units::cm, double offset_x=0) const;
+        bool check_signal_processing(const Facade::Cluster& main_cluster, const Point& p, const Vector& dir, double step = 1.0*units::cm, const double cut_ratio = 0.8, const int cut_value = 5) const;
 
-        bool check_other_tracks(Facade::Cluster& main_cluster, double offset_x) const;
 
 
 
@@ -104,10 +102,8 @@ namespace WireCell::Clus {
         // start by clearing the InternalData via this default construction.
         struct InternalData {
 
-            // FIXME: this is just an initial place holder to show how the
-            // internal data is handled in the implementation.  Delete this
-            // "dummy" attribute once some "real" internal data is added.
-            size_t dummy{0};
+            // save live grouping ...
+            Facade::Grouping* live;
         };
         InternalData m_internal;
     };
