@@ -49,6 +49,20 @@ namespace WireCell::Clus {
         // collect charge
         void collect_charge(double dis_cut, double range_cut);
 
+        /**
+         * Get anode for a specific APA identifier
+         * @param apa_ident APA identifier (typically same as APA number)
+         * @return Pointer to IAnodePlane, or nullptr if not found
+         */
+        IAnodePlane::pointer get_anode(int apa_ident = 0) const;
+
+        /**
+         * Get all available anodes from the grouping
+         * @return Map of APA identifier to anode pointer
+         */
+        std::map<int, IAnodePlane::pointer> get_all_anodes() const;
+
+        
 
     private:
         FittingType m_fitting_type;
