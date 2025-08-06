@@ -41,6 +41,8 @@ namespace WireCell::Clus {
          */
         FittingType get_fitting_type() const { return m_fitting_type; }
 
+        void add_segment(PR::Segment* segment); 
+
         // after the first round of track fitting, adjust the rough path ...
         WireCell::Point adjust_rough_path(PR::Segment& segment);
 
@@ -53,10 +55,10 @@ namespace WireCell::Clus {
         
         // cluster and grouping, CTPC is from m_grouping ...
         Facade::Grouping* m_grouping{nullptr};
-        std::vector<Facade::Cluster*> m_clusters;
+        std::set<Facade::Cluster*> m_clusters;
 
         // input segment
-        std::vector<PR::Segment> m_segments;
+        std::set<PR::Segment*> m_segments;
 
     };
 

@@ -14,6 +14,14 @@ TrackFitting::TrackFitting(FittingType fitting_type)
 
 }
 
+void TrackFitting::add_segment(PR::Segment* segment){
+    m_segments.insert(segment);
+    m_clusters.insert(segment->cluster());
+    m_grouping = segment->cluster()->grouping();
+
+    // std::cout << "TrackFitting: Added segment with " << segment->wcpts().size() << " points." << std::endl;
+}
+
 geo_point_t TrackFitting::adjust_rough_path(PR::Segment& segment){
     return geo_point_t(0,0,0);
 }
