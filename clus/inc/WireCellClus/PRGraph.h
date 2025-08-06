@@ -112,6 +112,9 @@ namespace WireCell::Clus::PR {
     ///
     /// The pair will be nullptr if segment edge not in graph.
     ///
+    /// The two Vertex objects are those associated with the source/target nodes
+    /// of the segment's edge.  The pair is ordered.  The first Vertex is the
+    /// one with a "wcpoint" closest to the segment's initial "wcpoint".
     std::pair<VertexPtr, VertexPtr> find_endpoints(Graph& graph, SegmentPtr seg);
 
     

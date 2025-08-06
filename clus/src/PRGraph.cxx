@@ -77,7 +77,18 @@ namespace WireCell::Clus::PR {
         auto [ed2,ingraph] = boost::edge(vd1, vd2, graph);
         if (!ingraph)  { return std::pair<VertexPtr, VertexPtr>{}; }
 
-        return std::make_pair(graph[vd1].vertex, graph[vd2].vertex);
+        auto vtx1 = graph[vd1].vertex;
+        auto vtx2 = graph[vd2].vertex;
+
+        auto ept = seg->wcpts().first().point;
+
+        double d1 = ray_length(Ray{vtx1->wcpt().point, ept});
+        double d2 = ray_length(Ray{vtx2->wcpt().point, ept});
+
+        if (d1 < d2) {
+            return std::make_pair(vtx1, vtx2);
+        }
+        return std::make_pair(vtx2, vtx1);        
     }
 
 }
