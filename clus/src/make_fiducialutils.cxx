@@ -68,8 +68,8 @@ public:
         std::cout << "Add FiducialUtils to grouping" << std::endl;
         auto fu = std::make_shared<FiducialUtils>(FiducialUtils::StaticData{m_dv, m_fiducial, m_pcts});
 
-        // // Feed the dynamic data (live and dead groupings)
-        // fu->feed_dynamic(FiducialUtils::DynamicData{*live_grouping, *dead_grouping});
+        // Feed the dynamic data (live and dead groupings)
+        fu->feed_dynamic(FiducialUtils::DynamicData{*live_grouping, *dead_grouping});
         
         // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, 10*units::cm));
 
