@@ -127,20 +127,20 @@ private:
         const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
         
         // Add the two boundary points as additional extreme point groups
-        {
-            std::vector<geo_point_t> temp_wcps;
-            geo_point_t boundary_point(x_coords[boundary_indices.first], 
+        geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
                                      y_coords[boundary_indices.first], 
                                      z_coords[boundary_indices.first]);
-            temp_wcps.push_back(boundary_point);
+        geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
+                                     y_coords[boundary_indices.second], 
+                                     z_coords[boundary_indices.second]);
+        {
+            std::vector<geo_point_t> temp_wcps;
+            temp_wcps.push_back(boundary_point_first);
             out_vec_wcps.push_back(temp_wcps);
         }
         {
-            std::vector<geo_point_t> temp_wcps;
-            geo_point_t boundary_point(x_coords[boundary_indices.second], 
-                                     y_coords[boundary_indices.second], 
-                                     z_coords[boundary_indices.second]);
-            temp_wcps.push_back(boundary_point);
+            std::vector<geo_point_t> temp_wcps;          
+            temp_wcps.push_back(boundary_point_second);
             out_vec_wcps.push_back(temp_wcps);
         }
 
@@ -250,188 +250,236 @@ private:
             }
         }
 
-        // // Determine which boundary points are exit candidates
-        // for (size_t i = 0; i != candidate_exit_wcps.size(); i++) {
-        //     double dis1 = (candidate_exit_wcps.at(i) - boundary_wcps.first).magnitude();
-        //     double dis2 = (candidate_exit_wcps.at(i) - boundary_wcps.second).magnitude();
-            
-        //     // Check if essentially one of the extreme points
-        //     if (dis1 < dis2) {
-        //         if (dis1 < 1.0*units::cm) temp_set.insert(0);
-        //     } else {
-        //         if (dis2 < 1.0*units::cm) temp_set.insert(1);
-        //     }
-        // }
+        // Determine which boundary points are exit candidates
+        for (size_t i = 0; i != candidate_exit_wcps.size(); i++) {
+            double dis1 = (candidate_exit_wcps.at(i) - boundary_point_first).magnitude();
+            double dis2 = (candidate_exit_wcps.at(i) - boundary_point_second).magnitude();
 
-        // // Protection against two end point situation
-        // if (temp_set.size() == 2) {
-        //     geo_point_t tp1 = boundary_wcps.first;
-        //     geo_point_t tp2 = boundary_wcps.second;
-            
-        //     temp_set.clear();
-            
-        //     if (!fiducial_utils->inside_fiducial_volume(tp1)) temp_set.insert(0);
-        //     if (!fiducial_utils->inside_fiducial_volume(tp2)) temp_set.insert(1);
-        //     if (temp_set.size() == 0) {
-        //         temp_set.insert(0);
-        //         temp_set.insert(1);
-        //     }
-        // }
+            // Check if essentially one of the extreme points
+            if (dis1 < dis2) {
+                if (dis1 < 1.0*units::cm) temp_set.insert(0);
+            } else {
+                if (dis2 < 1.0*units::cm) temp_set.insert(1);
+            }
+        }
 
-        // // Second round check if no candidates found
-        // if (temp_set.size() == 0) {
-        //     candidate_exit_wcps.clear();
+        // Protection against two end point situation
+        if (temp_set.size() == 2) {
+            geo_point_t tp1 = boundary_point_first;
+            geo_point_t tp2 = boundary_point_second;
             
-        //     // Repeat the process with flag_cosmic = false
-        //     boundary_wcps = cluster.get_two_boundary_wcps();
-        //     boundary_indices = cluster.get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
-        //     out_vec_wcps = cluster.get_extreme_wcps();
+            temp_set.clear();
             
-        //     // Add boundary points again
-        //     {
-        //         std::vector<geo_point_t> temp_wcps;
-        //         temp_wcps.push_back(boundary_wcps.first);
-        //         out_vec_wcps.push_back(temp_wcps);
-        //     }
-        //     {
-        //         std::vector<geo_point_t> temp_wcps;
-        //         temp_wcps.push_back(boundary_wcps.second);
-        //         out_vec_wcps.push_back(temp_wcps);
-        //     }
+            if (!fiducial_utils->inside_fiducial_volume(tp1)) temp_set.insert(0);
+            if (!fiducial_utils->inside_fiducial_volume(tp2)) temp_set.insert(1);
+            if (temp_set.size() == 0) {
+                temp_set.insert(0);
+                temp_set.insert(1);
+            }
+        }
+
+        // Second round check if no candidates found
+        if (temp_set.size() == 0) {
+            candidate_exit_wcps.clear();
             
-        //     // Repeat boundary check (same logic as above)
-        //     for (size_t i = 0; i != out_vec_wcps.size(); i++) {
-        //         bool flag_save = false;
+            // Repeat the process with flag_cosmic = false
+            boundary_indices = cluster.get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+            out_vec_wcps = cluster.get_extreme_wcps();
+            
+            // Get the steiner_pc to access actual points using boundary_indices
+            const auto& steiner_pc = cluster.get_pc("steiner_pc");
+            const auto& coords = cluster.get_default_scope().coords;
+            const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+            const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+            const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+            
+            // Add the two boundary points as additional extreme point groups
+            geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
+                                        y_coords[boundary_indices.first], 
+                                        z_coords[boundary_indices.first]);
+            geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
+                                        y_coords[boundary_indices.second], 
+                                        z_coords[boundary_indices.second]);
+
+            // Add boundary points again
+            {
+                std::vector<geo_point_t> temp_wcps;
+                temp_wcps.push_back(boundary_point_first);
+                out_vec_wcps.push_back(temp_wcps);
+            }
+            {
+                std::vector<geo_point_t> temp_wcps;
+                temp_wcps.push_back(boundary_point_second);
+                out_vec_wcps.push_back(temp_wcps);
+            }
+            
+            // Repeat boundary check (same logic as above)
+            for (size_t i = 0; i != out_vec_wcps.size(); i++) {
+                bool flag_save = false;
                 
-        //         for (size_t j = 0; j != out_vec_wcps.at(i).size(); j++) {
-        //             geo_point_t p1 = out_vec_wcps.at(i).at(j);
+                for (size_t j = 0; j != out_vec_wcps.at(i).size(); j++) {
+                    geo_point_t p1 = out_vec_wcps.at(i).at(j);
                     
-        //             if (!fiducial_utils->inside_fiducial_volume(p1)) {
-        //                 candidate_exit_wcps.push_back(out_vec_wcps.at(i).at(0));
-        //                 flag_save = true;
-        //                 break;
-        //             }
-        //         }
+                    if (!fiducial_utils->inside_fiducial_volume(p1)) {
+                        candidate_exit_wcps.push_back(out_vec_wcps.at(i).at(0));
+                        flag_save = true;
+                        break;
+                    }
+                }
                 
-        //         if (!flag_save) {
-        //             geo_point_t p1 = out_vec_wcps.at(i).at(0);
-        //             geo_vector_t dir_vec = cluster.VHoughTrans(p1, 30*units::cm);
-        //             dir_vec = dir_vec * (-1.0);
+                if (!flag_save) {
+                    geo_point_t p1 = out_vec_wcps.at(i).at(0);
+                    geo_vector_t dir_vec = cluster.vhough_transform(p1, 30*units::cm);
+                    dir_vec = dir_vec * (-1.0);
                     
-        //             geo_point_t dir(dir_vec.x(), dir_vec.y(), dir_vec.z());
-        //             geo_point_t dir_1(0, dir.y(), dir.z());
+                    geo_point_t dir(dir_vec.x(), dir_vec.y(), dir_vec.z());
+                    geo_point_t dir_1(0, dir.y(), dir.z());
                     
-        //             double angle1 = acos(dir_1.dot(U_dir) / (dir_1.magnitude() * U_dir.magnitude()));
-        //             geo_point_t tempV1(fabs(dir.x()), 
-        //                             sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle1), 0);
-        //             double angle1_1 = acos(tempV1.dot(drift_dir) / (tempV1.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
+                    // get apa and face from the point p1 ... 
+                    auto wpid_p1 = m_dv->contained_by(p1);
+                    // Fill drift_dir, U_dir, V_dir, W_dir from the maps using wpid_p1
+                    auto it_params = wpid_params.find(wpid_p1);
+                    if (it_params != wpid_params.end()) {
+                        drift_dir = std::get<0>(it_params->second);
+                    } else {
+                        std::cerr << "TaggerCheckSTM: wpid_params not found for wpid_p1" << std::endl;
+                    }
+
+                    auto it_U = wpid_U_dir.find(wpid_p1);
+                    if (it_U != wpid_U_dir.end()) {
+                        U_dir = it_U->second.first;
+                    } else {
+                        std::cerr << "TaggerCheckSTM: wpid_U_dir not found for wpid_p1" << std::endl;
+                    }
+
+                    auto it_V = wpid_V_dir.find(wpid_p1);
+                    if (it_V != wpid_V_dir.end()) {
+                        V_dir = it_V->second.first;
+                    } else {
+                        std::cerr << "TaggerCheckSTM: wpid_V_dir not found for wpid_p1" << std::endl;
+                    }
+
+                    auto it_W = wpid_W_dir.find(wpid_p1);
+                    if (it_W != wpid_W_dir.end()) {
+                        W_dir = it_W->second.first;
+                    } else {
+                        std::cerr << "TaggerCheckSTM: wpid_W_dir not found for wpid_p1" << std::endl;
+                    }
+
+
+                    double angle1 = acos(dir_1.dot(U_dir) / (dir_1.magnitude() * U_dir.magnitude()));
+                    geo_point_t tempV1(fabs(dir.x()), 
+                                    sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle1), 0);
+                    double angle1_1 = acos(tempV1.dot(drift_dir) / (tempV1.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
                     
-        //             double angle2 = acos(dir_1.dot(V_dir) / (dir_1.magnitude() * V_dir.magnitude()));
-        //             geo_point_t tempV2(fabs(dir.x()), 
-        //                             sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle2), 0);
-        //             double angle2_1 = acos(tempV2.dot(drift_dir) / (tempV2.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
+                    double angle2 = acos(dir_1.dot(V_dir) / (dir_1.magnitude() * V_dir.magnitude()));
+                    geo_point_t tempV2(fabs(dir.x()), 
+                                    sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle2), 0);
+                    double angle2_1 = acos(tempV2.dot(drift_dir) / (tempV2.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
                     
-        //             double angle3 = acos(dir_1.dot(W_dir) / (dir_1.magnitude() * W_dir.magnitude()));
-        //             geo_point_t tempV3(fabs(dir.x()), 
-        //                             sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle3), 0);
-        //             double angle3_1 = acos(tempV3.dot(drift_dir) / (tempV3.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
+                    double angle3 = acos(dir_1.dot(W_dir) / (dir_1.magnitude() * W_dir.magnitude()));
+                    geo_point_t tempV3(fabs(dir.x()), 
+                                    sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle3), 0);
+                    double angle3_1 = acos(tempV3.dot(drift_dir) / (tempV3.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
                     
-        //             if ((angle1_1 < 10 || angle2_1 < 10 || angle3_1 < 5)) {
-        //                 if (!fiducial_utils->check_signal_processing(cluster, p1, dir_vec, 1*units::cm)) {
-        //                     flag_save = true;
-        //                     candidate_exit_wcps.push_back(out_vec_wcps.at(i).at(0));
-        //                 }
-        //             }
+                    if ((angle1_1 < 10 || angle2_1 < 10 || angle3_1 < 5)) {
+                        if (!fiducial_utils->check_signal_processing(cluster, p1, dir_vec, 1*units::cm)) {
+                            flag_save = true;
+                            candidate_exit_wcps.push_back(out_vec_wcps.at(i).at(0));
+                        }
+                    }
                     
-        //             if (!flag_save) {
-        //                 double main_angle = acos(dir_vec.dot(main_dir) / (dir_vec.magnitude() * main_dir.magnitude()));
-        //                 double angle_deg = fabs((3.1415926/2. - main_angle) / 3.1415926 * 180.);
+                    if (!flag_save) {
+                        double main_angle = acos(dir_vec.dot(main_dir) / (dir_vec.magnitude() * main_dir.magnitude()));
+                        double angle_deg = fabs((3.1415926/2. - main_angle) / 3.1415926 * 180.);
                         
-        //                 if (angle_deg > 60) {
-        //                     if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)) {
-        //                         flag_save = true;
-        //                         candidate_exit_wcps.push_back(out_vec_wcps.at(i).at(0));
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     }
+                        if (angle_deg > 60) {
+                            if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)) {
+                                flag_save = true;
+                                candidate_exit_wcps.push_back(out_vec_wcps.at(i).at(0));
+                            }
+                        }
+                    }
+                }
+            }
             
-        //     // Determine boundary points again
-        //     for (size_t i = 0; i != candidate_exit_wcps.size(); i++) {
-        //         double dis1 = (candidate_exit_wcps.at(i) - boundary_wcps.first).magnitude();
-        //         double dis2 = (candidate_exit_wcps.at(i) - boundary_wcps.second).magnitude();
-                
-        //         if (dis1 < dis2) {
-        //             if (dis1 < 1.0*units::cm) temp_set.insert(0);
-        //         } else {
-        //             if (dis2 < 1.0*units::cm) temp_set.insert(1);
-        //         }
-        //     }
-            
-        //     // Protection against two end point situation
-        //     if (temp_set.size() == 2) {
-        //         geo_point_t tp1 = boundary_wcps.first;
-        //         geo_point_t tp2 = boundary_wcps.second;
-                
-        //         temp_set.clear();
-                
-        //         if (!fiducial_utils->inside_fiducial_volume(tp1)) temp_set.insert(0);
-        //         if (!fiducial_utils->inside_fiducial_volume(tp2)) temp_set.insert(1);
-        //         if (temp_set.size() == 0) {
-        //             temp_set.insert(0);
-        //             temp_set.insert(1);
-        //         }
-        //     }
-        // }
+            // Determine boundary points again
+            for (size_t i = 0; i != candidate_exit_wcps.size(); i++) {
+                double dis1 = (candidate_exit_wcps.at(i) - boundary_point_first).magnitude();
+                double dis2 = (candidate_exit_wcps.at(i) - boundary_point_second).magnitude();
 
-        // // Fully contained, so not a STM
-        // if (candidate_exit_wcps.size() == 0) {
-        //     std::cout << "Mid Point: A" << std::endl;
-        //     return false;
-        // }
+                if (dis1 < dis2) {
+                    if (dis1 < 1.0*units::cm) temp_set.insert(0);
+                } else {
+                    if (dis2 < 1.0*units::cm) temp_set.insert(1);
+                }
+            }
+            
+            // Protection against two end point situation
+            if (temp_set.size() == 2) {
+                geo_point_t tp1 = boundary_point_first;
+                geo_point_t tp2 = boundary_point_second;
+
+                temp_set.clear();
+                
+                if (!fiducial_utils->inside_fiducial_volume(tp1)) temp_set.insert(0);
+                if (!fiducial_utils->inside_fiducial_volume(tp2)) temp_set.insert(1);
+                if (temp_set.size() == 0) {
+                    temp_set.insert(0);
+                    temp_set.insert(1);
+                }
+            }
+        }
+
+        // Fully contained, so not a STM
+        if (candidate_exit_wcps.size() == 0) {
+            std::cout << "STMTagger: Mid Point: A" << std::endl;
+            return false;
+        }
 
         // std::cout << "end_point: " << temp_set.size() << " " << candidate_exit_wcps.size() << std::endl;
 
-        // // Determine first and last points for further analysis
-        // geo_point_t first_wcp, last_wcp;
-        // bool flag_double_end = false;
+        // Determine first and last points for further analysis
+        geo_point_t first_wcp, last_wcp;
+        bool flag_double_end = false;
 
-        // if (temp_set.size() != 0) {
-        //     if (*temp_set.begin() == 0) {
-        //         first_wcp = boundary_wcps.first;
-        //         last_wcp = boundary_wcps.second;
-        //     } else {
-        //         first_wcp = boundary_wcps.second;
-        //         last_wcp = boundary_wcps.first;
-        //     }
-        //     if (temp_set.size() == 2) flag_double_end = true;
-        // } else {
-        //     if (candidate_exit_wcps.size() == 1) {
-        //         first_wcp = candidate_exit_wcps.at(0);
+        if (temp_set.size() != 0) {
+            if (*temp_set.begin() == 0) {
+                first_wcp = boundary_point_first;
+                last_wcp = boundary_point_second;
+            } else {
+                first_wcp = boundary_point_second;
+                last_wcp = boundary_point_first;
+            }
+            if (temp_set.size() == 2) flag_double_end = true;
+        } else {
+            if (candidate_exit_wcps.size() == 1) {
+                first_wcp = candidate_exit_wcps.at(0);
+
+                geo_vector_t dir1 = boundary_point_first - candidate_exit_wcps.at(0);
+                geo_vector_t dir2 = boundary_point_second - candidate_exit_wcps.at(0);
+                double dis1 = dir1.magnitude();
+                double dis2 = dir2.magnitude();
                 
-        //         geo_vector_t dir1 = boundary_wcps.first - candidate_exit_wcps.at(0);
-        //         geo_vector_t dir2 = boundary_wcps.second - candidate_exit_wcps.at(0);
-        //         double dis1 = dir1.magnitude();
-        //         double dis2 = dir2.magnitude();
+                double angle_between = acos(dir1.dot(dir2) / (dis1 * dis2));
                 
-        //         double angle_between = acos(dir1.dot(dir2) / (dis1 * dis2));
-                
-        //         if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
-        //             std::cout << "Mid Point: B" << std::endl;
-        //             return false;
-        //         } else {
-        //             if (dis1 < dis2) {
-        //                 last_wcp = boundary_wcps.second;
-        //             } else {
-        //                 last_wcp = boundary_wcps.first;
-        //             }
-        //         }
-        //     } else {
-        //         std::cout << "Mid Point: C" << std::endl;
-        //         return false;
-        //     }
-        // }
+                if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
+                    std::cout << "Mid Point: B" << std::endl;
+                    return false;
+                } else {
+                    if (dis1 < dis2) {
+                        last_wcp = boundary_point_second;
+                    } else {
+                        last_wcp = boundary_point_first;
+                    }
+                }
+            } else {
+                std::cout << "Mid Point: C" << std::endl;
+                return false;
+            }
+        }
+
+        // std::cout << first_wcp << " " << last_wcp << std::endl;
 
         return false;
     }
