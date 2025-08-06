@@ -55,7 +55,10 @@ namespace WireCell::Clus {
     bool FiducialUtils::inside_fiducial_volume(const Point& p, 
                                                const std::vector<double>& tolerance_vec) const
     {
-        return tolerance_vec.empty();       // initial bogus query as place holder
+        std::cout << "Test: " << p << " " << m_sd.fiducial->contained(p) << std::endl;
+        return false;
+
+        //return tolerance_vec.empty();       // initial bogus query as place holder
     }
 
 

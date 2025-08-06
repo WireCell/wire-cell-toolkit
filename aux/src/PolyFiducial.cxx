@@ -139,7 +139,7 @@ public:
         if (! m_bb.inside(point)) return false;
 
         for (const auto& slab : m_slabs) {
-            if (slab.inside(point)) return true;
+            if (slab.inside(point, m_axis)) return true;
         }
         return false;
     }
