@@ -70,7 +70,7 @@ namespace WireCell::Clus::PR {
     /// to do both at once.
     template <typename... Args>
     SegmentPtr make_segment(Args&&... args) {
-        return std::make_shared<Vertex>(std::forward<Args>(args)...);
+        return std::make_shared<Segment>(std::forward<Args>(args)...);
     }
 
     /// Add a PR::Segment to the graph as an edge between the nodes of two

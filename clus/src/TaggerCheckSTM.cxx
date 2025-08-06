@@ -5,6 +5,9 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellClus/PRGraph.h"
+#include "WireCellClus/TrackFitting.h"  
+
 
 class TaggerCheckSTM;
 WIRECELL_FACTORY(TaggerCheckSTM, TaggerCheckSTM,
@@ -73,7 +76,9 @@ public:
 private:
     std::string m_grouping_name{"live"};
 
-    std::vector<size_t> do_rough_path(const Cluster& cluster,geo_point_t& first_point, geo_point_t& last_point) const{
+    TrackFitting m_track_fitter; 
+
+    std::vector<geo_point_t> do_rough_path(const Cluster& cluster,geo_point_t& first_point, geo_point_t& last_point) const{
          // 1. Get Steiner point cloud and graph
         // const auto& steiner_pc = cluster.get_pc("steiner_pc");
         // const auto& steiner_graph = cluster.get_graph("steiner_graph");
@@ -91,10 +96,64 @@ private:
         const std::vector<size_t>& path_indices = 
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
             
-        return path_indices;
+        std::vector<geo_point_t> path_points;
+        const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+        for (size_t idx : path_indices) {
+            path_points.emplace_back(x_coords[idx], y_coords[idx], z_coords[idx]);
+        }
+        return path_points;
     }
 
+    void create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
+                               const std::vector<geo_point_t>& path_points) const{
     
+        // // Step 1: Create trajectory graph
+        // PR::Graph trajectory_graph;
+        
+        // // Step 2: Create vertices (start and end points)
+        // auto start_vertex = PR::make_vertex(trajectory_graph);
+        // auto end_vertex = PR::make_vertex(trajectory_graph);
+        
+        // // Configure vertices with endpoints
+        // if (!path_points.empty()) {
+        //     auto first_point = path_points.front();
+        //     auto last_point = path_points.back();
+
+        //     // Create WCPoint objects from geo_point_t
+        //     PR::WCPoint start_wcpoint;
+        //     start_wcpoint.point = first_point;//WireCell::Point(first_point.x(), first_point.y(), first_point.z());
+        //     // start_wcpoint.index = 0;
+            
+        //     PR::WCPoint end_wcpoint;
+        //     end_wcpoint.point = last_point;//WireCell::Point(last_point.x(), last_point.y(), last_point.z());
+        //     // end_wcpoint.index = 1;
+
+        //     start_vertex->wcpt(start_wcpoint);
+        //     end_vertex->wcpt(end_wcpoint);
+        // }
+        
+        // Step 3: Prepare segment data
+        std::vector<PR::WCPoint> wcpoints;
+        
+        for (const auto& point : path_points) {
+            PR::WCPoint wcp;
+            wcp.point = point; 
+            wcpoints.push_back(wcp);
+        }
+        
+        // Step 4: Create segment connecting the vertices
+        auto segment = PR::make_segment();
+        
+        // Step 5: Configure the segment
+        segment->wcpts(wcpoints)
+            .dirsign(1); // direction: +1, 0, or -1
+                
+    }
    
     /**
      * Check if a cluster meets the conditions for STM (Short Track Muon) tagging.
@@ -103,7 +162,7 @@ private:
      * @param cluster The main cluster to analyze
      * @return true if cluster should be flagged as STM
      */
-    bool check_stm_conditions(const Cluster& cluster) const {
+    bool check_stm_conditions(Cluster& cluster) const {
         // get all the angles ...
 
         // Get all the wire plane IDs from the grouping
@@ -505,9 +564,11 @@ private:
         // std::cout << "STMTagger tracking " << first_wcp << " " << last_wcp << std::endl;
 
         // temporary tracking implementation ...
-        auto path_indices = do_rough_path(cluster, first_wcp, last_wcp);
+        auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
         // Optional: Print path info for debugging
-        std::cout << "TaggerCheckSTM: Steiner path: " << path_indices.size() << " points from index " << first_wcp << " " << last_wcp << std::endl;
+        // std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
+
+        bool fitting_success = m_track_fitter.fit_track(cluster);
 
 
         // missing check other tracks ...

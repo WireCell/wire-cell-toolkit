@@ -73,8 +73,6 @@ namespace WireCell::Clus::Facade {
         /// This flag is set by ClusteringTaggerCheckSTM algorithm when specific STM conditions are met
         inline const std::string STM = "STM";
 
-        // judge if we do tracking on a cluster 
-        inline const std::string do_tracking = "do_tracking";
     }
 
     struct ClusterLess {
