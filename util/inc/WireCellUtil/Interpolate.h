@@ -73,9 +73,40 @@ namespace WireCell {
     class irrterp {
         std::map<X, Y> points;
       public:
+
         using xtype = X;
         using ytype = Y;
 
+        
+        irrterp() = default;
+        // Copy constructor
+        irrterp(const irrterp& other) : points(other.points) {}
+
+        // Move constructor
+        irrterp(irrterp&& other) noexcept : points(std::move(other.points)) {}
+
+        // Copy assignment operator
+        irrterp& operator=(const irrterp& other) {
+            if (this != &other) {
+                points = other.points;
+            }
+            return *this;
+        }
+        // Move assignment operator
+        irrterp& operator=(irrterp&& other) noexcept {
+            if (this != &other) {
+                points = std::move(other.points);
+            }
+            return *this;
+        }
+
+        /// Construct with map copy
+        irrterp(const std::map<X, Y>& pts) : points(pts.begin(), pts.end) {}
+
+        /// Construct with map move
+        irrterp(std::map<X, Y>&& pts) : points(std::move(pts)) {}
+
+        /// Construct with map-like iterator range.
         template<typename PairIter>
         irrterp(PairIter beg, PairIter end) : points(beg, end) {}
 
@@ -167,6 +198,16 @@ namespace WireCell {
             }
             return out;
         }
+
+        // Public getter for testing
+        const std::map<X, Y>& get_points() const {
+            return points;
+        }
+
+        // Public setter for testing
+        void add_point(X x, Y y) {
+            points[x] = y;
+        }
     };
     
 
@@ -183,9 +224,62 @@ namespace WireCell {
      */
     template <typename X, typename Y = X>
     class linterp {
+        std::vector<Y> m_dat;
+        X m_le{0}, m_re{0}, m_step{0};
        public:
         using xtype = X;
         using ytype = Y;
+
+        // Default constructor
+        linterp() = default;
+
+        // Copy constructor
+        linterp(const linterp& other)
+            : m_dat(other.m_dat),
+              m_le(other.m_le),
+              m_re(other.m_re),
+              m_step(other.m_step) {}
+
+        // Move constructor
+        linterp(linterp&& other) noexcept
+            : m_dat(std::move(other.m_dat)),
+              m_le(std::move(other.m_le)),
+              m_re(std::move(other.m_re)),
+              m_step(std::move(other.m_step)) {
+            // For moved-from object, ensure primitives are in a valid, but unspecified state
+            // For doubles, often 0.0 or the moved value is fine.
+            // For std::vector, std::move leaves it in a valid, empty state.
+            other.m_le = X();
+            other.m_re = X();
+            other.m_step = X();
+        }
+
+        // Copy assignment operator
+        linterp& operator=(const linterp& other) {
+            if (this != &other) {
+                m_dat = other.m_dat;
+                m_le = other.m_le;
+                m_re = other.m_re;
+                m_step = other.m_step;
+            }
+            return *this;
+        }
+
+        // Move assignment operator
+        linterp& operator=(linterp&& other) noexcept {
+            if (this != &other) {
+                m_dat = std::move(other.m_dat);
+                m_le = std::move(other.m_le);
+                m_re = std::move(other.m_re);
+                m_step = std::move(other.m_step);
+
+                // For moved-from object, ensure primitives are in a valid, but unspecified state
+                other.m_le = X();
+                other.m_re = X();
+                other.m_step = X();
+            }
+            return *this;
+        }
 
         template <class Iterator>
         linterp(Iterator beg, Iterator end, X x0, X dx)
@@ -194,6 +288,26 @@ namespace WireCell {
           , m_step(dx)
         {
             m_re = m_le + m_step * (m_dat.size() - 1);
+        }
+
+
+        // Public getters for testing
+        const std::vector<Y>& get_data() const {
+            return m_dat;
+        }
+        
+        X get_le() const { return m_le; }
+        X get_re() const { return m_re; }
+        X get_step() const { return m_step; }
+
+        // Public setters for testing
+        void set_data(const std::vector<Y>& data) {
+            m_dat = data;
+        }
+        void set_params(X le, X re, X step) {
+            m_le = le;
+            m_re = re;
+            m_step = step;
         }
 
         Y operator()(X x) const
@@ -230,9 +344,6 @@ namespace WireCell {
             return out;
         }
 
-       private:
-        std::vector<Y> m_dat;
-        X m_le, m_re, m_step;
     };
 
     // Simpler interface to one-shot linear interpolation 

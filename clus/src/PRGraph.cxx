@@ -80,7 +80,7 @@ namespace WireCell::Clus::PR {
         auto vtx1 = graph[vd1].vertex;
         auto vtx2 = graph[vd2].vertex;
 
-        auto ept = seg->wcpts().first().point;
+        auto ept = seg->wcpts().front().point;
 
         double d1 = ray_length(Ray{vtx1->wcpt().point, ept});
         double d2 = ray_length(Ray{vtx2->wcpt().point, ept});
