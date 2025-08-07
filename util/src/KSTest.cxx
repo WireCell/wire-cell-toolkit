@@ -52,59 +52,7 @@ namespace WireCell {
     
     double KSTest1Sample::pvalue(double d_statistic, size_t n_samples) const
     {
-        if (n_samples == 0) {
-            throw std::invalid_argument("Number of samples (n_samples) cannot be zero for p-value calculation.");
-        }
-
-
-        // The scaled D-statistic, z = d * sqrt(N).
-        double z = d_statistic * std::sqrt(static_cast<double>(n_samples));
-        
-        // very small z (very good KS test) will lead to oscillations in the
-        // expansion.  We thus draw a line in the sand.  As a touch stone, for
-        // D=0.01 and N=100 the series produces p=1.0.  Yet even smaller D gives
-        // *smaller* p.
-        if (z < 0.1) {
-            return 1.0;
-        }
-
-        // Asymptotic formula for the p-value:
-        // P(D > d) = 2 * (e^-2z^2 - e^-8z^2 + e^-18z^2 - ...)
-        // The formula is P(D > d) = 2 * Sum_{k=1..inf} (-1)^{k-1} * exp(-2*k^2*z^2)
-        double pval = 0.0;
-        const int max_terms = 100; // Generous loop limit
-        const double tolerance = 1e-15; // Convergence tolerance
-
-        for (int k = 1; k <= max_terms; ++k) {
-            double exponent = -2.0 * k * k * z * z;
-
-            // Optimization: If the exponent is very large and negative, the term
-            // will underflow to zero, so we can stop the loop early.
-            if (exponent < -700.0) { // Approx. limit for a double
-                std::cerr << "KSTest1Sample::pvalue: tiny exponent, I quit early\n";
-                break;
-            }
-            
-            double term = std::exp(exponent);
-            if ((k % 2) == 0) { // If k is even
-                pval -= term;
-            } else { // If k is odd
-                pval += term;
-            }
-            
-            // Check for convergence based on the current term's magnitude
-            if (std::abs(term) < tolerance) {
-                std::cerr << "KSTest1Sample::pvalue: hit tolerance at k="<<k<<": term="<<term<<" tolerance=" << tolerance<<"\n";
-                break;
-            }
-        }
-        
-        pval *= 2.0;
-
-        // Clamp the p-value to [0, 1] to handle any small numerical inaccuracies.
-        return std::min(1.0, std::max(0.0, pval));
-
-
+        return ks_pvalue(d_statistic, n_samples);
     }
 
       
@@ -166,12 +114,20 @@ namespace WireCell {
             throw std::invalid_argument("Both sample sizes must be greater than zero for p-value calculation.");
         }
 
-        double n1 = static_cast<double>(ref_samples_.size());
-        double n2 = static_cast<double>(n_samples);
+        return ks_pvalue(d_statistic, n_samples, ref_samples_.size());
+    }
 
-        // Calculate the effective sample size for the two-sample KS test.
-        // This is used to scale the D statistic for comparison with the Kolmogorov distribution.
-        double n_eff = (n1 * n2) / (n1 + n2);
+    double ks_pvalue(double d_statistic, size_t ni1, size_t ni2)
+    {
+        if (ni1 == 0) {
+            throw std::invalid_argument("Test distribution can not have zero samples");
+        }
+
+        double n_eff = static_cast<double>(ni1);
+        if (ni2) {              // two sample case
+            double n2 = static_cast<double>(ni2);
+            n_eff = (n_eff * n2) / (n_eff + n2);
+        }
 
         // The scaled D-statistic, z = d * sqrt(N_eff).
         double z = d_statistic * std::sqrt(n_eff);
@@ -212,6 +168,7 @@ namespace WireCell {
 
         // Clamp the p-value to [0, 1] to handle any small numerical inaccuracies.
         return std::min(1.0, std::max(0.0, pval));
+
     }
 
 
@@ -253,6 +210,30 @@ namespace WireCell {
         }
     
         return cdf_values;
+    }
+
+    double kslike_compare(const std::vector<double>& test, const std::vector<double>& ref)
+    {
+        size_t npts = test.size();
+        if (npts != ref.size()) {
+            throw std::invalid_argument("The test and ref vectors must be same size.");
+        }
+
+        double sum1=0, sum2=0;
+        for (size_t ind=0; ind<npts; ++ind) {
+            sum1 += test[ind];
+            sum2 += ref[ind];
+        }
+        const double norm1 = 1.0/sum1;
+        const double norm2 = 1.0/sum2;
+
+        double dfmax = 0, rsum1=0, rsum2 = 0;
+        for (size_t ind=0; ind<npts; ++ind) {
+            rsum1 += norm1*test[ind];
+            rsum2 += norm2*ref[ind];
+            dfmax = std::max(dfmax, std::abs(rsum1-rsum2));
+        }
+        return dfmax;
     }
 
 }

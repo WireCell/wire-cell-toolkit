@@ -7,8 +7,17 @@
 
 // Define the CDF for a Gaussian distribution (standard normal)
 // CDF(x) = 0.5 * (1 + erf((x - mean) / (std_dev * sqrt(2))))
-double gaussian_cdf(double x, double mean, double std_dev) {
+static double gaussian_cdf(double x, double mean, double std_dev) {
     return 0.5 * (1.0 + std::erf((x - mean) / (std_dev * M_SQRT1_2))); // M_SQRT1_2 is 1/sqrt(2)
+}
+
+// A Gaussian PDF for demonstration
+static double gaussian_pdf(double x, double mean, double std_dev) {
+    const double xms = (x-mean)/std_dev;
+    return (1.0 / std::sqrt(2.0 * std_dev * M_PI)) * std::exp(-0.5 * xms * xms);
+}
+static double normal_pdf(double x) {
+    return (1.0 / std::sqrt(2.0 * M_PI)) * std::exp(-0.5 * x * x);
 }
 
 using spdlog::debug;
@@ -170,14 +179,10 @@ TEST_CASE("kstest two sample")
 
 }
 
-// A Gaussian PDF for demonstration
-double gaussian_pdf(double x) {
-    return (1.0 / std::sqrt(2.0 * M_PI)) * std::exp(-0.5 * x * x);
-}
 
 TEST_CASE("kstest discrete cdf")
 {
-auto my_pdf = gaussian_pdf;
+    auto my_pdf = normal_pdf;
     double start_coord = -5.0;
     double step_size = 0.01;
     size_t num_points = 1000;
@@ -190,6 +195,28 @@ auto my_pdf = gaussian_pdf;
     debug("Start coordinate: {}, Step size: {}", start_coord, step_size);
     debug("CDF at x={} is {}", start_coord + 1 * step_size, cdf[0]);
     debug("CDF at x={} is {}", start_coord + 500 * step_size, cdf[499]);
-    debug("CDF at x={} is {}", start_coord + num_points * step_size, cdf.back());    
+    debug("CDF at x={} is {}", start_coord + num_points * step_size, cdf.back());
 
+}
+
+TEST_CASE("kstest like")
+{
+    const size_t nsamples = 100;
+    std::vector<double> pdf1(nsamples), pdf2(nsamples), pdf3(nsamples);
+    const double step = 10.0/nsamples;
+    const double x0 = -10.0/(0.5*nsamples);
+    double mean1=0, mean2=0.001, mean3=2.0;
+    for (size_t ind=0; ind<nsamples; ++ind) {
+        const double x = x0 + ind*step;
+        pdf1[ind] = gaussian_pdf(x, mean1, 1.0);
+        pdf2[ind] = gaussian_pdf(x, mean2, 1.0);
+        pdf3[ind] = gaussian_pdf(x, mean3, 1.0);
+    }
+    const double d12 = kslike_compare(pdf1, pdf2);
+    const double p12 = ks_pvalue(d12, nsamples, nsamples);
+    const double d13 = kslike_compare(pdf1, pdf3);
+    const double p13 = ks_pvalue(d13, nsamples, nsamples);
+
+    debug("d12={}, p12={}", d12, p12);
+    debug("d13={}, p13={}", d13, p13);
 }

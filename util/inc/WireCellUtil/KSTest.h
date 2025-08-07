@@ -8,6 +8,34 @@
 namespace WireCell {
 
     /**
+     * @brief Return a KS-like "D" statistic comparing two discrete PDFs.
+     *
+     * If test/ref are not PDFs then the value returned can not be considered a
+     * KS test "D" statistic.  Otherwise, the value may be passed to ks_pvalue()
+     * to get a corresponding Kolmogorov probability value.
+     *
+     * This function mimics what ROOT's TH1::KolmogorovTest does with option
+     * "M".  
+     *
+     * @param test A regularly sampled test PDF.
+     * @param ref An identically sampled reference PDF.
+     */
+    double kslike_compare(const std::vector<double>& test, const std::vector<double>& ref);
+
+
+    /**
+     * @brief Calculate the P-value for a KS "D" statistic.
+     *
+     * Provide only n1 for "one sample KS" and both n1 and n2 for "two sample".
+     *
+     * @param n1 The number of samples in the test set.
+     * @param n2 The number of samples in the reference set, if two sample KS.
+     *
+     */
+    double ks_pvalue(double d_statistic, size_t n1, size_t n2=0);
+
+
+    /**
      * @brief Numerically integrates a PDF to produce a discrete CDF.
      *
      * This function calculates the CDF by taking the cumulative sum of the areas
@@ -27,6 +55,7 @@ namespace WireCell {
      */
     std::vector<double> discrete_cdf(std::function<double(double)> pdf,
                                      double start, double step, size_t n_samples);
+
 
 
     /** The one-sample Kolmogorov-Smirnov (KS) test for comparing a set of raw,
