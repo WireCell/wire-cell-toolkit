@@ -76,7 +76,7 @@ public:
 private:
     std::string m_grouping_name{"live"};
 
-    TrackFitting m_track_fitter; 
+    mutable TrackFitting m_track_fitter; 
 
     std::vector<geo_point_t> do_rough_path(const Cluster& cluster,geo_point_t& first_point, geo_point_t& last_point) const{
          // 1. Get Steiner point cloud and graph
@@ -109,34 +109,9 @@ private:
         return path_points;
     }
 
-    void create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
+    PR::Segment* create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
                                const std::vector<geo_point_t>& path_points) const{
     
-        // // Step 1: Create trajectory graph
-        // PR::Graph trajectory_graph;
-        
-        // // Step 2: Create vertices (start and end points)
-        // auto start_vertex = PR::make_vertex(trajectory_graph);
-        // auto end_vertex = PR::make_vertex(trajectory_graph);
-        
-        // // Configure vertices with endpoints
-        // if (!path_points.empty()) {
-        //     auto first_point = path_points.front();
-        //     auto last_point = path_points.back();
-
-        //     // Create WCPoint objects from geo_point_t
-        //     PR::WCPoint start_wcpoint;
-        //     start_wcpoint.point = first_point;//WireCell::Point(first_point.x(), first_point.y(), first_point.z());
-        //     // start_wcpoint.index = 0;
-            
-        //     PR::WCPoint end_wcpoint;
-        //     end_wcpoint.point = last_point;//WireCell::Point(last_point.x(), last_point.y(), last_point.z());
-        //     // end_wcpoint.index = 1;
-
-        //     start_vertex->wcpt(start_wcpoint);
-        //     end_vertex->wcpt(end_wcpoint);
-        // }
-        
         // Step 3: Prepare segment data
         std::vector<PR::WCPoint> wcpoints;
         
@@ -150,9 +125,9 @@ private:
         auto segment = PR::make_segment();
         
         // Step 5: Configure the segment
-        segment->wcpts(wcpoints)
-            .dirsign(1); // direction: +1, 0, or -1
-                
+        segment->wcpts(wcpoints).cluster(&cluster).dirsign(1); // direction: +1, 0, or -1
+               
+        return segment.get();
     }
    
     /**
@@ -568,8 +543,8 @@ private:
         // Optional: Print path info for debugging
         // std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
 
-        bool fitting_success = m_track_fitter.fit_track(cluster);
-
+        auto segment = create_segment_for_cluster(cluster, path_points);
+        m_track_fitter.add_segment(segment);
 
         // missing check other tracks ...
 
