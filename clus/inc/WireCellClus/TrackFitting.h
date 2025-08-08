@@ -47,7 +47,7 @@ namespace WireCell::Clus {
         WireCell::Point adjust_rough_path(PR::Segment& segment);
 
         // collect charge
-        void collect_charge(double dis_cut, double range_cut);
+        void prepare_data();
 
         /**
          * Get anode for a specific APA identifier

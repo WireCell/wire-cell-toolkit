@@ -815,7 +815,47 @@ void Grouping::clear_cache() const
     // This is utterly broken.  #381.
     // m_dead_winds.clear(); 
 
+
 }
+
+bool Grouping::is_blob_plane_bad(const Blob* blob, int plane, double cut_ratio) const {
+    const Cluster* cluster_ptr = blob->cluster();
+    if (!cluster_ptr) return true;
+    
+    const Grouping* grouping = cluster_ptr->grouping();
+    if (!grouping) return true;
+    
+    const auto wpid_val = blob->wpid();
+    const int apa = wpid_val.apa();
+    const int face = wpid_val.face();
+    const int time_slice = blob->slice_index_min();
+    
+    // Get wire ranges
+    int wire_min, wire_max;
+    switch (plane) {
+        case 0: wire_min = blob->u_wire_index_min(); wire_max = blob->u_wire_index_max(); break;
+        case 1: wire_min = blob->v_wire_index_min(); wire_max = blob->v_wire_index_max(); break;
+        case 2: wire_min = blob->w_wire_index_min(); wire_max = blob->w_wire_index_max(); break;
+        default: return true;
+    }
+    
+    if (wire_min >= wire_max) return true;
+    
+    // Count dead wires
+    int num_dead_wire = 0;
+    for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
+        if (grouping->is_wire_dead(apa, face, plane, wire_index, time_slice)) {
+            num_dead_wire++;
+            if (num_dead_wire > 1 && num_dead_wire >= cut_ratio * (wire_max - wire_min)) {
+                // If too many dead wires, consider the plane bad
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
 
 // Local Variables:
 // mode: c++

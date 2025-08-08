@@ -18,6 +18,7 @@
 #include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
+
 // forward declare
 namespace WireCell::Clus {
     class FiducialUtils;
@@ -196,6 +197,8 @@ namespace WireCell::Clus::Facade {
         // In Facade_Grouping.h, add to public section:
         double get_ave_3d_charge(const geo_point_t& point, const int apa, const int face, const double radius = 0.3 * units::cm) const;
         double get_ave_charge(const geo_point_t& point, const int apa, const int face, const int pind,  const double radius = 0.3 * units::cm) const;
+
+        bool is_blob_plane_bad(const Blob* blob, int plane, double cut_ratio = 0.5) const; 
 
         /// @brief Get ranges of dead channels that overlap with given time and channel window
         /// @param min_time Minimum time
