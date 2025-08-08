@@ -1,6 +1,7 @@
 #ifndef WIRECELL_CLUS_PR_SHOWER
 #define WIRECELL_CLUS_PR_SHOWER
 
+#include "WireCellClus/PRCommon.h"
 #include "WireCellClus/PRTrajectoryView.h"
 
 #include "WireCellUtil/Flagged.h"
@@ -56,6 +57,7 @@ namespace WireCell::Clus::PR {
     class Shower
         : public TrajectoryView
         , public Flagged<ShowerFlags> // can set flags
+        , public HasDPCs<Shower>      // has associated DynamicPointClouds.
     {
     public:
 

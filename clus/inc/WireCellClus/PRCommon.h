@@ -8,7 +8,86 @@
 
 #include "WireCellUtil/Point.h"
 
+namespace WireCell::Clus::Facade {
+    class Cluster;
+    class DynamicPointCloud;
+}
+
 namespace WireCell::Clus::PR {
+
+    /// A mixin for various PR objects that have an associated cluster. 
+    template<typename Subclass>
+    class HasCluster {
+    public:
+
+        virtual ~HasCluster() = default;
+
+        // Getters
+
+        /// Get the associated cluster.  May be nullptr.  Assumes user keeps
+        /// cluster (ie, its n-ary tree node) alive.
+        const Facade::Cluster* cluster() const { return m_cluster; }
+        Facade::Cluster* cluster() { return m_cluster; }
+
+        // Chainable setters
+
+        /// Store a pointer to a cluster.
+        Subclass& cluster(Facade::Cluster* cptr) { m_cluster = cptr; return *dynamic_cast<Subclass*>(this); }
+
+    private:
+        Facade::Cluster* m_cluster{nullptr};
+        
+    };
+
+    /// A mixin for various PR objects that have one or more associated DynamicPointCloud instances.
+    ///
+    /// It manages a named map from string to shared pointer of DynamicPointCloud.
+    template<typename Subclass>
+    class HasDPCs {
+    public:
+
+        virtual ~HasDPCs() = default;
+
+        // Getters
+
+        /// Get a const DynamicPointCloud pointer by name.  
+        ///
+        /// Returns nullptr if name is unknown.
+        std::shared_ptr<const Facade::DynamicPointCloud> dpcloud(const std::string& name) const {
+            auto it = m_dpcs.find(name);
+            if (it == m_dpcs.end()) {
+                return nullptr;
+            }
+            return it->second;
+        }
+
+        /// Get a mutable DynamicPointCloud pointer by name.
+        ///
+        /// Returns nullptr if name is unknown.
+        std::shared_ptr<Facade::DynamicPointCloud> dpcloud(const std::string& name) {
+            auto it = m_dpcs.find(name);
+            if (it == m_dpcs.end()) {
+                return nullptr;
+            }
+            return it->second;
+        }
+
+        // Chainable setters
+
+        /// Store a shared pointer to a DynamicPointCloud by name.
+        Subclass& dpcloud(const std::string& name, std::shared_ptr<Facade::DynamicPointCloud> dpc_ptr) { 
+            m_dpcs[name] = dpc_ptr;
+            return *dynamic_cast<Subclass*>(this); 
+        }
+
+    private:
+
+        std::unordered_map<std::string, std::shared_ptr<Facade::DynamicPointCloud>> m_dpcs;
+        
+    };
+
+    
+
 
     /// A WCPoint is a 3D point and corresponding wire indices and an index.
     //

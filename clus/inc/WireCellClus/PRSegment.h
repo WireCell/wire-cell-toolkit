@@ -5,10 +5,6 @@
 #include "WireCellClus/PRGraphType.h"
 #include "WireCellUtil/Flagged.h"
 
-namespace WireCell::Clus::Facade {
-    class Cluster;
-}
-
 namespace WireCell::Clus::PR {
 
     /** The flags used to categorize a segment.
@@ -58,6 +54,8 @@ namespace WireCell::Clus::PR {
     class Segment
     : public Flagged<SegmentFlags> // can set flags
     , public Graphed<edge_descriptor> // may live in a graph
+    , public HasCluster<Segment>      // has an associated Cluster*.
+    , public HasDPCs<Segment>      // has associated DynamicPointClouds.
     {
     public:
 
@@ -75,11 +73,6 @@ namespace WireCell::Clus::PR {
         /// Get the mutable original points.
         std::vector<WCPoint>& wcpts() { return m_wcpts; }
 
-        /// Get the associated cluster.  May be nullptr.  Assumes user keeps
-        /// cluster (ie, its n-ary tree node) alive.
-        const Facade::Cluster* cluster() const { return m_cluster; }
-        Facade::Cluster* cluster() { return m_cluster; }
-
         /// Get the sign +1/0/-1 (was "flag_dir" in WCT).
         int dirsign() const { return m_dirsign; }
 
@@ -96,7 +89,6 @@ namespace WireCell::Clus::PR {
             else m_dirsign = dirsign > 0 ? 1 : -1;
             return *this;
         }
-        Segment& cluster(Facade::Cluster* cptr) { m_cluster = cptr; return *this; }
 
 
     private:
@@ -105,8 +97,6 @@ namespace WireCell::Clus::PR {
         std::vector<Fit> m_fits;
 
         int m_dirsign{0};
-
-        Facade::Cluster* m_cluster{nullptr};
 
 
         // Still must consider adding:

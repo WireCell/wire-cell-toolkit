@@ -47,6 +47,7 @@ namespace WireCell::Clus::PR {
     class Vertex
         : public Flagged<VertexFlags> // can set flags
         , public Graphed<node_descriptor> // may live in a graph
+        , public HasCluster<Segment>      // has an associated Cluster*.
     {
     public:        
 
@@ -60,16 +61,11 @@ namespace WireCell::Clus::PR {
         const Fit& fit() const { return m_fit; }
         Fit& fit() { return m_fit; }
 
-        /// Get the associated cluster.  May be nullptr.  Assumes user keeps
-        /// cluster (ie, its n-ary tree node) alive.
-        const Facade::Cluster* cluster() const { return m_cluster; }
-        Facade::Cluster* cluster() { return m_cluster; }
 
         /// Chainable setters
 
         Vertex& wcpt(const WCPoint& wcpt) { m_wcpt = wcpt; return *this; }
         Vertex& fit(const Fit& fit) { m_fit = fit; return *this; }
-        Vertex& cluster(Facade::Cluster* cptr) { m_cluster = cptr; return *this; }
 
         // Distance from "initial point" to fit point.
         double fit_distance() {
@@ -80,7 +76,6 @@ namespace WireCell::Clus::PR {
 
         WCPoint m_wcpt;         // "initial" point.
         Fit m_fit;
-        Facade::Cluster* m_cluster{nullptr};
 
     };
 
