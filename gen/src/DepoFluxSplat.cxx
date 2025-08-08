@@ -273,17 +273,17 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
     }
 
     size_t ndepos_seen=0;
-    size_t ndepos_skipped=0;
+    // size_t ndepos_skipped=0;
     size_t nplanes_skipped=0;
     for (const auto& depo : *in->depos()) {
         if (!depo) {
-            ++ndepos_skipped;
+            // ++ndepos_skipped;
             continue;
         }
 
         auto face = find_face(depo);
         if (!face) {
-            ++ndepos_skipped;
+            // ++ndepos_skipped;
             continue;
         }
 
@@ -324,7 +324,7 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
 
                 double eff_nsigma = depo->extent_long() > 0 ? m_nsigma : 0;
                 if (nmin_sigma > eff_nsigma || nmax_sigma < -eff_nsigma) {
-                    ++ndepos_skipped;
+                    // ++ndepos_skipped;
                     continue;
                 }
             }

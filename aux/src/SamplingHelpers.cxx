@@ -192,12 +192,10 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
         pitch_mags[iface->which()][layer-ndummy_layers] = coords.pitch_mags()[layer];
     }
 
-    size_t nslices = 0;
     for (const auto& ibs : ibsv) {
         const auto& slice = ibs->slice();
         {
             // auto& slice = std::get<slice_t>(cgnode.ptr);
-            ++nslices;
             const auto slice_index = slice->start()/tick;
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
@@ -237,7 +235,6 @@ void Aux::add_ctpc(PointCloud::Tree::Points::node_t& root, const WireCell::IBlob
             // log->debug("ds_x.size() {}", ds_x.size());
         }
     }
-    // log->debug("got {} slices", nslices);
 
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {

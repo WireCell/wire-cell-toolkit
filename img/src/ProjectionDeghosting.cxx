@@ -112,7 +112,7 @@ namespace {
     {
         cluster_graph_t cg_out;
 
-        size_t nblobs = 0;
+        // size_t nblobs = 0;
         std::unordered_map<cluster_vertex_t, cluster_vertex_t> old2new;
         for (const auto& vtx : GraphTools::mir(boost::vertices(cg))) {
             const auto& node = cg[vtx];
@@ -120,7 +120,7 @@ namespace {
                 bool removal = blobs.find(vtx) != blobs.end();
                 if (!removal_mode) removal = !removal;
                 if (!removal) {
-                    ++nblobs;
+                    // ++nblobs;
                     old2new[vtx] = boost::add_vertex(node, cg_out);
                 }
             }

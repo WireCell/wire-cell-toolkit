@@ -212,17 +212,13 @@ struct Chirp {
 
     void dump(JsonEvent& dumper)
     {
-        int number = 0;
         for (const auto ind : *sel1) {
             const auto& br = one[ind];
             dumper(br, 10.0, 1.0, 1, ind);
-            ++number;
         }
-        number = 0;
         for (const auto ind : *sel2) {
             const auto& br = two[ind];
             dumper(br, 20.0, 1.0, 2, ind);
-            ++number;
         }
 
         return;

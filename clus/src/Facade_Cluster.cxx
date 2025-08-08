@@ -197,10 +197,10 @@ geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, 
 
         bool flag_para = false;
 
-        double angle_1 = fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) * 180. / 3.1415926;
-        double angle_2 = fabs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-        double angle_3 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-        double angle_4 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        double angle_1 = std::abs(dir1.angle(drift_dir) - 3.1415926 / 2.) * 180. / 3.1415926;
+        double angle_2 = std::abs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        double angle_3 = std::abs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        double angle_4 = std::abs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
         if (angle_1 < 5 && angle_2 < 5 || angle_3 < 2.5 && angle_4 < 2.5) flag_para = true;
 
@@ -292,10 +292,10 @@ geo_point_t Cluster::get_furthest_wcpoint(geo_point_t old_wcp, geo_point_t dir, 
                 dir3.set(old_wcp.x() - orig_point.x(), old_wcp.y() - orig_point.y(), old_wcp.z() - orig_point.z());
 
                 flag_para = false;
-                double angle_1 = fabs(dir1.angle(drift_dir) - 3.1415926 / 2.) * 180. / 3.1415926;
-                double angle_2 = fabs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-                double angle_3 = fabs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
-                double angle_4 = fabs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+                double angle_1 = std::abs(dir1.angle(drift_dir) - 3.1415926 / 2.) * 180. / 3.1415926;
+                double angle_2 = std::abs(dir.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+                double angle_3 = std::abs(dir2.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+                double angle_4 = std::abs(dir3.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
                 if (angle_1 < 7.5 && angle_2 < 7.5 || angle_3 < 5 && angle_4 < 5 && (angle_1 < 12.5 && angle_2 < 12.5))
                     flag_para = true;
@@ -1663,7 +1663,7 @@ void Cluster::Establish_close_connected_graph() const
         map_mcell_windex_wcps[mcell] = map_windex_wcps;
     }
 
-    int num_edges = 0;
+    // int num_edges = 0;
 
     // create graph for points inside the same mcell
     for (Blob* mcell : this->children()) {
@@ -1722,13 +1722,13 @@ void Cluster::Establish_close_connected_graph() const
 
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -1759,20 +1759,20 @@ void Cluster::Establish_close_connected_graph() const
                         //                                      pow(points[2][pind1] - points[2][pind2], 2));
                         //     num_edges++;
                         // }
-                        auto edge = add_edge(pind1,pind2,WireCell::PointCloud::Facade::EdgeProp(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
+                        /*auto edge =*/ add_edge(pind1,pind2,WireCell::PointCloud::Facade::EdgeProp(sqrt(pow(points[0][pind1] - points[0][pind2], 2) +
                                                              pow(points[1][pind1] - points[1][pind2], 2) +
                                                              pow(points[2][pind1] - points[2][pind2], 2))),*m_graph);
 	    //	    std::cout << index1 << " " << index2 << " " << edge.second << std::endl;
-                        if (edge.second){
-                            num_edges ++;
-                        }
+                        // if (edge.second){
+                        //     num_edges ++;
+                        // }
                     }
                 }
             }
         }
     }
 
-    LogDebug("in-blob edges: " << num_edges);
+    // LogDebug("in-blob edges: " << num_edges);
     // std::cout << "Test: in-blob edges: " << num_edges << std::endl;
 
     std::vector<int> time_slices;
@@ -1898,13 +1898,13 @@ void Cluster::Establish_close_connected_graph() const
             std::vector<std::set<int>*> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -2001,13 +2001,13 @@ void Cluster::Establish_close_connected_graph() const
             std::vector<std::set<int>*> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -2069,11 +2069,11 @@ void Cluster::Establish_close_connected_graph() const
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*m_graph);
-            if (edge.second){
-                //      (*graph)[edge.first].dist = dis;
-                num_edges ++;
-            }
+            /*auto edge =*/ add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*m_graph);
+            // if (edge.second){
+            //     //      (*graph)[edge.first].dist = dis;
+            //     num_edges ++;
+            // }
             // protect against dead cells ...
             //std::cout << dis/units::cm << std::endl;
             if (it5 == it4->second.begin() && dis > 0.25*units::cm)
@@ -2089,7 +2089,7 @@ void Cluster::Establish_close_connected_graph() const
     }
     // end of copying ...
 
-    LogDebug("all edges: " << num_edges);
+    // LogDebug("all edges: " << num_edges);
     // std::cout << "Test: all edges: " << num_edges << std::endl;
 
 }
@@ -2913,19 +2913,19 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 geo_vector_t tempV5;
 
                 double angle1 = tempV1.angle(U_dir); 
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir);
 
                 double angle2 = tempV1.angle(V_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle2),
                         0);
                 angle2 = tempV5.angle(drift_dir);
 
                 double angle1p = tempV1.angle(W_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1p),
                         0); 
                 angle1p = tempV5.angle(drift_dir);
@@ -2942,12 +2942,12 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 constexpr double perp_angle = pi/2.0;
                 constexpr double invalid_dist = 1e9;
 
-                if (fabs(angle3 - perp_angle) < perp_angle_tol) {
+                if (std::abs(angle3 - perp_angle) < perp_angle_tol) {
                     geo_vector_t tempV2 = vhough_transform(p1, 15*units::cm);
                     geo_vector_t tempV3 = vhough_transform(p2, 15*units::cm);
                     
-                    if (fabs(tempV2.angle(drift_dir) - perp_angle) < perp_angle_tol &&
-                        fabs(tempV3.angle(drift_dir) - perp_angle) < perp_angle_tol) {
+                    if (std::abs(tempV2.angle(drift_dir) - perp_angle) < perp_angle_tol &&
+                        std::abs(tempV3.angle(drift_dir) - perp_angle) < perp_angle_tol) {
                         flag_strong_check = false;
                     }
                 }
@@ -3042,13 +3042,13 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 geo_vector_t tempV5;
                 
                 double angle1 = tempV1.angle(U_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir);
                 
                 double angle2 = tempV1.angle(V_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
                 angle2 = tempV5.angle(drift_dir);
@@ -3057,13 +3057,13 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 double angle3 = tempV5.angle(drift_dir);
                 
                 double angle1p = tempV1.angle(W_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
                 angle1p = tempV5.angle(drift_dir);
 
                 const double pi = 3.141592653589793;
-                if (fabs(angle3 - pi/2) < 10.0/180.0*pi || 
+                if (std::abs(angle3 - pi/2) < 10.0/180.0*pi || 
                     angle1 < 12.5/180.0*pi ||
                     angle2 < 12.5/180.0*pi || 
                     angle1p < 7.5/180.0*pi) {
@@ -3118,13 +3118,13 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 geo_vector_t tempV5;
 
                 double angle1 = tempV1.angle(U_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir);
 
                 double angle2 = tempV1.angle(V_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
                 angle2 = tempV5.angle(drift_dir);
@@ -3133,13 +3133,13 @@ void Cluster::Connect_graph_overclustering_protection(const bool use_ctpc) const
                 double angle3 = tempV5.angle(drift_dir);
 
                 double angle1p = tempV1.angle(W_dir);
-                tempV5.set(fabs(p2.x() - p1.x()),
+                tempV5.set(std::abs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
                 angle1p = tempV5.angle(drift_dir);
 
                 const double pi = 3.141592653589793;
-                bool is_parallel = fabs(angle3 - pi/2) < 10.0/180.0*pi || 
+                bool is_parallel = std::abs(angle3 - pi/2) < 10.0/180.0*pi || 
                                 angle1 < 12.5/180.0*pi ||
                                 angle2 < 12.5/180.0*pi || 
                                 angle1p < 7.5/180.0*pi;
@@ -3809,7 +3809,7 @@ bool Cluster::judge_vertex(geo_point_t& p_test, const double asy_cut, const doub
 
     if ((num_pts.first + num_pts.second) == 0) return false;
 
-    double asy = fabs(num_pts.first - num_pts.second) / (num_pts.first + num_pts.second);
+    double asy = std::abs(num_pts.first - num_pts.second) / (num_pts.first + num_pts.second);
 
     if (asy > asy_cut) {
         return true;

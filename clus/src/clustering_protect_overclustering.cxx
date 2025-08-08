@@ -85,7 +85,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
         }
     }
 
-    int num_edges = 0;
+    // int num_edges = 0;
 
     // create graph for points inside the same mcell
     for (auto it = mcells.begin(); it != mcells.end(); it++) {
@@ -148,13 +148,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
 
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -197,10 +197,10 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
                         //     // wcp1.index_v << " " << wcp1.index_w << " " << wcp2.index_u << " " << wcp2.index_v << " "
                         //     // << wcp2.index_w << std::endl;
                         // }
-                        auto edge = add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
-                        if (edge.second) {
-                            num_edges++;
-                        }
+                        /*auto edge =*/ add_edge(index1, index2, WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+                        // if (edge.second) {
+                        //     num_edges++;
+                        // }
                     }
                 }
                 //}
@@ -331,13 +331,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
             std::vector<std::set<int> *> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -471,13 +471,13 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
             std::vector<std::set<int> *> min_wcps_set;
             // go through the first map and find the ones satisfying the condition
             for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_max_wire) <= max_wire_interval) {
+                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
                     max_wcps_set.push_back(&(it2->second));
                 }
             }
             // go through the second map and find the ones satisfying the condition
             for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (fabs(it2->first - index_min_wire) <= min_wire_interval) {
+                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
                     min_wcps_set.push_back(&(it2->second));
                 }
             }
@@ -577,11 +577,11 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
         for (auto it5 = it4->second.begin(); it5!=it4->second.end(); it5++){
             int index2 = (*it5).second;
             double dis = (*it5).first;
-            auto edge = add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
-            if (edge.second){
-                //      (*graph)[edge.first].dist = dis;
-                num_edges ++;
-            }
+            /*auto edge =*/ add_edge(index1,index2,WireCell::PointCloud::Facade::EdgeProp(dis),*graph);
+            // if (edge.second){
+            //     //      (*graph)[edge.first].dist = dis;
+            //     num_edges ++;
+            // }
             // protect against dead cells ...
             //std::cout << dis/units::cm << std::endl;
             if (it5 == it4->second.begin() && dis > 0.25*units::cm)

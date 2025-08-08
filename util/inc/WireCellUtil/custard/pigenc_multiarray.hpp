@@ -4,7 +4,29 @@
 #ifndef PIGENC_MULTIARRAY_HPP
 #define PIGENC_MULTIARRAY_HPP
 
+#ifdef __clang__
+#  if defined(__has_warning)
+#    define HAS_WARNING(warning) __has_warning(warning)
+#  else
+#    define HAS_WARNING(warning) 1
+#  endif
+#else
+#  define HAS_WARNING(warning) 1
+#endif
+
+#if HAS_WARNING("-Wdeprecated-declarations")
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 #include "boost/multi_array/storage_order.hpp"
+
+#if HAS_WARNING("-Wdeprecated-declarations")
+#pragma GCC diagnostic pop
+#endif
+
+
 #include "pigenc.hpp"
 
 namespace pigenc::multiarray {

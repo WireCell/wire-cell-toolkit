@@ -89,13 +89,13 @@ void blob_weight_simple(const cluster_graph_t& cgraph, graph_t& csg)
 
 void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
 {
-    int nblobs = 0;
+    // int nblobs = 0;
     for (auto desc : vertex_range(csg)) {
         auto& vtx = csg[desc];
         if (vtx.kind != node_t::blob) {
             continue;
         }
-        ++nblobs;
+        // ++nblobs;
         // check if blob is connected to other blobs in other slices
         // connection | weight
         // non | 9

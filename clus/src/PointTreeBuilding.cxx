@@ -301,12 +301,10 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     Facade::mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
     Facade::mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
 
-    size_t nslices = 0;
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
         const auto& cgnode = cg[vdesc];
         if (cgnode.code() == 's') {
             auto& slice = std::get<slice_t>(cgnode.ptr);
-            ++nslices;
             const auto& slice_index = slice->start()/tp.tick;
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
@@ -346,7 +344,6 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             // log->debug("ds_x.size() {}", ds_x.size());
         }
     }
-    // log->debug("got {} slices", nslices);
 
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {

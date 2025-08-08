@@ -146,7 +146,7 @@ void test_bigass(WireCell::ExecMon& em)
     em("select row again");
     int nzero = 0;
     for (int ind = 0; ind < part4.rows(); ++ind) {
-        if (part4(ind) == 0.00001) {
+        if (part4(ind) < 1e-5) {
             ++nzero;
         }
     }

@@ -24,7 +24,7 @@ std::vector<std::string> Aux::FrameSync::input_types()
 
 void Aux::FrameSync::flush(input_queues& iqs, output_queues& oqs)
 {
-    size_t neos=0, nmin=0, nempty=0;
+    size_t neos=0, nmin=0;
     int min_ident=std::numeric_limits<int>::max();
     size_t min_index=0;
 
@@ -32,7 +32,6 @@ void Aux::FrameSync::flush(input_queues& iqs, output_queues& oqs)
     for (size_t ind=0; ind<nin; ++ind) {
         auto& iq = iqs[ind];
         if (iq.empty()) {
-            ++nempty;
             log->debug("port {} empty", ind);
             continue;
         }
@@ -50,7 +49,6 @@ void Aux::FrameSync::flush(input_queues& iqs, output_queues& oqs)
             ++nmin;
         }
     }
-    // log->debug("neos: {} nmin: {} nempty: {}", neos, nmin, nempty);
 
     // found min (good)
     if (nmin > 0) {
