@@ -4,8 +4,15 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Persist.h"
 
+#include "WireCellUtil/BuildConfig.h"
+
+/// Including this breaks some builds, in particular when building in Spack.
+/// Some future person is free to add a wcb --with-omp flag to define HAS_OMP.
+/// See PR 404 (oh the irony!) for more info.
+#ifdef HAS_OMP
 #include <omp.h>
 #include <ATen/Parallel.h>
+#endif
 
 WIRECELL_FACTORY(TorchService, 
                  WireCell::Pytorch::TorchService,
@@ -19,6 +26,7 @@ using namespace WireCell;
 Pytorch::TorchService::TorchService()
     : Aux::Logger("TorchService", "torch")
 {
+#ifdef HAS_OMP
   // set the number of threads to OMP_NUM_THREADS
   const char* env_var = std::getenv("OMP_NUM_THREADS");
   if (env_var != NULL) {
@@ -32,6 +40,7 @@ Pytorch::TorchService::TorchService()
     } // env var not set
   }
   log->info("TorchService parallel info:\n{}",  at::get_parallel_info());
+#endif
 }
 
 Configuration Pytorch::TorchService::default_configuration() const
