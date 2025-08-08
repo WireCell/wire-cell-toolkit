@@ -546,6 +546,10 @@ private:
         auto segment = create_segment_for_cluster(cluster, path_points);
         m_track_fitter.add_segment(segment);
 
+        auto ch = m_track_fitter.get_channel_for_wire(0,0,1,50);
+        auto test_results = m_track_fitter.get_wires_for_channel(0,ch);
+        std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
+
         // missing check other tracks ...
 
 
