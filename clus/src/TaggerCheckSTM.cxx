@@ -22,13 +22,14 @@ using namespace WireCell::Clus::Facade;
  * for Short Track Muon (STM) characteristics and sets the STM flag when conditions are met.
  * This function works on clusters that have already been processed by clustering_recovering_bundle.
  */
-class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV {
+class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS {
 public:
     TaggerCheckSTM() {}
     virtual ~TaggerCheckSTM() {}
 
     virtual void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
+        NeedPCTS::configure(config); 
         m_grouping_name = get<std::string>(config, "grouping", "live");
     }
     
@@ -36,6 +37,8 @@ public:
         Configuration cfg;
         cfg["grouping"] = m_grouping_name;
         cfg["detector_volumes"] = "DetectorVolumes";
+        cfg["pc_transforms"] = "PCTransformSet";  
+
         return cfg;
     }
 
@@ -43,6 +46,7 @@ public:
         
         // Configure the track fitter with detector volume
         m_track_fitter.set_detector_volume(m_dv);
+        m_track_fitter.set_pc_transforms(m_pcts); 
 
         // Get the specified grouping (default: "live")
         auto groupings = ensemble.with_name(m_grouping_name);
@@ -568,6 +572,8 @@ private:
 
         auto organized_path = m_track_fitter.organize_orig_path(segment);
         std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << std::endl;
+
+        // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
 
         return false;
     }

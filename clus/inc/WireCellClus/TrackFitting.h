@@ -122,14 +122,28 @@ namespace WireCell::Clus {
         void set_detector_volume(IDetectorVolumes::pointer dv) { m_dv = dv; }
         
         /**
-         * Get the detector volume
-         * @return Pointer to IDetectorVolumes, or nullptr if not set
+         * Set the PCTransformSet for coordinate transformations
+         * @param pcts Pointer to PCTransformSet interface
+         */
+        void set_pc_transforms(IPCTransformSet::pointer pcts) { m_pcts = pcts; }
+
+        /**
+         * Get the current detector volumes
+         * @return Pointer to detector volumes interface
          */
         IDetectorVolumes::pointer get_detector_volume() const { return m_dv; }
+
+        /**
+         * Get the current PCTransformSet
+         * @return Pointer to PCTransformSet interface
+         */
+        IPCTransformSet::pointer get_pc_transforms() const { return m_pcts; }
+
 
     private:
         FittingType m_fitting_type;
         IDetectorVolumes::pointer m_dv{nullptr};  
+        IPCTransformSet::pointer m_pcts{nullptr};          // PC Transform Set
         
         // cluster and grouping, CTPC is from m_grouping ...
         Facade::Grouping* m_grouping{nullptr};

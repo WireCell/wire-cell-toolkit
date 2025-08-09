@@ -88,7 +88,7 @@ local wc = import "wirecell.jsonnet";
             name: prefix + name,
             data: {
                 grouping: "live",           // Which grouping to process
-            },
+            } + dv_cfg + pcts_cfg
         },
 
         pointed(name="", groupings=["live"]) :: {
