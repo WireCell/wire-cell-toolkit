@@ -571,7 +571,9 @@ private:
         m_track_fitter.fill_global_rb_map();
 
         auto organized_path = m_track_fitter.organize_orig_path(segment);
-        std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << std::endl;
+        auto test = m_track_fitter.examine_end_ps_vec(segment, organized_path, true, true);
+
+        std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << " " << test.size() << std::endl;
 
         // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
 

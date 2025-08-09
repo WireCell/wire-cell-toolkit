@@ -506,6 +506,11 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
 std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
     std::list<WireCell::Point> ps_list(pts.begin(), pts.end());
     
+    // get the cluster from the segment
+    auto cluster = segment->cluster();
+    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+    double cluster_t0 = cluster->get_flash().time();
+
     if (flag_start) {
         // test start
         WireCell::Point temp_start = ps_list.front(); 
@@ -514,9 +519,10 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             auto test_wpid = m_dv->contained_by(ps_list.front());
 
             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                
                 // this function takes the raw points ...
-                if (m_grouping->is_good_point(ps_list.front(), test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
+                auto temp_p_raw = transform->backward(ps_list.front(), cluster_t0, test_wpid.face(), test_wpid.apa());
+                // std::cout << temp_p_raw << " " << ps_list.front() << " " << test_wpid.apa() << " " << test_wpid.face() << std::endl;
+                if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
             }
             temp_start = ps_list.front();
             ps_list.pop_front();
@@ -533,9 +539,9 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 // figure out the wpid for the test_p ...
                 auto test_wpid = m_dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                    
                     // this function takes the raw points ...
-                    if (m_grouping->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                         ps_list.push_front(test_p);
                         break;
                     }
@@ -553,7 +559,8 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             auto test_wpid = m_dv->contained_by(ps_list.back());
             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                 //this function takes the raw points ...
-                if (m_grouping->is_good_point(ps_list.back(), test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
+                auto temp_p_raw = transform->backward(ps_list.back(), cluster_t0, test_wpid.face(), test_wpid.apa());
+                if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
             }
             temp_end = ps_list.back();
             ps_list.pop_back();
@@ -570,9 +577,9 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 auto test_wpid = m_dv->contained_by(test_p);
                 // figure out the wpid for the test_p ...
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                    
                     // the following function takes raw points ...
-                    if (m_grouping->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                         ps_list.push_back(test_p);
                         break;
                     }
