@@ -195,6 +195,8 @@ int TrackFitting::fetch_channel_from_anode(int apa, int face, int plane, int wir
 
 
 void TrackFitting::prepare_data() {
+    if (m_charge_data.size()!=0) return;
+
     // Process every Facade::Cluster in m_clusters
     for (auto& cluster : m_clusters) {
         // Get boundary range using get_uvwt_range which returns map<WirePlaneId, tuple<int,int,int,int>>
@@ -331,5 +333,5 @@ void TrackFitting::prepare_data() {
     }
 
 
-    std::cout << "Number of MEasurements: " << m_charge_data.size() << std::endl;
+    //std::cout << "Number of MEasurements: " << m_charge_data.size() << std::endl;
 }
