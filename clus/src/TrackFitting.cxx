@@ -502,3 +502,87 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
     
     return pts;
 }
+
+std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
+    std::list<WireCell::Point> ps_list(pts.begin(), pts.end());
+    
+    if (flag_start) {
+        // test start
+        WireCell::Point temp_start = ps_list.front(); 
+        while (ps_list.size() > 0) {
+            // figure out the wpid for ps_list.front() ... 
+            auto test_wpid = m_dv->contained_by(ps_list.front());
+
+            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                
+                // this function takes the raw points ...
+                if (m_grouping->is_good_point(ps_list.front(), test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
+            }
+            temp_start = ps_list.front();
+            ps_list.pop_front();
+        }
+        
+        if (ps_list.size() > 0) {
+            double dis_step = 0.2*units::cm;
+            double temp_dis = sqrt(pow(temp_start.x() - ps_list.front().x(), 2) + pow(temp_start.y() - ps_list.front().y(), 2) + pow(temp_start.z() - ps_list.front().z(), 2));
+            int ntest = std::round(temp_dis/dis_step);
+            for (size_t i = 1; i < ntest; i++) {
+                WireCell::Point test_p(temp_start.x() + (ps_list.front().x() - temp_start.x())/ntest * i,
+                                       temp_start.y() + (ps_list.front().y() - temp_start.y())/ntest * i,
+                                       temp_start.z() + (ps_list.front().z() - temp_start.z())/ntest * i);
+                // figure out the wpid for the test_p ...
+                auto test_wpid = m_dv->contained_by(test_p);
+                if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                    
+                    // this function takes the raw points ...
+                    if (m_grouping->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                        ps_list.push_front(test_p);
+                        break;
+                    }
+                }
+            }
+        } else {
+            ps_list.push_front(temp_start);
+        }
+    }
+    
+    if (flag_end) {
+        WireCell::Point temp_end = ps_list.back();
+        while (ps_list.size() > 0) {
+            // figure out the wpid for the ps_list.back() ...
+            auto test_wpid = m_dv->contained_by(ps_list.back());
+            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                //this function takes the raw points ...
+                if (m_grouping->is_good_point(ps_list.back(), test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
+            }
+            temp_end = ps_list.back();
+            ps_list.pop_back();
+        }
+        if (ps_list.size() > 0) {
+            double dis_step = 0.2*units::cm;
+            double temp_dis = sqrt(pow(temp_end.x() - ps_list.back().x(), 2) + pow(temp_end.y() - ps_list.back().y(), 2) + pow(temp_end.z() - ps_list.back().z(), 2));
+            int ntest = std::round(temp_dis/dis_step);
+            for (size_t i = 1; i < ntest; i++) {
+                WireCell::Point test_p(temp_end.x() + (ps_list.back().x() - temp_end.x())/ntest * i,
+                                       temp_end.y() + (ps_list.back().y() - temp_end.y())/ntest * i,
+                                       temp_end.z() + (ps_list.back().z() - temp_end.z())/ntest * i);
+
+                auto test_wpid = m_dv->contained_by(test_p);
+                // figure out the wpid for the test_p ...
+                if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                    
+                    // the following function takes raw points ...
+                    if (m_grouping->is_good_point(test_p, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                        ps_list.push_back(test_p);
+                        break;
+                    }
+                }
+            }
+        } else {
+            ps_list.push_back(temp_end);
+        }
+    }
+    
+    std::vector<WireCell::Point> tmp_pts(ps_list.begin(), ps_list.end());
+    return tmp_pts;
+}

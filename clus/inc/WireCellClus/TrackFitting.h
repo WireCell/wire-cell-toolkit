@@ -59,8 +59,9 @@ namespace WireCell::Clus {
          * @param end_point_limit Extension distance for end points
          * @return Vector of organized 3D points
          */
-        std::vector<WireCell::Point> organize_orig_path(std::shared_ptr<PR::Segment> , double low_dis_limit=1.2*units::cm, double end_point_limit=0.6*units::cm);
+        std::vector<WireCell::Point> organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit=1.2*units::cm, double end_point_limit=0.6*units::cm);
 
+        std::vector<WireCell::Point> examine_end_ps_vec(std::shared_ptr<PR::Segment> segment, const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end);
 
         /**
          * Get anode for a specific APA identifier
@@ -114,8 +115,21 @@ namespace WireCell::Clus {
         };
         CacheStats get_cache_stats() const;
 
+        /**
+         * Set the detector volume for this TrackFitting instance
+         * @param dv Pointer to IDetectorVolumes
+         */
+        void set_detector_volume(IDetectorVolumes::pointer dv) { m_dv = dv; }
+        
+        /**
+         * Get the detector volume
+         * @return Pointer to IDetectorVolumes, or nullptr if not set
+         */
+        IDetectorVolumes::pointer get_detector_volume() const { return m_dv; }
+
     private:
         FittingType m_fitting_type;
+        IDetectorVolumes::pointer m_dv{nullptr};  
         
         // cluster and grouping, CTPC is from m_grouping ...
         Facade::Grouping* m_grouping{nullptr};

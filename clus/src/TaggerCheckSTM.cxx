@@ -41,6 +41,9 @@ public:
 
     virtual void visit(Ensemble& ensemble) const {
         
+        // Configure the track fitter with detector volume
+        m_track_fitter.set_detector_volume(m_dv);
+
         // Get the specified grouping (default: "live")
         auto groupings = ensemble.with_name(m_grouping_name);
         if (groupings.empty()) {
