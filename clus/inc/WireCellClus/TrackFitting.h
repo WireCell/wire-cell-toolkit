@@ -49,6 +49,9 @@ namespace WireCell::Clus {
         // collect charge
         void prepare_data();
 
+        // Fill the global readout map
+        void fill_global_rb_map();
+
         /**
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
@@ -210,7 +213,9 @@ namespace WireCell::Clus {
         std::map<Coord2D, std::set<int>> m_2d_to_3d;  ///< Internal 2D→3D mapping
         std::map<int, Point3DInfo> m_3d_to_2d;               ///< Internal 3D→2D mapping
     
-    
+        // Global (apa, time, channel) to blobs
+        std::map<CoordReadout, std::set<Facade::Blob* > > global_rb_map;
+
     };
 
 } // namespace WireCell::Clus

@@ -333,5 +333,12 @@ void TrackFitting::prepare_data() {
     }
 
 
-    //std::cout << "Number of MEasurements: " << m_charge_data.size() << std::endl;
+    std::cout << "Number of Measurements: " << m_charge_data.size() << std::endl;
 }
+
+void fill_global_rb_map() {
+    // loop over the m_grouping's clusters
+    // for each clusters, loop over its blob
+    // for every blob, loop over its plane, and find out its CoordReadout 
+    // fill in global_rb_map;
+} 
