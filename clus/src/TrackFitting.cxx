@@ -593,3 +593,87 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
     std::vector<WireCell::Point> tmp_pts(ps_list.begin(), ps_list.end());
     return tmp_pts;
 }
+
+
+void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit) {
+    
+    std::vector<WireCell::Point> ps_vec = examine_end_ps_vec(segment, pts, true, true);
+    if (ps_vec.size() <= 1) ps_vec = pts;
+ 
+    pts.clear();
+    // fill in the beginning part
+    {
+        WireCell::Point p1 = ps_vec.front();
+        WireCell::Point p2 = ps_vec.front();
+        double dis1 = 0;
+        for (auto it = ps_vec.begin(); it != ps_vec.end(); it++) {
+            p2 = *it;
+            dis1 = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis1 > low_dis_limit) break;
+        }
+        if (dis1 > low_dis_limit) {
+            WireCell::Point extended_p1(
+                p1.x() + (p1.x() - p2.x()) / dis1 * end_point_limit,
+                p1.y() + (p1.y() - p2.y()) / dis1 * end_point_limit,
+                p1.z() + (p1.z() - p2.z()) / dis1 * end_point_limit
+            );
+            pts.push_back(extended_p1);
+        }
+    }
+    
+    // fill in the middle part
+    for (size_t i = 0; i != ps_vec.size(); i++) {
+        WireCell::Point p1 = ps_vec.at(i);
+        double dis;
+        if (pts.size() != 0) {
+            dis = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+        } else {
+            dis = sqrt(pow(p1.x() - ps_vec.back().x(), 2) + pow(p1.y() - ps_vec.back().y(), 2) + pow(p1.z() - ps_vec.back().z(), 2));
+        }
+        
+        if (dis < low_dis_limit * 0.8) {
+            continue;
+        } else if (dis < low_dis_limit * 1.6) {
+            pts.push_back(p1);
+        } else {
+            int npoints = std::round(dis / low_dis_limit);
+            WireCell::Point p_save = pts.back();
+            for (int j = 0; j != npoints; j++) {
+                WireCell::Point p(
+                    p_save.x() + (p1.x() - p_save.x()) / npoints * (j + 1),
+                    p_save.y() + (p1.y() - p_save.y()) / npoints * (j + 1),
+                    p_save.z() + (p1.z() - p_save.z()) / npoints * (j + 1)
+                );
+                pts.push_back(p);
+            }
+        }
+    }
+    
+    // fill in the end part
+    if (end_point_limit != 0) {
+        WireCell::Point p1 = ps_vec.back();
+        WireCell::Point p2 = ps_vec.back();
+        double dis1 = 0;
+        for (auto it = ps_vec.rbegin(); it != ps_vec.rend(); it++) {
+            p2 = *it;
+            dis1 = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis1 > low_dis_limit) break;
+        }
+        if (dis1 != 0) {
+            WireCell::Point extended_p1(
+                p1.x() + (p1.x() - p2.x()) / dis1 * end_point_limit,
+                p1.y() + (p1.y() - p2.y()) / dis1 * end_point_limit,
+                p1.z() + (p1.z() - p2.z()) / dis1 * end_point_limit
+            );
+            pts.push_back(extended_p1);
+        }
+    } else {
+        WireCell::Point p1 = ps_vec.back();
+        double dis1 = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+        if (dis1 >= 0.45*units::cm)
+            pts.push_back(p1);
+    }
+    
+    if (pts.size() <= 1)
+        pts = ps_vec;
+}

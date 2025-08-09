@@ -63,6 +63,9 @@ namespace WireCell::Clus {
 
         std::vector<WireCell::Point> examine_end_ps_vec(std::shared_ptr<PR::Segment> segment, const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end);
 
+        void organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit);
+    
+
         /**
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
