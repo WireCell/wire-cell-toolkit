@@ -300,32 +300,31 @@ void TrackFitting::prepare_data() {
                     
                     // Get time range
                     int time_min = blob->slice_index_min();
-                    int time_max = blob->slice_index_max();
+                    // int time_max = blob->slice_index_max();
                     
                     // Process each dead pixel
-                    for (int time_slice = time_min; time_slice < time_max; ++time_slice) {
-                        for (int wire_index = wire_min; wire_index < wire_max; ++wire_index) {
-                            int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
-                            CoordReadout data_key(apa, time_slice, channel);
-                                
-                            // Check if content exists
-                            auto it = m_charge_data.find(data_key);
+                    int time_slice = time_min;
+                    for (int wire_index = wire_min; wire_index < wire_max; ++wire_index) {
+                        int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
+                        CoordReadout data_key(apa, time_slice, channel);
                             
-                            if (it == m_charge_data.end()) {
-                                // No existing content
-                                double charge = blob_charge / num_wires;
-                                double charge_err = sqrt(pow(charge * 0.1, 2) + pow(600, 2));
-                                m_charge_data[data_key] = {charge, charge_err, 0};
-                            } else if (it->second.flag == 0) {
-                                // Existing content with flag = 0
-                                double new_charge = blob_charge / num_wires;
-                                double new_charge_err = sqrt(pow(new_charge * 0.1, 2) + pow(600, 2));
-                                
-                                it->second.charge += new_charge;
-                                it->second.charge_err = sqrt(pow(it->second.charge_err, 2) + pow(new_charge_err, 2));
-                            }
-                            // If flag != 0, do nothing
+                        // Check if content exists
+                        auto it = m_charge_data.find(data_key);
+                        
+                        if (it == m_charge_data.end()) {
+                            // No existing content
+                            double charge = blob_charge / num_wires;
+                            double charge_err = sqrt(pow(charge * 0.1, 2) + pow(600, 2));
+                            m_charge_data[data_key] = {charge, charge_err, 0};
+                        } else if (it->second.flag == 0) {
+                            // Existing content with flag = 0
+                            double new_charge = blob_charge / num_wires;
+                            double new_charge_err = sqrt(pow(new_charge * 0.1, 2) + pow(600, 2));
+                            
+                            it->second.charge += new_charge;
+                            it->second.charge_err = sqrt(pow(it->second.charge_err, 2) + pow(new_charge_err, 2));
                         }
+                        // If flag != 0, do nothing
                     }
                 }
             }
@@ -336,9 +335,73 @@ void TrackFitting::prepare_data() {
     std::cout << "Number of Measurements: " << m_charge_data.size() << std::endl;
 }
 
-void fill_global_rb_map() {
-    // loop over the m_grouping's clusters
-    // for each clusters, loop over its blob
-    // for every blob, loop over its plane, and find out its CoordReadout 
-    // fill in global_rb_map;
+void TrackFitting::fill_global_rb_map() {
+    // Clear the global readout map first
+    if (global_rb_map.size() != 0 ) return;
+
+    auto clusters = m_grouping->children();
+    // Loop over the m_grouping's clusters
+    for (auto& cluster : clusters) {
+        // For each cluster, loop over its blobs
+        if (!cluster->get_scope_filter(cluster->get_default_scope())) continue;
+
+        auto blobs = cluster->children();
+        for (auto blob : blobs) {
+            if (!blob) continue;
+            
+            // Get the wire plane ID for this blob to determine apa and face
+            auto wpid = blob->wpid();
+            int apa = wpid.apa();
+            int face = wpid.face();
+            
+            // Get the time slice bounds for this blob
+            int time_slice_min = blob->slice_index_min();
+            // int time_slice_max = blob->slice_index_max();
+            
+            // For every blob, loop over its planes (U=0, V=1, W=2)
+            for (int plane = 0; plane < 3; ++plane) {
+                 if (m_grouping->is_blob_plane_bad(blob, plane)) continue;
+
+                // Get wire bounds for this plane in the blob
+                int wire_min, wire_max;
+                switch (plane) {
+                    case 0: // U plane
+                        wire_min = blob->u_wire_index_min();
+                        wire_max = blob->u_wire_index_max();
+                        break;
+                    case 1: // V plane
+                        wire_min = blob->v_wire_index_min();
+                        wire_max = blob->v_wire_index_max();
+                        break;
+                    case 2: // W plane
+                        wire_min = blob->w_wire_index_min();
+                        wire_max = blob->w_wire_index_max();
+                        break;
+                    default:
+                        continue;
+                }
+                
+                // Skip if no valid wire range
+                if (wire_min >= wire_max) continue;
+                
+                // Loop over time slices in this blob
+                int time_slice = time_slice_min; 
+                // Loop over wire indices in this plane
+                for (int wire_index = wire_min; wire_index < wire_max; ++wire_index) {
+                    // Convert wire coordinates to channel using existing helper function
+                    int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
+                    if (channel == -1) continue; // Skip invalid channels
+                    
+                    // Create CoordReadout key and find out its CoordReadout
+                    CoordReadout coord_key(apa, time_slice, channel);
+                    
+                    // Fill in global_rb_map - add this blob to the set for this coordinate
+                    global_rb_map[coord_key].insert(blob);
+                    // std::cout << "Added blob to global_rb_map at " << coord_key.apa << " " << coord_key.time << " " << coord_key.channel  << std::endl;
+                }
+            }
+        }
+    }
+    
+    std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
 } 

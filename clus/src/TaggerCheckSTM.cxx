@@ -553,6 +553,8 @@ private:
         // missing check other tracks ...
         m_track_fitter.prepare_data();
 
+        m_track_fitter.fill_global_rb_map();
+
         return false;
     }
     
