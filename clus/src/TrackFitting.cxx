@@ -26,10 +26,6 @@ geo_point_t TrackFitting::adjust_rough_path(PR::Segment& segment){
     return geo_point_t(0,0,0);
 }
 
-void TrackFitting::prepare_data(){
-
-}
-
 IAnodePlane::pointer TrackFitting::get_anode(int apa_ident) const {
     if (!m_grouping) {
         std::cerr << "TrackFitting: No grouping available to get anode" << std::endl;
@@ -194,4 +190,146 @@ int TrackFitting::fetch_channel_from_anode(int apa, int face, int plane, int wir
     if (wire >= static_cast<int>(wires.size())) return -1;
     
     return wires[wire]->channel();
+}
+
+
+
+void TrackFitting::prepare_data() {
+    // Process every Facade::Cluster in m_clusters
+    for (auto& cluster : m_clusters) {
+        // Get boundary range using get_uvwt_range which returns map<WirePlaneId, tuple<int,int,int,int>>
+        auto uvwt_ranges = cluster->get_uvwt_range();
+        
+        // Get the grouping from the cluster
+        auto grouping = cluster->grouping();
+        
+        // Process each wpid (wire plane ID) separately
+        for (const auto& [wpid, range_tuple] : uvwt_ranges) {
+            int apa = wpid.apa();
+            int face = wpid.face();
+            
+            // Get the ranges for this wpid
+            // auto [u_size, v_size, w_size, t_size] = range_tuple;
+            
+            // Get min/max values for this specific apa/face
+            auto [u_min, v_min, w_min, t_min] = cluster->get_uvwt_min(apa, face);
+            auto [u_max, v_max, w_max, t_max] = cluster->get_uvwt_max(apa, face);
+            
+            // Process each plane (0=U, 1=V, 2=W)
+            for (int plane = 0; plane < 3; ++plane) {
+                int wire_min, wire_max, time_min, time_max;
+                
+                // Set the wire range based on plane
+                switch (plane) {
+                    case 0: wire_min = u_min; wire_max = u_max; break;
+                    case 1: wire_min = v_min; wire_max = v_max; break;
+                    case 2: wire_min = w_min; wire_max = w_max; break;
+                }
+                time_min = t_min;
+                time_max = t_max;
+                
+                // Get charge information for this plane
+                auto charge_map = grouping->get_overlap_good_ch_charge(
+                    time_min, time_max, wire_min, wire_max, apa, face, plane);
+                
+                // Process each charge entry
+                for (const auto& [time_wire, charge_data] : charge_map) {
+                    int time_slice = time_wire.first;
+                    int wire_index = time_wire.second;
+                    double charge = charge_data.first;
+                    double charge_err = charge_data.second;
+
+                    int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
+
+                    // Create key for m_charge_data
+                    CoordReadout data_key(apa, time_slice, channel);
+                    
+                    int flag = 1; // Default flag for all-live-channel case
+                    
+                    // Check for negative charge
+                    if (charge < 0) {
+                        charge = 0;
+                        charge_err = 1000;
+                        flag = 2;
+                    }
+                    
+                    // Save to m_charge_data
+                    m_charge_data[data_key] = {charge, charge_err, flag};
+                }
+            }
+        }
+    }
+        
+    for (auto& cluster : m_clusters) {
+         // Get the grouping from the cluster
+        auto grouping = cluster->grouping();
+        // Handle dead channels - loop over all Facade::Blobs in cluster
+        for (const auto* blob : cluster->children()) {
+            auto wpid = blob->wpid();
+            int apa = wpid.apa();
+            int face = wpid.face();
+            
+            // Check each plane for dead channels
+            for (int plane = 0; plane < 3; ++plane) {
+                // Check if this plane is bad for this blob
+                if (grouping->is_blob_plane_bad(blob, plane)) {
+                    // Get blob properties
+                    double blob_charge = blob->charge();
+                    
+                    // Get wire range for this plane
+                    int wire_min, wire_max;
+                    switch (plane) {
+                        case 0: 
+                            wire_min = blob->u_wire_index_min();
+                            wire_max = blob->u_wire_index_max();
+                            break;
+                        case 1: 
+                            wire_min = blob->v_wire_index_min();
+                            wire_max = blob->v_wire_index_max();
+                            break;
+                        case 2: 
+                            wire_min = blob->w_wire_index_min();
+                            wire_max = blob->w_wire_index_max();
+                            break;
+                    }
+                    
+                    int num_wires = wire_max - wire_min;
+                    if (num_wires <= 0) continue;
+                    
+                    // Get time range
+                    int time_min = blob->slice_index_min();
+                    int time_max = blob->slice_index_max();
+                    
+                    // Process each dead pixel
+                    for (int time_slice = time_min; time_slice < time_max; ++time_slice) {
+                        for (int wire_index = wire_min; wire_index < wire_max; ++wire_index) {
+                            int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
+                            CoordReadout data_key(apa, time_slice, channel);
+                                
+                            // Check if content exists
+                            auto it = m_charge_data.find(data_key);
+                            
+                            if (it == m_charge_data.end()) {
+                                // No existing content
+                                double charge = blob_charge / num_wires;
+                                double charge_err = sqrt(pow(charge * 0.1, 2) + pow(600, 2));
+                                m_charge_data[data_key] = {charge, charge_err, 0};
+                            } else if (it->second.flag == 0) {
+                                // Existing content with flag = 0
+                                double new_charge = blob_charge / num_wires;
+                                double new_charge_err = sqrt(pow(new_charge * 0.1, 2) + pow(600, 2));
+                                
+                                it->second.charge += new_charge;
+                                it->second.charge_err = sqrt(pow(it->second.charge_err, 2) + pow(new_charge_err, 2));
+                            }
+                            // If flag != 0, do nothing
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    std::cout << "Number of MEasurements: " << m_charge_data.size() << std::endl;
 }

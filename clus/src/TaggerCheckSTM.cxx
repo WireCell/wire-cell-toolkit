@@ -551,7 +551,7 @@ private:
         std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
 
         // missing check other tracks ...
-
+        m_track_fitter.prepare_data();
 
         return false;
     }
