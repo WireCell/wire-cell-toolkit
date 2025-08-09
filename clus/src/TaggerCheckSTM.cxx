@@ -109,7 +109,7 @@ private:
         return path_points;
     }
 
-    PR::Segment* create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
+    std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
                                const std::vector<geo_point_t>& path_points) const{
     
         // Step 3: Prepare segment data
@@ -127,7 +127,12 @@ private:
         // Step 5: Configure the segment
         segment->wcpts(wcpoints).cluster(&cluster).dirsign(1); // direction: +1, 0, or -1
                
-        return segment.get();
+        // auto& wcpts = segment->wcpts();
+        // for (size_t i=0;i!=path_points.size(); i++){
+        //     std::cout << "A: " << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
+        // }
+
+        return segment;
     }
    
     /**
@@ -541,9 +546,13 @@ private:
         // temporary tracking implementation ...
         auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
         // Optional: Print path info for debugging
-        // std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
+        std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
 
         auto segment = create_segment_for_cluster(cluster, path_points);
+        // auto& wcpts = segment->wcpts();
+        // for (size_t i=0;i!=path_points.size(); i++){
+        //     std::cout << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
+        // }
         m_track_fitter.add_segment(segment);
 
         auto ch = m_track_fitter.get_channel_for_wire(0,0,1,50);
@@ -552,8 +561,10 @@ private:
 
         // missing check other tracks ...
         m_track_fitter.prepare_data();
-
         m_track_fitter.fill_global_rb_map();
+
+        auto organized_path = m_track_fitter.organize_orig_path(segment);
+        std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << std::endl;
 
         return false;
     }

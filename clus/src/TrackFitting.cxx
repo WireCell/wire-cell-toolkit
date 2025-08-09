@@ -14,7 +14,7 @@ TrackFitting::TrackFitting(FittingType fitting_type)
 
 }
 
-void TrackFitting::add_segment(PR::Segment* segment){
+void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
     m_clusters.insert(segment->cluster());
     m_grouping = segment->cluster()->grouping();
@@ -411,3 +411,94 @@ void TrackFitting::fill_global_rb_map() {
     
     std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
 } 
+
+
+std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit, double end_point_limit) {
+    std::vector<WireCell::Point> pts;
+    
+    // Get the WCPoints from the segment
+    const auto& segment_wcpts = segment->wcpts();
+    if (segment_wcpts.empty()) {
+        return pts;
+    }
+    
+    // Convert WCPoints to vector for easier manipulation
+    std::vector<WireCell::Point> temp_wcps_vec;
+    for (const auto& wcp : segment_wcpts) {
+        temp_wcps_vec.push_back(wcp.point);
+    }
+    
+    // Fill in the beginning point ...
+    {
+        WireCell::Point p1 = temp_wcps_vec.front();
+        WireCell::Point p2 = temp_wcps_vec.front();
+        double dis1 = 0;
+        for (auto it = temp_wcps_vec.begin(); it != temp_wcps_vec.end(); it++) {
+            p2 = *it;
+            dis1 = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis1 > low_dis_limit) break;
+        }
+        if (dis1 != 0) {
+            WireCell::Point extended_p1(
+                p1.x() + (p1.x() - p2.x()) / dis1 * end_point_limit,
+                p1.y() + (p1.y() - p2.y()) / dis1 * end_point_limit,
+                p1.z() + (p1.z() - p2.z()) / dis1 * end_point_limit
+            );
+            pts.push_back(extended_p1);
+        }
+    }
+
+    // std::cout << "Test: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.front() << std::endl;
+    
+    // Fill in the middle part
+    for (size_t i = 0; i != temp_wcps_vec.size(); i++) {
+        WireCell::Point p1 = temp_wcps_vec.at(i);
+        
+        double dis = low_dis_limit;
+        if (pts.size() > 0) {
+            dis = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+        }
+        
+        if (dis < low_dis_limit * 0.8) {
+            continue;
+        } else if (dis < low_dis_limit * 1.6) {
+            pts.push_back(p1);
+        } else {
+            int npoints = std::round(dis / low_dis_limit);
+            WireCell::Point p_save = pts.back();
+            for (int j = 0; j != npoints; j++) {
+                WireCell::Point p(
+                    p_save.x() + (p1.x() - p_save.x()) / npoints * (j + 1),
+                    p_save.y() + (p1.y() - p_save.y()) / npoints * (j + 1),
+                    p_save.z() + (p1.z() - p_save.z()) / npoints * (j + 1)
+                );
+                pts.push_back(p);
+            }
+        }
+    }
+    
+    // Fill in the end part
+    {
+        WireCell::Point p1 = temp_wcps_vec.back();
+        WireCell::Point p2 = temp_wcps_vec.back();
+        double dis1 = 0;
+        for (auto it = temp_wcps_vec.rbegin(); it != temp_wcps_vec.rend(); it++) {
+            p2 = *it;
+            dis1 = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+            if (dis1 > low_dis_limit) break;
+        }
+        if (dis1 != 0) {
+            WireCell::Point extended_p1(
+                p1.x() + (p1.x() - p2.x()) / dis1 * end_point_limit,
+                p1.y() + (p1.y() - p2.y()) / dis1 * end_point_limit,
+                p1.z() + (p1.z() - p2.z()) / dis1 * end_point_limit
+            );
+            pts.push_back(extended_p1);
+        }
+    }
+
+    // std::cout << "Test: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.back() << std::endl;
+
+    
+    return pts;
+}

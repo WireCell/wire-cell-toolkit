@@ -41,7 +41,7 @@ namespace WireCell::Clus {
          */
         FittingType get_fitting_type() const { return m_fitting_type; }
 
-        void add_segment(PR::Segment* segment); 
+        void add_segment(std::shared_ptr<PR::Segment> ); 
 
         // after the first round of track fitting, adjust the rough path ...
         WireCell::Point adjust_rough_path(PR::Segment& segment);
@@ -51,6 +51,16 @@ namespace WireCell::Clus {
 
         // Fill the global readout map
         void fill_global_rb_map();
+
+        /**
+         * Organize original path from segment points with distance limits
+         * @param segment Pointer to PR::Segment containing the path points
+         * @param low_dis_limit Lower distance limit for point organization
+         * @param end_point_limit Extension distance for end points
+         * @return Vector of organized 3D points
+         */
+        std::vector<WireCell::Point> organize_orig_path(std::shared_ptr<PR::Segment> , double low_dis_limit=1.2*units::cm, double end_point_limit=0.6*units::cm);
+
 
         /**
          * Get anode for a specific APA identifier
@@ -114,7 +124,7 @@ namespace WireCell::Clus {
         std::set<Facade::Blob*> m_blobs;
 
         // input segment
-        std::set<PR::Segment*> m_segments;
+        std::set<std::shared_ptr<PR::Segment> > m_segments;
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION
