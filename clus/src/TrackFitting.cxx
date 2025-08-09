@@ -19,7 +19,13 @@ void TrackFitting::add_segment(PR::Segment* segment){
     m_clusters.insert(segment->cluster());
     m_grouping = segment->cluster()->grouping();
 
-    // std::cout << "TrackFitting: Added segment with " << segment->wcpts().size() << " points." << std::endl;
+    for (auto& cluster: m_clusters){
+        for (auto& blob: cluster->children()){
+            m_blobs.insert(blob);
+        }
+    }
+
+    std::cout << "TrackFitting: Added segment with " << segment->wcpts().size() << " points." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
 }
 
 geo_point_t TrackFitting::adjust_rough_path(PR::Segment& segment){

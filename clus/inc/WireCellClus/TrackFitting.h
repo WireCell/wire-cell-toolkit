@@ -111,6 +111,8 @@ namespace WireCell::Clus {
         Facade::Grouping* m_grouping{nullptr};
         std::set<Facade::Cluster*> m_clusters;
 
+        std::set<Facade::Blob*> m_blobs;
+
         // input segment
         std::set<PR::Segment*> m_segments;
 
