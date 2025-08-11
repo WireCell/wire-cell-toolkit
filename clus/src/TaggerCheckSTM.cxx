@@ -585,6 +585,8 @@ private:
 
         m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
 
+        m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
+
         return false;
     }
     

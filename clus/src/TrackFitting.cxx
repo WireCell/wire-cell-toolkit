@@ -1164,4 +1164,18 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
  void TrackFitting::examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point, double charge_cut){
 
+    // Get cluster from segment
+    auto cluster = segment->cluster();
+    // const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+    // double cluster_t0 = cluster->get_flash().time();
+
+    // find the apa and face ...
+    auto wpid = m_dv->contained_by(p);
+    int apa = wpid.apa();
+    int face = wpid.face();
+    
+    if (apa == -1 || face == -1) return;
+
+    
+
  }
