@@ -1617,3 +1617,13 @@ void TrackFitting::form_map(std::shared_ptr<PR::Segment> segment, std::vector<Wi
     
     pts = saved_pts;
 }
+
+
+// track trajectory fitting // should fit all APA ...
+void TrackFitting::trajectory_fit(std::vector<WireCell::Point>& ps_vec, int charge_div_method, double div_sigma){
+
+}
+
+bool TrackFitting::skip_trajectory_point(WireCell::Point& p, int i, std::vector<WireCell::Point>& ps_vec,  std::vector<WireCell::Point>& fine_tracking_path){
+    return false;
+}

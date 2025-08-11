@@ -139,6 +139,13 @@ namespace WireCell::Clus {
 
         void form_map(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
 
+        // track trajectory fitting // should fit all APA ...
+        void trajectory_fit(std::vector<WireCell::Point>& ps_vec, int charge_div_method, double div_sigma);
+
+        bool skip_trajectory_point(WireCell::Point& p, int i, std::vector<WireCell::Point>& ps_vec,  std::vector<WireCell::Point>& fine_tracking_path); 
+
+
+
         /**  
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
