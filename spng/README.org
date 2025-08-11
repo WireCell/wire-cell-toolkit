@@ -1,0 +1,75 @@
+#+title: Wire-Cell Signal Processing, Next Generation.
+
+* Goals
+
+The SPNG package shall meet these goals:
+
+- Perform calculations on CPU or GPU with configure-time switch.
+- Process each plane independently.
+- Pass arrays between functions while leaving them on a GPU device.
+- Proper array padding to avoid deconvolution bleed-over / wrap-around.
+- Support stream processing with no chunk boundary artifacts.
+
+* Array
+
+The goals require basing the package on a new array / tensor type.  Some of the requirements for the library providing this support are:
+
+- Provide C++ multi-dimensional array / tensor data structure with at least single precision float element type.
+
+- Element-wise arithmetic, large 1D and 2D FFT (decon), array mask operations ("region of interest finding").
+
+- Ability to run DL model inference a bonus.
+
+- Support a run/config-time switch to place arrays on CPU or on GPU.
+
+- Multiprocessing sharing a single GPU required, multi compute-units sharing a GPU (eg NVIDIA Triton) is a bonus.
+
+- Support for CPU + NVIDIA GPU at least, but the more the merrier.
+
+- Ability to pass handles to const arrays between disparate functions while keeping array data on a device with transparent, lazy CPU<-->GPU migration if/when needed.
+
+
+
+* Building
+
+This is a Wire-Cell User Package.  However, WCUP support is currently broken and so we rely on a hack:
+
+#+begin_example
+$ git clone git@github.com:wirecell/spng.git
+$ git clone git@github.com:WireCell/wire-cell-toolkit.git
+$ cd wire-cell-toolkit
+$ ln -s ../spng .
+#+end_example
+
+From then on we treat ~spng/~ as a normal WCT "subpackage", still in ~wire-cell-toolkit/~:
+
+#+begin_example
+$ TDIR=$PREFIX/lib/python3.11/site-packages/torch \
+  ./wcb configure \
+  --prefix=$PREFIX \
+  --boost-mt \
+  --boost-libs=$PREFIX/lib \
+  --boost-include=$PREFIX/include \
+  --with-jsonnet-libs=gojsonnet \
+  --with-cuda-lib=/usr/lib/x86_64-linux-gnu,$PREFIX/targets/x86_64-linux/lib \
+  --with-libtorch=$TDIR \
+  --with-libtorch-include=$TDIR/include,$TDIR/include/torch/csrc/api/include \
+  --with-libtorch-lib=$TDIR/lib
+
+$ ./wcb
+#+end_example
+
+An example for how ~PREFIX~ may be defined is at:
+
+https://www.phy.bnl.gov/~bviren/wire-cell/docs/wcwc-howto.html#spack-view-wct
+
+Torch is a bit weirdly installed.  Besides its prefix (~TDIR~) being deep under ~$PREFIX~ in the Python-related files, it requires *two* include directories, one inside the other, to be specified.
+
+* Testing
+
+Tests are in ~spng/tests/{doctest,test,check}_*.*~ following WCT's testing support.
+
+#+begin_example
+$ ./build/spng/wcdoctest-spng
+$ ./build/spng/check_raytiling_speed [cpu|gpu] [yes|no] [seed]
+#+end_example

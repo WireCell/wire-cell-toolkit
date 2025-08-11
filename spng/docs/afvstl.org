@@ -1,0 +1,217 @@
+#+title: ArrayFire vs LibTorch for SPNG
+
+* Introduction
+
+The design of SPNG is fundamentally array-based with the following requirements on the array data structure and operation.  The following requirements on the array class and function API:
+
+- Provide float32 and complex32 array element types.
+- Support sub-array indexing.
+- Usual element-wise arithmetic.
+- 1D and 2D forward and inverse DFT.
+- Transparent and runtime choice to place data and operations on CPU or GPU device.
+  - Support for at least nvidia GPUs.
+- Thread-safe "const" / read-only access of array data.
+- Ability to transfer array reference across threads to consumers without copying through host memory.
+- Access array's contiguous elements in host memory.
+- Produce an array from contiguous host memory.
+- Provide or enable development of file I/O
+- An efficient mechanism to marshal arrays in to and out from DNN inference models.
+  - Support use of models trained with and saved by PyTorch.
+- Ability to lend underlying array memory for use by non array-code.
+- C++ level const correctness.  
+- Provide or enable file I/O in Numpy format.
+- Clear developer documentation and API reference.
+- Support DNN models in TorchScript (~.ts~) file format.
+
+Given initial understanding of requirements and options, two candidates have been considered.
+
+- [[https://arrayfire.org/][ArrayFire]] "arrays"
+- [[https://pytorch.org/cppdocs/][LibTorch]] "tensors"
+
+The rest of this document compares the two candidates and attempts to conclude with a justified selection.
+
+* Initial biases
+
+SPNG is to become a subpackage of Wire-Cell Toolkit which already has a dependency on LibTorch.  LibTorch is the basis of two main WCT components: an ~IDFT~ (discrete Fourier transform operations) and an ~IForward~ (inference).  It also provides a semaphore-based mechanism to limit the load submitted via LibTorch by WCT on the GPU.
+These features appear to give LibTorch an initial advantage.  However, that is attenuated by a few facts.
+
+- The ~IDFT~ can be ignored as it inherently requires any array to suffer a round trip from host memory to device memory and back.  One of the principles of SPNG design is to remove any such round trips.
+- Array data can be marshalled through LibTorch tensors in order to use current ~IForward~ unchanged.  This may impose some overhead if an array copy or an array host/device roundtrip is required.
+- If the overhead is not acceptable, there is a good chance that existing LibTorch based ~IForward~ users (so far just DNNROI) can provide their inference models in a format that ArrayFire can utilize directly.
+
+Of course, WCT currently depends on LibTorch while ArrayFire would be a new dependency.  This bias is also somewhat attenuated as use of LibTorch with GPU is not widespread and requires some new work in various software ecosystems to supply GPU-enabled LibTorch.
+
+* Requirements
+
+Most of the requirements are met by both and need no comment.  This section describes some specific issues with one or both meeting a requirement.
+
+** Handling of arrays on CPU vs GPU
+
+A LibTorch array is "on" a CPU devie or a GPU device and can be explicitly sent ~to(device)~ one or the other.  C++ code can not directly access the array data in normal C++ code directly without either expensive indexing or via  "accessor" code that must be written differently for CPU or for GPU (CUDA).
+
+An ArrayFire array is "on" a "device".  There is no ~to()~ method.  There is a ~host<type>()~ function that returns a *copy* of array data as C++ data and which becomes owned by the caller.  A ~device()~ returns  a "device pointer" to memory on a device.  Ownership is not transferred to the caller but the memory is "locked" until ~unlock()~ is called. While locked the memory can be used by other device (eg CUDA) code.
+
+Both provide ways to construct an array on existing host data while avoiding a copy (~torch::from_blob()~ and constructing an AF array with pointer and ~afDevice~ flag.
+
+** Memory management and const correctness
+
+LibTorch arrays are effectively a ~shared_ptr<TensorImp>~ with a large facade API.
+The data of the underlying array type (~TensorImp~) is never ~const~.
+With LibTorch, ~const~-correctness is not possible at C++ level and must rely on developer contract.
+
+ArrayFire arrays are also handles on array memory.  While they may perform reference counting of the underlying array data and provide a facade, they do allow const correctness.  This appears to be possible by making ~host<type>()~ be effectively a ~new~ and passing ownership to the caller while ~device()~ has the "lock" mechanism (it can return host memory that will not be deleted by AF unless/until unlocked). 
+
+** File I/O
+
+Both provide "proprietary" file format which are essentially binary dumps of the array data.  WCT provides an ~std::ostream~ based I/O using Boost ~iostreams~ and read/write numpy files.  These support array data in ~std::vector~, Eigen3 and recently LibTorch.  Adding support for ArrayFire would need to be developed but is simple to do so.
+
+** Documentation
+
+LibTorch documentation is largely useless.  Reading headers provides more information than online APIs.  A few pages with high level documentation exists but is not comprehensive.  Developers can rely on LibTorch API being somewhat similar to the PyTorch API, which does have better documentation.  Developing with LibTorch requires constant google searching and grepping of headers.  As the developer continues and learns the difficulty this causes reduces somewhat but it is incredibly unfriendly experience to new developers.
+
+ArrayFire documentation is plentiful and clear.  A number of high level tutorials exist and the API reference documentation is embellished with clear function description, argument and return types and in some cases lengthy notes and comments.  All is collected and organized at ~arrayfire.org~ which provides built-in and effective search.
+
+* Performance tests
+
+** Software setup
+
+Get software and source
+
+#+begin_example
+$ wcwc view -S wirecell -d afvslt \
+   -s "arrayfire+cuda+opencl" \
+   -s "py-torch" \
+   -s "nlohmann-json" \
+   -s "go-jsonnet" \
+   -s "eigen" \
+   -s "fftw" \
+   afvslt/local
+$ cd afvslt && direnv allow
+$ git clone git@github.com:wirecell/spng.git
+#+end_example
+
+Build:
+
+#+begin_example
+$ ./spng/test/build-afvslt
+#+end_example
+
+Run:
+
+#+begin_example
+$ jsonnet spng/test/afvslt.jsonnet | OMP_NUM_THREADS=1 ./afvslt | python spng/test/afvslt.py
+#+end_example
+
+That full pipeline results in a table to paste into this document.  The set of benchmarks can be narrowed by giving arguments to the Jsonnet file such like as:
+
+#+begin_example
+$ jsonnet -A techs=af -A devices=gpu -A tests=arith spng/test/afvslt.jsonnet 
+#+end_example
+
+** Results
+
+
+The existing WCT ~OmnibusSigProc~ was examined and its three largest bottlenecks were considered for mocking in micro-benchmarks:
+
+1. Convolution via discrete Fourier transform.  
+2. Calculation of median and arbitrary quantile/percentile.
+3. Construction of Hermitian-symmetric arrays.
+
+The second poses problems as quantile is not implemented in AF.  However, it's core kernel is a sort, and this is tested.
+
+The third is excluded as it is not expected to be required (currently used to construct the "high frequency" half spectrum which could/should be included specifically).
+
+In addition, some simple element-wise arithmetic is benchmarked.
+
+Each time is an average over a number of repeats of the operation sufficient to use 1-10 seconds of total wall clock time.
+
+The results:
+
+
+| test   | dev | tech | time (ms) | notes            |
+|--------+-----+------+-----------+------------------|
+| arith  | GPU | AF   |      0.14 |                  |
+| arith  | GPU | LT   |      0.36 |                  |
+|--------+-----+------+-----------+------------------|
+| arith  | CPU | AF   |     33.40 |                  |
+| arith  | CPU | LT   |     11.91 |                  |
+| arith  | CPU | EI   |     18.78 |                  |
+|--------+-----+------+-----------+------------------|
+|--------+-----+------+-----------+------------------|
+| convo  | GPU | AF   |      2.20 |                  |
+| convo  | GPU | AF   |      2.02 | fwd is r2c       |
+| convo  | GPU | LT   |      0.89 |                  |
+|--------+-----+------+-----------+------------------|
+| convo  | CPU | AF   |    667.74 |                  |
+| convo  | CPU | AF   |    414.30 | fwd is r2c       |
+| convo  | CPU | LT   |    158.24 |                  |
+| convo  | CPU | EI   |    489.61 | fftw3            |
+| convo  | CPU | EI   |    309.31 | fftw3 fwd is r2c |
+|--------+-----+------+-----------+------------------|
+|--------+-----+------+-----------+------------------|
+| median | GPU | AF   |      1.30 |                  |
+| median | GPU | LT   |      0.18 |                  |
+|--------+-----+------+-----------+------------------|
+| median | CPU | AF   |   1109.09 |                  |
+| median | CPU | LT   |     76.73 |                  |
+| median | CPU | EI   |     90.98 | ~std::nth_element~ |
+|--------+-----+------+-----------+------------------|
+|--------+-----+------+-----------+------------------|
+| sort   | GPU | AF   |      1.33 |                  |
+| sort   | GPU | LT   |      1.55 |                  |
+|--------+-----+------+-----------+------------------|
+| sort   | CPU | AF   |   1119.37 |                  |
+| sort   | CPU | LT   |    383.22 |                  |
+| sort   | CPU | EI   |    317.24 | ~std::sort~        |
+|--------+-----+------+-----------+------------------|
+
+This is reproduced with:
+#+begin_example
+ ./spng/test/build-afvslt
+ jsonnet spng/test/afvslt.jsonnet | OMP_NUM_THREADS=1 ./afvslt | ./spng/test/afvslt.py fulltest.json
+#+end_example
+
+May narrow to a subset of tests:
+#+begin_example
+ jsonnet -A tests=convo,sort -A devices=gpu -A techs=af spng/test/afvslt.jsonnet | OMP_NUM_THREADS=1 ./afvslt
+#+end_example
+
+** Comments and conclusions 
+
+- The "EI" test uses Eigen arrays but only the "arith" test uses Eigen operators.  The rest are ~std::~ or FFTW3 algs operating on the data in the Eigen arrays.
+- Torch/CPU apparently beats FFTW3 by x3.  This surprising result led to refining the FFTW3 forward DFT to be an R2C optimization.  This reduces torch to x2 faster.  The remaining difference is assumed to be due to Torch using C2R optimization for the inv FFT.
+- ArrayFire is also apparently not detecting R2C or C2R.  It has these specializations.  They require handling the missing "half" of Hermitian symmetry.
+- Implementing explicit R2C in the AF convo test to mimic what was done for the EI convo test shows a relative speedup on CPU that is consistent with what is seen in the FFTW R2C specialization.  The speedup of AF on GPU with R2C is not consistent.  AF GPU must have some other, large overhead.  The relative CPU AF speedup is consistent with FFTW's.
+- It is likely that R2C and C2R optimization of AF convo would bring CPU similar to Torch CPU.  But, given the lack of improvement with just R2C on GPU for AF, it is uncertain if C2R on GPU would bring AF on par with Torch. OTOH, 2ms vs 1ms round trip convo is perhaps negligible compared to other time users.
+- AF CPU median result is relatively abysmal and it is likely due to a sort being performed.  AF CPU sort is also abysmal and takes nearly the same time which reinforces the conclusion that AF CPU median is doing a sort.  OTOH, AF GPU beats LT GPU on sort.
+- In principle, AF could be used as the array type and its memory loaned to others which have better algorithms.  Eg, ~std::nth_element~ can be used to implement ~median()~ when device is CPU.  And, perhaps torch can be used for ~median()~ on GPU.
+
+* Build issues
+
+https://github.com/arrayfire/arrayfire/issues/3516
+
+* ArrayFire issues
+
+** Building
+
+The latest version 3.9.0 added certain desirable features so is the minimum version considered.  The Spack recipe required updates [[https://github.com/spack/spack/pull/46490][PR]].  It has hits some problems related to spdlog via fmt API changes that WCT has faced but otherwise builds fairly well.
+
+Building against AF is a far simpler story than libtorch.  One needs only link to the "unified" ~libaf.so~.
+
+
+
+** Compute devices
+
+Arrays constructed on a particular "device" based on the current, globally-defined [[https://arrayfire.org/docs/unifiedbackend.htm#gsc.tab=0]["backend"]] (eg, CPU vs CUDA).  It is not allowed to combine arrays on different devices.  Regardless of what "device" the array resides, memory on the "host" (ie, C++ / CPU data) can be accessed via ~T* host<T>()~.  Caller becomes owner of returned memory.
+
+
+
+
+* LibTorch issues
+
+** Building
+
+LibTorch is a large package, on par with ROOT.  Building Spack's ~py-torch~ package is more or less straight-forward once it is understood that Spack's ~cuda~ package does not actually provide ~libcuda.so~.
+
+Building against LibTorch has several issues.  Torch is provided as several shared libs and one must explicitly link a couple extra for CUDA support.  The Torch headers are unusually provided in two locations, one inside the other and requiring two ~-I~ compiler flags.
+

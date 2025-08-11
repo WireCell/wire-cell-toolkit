@@ -1,0 +1,20 @@
+#+title: Constructing a Hermitian-symmetric array.
+
+The third largest performance nail in OSP (after DFT and ~percentile()~) is ~hermetian_mirror()~.  And, it is possible that we may accelerate it away 100% by simply not calling it.
+
+The function takes a complex array and returns a "Hermitian-symmetric" array that has
+- a real zero bin
+- a real Nyquist bin if even size
+- the second "half" array being the reverse and complex conjugate of the first half.
+
+This function call is actually forced on the caller of WCT's ~DftTools::inv_c2r()~.  The intention here is that to assure a zero imaginary part of the inverse DFT, the array must first have Hermitian-symmetry.  A forward DFT on a real array results in a complex array with Hermitian-symmetry but this symmetry can be spoiled in two ways:
+
+- WCT code will ignore the "high" aka "negative" frequency half of spectra and only operate on frequencies below Nyquist.  This code requires Hermitian-symmetry to explicitly restored.
+
+- Multiplicative operations in Fourier domain (apply filter/decon) have small floating point.
+
+If we always properly treat the full spectrum, we can avoid the biggest reason we must call ~hermetian_mirror()~.
+
+We then need some way to gauge if FP errors are significant.  I think to do this we must simply implement SPNG and examine the size of imaginary parts after realistic inverse DFT's.
+
+

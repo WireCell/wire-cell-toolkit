@@ -1,0 +1,218 @@
+digraph Overall {
+  graph [compound=true]
+  rankdir=TB  
+  
+
+  subgraph clusterDoIt {
+    label="DoIt"
+    //Input [shape=box3d]
+    MaskFunc [label="Load Masks:Chans"]
+    Masks [shape=rectangle]
+    ROIForms [shape=rectangle]
+    ROIRefines [shape=rectangle]
+    subgraph clusterInitResp {
+      label="InitResp"
+      //a -> b
+      FieldResp [shape=rectangle]
+      WireShift [shape=rectangle]
+      WirePadding [shape=rectangle]
+      nFFTticks [shape=rectangle]
+      nFFTwires [shape=rectangle]
+      LoadFieldResp -> FieldResp
+      LoadFieldResp -> WireShift
+      LoadFieldResp -> WirePadding
+      LoadFieldResp -> nFFTticks
+      LoadFieldResp -> nFFTwires
+    }
+    subgraph clusterPlaneLoop {
+      label="LoopPlanes"
+      subgraph clusterLoadData {
+        label="LoadDataPerPlane"
+        a [style="invis"]
+        //SkipOtherPlanes
+        MaskChans
+        Add [shape="point"]
+        RebaseWFs [color="red"]
+      }
+
+      subgraph clusterDecon2DInit {
+        label="decon_2D_init"
+        FFT_time
+        ElecResp [shape=rectangle]
+        ChanResp [shape=rectangle]
+        Redigitize
+        Combine
+        ElecResp -> ElecRespFFT_time 
+        ChanResp -> ChanRespFFT_time
+        FFT_wire
+        //FFT_FR_wire_domain
+        FFT_FR_time_domain [label="FFT_time"]
+        ElecRespFFT_time -> Combine
+        FFT_FR_time_domain -> Combine
+
+        invFFT_time
+        Combine -> invFFT_time
+        invFFT_time -> Redigitize
+
+        FFT_time2 [label="FFT_time"]
+        FFT_wire2 [label="FFT_wire"]
+        Redigitize -> FFT_time2
+        FFT_time2 -> FFT_wire2
+
+        ApplyFieldResp
+        ApplyHfFilter [label="Gaus wire filter"]
+        Inv_FFT_wire
+        Inv_FFT_time
+        ShiftWire
+        ShiftTime
+        FFT_time_2
+
+        subgraph clusterChanLoop {
+          label="channel loop"
+          ApplyResp
+        }
+      }
+
+      subgraph clusterTightROIs {
+        label="Find Tight ROIs"
+        IsInductionPlane [shape="diamond"]
+        UseROIRefine [shape="diamond"]
+        decon_2D_tighterROI [color="red"]
+        decon_2D_tightROI_ind [label="decon_2D_tightROI", color="red"]
+        decon_2D_tightROI_coll [label="decon_2D_tightROI", color="red"]
+        find_roi_by_decon_itself [color="red"]
+        find_roi_by_decon_itself_ind [label="find_roi_by_decon_itself", color="red"]
+      }
+
+      subgraph clusterLooseROIs {
+        label="Find Loose ROIs"
+        UseROIRefineLoose [shape="diamond", label="UseROIRefine"]
+        decon_2D_looseROI [color="red"]
+        find_roi_loose [color="red"]
+        decon_2D_ROI_refine [color="red"]
+      }
+
+      subgraph clusterLoadDataROIRefine {
+        label="Load Data -- ROI Refine"
+        ROIRefine_do_load_data_ind [color="red"]
+        ROIRefine_do_load_data_coll [color="red"]
+      }
+      dummy [style="invis", shape=point]
+    }
+
+    subgraph clusterPlaneLoop2 {
+      label="LoopPlanes"
+      cleanup_ROIs_in_plane
+      generate_merge_ROIs_in_plane
+
+      subgraph clusterAnodeFaces {
+        label="LoopAnodeFaces"
+        MP3ROI
+        MP2ROI
+      }
+      dummy2 [style="invis", shape=point]
+    }
+
+    subgraph clusterPlaneLoop3 {
+      label="LoopPlanes"
+      dummy3 [style="invis", shape=point]
+      subgraph clusterBreakROIsLoop {
+        label="BreakROIsLoop"
+        BreakROIs
+        CheckROIs
+        CleanROIs
+      }
+      ShrinkROIs, BreakROIs2, CleanROIs2
+      IsInductionPlanePL3 [label="IsInduction", shape=diamond]
+      CleanUpCollectionROIs, CleanUpInductionROIs,
+      ExtendROIs, decon_2D_hits, apply_roi, decon_2D_charge
+      apply_roi2 [label="apply_roi"]
+
+    }
+  }
+
+
+  WaveformsTPC [shape=box3d]
+  WaveformsTPC -> MaskFunc
+  MaskFunc -> Masks
+
+  Masks -> ROIForms
+  Masks -> ROIRefines
+  Masks -> MaskChans
+
+  //WaveformsTPC -> a
+  nFFTwires -> a [lhead=clusterLoadData]
+  nFFTticks -> a [lhead=clusterLoadData]
+  //Masks -> a [lhead=clusterLoadData]
+  //WaveformsTPC -> Add [lhead=clusterLoadData]
+  WaveformsTPC -> Add
+  MaskChans -> Add
+  //SkipOtherPlanes -> Add
+  Add -> RebaseWFs
+
+  RebaseWFs -> FFT_time
+  //ElecRespFFT_time -> ApplyResp
+  ChanRespFFT_time -> ApplyResp
+  FFT_time -> ApplyResp
+  ApplyResp -> FFT_wire [ltail=clusterChanLoop]
+  FieldResp -> FFT_FR_time_domain
+  //FFT_FR_time_domain -> FFT_FR_wire_domain
+  //FFT_FR_wire_domain -> ApplyFieldResp
+  FFT_wire -> ApplyFieldResp
+  FFT_wire2 -> ApplyFieldResp
+  ApplyFieldResp -> ApplyHfFilter
+  ApplyHfFilter -> Inv_FFT_wire
+  Inv_FFT_wire -> Inv_FFT_time
+  Inv_FFT_time -> ShiftWire
+  ShiftWire -> ShiftTime
+  ShiftTime -> FFT_time_2
+  FFT_time_2 -> IsInductionPlane
+
+  IsInductionPlane -> decon_2D_tightROI_coll [label="no"]
+  decon_2D_tightROI_coll -> find_roi_by_decon_itself
+
+  IsInductionPlane -> UseROIRefine [label="yes"]
+  UseROIRefine -> decon_2D_tighterROI [label="yes"]
+  decon_2D_tighterROI -> decon_2D_tightROI_ind
+  UseROIRefine -> decon_2D_tightROI_ind [label="yes"]
+  decon_2D_tightROI_ind -> find_roi_by_decon_itself_ind
+
+  find_roi_by_decon_itself_ind -> UseROIRefineLoose
+  UseROIRefineLoose -> decon_2D_looseROI [label="yes"]
+  decon_2D_looseROI -> find_roi_loose
+  find_roi_loose -> decon_2D_ROI_refine
+
+  ROIForms -> find_roi_loose
+  ROIForms -> find_roi_by_decon_itself_ind
+  ROIForms -> find_roi_by_decon_itself
+  decon_2D_ROI_refine -> ROIRefine_do_load_data_ind
+  find_roi_by_decon_itself -> ROIRefine_do_load_data_coll
+  edge [style="invis"]
+  ROIRefine_do_load_data_coll -> dummy //-> cleanup_ROIs_in_plane
+
+  edge [style="solid"]
+  dummy -> cleanup_ROIs_in_plane  [lhead=clusterPlaneLoop2, ltail=clusterPlaneLoop]
+  cleanup_ROIs_in_plane -> generate_merge_ROIs_in_plane
+
+  generate_merge_ROIs_in_plane -> MP3ROI [lhead=clusterAnodeFaces]
+  MP3ROI -> MP2ROI
+  MP2ROI -> dummy2 [ltail=clusterAnodeFaces, style=invis]
+
+  dummy2 -> dummy3 [lhead=clusterPlaneLoop3, ltail=clusterPlaneLoop2]
+  dummy3 -> BreakROIs [style=invis]
+  BreakROIs -> CheckROIs -> CleanROIs
+  CleanROIs -> ShrinkROIs [ltail=clusterBreakROIsLoop]
+  ShrinkROIs -> BreakROIs2 -> CleanROIs2
+
+  //IsInductionPlanePL3 [label="IsInduction", shape=diamond]
+  //CleanUpCollectionROIs, CleanUpInductionROIs,
+  //ExtendROIs, decon_2D_hits, apply_roi, decon_2D_charge
+  //apply_roi2 [label="apply_roi"]
+  CleanROIs2 -> IsInductionPlanePL3
+  IsInductionPlanePL3 -> CleanUpCollectionROIs [label="no"]
+  IsInductionPlanePL3 -> CleanUpInductionROIs [label="yes"]
+  CleanUpCollectionROIs -> ExtendROIs
+  CleanUpInductionROIs -> ExtendROIs  
+  ExtendROIs -> decon_2D_hits -> apply_roi -> decon_2D_charge -> apply_roi2
+
+}
