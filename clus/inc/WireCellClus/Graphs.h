@@ -190,6 +190,13 @@ namespace WireCell::Clus::Graphs {
             /// be kept and others removed and vice versa if accept is false.
             filtered_graph_type weight_threshold(edge_weight_type threshold, bool accept = true) const;
 
+            /// Find all neighbors within nlevel hops from the input index.
+            /// @param index The starting vertex index
+            /// @param nlevel The number of levels (hops) to search
+            /// @param include_self Whether to include the original vertex in the result (default: true)
+            /// @return A set of vertex indices that are within nlevel hops from the input index
+            vertex_set find_neighbors_nlevel(size_t index, int nlevel, bool include_self = true) const;
+
         };
 
 

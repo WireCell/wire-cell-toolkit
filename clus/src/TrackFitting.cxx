@@ -22,9 +22,8 @@ void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
 
     if (m_grouping == nullptr){
         m_grouping = segment->cluster()->grouping();
-        // Get all the wire plane IDs from the grouping
-        const auto& wpids = m_grouping->wpids();    
-        compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+
+        BuildGeometry();
     }
 
     for (auto& cluster: m_clusters){
@@ -34,6 +33,28 @@ void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     }
 
     std::cout << "TrackFitting: Added segment with " << segment->wcpts().size() << " points." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
+}
+
+void TrackFitting::BuildGeometry(){
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = m_grouping->wpids();    
+    compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+
+    // loop over wpids ...
+    for (const auto& wpid : wpids) {
+        double time_slice_width = m_dv->metadata(wpid)["nticks_live_slice"].asDouble() *  m_dv->metadata(wpid)["tick_drift"].asDouble();
+
+        WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
+        WirePlaneId wpid_v(kVlayer, wpid.face(), wpid.apa());
+        WirePlaneId wpid_w(kWlayer, wpid.face(), wpid.apa());
+
+        double pitch_u = m_dv->pitch_vector(wpid_u).magnitude();
+        double pitch_v = m_dv->pitch_vector(wpid_v).magnitude();
+        double pitch_w = m_dv->pitch_vector(wpid_w).magnitude();
+
+        wpid_geoms[wpid] = std::make_tuple(time_slice_width, pitch_u, pitch_v, pitch_w);
+        // std::cout << "Geometry: " << time_slice_width/units::cm << " " << pitch_u/units::cm << " " << pitch_v/units::cm << " " << pitch_w/units::cm << std::endl;
+    }
 }
 
 geo_point_t TrackFitting::adjust_rough_path(PR::Segment& segment){
@@ -689,5 +710,214 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
  void TrackFitting::form_point_association(std::shared_ptr<PR::Segment> segment,WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_cut ){
 
-     
+     // Clear previous associations
+    temp_2dut.associated_2d_points.clear();
+    temp_2dvt.associated_2d_points.clear();
+    temp_2dwt.associated_2d_points.clear();
+    
+    // Get cluster from segment
+    auto cluster = segment->cluster();
+    if (!cluster) return;
+
+
+    // Get closest point in cluster and find neighbors using graph
+    auto closest_result = cluster->get_closest_wcpoint(geo_point_t(p.x(), p.y(), p.z()));
+    size_t closest_point_index = closest_result.first;
+    geo_point_t closest_point = closest_result.second;
+
+    double temp_dis = sqrt(pow(closest_point.x() - p.x(), 2) + 
+                        pow(closest_point.y() - p.y(), 2) + 
+                        pow(closest_point.z() - p.z(), 2));
+    
+    if (temp_dis >= dis_cut) return;
+
+    // find the WPID for this point ...
+    WirePlaneId wpid = cluster->wire_plane_id(closest_point_index);
+    int wire_u = cluster->wire_index(closest_point_index, 0);
+    int wire_v = cluster->wire_index(closest_point_index, 1);
+    int wire_w = cluster->wire_index(closest_point_index, 2);
+
+    int apa = wpid.apa();
+    int face = wpid.face();
+
+    if (apa==-1 || face == -1) return;
+
+    // Get geometry information from TrackFitting internal data
+    auto paras = wpid_params.find(wpid);
+    auto geoms = wpid_geoms.find(wpid);
+    if (paras == wpid_params.end() || geoms == wpid_geoms.end()) return;
+
+    double angle_u = std::get<1>(paras->second);
+    double angle_v = std::get<2>(paras->second);
+    double angle_w = std::get<3>(paras->second);
+
+ 
+
+    double time_slice_width = std::get<0>(geoms->second);
+    double pitch_u = std::get<1>(geoms->second);
+    double pitch_v = std::get<2>(geoms->second);
+    double pitch_w = std::get<3>(geoms->second);
+    
+    
+    // std::cout << "WirePlaneId: " << wpid << ", Angles: (" << angle_u << ", " << angle_v << ", " << angle_w << ")" << " " << time_slice_width/units::cm << " " << pitch_u/units::cm << " " << pitch_v/units::cm << " " << putch_w/units::cm << std::endl;
+    // Get graph algorithms interface
+    // auto cached_gas = cluster->get_cached_graph_algorithms();
+    // for (auto ga: cached_gas){
+    //     std::cout << "GraphAlgorithm name: " << ga << std::endl;
+    // }
+    
+    const auto& ga = cluster->graph_algorithms("basic_pid");
+    //Find nearby points using graph traversal
+    auto total_vertices_found = ga.find_neighbors_nlevel(closest_point_index, nlevel);
+    std::cout << "Neighbors: " << closest_point_index << " " << total_vertices_found.size() << std::endl;
+    
+    // // Collect nearby blobs and their properties
+    // std::set<const Facade::Blob*> nearby_blobs_set;
+    // for (auto vertex_idx : total_vertices_found) {
+    //     const Facade::Blob* blob = cluster->blob_with_point(vertex_idx);
+    //     if (blob) {
+    //         nearby_blobs_set.insert(blob);
+    //     }
+    // }
+    
+    // // Get wire indices and time slice for current point
+    // WirePlaneId current_wpid = cluster->wire_plane_id(closest_point_index);
+    // int cur_wire_u = cluster->wire_index(closest_point_index, 0);
+    // int cur_wire_v = cluster->wire_index(closest_point_index, 1);
+    // int cur_wire_w = cluster->wire_index(closest_point_index, 2);
+    
+    // // Convert 3D point to time slice (simplified - may need proper coordinate transformation)
+    // int cur_time_slice = static_cast<int>(p.x() / time_slice_width);
+    
+    // // Calculate adaptive distance cuts for each plane
+    // double dis_cut_u = dis_cut;
+    // double dis_cut_v = dis_cut;
+    // double dis_cut_w = dis_cut;
+    
+    // double max_time_slice_u = 0, max_time_slice_v = 0, max_time_slice_w = 0;
+    
+    // // Find maximum time slice differences for adaptive cuts
+    // for (const auto* blob : nearby_blobs_set) {
+    //     int this_time_slice = (blob->slice_index_min() + blob->slice_index_max()) / 2;
+        
+    //     // Check U plane
+    //     if (abs(cur_wire_u - blob->u_wire_index_min()) <= 1 || 
+    //         abs(cur_wire_u - blob->u_wire_index_max()) <= 1) {
+    //         max_time_slice_u = std::max(max_time_slice_u, 
+    //                                    static_cast<double>(abs(this_time_slice - cur_time_slice)));
+    //     }
+        
+    //     // Check V plane
+    //     if (abs(cur_wire_v - blob->v_wire_index_min()) <= 1 || 
+    //         abs(cur_wire_v - blob->v_wire_index_max()) <= 1) {
+    //         max_time_slice_v = std::max(max_time_slice_v, 
+    //                                    static_cast<double>(abs(this_time_slice - cur_time_slice)));
+    //     }
+        
+    //     // Check W plane
+    //     if (abs(cur_wire_w - blob->w_wire_index_min()) <= 1 || 
+    //         abs(cur_wire_w - blob->w_wire_index_max()) <= 1) {
+    //         max_time_slice_w = std::max(max_time_slice_w, 
+    //                                    static_cast<double>(abs(this_time_slice - cur_time_slice)));
+    //     }
+    // }
+    
+    // // Update distance cuts based on time slice spans
+    // if (max_time_slice_u * time_slice_width * 1.2 < dis_cut_u)
+    //     dis_cut_u = max_time_slice_u * time_slice_width * 1.2;
+    // if (max_time_slice_v * time_slice_width * 1.2 < dis_cut_v)
+    //     dis_cut_v = max_time_slice_v * time_slice_width * 1.2;
+    // if (max_time_slice_w * time_slice_width * 1.2 < dis_cut_w)
+    //     dis_cut_w = max_time_slice_w * time_slice_width * 1.2;
+    
+    // // Process each nearby blob for wire range calculations
+    // for (const auto* blob : nearby_blobs_set) {
+    //     int this_time_slice = (blob->slice_index_min() + blob->slice_index_max()) / 2;
+        
+    //     // Calculate remaining distance cuts accounting for time offset
+    //     double rem_dis_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - this_time_slice) * time_slice_width, 2);
+    //     double rem_dis_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - this_time_slice) * time_slice_width, 2);
+    //     double rem_dis_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - this_time_slice) * time_slice_width, 2);
+        
+    //     if ((rem_dis_cut_u > 0 || rem_dis_cut_v > 0 || rem_dis_cut_w > 0) && 
+    //         abs(cur_time_slice - this_time_slice) <= time_cut) {
+            
+    //         // Calculate minimum wire distances
+    //         float min_u_dis, min_v_dis, min_w_dis;
+            
+    //         // U wire distance
+    //         if (cur_wire_u < blob->u_wire_index_min()) {
+    //             min_u_dis = blob->u_wire_index_min() - cur_wire_u;
+    //         } else if (cur_wire_u <= blob->u_wire_index_max()) {
+    //             min_u_dis = 0;
+    //         } else {
+    //             min_u_dis = cur_wire_u - blob->u_wire_index_max();
+    //         }
+            
+    //         // V wire distance
+    //         if (cur_wire_v < blob->v_wire_index_min()) {
+    //             min_v_dis = blob->v_wire_index_min() - cur_wire_v;
+    //         } else if (cur_wire_v <= blob->v_wire_index_max()) {
+    //             min_v_dis = 0;
+    //         } else {
+    //             min_v_dis = cur_wire_v - blob->v_wire_index_max();
+    //         }
+            
+    //         // W wire distance
+    //         if (cur_wire_w < blob->w_wire_index_min()) {
+    //             min_w_dis = blob->w_wire_index_min() - cur_wire_w;
+    //         } else if (cur_wire_w <= blob->w_wire_index_max()) {
+    //             min_w_dis = 0;
+    //         } else {
+    //             min_w_dis = cur_wire_w - blob->w_wire_index_max();
+    //         }
+            
+    //         // Use the dedicated calculate_ranges_simplified function
+    //         float range_u, range_v, range_w;
+    //         WireCell::Clus::TrackFittingUtil::calculate_ranges_simplified(
+    //             angle_u, angle_v, angle_w,
+    //             rem_dis_cut_u, rem_dis_cut_v, rem_dis_cut_w,
+    //             min_u_dis, min_v_dis, min_w_dis,
+    //             pitch_u, pitch_v, pitch_w,
+    //             range_u, range_v, range_w);
+            
+    //         // If all ranges are positive, add wire indices to associations
+    //         if (range_u > 0 && range_v > 0 && range_w > 0) {
+    //             // Calculate wire limits
+    //             float low_u_limit = cur_wire_u - sqrt(range_u) / pitch_u;
+    //             float high_u_limit = cur_wire_u + sqrt(range_u) / pitch_u;
+    //             float low_v_limit = cur_wire_v - sqrt(range_v) / pitch_v;
+    //             float high_v_limit = cur_wire_v + sqrt(range_v) / pitch_v;
+    //             float low_w_limit = cur_wire_w - sqrt(range_w) / pitch_w;
+    //             float high_w_limit = cur_wire_w + sqrt(range_w) / pitch_w;
+                
+    //             // Add U plane associations
+    //             for (int j = std::round(low_u_limit); j <= std::round(high_u_limit); j++) {
+    //                 Coord2D coord(current_wpid.apa(), current_wpid.face(), 
+    //                              this_time_slice, j, 
+    //                              get_channel(current_wpid.apa(), current_wpid.face(), 0, j), 
+    //                              WirePlaneLayer_t::kUlayer);
+    //                 temp_2dut.associated_2d_points.insert(coord);
+    //             }
+                
+    //             // Add V plane associations
+    //             for (int j = std::round(low_v_limit); j <= std::round(high_v_limit); j++) {
+    //                 Coord2D coord(current_wpid.apa(), current_wpid.face(), 
+    //                              this_time_slice, j, 
+    //                              get_channel(current_wpid.apa(), current_wpid.face(), 1, j), 
+    //                              WirePlaneLayer_t::kVlayer);
+    //                 temp_2dvt.associated_2d_points.insert(coord);
+    //             }
+                
+    //             // Add W plane associations
+    //             for (int j = std::round(low_w_limit); j <= std::round(high_w_limit); j++) {
+    //                 Coord2D coord(current_wpid.apa(), current_wpid.face(), 
+    //                              this_time_slice, j, 
+    //                              get_channel(current_wpid.apa(), current_wpid.face(), 2, j), 
+    //                              WirePlaneLayer_t::kWlayer);
+    //                 temp_2dwt.associated_2d_points.insert(coord);
+    //             }
+    //         }
+    //     }
+    // }
  }

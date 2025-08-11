@@ -257,7 +257,6 @@ namespace WireCell::Clus {
         // ----------------------------------------
         // Internal Storage
         // ----------------------------------------
-
         std::map<CoordReadout, ChargeMeasurement> m_charge_data;  ///< Internal charge data storage using ChargeMeasurement struct
         std::map<Coord2D, std::set<int>> m_2d_to_3d;  ///< Internal 2D→3D mapping
         std::map<int, Point3DInfo> m_3d_to_2d;               ///< Internal 3D→2D mapping
@@ -266,11 +265,17 @@ namespace WireCell::Clus {
         std::map<CoordReadout, std::set<Facade::Blob* > > global_rb_map;
 
         // global geometry
+
+        void BuildGeometry();
+
         std::map<WirePlaneId , std::tuple<WireCell::Point, double, double, double>> wpid_params;
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_U_dir;
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_V_dir;
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_W_dir;
         std::set<int> apas;
+        // Time_width, Pitch_u, pitch_v, pitch_w
+        std::map<WirePlaneId, std::tuple<double, double, double, double >> wpid_geoms;
+
 
     };
 

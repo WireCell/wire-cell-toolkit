@@ -1,6 +1,7 @@
 #include "WireCellUtil/GraphTools.h"
 #include "WireCellClus/Graphs.h"
 #include "PAAL.h"
+#include <queue>
 
 
 using namespace WireCell;
@@ -283,4 +284,71 @@ Weighted::filtered_graph_type Weighted::GraphAlgorithms::weight_threshold(double
         return accept == (get(weight_map, edge) >= threshold);
     };
     return Weighted::filtered_graph_type(m_graph, filter, boost::keep_all());
+}
+
+Weighted::vertex_set 
+Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool include_self) const
+{
+    vertex_set result;
+    
+    // Input validation
+    if (nlevel < 0) {
+        return result; // Return empty set for invalid nlevel
+    }
+    
+    // Check if the vertex index is valid
+    if (index >= boost::num_vertices(m_graph)) {
+        return result; // Return empty set for invalid vertex index
+    }
+    
+    // Convert size_t to vertex_type
+    vertex_type start_vertex = boost::vertex(index, m_graph);
+    
+    // Special case: if nlevel is 0, only return the original vertex if include_self is true
+    if (nlevel == 0) {
+        if (include_self) {
+            result.insert(start_vertex);
+        }
+        return result;
+    }
+    
+    // Use BFS to find neighbors level by level
+    std::queue<vertex_type> current_level;
+    std::queue<vertex_type> next_level;
+    std::set<vertex_type> visited;
+    
+    // Initialize with the starting vertex
+    current_level.push(start_vertex);
+    if (include_self) {
+        result.insert(start_vertex);
+    }
+    visited.insert(start_vertex);
+    
+    // Process each level
+    for (int level = 1; level <= nlevel; ++level) {
+        // Process all vertices at the current level
+        while (!current_level.empty()) {
+            vertex_type current_vertex = current_level.front();
+            current_level.pop();
+            
+            // Examine all adjacent vertices
+            auto adjacent_vertices = boost::adjacent_vertices(current_vertex, m_graph);
+            for (auto vi = adjacent_vertices.first; vi != adjacent_vertices.second; ++vi) {
+                vertex_type neighbor = *vi;
+                
+                // If we haven't visited this neighbor yet
+                if (visited.find(neighbor) == visited.end()) {
+                    visited.insert(neighbor);
+                    result.insert(neighbor);
+                    next_level.push(neighbor);
+                }
+            }
+        }
+        
+        // Move to the next level
+        current_level = std::move(next_level);
+        next_level = std::queue<vertex_type>(); // Clear next_level
+    }
+    
+    return result;
 }

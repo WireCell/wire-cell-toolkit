@@ -580,6 +580,11 @@ private:
 
         // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
 
+        WireCell::Point p = organized_path.front();
+        TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+
+        m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 5);
+
         return false;
     }
     
