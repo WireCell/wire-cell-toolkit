@@ -580,14 +580,15 @@ private:
 
         // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
 
-        WireCell::Point p = organized_path.front();
-        TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+        // WireCell::Point p = organized_path.front();
+        // TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+        // m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
+        // m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
+        // std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
 
-        m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
+        m_track_fitter.form_map(segment, organized_path);
 
-        m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
-
-        std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
+        // std::cout << "TaggerCheckSTM: Formed map with " << organized_path.size() << " points." << std::endl;
 
         return false;
     }

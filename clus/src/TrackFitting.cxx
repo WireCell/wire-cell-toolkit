@@ -1522,3 +1522,98 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     temp_2dwt.quantity = results.at(2);
 
  }
+
+void TrackFitting::form_map(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut) {
+    // Implementation of form_map function
+
+    m_3d_to_2d.clear();
+    m_2d_to_3d.clear();
+
+    PointVector saved_pts;
+    int count = 0;
+    
+    // Calculate distances between consecutive points
+    std::vector<double> distances;
+    for (size_t i = 0; i + 1 != pts.size(); i++) {
+        distances.push_back(sqrt(pow(pts.at(i+1).x() - pts.at(i).x(), 2) +
+                               pow(pts.at(i+1).y() - pts.at(i).y(), 2) +
+                               pow(pts.at(i+1).z() - pts.at(i).z(), 2)));
+    }
+
+    // Loop over the path
+    for (size_t i = 0; i != pts.size(); i++) {
+        double dis_cut;
+        if (i == 0) {
+            dis_cut = std::min(distances.at(i) * end_point_factor, 4/3. * end_point_factor * units::cm);
+        } else if (i + 1 == pts.size()) {
+            dis_cut = std::min(distances.back() * end_point_factor, 4/3. * end_point_factor * units::cm);
+        } else {
+            dis_cut = std::min(std::max(distances.at(i-1) * mid_point_factor, distances.at(i) * mid_point_factor), 
+                              4/3. * mid_point_factor * units::cm);
+        }
+
+        // check point's apa and face ...
+        // find the apa and face ...
+        auto wpid = m_dv->contained_by(pts.at(i));
+        int apa = wpid.apa();
+        int face = wpid.face();
+        
+        if (apa != -1 && face != -1) {
+
+            TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+            form_point_association(segment, pts.at(i), temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+
+            if (i == 0 || i == 1 || i + 1 == pts.size() || i + 2 == pts.size()) {
+                examine_point_association(segment, pts.at(i), temp_2dut, temp_2dvt, temp_2dwt, true, charge_cut);
+            } else {
+                examine_point_association(segment, pts.at(i), temp_2dut, temp_2dvt, temp_2dwt, false, charge_cut);
+            }
+
+            // Fill the mapping data if we have valid associations
+            if (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0) {
+                m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
+                m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kVlayer, temp_2dvt);
+                m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kWlayer, temp_2dwt);
+
+
+                // Fill reverse mapping for U plane
+                for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++) {
+                    if (m_2d_to_3d.find(*it) == m_2d_to_3d.end()) {
+                        std::set<int> temp_set;
+                        temp_set.insert(count);
+                        m_2d_to_3d[*it] = temp_set;
+                    } else {
+                        m_2d_to_3d[*it].insert(count);
+                    }
+                }
+
+                for (auto it = temp_2dvt.associated_2d_points.begin(); it != temp_2dvt.associated_2d_points.end(); it++) {
+                    if (m_2d_to_3d.find(*it) == m_2d_to_3d.end()) {
+                        std::set<int> temp_set;
+                        temp_set.insert(count);
+                        m_2d_to_3d[*it] = temp_set;
+                    } else {
+                        m_2d_to_3d[*it].insert(count);
+                    }
+                }
+
+                for (auto it = temp_2dwt.associated_2d_points.begin(); it != temp_2dwt.associated_2d_points.end(); it++) {
+                    if (m_2d_to_3d.find(*it) == m_2d_to_3d.end()) {
+                        std::set<int> temp_set;
+                        temp_set.insert(count);
+                        m_2d_to_3d[*it] = temp_set;
+                    } else {
+                        m_2d_to_3d[*it].insert(count);
+                    }
+                }
+
+                saved_pts.push_back(pts.at(i));
+                count++;
+            }
+        }
+    }
+
+    // std::cout << pts.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
+    
+    pts = saved_pts;
+}

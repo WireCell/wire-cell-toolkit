@@ -137,6 +137,8 @@ namespace WireCell::Clus {
 
         void examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point = false, double charge_cut = 2000);
 
+        void form_map(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
+
         /**  
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
