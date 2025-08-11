@@ -66,6 +66,75 @@ namespace WireCell::Clus {
         void organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit);
     
 
+                /// Internal coordinate (can be more complex)
+        struct Coord2D {
+            int apa, face, time, wire, channel;
+            WirePlaneLayer_t plane;  // Additional internal information
+
+            Coord2D(int a, int f, int t, int w, int c, WirePlaneLayer_t p)
+                : apa(a), face(f), time(t), wire(w), channel(c), plane(p) {}
+
+            bool operator<(const Coord2D& other) const {
+                if (apa != other.apa) return apa < other.apa;
+                if (face != other.face) return face < other.face;
+                if (time != other.time) return time < other.time;
+                if (wire != other.wire) return wire < other.wire;
+                if (channel != other.channel) return channel < other.channel;
+                return plane < other.plane;
+            }
+        };
+
+        /// Per-plane data for 3D points (exactly matches prototype)
+        struct PlaneData {
+            std::set<Coord2D> associated_2d_points;
+            double quantity;
+            
+            PlaneData() : quantity(0.0) {}
+        };
+
+        /// 3D point with per-plane associations (corrected structure)
+        struct Point3DInfo {
+            std::map<WirePlaneLayer_t, PlaneData> plane_data;
+            
+            const PlaneData& get_plane_data(WirePlaneLayer_t plane) const {
+                static PlaneData empty;
+                auto it = plane_data.find(plane);
+                return (it != plane_data.end()) ? it->second : empty;
+            }
+            
+            void set_plane_data(WirePlaneLayer_t plane, const PlaneData& data) {
+                plane_data[plane] = data;
+            }
+        };
+
+        struct CoordReadout {
+            int apa, time, channel;
+
+            CoordReadout(int a, int t, int c)
+            : apa(a), time(t), channel(c) {}
+
+            bool operator<(const CoordReadout& other) const {
+            if (apa != other.apa) return apa < other.apa;
+            if (time != other.time) return time < other.time;
+            return channel < other.channel;
+            }
+        };
+
+
+        /// Simple charge measurement (in ternal interface)
+        struct ChargeMeasurement {
+            double charge, charge_err;
+            int flag;
+            
+            ChargeMeasurement(double q = 0.0, double qe = 0.0, int f = 0) 
+                : charge(q), charge_err(qe), flag(f) {}
+        };
+
+
+
+        // point associations
+        void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_cut );
+
         /**
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
@@ -184,69 +253,6 @@ namespace WireCell::Clus {
         void cache_entire_plane(int apa, int face, int plane) const;
         int fetch_channel_from_anode(int apa, int face, int plane, int wire) const;
     
-        /// Internal coordinate (can be more complex)
-        struct Coord2D {
-            int apa, face, time, wire, channel;
-            WirePlaneLayer_t plane;  // Additional internal information
-
-            Coord2D(int a, int f, int t, int w, int c, WirePlaneLayer_t p)
-                : apa(a), face(f), time(t), wire(w), channel(c), plane(p) {}
-
-            bool operator<(const Coord2D& other) const {
-                if (apa != other.apa) return apa < other.apa;
-                if (face != other.face) return face < other.face;
-                if (time != other.time) return time < other.time;
-                if (wire != other.wire) return wire < other.wire;
-                if (channel != other.channel) return channel < other.channel;
-                return plane < other.plane;
-            }
-        };
-
-        /// Per-plane data for 3D points (exactly matches prototype)
-        struct PlaneData {
-            std::set<Coord2D> associated_2d_points;
-            double quantity;
-            
-            PlaneData() : quantity(0.0) {}
-        };
-
-        /// 3D point with per-plane associations (corrected structure)
-        struct Point3DInfo {
-            std::map<WirePlaneLayer_t, PlaneData> plane_data;
-            
-            const PlaneData& get_plane_data(WirePlaneLayer_t plane) const {
-                static PlaneData empty;
-                auto it = plane_data.find(plane);
-                return (it != plane_data.end()) ? it->second : empty;
-            }
-            
-            void set_plane_data(WirePlaneLayer_t plane, const PlaneData& data) {
-                plane_data[plane] = data;
-            }
-        };
-
-        struct CoordReadout {
-            int apa, time, channel;
-
-            CoordReadout(int a, int t, int c)
-            : apa(a), time(t), channel(c) {}
-
-            bool operator<(const CoordReadout& other) const {
-            if (apa != other.apa) return apa < other.apa;
-            if (time != other.time) return time < other.time;
-            return channel < other.channel;
-            }
-        };
-
-
-        /// Simple charge measurement (in ternal interface)
-        struct ChargeMeasurement {
-            double charge, charge_err;
-            int flag;
-            
-            ChargeMeasurement(double q = 0.0, double qe = 0.0, int f = 0) 
-                : charge(q), charge_err(qe), flag(f) {}
-        };
 
         // ----------------------------------------
         // Internal Storage
@@ -258,6 +264,13 @@ namespace WireCell::Clus {
     
         // Global (apa, time, channel) to blobs
         std::map<CoordReadout, std::set<Facade::Blob* > > global_rb_map;
+
+        // global geometry
+        std::map<WirePlaneId , std::tuple<WireCell::Point, double, double, double>> wpid_params;
+        std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_U_dir;
+        std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_V_dir;
+        std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_W_dir;
+        std::set<int> apas;
 
     };
 

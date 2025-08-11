@@ -1,5 +1,7 @@
 #include "WireCellClus/TrackFitting.h"
+#include "WireCellClus/TrackFitting_Util.h"
 #include "WireCellUtil/Logging.h"
+
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -17,7 +19,13 @@ TrackFitting::TrackFitting(FittingType fitting_type)
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
     m_clusters.insert(segment->cluster());
-    m_grouping = segment->cluster()->grouping();
+
+    if (m_grouping == nullptr){
+        m_grouping = segment->cluster()->grouping();
+        // Get all the wire plane IDs from the grouping
+        const auto& wpids = m_grouping->wpids();    
+        compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+    }
 
     for (auto& cluster: m_clusters){
         for (auto& blob: cluster->children()){
@@ -677,3 +685,9 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     if (pts.size() <= 1)
         pts = ps_vec;
 }
+
+
+ void TrackFitting::form_point_association(std::shared_ptr<PR::Segment> segment,WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_cut ){
+
+     
+ }
