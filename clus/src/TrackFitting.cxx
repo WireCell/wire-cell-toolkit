@@ -1166,8 +1166,8 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
     // Get cluster from segment
     auto cluster = segment->cluster();
-    // const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    // double cluster_t0 = cluster->get_flash().time();
+    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+    double cluster_t0 = cluster->get_flash().time();
 
     // find the apa and face ...
     auto wpid = m_dv->contained_by(p);
@@ -1176,6 +1176,349 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     
     if (apa == -1 || face == -1) return;
 
+    // // Convert 3D point to wire/time coordinates for each plane
+    geo_point_t p_raw = transform->backward(p, cluster_t0, apa, face);
+    auto [time_u, wire_u] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 0);
+    auto [time_v, wire_v] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 1);
+    auto [time_w, wire_w] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 2);
+
+    std::set<int> temp_types_u;
+    std::set<int> temp_types_v;
+    std::set<int> temp_types_w;
     
+    std::set<Coord2D> saved_2dut;
+    std::set<Coord2D> saved_2dvt;
+    std::set<Coord2D> saved_2dwt;
+
+    std::vector<float> results;
+    results.resize(3,0);
+    
+    // Process U plane
+    for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++){
+        CoordReadout coord_key(it->apa, it->time, it->channel);
+        auto charge_it = m_charge_data.find(coord_key);
+        if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            temp_types_u.insert(charge_it->second.flag);
+            if (charge_it->second.flag == 0) results.at(0)++;
+            saved_2dut.insert(*it);
+        }
+    }
+
+    // Process V plane
+    for (auto it = temp_2dvt.associated_2d_points.begin(); it != temp_2dvt.associated_2d_points.end(); it++){
+        CoordReadout coord_key(it->apa, it->time, it->channel);
+        auto charge_it = m_charge_data.find(coord_key);
+        if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            temp_types_v.insert(charge_it->second.flag);
+            if (charge_it->second.flag == 0) results.at(1)++;
+            saved_2dvt.insert(*it);
+        }
+    }
+
+    // Process W plane
+    for (auto it = temp_2dwt.associated_2d_points.begin(); it != temp_2dwt.associated_2d_points.end(); it++){
+        CoordReadout coord_key(it->apa, it->time, it->channel);
+        auto charge_it = m_charge_data.find(coord_key);
+        if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            temp_types_w.insert(charge_it->second.flag);
+            if (charge_it->second.flag == 0) results.at(2)++;
+            saved_2dwt.insert(*it);
+        }
+    }
+
+    // Calculate quality ratios
+    if (temp_2dut.associated_2d_points.size() != 0)
+        results.at(0) = (saved_2dut.size() - results.at(0)*1.0)/temp_2dut.associated_2d_points.size();
+    else
+        results.at(0) = 0;
+    
+    if (temp_2dvt.associated_2d_points.size() != 0)
+        results.at(1) = (saved_2dvt.size() - results.at(1)*1.0)/temp_2dvt.associated_2d_points.size();
+    else
+        results.at(1) = 0;
+    
+    if (temp_2dwt.associated_2d_points.size() != 0)
+        results.at(2) = (saved_2dwt.size() - results.at(2)*1.0)/temp_2dwt.associated_2d_points.size();
+    else
+        results.at(2) = 0;
+
+    // Reset if only flag 0 found
+    if (temp_types_u.find(0) != temp_types_u.end() && temp_types_u.size() == 1){
+        saved_2dut.clear();
+        results.at(0) = 0;
+    }
+    if (temp_types_v.find(0) != temp_types_v.end() && temp_types_v.size() == 1){
+        saved_2dvt.clear();
+        results.at(1) = 0;
+    }
+    if (temp_types_w.find(0) != temp_types_w.end() && temp_types_w.size() == 1){
+        saved_2dwt.clear();
+        results.at(2) = 0;
+    }
+
+    // Handle dead plane scenarios
+    // U and V planes are dead ...
+    if (saved_2dut.size() == 0 && saved_2dvt.size() == 0 && saved_2dwt.size() != 0){
+        int channel_u = get_channel_for_wire(apa, face, 0, wire_u);
+        int channel_v = get_channel_for_wire(apa, face, 1, wire_v);
+        saved_2dut.insert(Coord2D(apa, face, time_u, wire_u, channel_u, kUlayer));
+        saved_2dvt.insert(Coord2D(apa, face, time_v, wire_v, channel_v, kVlayer));
+        
+        // W plane check for outliers
+        if (!flag_end_point && saved_2dwt.size() > 0)
+        {
+            std::pair<double, double> ave_pos = std::make_pair(0,0);
+            double total_charge = 0;
+            for (auto it1 = saved_2dwt.begin(); it1 != saved_2dwt.end(); it1++){
+                CoordReadout coord_key(it1->apa, it1->time, it1->channel);
+                auto charge_it = m_charge_data.find(coord_key);
+                if (charge_it != m_charge_data.end()){
+                    ave_pos.first += it1->wire * charge_it->second.charge;
+                    ave_pos.second += it1->time * charge_it->second.charge;
+                    total_charge += charge_it->second.charge;
+                }
+            }
+            if (total_charge != 0){
+                ave_pos.first /= total_charge;
+                ave_pos.second /= total_charge;
+            }
+            double rms = 0;
+            for (auto it1 = saved_2dwt.begin(); it1 != saved_2dwt.end(); it1++){
+                rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+            }
+            rms = sqrt(rms/saved_2dwt.size());
+
+            if (sqrt(pow(ave_pos.first - wire_w, 2) + pow(ave_pos.second - time_w, 2)) > 0.75*rms && 
+                saved_2dwt.size() <= 5 && saved_2dwt.size() < 0.2 * temp_2dwt.associated_2d_points.size()){
+                saved_2dwt.clear();
+                int channel_w = get_channel_for_wire(apa, face, 2, wire_w);
+                saved_2dwt.insert(Coord2D(apa, face, time_w, wire_w, channel_w, kWlayer));
+                results.at(2) = 0;
+            }
+        }
+    }
+    else if (saved_2dut.size() == 0 && saved_2dwt.size() == 0 && saved_2dvt.size() != 0){
+        // U and W planes are dead ...
+        int channel_u = get_channel_for_wire(apa, face, 0, wire_u);
+        int channel_w = get_channel_for_wire(apa, face, 2, wire_w);
+        saved_2dut.insert(Coord2D(apa, face, time_u, wire_u, channel_u, kUlayer));
+        saved_2dwt.insert(Coord2D(apa, face, time_w, wire_w, channel_w, kWlayer));
+        
+        // V plane check for outliers
+        if (!flag_end_point && saved_2dvt.size() > 0)
+        {
+            std::pair<double, double> ave_pos = std::make_pair(0,0);
+            double total_charge = 0;
+            for (auto it1 = saved_2dvt.begin(); it1 != saved_2dvt.end(); it1++){
+                CoordReadout coord_key(it1->apa, it1->time, it1->channel);
+                auto charge_it = m_charge_data.find(coord_key);
+                if (charge_it != m_charge_data.end()){
+                    ave_pos.first += it1->wire * charge_it->second.charge;
+                    ave_pos.second += it1->time * charge_it->second.charge;
+                    total_charge += charge_it->second.charge;
+                }
+            }
+            if (total_charge != 0){
+                ave_pos.first /= total_charge;
+                ave_pos.second /= total_charge;
+            }
+            double rms = 0;
+            for (auto it1 = saved_2dvt.begin(); it1 != saved_2dvt.end(); it1++){
+                rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+            }
+            rms = sqrt(rms/saved_2dvt.size());
+
+            if (sqrt(pow(ave_pos.first - wire_v, 2) + pow(ave_pos.second - time_v, 2)) > 0.75*rms && 
+                saved_2dvt.size() <= 5 && saved_2dvt.size() < 0.2 * temp_2dvt.associated_2d_points.size()){
+                saved_2dvt.clear();
+                int channel_v = get_channel_for_wire(apa, face, 1, wire_v);
+                saved_2dvt.insert(Coord2D(apa, face, time_v, wire_v, channel_v, kVlayer));
+                results.at(1) = 0;
+            }
+        }
+    }
+    else if (saved_2dvt.size() == 0 && saved_2dwt.size() == 0 && saved_2dut.size() != 0){
+        // V and W planes are dead ...
+        int channel_v = get_channel_for_wire(apa, face, 1, wire_v);
+        int channel_w = get_channel_for_wire(apa, face, 2, wire_w);
+        saved_2dvt.insert(Coord2D(apa, face, time_v, wire_v, channel_v, kVlayer));
+        saved_2dwt.insert(Coord2D(apa, face, time_w, wire_w, channel_w, kWlayer));
+        
+        // U plane check for outliers
+        if (!flag_end_point && saved_2dut.size() > 0)
+        {
+            std::pair<double, double> ave_pos = std::make_pair(0,0);
+            double total_charge = 0;
+            for (auto it1 = saved_2dut.begin(); it1 != saved_2dut.end(); it1++){
+                CoordReadout coord_key(it1->apa, it1->time, it1->channel);
+                auto charge_it = m_charge_data.find(coord_key);
+                if (charge_it != m_charge_data.end()){
+                    ave_pos.first += it1->wire * charge_it->second.charge;
+                    ave_pos.second += it1->time * charge_it->second.charge;
+                    total_charge += charge_it->second.charge;
+                }
+            }
+            if (total_charge != 0){
+                ave_pos.first /= total_charge;
+                ave_pos.second /= total_charge;
+            }
+            double rms = 0;
+            for (auto it1 = saved_2dut.begin(); it1 != saved_2dut.end(); it1++){
+                rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+            }
+            rms = sqrt(rms/saved_2dut.size());
+
+            if (sqrt(pow(ave_pos.first - wire_u, 2) + pow(ave_pos.second - time_u, 2)) > 0.75*rms && 
+                saved_2dut.size() <= 5 && saved_2dut.size() < 0.2 * temp_2dut.associated_2d_points.size()){
+                saved_2dut.clear();
+                int channel_u = get_channel_for_wire(apa, face, 0, wire_u);
+                saved_2dut.insert(Coord2D(apa, face, time_u, wire_u, channel_u, kUlayer));
+                results.at(0) = 0;
+            }
+        }
+    }
+    // Handle partial dead plane scenarios (only one plane dead, check outliers in others)
+    else if (saved_2dut.size() == 0 && saved_2dwt.size() != 0 && saved_2dvt.size() != 0){
+        // Only U plane is dead, check W and V plane outliers
+        auto check_outliers = [&](std::set<Coord2D>& saved_plane, std::vector<float>& results, int result_idx, 
+                                 const std::set<Coord2D>& temp_plane, int expected_wire, int expected_time) {
+            if (!flag_end_point && saved_plane.size() > 0)
+            {
+                std::pair<double, double> ave_pos = std::make_pair(0,0);
+                double total_charge = 0;
+                for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
+                    CoordReadout coord_key(it1->apa, it1->time, it1->channel);
+                    auto charge_it = m_charge_data.find(coord_key);
+                    if (charge_it != m_charge_data.end()){
+                        ave_pos.first += it1->wire * charge_it->second.charge;
+                        ave_pos.second += it1->time * charge_it->second.charge;
+                        total_charge += charge_it->second.charge;
+                    }
+                }
+                if (total_charge != 0){
+                    ave_pos.first /= total_charge;
+                    ave_pos.second /= total_charge;
+                }
+                double rms = 0;
+                for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
+                    rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                }
+                rms = sqrt(rms/saved_plane.size());
+
+                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow(ave_pos.second - expected_time, 2)) > 0.75*rms && 
+                    saved_plane.size() <= 5 && saved_plane.size() < 0.2 * temp_plane.size()){
+                    saved_plane.clear();
+                    int channel = get_channel_for_wire(apa, face, result_idx == 2 ? 2 : 1, expected_wire);
+                    WirePlaneLayer_t plane_layer = (result_idx == 2) ? kWlayer : kVlayer;
+                    saved_plane.insert(Coord2D(apa, face, expected_time, expected_wire, channel, plane_layer));
+                    results.at(result_idx) = 0;
+                }
+            }
+        };
+        
+        check_outliers(saved_2dwt, results, 2, temp_2dwt.associated_2d_points, wire_w, time_w);
+        check_outliers(saved_2dvt, results, 1, temp_2dvt.associated_2d_points, wire_v, time_v);
+    }
+    else if (saved_2dvt.size() == 0 && saved_2dut.size() != 0 && saved_2dwt.size() != 0){
+        // Only V plane is dead, check U and W plane outliers
+        auto check_outliers = [&](std::set<Coord2D>& saved_plane, std::vector<float>& results, int result_idx, 
+                                 const std::set<Coord2D>& temp_plane, int expected_wire, int expected_time) {
+            if (!flag_end_point && saved_plane.size() > 0)
+            {
+                std::pair<double, double> ave_pos = std::make_pair(0,0);
+                double total_charge = 0;
+                for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
+                    CoordReadout coord_key(it1->apa, it1->time, it1->channel);
+                    auto charge_it = m_charge_data.find(coord_key);
+                    if (charge_it != m_charge_data.end()){
+                        ave_pos.first += it1->wire * charge_it->second.charge;
+                        ave_pos.second += it1->time * charge_it->second.charge;
+                        total_charge += charge_it->second.charge;
+                    }
+                }
+                if (total_charge != 0){
+                    ave_pos.first /= total_charge;
+                    ave_pos.second /= total_charge;
+                }
+                double rms = 0;
+                for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
+                    rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                }
+                rms = sqrt(rms/saved_plane.size());
+
+                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow(ave_pos.second - expected_time, 2)) > 0.75*rms && 
+                    saved_plane.size() <= 5 && saved_plane.size() < 0.2 * temp_plane.size()){
+                    saved_plane.clear();
+                    int channel = get_channel_for_wire(apa, face, result_idx == 0 ? 0 : 2, expected_wire);
+                    WirePlaneLayer_t plane_layer = (result_idx == 0) ? kUlayer : kWlayer;
+                    saved_plane.insert(Coord2D(apa, face, expected_time, expected_wire, channel, plane_layer));
+                    results.at(result_idx) = 0;
+                }
+            }
+        };
+        
+        check_outliers(saved_2dut, results, 0, temp_2dut.associated_2d_points, wire_u, time_u);
+        check_outliers(saved_2dwt, results, 2, temp_2dwt.associated_2d_points, wire_w, time_w);
+    }
+    else if (saved_2dwt.size() == 0 && saved_2dut.size() != 0 && saved_2dvt.size() != 0){
+        // Only W plane is dead, check U and V plane outliers  
+        auto check_outliers = [&](std::set<Coord2D>& saved_plane, std::vector<float>& results, int result_idx, 
+                                 const std::set<Coord2D>& temp_plane, int expected_wire, int expected_time) {
+            if (!flag_end_point && saved_plane.size() > 0)
+            {
+                std::pair<double, double> ave_pos = std::make_pair(0,0);
+                double total_charge = 0;
+                for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
+                    CoordReadout coord_key(it1->apa, it1->time, it1->channel);
+                    auto charge_it = m_charge_data.find(coord_key);
+                    if (charge_it != m_charge_data.end()){
+                        ave_pos.first += it1->wire * charge_it->second.charge;
+                        ave_pos.second += it1->time * charge_it->second.charge;
+                        total_charge += charge_it->second.charge;
+                    }
+                }
+                if (total_charge != 0){
+                    ave_pos.first /= total_charge;
+                    ave_pos.second /= total_charge;
+                }
+                double rms = 0;
+                for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
+                    rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                }
+                rms = sqrt(rms/saved_plane.size());
+
+                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow(ave_pos.second - expected_time, 2)) > 0.75*rms && 
+                    saved_plane.size() <= 5 && saved_plane.size() < 0.2 * temp_plane.size()){
+                    saved_plane.clear();
+                    int channel = get_channel_for_wire(apa, face, result_idx, expected_wire);
+                    WirePlaneLayer_t plane_layer = (result_idx == 0) ? kUlayer : kVlayer;
+                    saved_plane.insert(Coord2D(apa, face, expected_time, expected_wire, channel, plane_layer));
+                    results.at(result_idx) = 0;
+                }
+            }
+        };
+        
+        check_outliers(saved_2dut, results, 0, temp_2dut.associated_2d_points, wire_u, time_u);
+        check_outliers(saved_2dvt, results, 1, temp_2dvt.associated_2d_points, wire_v, time_v);
+    }
+    else if (saved_2dwt.size() == 0 && saved_2dut.size() == 0 && saved_2dvt.size() == 0){
+        // All planes are dead, use fallback coordinates
+        int channel_u = get_channel_for_wire(apa, face, 0, wire_u);
+        int channel_v = get_channel_for_wire(apa, face, 1, wire_v);
+        int channel_w = get_channel_for_wire(apa, face, 2, wire_w);
+        saved_2dut.insert(Coord2D(apa, face, time_u, wire_u, channel_u, kUlayer));
+        saved_2dvt.insert(Coord2D(apa, face, time_v, wire_v, channel_v, kVlayer));
+        saved_2dwt.insert(Coord2D(apa, face, time_w, wire_w, channel_w, kWlayer));
+    }
+    
+    // Update PlaneData with filtered results
+    temp_2dut.associated_2d_points = saved_2dut;
+    temp_2dvt.associated_2d_points = saved_2dvt;
+    temp_2dwt.associated_2d_points = saved_2dwt;
+    
+    // Update quantity fields with calculated results
+    temp_2dut.quantity = results.at(0);
+    temp_2dvt.quantity = results.at(1);
+    temp_2dwt.quantity = results.at(2);
 
  }
