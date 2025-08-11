@@ -1160,3 +1160,8 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     }
 
  }
+
+
+ void TrackFitting::examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point, double charge_cut){
+
+ }
