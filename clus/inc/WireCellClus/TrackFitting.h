@@ -5,6 +5,9 @@
 #include "WireCellUtil/Logging.h"
 #include "WireCellClus/PRGraph.h"
 
+#include <Eigen/IterativeLinearSolvers>
+
+
 namespace WireCell::Clus {
 
     /**
@@ -153,7 +156,27 @@ namespace WireCell::Clus {
         void update_dQ_dx_data();
         void recover_original_charge_data();
 
-
+        /**
+         * Calculate compact matrix analysis for wire plane sharing
+         * 
+         * This function analyzes the sharing patterns between 2D measurements and 3D positions
+         * to compute overlap ratios and adjust weight matrix coefficients. It processes sparse
+         * matrices representing the relationship between 2D wire measurements and 3D positions.
+         * 
+         * @param weight_matrix Reference to sparse weight matrix (MW, MV, or MU) to be modified
+         * @param response_matrix_transpose Transposed response matrix (RWT, RVT, or RUT)  
+         * @param n_2d_measurements Number of 2D measurements (wire/time points)
+         * @param n_3d_positions Number of 3D positions
+         * @param cut_position Threshold for wire sharing cut (default 2.0)
+         * @return Vector of pairs containing overlap ratios for each 3D position
+         *         Each pair contains (previous_neighbor_ratio, next_neighbor_ratio)
+         */
+        std::vector<std::pair<double, double>> calculate_compact_matrix(
+            Eigen::SparseMatrix<double>& weight_matrix,
+            const Eigen::SparseMatrix<double>& response_matrix_transpose,
+            int n_2d_measurements,
+            int n_3d_positions,
+            double cut_position = 2.0);
         /**  
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)

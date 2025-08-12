@@ -2,7 +2,6 @@
 #include "WireCellClus/TrackFitting_Util.h"
 #include "WireCellUtil/Logging.h"
 
-#include <Eigen/IterativeLinearSolvers>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -2631,4 +2630,153 @@ void TrackFitting::recover_original_charge_data(){
     for (const auto& [coord_key, measurement] : m_orig_charge_data) {
         m_charge_data[coord_key] = measurement;
     }
+}
+
+std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
+    Eigen::SparseMatrix<double>& weight_matrix,
+    const Eigen::SparseMatrix<double>& response_matrix_transpose,
+    int n_2d_measurements,
+    int n_3d_positions,
+    double cut_position){
+    std::vector<std::pair<double,double> > results(n_3d_positions, std::make_pair(0,0));
+
+    // Initialize count vector for 2D measurements
+    std::vector<int> count_2d(n_2d_measurements, 1);
+    
+    // Maps for storing relationships between 2D and 3D indices
+    std::map<int, std::set<int>> map_2d_to_3d;
+    std::map<int, std::set<int>> map_3d_to_2d;
+    std::map<std::pair<int, int>, double> map_pair_values;
+    
+    // Build mapping structures by iterating through sparse matrix
+    for (int k = 0; k < response_matrix_transpose.outerSize(); ++k) {
+        int count = 0;
+        
+        for (Eigen::SparseMatrix<double>::InnerIterator it(response_matrix_transpose, k); it; ++it) {
+            int row = it.row();
+            int col = it.col();
+            double value = it.value();
+            
+            // Build 2D to 3D mapping
+            if (map_2d_to_3d.find(col) != map_2d_to_3d.end()) {
+                map_2d_to_3d[col].insert(row);
+            } else {
+                std::set<int> temp_set;
+                temp_set.insert(row);
+                map_2d_to_3d[col] = temp_set;
+            }
+            
+            // Build 3D to 2D mapping  
+            if (map_3d_to_2d.find(row) != map_3d_to_2d.end()) {
+                map_3d_to_2d[row].insert(col);
+            } else {
+                std::set<int> temp_set;
+                temp_set.insert(col);
+                map_3d_to_2d[row] = temp_set;
+            }
+            
+            // Store pair values for later lookup
+            map_pair_values[std::make_pair(row, col)] = value;
+            count++;
+        }
+        
+        count_2d.at(k) = count;
+    }
+    
+    // Calculate average count for 3D positions
+    std::vector<std::pair<double, int>> average_count(n_3d_positions);
+    for (auto it = map_3d_to_2d.begin(); it != map_3d_to_2d.end(); ++it) {
+        int row = it->first;
+        double sum1 = 0.0;
+        double sum2 = 0.0;
+        int flag = 0;
+        
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
+            int col = *it1;
+            double val = map_pair_values[std::make_pair(row, col)];
+            sum1 += count_2d[col] * val;
+            sum2 += val;
+            if (count_2d[col] > 2) {
+                flag = 1;
+            }
+        }
+        
+        average_count.at(row) = std::make_pair(sum1 / sum2, flag);
+    }
+    
+    // Update 2D measurement weights based on 3D position sharing
+    for (auto it = map_2d_to_3d.begin(); it != map_2d_to_3d.end(); ++it) {
+        int col = it->first;
+        double sum1 = 0.0;
+        double sum2 = 0.0;
+        int flag = 0;
+        
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
+            int row = *it1;
+            double val = map_pair_values[std::make_pair(row, col)];
+            if (average_count.at(row).second == 1) {
+                flag = 1;
+            }
+            sum1 += average_count.at(row).first * val;
+            sum2 += val;
+        }
+        
+        // Adjust weight matrix coefficients based on sharing criteria
+        if (flag == 1 && weight_matrix.coeffRef(col, col) == 1 && sum1 > cut_position * sum2) {
+            weight_matrix.coeffRef(col, col) = std::pow(1.0 / (sum1 / sum2 - cut_position + 1), 2);
+        }
+    }
+    
+    // Calculate sharing ratios between neighboring 3D positions
+    
+    for (auto it = map_3d_to_2d.begin(); it != map_3d_to_2d.end(); ++it) {
+        int row = it->first;
+        auto it_prev = map_3d_to_2d.find(row - 1);
+        auto it_next = map_3d_to_2d.find(row + 1);
+        
+        double sum[3] = {0.0, 0.0, 0.0};
+        
+        // Count total connections for current 3D position
+        for (auto it3 = it->second.begin(); it3 != it->second.end(); ++it3) {
+            sum[0] += 1.0;  // Total count
+        }
+        
+        // Count shared connections with previous neighbor
+        if (it_prev != map_3d_to_2d.end()) {
+            std::vector<int> common_results(it->second.size());
+            auto it3 = std::set_intersection(
+                it->second.begin(), it->second.end(),
+                it_prev->second.begin(), it_prev->second.end(),
+                common_results.begin()
+            );
+            common_results.resize(it3 - common_results.begin());
+            
+            for (auto it4 = common_results.begin(); it4 != common_results.end(); ++it4) {
+                sum[1] += 1.0;  // Shared with previous
+            }
+        }
+        
+        // Count shared connections with next neighbor
+        if (it_next != map_3d_to_2d.end()) {
+            std::vector<int> common_results(it->second.size());
+            auto it3 = std::set_intersection(
+                it->second.begin(), it->second.end(),
+                it_next->second.begin(), it_next->second.end(),
+                common_results.begin()
+            );
+            common_results.resize(it3 - common_results.begin());
+            
+            for (auto it4 = common_results.begin(); it4 != common_results.end(); ++it4) {
+                sum[2] += 1.0;  // Shared with next
+            }
+        }
+        
+        // Calculate overlap ratios
+        if (sum[0] > 0) {
+            results.at(row).first = sum[1] / sum[0];   // Previous neighbor ratio
+            results.at(row).second = sum[2] / sum[0];  // Next neighbor ratio
+        }
+    }
+
+    return results;
 }
