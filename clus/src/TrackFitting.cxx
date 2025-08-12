@@ -1788,22 +1788,26 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 int face = apa_face.second; 
 
                 WirePlaneId wpid(kAllLayers, face, apa);
-                auto offset_t = std::get<0>(wpid_offsets[wpid]);
-                auto offset_u = std::get<1>(wpid_offsets[wpid]);
-                auto offset_v = std::get<2>(wpid_offsets[wpid]);
-                auto offset_w = std::get<3>(wpid_offsets[wpid]);
-                auto slope_x = std::get<0>(wpid_slopes[wpid]);
-                auto slope_yu = std::get<1>(wpid_slopes[wpid]).first;
-                auto slope_zu = std::get<1>(wpid_slopes[wpid]).second;
-                auto slope_yv = std::get<2>(wpid_slopes[wpid]).first;
-                auto slope_zv = std::get<2>(wpid_slopes[wpid]).second;
-                auto slope_yw = std::get<3>(wpid_slopes[wpid]).first;
-                auto slope_zw = std::get<3>(wpid_slopes[wpid]).second;
+                auto offset_it = wpid_offsets.find(wpid);
+                auto slope_it = wpid_slopes.find(wpid);
+                auto geom_it = wpid_geoms.find(wpid);
 
-                auto time_tick_width = std::get<0>(wpid_geoms[wpid]);
-                auto pitch_u = std::get<1>(wpid_geoms[wpid]);
-                auto pitch_v = std::get<2>(wpid_geoms[wpid]);
-                auto pitch_w = std::get<3>(wpid_geoms[wpid]);
+                auto offset_t = std::get<0>(offset_it->second);
+                auto offset_u = std::get<1>(offset_it->second);
+                auto offset_v = std::get<2>(offset_it->second);
+                auto offset_w = std::get<3>(offset_it->second);
+                auto slope_x = std::get<0>(slope_it->second);
+                auto slope_yu = std::get<1>(slope_it->second).first;
+                auto slope_zu = std::get<1>(slope_it->second).second;
+                auto slope_yv = std::get<2>(slope_it->second).first;
+                auto slope_zv = std::get<2>(slope_it->second).second;
+                auto slope_yw = std::get<3>(slope_it->second).first;
+                auto slope_zw = std::get<3>(slope_it->second).second;
+
+                auto time_tick_width = std::get<0>(geom_it->second);
+                auto pitch_u = std::get<1>(geom_it->second);
+                auto pitch_v = std::get<2>(geom_it->second);
+                auto pitch_w = std::get<3>(geom_it->second);
 
                 // Calculate weights
                 for (auto& [coord_idx, fac] : coord_idx_fac) {
@@ -1925,11 +1929,14 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             } 
 
             WirePlaneId wpid(kAllLayers, it->face, it->apa);
-            auto offset_t = std::get<0>(wpid_offsets[wpid]);
-            auto offset_u = std::get<1>(wpid_offsets[wpid]);
-            auto slope_x = std::get<0>(wpid_slopes[wpid]);
-            auto slope_yu = std::get<1>(wpid_slopes[wpid]).first;
-            auto slope_zu = std::get<1>(wpid_slopes[wpid]).second;
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+
+            auto offset_t = std::get<0>(offset_it->second);
+            auto offset_u = std::get<1>(offset_it->second);
+            auto slope_x = std::get<0>(slope_it->second);
+            auto slope_yu = std::get<1>(slope_it->second).first;
+            auto slope_zu = std::get<1>(slope_it->second).second;
                
             if (scaling != 0) {
                 data_u_2D(2 * index) = scaling * (it->wire - offset_u);
@@ -1987,11 +1994,14 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             } 
 
             WirePlaneId wpid(kAllLayers, it->face, it->apa);
-            auto offset_t = std::get<0>(wpid_offsets[wpid]);
-            auto offset_v = std::get<2>(wpid_offsets[wpid]);
-            auto slope_x = std::get<0>(wpid_slopes[wpid]);
-            auto slope_yv = std::get<2>(wpid_slopes[wpid]).first;
-            auto slope_zv = std::get<2>(wpid_slopes[wpid]).second;
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+
+            auto offset_t = std::get<0>(offset_it->second);
+            auto offset_v = std::get<2>(offset_it->second);
+            auto slope_x = std::get<0>(slope_it->second);
+            auto slope_yv = std::get<2>(slope_it->second).first;
+            auto slope_zv = std::get<2>(slope_it->second).second;
             
             // std::cout << "Test: " << std::endl;
             if (scaling != 0) {
@@ -2052,11 +2062,14 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             } 
 
             WirePlaneId wpid(kAllLayers, it->face, it->apa);
-            auto offset_t = std::get<0>(wpid_offsets[wpid]);
-            auto offset_w = std::get<3>(wpid_offsets[wpid]);
-            auto slope_x = std::get<0>(wpid_slopes[wpid]);
-            auto slope_yw = std::get<3>(wpid_slopes[wpid]).first;
-            auto slope_zw = std::get<3>(wpid_slopes[wpid]).second;
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+
+            auto offset_t = std::get<0>(offset_it->second);
+            auto offset_w = std::get<3>(offset_it->second);
+            auto slope_x = std::get<0>(slope_it->second);
+            auto slope_yw = std::get<3>(slope_it->second).first;
+            auto slope_zw = std::get<3>(slope_it->second).second;
             
             if (scaling != 0) {
                 data_w_2D(2 * index) = scaling * (it->wire - offset_w);
@@ -2191,17 +2204,20 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
 
         auto p_raw = transform->backward(p, cluster_t0, apa, face);
         WirePlaneId wpid(kAllLayers, face, apa);
-        auto offset_t = std::get<0>(wpid_offsets[wpid]);
-        auto offset_u = std::get<1>(wpid_offsets[wpid]);
-        auto offset_v = std::get<2>(wpid_offsets[wpid]);
-        auto offset_w = std::get<3>(wpid_offsets[wpid]);
-        auto slope_x = std::get<0>(wpid_slopes[wpid]);
-        auto slope_yu = std::get<1>(wpid_slopes[wpid]).first;
-        auto slope_zu = std::get<1>(wpid_slopes[wpid]).second;
-        auto slope_yv = std::get<2>(wpid_slopes[wpid]).first;
-        auto slope_zv = std::get<2>(wpid_slopes[wpid]).second;
-        auto slope_yw = std::get<3>(wpid_slopes[wpid]).first;
-        auto slope_zw = std::get<3>(wpid_slopes[wpid]).second;
+        auto offset_it = wpid_offsets.find(wpid);
+        auto slope_it = wpid_slopes.find(wpid);
+
+        auto offset_t = std::get<0>(offset_it->second);
+        auto offset_u = std::get<1>(offset_it->second);
+        auto offset_v = std::get<2>(offset_it->second);
+        auto offset_w = std::get<3>(offset_it->second);
+        auto slope_x = std::get<0>(slope_it->second);
+        auto slope_yu = std::get<1>(slope_it->second).first;
+        auto slope_zu = std::get<1>(slope_it->second).second;
+        auto slope_yv = std::get<2>(slope_it->second).first;
+        auto slope_zv = std::get<2>(slope_it->second).second;
+        auto slope_yw = std::get<3>(slope_it->second).first;
+        auto slope_zw = std::get<3>(slope_it->second).second;
 
         pu.push_back(offset_u + (slope_yu * p_raw.y() + slope_zu * p_raw.z()));
         pv.push_back(offset_v + (slope_yv * p_raw.y() + slope_zv * p_raw.z()));
@@ -2216,5 +2232,200 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
 }
 
 bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
+      // Extract APA and face information
+    int apa = apa_face.first;
+    int face = apa_face.second;
+    
+    // Get geometry parameters for this APA/face
+    WirePlaneId wpid(kAllLayers, face, apa);
+    
+    auto offset_it = wpid_offsets.find(wpid);
+    auto slope_it = wpid_slopes.find(wpid);
+    
+    if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
+        return false; // Can't process without geometry info
+    }
+    
+    // Extract offsets and slopes
+    double offset_t = std::get<0>(offset_it->second);
+    double offset_u = std::get<1>(offset_it->second);
+    double offset_v = std::get<2>(offset_it->second);
+    double offset_w = std::get<3>(offset_it->second);
+    
+    double slope_x = std::get<0>(slope_it->second);
+    double slope_yu = std::get<1>(slope_it->second).first;
+    double slope_zu = std::get<1>(slope_it->second).second;
+    double slope_yv = std::get<2>(slope_it->second).first;
+    double slope_zv = std::get<2>(slope_it->second).second;
+    double slope_yw = std::get<3>(slope_it->second).first;
+    double slope_zw = std::get<3>(slope_it->second).second;
+    
+    // Calculate 2D projections for current point p
+    int t1 = std::floor(offset_t + slope_x * p.x());
+    int u1 = std::floor(offset_u + (slope_yu * p.y() + slope_zu * p.z()));
+    int v1 = std::floor(offset_v + (slope_yv * p.y() + slope_zv * p.z()));
+    int w1 = std::floor(offset_w + (slope_yw * p.y() + slope_zw * p.z()));
+    
+    // Calculate 2D projections for comparison point pss_vec[i]
+    WireCell::Point ps_point = pss_vec.at(i).first;
+    int t2 = std::floor(offset_t + slope_x * ps_point.x());
+    int u2 = std::floor(offset_u + (slope_yu * ps_point.y() + slope_zu * ps_point.z()));
+    int v2 = std::floor(offset_v + (slope_yv * ps_point.y() + slope_zv * ps_point.z()));
+    int w2 = std::floor(offset_w + (slope_yw * ps_point.y() + slope_zw * ps_point.z()));
+    
+    // Helper lambda to get charge from nearby coordinates
+    auto get_charge_sum = [&](int wire, int time, WirePlaneLayer_t plane) -> double {
+        double charge_sum = 0.0;
+        
+        // Search in a 3x3 neighborhood (±1 in wire and time)
+        for (int dw = -1; dw <= 1; dw++) {
+            for (int dt = -1; dt <= 1; dt++) {
+                int channel = get_channel_for_wire(apa, face, static_cast<int>(plane), wire + dw);
+                if (channel < 0) continue;
+                
+                CoordReadout charge_key(apa, time + dt, channel);
+                auto charge_it = m_charge_data.find(charge_key);
+                if (charge_it != m_charge_data.end() && charge_it->second.flag != 0) {
+                    charge_sum += charge_it->second.charge;
+                }
+            }
+        }
+        return charge_sum;
+    };
+    
+    // Get charges for point p (c1)
+    double c1_u = get_charge_sum(u1, t1, kUlayer);
+    double c1_v = get_charge_sum(v1, t1, kVlayer);
+    double c1_w = get_charge_sum(w1, t1, kWlayer);
+    
+    // Get charges for comparison point (c2)
+    double c2_u = get_charge_sum(u2, t2, kUlayer);
+    double c2_v = get_charge_sum(v2, t2, kVlayer);
+    double c2_w = get_charge_sum(w2, t2, kWlayer);
+    
+    // Calculate charge ratios
+    double ratio = 0;
+    double ratio_1 = 1;
+    
+    // U plane ratio
+    if (c2_u != 0) {
+        ratio += c1_u / c2_u;
+        if (c1_u != 0)
+            ratio_1 *= c1_u / c2_u;
+        else
+            ratio_1 *= 0.25;
+    } else {
+        ratio += 1;
+    }
+    
+    // V plane ratio
+    if (c2_v != 0) {
+        ratio += c1_v / c2_v;
+        if (c1_v != 0)
+            ratio_1 *= c1_v / c2_v;
+        else
+            ratio_1 *= 0.25;
+    } else {
+        ratio += 1;
+    }
+    
+    // W plane ratio
+    if (c2_w != 0) {
+        ratio += c1_w / c2_w;
+        if (c1_w != 0)
+            ratio_1 *= c1_w / c2_w;
+        else
+            ratio_1 *= 0.25;
+    } else {
+        ratio += 1;
+    }
+    
+    // Apply charge-based correction
+    if (ratio / 3.0 < 0.97 || ratio_1 < 0.75) {
+        p = ps_point;
+    }
+    
+    // Angle constraint checking
+    if (fine_tracking_path.size() >= 2) {
+        // Get direction vectors for angle calculation
+        auto& last_point = fine_tracking_path[fine_tracking_path.size()-1].first;
+        auto& second_last_point = fine_tracking_path[fine_tracking_path.size()-2].first;
+        
+        // Vector from second-to-last to last point in fine tracking path
+        WireCell::Vector v1(last_point.x() - second_last_point.x(),
+                           last_point.y() - second_last_point.y(),
+                           last_point.z() - second_last_point.z());
+        
+        // Vector from last point to current point p
+        WireCell::Vector v2(p.x() - last_point.x(),
+                           p.y() - last_point.y(),
+                           p.z() - last_point.z());
+        
+        // Calculate angle between vectors (in degrees)
+        double dot_product = v1.dot(v2);
+        double mag1 = sqrt(v1.x()*v1.x() + v1.y()*v1.y() + v1.z()*v1.z());
+        double mag2 = sqrt(v2.x()*v2.x() + v2.y()*v2.y() + v2.z()*v2.z());
+        
+        double angle = 180.0;  // Default to large angle if vectors are too small
+        if (mag1 > 0 && mag2 > 0) {
+            double cos_angle = dot_product / (mag1 * mag2);
+            // Clamp to [-1, 1] to handle numerical errors
+            cos_angle = std::max(-1.0, std::min(1.0, cos_angle));
+            angle = acos(cos_angle) * 180.0 / M_PI;
+        }
+        
+        // Calculate angle between consecutive segments in original path for comparison
+        double angle1 = 180.0;
+        if (i >= 2) {
+            auto& p_i = pss_vec[i].first;
+            auto& p_i1 = pss_vec[i-1].first;
+            auto& p_i2 = pss_vec[i-2].first;
+            
+            WireCell::Vector v3(p_i1.x() - p_i2.x(), p_i1.y() - p_i2.y(), p_i1.z() - p_i2.z());
+            WireCell::Vector v4(p_i.x() - p_i1.x(), p_i.y() - p_i1.y(), p_i.z() - p_i1.z());
+            
+            double dot_34 = v3.dot(v4);
+            double mag3 = sqrt(v3.x()*v3.x() + v3.y()*v3.y() + v3.z()*v3.z());
+            double mag4 = sqrt(v4.x()*v4.x() + v4.y()*v4.y() + v4.z()*v4.z());
+            
+            if (mag3 > 0 && mag4 > 0) {
+                double cos_angle1 = dot_34 / (mag3 * mag4);
+                cos_angle1 = std::max(-1.0, std::min(1.0, cos_angle1));
+                angle1 = acos(cos_angle1) * 180.0 / M_PI;
+            }
+        }
+        
+        // Get hit information for dead channel detection
+        // Check if we have valid 3D to 2D mapping for current point index
+        bool has_u_hits = false, has_v_hits = false, has_w_hits = false;
+        if (m_3d_to_2d.find(i) != m_3d_to_2d.end()) {
+            const auto& point_info = m_3d_to_2d.at(i);
+            has_u_hits = point_info.get_plane_data(kUlayer).quantity > 0;
+            has_v_hits = point_info.get_plane_data(kVlayer).quantity > 0;
+            has_w_hits = point_info.get_plane_data(kWlayer).quantity > 0;
+        }
+        
+        // Check for dead channel conditions
+        int dead_plane_count = 0;
+        if (!has_u_hits) dead_plane_count++;
+        if (!has_v_hits) dead_plane_count++;
+        if (!has_w_hits) dead_plane_count++;
+        
+        if (angle > 45 && dead_plane_count >= 2) {
+            return true;
+        }
+        
+        // Check for fold-back or extreme angles
+        if (angle > 160 || angle > angle1 + 90) {
+            return true;
+        }
+        
+        // Check last point protection
+        if (i + 1 == pss_vec.size() && angle > 45 && mag2 < 0.5 * units::cm) {
+            return true;
+        }
+    }
+    
     return false;
-}
+
+ }
