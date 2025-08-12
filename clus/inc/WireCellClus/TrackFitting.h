@@ -144,7 +144,11 @@ namespace WireCell::Clus {
 
         bool skip_trajectory_point(WireCell::Point& p, std::pair<int,int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path); 
 
- 
+        // prepare for dQ/dx fitting
+        double cal_gaus_integral(int tbin, int wbin, double t_center, double t_sigma, 
+                                       double w_center, double w_sigma, int flag, double nsigma);
+
+        double cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma);
 
         /**  
          * Get anode for a specific APA identifier

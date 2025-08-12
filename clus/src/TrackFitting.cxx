@@ -1724,18 +1724,18 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 
     // {
     //     int apa = 0, face = 0;
-    //     auto cur_u = m_grouping->convert_3Dpoint_time_ch(pts.front(), apa, face, 0);
-    //     auto cur_v = m_grouping->convert_3Dpoint_time_ch(pts.front(), apa, face, 1);
-    //     auto cur_w = m_grouping->convert_3Dpoint_time_ch(pts.front(), apa, face, 2);
+    //     auto cur_u = m_grouping->convert_3Dpoint_time_ch(ptss.back().first, apa, face, 0);
+    //     auto cur_v = m_grouping->convert_3Dpoint_time_ch(ptss.back().first, apa, face, 1);
+    //     auto cur_w = m_grouping->convert_3Dpoint_time_ch(ptss.back().first, apa, face, 2);
 
     //     std::cout << std::get<0>(cur_u) << " " << std::get<1>(cur_u) << " " << std::get<1>(cur_v) << " " << std::get<1>(cur_w)  << std::endl;
 
     //     WirePlaneId wpid(kAllLayers, face, apa);
 
-    //     auto pt = std::get<0>(wpid_offsets[wpid]) + pts.front().x() * std::get<0>(wpid_slopes[wpid]);
-    //     auto pu = std::get<1>(wpid_offsets[wpid]) + std::get<1>(wpid_slopes[wpid]).first * pts.front().y() + std::get<1>(wpid_slopes[wpid]).second * pts.front().z();
-    //     auto pv = std::get<2>(wpid_offsets[wpid]) + std::get<2>(wpid_slopes[wpid]).first * pts.front().y() + std::get<2>(wpid_slopes[wpid]).second * pts.front().z();
-    //     auto pw = std::get<3>(wpid_offsets[wpid]) + std::get<3>(wpid_slopes[wpid]).first * pts.front().y() + std::get<3>(wpid_slopes[wpid]).second * pts.front().z();
+    //     auto pt = std::get<0>(wpid_offsets[wpid]) + ptss.back().first.x() * std::get<0>(wpid_slopes[wpid]);
+    //     auto pu = std::get<1>(wpid_offsets[wpid]) + std::get<1>(wpid_slopes[wpid]).first * ptss.back().first.y() + std::get<1>(wpid_slopes[wpid]).second * ptss.back().first.z();
+    //     auto pv = std::get<2>(wpid_offsets[wpid]) + std::get<2>(wpid_slopes[wpid]).first * ptss.back().first.y() + std::get<2>(wpid_slopes[wpid]).second * ptss.back().first.z();
+    //     auto pw = std::get<3>(wpid_offsets[wpid]) + std::get<3>(wpid_slopes[wpid]).first * ptss.back().first.y() + std::get<3>(wpid_slopes[wpid]).second * ptss.back().first.z();
 
     //     std::cout << pt << " " << pu << " " << pv << " " << pw << std::endl;
     // }
@@ -2429,3 +2429,161 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
     return false;
 
  }
+
+
+ double TrackFitting::cal_gaus_integral(int tbin, int wbin, double t_center, double t_sigma, 
+                                       double w_center, double w_sigma, int flag, double nsigma) {
+    // flag = 0: no boundary effect, pure Gaussian, time or collection plane
+    // flag = 1: taking into account boundary effect for induction plane
+    // flag = 2: more complex induction plane response
+    
+    double result = 0;
+    
+    // *** COORDINATE SYSTEM CLARIFICATION ***
+    // In this toolkit convention:
+    // - w_center = offset_u + (slope_yu * p.y + slope_zu * p.z)  [continuous coordinate]
+    // - wbin = std::round(w_center)  [bin index - nearest integer]
+    // - t_center = offset_t + slope_t * p.x  [continuous coordinate] 
+    // - tbin = std::round(t_center)  [bin index - nearest integer]
+    // Therefore: compare tbin vs t_center and wbin vs w_center DIRECTLY
+    
+    // Check if we're within nsigma range of both time and wire centers
+    if (fabs(tbin - t_center) <= nsigma * t_sigma &&              // Direct comparison: bin index vs continuous center
+        fabs(wbin - w_center) <= nsigma * w_sigma) {              // Direct comparison: bin index vs continuous center
+        
+        // Time dimension integration 
+        // If tbin = std::round(t_center), then bin spans [tbin-0.5, tbin+0.5]
+        result = 0.5 * (std::erf((tbin + 0.5 - t_center) / sqrt(2.) / t_sigma) - 
+                       std::erf((tbin - 0.5 - t_center) / sqrt(2.) / t_sigma));
+        
+        if (flag == 0) {
+            // Pure Gaussian case - simple wire dimension integration
+            // If wbin = std::round(w_center), then bin spans [wbin-0.5, wbin+0.5]
+            result *= 0.5 * (std::erf((wbin + 0.5 - w_center) / sqrt(2.) / w_sigma) - 
+                            std::erf((wbin - 0.5 - w_center) / sqrt(2.) / w_sigma));
+                            
+        } else if (flag == 1) {
+            // Induction plane with bipolar response
+            // All boundaries shift by -0.5 due to bin convention change
+            
+            // First part: positive lobe (was wbin+0.5 to wbin+1.5, now wbin+0.0 to wbin+1.0)
+            double x2 = wbin + 1.0;     // was wbin + 1.5, shifted by -0.5
+            double x1 = wbin + 0.0;     // was wbin + 0.5, shifted by -0.5 (bin center)
+            double x0 = w_center;
+            
+            double content1 = 0.5 * (std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                                    std::erf((x1 - x0) / sqrt(2.) / w_sigma));
+            
+            // Weight calculation for positive lobe
+            double w1 = -pow(w_sigma, 2) / (-1) / sqrt(2. * 3.1415926) / w_sigma *
+                       (exp(-pow(x0 - x2, 2) / 2. / pow(w_sigma, 2)) - 
+                        exp(-pow(x0 - x1, 2) / 2. / pow(w_sigma, 2))) /
+                       (0.5 * std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                        0.5 * std::erf((x1 - x0) / sqrt(2.) / w_sigma)) +
+                       (x0 - x2) / (-1);
+            
+            // Second part: negative lobe (was wbin-0.5 to wbin+0.5, now wbin-1.0 to wbin+0.0)
+            x2 = wbin + 0.0;            // was wbin + 0.5, shifted by -0.5 (bin center)
+            x1 = wbin - 1.0;            // was wbin - 0.5, shifted by -0.5
+            
+            double content2 = 0.5 * (std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                                    std::erf((x1 - x0) / sqrt(2.) / w_sigma));
+            
+            // Weight calculation for negative lobe
+            double w2 = -pow(w_sigma, 2) / (-1) / sqrt(2. * 3.1415926) / w_sigma *
+                       (exp(-pow(x0 - x2, 2) / 2. / pow(w_sigma, 2)) - 
+                        exp(-pow(x0 - x1, 2) / 2. / pow(w_sigma, 2))) /
+                       (0.5 * std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                        0.5 * std::erf((x1 - x0) / sqrt(2.) / w_sigma)) +
+                       (x0 - x2) / (-1);
+            
+            // Combine positive and negative contributions
+            result *= (content1 * w1 + content2 * (1 - w2));
+            
+        } else if (flag == 2) {
+            // More complex induction response with multiple components
+            // All boundaries shift by -0.5 due to bin convention change
+            double sum = 0;
+            
+            // Component 1: (was wbin+0.5 to wbin+1.0, now wbin+0.0 to wbin+0.5)
+            double x2 = wbin + 0.5;     // was wbin + 1.0, shifted by -0.5
+            double x1 = wbin + 0.0;     // was wbin + 0.5, shifted by -0.5 (bin center)
+            double x0 = w_center;
+            
+            double content1 = 0.5 * (std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                                    std::erf((x1 - x0) / sqrt(2.) / w_sigma));
+            double w1 = -pow(w_sigma, 2) / (-1) / sqrt(2. * 3.1415926) / w_sigma *
+                       (exp(-pow(x0 - x2, 2) / 2. / pow(w_sigma, 2)) - 
+                        exp(-pow(x0 - x1, 2) / 2. / pow(w_sigma, 2))) /
+                       (0.5 * std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                        0.5 * std::erf((x1 - x0) / sqrt(2.) / w_sigma)) +
+                       (x0 - x2) / (-1);
+            
+            sum += content1 * (0.545 + 0.697 * w1);
+            
+            // Component 2: (was wbin+1.0 to wbin+1.5, now wbin+0.5 to wbin+1.0)
+            x2 = wbin + 1.0;            // was wbin + 1.5, shifted by -0.5
+            x1 = wbin + 0.5;            // was wbin + 1.0, shifted by -0.5
+            
+            content1 = 0.5 * (std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                             std::erf((x1 - x0) / sqrt(2.) / w_sigma));
+            w1 = -pow(w_sigma, 2) / (-1) / sqrt(2. * 3.1415926) / w_sigma *
+                (exp(-pow(x0 - x2, 2) / 2. / pow(w_sigma, 2)) - 
+                 exp(-pow(x0 - x1, 2) / 2. / pow(w_sigma, 2))) /
+                (0.5 * std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                 0.5 * std::erf((x1 - x0) / sqrt(2.) / w_sigma)) +
+                (x0 - x2) / (-1);
+            
+            sum += content1 * (0.11364 + 0.1 * w1);
+            
+            // Component 3: (was wbin+0.0 to wbin+0.5, now wbin-0.5 to wbin+0.0)
+            x2 = wbin + 0.0;            // was wbin + 0.5, shifted by -0.5 (bin center)
+            x1 = wbin - 0.5;            // was wbin + 0.0, shifted by -0.5
+            
+            content1 = 0.5 * (std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                             std::erf((x1 - x0) / sqrt(2.) / w_sigma));
+            w1 = -pow(w_sigma, 2) / (-1) / sqrt(2. * 3.1415926) / w_sigma *
+                (exp(-pow(x0 - x2, 2) / 2. / pow(w_sigma, 2)) - 
+                 exp(-pow(x0 - x1, 2) / 2. / pow(w_sigma, 2))) /
+                (0.5 * std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                 0.5 * std::erf((x1 - x0) / sqrt(2.) / w_sigma)) +
+                (x0 - x2) / (-1);
+            
+            sum += content1 * (0.545 + 0.697 * (1 - w1));
+            
+            // Component 4: (was wbin-0.5 to wbin+0.0, now wbin-1.0 to wbin-0.5)
+            x2 = wbin - 0.5;            // was wbin + 0.0, shifted by -0.5
+            x1 = wbin - 1.0;            // was wbin - 0.5, shifted by -0.5
+            
+            content1 = 0.5 * (std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                             std::erf((x1 - x0) / sqrt(2.) / w_sigma));
+            w1 = -pow(w_sigma, 2) / (-1) / sqrt(2. * 3.1415926) / w_sigma *
+                (exp(-pow(x0 - x2, 2) / 2. / pow(w_sigma, 2)) - 
+                 exp(-pow(x0 - x1, 2) / 2. / pow(w_sigma, 2))) /
+                (0.5 * std::erf((x2 - x0) / sqrt(2.) / w_sigma) - 
+                 0.5 * std::erf((x1 - x0) / sqrt(2.) / w_sigma)) +
+                (x0 - x2) / (-1);
+            
+            sum += content1 * (0.11364 + 0.1 * (1 - w1));
+            
+            result *= sum;
+        }
+    }
+    
+    return result;
+}
+
+
+double TrackFitting::cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma){
+  double result = 0;
+  double result1 = 0;
+
+  for (size_t i=0;i!=t_centers.size();i++){
+    result += cal_gaus_integral(tbin,wbin,t_centers.at(i), t_sigmas.at(i), w_centers.at(i), w_sigmas.at(i),flag,nsigma) * weights.at(i);
+    result1 += weights.at(i);
+  }
+
+  result /= result1;
+  
+  return result;
+}
