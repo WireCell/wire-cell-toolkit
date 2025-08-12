@@ -2780,3 +2780,100 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
 
     return results;
 }
+
+
+// Header declaration (add to TrackFitting.h in public section):
+// void dQ_dx_fill(double dis_end_point_ext = 0.5 * units::cm);
+
+void TrackFitting::dQ_dx_fill(double dis_end_point_ext) {
+    if (fine_tracking_path.size() <= 1) return;
+    
+    // Resize vectors to match fine_tracking_path size
+    dQ.resize(fine_tracking_path.size(), 0);
+    dx.resize(fine_tracking_path.size(), 0);
+    reduced_chi2.resize(fine_tracking_path.size(), 0);
+    
+    // Loop through each point in the fine tracking path
+    for (size_t i = 0; i != fine_tracking_path.size(); i++) {
+        WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
+        WireCell::Point prev_rec_pos, next_rec_pos;
+        
+        if (i == 0) {
+            // First point: extrapolate backward from the direction to next point
+            next_rec_pos = WireCell::Point(
+                (fine_tracking_path.at(i).first.x() + fine_tracking_path.at(i+1).first.x()) / 2.0,
+                (fine_tracking_path.at(i).first.y() + fine_tracking_path.at(i+1).first.y()) / 2.0,
+                (fine_tracking_path.at(i).first.z() + fine_tracking_path.at(i+1).first.z()) / 2.0
+            );
+            
+            double length = sqrt(
+                pow(fine_tracking_path.at(i+1).first.x() - fine_tracking_path.at(i).first.x(), 2) +
+                pow(fine_tracking_path.at(i+1).first.y() - fine_tracking_path.at(i).first.y(), 2) +
+                pow(fine_tracking_path.at(i+1).first.z() - fine_tracking_path.at(i).first.z(), 2)
+            );
+            
+            if (length == 0) {
+                prev_rec_pos = fine_tracking_path.at(i).first;
+            } else {
+                prev_rec_pos = WireCell::Point(
+                    fine_tracking_path.at(i).first.x() - (fine_tracking_path.at(i+1).first.x() - fine_tracking_path.at(i).first.x()) / length * dis_end_point_ext,
+                    fine_tracking_path.at(i).first.y() - (fine_tracking_path.at(i+1).first.y() - fine_tracking_path.at(i).first.y()) / length * dis_end_point_ext,
+                    fine_tracking_path.at(i).first.z() - (fine_tracking_path.at(i+1).first.z() - fine_tracking_path.at(i).first.z()) / length * dis_end_point_ext
+                );
+            }
+        } else if (i + 1 == fine_tracking_path.size()) {
+            // Last point: extrapolate forward from the direction from previous point
+            prev_rec_pos = WireCell::Point(
+                (fine_tracking_path.at(i).first.x() + fine_tracking_path.at(i-1).first.x()) / 2.0,
+                (fine_tracking_path.at(i).first.y() + fine_tracking_path.at(i-1).first.y()) / 2.0,
+                (fine_tracking_path.at(i).first.z() + fine_tracking_path.at(i-1).first.z()) / 2.0
+            );
+            
+            double length = sqrt(
+                pow(fine_tracking_path.at(i-1).first.x() - fine_tracking_path.at(i).first.x(), 2) +
+                pow(fine_tracking_path.at(i-1).first.y() - fine_tracking_path.at(i).first.y(), 2) +
+                pow(fine_tracking_path.at(i-1).first.z() - fine_tracking_path.at(i).first.z(), 2)
+            );
+            
+            if (length == 0) {
+                next_rec_pos = fine_tracking_path.at(i).first;
+            } else {
+                next_rec_pos = WireCell::Point(
+                    fine_tracking_path.at(i).first.x() - (fine_tracking_path.at(i-1).first.x() - fine_tracking_path.at(i).first.x()) / length * dis_end_point_ext,
+                    fine_tracking_path.at(i).first.y() - (fine_tracking_path.at(i-1).first.y() - fine_tracking_path.at(i).first.y()) / length * dis_end_point_ext,
+                    fine_tracking_path.at(i).first.z() - (fine_tracking_path.at(i-1).first.z() - fine_tracking_path.at(i).first.z()) / length * dis_end_point_ext
+                );
+            }
+        } else {
+            // Middle points: use midpoints to neighboring points
+            prev_rec_pos = WireCell::Point(
+                (fine_tracking_path.at(i).first.x() + fine_tracking_path.at(i-1).first.x()) / 2.0,
+                (fine_tracking_path.at(i).first.y() + fine_tracking_path.at(i-1).first.y()) / 2.0,
+                (fine_tracking_path.at(i).first.z() + fine_tracking_path.at(i-1).first.z()) / 2.0
+            );
+            
+            next_rec_pos = WireCell::Point(
+                (fine_tracking_path.at(i).first.x() + fine_tracking_path.at(i+1).first.x()) / 2.0,
+                (fine_tracking_path.at(i).first.y() + fine_tracking_path.at(i+1).first.y()) / 2.0,
+                (fine_tracking_path.at(i).first.z() + fine_tracking_path.at(i+1).first.z()) / 2.0
+            );
+        }
+        
+        // Calculate dx as sum of distances to previous and next positions
+        dx.at(i) = sqrt(
+            pow(curr_rec_pos.x() - prev_rec_pos.x(), 2) +
+            pow(curr_rec_pos.y() - prev_rec_pos.y(), 2) +
+            pow(curr_rec_pos.z() - prev_rec_pos.z(), 2)
+        ) + sqrt(
+            pow(curr_rec_pos.x() - next_rec_pos.x(), 2) +
+            pow(curr_rec_pos.y() - next_rec_pos.y(), 2) +
+            pow(curr_rec_pos.z() - next_rec_pos.z(), 2)
+        );
+        
+        // Set placeholder dQ value (5000 * dx as in original)
+        dQ.at(i) = 5000 * dx.at(i);
+        
+        // Initialize reduced_chi2 to 0
+        reduced_chi2.at(i) = 0;
+    }
+}
