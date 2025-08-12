@@ -1865,7 +1865,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         int n_2D_v = 2 * plane_data_v.associated_2d_points.size();
         int n_2D_w = 2 * plane_data_w.associated_2d_points.size();
 
-        std::cout << i << " " << n_2D_u << " " << n_2D_v << " " << n_2D_w << std::endl;
+        // std::cout << i << " " << n_2D_u << " " << n_2D_v << " " << n_2D_w << std::endl;
         
         Eigen::VectorXd temp_pos_3D(3), data_u_2D(n_2D_u), data_v_2D(n_2D_v), data_w_2D(n_2D_w);
         Eigen::VectorXd temp_pos_3D_init(3);
@@ -2261,17 +2261,17 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
     double slope_zw = std::get<3>(slope_it->second).second;
     
     // Calculate 2D projections for current point p
-    int t1 = std::floor(offset_t + slope_x * p.x());
-    int u1 = std::floor(offset_u + (slope_yu * p.y() + slope_zu * p.z()));
-    int v1 = std::floor(offset_v + (slope_yv * p.y() + slope_zv * p.z()));
-    int w1 = std::floor(offset_w + (slope_yw * p.y() + slope_zw * p.z()));
+    int t1 = std::round(offset_t + slope_x * p.x());
+    int u1 = std::round(offset_u + (slope_yu * p.y() + slope_zu * p.z()));
+    int v1 = std::round(offset_v + (slope_yv * p.y() + slope_zv * p.z()));
+    int w1 = std::round(offset_w + (slope_yw * p.y() + slope_zw * p.z()));
     
     // Calculate 2D projections for comparison point pss_vec[i]
     WireCell::Point ps_point = pss_vec.at(i).first;
-    int t2 = std::floor(offset_t + slope_x * ps_point.x());
-    int u2 = std::floor(offset_u + (slope_yu * ps_point.y() + slope_zu * ps_point.z()));
-    int v2 = std::floor(offset_v + (slope_yv * ps_point.y() + slope_zv * ps_point.z()));
-    int w2 = std::floor(offset_w + (slope_yw * ps_point.y() + slope_zw * ps_point.z()));
+    int t2 = std::round(offset_t + slope_x * ps_point.x());
+    int u2 = std::round(offset_u + (slope_yu * ps_point.y() + slope_zu * ps_point.z()));
+    int v2 = std::round(offset_v + (slope_yv * ps_point.y() + slope_zv * ps_point.z()));
+    int w2 = std::round(offset_w + (slope_yw * ps_point.y() + slope_zw * ps_point.z()));
     
     // Helper lambda to get charge from nearby coordinates
     auto get_charge_sum = [&](int wire, int time, WirePlaneLayer_t plane) -> double {
