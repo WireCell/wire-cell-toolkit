@@ -588,6 +588,9 @@ private:
 
         m_track_fitter.form_map(segment, organized_path);
 
+        // validate the geometry ... 
+
+       
         // std::cout << "TaggerCheckSTM: Formed map with " << organized_path.size() << " points." << std::endl;
 
         return false;

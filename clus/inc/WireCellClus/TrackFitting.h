@@ -284,9 +284,14 @@ namespace WireCell::Clus {
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_V_dir;
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_W_dir;
         std::set<int> apas;
-        // Time_width, Pitch_u, pitch_v, pitch_w
+
+        // Time_width, Pitch_u, pitch_v, pitch_w, for each apa/face
         std::map<WirePlaneId, std::tuple<double, double, double, double >> wpid_geoms;
 
+        // geometry information T, U, V, W for each apa/face
+        std::map<WirePlaneId, std::tuple<double, double, double, double >> wpid_offsets;
+        // T, slope_yu slope_zu, slope_yv slope_zv, slope_yw slope_zw 
+        std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double> >> wpid_slopes;
 
     };
 

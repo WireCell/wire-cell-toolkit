@@ -2,6 +2,7 @@
 #include "WireCellClus/TrackFitting_Util.h"
 #include "WireCellUtil/Logging.h"
 
+#include <Eigen/IterativeLinearSolvers>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -40,6 +41,12 @@ void TrackFitting::BuildGeometry(){
     const auto& wpids = m_grouping->wpids();    
     compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
 
+    // Clear existing maps
+    wpid_offsets.clear();
+    wpid_slopes.clear();
+     // Get all unique APA/face combinations
+    std::set<std::pair<int, int>> apa_face_combinations;
+
     // loop over wpids ...
     for (const auto& wpid : wpids) {
         double time_slice_width = //m_dv->metadata(wpid)["nticks_live_slice"].asDouble() *  
@@ -55,7 +62,103 @@ void TrackFitting::BuildGeometry(){
 
         wpid_geoms[wpid] = std::make_tuple(time_slice_width, pitch_u, pitch_v, pitch_w);
         // std::cout << "Geometry: " << time_slice_width/units::cm << " " << pitch_u/units::cm << " " << pitch_v/units::cm << " " << pitch_w/units::cm << std::endl;
+
+        apa_face_combinations.insert({wpid.apa(), wpid.face()});
     }
+    
+    // Process each APA/face combination
+    for (const auto& [apa, face] : apa_face_combinations) {
+        try {
+            // Get anode interface for this APA/face
+            auto anode = m_grouping->get_anode(apa);
+            if (!anode) {
+                std::cerr << "TrackFitting: Could not get anode for APA " << apa << std::endl;
+                continue;
+            }
+            
+            auto iface = anode->faces()[face];
+            if (!iface) {
+                std::cerr << "TrackFitting: Could not get face " << face << " for APA " << apa << std::endl;
+                continue;
+            }
+            
+            // Get geometry parameters from grouping
+            const auto& pitch_mags = m_grouping->pitch_mags();
+            const auto& proj_centers = m_grouping->proj_centers();
+            
+            // Get wire angles for this APA/face
+            const auto [angle_u, angle_v, angle_w] = m_grouping->wire_angles(apa, face);
+            std::vector<double> angles = {angle_u, angle_v, angle_w};
+            
+            // Get time/drift parameters from grouping cache
+            double time_offset = m_grouping->get_time_offset().at(apa).at(face);
+            double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
+            double tick = m_grouping->get_tick().at(apa).at(face);
+            
+            // Get drift direction and origin from anode face
+            double xsign = iface->dirx();
+            double xorig = iface->planes()[2]->wires().front()->center().x();
+            
+            // Create WirePlaneId for this APA/face combination
+            WirePlaneId wpid(kAllLayers, face, apa);
+            
+            // Calculate slopes and offsets for each plane
+            std::pair<double, double> slope_yu_zu, slope_yv_zv, slope_yw_zw;
+            double offset_u, offset_v, offset_w, offset_t;
+            
+            // U plane (plane index 0)
+            double pitch_u = pitch_mags.at(apa).at(face).at(0);
+            double center_u = proj_centers.at(apa).at(face).at(0);
+            offset_u = -(center_u + 0.5 * pitch_u) / pitch_u;
+            slope_yu_zu = {-sin(angles[0]) / pitch_u, cos(angles[0]) / pitch_u};
+            
+            // V plane (plane index 1)
+            double pitch_v = pitch_mags.at(apa).at(face).at(1);
+            double center_v = proj_centers.at(apa).at(face).at(1);
+            offset_v = -(center_v + 0.5 * pitch_v) / pitch_v;
+            slope_yv_zv = {-sin(angles[1]) / pitch_v, cos(angles[1]) / pitch_v};
+            
+            // W plane (plane index 2)
+            double pitch_w = pitch_mags.at(apa).at(face).at(2);
+            double center_w = proj_centers.at(apa).at(face).at(2);
+            offset_w = -(center_w + 0.5 * pitch_w) / pitch_w;
+            slope_yw_zw = {-sin(angles[2]) / pitch_w, cos(angles[2]) / pitch_w};
+            
+            // Time conversion parameters
+            // From drift2time: time = (drift - xorig)/(xsign * drift_speed) - time_offset
+            // tick_index = round(time / tick)
+            double slope_t = 1.0 / (xsign * drift_speed * tick);
+            offset_t = -(xorig / (xsign * drift_speed) + time_offset) / tick;
+            
+            // Store in maps
+            wpid_offsets[wpid] = std::make_tuple(offset_t, offset_u, offset_v, offset_w);
+            wpid_slopes[wpid] = std::make_tuple(
+                slope_t,           // T slope (for x direction)
+                slope_yu_zu,       // U plane slopes (y, z)
+                slope_yv_zv,       // V plane slopes (y, z)
+                slope_yw_zw        // W plane slopes (y, z)
+            );
+            
+            // // Debug output (optional - can be removed)
+            // std::cout << "TrackFitting: Initialized geometry for APA " << apa 
+            //           << " Face " << face << std::endl;
+            // std::cout << "  Offsets: T=" << offset_t << " U=" << offset_u 
+            //           << " V=" << offset_v << " W=" << offset_w << std::endl;
+            // std::cout << "  Slopes: T=" << slope_t 
+            //           << " U=(" << slope_yu_zu.first << "," << slope_yu_zu.second << ")"
+            //           << " V=(" << slope_yv_zv.first << "," << slope_yv_zv.second << ")"
+            //           << " W=(" << slope_yw_zw.first << "," << slope_yw_zw.second << ")" << std::endl;
+                      
+        } catch (const std::exception& e) {
+            std::cerr << "TrackFitting: Error initializing geometry for APA " << apa 
+                      << " Face " << face << ": " << e.what() << std::endl;
+        }
+    }
+    
+    // std::cout << "TrackFitting: Geometry initialization complete. Processed " 
+    //           << wpid_offsets.size() << " wire plane configurations." << std::endl;
+
+
 }
 
 geo_point_t TrackFitting::adjust_rough_path(PR::Segment& segment){
@@ -1616,12 +1719,31 @@ void TrackFitting::form_map(std::shared_ptr<PR::Segment> segment, std::vector<Wi
     // std::cout << pts.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
     
     pts = saved_pts;
+
+
+    // {
+    //     int apa = 0, face = 0;
+    //     auto cur_u = m_grouping->convert_3Dpoint_time_ch(pts.front(), apa, face, 0);
+    //     auto cur_v = m_grouping->convert_3Dpoint_time_ch(pts.front(), apa, face, 1);
+    //     auto cur_w = m_grouping->convert_3Dpoint_time_ch(pts.front(), apa, face, 2);
+
+    //     std::cout << std::get<0>(cur_u) << " " << std::get<1>(cur_u) << " " << std::get<1>(cur_v) << " " << std::get<1>(cur_w)  << std::endl;
+
+    //     WirePlaneId wpid(kAllLayers, face, apa);
+
+    //     auto pt = std::get<0>(wpid_offsets[wpid]) + pts.front().x() * std::get<0>(wpid_slopes[wpid]);
+    //     auto pu = std::get<1>(wpid_offsets[wpid]) + std::get<1>(wpid_slopes[wpid]).first * pts.front().y() + std::get<1>(wpid_slopes[wpid]).second * pts.front().z();
+    //     auto pv = std::get<2>(wpid_offsets[wpid]) + std::get<2>(wpid_slopes[wpid]).first * pts.front().y() + std::get<2>(wpid_slopes[wpid]).second * pts.front().z();
+    //     auto pw = std::get<3>(wpid_offsets[wpid]) + std::get<3>(wpid_slopes[wpid]).first * pts.front().y() + std::get<3>(wpid_slopes[wpid]).second * pts.front().z();
+
+    //     std::cout << pt << " " << pu << " " << pv << " " << pw << std::endl;
+    // }
 }
 
 
 // track trajectory fitting // should fit all APA ...
 void TrackFitting::trajectory_fit(std::vector<WireCell::Point>& ps_vec, int charge_div_method, double div_sigma){
-
+    Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
 }
 
 bool TrackFitting::skip_trajectory_point(WireCell::Point& p, int i, std::vector<WireCell::Point>& ps_vec,  std::vector<WireCell::Point>& fine_tracking_path){
