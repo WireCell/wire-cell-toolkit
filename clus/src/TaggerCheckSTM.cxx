@@ -586,7 +586,11 @@ private:
         // m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
         // std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
 
-        m_track_fitter.form_map(segment, organized_path);
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
+        for (const auto& p : organized_path) {
+            ptss.emplace_back(p, segment);
+        }
+        m_track_fitter.form_map(ptss);
 
         // validate the geometry ... 
 

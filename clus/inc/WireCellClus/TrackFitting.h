@@ -137,14 +137,14 @@ namespace WireCell::Clus {
 
         void examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point = false, double charge_cut = 2000);
 
-        void form_map(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
+        void form_map(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
 
         // track trajectory fitting // should fit all APA ...
-        void trajectory_fit(std::vector<WireCell::Point>& ps_vec, int charge_div_method, double div_sigma);
+        void trajectory_fit(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec, int charge_div_method, double div_sigma);
 
-        bool skip_trajectory_point(WireCell::Point& p, int i, std::vector<WireCell::Point>& ps_vec,  std::vector<WireCell::Point>& fine_tracking_path); 
+        bool skip_trajectory_point(WireCell::Point& p, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path); 
 
-
+ 
 
         /**  
          * Get anode for a specific APA identifier
@@ -222,13 +222,14 @@ namespace WireCell::Clus {
          */
         IPCTransformSet::pointer get_pc_transforms() const { return m_pcts; }
 
-        std::vector<WireCell::Point> get_fine_tracking_path() const { return fine_tracking_path; }
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> get_fine_tracking_path() const { return fine_tracking_path; }
         std::vector<double> get_dQ() const { return dQ; }
         std::vector<double> get_dx() const { return dx; }
         std::vector<double> get_pu() const { return pu; }
         std::vector<double> get_pv() const { return pv; }
         std::vector<double> get_pw() const { return pw; }
         std::vector<double> get_pt() const { return pt; }
+        std::vector<std::pair<int,int>> get_paf() const {return paf;}
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
     private:
@@ -302,13 +303,14 @@ namespace WireCell::Clus {
         std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double> >> wpid_slopes;
 
         // result
-        std::vector<WireCell::Point> fine_tracking_path;
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
         std::vector<double> dQ;
         std::vector<double> dx;
         std::vector<double> pu;
         std::vector<double> pv;
         std::vector<double> pw;
         std::vector<double> pt;
+        std::vector<std::pair<int, int>> paf;
         std::vector<double> reduced_chi2;
     };
 
