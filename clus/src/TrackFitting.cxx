@@ -2781,10 +2781,6 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
     return results;
 }
 
-
-// Header declaration (add to TrackFitting.h in public section):
-// void dQ_dx_fill(double dis_end_point_ext = 0.5 * units::cm);
-
 void TrackFitting::dQ_dx_fill(double dis_end_point_ext) {
     if (fine_tracking_path.size() <= 1) return;
     
@@ -2876,4 +2872,8 @@ void TrackFitting::dQ_dx_fill(double dis_end_point_ext) {
         // Initialize reduced_chi2 to 0
         reduced_chi2.at(i) = 0;
     }
+}
+
+void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag_dQ_dx_fit_reg) {
+    
 }

@@ -173,8 +173,9 @@ namespace WireCell::Clus {
          */
         std::vector<std::pair<double, double>> calculate_compact_matrix(Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
 
-        void dQ_dx_fill(double dis_end_point_ext);
+        void dQ_dx_fill(double dis_end_point_ext=0.45*units::cm);
 
+        void dQ_dx_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
 
         /**  
          * Get anode for a specific APA identifier
