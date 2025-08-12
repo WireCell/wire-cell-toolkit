@@ -222,6 +222,14 @@ namespace WireCell::Clus {
          */
         IPCTransformSet::pointer get_pc_transforms() const { return m_pcts; }
 
+        std::vector<WireCell::Point> get_fine_tracking_path() const { return fine_tracking_path; }
+        std::vector<double> get_dQ() const { return dQ; }
+        std::vector<double> get_dx() const { return dx; }
+        std::vector<double> get_pu() const { return pu; }
+        std::vector<double> get_pv() const { return pv; }
+        std::vector<double> get_pw() const { return pw; }
+        std::vector<double> get_pt() const { return pt; }
+        std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
     private:
         FittingType m_fitting_type;
@@ -293,6 +301,15 @@ namespace WireCell::Clus {
         // T, slope_yu slope_zu, slope_yv slope_zv, slope_yw slope_zw 
         std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double> >> wpid_slopes;
 
+        // result
+        std::vector<WireCell::Point> fine_tracking_path;
+        std::vector<double> dQ;
+        std::vector<double> dx;
+        std::vector<double> pu;
+        std::vector<double> pv;
+        std::vector<double> pw;
+        std::vector<double> pt;
+        std::vector<double> reduced_chi2;
     };
 
 } // namespace WireCell::Clus
