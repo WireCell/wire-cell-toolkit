@@ -150,6 +150,10 @@ namespace WireCell::Clus {
 
         double cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma);
 
+        void update_dQ_dx_data();
+        void recover_original_charge_data();
+
+
         /**  
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
@@ -282,6 +286,8 @@ namespace WireCell::Clus {
         // Internal Storage
         // ----------------------------------------
         std::map<CoordReadout, ChargeMeasurement> m_charge_data;  ///< Internal charge data storage using ChargeMeasurement struct
+        std::map<CoordReadout, ChargeMeasurement> m_orig_charge_data; // saved original charge measurement, if modified
+
         std::map<Coord2D, std::set<int>> m_2d_to_3d;  ///< Internal 2D→3D mapping
         std::map<int, Point3DInfo> m_3d_to_2d;               ///< Internal 3D→2D mapping
     

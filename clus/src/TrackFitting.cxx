@@ -2587,3 +2587,48 @@ double TrackFitting::cal_gaus_integral_seg(int tbin, int wbin, std::vector<doubl
   
   return result;
 }
+
+
+void TrackFitting::update_dQ_dx_data() {
+    // Step 1: Loop over m_clusters to collect all track blobs
+    std::set<Facade::Blob*> track_blobs_set;
+    for (auto cluster : m_clusters) {
+        // Collect blobs from each cluster using toolkit convention
+        for (auto blob : cluster->children()) {
+            track_blobs_set.insert(blob);
+        }
+    }
+    
+    // Step 2: Check each measurement in global_rb_map
+    for (const auto& [coord_key, blob_set] : global_rb_map) {
+        // coord_key is of type CoordReadout
+        // blob_set is of type std::set<const Facade::Blob*>
+
+        bool is_shared = false;
+
+        for (auto blob : blob_set) {
+            if (track_blobs_set.find(blob) == track_blobs_set.end()) {
+                // Found a blob not belonging to our track clusters
+                is_shared = true;
+                break;
+            }
+        }
+            
+        if (is_shared) {
+            // Find and modify the measurement if it exists
+            auto charge_it = m_charge_data.find(coord_key);
+            if (charge_it != m_charge_data.end()) {
+                // Get current measurement and increase charge error for shared measurements
+                ChargeMeasurement& measurement = charge_it->second;
+                m_orig_charge_data[coord_key] = measurement;
+                measurement.charge_err = 8000.0; // High penalty for shared wires
+            }
+        }
+    }
+}
+
+void TrackFitting::recover_original_charge_data(){
+    for (const auto& [coord_key, measurement] : m_orig_charge_data) {
+        m_charge_data[coord_key] = measurement;
+    }
+}
