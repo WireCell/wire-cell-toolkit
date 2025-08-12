@@ -592,7 +592,7 @@ private:
         }
         m_track_fitter.form_map(ptss);
 
-        // validate the geometry ... 
+        m_track_fitter.trajectory_fit(ptss);
 
        
         // std::cout << "TaggerCheckSTM: Formed map with " << organized_path.size() << " points." << std::endl;

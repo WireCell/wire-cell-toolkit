@@ -1717,7 +1717,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
         }
     }
 
-    // std::cout << pts.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
+    // std::cout << ptss.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
     
     ptss = saved_pts;
 
@@ -1853,8 +1853,6 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
         double cluster_t0 = cluster->get_flash().time();
         
-
-
         auto plane_data_u = point_info.get_plane_data(WirePlaneLayer_t::kUlayer);
         auto plane_data_v = point_info.get_plane_data(WirePlaneLayer_t::kVlayer);
         auto plane_data_w = point_info.get_plane_data(WirePlaneLayer_t::kWlayer);
@@ -1862,6 +1860,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         int n_2D_u = 2 * plane_data_u.associated_2d_points.size();
         int n_2D_v = 2 * plane_data_v.associated_2d_points.size();
         int n_2D_w = 2 * plane_data_w.associated_2d_points.size();
+
+        std::cout << i << " " << n_2D_u << " " << n_2D_v << " " << n_2D_w << std::endl;
         
         Eigen::VectorXd temp_pos_3D(3), data_u_2D(n_2D_u), data_v_2D(n_2D_v), data_w_2D(n_2D_w);
         Eigen::VectorXd temp_pos_3D_init(3);
@@ -1939,9 +1939,11 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 RU.insert(2 * index, 2) = scaling * slope_zu;     // Z --> U
                 RU.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
             }
+            // std::cout << index << " U " << n_2D_u << std::endl;
             index++;
         }
         
+        // std::cout << "Fill V " << std::endl;
         // Fill V plane data (similar to U)
         index = 0;
         for (auto it = plane_data_v.associated_2d_points.begin(); it != plane_data_v.associated_2d_points.end(); it++) {
@@ -1991,6 +1993,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_yv = std::get<2>(wpid_slopes[wpid]).first;
             auto slope_zv = std::get<2>(wpid_slopes[wpid]).second;
             
+            // std::cout << "Test: " << std::endl;
             if (scaling != 0) {
                 data_v_2D(2 * index) = scaling * (it->wire - offset_v);
                 data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -1999,9 +2002,13 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 RV.insert(2 * index, 2) = scaling * slope_zv;     // Z --> V
                 RV.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
             }
+            // std::cout << index << " V " << n_2D_v << std::endl;
+
             index++;
         }
         
+        // std::cout << "Fill W " << std::endl;
+
         // Fill W plane data (similar to U and V)
         index = 0;
         for (auto it = plane_data_w.associated_2d_points.begin(); it != plane_data_w.associated_2d_points.end(); it++) {
@@ -2055,10 +2062,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 data_w_2D(2 * index) = scaling * (it->wire - offset_w);
                 data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
                 
-                RV.insert(2 * index, 1) = scaling * slope_yw;     // Y --> W
+                RW.insert(2 * index, 1) = scaling * slope_yw;     // Y --> W
                 RW.insert(2 * index, 2) = scaling * slope_zw;     // Z --> W
                 RW.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
             }
+            // std::cout << index << " W " << n_2D_w << std::endl;
+
             index++;
         }
         
