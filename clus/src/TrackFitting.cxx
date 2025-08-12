@@ -2117,8 +2117,9 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto test_wpid = m_dv->contained_by(pss_vec[i].first);
 
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
+        auto apa_face = std::make_pair(test_wpid.face(), test_wpid.apa());
         // all corrected points ...
-        bool flag_skip = skip_trajectory_point(p, i, pss_vec, fine_tracking_path);
+        bool flag_skip = skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
         // Protection against too many consecutive skips
         if (flag_skip) {
             skip_count++;
@@ -2214,6 +2215,6 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     pss_vec = fine_tracking_path;
 }
 
-bool TrackFitting::skip_trajectory_point(WireCell::Point& p, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
+bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
     return false;
 }
