@@ -79,6 +79,11 @@ namespace WireCell::Clus {
             double low_dis_limit = 1.2*units::cm;            // cm, lower distance limit for point organization
             double end_point_limit = 0.6*units::cm;          // cm, extension distance for end points
             double time_tick_cut = 20;   //            //  tick cut for point association
+
+            // addition parameters
+            double share_charge_err = 8000;
+            double min_drift_time = 50*units::us;
+            double search_range = 10; // wires, or time slices (not ticks)
         };
  
         /**

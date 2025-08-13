@@ -68,6 +68,11 @@ namespace WireCell::Clus {
             params.end_point_limit = 0.6*units::cm;          // cm
             params.time_tick_cut = 20;            // time tick
             
+            // addition parameters
+            params.share_charge_err = 8000;
+            params.min_drift_time = 50*units::us;
+            params.search_range = 10; // wires, or time slices (not ticks)
+
             fitter.set_parameters(params);
             return fitter;
         }

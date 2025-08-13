@@ -88,6 +88,12 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.nlevel = static_cast<int>(value);
     } else if (name == "charge_cut") {
         m_params.charge_cut = value;
+    } else if (name == "share_charge_err") {
+        m_params.share_charge_err = value;
+    } else if (name == "min_drift_time") {
+        m_params.min_drift_time = value;
+    } else if (name == "search_range") {
+        m_params.search_range = value;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
     }
@@ -161,6 +167,12 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return static_cast<double>(m_params.nlevel);
     } else if (name == "charge_cut") {
         return m_params.charge_cut;
+    } else if (name == "share_charge_err") {
+        return m_params.share_charge_err;
+    } else if (name == "min_drift_time") {
+        return m_params.min_drift_time;
+    } else if (name == "search_range") {
+        return m_params.search_range;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
         return 0;
@@ -2782,7 +2794,7 @@ void TrackFitting::update_dQ_dx_data() {
                 // Get current measurement and increase charge error for shared measurements
                 ChargeMeasurement& measurement = charge_it->second;
                 m_orig_charge_data[coord_key] = measurement;
-                measurement.charge_err = 8000.0; // High penalty for shared wires
+                measurement.charge_err = m_params.share_charge_err; // High penalty for shared wires
             }
         }
     }
@@ -3231,7 +3243,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             double weight = (curr_rec_pos - prev_rec_pos).magnitude();
             
             // Calculate drift time and diffusion
-            double drift_time = std::max(50*units::us, reco_pos.x() / time_tick_width * 0.5*units::us );
+            double drift_time = std::max(m_params.min_drift_time, reco_pos.x() / time_tick_width * 0.5*units::us );
             double diff_sigma_L = sqrt(2 * DL * drift_time);
             double diff_sigma_T = sqrt(2 * DT * drift_time);
             
@@ -3259,7 +3271,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
             weight = (curr_rec_pos - next_rec_pos).magnitude();
 
-            drift_time = std::max(50*units::us, reco_pos.x() / time_tick_width * 0.5*units::us );
+            drift_time = std::max(m_params.min_drift_time, reco_pos.x() / time_tick_width * 0.5*units::us );
             diff_sigma_L = sqrt(2 * DL * drift_time);
             diff_sigma_T = sqrt(2 * DT * drift_time);
 
