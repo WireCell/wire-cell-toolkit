@@ -269,6 +269,8 @@ namespace WireCell::Clus {
 
         void dQ_dx_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
 
+        void do_single_tracking();
+
         /**  
          * Get anode for a specific APA identifier
          * @param apa_ident APA identifier (typically same as APA number)
@@ -355,6 +357,7 @@ namespace WireCell::Clus {
         std::vector<std::pair<int,int>> get_paf() const {return paf;}
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
+        void set_flag_dQ_dx_fit(bool flag=true){m_flag_dQ_dx_fit = flag;}
     private:
          // Core parameters - centralized storage
         Parameters m_params;
@@ -364,6 +367,7 @@ namespace WireCell::Clus {
             return (param_value < 0) ? default_value : param_value;
         }
 
+        bool m_flag_dQ_dx_fit{true};
         FittingType m_fitting_type;
         IDetectorVolumes::pointer m_dv{nullptr};  
         IPCTransformSet::pointer m_pcts{nullptr};          // PC Transform Set
