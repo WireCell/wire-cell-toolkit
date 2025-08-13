@@ -20,6 +20,7 @@
 #include <memory>
 #include "VertexDataSource.h"
 #include <unordered_map>
+#include <cstdint> // for std::uint8_t
 
 namespace quickhull {
 
