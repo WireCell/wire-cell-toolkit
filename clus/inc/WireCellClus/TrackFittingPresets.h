@@ -79,28 +79,6 @@ namespace WireCell::Clus {
             return create_with_current_values(); // Same as your current values for now
         }
         
-        /**
-         * Create TrackFitting with alternative parameter set (for experimentation)
-         */
-        static TrackFitting create_alternative() {
-            TrackFitting fitter = create_with_current_values();
-            
-            // Modify a few parameters for testing
-            fitter.set_parameter("DL", 7.0e-6);           // Slightly higher diffusion
-            fitter.set_parameter("min_track_length", 3.0); // Shorter minimum track
-            fitter.set_parameter("rel_uncer_ind", 0.08);   // Higher uncertainty
-            
-            return fitter;
-        }
-        
-        /**
-         * Create TrackFitting with specific fitting type and current parameters
-         */
-        static TrackFitting create_with_fitting_type(TrackFitting::FittingType type) {
-            TrackFitting fitter = create_with_current_values();
-            fitter.set_fitting_type(type);
-            return fitter;
-        }
     };
 
 } // namespace WireCell::Clus
