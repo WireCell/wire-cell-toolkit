@@ -84,6 +84,14 @@ namespace WireCell::Clus {
             double share_charge_err = 8000;
             double min_drift_time = 50*units::us;
             double search_range = 10; // wires, or time slices (not ticks)
+
+            double dead_ind_weight = 0.3;
+            double dead_col_weight = 0.9;
+            double close_ind_weight = 0.15;
+            double close_col_weight = 0.45;
+            double overlap_th = 0.5;
+            double dx_norm_length = 0.6*units::cm;
+            double lambda= 0.0005;
         };
  
         /**

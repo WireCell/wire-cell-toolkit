@@ -94,6 +94,20 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.min_drift_time = value;
     } else if (name == "search_range") {
         m_params.search_range = value;
+    } else if (name == "dead_ind_weight") {
+        m_params.dead_ind_weight = value;
+    } else if (name == "dead_col_weight") {
+        m_params.dead_col_weight = value;
+    } else if (name == "close_ind_weight") {
+        m_params.close_ind_weight = value;
+    } else if (name == "close_col_weight") {
+        m_params.close_col_weight = value;
+    } else if (name == "overlap_th") {
+        m_params.overlap_th = value;
+    } else if (name == "dx_norm_length") {
+        m_params.dx_norm_length = value;
+    } else if (name == "lambda") {
+        m_params.lambda = value;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
     }
@@ -173,6 +187,20 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.min_drift_time;
     } else if (name == "search_range") {
         return m_params.search_range;
+    } else if (name == "dead_ind_weight") {
+        return m_params.dead_ind_weight;
+    } else if (name == "dead_col_weight") {
+        return m_params.dead_col_weight;
+    } else if (name == "close_ind_weight") {
+        return m_params.close_ind_weight;
+    } else if (name == "close_col_weight") {
+        return m_params.close_col_weight;
+    } else if (name == "overlap_th") {
+        return m_params.overlap_th;
+    } else if (name == "dx_norm_length") {
+        return m_params.dx_norm_length;
+    } else if (name == "lambda") {
+        return m_params.lambda;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
         return 0;
@@ -1437,6 +1465,9 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
     double cluster_t0 = cluster->get_flash().time();
 
+    auto first_blob = segment->cluster()->children()[0];
+    int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+
     // find the apa and face ...
     auto wpid = m_dv->contained_by(p);
     int apa = wpid.apa();
@@ -1552,11 +1583,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             }
             double rms = 0;
             for (auto it1 = saved_2dwt.begin(); it1 != saved_2dwt.end(); it1++){
-                rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                rms += pow(it1->wire - ave_pos.first, 2) + pow((it1->time - ave_pos.second)/cur_ntime_ticks, 2);
             }
             rms = sqrt(rms/saved_2dwt.size());
 
-            if (sqrt(pow(ave_pos.first - wire_w, 2) + pow(ave_pos.second - time_w, 2)) > 0.75*rms && 
+            if (sqrt(pow(ave_pos.first - wire_w, 2) + pow((ave_pos.second - time_w)/cur_ntime_ticks, 2)) > 0.75*rms && 
                 saved_2dwt.size() <= 5 && saved_2dwt.size() < 0.2 * temp_2dwt.associated_2d_points.size()){
                 saved_2dwt.clear();
                 int channel_w = get_channel_for_wire(apa, face, 2, wire_w);
@@ -1592,11 +1623,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             }
             double rms = 0;
             for (auto it1 = saved_2dvt.begin(); it1 != saved_2dvt.end(); it1++){
-                rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                rms += pow(it1->wire - ave_pos.first, 2) + pow((it1->time - ave_pos.second)/cur_ntime_ticks, 2);
             }
             rms = sqrt(rms/saved_2dvt.size());
 
-            if (sqrt(pow(ave_pos.first - wire_v, 2) + pow(ave_pos.second - time_v, 2)) > 0.75*rms && 
+            if (sqrt(pow(ave_pos.first - wire_v, 2) + pow((ave_pos.second - time_v)/cur_ntime_ticks, 2)) > 0.75*rms && 
                 saved_2dvt.size() <= 5 && saved_2dvt.size() < 0.2 * temp_2dvt.associated_2d_points.size()){
                 saved_2dvt.clear();
                 int channel_v = get_channel_for_wire(apa, face, 1, wire_v);
@@ -1632,11 +1663,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             }
             double rms = 0;
             for (auto it1 = saved_2dut.begin(); it1 != saved_2dut.end(); it1++){
-                rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                rms += pow(it1->wire - ave_pos.first, 2) + pow((it1->time - ave_pos.second)/cur_ntime_ticks, 2);
             }
             rms = sqrt(rms/saved_2dut.size());
 
-            if (sqrt(pow(ave_pos.first - wire_u, 2) + pow(ave_pos.second - time_u, 2)) > 0.75*rms && 
+            if (sqrt(pow(ave_pos.first - wire_u, 2) + pow((ave_pos.second - time_u)/cur_ntime_ticks, 2)) > 0.75*rms && 
                 saved_2dut.size() <= 5 && saved_2dut.size() < 0.2 * temp_2dut.associated_2d_points.size()){
                 saved_2dut.clear();
                 int channel_u = get_channel_for_wire(apa, face, 0, wire_u);
@@ -1669,11 +1700,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                 }
                 double rms = 0;
                 for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
-                    rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                    rms += pow(it1->wire - ave_pos.first, 2) + pow((it1->time - ave_pos.second)/cur_ntime_ticks, 2);
                 }
                 rms = sqrt(rms/saved_plane.size());
 
-                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow(ave_pos.second - expected_time, 2)) > 0.75*rms && 
+                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow((ave_pos.second - expected_time)/cur_ntime_ticks, 2)) > 0.75*rms && 
                     saved_plane.size() <= 5 && saved_plane.size() < 0.2 * temp_plane.size()){
                     saved_plane.clear();
                     int channel = get_channel_for_wire(apa, face, result_idx == 2 ? 2 : 1, expected_wire);
@@ -1710,11 +1741,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                 }
                 double rms = 0;
                 for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
-                    rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                    rms += pow(it1->wire - ave_pos.first, 2) + pow((it1->time - ave_pos.second)/cur_ntime_ticks, 2);
                 }
                 rms = sqrt(rms/saved_plane.size());
 
-                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow(ave_pos.second - expected_time, 2)) > 0.75*rms && 
+                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow((ave_pos.second - expected_time)/cur_ntime_ticks, 2)) > 0.75*rms && 
                     saved_plane.size() <= 5 && saved_plane.size() < 0.2 * temp_plane.size()){
                     saved_plane.clear();
                     int channel = get_channel_for_wire(apa, face, result_idx == 0 ? 0 : 2, expected_wire);
@@ -1751,11 +1782,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                 }
                 double rms = 0;
                 for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
-                    rms += pow(it1->wire - ave_pos.first, 2) + pow(it1->time - ave_pos.second, 2);
+                    rms += pow(it1->wire - ave_pos.first, 2) + pow((it1->time - ave_pos.second)/cur_ntime_ticks, 2);
                 }
                 rms = sqrt(rms/saved_plane.size());
 
-                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow(ave_pos.second - expected_time, 2)) > 0.75*rms && 
+                if (sqrt(pow(ave_pos.first - expected_wire, 2) + pow((ave_pos.second - expected_time)/cur_ntime_ticks, 2)) > 0.75*rms && 
                     saved_plane.size() <= 5 && saved_plane.size() < 0.2 * temp_plane.size()){
                     saved_plane.clear();
                     int channel = get_channel_for_wire(apa, face, result_idx, expected_wire);
@@ -3324,7 +3355,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             double diff_sigma_L = sqrt(2 * DL * drift_time);
             double diff_sigma_T = sqrt(2 * DT * drift_time);
             
-            double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width / cur_ntime_ticks;
+            double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width;
             double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
             double sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
             double sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
@@ -3352,7 +3383,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             diff_sigma_L = sqrt(2 * DL * drift_time);
             diff_sigma_T = sqrt(2 * DT * drift_time);
 
-            sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width / cur_ntime_ticks;
+            sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width;
             sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
             sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
             sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
@@ -3368,209 +3399,251 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             sigmas_T.push_back(sigma_L);
         }
         
-    //     // Fill response matrices using Gaussian integration
-    //     int n_u = 0;
-    //     for (auto it = map_2D_ut_charge.begin(); it != map_2D_ut_charge.end(); it++) {
-    //         if (abs(it->first.first - centers_U.front()) <= 10 && 
-    //             abs(it->first.second - centers_T.front()) <= 10) {
-                
-    //             double value = cal_gaus_integral_seg(it->first.second, it->first.first,
-    //                                                centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4);
-                
-    //             if (std::get<2>(it->second) == 0 && value > 0) reg_flag_u[i] = 1; // Dead channel
-                
-    //             if (value > 0 && std::get<0>(it->second) > 0 && std::get<2>(it->second) != 0) {
-    //                 double charge = std::get<0>(it->second);
-    //                 double charge_err = std::get<1>(it->second);
-    //                 double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-    //                 RU.insert(n_u, i) = value / total_err;
-    //             }
-    //         }
-    //         n_u++;
-    //     }
-        
-        
-    //     // Additional dead channel checks
-    //     if (reg_flag_u[i] == 0) {
-    //         for (size_t kk = 0; kk < centers_U.size(); kk++) {
-    //             if (map_2D_ut_charge.find(std::make_pair(int(centers_U[kk]), int(centers_T[kk]))) == map_2D_ut_charge.end()) {
-    //                 reg_flag_u[i] = 1;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     if (reg_flag_v[i] == 0) {
-    //         for (size_t kk = 0; kk < centers_V.size(); kk++) {
-    //             if (map_2D_vt_charge.find(std::make_pair(int(centers_V[kk]), int(centers_T[kk]))) == map_2D_vt_charge.end()) {
-    //                 reg_flag_v[i] = 1;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     if (reg_flag_w[i] == 0) {
-    //         for (size_t kk = 0; kk < centers_W.size(); kk++) {
-    //             if (map_2D_wt_charge.find(std::make_pair(int(centers_W[kk]), int(centers_T[kk]))) == map_2D_wt_charge.end()) {
-    //                 reg_flag_w[i] = 1;
-    //                 break;
-    //             }
-    //         }
-    //     }
+        // Fill response matrices using Gaussian integration
+        int n_u = 0;
+        std::set<std::pair<int, int>> set_UT;
+        for (const auto& [coord_key, result] : map_U_charge_2D) {
+            const auto& measurement = result.first;
+            const auto& Coord2D_set = result.second;    
+
+            for (const auto& coord2d : Coord2D_set) {
+                // coord2d: TrackFitting::Coord2D
+                // Only process if plane matches U
+                if (coord2d.plane != kUlayer || coord2d.apa != apa || coord2d.face != face) continue;
+                int wire = coord2d.wire;
+                int time = coord2d.time;
+
+                set_UT.insert(std::make_pair(wire, time));
+
+                if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4);
+
+
+                    if (measurement.flag == 0 && value > 0) reg_flag_u[i] = 1; // Dead channel
+                    
+                    if (value > 0 && measurement.charge > 0 && measurement.flag != 0) {
+                        double charge = measurement.charge;
+                        double charge_err = measurement.charge_err;
+                        double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
+                        RU.insert(n_u, i) = value / total_err;
+                    }
+                }
+            }
+            n_u++;
+        }
+        int n_v = 0;
+        std::set<std::pair<int, int>> set_VT;
+        for (const auto& [coord_key, result] : map_V_charge_2D) {
+            const auto& measurement = result.first;
+            const auto& Coord2D_set = result.second;    
+
+            for (const auto& coord2d : Coord2D_set) {
+                // coord2d: TrackFitting::Coord2D
+                // Only process if plane matches V
+                if (coord2d.plane != kVlayer || coord2d.apa != apa || coord2d.face != face) continue;
+                int wire = coord2d.wire;
+                int time = coord2d.time;
+                set_VT.insert(std::make_pair(wire, time));
+
+                if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4);
+
+                    if (measurement.flag == 0 && value > 0) reg_flag_v[i] = 1; // Dead channel
+
+                    if (value > 0 && measurement.charge > 0 && measurement.flag != 0) {
+                        double charge = measurement.charge;
+                        double charge_err = measurement.charge_err;
+                        double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
+                        RV.insert(n_v, i) = value / total_err;
+                    }
+
+                }
+            }
+            n_v++;
+        }
+        int n_w = 0;
+        std::set<std::pair<int, int>> set_WT;
+        for (const auto& [coord_key, result] : map_W_charge_2D) {
+            const auto& measurement = result.first;
+            const auto& Coord2D_set = result.second;    
+
+            for (const auto& coord2d : Coord2D_set) {
+                // coord2d: TrackFitting::Coord2D
+                // Only process if plane matches W
+                if (coord2d.plane != kWlayer || coord2d.apa != apa || coord2d.face != face) continue;
+                int wire = coord2d.wire;
+                int time = coord2d.time;
+                set_WT.insert(std::make_pair(wire, time));
+                if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4);
+
+                    if (measurement.flag == 0 && value > 0) reg_flag_w[i] = 1; // Dead channel
+
+                    if (value > 0 && measurement.charge > 0 && measurement.flag != 0) {
+                        double charge = measurement.charge;
+                        double charge_err = measurement.charge_err;
+                        double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_col, 2) + pow(add_uncer_col, 2));
+                        RW.insert(n_w, i) = value / total_err;
+                    }
+                }
+            }
+            n_u++;
+        }
+
+
+        // Additional dead channel checks
+        if (reg_flag_u[i] == 0) { // apa, face
+            for (size_t kk = 0; kk < centers_U.size(); kk++) {
+                if (set_UT.find(std::make_pair(int(centers_U[kk]), int(centers_T[kk]))) == set_UT.end()) {
+                    reg_flag_u[i] = 1;
+                    break;
+                }
+            }
+        }
+        if (reg_flag_v[i] == 0) { // apa, face
+            for (size_t kk = 0; kk < centers_V.size(); kk++) {
+                if (set_VT.find(std::make_pair(int(centers_V[kk]), int(centers_T[kk]))) == set_VT.end()) {
+                    reg_flag_v[i] = 1;
+                    break;
+                }
+            }
+        }
+        if (reg_flag_w[i] == 0) { // apa, face
+            for (size_t kk = 0; kk < centers_W.size(); kk++) {
+                if (set_WT.find(std::make_pair(int(centers_W[kk]), int(centers_T[kk]))) == set_WT.end()) {
+                    reg_flag_w[i] = 1;
+                    break;
+                }
+            }
+        }
     }
     
-    // // Calculate compact matrices for overlap analysis
-    // Eigen::SparseMatrix<double> RUT = RU.transpose();
-    // Eigen::SparseMatrix<double> RVT = RV.transpose();
-    // Eigen::SparseMatrix<double> RWT = RW.transpose();
+    // Calculate compact matrices for overlap analysis
+    Eigen::SparseMatrix<double> RUT = RU.transpose();
+    Eigen::SparseMatrix<double> RVT = RV.transpose();
+    Eigen::SparseMatrix<double> RWT = RW.transpose();
     
-    // Eigen::SparseMatrix<double> MU(n_2D_u, n_2D_u), MV(n_2D_v, n_2D_v), MW(n_2D_w, n_2D_w);
-    // for (int k = 0; k < n_2D_u; k++) MU.insert(k, k) = 1;
-    // for (int k = 0; k < n_2D_v; k++) MV.insert(k, k) = 1;
-    // for (int k = 0; k < n_2D_w; k++) MW.insert(k, k) = 1;
+    Eigen::SparseMatrix<double> MU(n_2D_u, n_2D_u), MV(n_2D_v, n_2D_v), MW(n_2D_w, n_2D_w);
+    for (int k = 0; k < n_2D_u; k++) MU.insert(k, k) = 1;
+    for (int k = 0; k < n_2D_v; k++) MV.insert(k, k) = 1;
+    for (int k = 0; k < n_2D_w; k++) MW.insert(k, k) = 1;
     
-    // std::vector<std::pair<double, double>> overlap_u = calculate_compact_matrix(MU, RUT, n_2D_u, n_3D_pos, 3);
-    // std::vector<std::pair<double, double>> overlap_v = calculate_compact_matrix(MV, RVT, n_2D_v, n_3D_pos, 3);
-    // std::vector<std::pair<double, double>> overlap_w = calculate_compact_matrix(MW, RWT, n_2D_w, n_3D_pos, 2);
+    std::vector<std::pair<double, double>> overlap_u = calculate_compact_matrix(MU, RUT, n_2D_u, n_3D_pos, 3);
+    std::vector<std::pair<double, double>> overlap_v = calculate_compact_matrix(MV, RVT, n_2D_v, n_3D_pos, 3);
+    std::vector<std::pair<double, double>> overlap_w = calculate_compact_matrix(MW, RWT, n_2D_w, n_3D_pos, 2);
     
-    // // Add regularization based on dead channels and overlaps
-    // Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
-    
-    // const double dead_ind_weight = 0.3;
-    // const double dead_col_weight = 0.9;
-    // const double close_ind_weight = 0.15;
-    // const double close_col_weight = 0.45;
-    
-    // for (int i = 0; i < n_3D_pos; i++) {
-    //     bool flag_u = reg_flag_u[i];
-    //     bool flag_v = reg_flag_v[i];
-    //     bool flag_w = reg_flag_w[i];
+    // Add regularization based on dead channels and overlaps
+    Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
+
+    const double dead_ind_weight = m_params.dead_ind_weight;
+    const double dead_col_weight = m_params.dead_col_weight;
+    const double close_ind_weight = m_params.close_ind_weight;
+    const double close_col_weight = m_params.close_col_weight;
+
+    for (int i = 0; i < n_3D_pos; i++) {
+        bool flag_u = reg_flag_u[i];
+        bool flag_v = reg_flag_v[i];
+        bool flag_w = reg_flag_w[i];
         
-    //     if (n_3D_pos != 1) {
-    //         double weight = 0;
-    //         if (flag_u) weight += dead_ind_weight;
-    //         if (flag_v) weight += dead_ind_weight;
-    //         if (flag_w) weight += dead_col_weight;
+        if (n_3D_pos != 1) {
+            double weight = 0;
+            if (flag_u) weight += dead_ind_weight;
+            if (flag_v) weight += dead_ind_weight;
+            if (flag_w) weight += dead_col_weight;
             
-    //         if (i < overlap_u.size()) {
-    //             if (overlap_u[i].second > 0.5) weight += close_ind_weight * pow(2 * overlap_u[i].second - 1, 2);
-    //             if (overlap_v[i].second > 0.5) weight += close_ind_weight * pow(2 * overlap_v[i].second - 1, 2);
-    //             if (overlap_w[i].second > 0.5) weight += close_col_weight * pow(2 * overlap_w[i].second - 1, 2);
-    //         }
+            if (i==0){
+                if (overlap_u[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_u[i].second - 1, 2);
+                if (overlap_v[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_v[i].second - 1, 2);
+                if (overlap_w[i].second > m_params.overlap_th) weight += close_col_weight * pow(2 * overlap_w[i].second - 1, 2);
+            }else if (i==n_3D_pos-1){
+                if (overlap_u[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_u[i].first - 1, 2);
+                if (overlap_v[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_v[i].first - 1, 2);
+                if (overlap_w[i].second > m_params.overlap_th) weight += close_col_weight * pow(2 * overlap_w[i].first - 1, 2);
+            }else{
+                if (overlap_u.at(i).first + overlap_u.at(i).second > 2*m_params.overlap_th) weight += close_ind_weight * pow(overlap_u.at(i).first + overlap_u.at(i).second - 1,2);
+                if (overlap_v.at(i).first + overlap_v.at(i).second > 2*m_params.overlap_th) weight += close_ind_weight * pow(overlap_v.at(i).first + overlap_v.at(i).second - 1,2);
+                if (overlap_w.at(i).first + overlap_w.at(i).second > 2*m_params.overlap_th) weight += close_col_weight * pow(overlap_w.at(i).first + overlap_w.at(i).second - 1,2);
+
+            }
             
-    //         double dx_norm = (dx[i] + 0.6e-3) / 0.6e-3; // Normalize by 0.6 mm
+            double dx_norm = (dx[i] + 0.001*units::cm) / m_params.dx_norm_length; // Normalize by 0.6 mm
             
-    //         if (i == 0) {
-    //             FMatrix.insert(0, 0) = -weight / dx_norm;
-    //             if (n_3D_pos > 1) FMatrix.insert(0, 1) = weight / dx_norm;
-    //         } else if (i == n_3D_pos - 1) {
-    //             FMatrix.insert(i, i) = -weight / dx_norm;
-    //             FMatrix.insert(i, i-1) = weight / dx_norm;
-    //         } else {
-    //             FMatrix.insert(i, i) = -2.0 * weight / dx_norm;
-    //             FMatrix.insert(i, i+1) = weight / dx_norm;
-    //             FMatrix.insert(i, i-1) = weight / dx_norm;
-    //         }
-    //     }
-    // }
+            if (i == 0) {
+                FMatrix.insert(0, 0) = -weight / dx_norm;
+                if (n_3D_pos > 1) FMatrix.insert(0, 1) = weight / dx_norm;
+            } else if (i == n_3D_pos - 1) {
+                FMatrix.insert(i, i) = -weight / dx_norm; 
+                FMatrix.insert(i, i-1) = weight / dx_norm;
+            } else {
+                FMatrix.insert(i, i) = -2.0 * weight / dx_norm;
+                FMatrix.insert(i, i+1) = weight / dx_norm;
+                FMatrix.insert(i, i-1) = weight / dx_norm;
+            }
+        }
+    }
     
-    // // Apply regularization scaling
-    // double lambda = 0.0005;
-    // FMatrix *= lambda;
-    // if (!flag_dQ_dx_fit_reg) FMatrix *= 0.01;
+    // Apply regularization scaling
+    double lambda = m_params.lambda;
+    FMatrix *= lambda;
+    if (!flag_dQ_dx_fit_reg) FMatrix *= 0.01;
     
-    // // Solve the linear system
-    // Eigen::SparseMatrix<double> FMatrixT = FMatrix.transpose();
-    // Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
+    // Solve the linear system
+    Eigen::SparseMatrix<double> FMatrixT = FMatrix.transpose();
+    Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
     
-    // Eigen::VectorXd b = RUT * MU * data_u_2D + RVT * MV * data_v_2D + RWT * MW * data_w_2D;
-    // Eigen::SparseMatrix<double> A = RUT * MU * RU + RVT * MV * RV + RWT * MW * RW + FMatrixT * FMatrix;
+    Eigen::VectorXd b = RUT * MU * data_u_2D + RVT * MV * data_v_2D + RWT * MW * data_w_2D;
+    Eigen::SparseMatrix<double> A = RUT * MU * RU + RVT * MV * RV + RWT * MW * RW + FMatrixT * FMatrix;
     
-    // solver.compute(A);
-    // pos_3D = solver.solveWithGuess(b, pos_3D_init);
+    solver.compute(A);
+    pos_3D = solver.solveWithGuess(b, pos_3D_init);
     
-    // if (std::isnan(solver.error())) {
-    //     pos_3D = solver.solve(b);
-    // }
+    if (std::isnan(solver.error())) {
+        pos_3D = solver.solve(b);
+    }
     
-    // // Extract dQ values and apply corrections
-    // dQ.resize(n_3D_pos);
-    // for (int i = 0; i < n_3D_pos; i++) {
-    //     double corr = 1.0; // Skip electron lifetime correction as requested
+    // Extract dQ values and apply corrections
+    dQ.resize(n_3D_pos);
+ 
+    // Calculate predictions and reduced chi-squared
+    pred_data_u_2D = RU * pos_3D;
+    pred_data_v_2D = RV * pos_3D;
+    pred_data_w_2D = RW * pos_3D;
+    
+    // Calculate reduced chi-squared for each 3D point
+    reduced_chi2.resize(n_3D_pos);
+    for (int k = 0; k < n_3D_pos; k++) {
+        double sum[3] = {0, 0, 0};
+        double sum1[3] = {0, 0, 0};
         
-    //     // Apply U-plane-specific correction for certain wire ranges
-    //     auto wpid = m_dv->contained_by(fine_tracking_path[i].first);
-    //     if (wpid.apa() != -1 && wpid.face() != -1) {
-    //         WirePlaneId wpid_key(kAllLayers, wpid.face(), wpid.apa());
-    //         auto offset_it = wpid_offsets.find(wpid_key);
-    //         auto slope_it = wpid_slopes.find(wpid_key);
-            
-    //         if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
-    //             double offset_u = std::get<1>(offset_it->second);
-    //             auto slope_yu = std::get<1>(slope_it->second).first;
-    //             auto slope_zu = std::get<1>(slope_it->second).second;
-                
-    //             WireCell::Point p = fine_tracking_path[i].first;
-    //             double central_U = offset_u + (slope_yu * p.y() + slope_zu * p.z());
-                
-    //             // Apply correction for specific U-wire ranges (detector-specific)
-    //             if ((central_U >= 296 && central_U <= 327) ||
-    //                 (central_U >= 336 && central_U <= 337) ||
-    //                 (central_U >= 343 && central_U <= 351) ||
-    //                 (central_U >= 376 && central_U <= 400) ||
-    //                 (central_U >= 410 && central_U <= 484) ||
-    //                 (central_U >= 501 && central_U <= 524) ||
-    //                 (central_U >= 536 && central_U <= 671)) {
-    //                 dQ[i] = pos_3D(i) / 0.7 * corr;
-    //             } else {
-    //                 dQ[i] = pos_3D(i) * corr;
-    //             }
-    //         } else {
-    //             dQ[i] = pos_3D(i) * corr;
-    //         }
-    //     } else {
-    //         dQ[i] = pos_3D(i) * corr;
-    //     }
-    // }
-    
-    // // Calculate predictions and reduced chi-squared
-    // pred_data_u_2D = RU * pos_3D;
-    // pred_data_v_2D = RV * pos_3D;
-    // pred_data_w_2D = RW * pos_3D;
-    
-    // // Calculate reduced chi-squared for each 3D point
-    // reduced_chi2.resize(n_3D_pos);
-    // for (int k = 0; k < n_3D_pos; k++) {
-    //     double sum[3] = {0, 0, 0};
-    //     double sum1[3] = {0, 0, 0};
+        for (Eigen::SparseMatrix<double>::InnerIterator it(RU, k); it; ++it) {
+            if (pred_data_u_2D(it.row()) > 0) {
+                sum[0] += pow(data_u_2D(it.row()) - pred_data_u_2D(it.row()), 2) * 
+                          (it.value() * pos_3D(k)) / pred_data_u_2D(it.row());
+                sum1[0] += (it.value() * pos_3D(k)) / pred_data_u_2D(it.row());
+            }
+        }
         
-    //     for (Eigen::SparseMatrix<double>::InnerIterator it(RU, k); it; ++it) {
-    //         if (pred_data_u_2D(it.row()) > 0) {
-    //             sum[0] += pow(data_u_2D(it.row()) - pred_data_u_2D(it.row()), 2) * 
-    //                       (it.value() * pos_3D(k)) / pred_data_u_2D(it.row());
-    //             sum1[0] += (it.value() * pos_3D(k)) / pred_data_u_2D(it.row());
-    //         }
-    //     }
+        for (Eigen::SparseMatrix<double>::InnerIterator it(RV, k); it; ++it) {
+            if (pred_data_v_2D(it.row()) > 0) {
+                sum[1] += pow(data_v_2D(it.row()) - pred_data_v_2D(it.row()), 2) * 
+                          (it.value() * pos_3D(k)) / pred_data_v_2D(it.row());
+                sum1[1] += (it.value() * pos_3D(k)) / pred_data_v_2D(it.row());
+            }
+        }
         
-    //     for (Eigen::SparseMatrix<double>::InnerIterator it(RV, k); it; ++it) {
-    //         if (pred_data_v_2D(it.row()) > 0) {
-    //             sum[1] += pow(data_v_2D(it.row()) - pred_data_v_2D(it.row()), 2) * 
-    //                       (it.value() * pos_3D(k)) / pred_data_v_2D(it.row());
-    //             sum1[1] += (it.value() * pos_3D(k)) / pred_data_v_2D(it.row());
-    //         }
-    //     }
+        for (Eigen::SparseMatrix<double>::InnerIterator it(RW, k); it; ++it) {
+            if (pred_data_w_2D(it.row()) > 0) {
+                sum[2] += pow(data_w_2D(it.row()) - pred_data_w_2D(it.row()), 2) * 
+                          (it.value() * pos_3D(k)) / pred_data_w_2D(it.row());
+                sum1[2] += (it.value() * pos_3D(k)) / pred_data_w_2D(it.row());
+            }
+        }
         
-    //     for (Eigen::SparseMatrix<double>::InnerIterator it(RW, k); it; ++it) {
-    //         if (pred_data_w_2D(it.row()) > 0) {
-    //             sum[2] += pow(data_w_2D(it.row()) - pred_data_w_2D(it.row()), 2) * 
-    //                       (it.value() * pos_3D(k)) / pred_data_w_2D(it.row());
-    //             sum1[2] += (it.value() * pos_3D(k)) / pred_data_w_2D(it.row());
-    //         }
-    //     }
+        double total_chi2 = sum[0] + sum[1] + sum[2] / 4.0; // Weight collection plane differently
+        double total_weight = sum1[0] + sum1[1] + sum1[2];
         
-    //     double total_chi2 = sum[0] + sum[1] + sum[2] / 4.0; // Weight collection plane differently
-    //     double total_weight = sum1[0] + sum1[1] + sum1[2];
-        
-    //     reduced_chi2[k] = (total_weight > 0) ? sqrt(total_chi2 / total_weight) : 0;
-    // }
+        reduced_chi2[k] = (total_weight > 0) ? sqrt(total_chi2 / total_weight) : 0;
+    }
     
     // Restore original charge data
     recover_original_charge_data();

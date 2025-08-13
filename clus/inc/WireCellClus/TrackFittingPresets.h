@@ -73,6 +73,14 @@ namespace WireCell::Clus {
             params.min_drift_time = 50*units::us;
             params.search_range = 10; // wires, or time slices (not ticks)
 
+            params.dead_ind_weight = 0.3;
+            params.dead_col_weight = 0.9;
+            params.close_ind_weight = 0.15;
+            params.close_col_weight = 0.45;
+            params.overlap_th = 0.5;
+            params.dx_norm_length = 0.6*units::cm;
+            params.lambda = 0.0005;
+
             fitter.set_parameters(params);
             return fitter;
         }
