@@ -26,6 +26,62 @@ namespace WireCell::Clus {
         };
 
         /**
+         * Structure to hold all track fitting parameters in one place
+         */
+        struct Parameters {
+            // Diffusion coefficients (LArTPC standard values)
+            double DL = 6.4e-6;                    // m²/s, longitudinal diffusion
+            double DT = 9.8e-6;                    // m²/s, transverse diffusion
+            
+            // Software filter effects (wire dimension broadening)
+            double col_sigma_w_T = 0.188060 * 0.2; // Collection plane, units: wire pitch
+            double ind_sigma_u_T = 0.402993 * 0.3; // U induction plane
+            double ind_sigma_v_T = 0.402993 * 0.5; // V induction plane
+            
+            // Uncertainty parameters
+            double rel_uncer_ind = 0.075;          // Relative uncertainty for induction planes
+            double rel_uncer_col = 0.05;           // Relative uncertainty for collection plane
+            double add_uncer_ind = 0.0;            // Additional uncertainty for induction
+            double add_uncer_col = 300.0;          // Additional uncertainty for collection
+            
+            // Longitudinal filter effects (time dimension)
+            double add_sigma_L = 1.428249 * 0.5;   // units: time tick
+            
+            // Additional useful parameters for charge err estimation ...
+            double rel_charge_uncer = 0.1; // 10% 
+            double add_charge_uncer = 600; // electrons
+
+            double default_charge_th = 100;
+            double default_charge_err = 1000; 
+
+            double scaling_quality_th = 0.5;
+            double scaling_ratio = 0.05;
+
+            double area_ratio1 = 1.8*units::mm;
+            double area_ratio2 = 1.7;
+
+            double skip_default_ratio_1 = 0.25;
+            double skip_ratio_cut = 0.97;
+            double skip_ratio_1_cut = 0.75;
+
+            double skip_angle_cut_1 = 160;
+            double skip_angle_cut_2 = 90;
+            double skip_angle_cut_3 = 45;
+            double skip_dis_cut = 0.5*units::cm;
+
+            double default_dQ_dx = 5000; 
+
+            double end_point_factor=0.6;
+            double mid_point_factor=0.9;
+            int nlevel=3;
+            double charge_cut=2000;
+            
+            double low_dis_limit = 1.2*units::cm;            // cm, lower distance limit for point organization
+            double end_point_limit = 0.6*units::cm;          // cm, extension distance for end points
+            double time_tick_cut = 20;   //            //  tick cut for point association
+        };
+ 
+        /**
          * Constructor
          * @param fitting_type The type of fitting to perform (single or multiple tracks)
          */
@@ -43,6 +99,29 @@ namespace WireCell::Clus {
          * @return The current fitting type
          */
         FittingType get_fitting_type() const { return m_fitting_type; }
+
+        // Parameter management methods
+        
+        /**
+         * Get read-only access to current parameters
+         */
+        const Parameters& get_parameters() const { return m_params; }
+        
+        /**
+         * Set new parameters (replaces all current parameters)
+         */
+        void set_parameters(const Parameters& params) { m_params = params; }
+        
+        /**
+         * Set specific parameter by name
+         */
+        void set_parameter(const std::string& name, double value);
+        
+        /**
+         * Get specific parameter by name
+         */
+        double get_parameter(const std::string& name) const;
+
 
         void add_segment(std::shared_ptr<PR::Segment> ); 
 
@@ -264,6 +343,14 @@ namespace WireCell::Clus {
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
     private:
+         // Core parameters - centralized storage
+        Parameters m_params;
+
+        // Helper method to get parameter value or default
+        double get_param_or_default(double param_value, double default_value) const {
+            return (param_value < 0) ? default_value : param_value;
+        }
+
         FittingType m_fitting_type;
         IDetectorVolumes::pointer m_dv{nullptr};  
         IPCTransformSet::pointer m_pcts{nullptr};          // PC Transform Set

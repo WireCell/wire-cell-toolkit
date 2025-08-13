@@ -594,7 +594,9 @@ private:
 
         m_track_fitter.trajectory_fit(ptss);
 
-       
+
+        // std::cout << m_track_fitter.get_parameter("DL") << std::endl;
+
         // std::cout << "TaggerCheckSTM: Formed map with " << organized_path.size() << " points." << std::endl;
 
         return false;
