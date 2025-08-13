@@ -156,7 +156,10 @@ def _configure(ctx, name, incs=(), libs=(), bins=(), pcname=None, mandatory=True
 
     if libs:
         ctx.start_msg("Location for %s libs" % (name,))
+        have_libs = getattr(ctx.env, 'LIB_' + UPPER, None)
         for tryl in libs:
+            if tryl in have_libs:
+                continue
             ctx.check_cxx(lib=tryl, define_name='HAVE_'+UPPER+'_LIB',
                           use=[UPPER] + extuses, uselib_store=UPPER, mandatory=mandatory)
         ctx.end_msg(str(getattr(ctx.env, 'LIBPATH_' + UPPER, None)))
