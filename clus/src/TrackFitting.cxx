@@ -1276,6 +1276,9 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                 dis_cut_v = max_time_slice_v * time_tick_width * 1.2;
             if (max_time_slice_w * time_tick_width * 1.2 < dis_cut_w)
                 dis_cut_w = max_time_slice_w * time_tick_width * 1.2;
+
+                                    // std::cout << "Time tick: " << time_tick_width/units::mm << std::endl;
+
         
             // // Process each nearby blob for wire range calculations (equivalent to final loop)
             for (auto vertex_info : map_vertex_info){
@@ -1983,6 +1986,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                         fac = factor;
                         sum += factor;
                 }
+
+
                 
                 // Normalize weights
                 if (sum > 0) {
@@ -1994,6 +1999,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         }
     }
     
+
     // Main fitting loop using Eigen
     Eigen::VectorXd pos_3D(3 * pss_vec.size());
     

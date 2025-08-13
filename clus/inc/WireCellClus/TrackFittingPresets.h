@@ -23,16 +23,16 @@ namespace WireCell::Clus {
             TrackFitting::Parameters params;
             
             // Set to exactly your current hard-coded values
-            params.DL = 6.4e-6;                    // m²/s, longitudinal diffusion
-            params.DT = 9.8e-6;                    // m²/s, transverse diffusion
-            params.col_sigma_w_T = 0.188060 * 0.2; // Collection plane
-            params.ind_sigma_u_T = 0.402993 * 0.3; // U induction plane
-            params.ind_sigma_v_T = 0.402993 * 0.5; // V induction plane
+            params.DL = 6.4* pow(units::cm,2)/units::second;                    // m²/s, longitudinal diffusion
+            params.DT = 9.8* pow(units::cm,2)/units::second;                    // m²/s, transverse diffusion
+            params.col_sigma_w_T = 0.188060 * 3*units::mm * 0.2; // Collection plane
+            params.ind_sigma_u_T = 0.402993 * 3*units::mm * 0.3; // U induction plane
+            params.ind_sigma_v_T = 0.402993 * 3*units::mm * 0.5; // V induction plane
             params.rel_uncer_ind = 0.075;          // Relative uncertainty for induction
             params.rel_uncer_col = 0.05;           // Relative uncertainty for collection
             params.add_uncer_ind = 0.0;            // Additional uncertainty for induction
             params.add_uncer_col = 300.0;          // Additional uncertainty for collection
-            params.add_sigma_L = 1.428249 * 0.5;   // Longitudinal filter effects
+            params.add_sigma_L = 1.428249 *0.5505*units::mm/ 0.5;   // Longitudinal filter effects
             
             // Additional useful parameters for charge err estimation ...
             params.rel_charge_uncer = 0.1; // 10%
@@ -56,7 +56,7 @@ namespace WireCell::Clus {
             params.skip_angle_cut_3 = 45;
             params.skip_dis_cut = 0.5*units::cm;
 
-            params.default_dQ_dx = 5000;
+            params.default_dQ_dx = 5000; // electrons
 
             params.end_point_factor = 0.6;
             params.mid_point_factor = 0.9;

@@ -7,6 +7,7 @@
 #include "WireCellUtil/Logging.h"
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/TrackFitting.h"  
+#include "WireCellClus/TrackFittingPresets.h"
 
 
 class TaggerCheckSTM;
@@ -24,13 +25,26 @@ using namespace WireCell::Clus::Facade;
  */
 class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS {
 public:
-    TaggerCheckSTM() {}
+    TaggerCheckSTM() {
+        // Initialize with default preset
+        m_track_fitter = TrackFittingPresets::create_with_current_values();
+    }
     virtual ~TaggerCheckSTM() {}
 
     virtual void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedPCTS::configure(config); 
         m_grouping_name = get<std::string>(config, "grouping", "live");
+
+        m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
+    
+        if (!m_trackfitting_config_file.empty()) {
+            std::cout << "TaggerCheckSTM: Loading TrackFitting config from: " << m_trackfitting_config_file << std::endl;
+            load_trackfitting_config(m_trackfitting_config_file);
+        } else {
+            std::cout << "TaggerCheckSTM: No TrackFitting config file specified, using defaults" << std::endl;
+        }
+
     }
     
     virtual Configuration default_configuration() const {
@@ -39,6 +53,7 @@ public:
         cfg["detector_volumes"] = "DetectorVolumes";
         cfg["pc_transforms"] = "PCTransformSet";  
 
+        cfg["trackfitting_config_file"] = ""; 
         return cfg;
     }
 
@@ -82,8 +97,48 @@ public:
 
 private:
     std::string m_grouping_name{"live"};
-
+    std::string m_trackfitting_config_file;  // Path to TrackFitting config file
     mutable TrackFitting m_track_fitter; 
+
+    void load_trackfitting_config(const std::string& config_file) {
+        try {
+            // Load JSON file
+            std::ifstream file(config_file);
+            if (!file.is_open()) {
+                std::cerr << "TaggerCheckSTM: Cannot open config file: " << config_file << std::endl;
+                return;
+            }
+            
+            Json::Value root;
+            Json::CharReaderBuilder builder;
+            std::string errs;
+            
+            if (!Json::parseFromStream(builder, file, &root, &errs)) {
+                std::cerr << "TaggerCheckSTM: Failed to parse JSON: " << errs << std::endl;
+                return;
+            }
+            
+            // Apply each parameter from the JSON file
+            for (const auto& param_name : root.getMemberNames()) {
+                if (param_name.substr(0, 1) == "_") continue;  // Skip comments
+                
+                try {
+                    double value = root[param_name].asDouble();
+                    m_track_fitter.set_parameter(param_name, value);
+                    std::cout << "TaggerCheckSTM: Set " << param_name << " = " << value << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "TaggerCheckSTM: Failed to set parameter " << param_name 
+                            << ": " << e.what() << std::endl;
+                }
+            }
+            
+            std::cout << "TaggerCheckSTM: Successfully loaded TrackFitting configuration" << std::endl;
+            
+        } catch (const std::exception& e) {
+            std::cerr << "TaggerCheckSTM: Exception loading config: " << e.what() << std::endl;
+            std::cerr << "TaggerCheckSTM: Using default TrackFitting parameters" << std::endl;
+        }
+    }
 
     std::vector<geo_point_t> do_rough_path(const Cluster& cluster,geo_point_t& first_point, geo_point_t& last_point) const{
          // 1. Get Steiner point cloud and graph

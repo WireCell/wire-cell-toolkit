@@ -30,14 +30,14 @@ namespace WireCell::Clus {
          */
         struct Parameters {
             // Diffusion coefficients (LArTPC standard values)
-            double DL = 6.4e-6;                    // m²/s, longitudinal diffusion
-            double DT = 9.8e-6;                    // m²/s, transverse diffusion
-            
+            double DL = 6.4* pow(units::cm,2)/units::second;                    // m²/s, longitudinal diffusion
+            double DT = 9.8* pow(units::cm,2)/units::second;                    // m²/s, transverse diffusion
+
             // Software filter effects (wire dimension broadening)
-            double col_sigma_w_T = 0.188060 * 0.2; // Collection plane, units: wire pitch
-            double ind_sigma_u_T = 0.402993 * 0.3; // U induction plane
-            double ind_sigma_v_T = 0.402993 * 0.5; // V induction plane
-            
+            double col_sigma_w_T = 0.188060 * 3*units::mm * 0.2; // Collection plane, units: wire pitch
+            double ind_sigma_u_T = 0.402993 * 3*units::mm * 0.3; // U induction plane
+            double ind_sigma_v_T = 0.402993 * 3*units::mm * 0.5; // V induction plane
+
             // Uncertainty parameters
             double rel_uncer_ind = 0.075;          // Relative uncertainty for induction planes
             double rel_uncer_col = 0.05;           // Relative uncertainty for collection plane
@@ -45,8 +45,8 @@ namespace WireCell::Clus {
             double add_uncer_col = 300.0;          // Additional uncertainty for collection
             
             // Longitudinal filter effects (time dimension)
-            double add_sigma_L = 1.428249 * 0.5;   // units: time tick
-            
+            double add_sigma_L = 1.428249 *0.5505*units::mm /0.5;   
+             
             // Additional useful parameters for charge err estimation ...
             double rel_charge_uncer = 0.1; // 10% 
             double add_charge_uncer = 600; // electrons
