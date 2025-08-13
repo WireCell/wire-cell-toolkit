@@ -81,6 +81,8 @@ namespace WireCell::Clus {
             params.dx_norm_length = 0.6*units::cm;
             params.lambda = 0.0005;
 
+            params.div_sigma = 0.6*units::cm;
+
             fitter.set_parameters(params);
             return fitter;
         }

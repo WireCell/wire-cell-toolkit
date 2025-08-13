@@ -621,35 +621,37 @@ private:
         auto test_results = m_track_fitter.get_wires_for_channel(0,ch);
         std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
 
-        // missing check other tracks ...
-        m_track_fitter.prepare_data();
-        m_track_fitter.fill_global_rb_map();
+        m_track_fitter.do_single_tracking();
+        
+        // // missing check other tracks ...
+        // m_track_fitter.prepare_data();
+        // m_track_fitter.fill_global_rb_map();
 
-        auto organized_path = m_track_fitter.organize_orig_path(segment);
-        // auto test = m_track_fitter.examine_end_ps_vec(segment, organized_path, true, true);
+        // auto organized_path = m_track_fitter.organize_orig_path(segment);
+        // // auto test = m_track_fitter.examine_end_ps_vec(segment, organized_path, true, true);
 
-        auto test_path = organized_path;
-        m_track_fitter.organize_ps_path(segment, test_path, 1.2*units::cm, 0.6*units::cm);
+        // auto test_path = organized_path;
+        // m_track_fitter.organize_ps_path(segment, test_path, 1.2*units::cm, 0.6*units::cm);
 
-        std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << " " << test_path.size() << std::endl;
+        // std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << " " << test_path.size() << std::endl;
 
-        // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
+        // // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
 
-        // WireCell::Point p = organized_path.front();
-        // TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
-        // m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
-        // m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
-        // std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
+        // // WireCell::Point p = organized_path.front();
+        // // TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+        // // m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
+        // // m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
+        // // std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
 
-        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
-        for (const auto& p : organized_path) {
-            ptss.emplace_back(p, segment);
-        }
-        m_track_fitter.form_map(ptss);
+        // std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
+        // for (const auto& p : organized_path) {
+        //     ptss.emplace_back(p, segment);
+        // }
+        // m_track_fitter.form_map(ptss);
 
-        m_track_fitter.trajectory_fit(ptss);
+        // m_track_fitter.trajectory_fit(ptss);
 
-        m_track_fitter.dQ_dx_fit();
+        // m_track_fitter.dQ_dx_fit();
 
 
         // std::cout << m_track_fitter.get_parameter("DL") << std::endl;

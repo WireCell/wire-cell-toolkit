@@ -108,6 +108,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.dx_norm_length = value;
     } else if (name == "lambda") {
         m_params.lambda = value;
+    } else if (name == "div_sigma") {
+        m_params.div_sigma = value;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
     }
@@ -201,6 +203,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.dx_norm_length;
     } else if (name == "lambda") {
         return m_params.lambda;
+    } else if (name == "div_sigma") {
+        return m_params.div_sigma;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
         return 0;
@@ -3649,7 +3653,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     recover_original_charge_data();
 }
 
-void TrackFitting::do_single_tracking() {
+void TrackFitting::do_single_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit) {
       // Clear all internal tracking vectors
     fine_tracking_path.clear();
     dQ.clear();
@@ -3663,7 +3667,7 @@ void TrackFitting::do_single_tracking() {
     
     bool flag_1st_tracking = true;
     bool flag_2nd_tracking = true;
-    bool flag_dQ_dx = m_flag_dQ_dx_fit;
+    bool flag_dQ_dx = flag_dQ_dx_fit;
     
     // Prepare the data for the fit - collect charge information from 2D projections
     prepare_data();
@@ -3672,112 +3676,109 @@ void TrackFitting::do_single_tracking() {
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
+
+    if (m_segments.empty()) {
+        // Handle empty segments case - could log warning or return
+        return;
+    }
+    auto segment = *m_segments.begin();
     
-    // std::vector<WireCell::Point> pts = organize_wcps_path(segment, path_wcps, low_dis_limit, end_point_limit); 
-    // if (pts.size() == 0) return;
-    // else if (pts.size() == 1) {
-    //     if (sqrt(pow(path_wcps.back().x() - pts.back().x(), 2) + 
-    //              pow(path_wcps.back().y() - pts.back().y(), 2) + 
-    //              pow(path_wcps.back().z() - pts.back().z(), 2)) < 0.01*units::cm) {
-    //         return;
-    //     } else {
-    //         WireCell::Point p2(path_wcps.back().x(), path_wcps.back().y(), path_wcps.back().z());
-    //         pts.push_back(p2);
-    //     }
-    // }
+    auto pts = organize_orig_path(segment, low_dis_limit, end_point_limit); 
+    if (pts.size() == 0) return;
+    else if (pts.size() == 1) {
+        const auto& segment_wcpts = segment->wcpts();
+        if (!segment_wcpts.empty()) {
+            const auto& last_segment_point = segment_wcpts.back().point;
+            if (sqrt(pow(last_segment_point.x() - pts.back().x(), 2) + 
+                     pow(last_segment_point.y() - pts.back().y(), 2) + 
+                     pow(last_segment_point.z() - pts.back().z(), 2)) < 0.01*units::cm) {
+                return;
+            } else {
+                WireCell::Point p2(last_segment_point.x(), last_segment_point.y(), last_segment_point.z());
+                pts.push_back(p2);
+            }
+        }
+    }
+
+    std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
+    for (const auto& pt : pts) {
+        ptss.emplace_back(pt, segment);
+    }
+
+    if (flag_1st_tracking) {
+        form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        trajectory_fit(ptss, 1, m_params.div_sigma);
+    }
+
+  
     
-    // // Form association maps between 3D points and 2D projections
-    // std::map<int, std::pair<std::set<std::pair<int,int>>, float>> map_3D_2DU_set;
-    // std::map<int, std::pair<std::set<std::pair<int,int>>, float>> map_3D_2DV_set;
-    // std::map<int, std::pair<std::set<std::pair<int,int>>, float>> map_3D_2DW_set;
+    // Check for very close start/end points and reset if needed
+    if (ptss.size() == 2) {
+        if (sqrt(pow(ptss.front().first.x() - ptss.back().first.x(), 2) + 
+                 pow(ptss.front().first.y() - ptss.back().first.y(), 2) + 
+                 pow(ptss.front().first.z() - ptss.back().first.z(), 2)) < 0.1*units::cm) {
+            ptss.clear();
+            const auto& segment_wcpts = segment->wcpts();
+            WireCell::Point p1(segment_wcpts.front().point.x(), segment_wcpts.front().point.y(), segment_wcpts.front().point.z());
+            ptss.push_back(std::make_pair(p1,segment));
+            WireCell::Point p2(segment_wcpts.back().point.x(), segment_wcpts.back().point.y(), segment_wcpts.back().point.z());
+            ptss.push_back(std::make_pair(p2,segment));
+        }
+    }
     
-    // std::map<std::pair<int,int>, std::set<int>> map_2DU_3D_set;
-    // std::map<std::pair<int,int>, std::set<int>> map_2DV_3D_set;
-    // std::map<std::pair<int,int>, std::set<int>> map_2DW_3D_set;
+    if (ptss.size() <= 1) return;
     
-    // if (flag_1st_tracking) {
-    //     form_point_association_maps(segment, pts,
-    //                                map_2D_ut_charge, map_2D_vt_charge, map_2D_wt_charge,
-    //                                map_3D_2DU_set, map_3D_2DV_set, map_3D_2DW_set,
-    //                                map_2DU_3D_set, map_2DV_3D_set, map_2DW_3D_set);
+    if (flag_2nd_tracking) {
+        // Second round trajectory fit with tighter parameters
+        low_dis_limit = m_params.low_dis_limit/2.;
+        end_point_limit = m_params.end_point_limit/2.;
+
+        pts.clear();
+        for (const auto& pt_pair : ptss) {
+            pts.push_back(pt_pair.first);
+        }
+
+        organize_ps_path(segment, pts, low_dis_limit, end_point_limit);
         
-    //     trajectory_fit(segment, pts, map_3D_2DU_set, map_3D_2DV_set, map_3D_2DW_set,
-    //                   map_2DU_3D_set, map_2DV_3D_set, map_2DW_3D_set,
-    //                   map_2D_ut_charge, map_2D_vt_charge, map_2D_wt_charge);
-    // }
+        ptss.clear();
+        for (const auto& pt : pts) {
+            ptss.emplace_back(pt, segment);
+        }
+        form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        trajectory_fit(ptss, 2, m_params.div_sigma);
+
+        pts.clear();
+        for (const auto& pt_pair : ptss) {
+            pts.push_back(pt_pair.first);
+        }
+        
+        // Final path organization
+        organize_ps_path(segment, pts, low_dis_limit, 0);
+    }
     
-    // // Check for very close start/end points and reset if needed
-    // if (pts.size() == 2) {
-    //     if (sqrt(pow(pts.front().x() - pts.back().x(), 2) + 
-    //              pow(pts.front().y() - pts.back().y(), 2) + 
-    //              pow(pts.front().z() - pts.back().z(), 2)) < 0.1*units::cm) {
-    //         pts.clear();
-    //         WireCell::Point p1(path_wcps.front().x(), path_wcps.front().y(), path_wcps.front().z());
-    //         pts.push_back(p1);
-    //         WireCell::Point p2(path_wcps.back().x(), path_wcps.back().y(), path_wcps.back().z());
-    //         pts.push_back(p2);
-    //     }
-    // }
+     
+    // Check for very close start/end points and reset if needed
+    if (ptss.size() == 2) {
+        if (sqrt(pow(ptss.front().first.x() - ptss.back().first.x(), 2) + 
+                 pow(ptss.front().first.y() - ptss.back().first.y(), 2) + 
+                 pow(ptss.front().first.z() - ptss.back().first.z(), 2)) < 0.1*units::cm) {
+            ptss.clear();
+            const auto& segment_wcpts = segment->wcpts();
+            WireCell::Point p1(segment_wcpts.front().point.x(), segment_wcpts.front().point.y(), segment_wcpts.front().point.z());
+            ptss.push_back(std::make_pair(p1,segment));
+            WireCell::Point p2(segment_wcpts.back().point.x(), segment_wcpts.back().point.y(), segment_wcpts.back().point.z());
+            ptss.push_back(std::make_pair(p2,segment));
+        }
+    }
     
-    // if (pts.size() <= 1) return;
-    
-    // if (flag_2nd_tracking) {
-    //     // Second round trajectory fit with tighter parameters
-    //     low_dis_limit = 0.6*units::cm;
-    //     end_point_limit = 0.3*units::cm;
-        
-    //     organize_ps_path(segment, pts, low_dis_limit, end_point_limit);
-        
-    //     // Clear and rebuild association maps
-    //     map_3D_2DU_set.clear();
-    //     map_3D_2DV_set.clear();
-    //     map_3D_2DW_set.clear();
-    //     map_2DU_3D_set.clear();
-    //     map_2DV_3D_set.clear();
-    //     map_2DW_3D_set.clear();
-        
-    //     form_point_association_maps(segment, pts,
-    //                                map_2D_ut_charge, map_2D_vt_charge, map_2D_wt_charge,
-    //                                map_3D_2DU_set, map_3D_2DV_set, map_3D_2DW_set,
-    //                                map_2DU_3D_set, map_2DV_3D_set, map_2DW_3D_set);
-        
-    //     trajectory_fit(segment, pts, map_3D_2DU_set, map_3D_2DV_set, map_3D_2DW_set,
-    //                   map_2DU_3D_set, map_2DV_3D_set, map_2DW_3D_set,
-    //                   map_2D_ut_charge, map_2D_vt_charge, map_2D_wt_charge, 2, 0.6*units::cm);
-        
-    //     // Final path organization
-    //     organize_ps_path(segment, pts, low_dis_limit, 0);
-    // }
-    
-    // // Final check for very close start/end points
-    // if (pts.size() == 2) {
-    //     if (sqrt(pow(pts.front().x() - pts.back().x(), 2) + 
-    //              pow(pts.front().y() - pts.back().y(), 2) + 
-    //              pow(pts.front().z() - pts.back().z(), 2)) < 0.1*units::cm) {
-    //         pts.clear();
-    //         WireCell::Point p1(path_wcps.front().x(), path_wcps.front().y(), path_wcps.front().z());
-    //         pts.push_back(p1);
-    //         WireCell::Point p2(path_wcps.back().x(), path_wcps.back().y(), path_wcps.back().z());
-    //         pts.push_back(p2);
-    //     }
-    // }
-    
-    // if (flag_dQ_dx) {
-    //     // Store the fine tracking path as pairs of (Point, Segment)
-    //     fine_tracking_path.clear();
-    //     for (const auto& pt : pts) {
-    //         fine_tracking_path.push_back(std::make_pair(pt, segment));
-    //     }
-        
-    //     // Perform dQ/dx fit using the prepared charge data
-    //     dQ_dx_fit(map_2D_ut_charge, map_2D_vt_charge, map_2D_wt_charge, time, end_point_limit, flag_dQ_dx_fit_reg);
-    // } else {
-    //     // Fill the data with default values
-    //     fine_tracking_path.clear();
-    //     for (const auto& pt : pts) {
-    //         fine_tracking_path.push_back(std::make_pair(pt, segment));
-    //     }
-    //     dQ_dx_fill(end_point_limit);
-    // }
+    fine_tracking_path = ptss;
+
+    if (flag_dQ_dx) {
+        // Store the fine tracking path as pairs of (Point, Segment)
+        // Perform dQ/dx fit using the prepared charge data
+        dQ_dx_fit(end_point_limit, flag_dQ_dx_fit_reg);
+    } else {
+        dQ_dx_fill(end_point_limit);
+    }
 
 }
