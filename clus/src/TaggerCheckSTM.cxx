@@ -649,6 +649,8 @@ private:
 
         m_track_fitter.trajectory_fit(ptss);
 
+        m_track_fitter.dQ_dx_fit();
+
 
         // std::cout << m_track_fitter.get_parameter("DL") << std::endl;
 

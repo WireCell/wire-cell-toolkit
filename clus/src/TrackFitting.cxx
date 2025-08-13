@@ -3072,25 +3072,75 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     const double add_uncer_col = m_params.add_uncer_col; // WAS: const double add_uncer_col = 300.0;
     const double add_sigma_L = m_params.add_sigma_L;     // WAS: const double add_sigma_L = 1.428249 * 0.5;
     
+    std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>> map_U_charge_2D, map_V_charge_2D, map_W_charge_2D;
+    // Fill the maps from m_charge_data
+    // Fill the maps from m_charge_data
+    for (const auto& [coord_readout, charge_measurement] : m_charge_data) {
+        int apa = coord_readout.apa;
+        int time = coord_readout.time;
+        int channel = coord_readout.channel;
+        
+        // Get wires for this channel using the dedicated function
+        auto wires_info = get_wires_for_channel(apa, channel);
+        if (wires_info.empty()) continue; // Skip if no wire mapping found
+        
+        std::set<TrackFitting::Coord2D> associated_coords;
+        int plane = -1; // asssuming all wires are from the same plane name ...
+        // Process each wire associated with this channel
+        for (const auto& wire_info : wires_info) {
+            int face = std::get<0>(wire_info);
+            plane = std::get<1>(wire_info);
+            int wire = std::get<2>(wire_info);
+            
+            // Convert plane int to WirePlaneLayer_t
+            WirePlaneLayer_t plane_layer = (plane == 0) ? kUlayer : 
+                                        (plane == 1) ? kVlayer : kWlayer;
+            
+            // Create TrackFitting::Coord2D with all fields filled
+            TrackFitting::Coord2D coord_2d(apa, face, time, wire, channel, plane_layer);
+            associated_coords.insert(coord_2d);
+        }
 
-    
+        // Create the pair for storage
+        std::pair<ChargeMeasurement, std::set<TrackFitting::Coord2D>> charge_coord_pair = std::make_pair(charge_measurement, associated_coords);
+
+        // Store in appropriate plane map
+        switch (plane) {
+            case 0: // U plane
+                map_U_charge_2D[coord_readout] = charge_coord_pair;
+                break;
+            case 1: // V plane  
+                map_V_charge_2D[coord_readout] = charge_coord_pair;
+                break;
+            case 2: // W plane
+                map_W_charge_2D[coord_readout] = charge_coord_pair;
+                break;
+        }
+    }
+
     int n_3D_pos = fine_tracking_path.size();
+
+    std::cout << "dQ/dx: " << map_U_charge_2D.size() << " " << map_V_charge_2D.size() << " " << map_W_charge_2D.size() << std::endl;
 
     // need to separate measurements into U, V, W and form separate matrices ... 
     // need to store measurement --> U, V, W --> measurements
-    // int n_2D = m_charge_data.size();
+    int n_2D_u = map_U_charge_2D.size();
+    int n_2D_v = map_V_charge_2D.size();
+    int n_2D_w = map_W_charge_2D.size();
     
-    // if (n_2D == 0) return;
+    if (n_2D_u == 0 && n_2D_v == 0 && n_2D_w == 0) return;
     
     // // Initialize Eigen matrices and vectors
-    // Eigen::VectorXd pos_3D(n_3D_pos), data_2D(n_2D);
-    // Eigen::VectorXd pred_data_2D(n_2D);
+    Eigen::VectorXd pos_3D(n_3D_pos), data_u_2D(n_2D_u), data_v_2D(n_2D_v), data_w_2D(n_2D_w);
+    Eigen::VectorXd pred_data_u_2D(n_2D_u), pred_data_v_2D(n_2D_v), pred_data_w_2D(n_2D_w);
     
-    // Eigen::SparseMatrix<double> RA(n_2D, n_3D_pos);
-   
+    Eigen::SparseMatrix<double> RU(n_2D_u, n_3D_pos);
+    Eigen::SparseMatrix<double> RV(n_2D_v, n_3D_pos);
+    Eigen::SparseMatrix<double> RW(n_2D_w, n_3D_pos);
+    
     Eigen::VectorXd pos_3D_init(n_3D_pos);
-    // regularization flag for u, v, w ...
     std::vector<int> reg_flag_u(n_3D_pos, 0), reg_flag_v(n_3D_pos, 0), reg_flag_w(n_3D_pos, 0);
+    
     
     // Initialize solution vector
     for (int i = 0; i < n_3D_pos; i++) {
@@ -3098,20 +3148,47 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     }
     
     // Fill data vectors with charge/uncertainty ratios
-    // {
-    //     int n_a = 0;
-    //     for (const auto& [coord_key, measurement] : m_charge_data) {
-    //         if (measurement.charge >0) {
-    //             double charge = measurement.charge;
-    //             double charge_err = measurement.charge_err;
-    //             double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-    //             data_2D(n_a) = charge / total_err;
-    //         } else {
-    //             data_2D(n_a) = 0;
-    //         }
-    //         n_a++;
-    //     }
-    // }
+    {
+        int n_u = 0;
+        for (const auto& [coord_key, result] : map_U_charge_2D) {
+            const auto& measurement = result.first;
+            if (measurement.charge >0) {
+                double charge = measurement.charge;
+                double charge_err = measurement.charge_err;
+                double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
+                data_u_2D(n_u) = charge / total_err;
+            } else {
+                data_u_2D(n_u) = 0;
+            }
+            n_u++;
+        }
+        int n_v = 0;
+        for (const auto& [coord_key, result] : map_V_charge_2D) {
+            const auto& measurement = result.first;
+            if (measurement.charge >0) {
+                double charge = measurement.charge;
+                double charge_err = measurement.charge_err;
+                double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
+                data_v_2D(n_v) = charge / total_err;
+            } else {
+                data_v_2D(n_v) = 0;
+            }
+            n_v++;
+        }
+        int n_w = 0;
+        for (const auto& [coord_key, result] : map_W_charge_2D) {
+            const auto& measurement = result.first;
+            if (measurement.charge >0) {
+                double charge = measurement.charge;
+                double charge_err = measurement.charge_err;
+                double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_col, 2) + pow(add_uncer_col, 2));
+                data_w_2D(n_w) = charge / total_err;
+            } else {
+                data_w_2D(n_w) = 0;
+            }
+            n_w++;
+        }
+    }
     
     // Calculate dx values (path segment lengths)
     dx.resize(n_3D_pos);
