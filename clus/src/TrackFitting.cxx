@@ -163,6 +163,7 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.charge_cut;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
+        return 0;
     }
 }
 
@@ -2791,6 +2792,7 @@ void TrackFitting::recover_original_charge_data(){
     for (const auto& [coord_key, measurement] : m_orig_charge_data) {
         m_charge_data[coord_key] = measurement;
     }
+    m_orig_charge_data.clear();
 }
 
 std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
@@ -3059,276 +3061,223 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     const double add_sigma_L = m_params.add_sigma_L;     // WAS: const double add_sigma_L = 1.428249 * 0.5;
     
 
-    // // Build charge data maps from toolkit charge measurements
-    // std::map<std::pair<int,int>, std::tuple<double, double, int>> map_2D_ut_charge;
-    // std::map<std::pair<int,int>, std::tuple<double, double, int>> map_2D_vt_charge;
-    // std::map<std::pair<int,int>, std::tuple<double, double, int>> map_2D_wt_charge;
     
-    // // Fill charge maps from m_charge_data
-    // for (const auto& [coord_key, measurement] : m_charge_data) {
-    //     if (measurement.flag == 0) continue; // Skip dead channels
-        
-    //     // Convert channel to wire number for each plane
-    //     // Note: This is a simplified approach - in practice, you'd need proper channel-to-wire mapping
-        
-    //     // Determine plane from channel range (detector-specific)
-    //     int wire = -1;
-    //     int plane = -1;
-    //     // TODO: Implement proper channel-to-wire conversion based on detector geometry
-        
-    //     if (plane == 0) { // U plane
-    //         map_2D_ut_charge[std::make_pair(wire, coord_key.time)] = 
-    //             std::make_tuple(measurement.charge, measurement.charge_err, measurement.flag);
-    //     } else if (plane == 1) { // V plane  
-    //         map_2D_vt_charge[std::make_pair(wire, coord_key.time)] = 
-    //             std::make_tuple(measurement.charge, measurement.charge_err, measurement.flag);
-    //     } else if (plane == 2) { // W plane
-    //         map_2D_wt_charge[std::make_pair(wire, coord_key.time)] = 
-    //             std::make_tuple(measurement.charge, measurement.charge_err, measurement.flag);
-    //     }
-    // }
+    int n_3D_pos = fine_tracking_path.size();
+
+    // need to separate measurements into U, V, W and form separate matrices ... 
+    // need to store measurement --> U, V, W --> measurements
+    // int n_2D = m_charge_data.size();
     
-    // int n_3D_pos = fine_tracking_path.size();
-    // int n_2D_u = map_2D_ut_charge.size();
-    // int n_2D_v = map_2D_vt_charge.size();
-    // int n_2D_w = map_2D_wt_charge.size();
-    
-    // if (n_2D_u == 0 && n_2D_v == 0 && n_2D_w == 0) return;
+    // if (n_2D == 0) return;
     
     // // Initialize Eigen matrices and vectors
-    // Eigen::VectorXd pos_3D(n_3D_pos), data_u_2D(n_2D_u), data_v_2D(n_2D_v), data_w_2D(n_2D_w);
-    // Eigen::VectorXd pred_data_u_2D(n_2D_u), pred_data_v_2D(n_2D_v), pred_data_w_2D(n_2D_w);
+    // Eigen::VectorXd pos_3D(n_3D_pos), data_2D(n_2D);
+    // Eigen::VectorXd pred_data_2D(n_2D);
     
-    // Eigen::SparseMatrix<double> RU(n_2D_u, n_3D_pos);
-    // Eigen::SparseMatrix<double> RV(n_2D_v, n_3D_pos);
-    // Eigen::SparseMatrix<double> RW(n_2D_w, n_3D_pos);
+    // Eigen::SparseMatrix<double> RA(n_2D, n_3D_pos);
+   
+    Eigen::VectorXd pos_3D_init(n_3D_pos);
+    // regularization flag for u, v, w ...
+    std::vector<int> reg_flag_u(n_3D_pos, 0), reg_flag_v(n_3D_pos, 0), reg_flag_w(n_3D_pos, 0);
     
-    // Eigen::VectorXd pos_3D_init(n_3D_pos);
-    // std::vector<int> reg_flag_u(n_3D_pos, 0), reg_flag_v(n_3D_pos, 0), reg_flag_w(n_3D_pos, 0);
+    // Initialize solution vector
+    for (int i = 0; i < n_3D_pos; i++) {
+        pos_3D_init(i) = 50000.0; // Initial guess
+    }
     
-    // // Initialize solution vector
-    // for (int i = 0; i < n_3D_pos; i++) {
-    //     pos_3D_init(i) = 50000.0; // Initial guess
-    // }
-    
-    // // Fill data vectors with charge/uncertainty ratios
+    // Fill data vectors with charge/uncertainty ratios
     // {
-    //     int n_u = 0;
-    //     for (auto it = map_2D_ut_charge.begin(); it != map_2D_ut_charge.end(); it++) {
-    //         if (std::get<0>(it->second) > 0) {
-    //             double charge = std::get<0>(it->second);
-    //             double charge_err = std::get<1>(it->second);
+    //     int n_a = 0;
+    //     for (const auto& [coord_key, measurement] : m_charge_data) {
+    //         if (measurement.charge >0) {
+    //             double charge = measurement.charge;
+    //             double charge_err = measurement.charge_err;
     //             double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-    //             data_u_2D(n_u) = charge / total_err;
+    //             data_2D(n_a) = charge / total_err;
     //         } else {
-    //             data_u_2D(n_u) = 0;
+    //             data_2D(n_a) = 0;
     //         }
-    //         n_u++;
-    //     }
-        
-    //     int n_v = 0;
-    //     for (auto it = map_2D_vt_charge.begin(); it != map_2D_vt_charge.end(); it++) {
-    //         if (std::get<0>(it->second) > 0) {
-    //             double charge = std::get<0>(it->second);
-    //             double charge_err = std::get<1>(it->second);
-    //             double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-    //             data_v_2D(n_v) = charge / total_err;
-    //         } else {
-    //             data_v_2D(n_v) = 0;
-    //         }
-    //         n_v++;
-    //     }
-        
-    //     int n_w = 0;
-    //     for (auto it = map_2D_wt_charge.begin(); it != map_2D_wt_charge.end(); it++) {
-    //         if (std::get<0>(it->second) > 0) {
-    //             double charge = std::get<0>(it->second);
-    //             double charge_err = std::get<1>(it->second);
-    //             double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_col, 2) + pow(add_uncer_col, 2));
-    //             data_w_2D(n_w) = charge / total_err;
-    //         } else {
-    //             data_w_2D(n_w) = 0;
-    //         }
-    //         n_w++;
+    //         n_a++;
     //     }
     // }
     
-    // // Calculate dx values (path segment lengths)
-    // dx.resize(n_3D_pos);
-    // for (int i = 0; i < n_3D_pos; i++) {
-    //     WireCell::Point prev_rec_pos, next_rec_pos;
-    //     WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
+    // Calculate dx values (path segment lengths)
+    dx.resize(n_3D_pos);
+    for (int i = 0; i < n_3D_pos; i++) {
+        WireCell::Point prev_rec_pos, next_rec_pos;
+        WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
         
-    //     if (i == 0) {
-    //         // First point: extrapolate backward
-    //         if (n_3D_pos > 1) {
-    //             WireCell::Point next_point = fine_tracking_path.at(i+1).first;
-    //             WireCell::Vector dir = next_point - curr_rec_pos;
-    //             double length = dir.magnitude();
-    //             if (length > 0) {
-    //                 prev_rec_pos = curr_rec_pos - (dir / length) * dis_end_point_ext;
-    //             } else {
-    //                 prev_rec_pos = curr_rec_pos;
-    //             }
-    //             next_rec_pos = (curr_rec_pos + next_point) * 0.5;
-    //         } else {
-    //             prev_rec_pos = curr_rec_pos;
-    //             next_rec_pos = curr_rec_pos;
-    //         }
-    //     } else if (i == n_3D_pos - 1) {
-    //         // Last point: extrapolate forward
-    //         WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
-    //         WireCell::Vector dir = curr_rec_pos - prev_point;
-    //         double length = dir.magnitude();
-    //         if (length > 0) {
-    //             next_rec_pos = curr_rec_pos + (dir / length) * dis_end_point_ext;
-    //         } else {
-    //             next_rec_pos = curr_rec_pos;
-    //         }
-    //         prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
-    //     } else {
-    //         // Middle point
-    //         prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
-    //         next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
-    //     }
+        if (i == 0) {
+            // First point: extrapolate backward
+            if (n_3D_pos > 1) {
+                WireCell::Point next_point = fine_tracking_path.at(i+1).first;
+                WireCell::Vector dir = next_point - curr_rec_pos;
+                double length = dir.magnitude();
+                if (length > 0) {
+                    prev_rec_pos = curr_rec_pos - (dir / length) * dis_end_point_ext;
+                } else {
+                    prev_rec_pos = curr_rec_pos;
+                }
+                next_rec_pos = (curr_rec_pos + next_point) * 0.5;
+            } else {
+                prev_rec_pos = curr_rec_pos;
+                next_rec_pos = curr_rec_pos;
+            }
+        } else if (i == n_3D_pos - 1) {
+            // Last point: extrapolate forward
+            WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
+            WireCell::Vector dir = curr_rec_pos - prev_point;
+            double length = dir.magnitude();
+            if (length > 0) {
+                next_rec_pos = curr_rec_pos + (dir / length) * dis_end_point_ext;
+            } else {
+                next_rec_pos = curr_rec_pos;
+            }
+            prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
+        } else {
+            // Middle point
+            prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
+            next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
+        }
         
-    //     dx[i] = (curr_rec_pos - prev_rec_pos).magnitude() + (curr_rec_pos - next_rec_pos).magnitude();
-    // }
+        dx[i] = (curr_rec_pos - prev_rec_pos).magnitude() + (curr_rec_pos - next_rec_pos).magnitude();
+    }
     
-    // // Build response matrices using geometry information
-    // for (int i = 0; i < n_3D_pos; i++) {
-    //     WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
-    //     auto segment = fine_tracking_path.at(i).second;
+    // Build response matrices using geometry information
+    for (int i = 0; i < n_3D_pos; i++) {
+        WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
+        auto segment = fine_tracking_path.at(i).second;
         
-    //     // Get APA and face from segment
-    //     auto wpid = m_dv->contained_by(curr_rec_pos);
-    //     int apa = wpid.apa();
-    //     int face = wpid.face();
+        int apa = paf.at(i).first;
+        int face = paf.at(i).second;
+                
+        WirePlaneId wpid_key(kAllLayers, face, apa);
         
-    //     if (apa == -1 || face == -1) continue;
+        // Get geometry parameters from wpid_offsets and wpid_slopes
+        auto offset_it = wpid_offsets.find(wpid_key);
+        auto slope_it = wpid_slopes.find(wpid_key);
+        auto geom_it = wpid_geoms.find(wpid_key);
         
-    //     WirePlaneId wpid_key(kAllLayers, face, apa);
+        if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
         
-    //     // Get geometry parameters from wpid_offsets and wpid_slopes
-    //     auto offset_it = wpid_offsets.find(wpid_key);
-    //     auto slope_it = wpid_slopes.find(wpid_key);
-    //     auto geom_it = wpid_geoms.find(wpid_key);
+        double offset_t = std::get<0>(offset_it->second);
+        double offset_u = std::get<1>(offset_it->second);
+        double offset_v = std::get<2>(offset_it->second);
+        double offset_w = std::get<3>(offset_it->second);
         
-    //     if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
+        double slope_x = std::get<0>(slope_it->second);
+        auto slope_yu = std::get<1>(slope_it->second).first;
+        auto slope_zu = std::get<1>(slope_it->second).second;
+        auto slope_yv = std::get<2>(slope_it->second).first;
+        auto slope_zv = std::get<2>(slope_it->second).second;
+        auto slope_yw = std::get<3>(slope_it->second).first;
+        auto slope_zw = std::get<3>(slope_it->second).second;
         
-    //     double offset_t = std::get<0>(offset_it->second);
-    //     double offset_u = std::get<1>(offset_it->second);
-    //     double offset_v = std::get<2>(offset_it->second);
-    //     double offset_w = std::get<3>(offset_it->second);
+        double time_tick_width = std::get<0>(geom_it->second);
+        double pitch_u = std::get<1>(geom_it->second);
+        double pitch_v = std::get<2>(geom_it->second);
+        double pitch_w = std::get<3>(geom_it->second);
+
+        // get first blob from the segment --> cluster, 
+        auto first_blob = segment->cluster()->children()[0];
+        int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+
         
-    //     double slope_x = std::get<0>(slope_it->second);
-    //     auto slope_yu = std::get<1>(slope_it->second).first;
-    //     auto slope_zu = std::get<1>(slope_it->second).second;
-    //     auto slope_yv = std::get<2>(slope_it->second).first;
-    //     auto slope_zv = std::get<2>(slope_it->second).second;
-    //     auto slope_yw = std::get<3>(slope_it->second).first;
-    //     auto slope_zw = std::get<3>(slope_it->second).second;
+        // Calculate previous and next positions for Gaussian integration
+        WireCell::Point prev_rec_pos, next_rec_pos;
+        if (i == 0) {
+            if (n_3D_pos > 1) {
+                WireCell::Point next_point = fine_tracking_path.at(i+1).first;
+                next_rec_pos = (curr_rec_pos + next_point) * 0.5;
+                WireCell::Vector dir = next_point - curr_rec_pos;
+                double length = dir.magnitude();
+                if (length > 0) {
+                    prev_rec_pos = curr_rec_pos - (dir / length) * dis_end_point_ext;
+                } else {
+                    prev_rec_pos = curr_rec_pos;
+                }
+            } else {
+                prev_rec_pos = next_rec_pos = curr_rec_pos;
+            }
+        } else if (i == n_3D_pos - 1) {
+            WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
+            prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
+            WireCell::Vector dir = curr_rec_pos - prev_point;
+            double length = dir.magnitude();
+            if (length > 0) {
+                next_rec_pos = curr_rec_pos + (dir / length) * dis_end_point_ext;
+            } else {
+                next_rec_pos = curr_rec_pos;
+            }
+        } else {
+            prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
+            next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
+        }
         
-    //     double time_slice_width = std::get<0>(geom_it->second);
-    //     double pitch_u = std::get<1>(geom_it->second);
-    //     double pitch_v = std::get<2>(geom_it->second);
-    //     double pitch_w = std::get<3>(geom_it->second);
+        // Create Gaussian integration points and weights
+        std::vector<double> centers_U, centers_V, centers_W, centers_T;
+        std::vector<double> sigmas_U, sigmas_V, sigmas_W, sigmas_T;
+        std::vector<double> weights;
         
-    //     // Calculate previous and next positions for Gaussian integration
-    //     WireCell::Point prev_rec_pos, next_rec_pos;
-    //     if (i == 0) {
-    //         if (n_3D_pos > 1) {
-    //             WireCell::Point next_point = fine_tracking_path.at(i+1).first;
-    //             next_rec_pos = (curr_rec_pos + next_point) * 0.5;
-    //             WireCell::Vector dir = next_point - curr_rec_pos;
-    //             double length = dir.magnitude();
-    //             if (length > 0) {
-    //                 prev_rec_pos = curr_rec_pos - (dir / length) * dis_end_point_ext;
-    //             } else {
-    //                 prev_rec_pos = curr_rec_pos;
-    //             }
-    //         } else {
-    //             prev_rec_pos = next_rec_pos = curr_rec_pos;
-    //         }
-    //     } else if (i == n_3D_pos - 1) {
-    //         WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
-    //         prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
-    //         WireCell::Vector dir = curr_rec_pos - prev_point;
-    //         double length = dir.magnitude();
-    //         if (length > 0) {
-    //             next_rec_pos = curr_rec_pos + (dir / length) * dis_end_point_ext;
-    //         } else {
-    //             next_rec_pos = curr_rec_pos;
-    //         }
-    //     } else {
-    //         prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
-    //         next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
-    //     }
-        
-    //     // Create Gaussian integration points and weights
-    //     std::vector<double> centers_U, centers_V, centers_W, centers_T;
-    //     std::vector<double> sigmas_U, sigmas_V, sigmas_W, sigmas_T;
-    //     std::vector<double> weights;
-        
-    //     // Sample 5 points along each half-segment
-    //     for (int j = 0; j < 5; j++) {
-    //         // First half (prev to curr)
-    //         WireCell::Point reco_pos = prev_rec_pos + (curr_rec_pos - prev_rec_pos) * (j + 0.5) / 5.0;
+        // Sample 5 points along each half-segment
+        for (int j = 0; j < 5; j++) {
+            // First half (prev to curr)
+            WireCell::Point reco_pos = prev_rec_pos + (curr_rec_pos - prev_rec_pos) * (j + 0.5) / 5.0;
             
-    //         double central_T = offset_t + slope_x * reco_pos.x();
-    //         double central_U = offset_u + (slope_yu * reco_pos.y() + slope_zu * reco_pos.z());
-    //         double central_V = offset_v + (slope_yv * reco_pos.y() + slope_zv * reco_pos.z());
-    //         double central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
-    //         double weight = (curr_rec_pos - prev_rec_pos).magnitude();
+            double central_T = offset_t + slope_x * reco_pos.x();
+            double central_U = offset_u + (slope_yu * reco_pos.y() + slope_zu * reco_pos.z());
+            double central_V = offset_v + (slope_yv * reco_pos.y() + slope_zv * reco_pos.z());
+            double central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
+            double weight = (curr_rec_pos - prev_rec_pos).magnitude();
             
-    //         // Calculate drift time and diffusion
-    //         double drift_time = std::max(50e-6, reco_pos.x() / time_slice_width * 0.5e-6 - flash_time * 1e-6);
-    //         double diff_sigma_L = sqrt(2 * DL * drift_time);
-    //         double diff_sigma_T = sqrt(2 * DT * drift_time);
+            // Calculate drift time and diffusion
+            double drift_time = std::max(50*units::us, reco_pos.x() / time_tick_width * 0.5*units::us );
+            double diff_sigma_L = sqrt(2 * DL * drift_time);
+            double diff_sigma_T = sqrt(2 * DT * drift_time);
             
-    //         double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_slice_width, 2)) / time_slice_width;
-    //         double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
-    //         double sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
-    //         double sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
+            double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width / cur_ntime_ticks;
+            double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
+            double sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
+            double sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
             
-    //         centers_U.push_back(central_U);
-    //         centers_V.push_back(central_V);
-    //         centers_W.push_back(central_W);
-    //         centers_T.push_back(central_T);
-    //         weights.push_back(weight);
-    //         sigmas_U.push_back(sigma_T_u);
-    //         sigmas_V.push_back(sigma_T_v);
-    //         sigmas_W.push_back(sigma_T_w);
-    //         sigmas_T.push_back(sigma_L);
+            centers_U.push_back(central_U);
+            centers_V.push_back(central_V);
+            centers_W.push_back(central_W);
+            centers_T.push_back(central_T);
+            weights.push_back(weight);
+            sigmas_U.push_back(sigma_T_u);
+            sigmas_V.push_back(sigma_T_v);
+            sigmas_W.push_back(sigma_T_w);
+            sigmas_T.push_back(sigma_L);
             
-    //         // Second half (curr to next)
-    //         reco_pos = next_rec_pos + (curr_rec_pos - next_rec_pos) * (j + 0.5) / 5.0;
+            // Second half (curr to next)
+            reco_pos = next_rec_pos + (curr_rec_pos - next_rec_pos) * (j + 0.5) / 5.0;
             
-    //         central_T = offset_t + slope_x * reco_pos.x();
-    //         central_U = offset_u + (slope_yu * reco_pos.y() + slope_zu * reco_pos.z());
-    //         central_V = offset_v + (slope_yv * reco_pos.y() + slope_zv * reco_pos.z());
-    //         central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
-    //         weight = (curr_rec_pos - next_rec_pos).magnitude();
+            central_T = offset_t + slope_x * reco_pos.x();
+            central_U = offset_u + (slope_yu * reco_pos.y() + slope_zu * reco_pos.z());
+            central_V = offset_v + (slope_yv * reco_pos.y() + slope_zv * reco_pos.z());
+            central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
+            weight = (curr_rec_pos - next_rec_pos).magnitude();
+
+            drift_time = std::max(50*units::us, reco_pos.x() / time_tick_width * 0.5*units::us );
+            diff_sigma_L = sqrt(2 * DL * drift_time);
+            diff_sigma_T = sqrt(2 * DT * drift_time);
+
+            sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width / cur_ntime_ticks;
+            sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
+            sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
+            sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
             
-    //         drift_time = std::max(50e-6, reco_pos.x() / time_slice_width * 0.5e-6 - flash_time * 1e-6);
-    //         diff_sigma_L = sqrt(2 * DL * drift_time);
-    //         diff_sigma_T = sqrt(2 * DT * drift_time);
-            
-    //         sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_slice_width, 2)) / time_slice_width;
-    //         sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
-    //         sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
-    //         sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
-            
-    //         centers_U.push_back(central_U);
-    //         centers_V.push_back(central_V);
-    //         centers_W.push_back(central_W);
-    //         centers_T.push_back(central_T);
-    //         weights.push_back(weight);
-    //         sigmas_U.push_back(sigma_T_u);
-    //         sigmas_V.push_back(sigma_T_v);
-    //         sigmas_W.push_back(sigma_T_w);
-    //         sigmas_T.push_back(sigma_L);
-    //     }
+            centers_U.push_back(central_U);
+            centers_V.push_back(central_V);
+            centers_W.push_back(central_W);
+            centers_T.push_back(central_T);
+            weights.push_back(weight);
+            sigmas_U.push_back(sigma_T_u);
+            sigmas_V.push_back(sigma_T_v);
+            sigmas_W.push_back(sigma_T_w);
+            sigmas_T.push_back(sigma_L);
+        }
         
     //     // Fill response matrices using Gaussian integration
     //     int n_u = 0;
@@ -3351,45 +3300,6 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     //         n_u++;
     //     }
         
-    //     int n_v = 0;
-    //     for (auto it = map_2D_vt_charge.begin(); it != map_2D_vt_charge.end(); it++) {
-    //         if (abs(it->first.first - centers_V.front()) <= 10 && 
-    //             abs(it->first.second - centers_T.front()) <= 10) {
-                
-    //             double value = cal_gaus_integral_seg(it->first.second, it->first.first,
-    //                                                centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4);
-                
-    //             if (std::get<2>(it->second) == 0 && value > 0) reg_flag_v[i] = 1; // Dead channel
-                
-    //             if (value > 0 && std::get<0>(it->second) > 0 && std::get<2>(it->second) != 0) {
-    //                 double charge = std::get<0>(it->second);
-    //                 double charge_err = std::get<1>(it->second);
-    //                 double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-    //                 RV.insert(n_v, i) = value / total_err;
-    //             }
-    //         }
-    //         n_v++;
-    //     }
-        
-    //     int n_w = 0;
-    //     for (auto it = map_2D_wt_charge.begin(); it != map_2D_wt_charge.end(); it++) {
-    //         if (abs(it->first.first - centers_W.front()) <= 10 && 
-    //             abs(it->first.second - centers_T.front()) <= 10) {
-                
-    //             double value = cal_gaus_integral_seg(it->first.second, it->first.first,
-    //                                                centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4);
-                
-    //             if (std::get<2>(it->second) == 0 && value > 0) reg_flag_w[i] = 1; // Dead channel
-                
-    //             if (value > 0 && std::get<0>(it->second) > 0 && std::get<2>(it->second) != 0) {
-    //                 double charge = std::get<0>(it->second);
-    //                 double charge_err = std::get<1>(it->second);
-    //                 double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_col, 2) + pow(add_uncer_col, 2));
-    //                 RW.insert(n_w, i) = value / total_err;
-    //             }
-    //         }
-    //         n_w++;
-    //     }
         
     //     // Additional dead channel checks
     //     if (reg_flag_u[i] == 0) {
@@ -3416,7 +3326,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     //             }
     //         }
     //     }
-    // }
+    }
     
     // // Calculate compact matrices for overlap analysis
     // Eigen::SparseMatrix<double> RUT = RU.transpose();
