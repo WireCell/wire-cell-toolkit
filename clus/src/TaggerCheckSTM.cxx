@@ -1077,17 +1077,14 @@ private:
                     << " " << ks3 << " " << ratio3 << " " << ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 
                     << " " << dQ_dx[max_bin]/50e3 << " " << dQ_dx.size() - max_bin << " " << std::endl;
 
-            if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/50e3 > 2.3 && 
+            if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/50e3 > 2.3 &&
                 (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {
-                
-                if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/50e3 > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1) 
-                    return true;
-                if (dQ_dx.size()-max_bin <= 1 && (dQ_dx[max_bin]/50e3 < 3.0 && 
-                    (((ks1 < 0.06 && (ks2 > 0.03)) || (ks1 < 0.065 && ks2 > 0.04)) || 
-                    (ks1 < 0.035 && dQ_dx[max_bin]/50e3 < 4.0)))) 
-                    return false;
+                if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/50e3 > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1)
+                return true;
+                if (dQ_dx.size()-max_bin <= 1 && ((dQ_dx[max_bin]/50e3 < 3.0 && ((ks1 < 0.06 && ks2 > 0.03) || (ks1 < 0.065 && ks2 > 0.04))) || (ks1 < 0.035 && dQ_dx[max_bin]/50e3 < 4.0)))
+                return false;
                 if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.027)
-                    return true;
+                return true;
             }
 
             // Check for proton with very high dQ_dx
@@ -1095,14 +1092,11 @@ private:
             std::cout << "End proton detection1: " << track_medium_dQ_dx << " " << dQ_dx[max_bin]/50e3 
                     << " " << ks3 << " " << ratio3 << std::endl;
                     
-            if (track_medium_dQ_dx < 1.0 && dQ_dx[max_bin]/50e3 > 3.5) {
-                if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) 
-                    return true;
-                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx[max_bin]/50e3 > 4.3 && ks3 > 0.03)) 
-                    return true;
-            } else if (track_medium_dQ_dx < 1 && dQ_dx[max_bin]/50e3 > 3.0) {
-                if (ks3 > 0.12 && ks1 > 0.03) 
-                    return true;
+            if (track_medium_dQ_dx < 1.0 && dQ_dx.at(max_bin)/50e3 > 3.5){
+                if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) return true;
+                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx.at(max_bin)/50e3 > 4.3 && ks3 > 0.03)) return true;
+            }else if (track_medium_dQ_dx < 1 && dQ_dx.at(max_bin)/50e3 > 3.0){
+                if (ks3 > 0.12 && ks1 > 0.03) return true;
             }
         }
 
