@@ -1103,6 +1103,46 @@ private:
         return false;
     }
 
+    bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num, double peak_range = 40*units::cm, double offset_x = 0*units::cm, double com_range = 35*units::cm, bool flag_strong_check = false) const{
+        auto& cluster = *segment->cluster();
+        // Get FiducialUtils from the grouping
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            std::cout << "TaggerCheckSTM: No FiducialUtils available in find_first_kink" << std::endl;
+            return -1;
+        }
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        // double cluster_t0 = cluster.get_flash().time();
+        
+        // Extract fit results from the segment
+        const auto& fits = segment->fits();
+        
+        // Convert fit data to vectors matching the TrackFitting interface
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+        std::vector<double> dQ, dx;
+        std::vector<std::pair<int,int>> paf;
+        
+        for (const auto& fit : fits) {
+            fine_tracking_path.emplace_back(fit.point, segment);
+            dQ.push_back(fit.dQ);
+            dx.push_back(fit.dx);
+            paf.push_back(fit.paf);
+        }
+
+        if (fine_tracking_path.empty()) {
+            return false;
+        }
+
+        // Extract points vector for compatibility with prototype algorithm
+        std::vector<WireCell::Point> pts;
+        for (const auto& path_point : fine_tracking_path) {
+            pts.push_back(path_point.first);
+        }
+
+        
+        return false;
+    }
+
     std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
                                const std::vector<geo_point_t>& path_points) const{
     
