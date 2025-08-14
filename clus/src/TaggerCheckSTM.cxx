@@ -483,6 +483,16 @@ private:
 
     int find_first_kink(const WireCell::Clus::Facade::Cluster& cluster) const{
         // Implement your logic to find the first kink in the cluster
+        
+        // Get FiducialUtils from the grouping
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            std::cout << "TaggerCheckSTM: No FiducialUtils available in find_first_kink" << std::endl;
+            return -1;
+        }
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        double cluster_t0 = cluster.get_flash().time();
+        
         auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
         auto dQ = m_track_fitter.get_dQ();
         auto dx = m_track_fitter.get_dx();
@@ -492,9 +502,196 @@ private:
         auto pt = m_track_fitter.get_pt();
         auto paf = m_track_fitter.get_paf();
 
-        
+        if (fine_tracking_path.empty()) {
+            return -1;
+        }
 
-        return -1;  // Placeholder return value
+        // Define drift direction (X direction in detector coordinates)
+        WireCell::Vector drift_dir_abs(1.0, 0.0, 0.0);
+        
+        // Initialize angle vectors
+        std::vector<double> refl_angles(fine_tracking_path.size(), 0);
+        std::vector<double> para_angles(fine_tracking_path.size(), 0);
+        std::vector<double> ave_angles(fine_tracking_path.size(), 0);
+        std::vector<int> max_numbers(fine_tracking_path.size(), -1);
+        
+        // Calculate reflection and parallel angles for each point
+        for (size_t i = 0; i != fine_tracking_path.size(); i++) {
+            double angle1 = 0;
+            double angle2 = 0;
+            
+            for (int j = 0; j != 6; j++) {
+                WireCell::Vector v10(0, 0, 0);
+                WireCell::Vector v20(0, 0, 0);
+                
+                // Backward vector (from point i-j-1 to point i)
+                if (i > j) {
+                    v10 = WireCell::Vector(fine_tracking_path.at(i).first.x() - fine_tracking_path.at(i-j-1).first.x(),
+                                        fine_tracking_path.at(i).first.y() - fine_tracking_path.at(i-j-1).first.y(),
+                                        fine_tracking_path.at(i).first.z() - fine_tracking_path.at(i-j-1).first.z());
+                }
+                
+                // Forward vector (from point i to point i+j+1)
+                if (i + j + 1 < fine_tracking_path.size()) {
+                    v20 = WireCell::Vector(fine_tracking_path.at(i+j+1).first.x() - fine_tracking_path.at(i).first.x(),
+                                        fine_tracking_path.at(i+j+1).first.y() - fine_tracking_path.at(i).first.y(),
+                                        fine_tracking_path.at(i+j+1).first.z() - fine_tracking_path.at(i).first.z());
+                }
+                
+                if (j == 0) {
+                    // For the first iteration, set initial values
+                    if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                        angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                    }                
+                    // Calculate angles with drift direction
+                    if (v10.magnitude() > 0) {
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::abs(angle_v10 - 90.0);
+                    }
+                    if (v20.magnitude() > 0) {
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::max(angle2, std::abs(angle_v20 - 90.0));
+                    }
+                } else {
+                    // For subsequent iterations, take minimum values
+                    if (v10.magnitude() != 0 && v20.magnitude() != 0) {
+                        double temp_angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                        angle1 = std::min(temp_angle1, angle1);
+                        
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        double temp_angle2 = std::max(std::abs(angle_v10 - 90.0), std::abs(angle_v20 - 90.0));
+                        angle2 = std::min(temp_angle2, angle2);
+                    }
+                }
+            }
+            
+            refl_angles.at(i) = angle1;
+            para_angles.at(i) = angle2;
+        }
+        
+        // Calculate average angles in a 5-point window
+        for (int i = 0; i != fine_tracking_path.size(); i++) {
+            double sum_angles = 0;
+            double nsum = 0;
+            double max_angle = 0;
+            int max_num = -1;
+            
+            for (int j = -2; j != 3; j++) {
+                if (i + j >= 0 && i + j < fine_tracking_path.size()) {
+                    if (para_angles.at(i + j) > 12) {
+                        sum_angles += pow(refl_angles.at(i + j), 2);
+                        nsum++;
+                        if (refl_angles.at(i + j) > max_angle) {
+                            max_angle = refl_angles.at(i + j);
+                            max_num = i + j;
+                        }
+                    }
+                }
+            }
+            
+            if (nsum != 0) sum_angles = sqrt(sum_angles / nsum);
+            ave_angles.at(i) = sum_angles;
+            max_numbers.at(i) = max_num;
+        }
+        
+        // Look for kink candidates
+        for (int i = 0; i != fine_tracking_path.size(); i++) {
+            geo_point_t current_point(fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.at(i).first.z());
+            
+            // Check basic angle conditions and fiducial volume
+            if ((refl_angles.at(i) > 20 && ave_angles.at(i) > 10) && 
+                fiducial_utils->inside_fiducial_volume(current_point)) {
+                
+                // Calculate angle between start-to-kink and kink-to-end vectors
+                WireCell::Vector v10(fine_tracking_path.at(i).first.x() - fine_tracking_path.front().first.x(),
+                                    fine_tracking_path.at(i).first.y() - fine_tracking_path.front().first.y(),
+                                    fine_tracking_path.at(i).first.z() - fine_tracking_path.front().first.z());
+                WireCell::Vector v20(fine_tracking_path.back().first.x() - fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.back().first.y() - fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.back().first.z() - fine_tracking_path.at(i).first.z());
+                
+                double angle3 = 0;
+                if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                    angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                }
+                
+                double angle3p = angle3;
+                if (i + 1 != fine_tracking_path.size()) {
+                    WireCell::Vector v11(fine_tracking_path.at(i+1).first.x() - fine_tracking_path.front().first.x(),
+                                        fine_tracking_path.at(i+1).first.y() - fine_tracking_path.front().first.y(),
+                                        fine_tracking_path.at(i+1).first.z() - fine_tracking_path.front().first.z());
+                    WireCell::Vector v21(fine_tracking_path.back().first.x() - fine_tracking_path.at(i+1).first.x(),
+                                        fine_tracking_path.back().first.y() - fine_tracking_path.at(i+1).first.y(),
+                                        fine_tracking_path.back().first.z() - fine_tracking_path.at(i+1).first.z());
+                    if (v11.magnitude() > 0 && v21.magnitude() > 0) {
+                        angle3p = std::acos(v11.dot(v21) / (v11.magnitude() * v21.magnitude())) / 3.1415926 * 180.0;
+                    }
+                }
+                
+                // need to calculate current_point_raw ...
+                WireCell::Point current_point_raw= transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
+
+                // Apply selection criteria
+                if ((angle3 < 20 && ave_angles.at(i) < 20) || 
+                    (angle3 < 12.5 && fiducial_utils->inside_dead_region(current_point_raw, paf.at(i).first, paf.at(i).second, 2)) || 
+                    angle3 < 7.5 || i <= 4) continue;
+                
+                if ((angle3 > 30 && (refl_angles.at(i) > 25.5 && ave_angles.at(i) > 12.5)) ||
+                    (angle3 > 40 && angle3 > angle3p && v10.magnitude() > 5*units::cm && v20.magnitude() > 5*units::cm)) {
+                    
+        //             // Special handling for shortened Y region
+        //             if (pw.at(i) > 7135-5 && pw.at(i) < 7264+5) {
+        //                 bool flag_bad = false;
+        //                 // Check for dead channels around this position
+        //                 // This would need access to ch_mcell_set_map equivalent in toolkit
+        //                 // For now, apply stricter angle cuts in this region
+        //                 if (pw.at(i) > 7135 && pw.at(i) < 7264) {
+        //                     if (refl_angles.at(i) < 27 || ave_angles.at(i) < 15) continue;
+        //                 }
+        //             }
+                    
+                    // Calculate charge density before and after kink
+                    double sum_fQ = 0;
+                    double sum_fx = 0;
+                    double sum_bQ = 0;
+                    double sum_bx = 0;
+                    
+                    for (int k = 0; k != 10; k++) {
+                        if (i >= k + 1) {
+                            sum_fQ += dQ.at(i - k - 1);
+                            sum_fx += dx.at(i - k - 1);
+                        }
+                        if (i + k + 1 < dQ.size()) {
+                            sum_bQ += dQ.at(i + k + 1);
+                            sum_bx += dx.at(i + k + 1);
+                        }
+                    }
+                    
+                    sum_fQ /= (sum_fx / units::cm + 1e-9) * 50e3;
+                    sum_bQ /= (sum_bx / units::cm + 1e-9) * 50e3;
+                    
+                    // Final selection criteria
+                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) || 
+                        (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) && 
+                        v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
+                        
+                        if (i + 2 < dQ.size()) {
+                            std::cout << "Kink: " << i << " " << refl_angles.at(i) << " " << para_angles.at(i) 
+                                    << " " << ave_angles.at(i) << " " << max_numbers.at(i) << " " << angle3 
+                                    << " " << dQ.at(i)/dx.at(i)*units::cm/50e3 << " " << pu.at(i) 
+                                    << " " << pv.at(i) << " " << pw.at(i) << std::endl;
+                            return max_numbers.at(i);
+                        }
+                    }
+                }
+            }
+        }
+
+
+        return fine_tracking_path.size();  // Placeholder return value
     }
 
     std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
@@ -952,6 +1149,8 @@ private:
 
         geo_point_t mid_point(0,0,0);
         adjust_rough_path(cluster, mid_point);
+
+        find_first_kink(cluster);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
