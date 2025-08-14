@@ -690,6 +690,104 @@ private:
             }
         }
 
+        for (int i=0;i!=fine_tracking_path.size();i++){
+            // std::cout << i << " " << refl_angles.at(i) << " " << ave_angles.at(i) << " " << inside_fiducial_volume(fine_tracking_path.at(i)) << std::endl;
+            
+            geo_point_t current_point(fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.at(i).first.z());
+            
+            if ((refl_angles.at(i) > 20 && ave_angles.at(i) > 15) && 
+                fiducial_utils->inside_fiducial_volume(current_point)) {
+
+                WireCell::Vector v10(fine_tracking_path.at(i).first.x() - fine_tracking_path.front().first.x(),
+                                fine_tracking_path.at(i).first.y() - fine_tracking_path.front().first.y(),
+                                fine_tracking_path.at(i).first.z() - fine_tracking_path.front().first.z());
+                WireCell::Vector v20(fine_tracking_path.back().first.x() - fine_tracking_path.at(i).first.x(),
+                                fine_tracking_path.back().first.y() - fine_tracking_path.at(i).first.y(),
+                                fine_tracking_path.back().first.z() - fine_tracking_path.at(i).first.z());
+                
+                double angle3 = 0;
+                if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                    angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                }
+                
+                // Convert to raw coordinates for dead region check
+                WireCell::Point current_point_raw = transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
+                
+                if ((angle3 < 20 && ave_angles.at(i) < 20) || 
+                    (angle3 < 12.5 && fiducial_utils->inside_dead_region(current_point_raw, paf.at(i).first, paf.at(i).second, 2)) || 
+                    angle3 < 7.5 || i <= 4) continue;
+                
+                if (angle3 > 30){
+            //         // shorted Y ...
+            //         if (pw.at(i) > 7135 && pw.at(i) < 7264){
+            //             bool flag_bad = false;
+            //             for (int k=-1;k!=2;k++){
+            //                 if (grouping->is_wire_dead(paf.at(i).first, paf.at(i).second, 1, std::round(pv.at(i)+k), std::round(pt.at(i)))){
+            //                     flag_bad = true;
+            //                     break;
+            //                 }
+            //             }
+            //             if (flag_bad) continue;
+            //         }
+                    bool flag_bad_u = false;
+                    {
+                        for (int k=-1;k!=2;k++){
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 0, std::round(pu.at(i)+k), std::round(pt.at(i)))){
+                                flag_bad_u = true;
+                                break;
+                            }
+                        }
+                    }
+                    bool flag_bad_v = false;
+                    {
+                        for (int k=-1;k!=2;k++){
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1, std::round(pv.at(i)+k), std::round(pt.at(i)))){
+                                flag_bad_v = true;
+                                break;
+                            }
+                        }
+                    }
+                    bool flag_bad_w = false;
+                    {
+                        for (int k=-1;k!=2;k++){
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 2, std::round(pw.at(i)+k), std::round(pt.at(i)))){
+                                flag_bad_w = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    double sum_fQ = 0;
+                    double sum_fx = 0;
+                    double sum_bQ = 0;
+                    double sum_bx = 0;
+                    for (int k=0;k!=10;k++){
+                        if (i>=k+1){
+                            sum_fQ += dQ.at(i-k-1);
+                            sum_fx += dx.at(i-k-1);
+                        }
+                        if (i+k+1 < dQ.size()){
+                            sum_bQ += dQ.at(i+k+1);
+                            sum_bx += dx.at(i+k+1);
+                        }
+                    }
+                    sum_fQ /= (sum_fx/units::cm+1e-9)*50e3;
+                    sum_bQ /= (sum_bx/units::cm+1e-9)*50e3;
+                    //std::cout << sum_fQ << " " << sum_bQ << std::endl;
+                    if (std::abs(sum_fQ-sum_bQ) < 0.07*(sum_fQ+sum_bQ) && (flag_bad_u||flag_bad_v||flag_bad_w)) continue;
+                    
+                    if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
+                        if (i+2<dQ.size()){
+                            std::cout << "Kink: " << i << " " << refl_angles.at(i) << " " << para_angles.at(i) << " " << ave_angles.at(i) << " " << max_numbers.at(i) << " " << angle3 << " " << dQ.at(i)/dx.at(i)*units::cm/50e3 << std::endl;
+                            return max_numbers.at(i);
+                        }
+                    }
+                }
+            }
+        }
+
 
         return fine_tracking_path.size();  // Placeholder return value
     }
