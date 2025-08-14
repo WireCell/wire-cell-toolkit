@@ -72,24 +72,44 @@ public:
         auto& grouping = *groupings.at(0);
         
         // Find clusters that have the main_cluster flag (set by clustering_recovering_bundle)
-        std::vector<Cluster*> main_clusters;
+        Cluster* main_cluster = nullptr;
 
         for (auto* cluster : grouping.children()) {
             if (cluster->get_flag(Flags::main_cluster)) {
-                main_clusters.push_back(cluster);
+                main_cluster = cluster;
             }
         }
 
-        std::cout << "TaggerCheckSTM: Found " << main_clusters.size() 
+        std::cout << "TaggerCheckSTM: Found " << (main_cluster ? 1 : 0)
                   << " main clusters to check for STM conditions." << std::endl;
+
+        // For each main cluster, find its associated clusters
+        std::map<Cluster*, std::vector<Cluster*>> main_to_associated;
+        if (main_cluster) {
+            std::vector<Cluster*> associated_clusters;
+            
+            // Find all clusters with the associated_cluster flag
+            for (auto* cluster : grouping.children()) {
+                if (cluster->get_flag(Flags::associated_cluster)) {
+                    associated_clusters.push_back(cluster);
+                }
+            }
+            
+            main_to_associated[main_cluster] = associated_clusters;
+            
+            // std::cout << "TaggerCheckSTM: Main cluster " << main_cluster->ident() 
+            //           << " has " << associated_clusters.size() << " associated clusters: ";
+            // for (auto* assoc : associated_clusters) {
+            //     std::cout << assoc->ident() << " ";
+            // }
+            // std::cout << std::endl;
+        }
 
         // Process each main cluster
         size_t stm_count = 0;
-        for (auto* cluster : main_clusters) {
-            if (check_stm_conditions(*cluster)) {
-                cluster->set_flag(Flags::STM);
-                stm_count++;
-            }
+        if (check_stm_conditions(*main_cluster, main_to_associated[main_cluster] )) {
+            main_cluster->set_flag(Flags::STM);
+            stm_count++;
         }
         
         (void)stm_count;
@@ -817,7 +837,12 @@ private:
 
         return segment;
     }
-   
+
+    bool check_other_clusters(Cluster& main_cluster, std::vector<Cluster*> associated_clusters) const {
+
+      
+    }
+
     /**
      * Check if a cluster meets the conditions for STM (Short Track Muon) tagging.
      * This is where you'll implement your specific STM detection algorithm.
@@ -825,7 +850,7 @@ private:
      * @param cluster The main cluster to analyze
      * @return true if cluster should be flagged as STM
      */
-    bool check_stm_conditions(Cluster& cluster) const {
+    bool check_stm_conditions(Cluster& cluster, std::vector<Cluster*> associated_clusters) const {
         // get all the angles ...
 
         // Get all the wire plane IDs from the grouping
@@ -1249,6 +1274,8 @@ private:
         adjust_rough_path(cluster, mid_point);
 
         find_first_kink(cluster);
+
+        check_other_clusters(cluster, associated_clusters);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
