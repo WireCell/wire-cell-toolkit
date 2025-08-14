@@ -310,7 +310,7 @@ namespace WireCell {
             m_step = step;
         }
 
-        Y operator()(X x) const
+        Y operator()(const X& x) const
         {
             if (x <= m_le) return m_dat.front();
             if (x >= m_re) return m_dat.back();
