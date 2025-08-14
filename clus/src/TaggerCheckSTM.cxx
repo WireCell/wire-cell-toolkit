@@ -1139,7 +1139,7 @@ private:
             pts.push_back(path_point.first);
         }
 
-        
+
         return false;
     }
 
@@ -2053,6 +2053,8 @@ private:
         search_other_tracks(cluster, fitted_segments);
 
         detect_proton(segment, kink_num, fitted_segments);
+
+        eval_stm(segment, kink_num);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
