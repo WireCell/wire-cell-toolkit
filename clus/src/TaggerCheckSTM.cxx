@@ -18,6 +18,10 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
+struct edge_base_t {
+    typedef boost::edge_property_tag kind;
+};
+
 /**
  * Clustering function that checks the main cluster from clustering_recovering_bundle
  * for Short Track Muon (STM) characteristics and sets the STM flag when conditions are met.
@@ -873,7 +877,7 @@ private:
         segment->dpcloud("main", dpc);
 
         // // Now you can access the DynamicPointCloud:
-        // auto retrieved_dpc = segment->dpcloud("main");
+        // 
         // if (retrieved_dpc) {
         //     // Use DynamicPointCloud methods
         //     auto points_info = retrieved_dpc->get_2d_points_info(some_point, radius, plane, face, apa);
@@ -882,13 +886,300 @@ private:
         return segment;
     }
 
-    std::vector<std::shared_ptr<PR::Segment> > search_other_tracks(Cluster& main_cluster, std::shared_ptr<PR::Segment> segment, double search_range, double scaling_2d) const{
+    void search_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments, double search_range = 1.5*units::cm, double scaling_2d = 0.8) const{
         std::vector<std::shared_ptr<PR::Segment> > other_segments;
-        // Implement your search logic here
 
+        // Early return if no existing segment
+        if (fitted_segments.empty()) return;
+
+        const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+        const auto& wpid_array = steiner_pc.get("wpid")->elements<WirePlaneId>();
+
+        const size_t N = x_coords.size();
+        if (N == 0) return;
         
+        std::vector<bool> flag_tagged(N, false);
+        int num_tagged = 0;
 
-        return other_segments;
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        double cluster_t0 = cluster.get_flash().time();
+        
+        // Step 1: Tag points within search_range of existing tracks        
+        for (size_t i = 0; i < N; i++) {
+            geo_point_t p(x_coords[i], y_coords[i], z_coords[i]);
+            double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
+            
+            // Get closest 2D distances for each plane using DynamicPointCloud
+            // Get wire plane parameters for 2D projections
+            WirePlaneId wpid = wpid_array[i];
+            int apa = wpid.apa();
+            int face = wpid.face();
+
+            for (const auto& fit_seg : fitted_segments) {
+                // Get closest point on the segment to point p
+                const auto& fit_seg_dpc = fit_seg->dpcloud("main");
+
+                auto closest_result = fit_seg_dpc->kd3d().knn(1, p);
+                if (closest_result.empty()) continue;
+                
+                // size_t closest_index = closest_result[0].first;
+                double closest_3d_distance = sqrt(closest_result[0].second);
+                
+                if (closest_3d_distance < search_range) {
+                    flag_tagged[i] = true;
+                    num_tagged++;
+                    break;
+                }    
+    
+                // Check distances in each plane (U, V, W)
+                for (int plane = 0; plane < 3; plane++) {
+                    auto closest_2d = fit_seg_dpc->get_closest_2d_point_info(p, plane, face, apa);
+                    double dist_2d = std::get<0>(closest_2d);
+                    
+                    if (plane == 0 && dist_2d < min_dis_u) min_dis_u = dist_2d;
+                    else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
+                    else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
+                }
+            }
+            
+            // Additional tagging based on 2D projections and dead channels
+            if (!flag_tagged[i]) {
+                // Check if point should be tagged based on 2D distances or dead channels
+                // figure out the raw_point ...
+                auto p_raw= transform->backward(p, cluster_t0, face, apa);
+
+                // Note: Dead channel checking would require access to detector status
+                bool u_ok = (min_dis_u < scaling_2d * search_range || cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0));  // U plane
+                bool v_ok = (min_dis_v < scaling_2d * search_range || cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1));  // V plane  
+                bool w_ok = (min_dis_w < scaling_2d * search_range || cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2));  // W plane
+                
+                if (u_ok && v_ok && w_ok) {
+                    flag_tagged[i] = true;
+                }
+            }
+        }
+        (void) num_tagged;
+
+        // Step 2: Get Steiner_Graph and its terminals ...
+        const auto& steiner_graph = cluster.get_graph("steiner_graph");
+        const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
+        
+        // Step 3: Identify terminal vertices from cluster boundary points
+        std::vector<size_t> terminals;
+        std::map<size_t, size_t> map_oindex_tindex;
+        for (size_t i = 0;i!=flag_steiner_terminal.size();i++){
+            if (flag_steiner_terminal[i]){
+                map_oindex_tindex[i] = terminals.size();
+                terminals.push_back(i);
+            }
+        }
+
+        // Step 4: Use cluster's graph for Voronoi computation
+        using namespace WireCell::Clus::Graphs::Weighted;
+        auto vor = voronoi(steiner_graph, terminals);
+        // Access nearest terminal for any vertex like this:
+        // auto nearest_terminal_for_vertex_i = vor.terminal[i];
+
+        // Step 5: Build terminal graph and find MST
+        using Base = boost::property<edge_base_t, edge_type>;  // Not edge_name_t!
+        using WeightProperty = boost::property<boost::edge_weight_t, double, Base>;
+        using TerminalGraph = boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+                                                boost::no_property, WeightProperty>;
+        
+        TerminalGraph terminal_graph(N);
+        std::map<std::pair<size_t, size_t>, std::pair<double, edge_type>> map_saved_edge;
+        
+        // Build terminal graph from Voronoi regions
+        auto edge_weight = get(boost::edge_weight, steiner_graph);
+
+        for (auto w : boost::make_iterator_range(edges(steiner_graph))) {
+            size_t nearest_to_source = vor.terminal[source(w, steiner_graph)];
+            size_t nearest_to_target = vor.terminal[target(w, steiner_graph)];
+            
+            if (nearest_to_source != nearest_to_target) {
+                double weight = vor.distance[source(w, steiner_graph)] + 
+                            vor.distance[target(w, steiner_graph)] + 
+                            edge_weight[w];  // Don't forget the edge weight!
+                
+                // Convert terminal indices back to actual terminal vertices
+                auto edge_pair1 = std::make_pair(nearest_to_source, nearest_to_target);
+                auto edge_pair2 = std::make_pair(nearest_to_target, nearest_to_source);
+
+                auto it1 = map_saved_edge.find(edge_pair1);
+                auto it2 = map_saved_edge.find(edge_pair2);
+
+                if (it1 != map_saved_edge.end()) {
+                    // Update (A,B) if better
+                    if (weight < it1->second.first) {
+                        it1->second = std::make_pair(weight, w);
+                    }
+                } else if (it2 != map_saved_edge.end()) {
+                    // Update (B,A) if better  
+                    if (weight < it2->second.first) {
+                        it2->second = std::make_pair(weight, w);
+                    }
+                } else {
+                    // Create new entry
+                    map_saved_edge[edge_pair1] = std::make_pair(weight, w);
+                }
+            }
+        }
+        
+        // Add edges with compound properties
+        for (const auto& [edge_pair, weight_info] : map_saved_edge) {
+            boost::add_edge(edge_pair.first, edge_pair.second, 
+                        WeightProperty(weight_info.first, Base(weight_info.second)),
+                        terminal_graph);
+        }
+        
+        // Step 6: Find minimum spanning tree
+        std::vector<boost::graph_traits<TerminalGraph>::edge_descriptor> mst_edges;
+        boost::kruskal_minimum_spanning_tree(terminal_graph, std::back_inserter(mst_edges));
+        
+        // Step 7: Create cluster graph and find connected components
+        TerminalGraph terminal_graph_cluster(terminals.size());
+        std::map<size_t, std::set<size_t>> map_connection;
+        
+        for (const auto& edge : mst_edges) {
+            size_t source_idx = boost::source(edge, terminal_graph);
+            size_t target_idx = boost::target(edge, terminal_graph);
+            
+            if (flag_tagged[terminals[source_idx]] == flag_tagged[terminals[target_idx]]) {
+                boost::add_edge(map_oindex_tindex[source_idx], map_oindex_tindex[target_idx], terminal_graph_cluster);
+            } else { 
+                if (map_connection.find(source_idx)==map_connection.end()){
+                    std::set<size_t> temp_results;
+                    temp_results.insert(target_idx);
+                    map_connection[source_idx] = temp_results;
+                }else{
+                    map_connection[source_idx].insert(target_idx);
+                }
+                if (map_connection.find(target_idx)==map_connection.end()){
+                    std::set<size_t> temp_results;
+                    temp_results.insert(source_idx);
+                    map_connection[target_idx] = temp_results;
+                }else{
+                    map_connection[target_idx].insert(source_idx);
+                }
+            }
+        }
+        
+        // Step 8: Find connected components
+        std::vector<int> component(boost::num_vertices(terminal_graph_cluster));
+        const int num_components = boost::connected_components(terminal_graph_cluster, &component[0]);
+        std::vector<int> ncounts(num_components, 0);
+        std::vector<std::vector<size_t>> sep_clusters(num_components);
+        
+        for (size_t i = 0; i < component.size(); ++i) {
+            ncounts[component[i]]++;
+            sep_clusters[component[i]].push_back(terminals[i]);
+        }
+        
+        // // Step 9: Filter and create new segments for valid clusters
+        // for (int comp_idx = 0; comp_idx < num_components; comp_idx++) {
+        //     // Skip if inside original track or just one point
+        //     if (flag_tagged[sep_clusters[comp_idx].front()] || ncounts[comp_idx] == 1) continue;
+            
+        //     // Find connection point to existing track
+        //     size_t special_A = SIZE_MAX;
+        //     for (size_t j = 0; j < ncounts[comp_idx]; j++) {
+        //         if (map_connection.find(sep_clusters[comp_idx][j]) != map_connection.end()) {
+        //             special_A = sep_clusters[comp_idx][j];
+        //             break;
+        //         }
+        //     }
+            
+        //     if (special_A == SIZE_MAX) continue;
+            
+        //     // Find furthest point from special_A
+        //     size_t special_B = special_A;
+        //     double max_dis = 0;
+        //     int number_not_faked = 0;
+        //     double max_dis_u = 0, max_dis_v = 0, max_dis_w = 0;
+            
+        //     for (size_t j = 0; j < ncounts[comp_idx]; j++) {
+        //         size_t point_idx = sep_clusters[comp_idx][j];
+        //         geo_point_t p1 = main_cluster.point3d(special_A);
+        //         geo_point_t p2 = main_cluster.point3d(point_idx);
+                
+        //         double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+        //         if (dis > max_dis) {
+        //             max_dis = dis;
+        //             special_B = point_idx;
+        //         }
+                
+        //         // Check if this track segment is "fake" (too close to existing tracks)
+        //         double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
+                
+        //         for (const auto& fit_seg : fit_segments) {
+        //             auto seg_dpc = fit_seg->dpcloud("main");
+        //             if (seg_dpc) {
+        //                 WirePlaneId wpid = main_cluster.wire_plane_id(point_idx);
+        //                 int apa = wpid.apa();
+        //                 int face = wpid.face();
+                        
+        //                 for (int plane = 0; plane < 3; plane++) {
+        //                     auto closest_2d = seg_dpc->get_closest_2d_point_info(p2, plane, face, apa);
+        //                     double dist_2d = std::get<0>(closest_2d);
+                            
+        //                     if (plane == 0 && dist_2d < min_dis_u) min_dis_u = dist_2d;
+        //                     else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
+        //                     else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
+        //                 }
+        //             }
+        //         }
+                
+        //         int flag_num = 0;
+        //         if (min_dis_u > scaling_2d * search_range) flag_num++;
+        //         if (min_dis_v > scaling_2d * search_range) flag_num++;
+        //         if (min_dis_w > scaling_2d * search_range) flag_num++;
+                
+        //         if (min_dis_u > max_dis_u) max_dis_u = min_dis_u;
+        //         if (min_dis_v > max_dis_v) max_dis_v = min_dis_v;
+        //         if (min_dis_w > max_dis_w) max_dis_w = min_dis_w;
+                
+        //         if (flag_num >= 2) number_not_faked++;
+        //     }
+            
+        //     // Apply quality cuts (from prototype)
+        //     if (number_not_faked < 4 && (number_not_faked < 0.15 * ncounts[comp_idx] || number_not_faked == 1)) continue;
+            
+        //     bool quality_check = ((max_dis_u/units::cm > 4 || max_dis_v/units::cm > 4 || max_dis_w/units::cm > 4) && 
+        //                         max_dis_u + max_dis_v + max_dis_w > 7*units::cm) ||
+        //                         (number_not_faked > 4 && number_not_faked >= 0.75*ncounts[comp_idx]);
+            
+        //     if (!quality_check) continue;
+            
+        //     // Step 10: Create new segment for this cluster
+        //     std::vector<size_t> path_indices;
+            
+        //     // Use cluster's shortest path algorithm to connect special_A to special_B
+        //     auto path_wcps = main_cluster.graph_algorithms(main_cluster.get_graph_flavor(), m_dv, m_pcts).shortest_path(special_A, special_B);
+            
+        //     // Convert path to points
+        //     std::vector<geo_point_t> path_points;
+        //     for (size_t idx : path_wcps) {
+        //         path_points.push_back(main_cluster.point3d(idx));
+        //     }
+            
+        //     // Create new segment using the helper function
+        //     auto new_segment = create_segment_for_cluster_from_indices(main_cluster, path_wcps);
+        //     if (new_segment) {
+        //         other_segments.push_back(new_segment);
+                
+        //         // Add to track fitter for trajectory fitting
+        //         m_track_fitter.add_segment(new_segment);
+        //         m_track_fitter.do_single_tracking(new_segment);
+                
+        //         std::cout << "TaggerCheckSTM: Found additional track with " << path_points.size() 
+        //                 << " points, length: " << max_dis/units::cm << " cm" << std::endl;
+        //     }
+        // }
+
     }
 
     bool check_other_clusters(Cluster& main_cluster, std::vector<Cluster*> associated_clusters) const {
@@ -1369,7 +1660,9 @@ private:
 
         check_other_clusters(cluster, associated_clusters);
 
-        search_other_tracks(cluster, segment);
+        std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+        fitted_segments.push_back(segment);
+        search_other_tracks(cluster, fitted_segments);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
