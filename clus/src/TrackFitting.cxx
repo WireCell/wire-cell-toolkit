@@ -3783,4 +3783,60 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         dQ_dx_fill(end_point_limit);
     }
 
+    // Now put the results back into the
+    // Create vector of Fit objects from the internal tracking results
+    std::vector<PR::Fit> segment_fits;
+    segment_fits.reserve(fine_tracking_path.size());
+    
+    // Check that all vectors have consistent sizes
+    size_t npoints = fine_tracking_path.size();
+    if (dQ.size() != npoints || dx.size() != npoints || 
+        pu.size() != npoints || pv.size() != npoints || 
+        pw.size() != npoints || pt.size() != npoints || 
+        reduced_chi2.size() != npoints) {
+        throw std::runtime_error("TrackFitting::do_single_tracking: inconsistent vector sizes for fit output!");
+    }
+    
+    // Calculate cumulative range (distance along track)
+    std::vector<double> cumulative_range(npoints, 0.0);
+    if (npoints > 1) {
+        for (size_t i = 1; i < npoints; ++i) {
+            const auto& p1 = fine_tracking_path[i-1].first;
+            const auto& p2 = fine_tracking_path[i].first;
+            double step_distance = sqrt(pow(p2.x() - p1.x(), 2) + 
+                                      pow(p2.y() - p1.y(), 2) + 
+                                      pow(p2.z() - p1.z(), 2));
+            cumulative_range[i] = cumulative_range[i-1] + step_distance;
+        }
+    }
+    
+    // Convert internal results to PR::Fit objects
+    for (size_t i = 0; i < npoints; ++i) {
+        PR::Fit fit;
+        
+        // Set the fitted 3D point
+        fit.point = fine_tracking_path[i].first;
+        
+        // Set physics quantities
+        fit.dQ =  dQ[i];
+        fit.dx = dx[i];
+        fit.pu = pu[i];
+        fit.pv = pv[i];
+        fit.pw = pw[i];
+        fit.pt = pt[i];
+        fit.paf = paf[i];
+        fit.reduced_chi2 = reduced_chi2[i];
+
+        // Set trajectory information
+        fit.index = static_cast<int>(i);
+        fit.range = cumulative_range[i];
+        
+        // Set fix flags (typically fix endpoints for track fitting)
+        fit.flag_fix = false;        
+        segment_fits.push_back(fit);
+    }
+    
+    // Assign the fits to the segment
+    segment->fits(segment_fits);
+    
 }

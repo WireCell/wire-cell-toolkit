@@ -118,7 +118,8 @@ namespace WireCell::Clus::PR {
      */
     struct Fit {
         WireCell::Point point;
-        double dQ{-1}, dx{0}, pu{-1}, pv{-1}, pw{-1}, pt{0}, reduced_chi2{-1};
+        double dQ{-1}, dx{0}, pu{-1}, pv{-1}, pw{-1}, pt{0} , reduced_chi2{-1};
+        std::pair<int, int> paf{-1, -1}; // apa, face
 
         int index{-1};
         double range{-1};

@@ -819,6 +819,9 @@ private:
         std::vector<PR::WCPoint> wcpoints;
         std::vector<std::pair<geo_point_t, WirePlaneId>> point_plane_pairs;
 
+        // const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        // double cluster_t0 = cluster.get_flash().time();
+
         for (const auto& point : path_points) {
             PR::WCPoint wcp;
             wcp.point = point; 
@@ -826,6 +829,8 @@ private:
 
             // Create a WirePlaneId for the point
             WirePlaneId wpid = m_dv->contained_by(point);
+
+            // WireCell::Point point_raw= transform->backward(point, cluster_t0, wpid.face(), wpid.apa());
             point_plane_pairs.emplace_back(point, wpid);
         }
         
@@ -860,7 +865,7 @@ private:
         // Step 3: Create DPCPoints using factory function (recommended)
         auto dpc_points = Facade::make_points_direct(&cluster, m_dv, wpid_params, point_plane_pairs, true);
 
-        std::cout << "Created DPCPoints: " << dpc_points.size() << std::endl;
+        // std::cout << "Created DPCPoints: " << dpc_points.size() << std::endl;
         // // Step 4: Add points to DynamicPointCloud
         dpc->add_points(dpc_points);
 
