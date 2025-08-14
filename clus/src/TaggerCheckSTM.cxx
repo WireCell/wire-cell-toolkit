@@ -839,8 +839,47 @@ private:
     }
 
     bool check_other_clusters(Cluster& main_cluster, std::vector<Cluster*> associated_clusters) const {
+        int number_clusters = 0;
+        double total_length = 0;
+        
+        // Iterate through all associated clusters
+        for (auto it = associated_clusters.begin(); it != associated_clusters.end(); it++) {
+            Cluster* cluster = *it;
+            
+            // Get the two boundary points (equivalent to get_two_boundary_wcps in prototype)
+            std::pair<geo_point_t, geo_point_t> boundary_points = cluster->get_two_boundary_wcps();
+            
+            // Calculate coverage_x (difference in x coordinates)
+            double coverage_x = boundary_points.first.x() - boundary_points.second.x();
+            
+            // Get cluster length using the toolkit's built-in function
+            double length = cluster->get_length();
+            
+            // Get closest points between main cluster and current cluster
+            std::tuple<int, int, double> results = main_cluster.get_closest_points(*cluster);
+            
+            // Apply the same conditions as in the prototype:
+            // - Distance between clusters < 25 cm
+            // - Absolute coverage in X > 0.75 cm  
+            // - Length > 5 cm
+            if (std::get<2>(results) < 25*units::cm && 
+                fabs(coverage_x) > 0.75*units::cm && 
+                length > 5*units::cm) {
+                number_clusters++;
+                total_length += length;
+            }
+        }
+        
+        // Apply the final condition from prototype
+        if (number_clusters > 0 && 
+            (number_clusters/3. + total_length/(35*units::cm)/number_clusters) >= 1) {
+            std::cout << "Other clusters: " << number_clusters << " " 
+                    << (number_clusters/3. + total_length/(35*units::cm)/number_clusters) 
+                    << std::endl;
+            return true;
+        }
 
-      
+      return false;
     }
 
     /**
