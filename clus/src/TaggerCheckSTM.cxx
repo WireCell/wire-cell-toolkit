@@ -526,9 +526,11 @@ private:
         return out_path_points;
     }
 
-    int find_first_kink(const WireCell::Clus::Facade::Cluster& cluster) const{
+    int find_first_kink(std::shared_ptr<PR::Segment> segment) const{
         // Implement your logic to find the first kink in the cluster
-        
+
+        auto& cluster = *segment->cluster();
+
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
@@ -538,14 +540,24 @@ private:
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
         double cluster_t0 = cluster.get_flash().time();
         
-        auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
-        auto dQ = m_track_fitter.get_dQ();
-        auto dx = m_track_fitter.get_dx();
-        auto pu = m_track_fitter.get_pu();
-        auto pv = m_track_fitter.get_pv();
-        auto pw = m_track_fitter.get_pw();
-        auto pt = m_track_fitter.get_pt();
-        auto paf = m_track_fitter.get_paf();
+        // Extract fit results from the segment
+        const auto& fits = segment->fits();
+        
+        // Convert fit data to vectors matching the TrackFitting interface
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+        std::vector<double> dQ, dx, pu, pv, pw, pt;
+        std::vector<std::pair<int,int>> paf;
+        
+        for (const auto& fit : fits) {
+            fine_tracking_path.emplace_back(fit.point, segment);
+            dQ.push_back(fit.dQ);
+            dx.push_back(fit.dx);
+            pu.push_back(fit.pu);
+            pv.push_back(fit.pv);
+            pw.push_back(fit.pw);
+            pt.push_back(fit.pt);
+            paf.push_back(fit.paf);
+        }
 
         if (fine_tracking_path.empty()) {
             return -1;
@@ -835,6 +847,43 @@ private:
 
 
         return fine_tracking_path.size();  // Placeholder return value
+    }
+
+    bool detect_proton(std::shared_ptr<PR::Segment> segment, int kink_num, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments) const{
+        auto& cluster = *segment->cluster();
+        // Get FiducialUtils from the grouping
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            std::cout << "TaggerCheckSTM: No FiducialUtils available in find_first_kink" << std::endl;
+            return -1;
+        }
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        double cluster_t0 = cluster.get_flash().time();
+        
+        // Extract fit results from the segment
+        const auto& fits = segment->fits();
+        
+        // Convert fit data to vectors matching the TrackFitting interface
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+        std::vector<double> dQ, dx;
+        std::vector<std::pair<int,int>> paf;
+        
+        for (const auto& fit : fits) {
+            fine_tracking_path.emplace_back(fit.point, segment);
+            dQ.push_back(fit.dQ);
+            dx.push_back(fit.dx);
+            paf.push_back(fit.paf);
+        }
+
+        if (fine_tracking_path.empty()) {
+            return false;
+        }
+
+        if (!m_linterp_function){
+            
+        }
+
+        return false;
     }
 
     std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
@@ -1738,13 +1787,15 @@ private:
         geo_point_t mid_point(0,0,0);
         adjust_rough_path(cluster, mid_point);
 
-        find_first_kink(cluster);
+        auto kink_num = find_first_kink(segment);
 
         check_other_clusters(cluster, associated_clusters);
 
         std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
         fitted_segments.push_back(segment);
         search_other_tracks(cluster, fitted_segments);
+
+        detect_proton(segment, kink_num, fitted_segments);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
