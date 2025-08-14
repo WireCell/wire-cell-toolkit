@@ -11,6 +11,8 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 
 #include "WireCellIface/IScalarFunction.h"
+#include "WireCellUtil/KSTest.h"
+
 
 
 
@@ -858,7 +860,7 @@ private:
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        double cluster_t0 = cluster.get_flash().time();
+        // double cluster_t0 = cluster.get_flash().time();
         
         // Extract fit results from the segment
         const auto& fits = segment->fits();
@@ -879,8 +881,229 @@ private:
             return false;
         }
 
-        if (!m_linterp_function){
+        // Extract points vector for compatibility with prototype algorithm
+        std::vector<WireCell::Point> pts;
+        for (const auto& path_point : fine_tracking_path) {
+            pts.push_back(path_point.first);
+        }
+
+        // Determine end point
+        WireCell::Point end_p;
+        if (kink_num == pts.size()) {
+            end_p = pts.back();
+        } else {
+            end_p = pts.at(kink_num);
+        }
+
+        // Calculate main track direction vector
+        geo_point_t p1(pts.front().x() - pts.back().x(),
+                    pts.front().y() - pts.back().y(),
+                    pts.front().z() - pts.back().z());
+
+        // Check fitted segments for Michel electrons and delta rays
+        for (size_t i = 1; i < fitted_segments.size(); i++) {
+            const auto& seg_fits = fitted_segments[i]->fits();
+            if (seg_fits.empty()) continue;
+
+            double dis = sqrt(pow(end_p.x() - seg_fits.front().point.x(), 2) +
+                            pow(end_p.y() - seg_fits.front().point.y(), 2) +
+                            pow(end_p.z() - seg_fits.front().point.z(), 2));
+
+            // Protection against Michel electron
+            double seg_length = segment_track_length(fitted_segments[i]);
+            double seg_dQ_dx = segment_median_dQ_dx(fitted_segments[i]) * units::cm / 50000;
             
+            if (dis < 1*units::cm && seg_length > 4*units::cm && seg_dQ_dx > 0.5) {
+                return false;
+            }
+
+            // Check for delta rays
+            if (dis > 10*units::cm && seg_length > 4*units::cm) {
+                geo_point_t p2(seg_fits.back().point.x() - seg_fits.front().point.x(),
+                        seg_fits.back().point.y() - seg_fits.front().point.y(),
+                        seg_fits.back().point.z() - seg_fits.front().point.z()); 
+                
+                // Get closest point on the segment to point p
+                const auto& fit_seg_dpc = segment->dpcloud("main");
+                auto closest_result_back = fit_seg_dpc->kd3d().knn(1, seg_fits.back().point);
+                size_t closest_index_back = closest_result_back[0].first;
+
+                auto closest_result_front = fit_seg_dpc->kd3d().knn(1, seg_fits.front().point);
+                size_t closest_index_front = closest_result_front[0].first;
+                
+                // Access the actual 3D points at the found indices
+                const auto& dpc_points = fit_seg_dpc->get_points();
+                const auto& closest_point_back = dpc_points[closest_index_back];
+                const auto& closest_point_front = dpc_points[closest_index_front];
+                
+                // Access 3D coordinates
+                geo_point_t back_point(closest_point_back.x, closest_point_back.y, closest_point_back.z);
+                geo_point_t front_point(closest_point_front.x, closest_point_front.y, closest_point_front.z);
+                
+                geo_point_t p3(0,0,0);
+                if (pow(end_p.x() - back_point.x(), 2) + pow(end_p.y() - back_point.y(), 2) + pow(end_p.z() - back_point.z(), 2) < 
+                    pow(end_p.x() - front_point.x(), 2) + pow(end_p.y() - front_point.y(), 2) + pow(end_p.z() - front_point.z(), 2)) {
+                    p3.set(front_point.x() - back_point.x(), front_point.y() - back_point.y(), front_point.z() - back_point.z());
+                } else {
+                    p3.set(back_point.x() - front_point.x(), back_point.y() - front_point.y(), back_point.z() - front_point.z());
+                }
+
+                // Judge direction for delta ray detection
+                if ((p2.angle(p1)/3.1415926*180. < 20 || 
+                    (p3.angle(p1)/3.1415926*180. < 15 && p3.magnitude() > 4*units::cm && p2.angle(p1)/3.1415926*180. < 35)) &&
+                    seg_dQ_dx > 0.8) {
+                    std::cout << "Delta Ray Dir: " << p2.angle(p1)/3.1415926*180. << " " 
+                            << p3.angle(p1)/3.1415926*180. << " " << p3.magnitude()/units::cm << " " 
+                            << dis/units::cm << " " << seg_length/units::cm << std::endl;
+                    return true;
+                }
+            }
+        }
+
+        // Calculate cumulative distances and dQ/dx along track
+        std::vector<double> L(pts.size(), 0);
+        std::vector<double> dQ_dx(pts.size(), 0);
+        double dis = 0;
+        L[0] = dis;
+        dQ_dx[0] = dQ[0] / (dx[0] / units::cm + 1e-9);
+        
+        for (size_t i = 1; i != pts.size(); i++) {
+            dis += sqrt(pow(pts[i].x() - pts[i-1].x(), 2) + pow(pts[i].y() - pts[i-1].y(), 2) + pow(pts[i].z() - pts[i-1].z(), 2));
+            L[i] = dis;
+            dQ_dx[i] = dQ[i] / (dx[i] / units::cm + 1e-9);
+        }
+
+        double end_L;
+        double max_num;
+        if (kink_num == pts.size()) {
+            end_L = L.back();
+            max_num = L.size();
+        } else {
+            end_L = L[kink_num] - 0.5*units::cm;
+            max_num = kink_num;
+        }
+
+        // Find the maximum bin
+        double max_bin = -1;
+        double max_sum = 0;
+        for (size_t i = 0; i != L.size(); i++) {
+            double sum = 0;
+            double nsum = 0;
+            double temp_max_bin = i;
+            double temp_max_val = dQ_dx[i];
+            
+            if (L[i] < end_L + 0.5*units::cm && L[i] > end_L - 40*units::cm && i < max_num) {
+                sum += dQ_dx[i]; nsum++;
+                if (i >= 2) {
+                    sum += dQ_dx[i-2]; nsum++;
+                    if (dQ_dx[i-2] > temp_max_val && i-2 < max_num) {
+                        temp_max_val = dQ_dx[i-2];
+                        temp_max_bin = i-2;
+                    }
+                }
+                if (i >= 1) {
+                    sum += dQ_dx[i-1]; nsum++;
+                    if (dQ_dx[i-1] > temp_max_val && i-1 < max_num) {
+                        temp_max_val = dQ_dx[i-1];
+                        temp_max_bin = i-1;
+                    }
+                }
+                if (i+1 < L.size()) {
+                    sum += dQ_dx[i+1]; nsum++;
+                    if (dQ_dx[i+1] > temp_max_val && i+1 < max_num) {
+                        temp_max_val = dQ_dx[i+1];
+                        temp_max_bin = i+1;
+                    }
+                }
+                if (i+2 < L.size()) {
+                    sum += dQ_dx[i+2]; nsum++;
+                    if (dQ_dx[i+2] > temp_max_val && i+2 < max_num) {
+                        temp_max_val = dQ_dx[i+2];
+                        temp_max_bin = i+2;
+                    }
+                }
+                sum /= nsum;
+                if (sum > max_sum) {
+                    max_sum = sum;
+                    max_bin = temp_max_bin;
+                }
+            }
+        }
+
+        end_L = L[max_bin] + 0.2*units::cm;
+        int ncount = 0, ncount_p = 0;
+        std::vector<double> vec_x, vec_xp;
+        std::vector<double> vec_y, vec_yp;
+
+        for (size_t i = 0; i != L.size(); i++) {
+            if (end_L - L[i] < 35*units::cm && end_L - L[i] > 3*units::cm) {
+                vec_x.push_back(end_L - L[i]);
+                vec_y.push_back(dQ_dx[i]);
+                ncount++;
+            }
+
+            if (end_L - L[i] < 20*units::cm) {
+                vec_xp.push_back(end_L - L[i]);
+                vec_yp.push_back(dQ_dx[i]);
+                ncount_p++;
+            }
+        }
+
+        if (ncount >= 5) {
+            // Create reference vectors for comparison
+            std::vector<double> muon_ref(ncount);
+            std::vector<double> const_ref(ncount, 50e3);
+            std::vector<double> muon_ref_p(ncount_p);
+
+            for (size_t i = 0; i != ncount; i++) {
+                muon_ref[i] = m_linterp_function->scalar_function((vec_x[i])/units::cm);
+            }
+            for (size_t i = 0; i != ncount_p; i++) {
+                muon_ref_p[i] = m_linterp_function->scalar_function((vec_xp[i])/units::cm);
+            }
+
+            // Perform KS-like tests using kslike_compare
+            double ks1 = WireCell::kslike_compare(vec_y, muon_ref);
+            double ratio1 = std::accumulate(muon_ref.begin(), muon_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+            double ks2 = WireCell::kslike_compare(vec_y, const_ref);
+            double ratio2 = std::accumulate(const_ref.begin(), const_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+            double ks3 = WireCell::kslike_compare(vec_yp, muon_ref_p);
+            double ratio3 = std::accumulate(vec_yp.begin(), vec_yp.end(), 0.0) / 
+                        (std::accumulate(muon_ref_p.begin(), muon_ref_p.end(), 0.0) + 1e-9);
+
+            std::cout << "End proton detection: " << ks1 << " " << ks2 << " " << ratio1 << " " << ratio2 
+                    << " " << ks3 << " " << ratio3 << " " << ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 
+                    << " " << dQ_dx[max_bin]/50e3 << " " << dQ_dx.size() - max_bin << " " << std::endl;
+
+            if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/50e3 > 2.3 && 
+                (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {
+                
+                if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/50e3 > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1) 
+                    return true;
+                if (dQ_dx.size()-max_bin <= 1 && (dQ_dx[max_bin]/50e3 < 3.0 && 
+                    (((ks1 < 0.06 && (ks2 > 0.03)) || (ks1 < 0.065 && ks2 > 0.04)) || 
+                    (ks1 < 0.035 && dQ_dx[max_bin]/50e3 < 4.0)))) 
+                    return false;
+                if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.027)
+                    return true;
+            }
+
+            // Check for proton with very high dQ_dx
+            double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / 50000.;
+            std::cout << "End proton detection1: " << track_medium_dQ_dx << " " << dQ_dx[max_bin]/50e3 
+                    << " " << ks3 << " " << ratio3 << std::endl;
+                    
+            if (track_medium_dQ_dx < 1.0 && dQ_dx[max_bin]/50e3 > 3.5) {
+                if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) 
+                    return true;
+                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx[max_bin]/50e3 > 4.3 && ks3 > 0.03)) 
+                    return true;
+            } else if (track_medium_dQ_dx < 1 && dQ_dx[max_bin]/50e3 > 3.0) {
+                if (ks3 > 0.12 && ks1 > 0.03) 
+                    return true;
+            }
         }
 
         return false;
