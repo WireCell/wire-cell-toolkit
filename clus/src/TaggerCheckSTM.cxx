@@ -171,6 +171,24 @@ private:
         return path_points;
     }
 
+    // return a vector of point, also the mid_p is also a return point ...
+    std::vector<geo_point_t> adjust_rough_path(const Cluster& cluster, geo_point_t& mid_p){
+        const geo_point_t drift_dir_abs(1,0,0); 
+        // use the m_track_fitter ...
+        auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
+        auto dQ = m_track_fitter.get_dQ();
+        auto dx = m_track_fitter.get_dx();
+
+        // get steiner PC
+        const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+
+    }
+
     std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
                                const std::vector<geo_point_t>& path_points) const{
     
@@ -622,7 +640,7 @@ private:
         std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
 
         m_track_fitter.do_single_tracking();
-        
+
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
         // m_track_fitter.fill_global_rb_map();
