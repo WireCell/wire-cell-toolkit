@@ -882,7 +882,7 @@ private:
         return segment;
     }
 
-    std::vector<std::shared_ptr<PR::Segment> > search_other_tracks(Cluster& main_cluster, std::shared_ptr<PR::Segment> segment, double search_range, double scaling_2d) const{
+    std::vector<std::shared_ptr<PR::Segment> > search_other_tracks(Cluster& main_cluster, std::shared_ptr<PR::Segment> segment/*, double search_range, double scaling_2d*/) const{
         std::vector<std::shared_ptr<PR::Segment> > other_segments;
         // Implement your search logic here
 
