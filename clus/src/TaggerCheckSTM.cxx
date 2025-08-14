@@ -1048,7 +1048,7 @@ private:
             size_t source_idx = boost::source(edge, terminal_graph);
             size_t target_idx = boost::target(edge, terminal_graph);
             
-            if (flag_tagged[terminals[source_idx]] == flag_tagged[terminals[target_idx]]) {
+            if (flag_tagged[source_idx] == flag_tagged[target_idx]) {
                 boost::add_edge(map_oindex_tindex[source_idx], map_oindex_tindex[target_idx], terminal_graph_cluster);
             } else { 
                 if (map_connection.find(source_idx)==map_connection.end()){
@@ -1079,106 +1079,100 @@ private:
             sep_clusters[component[i]].push_back(terminals[i]);
         }
         
-        // // Step 9: Filter and create new segments for valid clusters
-        // for (int comp_idx = 0; comp_idx < num_components; comp_idx++) {
-        //     // Skip if inside original track or just one point
-        //     if (flag_tagged[sep_clusters[comp_idx].front()] || ncounts[comp_idx] == 1) continue;
+        // Step 9: Filter and create new segments for valid clusters
+        for (int comp_idx = 0; comp_idx < num_components; comp_idx++) {
+            // Skip if inside original track or just one point
+            if (flag_tagged[sep_clusters[comp_idx].front()] || ncounts[comp_idx] == 1) continue;    
+            // Find connection point to existing track
+            size_t special_A = SIZE_MAX;
+            for (size_t j = 0; j < ncounts[comp_idx]; j++) {
+                if (map_connection.find(sep_clusters[comp_idx][j]) != map_connection.end()) {
+                    special_A = sep_clusters[comp_idx][j];
+                    break;
+                }
+            }
+            if (special_A == SIZE_MAX) continue;
             
-        //     // Find connection point to existing track
-        //     size_t special_A = SIZE_MAX;
-        //     for (size_t j = 0; j < ncounts[comp_idx]; j++) {
-        //         if (map_connection.find(sep_clusters[comp_idx][j]) != map_connection.end()) {
-        //             special_A = sep_clusters[comp_idx][j];
-        //             break;
-        //         }
-        //     }
+            // Find furthest point from special_A
+            size_t special_B = special_A;
+            double max_dis = 0;
+            int number_not_faked = 0;
+            double max_dis_u = 0, max_dis_v = 0, max_dis_w = 0;
             
-        //     if (special_A == SIZE_MAX) continue;
-            
-        //     // Find furthest point from special_A
-        //     size_t special_B = special_A;
-        //     double max_dis = 0;
-        //     int number_not_faked = 0;
-        //     double max_dis_u = 0, max_dis_v = 0, max_dis_w = 0;
-            
-        //     for (size_t j = 0; j < ncounts[comp_idx]; j++) {
-        //         size_t point_idx = sep_clusters[comp_idx][j];
-        //         geo_point_t p1 = main_cluster.point3d(special_A);
-        //         geo_point_t p2 = main_cluster.point3d(point_idx);
+            for (size_t j = 0; j < ncounts[comp_idx]; j++) {
+                size_t point_idx = sep_clusters[comp_idx][j];
+                geo_point_t p1(x_coords[special_A], y_coords[special_A], z_coords[special_A]);
+                geo_point_t p2(x_coords[point_idx], y_coords[point_idx], z_coords[point_idx]);
+
+                double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+                if (dis > max_dis) {
+                    max_dis = dis;
+                    special_B = point_idx;
+                }
                 
-        //         double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-        //         if (dis > max_dis) {
-        //             max_dis = dis;
-        //             special_B = point_idx;
-        //         }
-                
-        //         // Check if this track segment is "fake" (too close to existing tracks)
-        //         double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
-                
-        //         for (const auto& fit_seg : fit_segments) {
-        //             auto seg_dpc = fit_seg->dpcloud("main");
-        //             if (seg_dpc) {
-        //                 WirePlaneId wpid = main_cluster.wire_plane_id(point_idx);
-        //                 int apa = wpid.apa();
-        //                 int face = wpid.face();
+                // Check if this track segment is "fake" (too close to existing tracks)
+                double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
+                WirePlaneId wpid = wpid_array[point_idx];
+                int apa = wpid.apa();
+                int face = wpid.face();
+
+                for (const auto& fit_seg : fitted_segments) {
+                    const auto& fit_seg_dpc = fit_seg->dpcloud("main");
+                    for (int plane = 0; plane < 3; plane++) {
+                        auto closest_2d = fit_seg_dpc->get_closest_2d_point_info(p2, plane, face, apa);
+                        double dist_2d = std::get<0>(closest_2d);
                         
-        //                 for (int plane = 0; plane < 3; plane++) {
-        //                     auto closest_2d = seg_dpc->get_closest_2d_point_info(p2, plane, face, apa);
-        //                     double dist_2d = std::get<0>(closest_2d);
-                            
-        //                     if (plane == 0 && dist_2d < min_dis_u) min_dis_u = dist_2d;
-        //                     else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
-        //                     else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
-        //                 }
-        //             }
-        //         }
+                        if (plane == 0 && dist_2d < min_dis_u) min_dis_u = dist_2d;
+                        else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
+                        else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
+                    }
+                }
                 
-        //         int flag_num = 0;
-        //         if (min_dis_u > scaling_2d * search_range) flag_num++;
-        //         if (min_dis_v > scaling_2d * search_range) flag_num++;
-        //         if (min_dis_w > scaling_2d * search_range) flag_num++;
-                
-        //         if (min_dis_u > max_dis_u) max_dis_u = min_dis_u;
-        //         if (min_dis_v > max_dis_v) max_dis_v = min_dis_v;
-        //         if (min_dis_w > max_dis_w) max_dis_w = min_dis_w;
-                
-        //         if (flag_num >= 2) number_not_faked++;
-        //     }
+
+                auto p_raw= transform->backward(p2, cluster_t0, face, apa);
+
+                int flag_num = 0;
+                if (min_dis_u > scaling_2d * search_range && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0))) flag_num++;
+                if (min_dis_v > scaling_2d * search_range && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1))) flag_num++;
+                if (min_dis_w > scaling_2d * search_range && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2))) flag_num++;
+
+                if (min_dis_u > max_dis_u && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0))) max_dis_u = min_dis_u;
+                if (min_dis_v > max_dis_v && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1))) max_dis_v = min_dis_v;
+                if (min_dis_w > max_dis_w && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2))) max_dis_w = min_dis_w;
+
+                if (flag_num >= 2) number_not_faked++;
+            }
             
-        //     // Apply quality cuts (from prototype)
-        //     if (number_not_faked < 4 && (number_not_faked < 0.15 * ncounts[comp_idx] || number_not_faked == 1)) continue;
+            // Apply quality cuts (from prototype)
+            if (number_not_faked < 4 && (number_not_faked < 0.15 * ncounts[comp_idx] || number_not_faked == 1)) continue;
             
-        //     bool quality_check = ((max_dis_u/units::cm > 4 || max_dis_v/units::cm > 4 || max_dis_w/units::cm > 4) && 
-        //                         max_dis_u + max_dis_v + max_dis_w > 7*units::cm) ||
-        //                         (number_not_faked > 4 && number_not_faked >= 0.75*ncounts[comp_idx]);
+            bool quality_check = ((max_dis_u/units::cm > 4 || max_dis_v/units::cm > 4 || max_dis_w/units::cm > 4) && 
+                                max_dis_u + max_dis_v + max_dis_w > 7*units::cm) ||
+                                (number_not_faked > 4 && number_not_faked >= 0.75*ncounts[comp_idx]);
             
-        //     if (!quality_check) continue;
+            if (!quality_check) continue;
             
-        //     // Step 10: Create new segment for this cluster
-        //     std::vector<size_t> path_indices;
+            // Step 10: Create new segment for this cluster
+            std::vector<size_t> path_indices;
             
-        //     // Use cluster's shortest path algorithm to connect special_A to special_B
-        //     auto path_wcps = main_cluster.graph_algorithms(main_cluster.get_graph_flavor(), m_dv, m_pcts).shortest_path(special_A, special_B);
-            
-        //     // Convert path to points
-        //     std::vector<geo_point_t> path_points;
-        //     for (size_t idx : path_wcps) {
-        //         path_points.push_back(main_cluster.point3d(idx));
-        //     }
-            
-        //     // Create new segment using the helper function
-        //     auto new_segment = create_segment_for_cluster_from_indices(main_cluster, path_wcps);
-        //     if (new_segment) {
-        //         other_segments.push_back(new_segment);
-                
-        //         // Add to track fitter for trajectory fitting
-        //         m_track_fitter.add_segment(new_segment);
-        //         m_track_fitter.do_single_tracking(new_segment);
-                
-        //         std::cout << "TaggerCheckSTM: Found additional track with " << path_points.size() 
-        //                 << " points, length: " << max_dis/units::cm << " cm" << std::endl;
-        //     }
-        // }
+            // Use cluster's shortest path algorithm to connect special_A to special_B
+            auto path_wcps = cluster.graph_algorithms("steiner_graph", m_dv, m_pcts).shortest_path(special_A, special_B);
+
+            // Convert path to points
+            std::vector<geo_point_t> path_points;
+            for (size_t idx : path_wcps) {
+                path_points.push_back({x_coords[idx],y_coords[idx],z_coords[idx]});
+            }
+
+            auto new_segment = create_segment_for_cluster(cluster, path_points);
+        
+            m_track_fitter.add_segment(new_segment);
+            m_track_fitter.do_single_tracking(new_segment);
+
+            fitted_segments.push_back(new_segment);
+        }
+
+        // std::cout << "Fitted segments: " << fitted_segments.size() << std::endl;
 
     }
 
