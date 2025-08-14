@@ -43,7 +43,7 @@ namespace WireCell::Clus::PR {
     /// @param seg The segment containing fit data
     /// @param threshold dQ/dx threshold value
     /// @return Length of track segments above threshold
-    double segment_track_length_threshold(SegmentPtr seg, double threshold);
+    double segment_track_length_threshold(SegmentPtr seg, double threshold = 75000./units::cm);
 
     /// Calculate track length from segment using geometric distance between points
     ///

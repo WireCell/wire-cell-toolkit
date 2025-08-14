@@ -8,6 +8,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/TrackFitting.h"  
 #include "WireCellClus/TrackFittingPresets.h"
+#include "WireCellClus/PRSegmentFunctions.h"
 
 
 class TaggerCheckSTM;
@@ -1221,8 +1222,69 @@ private:
     }
 
     bool check_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments){
-
+        if (fitted_segments.size() <= 1) return false;
+    
+        int ntracks = 0;
+        // double total_track_length = 0;
         
+        // drift direction (1,0,0) same as prototype
+        geo_point_t drift_dir_abs(1, 0, 0);
+        
+        // Loop through segments starting from index 1 (skip main segment)
+        for (size_t i = 1; i < fitted_segments.size(); i++) {
+            auto segment = fitted_segments[i];
+            // Use helper functions from PRSegmentFunctions.h
+            double track_length1 = segment_track_length(segment) / units::cm;
+            double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / 50000.;
+            double track_length_threshold = segment_track_length_threshold(segment, 75000./units::cm) / units::cm;
+            
+            // Calculate direction vector (geometric path from front to back)
+            const auto& fits = segment->fits();
+            if (fits.empty()) continue;  // Skip if no fits available
+            
+            const auto& front_pt = fits.front().point;
+            const auto& back_pt = fits.back().point;
+            geo_point_t dir1(
+                front_pt.x() - back_pt.x(),
+                front_pt.y() - back_pt.y(), 
+                front_pt.z() - back_pt.z()
+            );
+            
+            // Calculate geometric length using helper function (maps to get_track_length(2))
+            double straightness_ratio = segment_geometric_length(segment) / segment_track_length(segment);
+            
+            // Main logic from prototype
+            if (track_length1 > 5 && track_medium_dQ_dx > 0.4) {
+                ntracks++;
+            }
+            if (track_length1 > 40 && track_medium_dQ_dx > 0.8) return true;
+            
+            double angle_deg = fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) * 180. / 3.1415926;
+            if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly parallel to drift
+            
+            // Complex condition from prototype
+            if (((track_length1 > 5 && track_medium_dQ_dx > 0.7) &&
+                ((track_medium_dQ_dx - 0.7)/0.1 > (19 - track_length1)/7.) &&
+                straightness_ratio > 0.99) ||
+                (track_length1 > 4 && track_medium_dQ_dx > 1.5 && straightness_ratio > 0.975)) {
+                return true;
+            }
+            
+            if (track_medium_dQ_dx > 1.5 && track_length1 > 8 && straightness_ratio < 0.9) continue;
+            
+            if ((track_medium_dQ_dx > 1.5 && track_length1 > 3) ||
+                (track_medium_dQ_dx > 2.5 && track_length1 > 2.5) ||
+                (track_length_threshold > 5 && ((track_length_threshold > 0.6 * track_length1) || track_length1 > 20))) {
+
+                if (track_length1 < 5 && track_medium_dQ_dx < 2) continue;
+                else if (track_length1 < 25 && track_medium_dQ_dx < 1) continue;
+                else if (track_length1 < 10 && track_medium_dQ_dx < 85/50.) continue;
+                else if (track_length1 < 3.5 && track_medium_dQ_dx < 110/50.) continue;
+                else return true;
+            }
+        }
+        
+        if (ntracks >= 3) return true;
         return false;
     }
 
