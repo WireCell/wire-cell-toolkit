@@ -1,4 +1,8 @@
 #include "WireCellAux/LinterpFunction.h"
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(LinterpFunction, WireCell::Aux::LinterpFunction,
+                 WireCell::IScalarFunction, WireCell::IConfigurable)
 
 namespace WireCell::Aux {
 
