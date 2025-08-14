@@ -453,6 +453,87 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
 }
 
 
+std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const Cluster *cluster, const IDetectorVolumes::pointer dv, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, std::vector<std::pair<geo_point_t,WirePlaneId>>& points_info, bool flag_wrap){
+     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+
+    if (!cluster) {
+        SPDLOG_WARN("make_points_cluster_skeleton: null cluster return empty points");
+        return dpc_points;
+    }
+    dpc_points.reserve(points_info.size());
+
+    // Cache for angle values per wpid to avoid repeated tuple unpacking
+    std::unordered_map<int, std::array<double, 3>> wpid_angles_cache;
+    
+    for (auto& [test_point, wpid_test_point] : points_info) {
+        // std::cout << test_point << " " <<  wpid_test_point << std::endl;
+        if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
+            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
+        }
+        
+        // Get or compute angle values for this wpid
+        // std::array<double, 3> angle_uvw;
+        // auto cache_it = wpid_angles_cache.find(wpid_test_point.ident());
+        // if (cache_it == wpid_angles_cache.end()) {
+        //     const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
+        //     angle_uvw = {angle_u, angle_v, angle_w};
+        //     wpid_angles_cache[wpid_test_point.ident()] = angle_uvw;
+        // } else {
+        //     angle_uvw = cache_it->second;
+        // }
+
+        DynamicPointCloud::DPCPoint point;
+        point.wpid = wpid_test_point.ident(); // Direct assignment without recreation
+        point.cluster = cluster;
+        point.blob = nullptr;
+            
+        // Pre-allocate and initialize vectors
+        point.x_2d.resize(3);
+        point.y_2d.resize(3);
+        point.wpid_2d.resize(3);
+        point.wind = wind_bogus;
+        point.dist_cut = dist_cut_bogus;
+            
+        point.x = test_point.x();
+        point.y = test_point.y();
+        point.z = test_point.z();
+
+        if (wpid_test_point.apa() != -1) {
+            // Get cached angles if available
+            std::array<double, 3> temp_angle_uvw;
+            auto cache_it = wpid_angles_cache.find(wpid_test_point.ident());
+            if (cache_it == wpid_angles_cache.end()) {
+                const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
+                temp_angle_uvw = {angle_u, angle_v, angle_w};
+                wpid_angles_cache[wpid_test_point.ident()] = temp_angle_uvw;
+            } else {
+                temp_angle_uvw = cache_it->second;
+            }
+            
+            if (flag_wrap){
+                fill_wrap_points(cluster, test_point, wpid_test_point,  point.x_2d, point.y_2d, point.wpid_2d);
+            }else{
+                for (size_t pindex = 0; pindex < 3; ++pindex) {
+                    point.x_2d[pindex].push_back(point.x);
+                    point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
+                                        sin(temp_angle_uvw[pindex]) * point.y);
+                    point.wpid_2d[pindex].push_back(wpid_test_point.ident());
+
+                }
+            }
+        } 
+        // else {
+            // point.x_2d = {-1e12, -1e12, -1e12};
+            // point.y_2d = {-1e12, -1e12, -1e12};
+        // }
+        dpc_points.push_back(std::move(point));
+    }
+   
+   
+    return dpc_points;
+
+}
+
 
 std::vector<DynamicPointCloud::DPCPoint>
 Clus::Facade::make_points_cluster_skeleton(

@@ -96,6 +96,8 @@ namespace WireCell::Clus::Facade {
         bool flag_wrap = false,
         const double step = 0.6 * units::cm);
 
+    std::vector<DynamicPointCloud::DPCPoint> make_points_direct(const Cluster *cluster, const IDetectorVolumes::pointer dv, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, std::vector<std::pair<geo_point_t,WirePlaneId>>& points_info, bool flag_wrap = false);
+
     /// @brief add points from p_test along dir with range and step
     /// @attention: the index_uvw is hacked to store the distance cut
     std::vector<DynamicPointCloud::DPCPoint> make_points_linear_extrapolation(

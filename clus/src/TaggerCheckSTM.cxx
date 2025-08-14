@@ -817,12 +817,18 @@ private:
     
         // Step 3: Prepare segment data
         std::vector<PR::WCPoint> wcpoints;
-        
+        std::vector<std::pair<geo_point_t, WirePlaneId>> point_plane_pairs;
+
         for (const auto& point : path_points) {
             PR::WCPoint wcp;
             wcp.point = point; 
             wcpoints.push_back(wcp);
+
+            // Create a WirePlaneId for the point
+            WirePlaneId wpid = m_dv->contained_by(point);
+            point_plane_pairs.emplace_back(point, wpid);
         }
+        
         
         // Step 4: Create segment connecting the vertices
         auto segment = PR::make_segment();
@@ -833,6 +839,39 @@ private:
         // auto& wcpts = segment->wcpts();
         // for (size_t i=0;i!=path_points.size(); i++){
         //     std::cout << "A: " << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
+        // }
+
+        // create and associate Dynamic Point Cloud
+
+        // // Step 1: Get wpid_params (from detector configuration)
+        // Get all the wire plane IDs from the grouping
+        const auto& wpids = cluster.grouping()->wpids();
+        // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+        std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+        std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
+        std::set<int> apas;
+        compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+
+        // Step 2: Create DynamicPointCloud
+        auto dpc = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+
+        // Step 3: Create DPCPoints using factory function (recommended)
+        auto dpc_points = Facade::make_points_direct(&cluster, m_dv, wpid_params, point_plane_pairs, true);
+
+        std::cout << "Created DPCPoints: " << dpc_points.size() << std::endl;
+        // // Step 4: Add points to DynamicPointCloud
+        dpc->add_points(dpc_points);
+
+        // Step 5: Associate with segment
+        segment->dpcloud("main", dpc);
+
+        // // Now you can access the DynamicPointCloud:
+        // auto retrieved_dpc = segment->dpcloud("main");
+        // if (retrieved_dpc) {
+        //     // Use DynamicPointCloud methods
+        //     auto points_info = retrieved_dpc->get_2d_points_info(some_point, radius, plane, face, apa);
         // }
 
         return segment;
