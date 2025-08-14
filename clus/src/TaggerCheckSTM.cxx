@@ -180,7 +180,9 @@ private:
         auto dQ = m_track_fitter.get_dQ();
         auto dx = m_track_fitter.get_dx();
 
-        
+        mid_p.at(0) = fine_tracking_path.at(0).first.x();
+        mid_p.at(1) = fine_tracking_path.at(0).first.y();
+        mid_p.at(2) = fine_tracking_path.at(0).first.z();
 
         // Initialize variables
         int save_i = 0;
@@ -317,18 +319,163 @@ private:
             }
         }
 
-
-        // get steiner PC
-        const auto& steiner_pc = cluster.get_pc("steiner_pc");
-        const auto& coords = cluster.get_default_scope().coords;
-        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
-
         std::vector<geo_point_t> out_path_points;
 
         if (flag_crawl){
+            // Start to Crawl
+            const double step_dis = 1.0 * units::cm;
             
+            // Get point clouds and coordinate arrays from cluster
+            const auto& steiner_pc = cluster.get_pc("steiner_pc");
+            const auto& coords = cluster.get_default_scope().coords;
+            const auto& steiner_x = steiner_pc.get(coords.at(0))->elements<double>();
+            const auto& steiner_y = steiner_pc.get(coords.at(1))->elements<double>();
+            const auto& steiner_z = steiner_pc.get(coords.at(2))->elements<double>();
+      
+            
+            // Initialization - get starting point from fine tracking path
+            geo_point_t p(fine_tracking_path.at(save_i).first.x(), 
+                        fine_tracking_path.at(save_i).first.y(), 
+                        fine_tracking_path.at(save_i).first.z());
+            
+            // Find closest point in steiner point cloud
+            auto curr_knn_results = cluster.kd_steiner_knn(1, p, "steiner_pc");
+            size_t curr_index = curr_knn_results[0].first;
+            geo_point_t curr_wcp(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
+            
+            // Calculate previous point direction
+            geo_point_t prev_p(0, 0, 0);
+            int num_p = 0;
+            for (size_t i = 1; i != 6; i++) {
+                if (save_i >= i) {
+                    prev_p.at(0) += fine_tracking_path.at(save_i - i).first.x();
+                    prev_p.at(1) += fine_tracking_path.at(save_i - i).first.y();
+                    prev_p.at(2) += fine_tracking_path.at(save_i - i).first.z();
+                    num_p++;
+                }
+            }
+            prev_p.at(0) /= num_p;
+            prev_p.at(1) /= num_p;
+            prev_p.at(2) /= num_p;
+            
+            // Calculate initial direction
+            WireCell::Vector dir(p.at(0) - prev_p.at(0), p.at(1) - prev_p.at(1), p.at(2) - prev_p.at(2));
+            dir = dir.norm();
+            
+            bool flag_continue = true;
+            while (flag_continue) {
+                flag_continue = false;
+                
+                for (int i = 0; i != 3; i++) {
+                    // Calculate test point
+                    geo_point_t test_p(curr_wcp.at(0) + dir.x() * step_dis * (i + 1),
+                                       curr_wcp.at(1) + dir.y() * step_dis * (i + 1),
+                                       curr_wcp.at(2) + dir.z() * step_dis * (i + 1));
+                    // Try normal point cloud first
+                    auto search_result = cluster.get_closest_wcpoint(test_p);
+                    geo_point_t next_wcp = search_result.second;
+                    WireCell::Vector dir1(next_wcp.at(0) - curr_wcp.at(0),
+                                          next_wcp.at(1) - curr_wcp.at(1),
+                                          next_wcp.at(2) - curr_wcp.at(2));
+
+                    // Check angle constraint (30 degrees)
+                    if (dir1.magnitude() != 0 && (std::acos(dir1.dot(dir) / dir1.magnitude()) / 3.1415926 * 180.0 < 30)) {
+                        flag_continue = true;
+                        curr_wcp = next_wcp;
+                        dir = dir1 + dir * 5.0 * units::cm; // momentum trick
+                        dir = dir.norm();
+                        break;
+                    }
+                    
+                    // Try steiner point cloud
+                    auto next_knn_steiner = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
+                    size_t next_index = next_knn_steiner[0].first;
+                    next_wcp.at(0) = steiner_x[next_index];
+                    next_wcp.at(1) = steiner_y[next_index];
+                    next_wcp.at(2) = steiner_z[next_index];
+                    WireCell::Vector dir2(next_wcp.at(0) - curr_wcp.at(0),
+                                          next_wcp.at(1) - curr_wcp.at(1),
+                                          next_wcp.at(2) - curr_wcp.at(2));
+                    
+                    // Check angle constraint (30 degrees)
+                    if (dir2.magnitude() != 0 && (std::acos(dir2.dot(dir) / dir2.magnitude()) / 3.1415926 * 180.0 < 30)) {
+                        flag_continue = true;
+                        curr_wcp = next_wcp;
+                        dir = dir2 + dir * 5.0 * units::cm; // momentum trick
+                        dir = dir.norm();
+                        break;
+                    }
+                }
+            }
+            
+            // Find first and last points in steiner point cloud
+            geo_point_t first_p(fine_tracking_path.front().first.x(), 
+                            fine_tracking_path.front().first.y(), 
+                            fine_tracking_path.front().first.z());
+            auto first_knn_results = cluster.kd_steiner_knn(1, first_p, "steiner_pc");
+            size_t first_index = first_knn_results[0].first;
+            
+            geo_point_t last_p(fine_tracking_path.back().first.x(), 
+                            fine_tracking_path.back().first.y(), 
+                            fine_tracking_path.back().first.z());
+            auto last_knn_results = cluster.kd_steiner_knn(1, last_p, "steiner_pc");
+            size_t last_index = last_knn_results[0].first;
+            
+            // Update current point to closest steiner point
+            auto curr_steiner_knn = cluster.kd_steiner_knn(1, curr_wcp, "steiner_pc");
+            curr_index = curr_steiner_knn[0].first;
+            
+            mid_p = curr_wcp;
+
+            std::cout << "First, Center: " << steiner_x[first_index] << " " << steiner_y[first_index] 
+                    << " " << steiner_z[first_index] << " " << steiner_x[curr_index] << " " 
+                    << steiner_y[curr_index] << " " << steiner_z[curr_index] << std::endl;
+            
+            // Calculate distance from current to last point
+            double dis = std::sqrt(std::pow(steiner_x[curr_index] - steiner_x[last_index], 2) + 
+                                std::pow(steiner_y[curr_index] - steiner_y[last_index], 2) + 
+                                std::pow(steiner_z[curr_index] - steiner_z[last_index], 2));
+            
+            if (dis > 1.0 * units::cm) {
+                // Find path from first to current point
+                const std::vector<size_t>& path1_indices = 
+                    cluster.graph_algorithms("steiner_graph").shortest_path(first_index, curr_index);
+                
+                // Find path from current to last point
+                const std::vector<size_t>& path2_indices = 
+                    cluster.graph_algorithms("steiner_graph").shortest_path(curr_index, last_index);
+                
+                // Combine paths, removing duplicate middle point
+                // Copy first path to temporary storage
+                std::vector<size_t> temp_path_indices = path1_indices;
+                
+                // Find overlapping portion between end of path1 and beginning of path2
+                int count = 0;
+                auto it1 = temp_path_indices.rbegin();  // reverse iterator for temp path
+                for (auto it = path2_indices.begin(); it != path2_indices.end() && it1 != temp_path_indices.rend(); ++it, ++it1) {
+                    if (*it == *it1) {
+                        count++;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Remove from end of temp_path_indices
+                for (int i = 0; i != count; i++) {
+                    temp_path_indices.pop_back();
+                }
+                
+                // Add first path (without overlapping end)
+                for (size_t idx : temp_path_indices) {
+                    out_path_points.emplace_back(steiner_x[idx], steiner_y[idx], steiner_z[idx]);
+                }
+                
+                // Add second path (without overlapping beginning)
+                for (size_t idx : path2_indices) {
+                    out_path_points.emplace_back(steiner_x[idx], steiner_y[idx], steiner_z[idx]);
+                }
+                
+            }
         }
 
         return out_path_points;
