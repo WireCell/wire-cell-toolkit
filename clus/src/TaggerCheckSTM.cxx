@@ -327,6 +327,10 @@ private:
 
         std::vector<geo_point_t> out_path_points;
 
+        if (flag_crawl){
+            
+        }
+
         return out_path_points;
     }
 
