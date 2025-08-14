@@ -1220,6 +1220,12 @@ private:
       return false;
     }
 
+    bool check_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments){
+
+        
+        return false;
+    }
+
     /**
      * Check if a cluster meets the conditions for STM (Short Track Muon) tagging.
      * This is where you'll implement your specific STM detection algorithm.
