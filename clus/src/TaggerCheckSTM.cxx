@@ -882,6 +882,15 @@ private:
         return segment;
     }
 
+    std::vector<std::shared_ptr<PR::Segment> > search_other_tracks(Cluster& main_cluster, std::shared_ptr<PR::Segment> segment) const{
+        std::vector<std::shared_ptr<PR::Segment> > other_segments;
+        // Implement your search logic here
+
+        
+
+        return other_segments;
+    }
+
     bool check_other_clusters(Cluster& main_cluster, std::vector<Cluster*> associated_clusters) const {
         int number_clusters = 0;
         double total_length = 0;
@@ -1359,6 +1368,8 @@ private:
         find_first_kink(cluster);
 
         check_other_clusters(cluster, associated_clusters);
+
+        search_other_tracks(cluster, segment);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
