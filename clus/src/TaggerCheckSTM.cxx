@@ -481,6 +481,15 @@ private:
         return out_path_points;
     }
 
+    int find_first_kink(const WireCell::Clus::Facade::Cluster& cluster) const{
+        // Implement your logic to find the first kink in the cluster
+        auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
+        // auto dQ = m_track_fitter.get_dQ();
+        // auto dx = m_track_fitter.get_dx();
+
+        return -1;  // Placeholder return value
+    }
+
     std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
                                const std::vector<geo_point_t>& path_points) const{
     
