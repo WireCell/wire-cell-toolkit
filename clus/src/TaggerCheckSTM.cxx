@@ -10,6 +10,9 @@
 #include "WireCellClus/TrackFittingPresets.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 
+#include "WireCellIface/IScalarFunction.h"
+
+
 
 class TaggerCheckSTM;
 WIRECELL_FACTORY(TaggerCheckSTM, TaggerCheckSTM,
@@ -50,6 +53,19 @@ public:
             std::cout << "TaggerCheckSTM: No TrackFitting config file specified, using defaults" << std::endl;
         }
 
+        // Configure the LinterpFunction - similar to how drifter is configured
+        auto linterp_name = get<std::string>(config, "linterp_function", "Muon");
+        if (!linterp_name.empty()) {
+            m_linterp_function = Factory::find_tn<IScalarFunction>(linterp_name);
+            if (!m_linterp_function) {
+                std::cout << "TaggerCheckSTM: Failed to find LinterpFunction: " <<  linterp_name << std::endl;
+                THROW(ValueError() << errmsg{"Failed to find LinterpFunction: " + linterp_name});
+            }
+            std::cout << "TaggerCheckSTM: Successfully configured LinterpFunction: " << linterp_name << std::endl;
+        } else {
+            std::cout << "TaggerCheckSTM: No LinterpFunction configured" << std::endl;
+        }
+
     }
     
     virtual Configuration default_configuration() const {
@@ -59,6 +75,8 @@ public:
         cfg["pc_transforms"] = "PCTransformSet";  
 
         cfg["trackfitting_config_file"] = ""; 
+        cfg["linterp_function"] = "";  // empty means user must provide
+
         return cfg;
     }
 
@@ -124,6 +142,8 @@ private:
     std::string m_grouping_name{"live"};
     std::string m_trackfitting_config_file;  // Path to TrackFitting config file
     mutable TrackFitting m_track_fitter; 
+
+    WireCell::IScalarFunction::pointer m_linterp_function;
 
     void load_trackfitting_config(const std::string& config_file) {
         try {
