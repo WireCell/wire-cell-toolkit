@@ -1103,7 +1103,7 @@ private:
         return false;
     }
 
-    bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num, double peak_range = 40*units::cm, double offset_x = 0*units::cm, double com_range = 35*units::cm, bool flag_strong_check = false) const{
+    bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num, double peak_range = 40*units::cm, double offset_length = 0*units::cm, double com_range = 35*units::cm, bool flag_strong_check = false) const{
         auto& cluster = *segment->cluster();
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
@@ -1137,6 +1137,171 @@ private:
         std::vector<WireCell::Point> pts;
         for (const auto& path_point : fine_tracking_path) {
             pts.push_back(path_point.first);
+        }
+        
+        std::vector<double> L(pts.size(), 0);
+        std::vector<double> dQ_dx(pts.size(), 0);
+        double dis = 0;
+        L[0] = dis;
+        dQ_dx[0] = dQ[0] / (dx[0] / units::cm + 1e-9);
+
+        for (size_t i = 1; i != pts.size(); i++) {
+            dis += sqrt(pow(pts[i].x() - pts[i-1].x(), 2) + 
+                        pow(pts[i].y() - pts[i-1].y(), 2) + 
+                        pow(pts[i].z() - pts[i-1].z(), 2));
+            L[i] = dis;
+            dQ_dx[i] = dQ[i] / (dx[i] / units::cm + 1e-9);
+        }
+
+        double end_L;
+        double max_num;
+        if (kink_num == pts.size()) {
+            end_L = L.back();
+            max_num = L.size();
+        } else {
+            end_L = L[kink_num] - 0.5 * units::cm;
+            max_num = kink_num;
+        }
+
+        double max_bin = -1;
+        double max_sum = 0;
+        for (size_t i = 0; i != L.size(); i++) {
+            double sum = 0;
+            double nsum = 0;
+            double temp_max_bin = i;
+            double temp_max_val = dQ_dx[i];
+            
+            if (L[i] < end_L + 0.5 * units::cm && L[i] > end_L - peak_range && i < max_num) {
+                sum += dQ_dx[i]; nsum++;
+                if (i >= 2) {
+                    sum += dQ_dx[i-2]; nsum++;
+                    if (dQ_dx[i-2] > temp_max_val && i-2 < max_num) {
+                        temp_max_val = dQ_dx[i-2];
+                        temp_max_bin = i-2;
+                    }
+                }
+                if (i >= 1) {
+                    sum += dQ_dx[i-1]; nsum++;
+                    if (dQ_dx[i-1] > temp_max_val && i-1 < max_num) {
+                        temp_max_val = dQ_dx[i-1];
+                        temp_max_bin = i-1;
+                    }
+                }
+                if (i+1 < L.size()) {
+                    sum += dQ_dx[i+1]; nsum++;
+                    if (dQ_dx[i+1] > temp_max_val && i+1 < max_num) {
+                        temp_max_val = dQ_dx[i+1];
+                        temp_max_bin = i+1;
+                    }
+                }
+                if (i+2 < L.size()) {
+                    sum += dQ_dx[i+2]; nsum++;
+                    if (dQ_dx[i+2] > temp_max_val && i+2 < max_num) {
+                        temp_max_val = dQ_dx[i+2];
+                        temp_max_bin = i+2;
+                    }
+                }
+                sum /= nsum;
+                if (sum > max_sum) {
+                    max_sum = sum;
+                    max_bin = temp_max_bin;
+                }
+            }
+        }
+
+        if (max_bin == -1)
+            max_bin = max_num;
+
+        end_L = L[max_bin] + 0.2 * units::cm;
+        int ncount = 0;
+        std::vector<double> vec_x;
+        std::vector<double> vec_y;
+        std::vector<double> vec_res_x;
+        std::vector<double> vec_res_y;
+
+        for (size_t i = 0; i != L.size(); i++) {
+            if (end_L - L[i] < com_range && end_L - L[i] > 0) {
+                vec_x.push_back(end_L - L[i]);
+                vec_y.push_back(dQ_dx[i]);
+                ncount++;
+            } else if (L[i] > end_L) {
+                vec_res_x.push_back(L[i] - end_L);
+                vec_res_y.push_back(dQ_dx[i]);
+            }
+        }
+
+        double ave_res_dQ_dx = 0;
+        double res_length = 0;
+        for (size_t i = 0; i != vec_res_y.size(); i++) {
+            ave_res_dQ_dx += vec_res_y[i];
+        }
+
+        if (vec_res_y.size() > 0) {
+            res_length = vec_res_x.back();
+            ave_res_dQ_dx /= 1. * vec_res_y.size();
+        }
+
+        double res_length1 = 0, res_dis1 = 0;
+        if (max_bin + 3 < L.size()) {
+            res_length1 = L.back() - L[max_bin + 3];
+            res_dis1 = sqrt(pow(pts.back().x() - pts[max_bin + 3].x(), 2) +
+                        pow(pts.back().y() - pts[max_bin + 3].y(), 2) +
+                        pow(pts.back().z() - pts[max_bin + 3].z(), 2));
+        }
+
+        // Create vectors for KS test instead of histograms
+        std::vector<double> test_data(ncount);
+        std::vector<double> ref_muon(ncount);
+        std::vector<double> ref_flat(ncount);
+
+        for (size_t i = 0; i != ncount; i++) {
+            test_data[i] = vec_y[i];
+            ref_muon[i] = m_linterp_function->scalar_function((vec_x[i] + offset_length) / units::cm);
+            ref_flat[i] = 50e3;
+        }
+
+        double ks1 = WireCell::kslike_compare(test_data, ref_muon);
+        double ratio1 = std::accumulate(ref_muon.begin(), ref_muon.end(), 0.0) / 
+                        (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
+        double ks2 = WireCell::kslike_compare(test_data, ref_flat);
+        double ratio2 = std::accumulate(ref_flat.begin(), ref_flat.end(), 0.0) / 
+                        (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
+
+        std::cout << "KS value: " << flag_strong_check << " " << ks1 << " " << ks2 << " " << ratio1 << " " << ratio2 << " " << ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 << " "  << res_dis1/(res_length1+1e-9) << " " << res_length /units::cm << " " << ave_res_dQ_dx/50000. << std::endl;
+
+        if (ks1 - ks2 >= 0.0) return false;
+        if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) return false;
+
+        if (((res_length > 8*units::cm && ave_res_dQ_dx/50000. > 0.9 && res_length1 > 5*units::cm) ||
+            (res_length1 > 1.5*units::cm && ave_res_dQ_dx/50000. > 2.3)) && res_dis1/(res_length1+1e-9) > 0.99)
+            return false;
+
+        // If residual does not look like a michel electron
+        if ((res_length > 20 * units::cm && ave_res_dQ_dx/50000. > 1.2 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) ||
+            (res_length > 16 * units::cm && ave_res_dQ_dx > 72500) || 
+            (res_length > 10 * units::cm && ave_res_dQ_dx > 72500 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
+            (res_length > 10 * units::cm && ave_res_dQ_dx > 85000) ||
+            (res_length > 6 * units::cm && ave_res_dQ_dx > 92500) ||
+            (res_length > 6 * units::cm && ave_res_dQ_dx > 72500 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
+            (res_length > 4 * units::cm && ave_res_dQ_dx/50000. > 1.4 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > 0.02) ||
+            (res_length > 2*units::cm && ave_res_dQ_dx/50000. > 4.5))
+            return false;
+
+        if (!flag_strong_check) {
+            if (ks1 - ks2 < -0.02 && ((ks2 > 0.09 && fabs(ratio2-1) > 0.1) || ratio2 > 1.5 || ks2 > 0.2)) 
+                return true;
+            if (ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 < 0) 
+                return true;
+        } else {
+            if (ks1 - ks2 < -0.02 && (ks2 > 0.09 || ratio2 > 1.5) && ks1 < 0.05 && fabs(ratio1-1) < 0.1) 
+                return true;
+            if (ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 < 0 && ks1 < 0.05 && fabs(ratio1-1) < 0.1) 
+                return true;
         }
 
 
