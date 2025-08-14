@@ -172,12 +172,151 @@ private:
     }
 
     // return a vector of point, also the mid_p is also a return point ...
-    std::vector<geo_point_t> adjust_rough_path(const Cluster& cluster, geo_point_t& mid_p){
+    std::vector<geo_point_t> adjust_rough_path(const Cluster& cluster, geo_point_t& mid_p) const{
+
         const geo_point_t drift_dir_abs(1,0,0); 
         // use the m_track_fitter ...
         auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
         auto dQ = m_track_fitter.get_dQ();
         auto dx = m_track_fitter.get_dx();
+
+        
+
+        // Initialize variables
+        int save_i = 0;
+        bool flag_crawl = false;
+
+        // Initialize angle vectors
+        std::vector<double> refl_angles(fine_tracking_path.size(), 0);
+        std::vector<double> para_angles(fine_tracking_path.size(), 0);
+
+        // First part: Calculate reflection and parallel angles for each point
+        for (size_t i = 0; i != fine_tracking_path.size(); i++) {
+            double angle1 = 0;  // reflection angle
+            double angle2 = 0;  // parallel angle
+            
+            // Calculate angles using vectors to neighboring points at different distances
+            for (int j = 0; j != 6; j++) {
+                WireCell::Vector v10(0, 0, 0);  // Vector from previous point
+                WireCell::Vector v20(0, 0, 0);  // Vector to next point
+                
+                // Backward vector (from point i-j-1 to point i)
+                if (i > j) {
+                    v10 = WireCell::Vector(fine_tracking_path.at(i).first.x() - fine_tracking_path.at(i-j-1).first.x(),
+                                        fine_tracking_path.at(i).first.y() - fine_tracking_path.at(i-j-1).first.y(),
+                                        fine_tracking_path.at(i).first.z() - fine_tracking_path.at(i-j-1).first.z());
+                }
+                
+                // Forward vector (from point i to point i+j+1)
+                if (i + j + 1 < fine_tracking_path.size()) {
+                    v20 = WireCell::Vector(fine_tracking_path.at(i+j+1).first.x() - fine_tracking_path.at(i).first.x(),
+                                        fine_tracking_path.at(i+j+1).first.y() - fine_tracking_path.at(i).first.y(),
+                                        fine_tracking_path.at(i+j+1).first.z() - fine_tracking_path.at(i).first.z());
+                }
+                
+                if (j == 0) {
+                    // For the first iteration, set initial values
+                    if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                        angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                    }                
+                    // Calculate angles with drift direction
+                    if (v10.magnitude() > 0) {
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::abs(angle_v10 - 90.0);
+                    }
+                    if (v20.magnitude() > 0) {
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::max(angle2, std::abs(angle_v20 - 90.0));
+                    }
+                } else {
+                    // For subsequent iterations, take minimum values
+                    if (v10.magnitude() != 0 && v20.magnitude() != 0) {
+                        double temp_angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                        angle1 = std::min(temp_angle1, angle1);
+                        
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        double temp_angle2 = std::max(std::abs(angle_v10 - 90.0), std::abs(angle_v20 - 90.0));
+                        angle2 = std::min(temp_angle2, angle2);
+                    }
+                }
+            }
+            
+            refl_angles.at(i) = angle1;
+            para_angles.at(i) = angle2;
+        }
+
+        // Second part: Analyze charge and find breakpoints
+        for (int i = 0; i != fine_tracking_path.size(); i++) {
+            double min_dQ_dx = dQ.at(i) / dx.at(i);
+            
+            // Find minimum dQ/dx in the next 5 points
+            for (size_t j = 1; j != 6; j++) {
+                if (i + j < fine_tracking_path.size()) {
+                    if (dQ.at(i + j) / dx.at(i + j) < min_dQ_dx) {
+                        min_dQ_dx = dQ.at(i + j) / dx.at(i + j);
+                    }
+                }
+            }
+            
+            // Calculate sum of reflection angles in a local window
+            double sum_angles = 0;
+            double nsum = 0;
+            
+            for (int j = -2; j != 3; j++) {
+                if (i + j >= 0 && i + j < fine_tracking_path.size()) {
+                    if (para_angles.at(i + j) > 10) {
+                        sum_angles += pow(refl_angles.at(i + j), 2);
+                        nsum++;
+                    }
+                }
+            }
+            
+            if (nsum != 0) {
+                sum_angles = sqrt(sum_angles / nsum);
+            }
+            
+            // First breakpoint condition: Low charge with significant angles
+            if (min_dQ_dx < 1000 && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
+                std::cout << "Mid_Point_Break: " << i << " " << refl_angles.at(i) << " " 
+                        << para_angles.at(i) << " " << min_dQ_dx << " " 
+                        << fine_tracking_path.at(i).first.x() << " " 
+                        << fine_tracking_path.at(i).first.y() << " " 
+                        << fine_tracking_path.at(i).first.z() << std::endl;
+                flag_crawl = true;
+                save_i = i;
+                break;
+            }
+            // Second breakpoint condition: Higher angle thresholds with geometric constraints
+            else if (para_angles.at(i) > 15 && refl_angles.at(i) > 27 && sum_angles > 12.5) {
+                // Calculate angle between vectors from start to point and point to end
+                WireCell::Vector v10(fine_tracking_path.at(i).first.x() - fine_tracking_path.front().first.x(),
+                                    fine_tracking_path.at(i).first.y() - fine_tracking_path.front().first.y(),
+                                    fine_tracking_path.at(i).first.z() - fine_tracking_path.front().first.z());
+
+                WireCell::Vector v20(fine_tracking_path.back().first.x() - fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.back().first.y() - fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.back().first.z() - fine_tracking_path.at(i).first.z());
+
+                double angle3 = 0;
+                if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                    angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                }
+                
+                // Skip if the angle is too small (nearly straight line)
+                if (angle3 < 20) continue;
+                
+                std::cout << "Mid_Point_Break: " << i << " " << refl_angles.at(i) << " " 
+                        << para_angles.at(i) << " " << angle3 << " " << min_dQ_dx << " " 
+                        << fine_tracking_path.at(i).first.x() << " " 
+                        << fine_tracking_path.at(i).first.y() << " " 
+                        << fine_tracking_path.at(i).first.z() << std::endl;
+                flag_crawl = true;
+                save_i = i;
+                break;
+            }
+        }
+
 
         // get steiner PC
         const auto& steiner_pc = cluster.get_pc("steiner_pc");
@@ -186,7 +325,9 @@ private:
         const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
         const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
 
+        std::vector<geo_point_t> out_path_points;
 
+        return out_path_points;
     }
 
     std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
@@ -641,39 +782,32 @@ private:
 
         m_track_fitter.do_single_tracking();
 
+
+        geo_point_t mid_point(0,0,0);
+        adjust_rough_path(cluster, mid_point);
+
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
         // m_track_fitter.fill_global_rb_map();
-
         // auto organized_path = m_track_fitter.organize_orig_path(segment);
         // // auto test = m_track_fitter.examine_end_ps_vec(segment, organized_path, true, true);
-
         // auto test_path = organized_path;
         // m_track_fitter.organize_ps_path(segment, test_path, 1.2*units::cm, 0.6*units::cm);
-
         // std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << " " << test_path.size() << std::endl;
-
         // // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
-
         // // WireCell::Point p = organized_path.front();
         // // TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
         // // m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
         // // m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
         // // std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
-
         // std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
         // for (const auto& p : organized_path) {
         //     ptss.emplace_back(p, segment);
         // }
         // m_track_fitter.form_map(ptss);
-
         // m_track_fitter.trajectory_fit(ptss);
-
         // m_track_fitter.dQ_dx_fit();
-
-
         // std::cout << m_track_fitter.get_parameter("DL") << std::endl;
-
         // std::cout << "TaggerCheckSTM: Formed map with " << organized_path.size() << " points." << std::endl;
 
         return false;
