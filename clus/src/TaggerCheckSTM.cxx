@@ -484,8 +484,15 @@ private:
     int find_first_kink(const WireCell::Clus::Facade::Cluster& cluster) const{
         // Implement your logic to find the first kink in the cluster
         auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
-        // auto dQ = m_track_fitter.get_dQ();
-        // auto dx = m_track_fitter.get_dx();
+        auto dQ = m_track_fitter.get_dQ();
+        auto dx = m_track_fitter.get_dx();
+        auto pu = m_track_fitter.get_pu();
+        auto pv = m_track_fitter.get_pv();
+        auto pw = m_track_fitter.get_pw();
+        auto pt = m_track_fitter.get_pt();
+        auto paf = m_track_fitter.get_paf();
+
+        
 
         return -1;  // Placeholder return value
     }
