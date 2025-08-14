@@ -1306,7 +1306,7 @@ private:
         auto test_results = m_track_fitter.get_wires_for_channel(0,ch);
         std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
 
-        m_track_fitter.do_single_tracking();
+        m_track_fitter.do_single_tracking(segment);
 
 
         geo_point_t mid_point(0,0,0);

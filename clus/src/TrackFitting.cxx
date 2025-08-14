@@ -3653,7 +3653,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     recover_original_charge_data();
 }
 
-void TrackFitting::do_single_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit) {
+void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data) {
       // Clear all internal tracking vectors
     fine_tracking_path.clear();
     dQ.clear();
@@ -3670,18 +3670,20 @@ void TrackFitting::do_single_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_f
     bool flag_dQ_dx = flag_dQ_dx_fit;
     
     // Prepare the data for the fit - collect charge information from 2D projections
-    prepare_data();
-    fill_global_rb_map();
+    if (flag_force_load_data || global_rb_map.size() == 0){
+        prepare_data();
+        fill_global_rb_map();
+    }
 
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
 
-    if (m_segments.empty()) {
+    if (m_segments.find(segment) == m_segments.end()) {
         // Handle empty segments case - could log warning or return
         return;
     }
-    auto segment = *m_segments.begin();
+    // auto segment = *m_segments.begin();
     
     auto pts = organize_orig_path(segment, low_dis_limit, end_point_limit); 
     if (pts.size() == 0) return;
