@@ -98,6 +98,13 @@ $ (hack)
 $ git <push|pull|commit> [...]
 #+end_example
 
+While the dual-source modality is maintained, the developer should also push the
+subrepo.
+
+#+begin_example
+$ git subrepo push spng
+#+end_example
+
 The rest of this section summarizes the basic ~git subrepo~ maintenance.  Initial creation:
 
 #+begin_example
