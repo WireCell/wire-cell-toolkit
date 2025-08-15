@@ -1712,7 +1712,7 @@ private:
       return false;
     }
 
-    bool check_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments){
+    bool check_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments) const {
         if (fitted_segments.size() <= 1) return false;
     
         int ntracks = 0;
@@ -2183,6 +2183,397 @@ private:
                 return false;
             }
         }
+
+        bool flag_other_clusters = check_other_clusters(cluster, associated_clusters);
+
+        std::cout << "STM analysis: flag_double_end=" << flag_double_end 
+                  << ", flag_other_clusters=" << flag_other_clusters << std::endl;
+
+        // Forward check
+        {
+            if (flag_double_end) std::cout << "Forward check!" << std::endl;
+            
+            // Do rough path tracking
+            auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
+            
+            {
+                // Create segment for tracking
+                auto segment = create_segment_for_cluster(cluster, path_points);
+                m_track_fitter.add_segment(segment);
+                m_track_fitter.do_single_tracking(segment, false);
+                // Extract fit results from the segment
+                const auto& fits = segment->fits();
+                if (fits.size() <=3) return false;
+            }
+
+            std::cout << "Finish first round of fitting" << std::endl;
+
+            geo_point_t mid_point(0,0,0);
+            auto adjusted_path_points = adjust_rough_path(cluster, mid_point);
+            auto adjusted_segment = create_segment_for_cluster(cluster, adjusted_path_points);
+            m_track_fitter.clear_segments();
+            m_track_fitter.add_segment(adjusted_segment);
+            m_track_fitter.do_single_tracking(adjusted_segment);
+
+            std::cout << "Finish second round of fitting" << std::endl;
+
+            std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+            std::vector<double> dQ, dx;
+            std::vector<std::pair<int,int>> paf;
+
+            const auto& fits = adjusted_segment->fits();
+            for (const auto& fit : fits) {
+                fine_tracking_path.emplace_back(fit.point, adjusted_segment);
+                dQ.push_back(fit.dQ);
+                dx.push_back(fit.dx);
+                paf.push_back(fit.paf);
+            }
+
+            // Extract points for compatibility
+            std::vector<WireCell::Point> pts;
+            for (const auto& path_point : fine_tracking_path) {
+                pts.push_back(path_point.first);
+            }
+
+            std::cout << "Collect points " << pts.size() << std::endl;
+
+            int kink_num = find_first_kink(adjusted_segment);
+
+            std::cout << "Kink Number: " << kink_num << std::endl;
+
+            double left_L = 0; 
+            double left_Q = 0;
+            double exit_L = 0; 
+            double exit_Q = 0;
+            
+            for (size_t i=0; i != kink_num && i < dx.size(); i++){
+                exit_L += dx.at(i);
+                exit_Q += dQ.at(i);
+            }
+            for (size_t i = kink_num; i < dx.size(); i++){
+                left_L += dx.at(i);
+                left_Q += dQ.at(i);
+            }
+            
+            std::cout << "Left: " << exit_L/units::cm << " " << left_L/units::cm << " " 
+                      << (left_Q/(left_L/units::cm+1e-9))/50e3 << " " 
+                      << (exit_Q/(exit_L/units::cm+1e-9)/50e3) << std::endl;
+
+            // TGM (Through-Going Muon) check
+            if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && (!fiducial_utils->inside_fiducial_volume(pts.back()))){
+
+                bool flag_TGM_anode = false;
+                if ((pts.back().x() < 2*units::cm || pts.front().x() < 2*units::cm) && 
+                    kink_num >= 0 && kink_num < pts.size()) {
+                    if (pts.at(kink_num).x() < 6*units::cm){
+                        geo_point_t v10(pts.back().x()-pts.at(kink_num).x(),
+                                       pts.back().y()-pts.at(kink_num).y(),
+                                       pts.back().z()-pts.at(kink_num).z());
+                        geo_point_t v20(pts.front().x()-pts.at(kink_num).x(),
+                                       pts.front().y()-pts.at(kink_num).y(),
+                                       pts.front().z()-pts.at(kink_num).z());
+                        
+                        if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90)<12.5 && v10.magnitude()>15*units::cm) || 
+                            (fabs(v20.angle(drift_dir)/3.1415926*180.-90)<12.5 && v20.magnitude()>15*units::cm)) {
+                            flag_TGM_anode = true;
+                        }
+                    }
+                }
+                
+                if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode){
+                    std::cout << "TGM: " << pts.front() << " " << pts.back() << std::endl;
+                    cluster.set_flag(Flags::TGM);
+                    return true;
+                }
+                
+            } 
+            else if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && left_L < 3*units::cm){
+                // Check dead volume
+                WireCell::Point p1 = pts.back();
+                geo_point_t dir_vec = cluster.vhough_transform(p1, 30*units::cm);
+                dir_vec *= -1;
+                
+                if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)){
+                    if (exit_L < 3*units::cm || left_L < 3*units::cm){
+                        std::cout << "TGM: " << pts.front() << " " << pts.back() << std::endl;
+                        cluster.set_flag(Flags::TGM);
+                        return true;
+                    }
+                }
+            } 
+
+            // STM evaluation logic
+            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)){
+                if (!flag_double_end){
+                    std::cout << "Mid Point A " << " Fid "
+                             << " " << mid_point << " " << left_L << " " 
+                             << (left_Q/(left_L/units::cm+1e-9)/50e3) << std::endl;
+                    return false;
+                }
+            } else {
+                bool flag_fix_end = false;
+                if (exit_L < 35*units::cm || ((left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0 && left_L > 2*units::cm)) {
+                    flag_fix_end = true;
+                }
+                
+                // Readjust parameters for short tracks
+                if ((left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3)< 1.5) ||
+                    (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.7) ||
+                    (left_L < 5*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.8) ||
+                    (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.9)){
+                    left_L = 0;
+                    kink_num = dQ.size();
+                    exit_L = 40*units::cm;
+                    flag_fix_end = false;
+                }
+
+                bool flag_pass = false;
+
+                if (!flag_other_clusters){
+                    if (left_L < 40*units::cm) {
+                        if (flag_fix_end){
+                            flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                       eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                        } else {
+                            flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 35*units::cm) ||
+                                       eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                        }
+                        
+                        if (!flag_pass){
+                            if (flag_fix_end){
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                            } else {
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                            }
+                        }
+                    }
+                    
+                    if (left_L < 20*units::cm){
+                        if (!flag_pass){
+                            if (flag_fix_end){
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                            } else {
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 35*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                            }
+                        }
+                        
+                        if (!flag_pass){
+                            if (flag_fix_end){
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                            } else {
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                            }
+                        }
+                    }
+                } else {
+                    if (flag_fix_end) {
+                        flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
+                    } else {
+                        flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm, 0., 35*units::cm, true);
+                    }
+                }
+                
+                if (flag_pass) {
+                    std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+                    fitted_segments.push_back(adjusted_segment);
+                    search_other_tracks(cluster, fitted_segments);
+
+                    if (check_other_tracks(cluster, fitted_segments)){
+                        std::cout << "Mid Point Tracks" << std::endl;
+                        return false;
+                    }
+                    
+                    if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
+                }
+            }
+        }
+        
+        // Backward check (if double-ended)
+        if (flag_double_end){
+            std::cout << "Backward check!" << std::endl;
+            
+            {
+                m_track_fitter.clear_segments();
+                // Do backward path tracking
+                auto path_points = do_rough_path(cluster, last_wcp, first_wcp);
+                auto segment = create_segment_for_cluster(cluster, path_points);
+                m_track_fitter.add_segment(segment);
+                m_track_fitter.do_single_tracking(segment, false);
+
+            }
+            geo_point_t mid_point(0,0,0);
+            auto adjusted_path_points = adjust_rough_path(cluster, mid_point);
+            auto adjusted_segment = create_segment_for_cluster(cluster, adjusted_path_points);
+            m_track_fitter.clear_segments();
+            m_track_fitter.add_segment(adjusted_segment);
+            m_track_fitter.do_single_tracking(adjusted_segment);
+
+            std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+            std::vector<double> dQ, dx;
+            std::vector<std::pair<int,int>> paf;
+
+            const auto& fits = adjusted_segment->fits();
+            for (const auto& fit : fits) {
+                fine_tracking_path.emplace_back(fit.point, adjusted_segment);
+                dQ.push_back(fit.dQ);
+                dx.push_back(fit.dx);
+                paf.push_back(fit.paf);
+            }
+
+            // Extract points for compatibility
+            std::vector<WireCell::Point> pts;
+            for (const auto& path_point : fine_tracking_path) {
+                pts.push_back(path_point.first); 
+            }
+
+            int kink_num = find_first_kink(adjusted_segment);
+            
+            double left_L = 0;
+            double left_Q = 0;
+            double exit_L = 0;
+            double exit_Q = 0;
+            
+            for (size_t i=0; i != kink_num && i < dx.size(); i++){
+                exit_L += dx.at(i);
+                exit_Q += dQ.at(i);
+            }
+            for (size_t i = kink_num; i != dx.size(); i++){
+                left_L += dx.at(i);
+                left_Q += dQ.at(i);
+            }
+            
+            std::cout << "Left: " << exit_L/units::cm << " " << left_L/units::cm << " " 
+                      << (left_Q/(left_L/units::cm+1e-9))/50e3 << " " 
+                      << (exit_Q/(exit_L/units::cm+1e-9)/50e3) << std::endl;
+            
+            // TGM check for backward direction
+            if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && 
+                (!fiducial_utils->inside_fiducial_volume(pts.back()))){
+                
+                bool flag_TGM_anode = false;
+                
+                if ((pts.back().x() < 2*units::cm || pts.front().x() < 2*units::cm) && 
+                    kink_num >= 0 && kink_num < pts.size()) {
+                    if (pts.at(kink_num).x() < 6*units::cm){
+                        geo_point_t v10(pts.back().x()-pts.at(kink_num).x(),
+                                       pts.back().y()-pts.at(kink_num).y(),
+                                       pts.back().z()-pts.at(kink_num).z());
+                        geo_point_t v20(pts.front().x()-pts.at(kink_num).x(),
+                                       pts.front().y()-pts.at(kink_num).y(),
+                                       pts.front().z()-pts.at(kink_num).z());
+                        
+                        if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90)<12.5 && v10.magnitude()>15*units::cm) || 
+                            (fabs(v20.angle(drift_dir)/3.1415926*180.-90)<12.5 && v20.magnitude()>15*units::cm)) {
+                            flag_TGM_anode = true;
+                        }
+                    }
+                }
+                
+                if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode){
+                    std::cout << "TGM: " << pts.front() << " " << pts.back() << std::endl;
+                    cluster.set_flag(Flags::TGM);
+                    return true;
+                }
+            }
+
+            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)){
+                std::cout << "Mid Point A " << " Fid" 
+                         << " " << mid_point << " " << left_L << " " 
+                         << (left_Q/(left_L/units::cm+1e-9)/50e3) << std::endl;
+                return false;
+            } else {
+                bool flag_fix_end = false;
+                if (exit_L < 35*units::cm || ((left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0 && left_L > 2*units::cm)) {
+                    flag_fix_end = true;
+                }
+                
+                if ((left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3)< 1.5) ||
+                    (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.7) ||
+                    (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.9)){
+                    left_L = 0;
+                    kink_num = dQ.size();
+                    exit_L = 40*units::cm;
+                    flag_fix_end = false;
+                }
+
+                bool flag_pass = false;
+                if (!flag_other_clusters){
+                    if (left_L < 40*units::cm) {
+                        if (flag_fix_end){
+                            flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                       eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                        } else {
+                            flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 35*units::cm) ||
+                                       eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                        }
+                        
+                        if (!flag_pass){
+                            if (flag_fix_end){
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                            } else {
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                            }
+                        }
+                    }
+                    
+                    if (left_L < 20*units::cm){
+                        if (!flag_pass){
+                            if (flag_fix_end){
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                            } else {
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 35*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                            }
+                        }
+                        
+                        if (!flag_pass){
+                            if (flag_fix_end){
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                            } else {
+                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 15*units::cm) ||
+                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                            }
+                        }
+                    }
+                } else {
+                    if (flag_fix_end) {
+                        flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
+                    } else {
+                        flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm, 0., 35*units::cm, true);
+                    }
+                }
+
+                if (flag_pass) {
+                    std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+                    fitted_segments.push_back(adjusted_segment);
+                    search_other_tracks(cluster, fitted_segments);
+                    
+                    if (check_other_tracks(cluster, fitted_segments)){
+                        std::cout << "Mid Point Tracks" << std::endl;
+                        return false;
+                    }
+                    
+                    if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
+                }
+            }
+        }
+        
+        std::cout << "Mid Point " << std::endl;
+
+
+
+
+
 
 
         // // std::cout << "STMTagger tracking " << first_wcp << " " << last_wcp << std::endl;

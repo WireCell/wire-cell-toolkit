@@ -211,6 +211,12 @@ double TrackFitting::get_parameter(const std::string& name) const {
     }
 }
 
+void TrackFitting::clear_segments(){
+    m_segments.clear();
+    m_clusters.clear();
+    m_blobs.clear(); 
+}
+
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
     m_clusters.insert(segment->cluster());

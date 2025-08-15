@@ -138,8 +138,10 @@ namespace WireCell::Clus {
         double get_parameter(const std::string& name) const;
 
 
-        void add_segment(std::shared_ptr<PR::Segment> ); 
+        void add_segment(std::shared_ptr<PR::Segment> segment);
 
+        void clear_segments();
+ 
         // after the first round of track fitting, adjust the rough path ...
         WireCell::Point adjust_rough_path(PR::Segment& segment);
 
