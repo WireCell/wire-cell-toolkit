@@ -2185,41 +2185,41 @@ private:
         }
 
 
-        // std::cout << "STMTagger tracking " << first_wcp << " " << last_wcp << std::endl;
+        // // std::cout << "STMTagger tracking " << first_wcp << " " << last_wcp << std::endl;
 
-        // temporary tracking implementation ...
-        auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
-        // Optional: Print path info for debugging
-        std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
+        // // temporary tracking implementation ...
+        // auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
+        // // Optional: Print path info for debugging
+        // std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
 
-        auto segment = create_segment_for_cluster(cluster, path_points);
-        // auto& wcpts = segment->wcpts();
-        // for (size_t i=0;i!=path_points.size(); i++){
-        //     std::cout << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
-        // }
-        m_track_fitter.add_segment(segment);
+        // auto segment = create_segment_for_cluster(cluster, path_points);
+        // // auto& wcpts = segment->wcpts();
+        // // for (size_t i=0;i!=path_points.size(); i++){
+        // //     std::cout << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
+        // // }
+        // m_track_fitter.add_segment(segment);
 
-        auto ch = m_track_fitter.get_channel_for_wire(0,0,1,50);
-        auto test_results = m_track_fitter.get_wires_for_channel(0,ch);
-        std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
+        // auto ch = m_track_fitter.get_channel_for_wire(0,0,1,50);
+        // auto test_results = m_track_fitter.get_wires_for_channel(0,ch);
+        // std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
 
-        m_track_fitter.do_single_tracking(segment);
+        // m_track_fitter.do_single_tracking(segment);
 
 
-        geo_point_t mid_point(0,0,0);
-        adjust_rough_path(cluster, mid_point);
+        // geo_point_t mid_point(0,0,0);
+        // adjust_rough_path(cluster, mid_point);
 
-        auto kink_num = find_first_kink(segment);
+        // auto kink_num = find_first_kink(segment);
 
-        check_other_clusters(cluster, associated_clusters);
+        // check_other_clusters(cluster, associated_clusters);
 
-        std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
-        fitted_segments.push_back(segment);
-        search_other_tracks(cluster, fitted_segments);
+        // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+        // fitted_segments.push_back(segment);
+        // search_other_tracks(cluster, fitted_segments);
 
-        detect_proton(segment, kink_num, fitted_segments);
+        // detect_proton(segment, kink_num, fitted_segments);
 
-        eval_stm(segment, kink_num);
+        // eval_stm(segment, kink_num);
 
         // // missing check other tracks ...
         // m_track_fitter.prepare_data();
