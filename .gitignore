@@ -88,3 +88,4 @@ version.txt
 .cache
 .clangd
 junk*
+data
