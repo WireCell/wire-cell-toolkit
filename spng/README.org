@@ -29,19 +29,128 @@ The goals require basing the package on a new array / tensor type.  Some of the 
 - Ability to pass handles to const arrays between disparate functions while keeping array data on a device with transparent, lazy CPU<-->GPU migration if/when needed.
 
 
+* Source
+
+The *spng* source code simultaneously exists in two repositories: the stand-alone
+*spng* repo and the main *wire-cell-toolkit* repo (specifically in its "spng" branch).
+
+In both cases the source must be provided as a ~spng/~ sub-directory of a working
+directory of a *wire-cell-toolkit* repo clone.  In either case, it is important to
+know that the connection between the two repos is limited to changes to the
+~spng/~ sub-directory as it resides in:
+
+- *spng* repo "master" branch
+- *wire-cell-toolkit* repo "spng" branch  
+
+This dual-source modal nature is historical and temporary.  It is expected that
+the stand-alone *spng* repo will eventually become stale and all development will
+be done in the *wire-cell-toolkit* repository directly.  Until then, this section
+describes how the developer may operate in either of the two source modes and
+then gives some simple commit push policy.
+
+
+** Local graft
+
+In this mode, the developer will "graft" the stand-alone *spng* repo to local clone
+of *wire-cell-toolkit* repo as a ~spng/~ sub-directory.
+
+This mode is useful if the developer is working on a branch of the *spng* repo
+other than "master".  
+
+#+begin_example
+$ git clone git@github.com:WireCell/wire-cell-toolkit.git
+$ git clone git@github.com:wirecell/spng.git wire-cell-toolkit/spng
+
+$ cd wire-cell-toolkit/spng
+$ git switch my-feature-branch
+#+end_example
+
+In this mode, the developer may pick any branch of *wire-cell-toolkit* repo *except*
+the "spng" branch to form the base.  The developer may work in any branch of the
+cloned *spng* repo.  Any push/pull/commit for changes to the ~spng/~ directory must
+be run from the ~spng/~ subdir.
+
+#+begin_example
+$ cd spng/
+$ git <push|pull|commit> [...]
+$ cd ..
+#+end_example
+
+In order for commits to the a *spng* repo feature branch to be used by others,
+they must be merged to *spng* repo "master" branch either via local ~git merge~ and
+~git push~ or via GitHub PR.  Afterwards, these new commits should be pulled to
+the *wire-cell-toolkit* repo "spng" branch as described below.  Developers should
+periodically pull changes pushed to *spng* repo "master" branch.
+
+Or, more simply, convert to the next mode:
+
+** WCT branch
+
+This is expected to eventually be the only mode for working with SPNG source.
+In this mode, the developer need not know that ~spng/~ has a ~git subrepo~
+connection to the *spng* repo.  Simply work on the "spng" branch:
+
+#+begin_example
+$ git clone git@github.com:WireCell/wire-cell-toolkit.git
+$ cd wire-cell-toolkit
+$ git switch spng
+$ (hack)
+$ git <push|pull|commit> [...]
+#+end_example
+
+The rest of this section summarizes the basic ~git subrepo~ maintenance.  Initial creation:
+
+#+begin_example
+$ git switch spng
+$ git subrepo clone git@github.com:WireCell/spng.git spng
+#+end_example
+
+Pull updates in the *spng* repo "master" branch to the *wire-cell-toolkit* repo "spng" branch with:
+
+#+begin_example
+$ git subrepo pull spng
+#+end_example
+
+Push updates in the *wire-cell-toolkit* repo "spng" branch to the *spng* repo "master" branch with:
+
+#+begin_example
+$ git subrepo push spng
+#+end_example
+
+Independently, developers following the [[Local graft]] approach *must* push/pull *spng*
+repo "master" branch to put/get commits made by developers using this mode.
+
+** Commit push policy
+
+This section categorizes two types of branches and describes simple policy
+specific to each.
+
+*** Main branches
+
+The *spng* repo "master" branch and *wire-cell-toolkit* repo "spng" branch are "main
+branches" and are intended to have identical content while the dual-source
+modality is maintained.
+
+- You may push to a "main" branch as long as the code compiles.
+
+- You should follow up by syncing the two "main" branches in the *spng* and *wire-cell-toolkit* repos.
+
+*** Feature branches
+
+Any *spng* repo branch other than "master" is a "feature branch and any
+*wire-cell-toolkit* branch other than "spng" which has SPNG as a ~git subrepo~ are
+"feature branches".
+
+- You may freely push to feature branches.
+
+- Developers may share feature branches and should work out any additional policy for them as needed.  
+
+
 
 * Building
 
-This is a Wire-Cell User Package.  However, WCUP support is currently broken and so we rely on a hack:
-
-#+begin_example
-$ git clone git@github.com:wirecell/spng.git
-$ git clone git@github.com:WireCell/wire-cell-toolkit.git
-$ cd wire-cell-toolkit
-$ ln -s ../spng .
-#+end_example
-
-From then on we treat ~spng/~ as a normal WCT "subpackage", still in ~wire-cell-toolkit/~:
+See [[Source]] to prepare a source area.
+Then we treat ~spng/~ as a normal WCT "subpackage" and configure the build something like:
 
 #+begin_example
 $ TDIR=$PREFIX/lib/python3.11/site-packages/torch \
@@ -59,11 +168,25 @@ $ TDIR=$PREFIX/lib/python3.11/site-packages/torch \
 $ ./wcb
 #+end_example
 
-An example for how ~PREFIX~ may be defined is at:
+Some contexts where ~PREFIX~ are defined:
 
-https://www.phy.bnl.gov/~bviren/wire-cell/docs/wcwc-howto.html#spack-view-wct
+- https://www.phy.bnl.gov/~bviren/wire-cell/docs/wcwc-howto.html#spack-view-wct
 
-Torch is a bit weirdly installed.  Besides its prefix (~TDIR~) being deep under ~$PREFIX~ in the Python-related files, it requires *two* include directories, one inside the other, to be specified.
+- https://github.com/brettviren/winch/blob/master/doc/spng.org
+
+** Note on Torch
+
+The Torch package is "weird" in a few ways.  You *must* direct the source to use
+not just *two* torch include areas but one that is inside the other.  The
+locations of these C++ dependencies are themselves deep inside a Python
+installation area.  And, that area is parameterized by the Python version.
+
+If you have working Python runtime access to the Torch installation you can
+learn the base directory of the Torch installation with:
+
+#+begin_example
+$ python -c 'import torch; print(torch.__path__[0]);'
+#+end_example
 
 * Testing
 
