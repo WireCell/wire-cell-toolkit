@@ -44,7 +44,7 @@ local img = {
         //name: 'chsel%d' % n,
         name: 'chsel%d' % anode.data.ident,
         data: {
-          channels: std.range(5632 * anode.data.ident, 5632 * (anode.data.ident + 1) - 1),
+          channels: std.range(5638 * anode.data.ident, 5638 * (anode.data.ident + 1) - 1), // v0200: 5632, v0202: 5638
           //tags: ['orig%d' % n], // traces tag //commented? Ewerton 2023-09-xx
           tags: ['gauss%d' % anode.data.ident, 'wiener%d' % anode.data.ident], // changed Ewerton 2023-09-27
         },
@@ -145,9 +145,9 @@ local img = {
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
-                //nthreshold: [1e-6, 1e-6, 1e-6],
+                // nthreshold: [1e-6, 1e-6, 1e-6],
                 nthreshold: [3.6, 3.6, 3.6], //original
-                //nthreshold: [2.5, 2.5, 2.5], //changed Ewerton
+                // nthreshold: [1.0, 1.0, 1.0], //changed Ewerton
                 // nthreshold: [0, 0, 0], //changed Ewerton
             },
         }, nin=1, nout=1, uses=[anode]),
@@ -254,6 +254,7 @@ local img = {
                     weighting_strategies: ["uniform"], //"uniform", "simple", "uboone"
                     solve_config: "uboone",
                     whiten: true,
+                    lasso_lambda_scale: 1.0,
                 }
             }, nin=1, nout=1),
             local cs2 = g.pnode({
@@ -263,6 +264,7 @@ local img = {
                     weighting_strategies: ["uboone"], //"uniform", "simple", "uboone"
                     solve_config: "uboone",
                     whiten: true,
+                    lasso_lambda_scale: 1.0,
                 }
             }, nin=1, nout=1),
             local local_clustering = g.pnode({
@@ -310,7 +312,8 @@ local img = {
         local ld3 = self.local_deghosting(3,"3rd"),
 
         ret: g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc],"uboone-solving"),
-        // ret: g.pipeline([bc, cs1, ld1, gc],"simple-solving"),
+        // ret: g.pipeline([bc, cs1, gc],"simple-solving"),
+        // ret: g.pipeline([bc, ld1, gc],"tiling only"),
     }.ret,
 
     dump :: function(anode, aname, drift_speed) {
