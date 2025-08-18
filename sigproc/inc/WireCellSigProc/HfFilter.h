@@ -25,6 +25,7 @@ namespace WireCell {
             double m_sigma;
             double m_power;
             bool m_flag;
+            bool m_use_negative_freqs{true};
         };
     }  // namespace SigProc
 }  // namespace WireCell
