@@ -2120,6 +2120,13 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
 
     LogDebug(" npoints " << npoints() << " nconnected " << num);
     if (num <= 1) return;
+    if (num > 1000) {
+        std::cout << "Warning: too many connected components: " << num
+                  << ", cluster length: " << get_length() / units::cm
+                  << " cm, nblobs: " << children().size()
+                  << ", npoints: " << npoints() << std::endl;
+        return;
+    }
 
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
     std::vector<std::vector<size_t>> pt_clouds_global_indices;
@@ -2225,7 +2232,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-                double step_dis = 1.0 * units::cm;
+                double step_dis = std::max(1.0 * units::cm, dis/10.);
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
                 geo_point_t test_p;
@@ -2252,7 +2259,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k]));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-                double step_dis = 1.0 * units::cm;
+                double step_dis = std::max(1.0 * units::cm, dis/10.);
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
                 geo_point_t test_p;
@@ -2279,7 +2286,7 @@ void Cluster::Connect_graph(const bool use_ctpc) const {
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));
 
                 double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-                double step_dis = 1.0 * units::cm;
+                double step_dis = std::max(1.0 * units::cm, dis/10.);
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
                 geo_point_t test_p;
