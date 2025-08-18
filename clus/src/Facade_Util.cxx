@@ -662,12 +662,13 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
         nedges += boost::num_edges(g);
     }
 
-    // x, y, z, q, bidx
-    MultiArray apoints(boost::extents[npoints][5]);
+    // x, y, z, q, bidx, cidx
+    MultiArray apoints(boost::extents[npoints][6]);
     // head node, tail node, weight
     MultiArray aedges(boost::extents[nedges][3]);
 
     // global point index
+    int gcidx = 0;
     int gpidx = 0;
     int geidx = 0;
     int gpoffset = 0;
@@ -687,6 +688,7 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
             const auto [tmppt, blob] = cluster->get_closest_point_blob({apoints[gpidx][0], apoints[gpidx][1], apoints[gpidx][2]});
             apoints[gpidx][3] = blob->charge()/blob->npoints();
             apoints[gpidx][4] = b2idx[blob];
+            apoints[gpidx][5] = gcidx;
         }
         auto erange = boost::edges(g);
         for (auto eit = erange.first; eit != erange.second; ++eit) {
@@ -700,6 +702,7 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
             geidx++;
         }
         gpoffset += boost::num_vertices(g);
+        gcidx += 1;
     }
 
     using ostream_t = boost::iostreams::filtering_ostream;
