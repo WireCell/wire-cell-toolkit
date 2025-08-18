@@ -165,6 +165,8 @@ void Img::ChargeSolving::configure(const WireCell::Configuration& cfg)
 
     m_lasso_tolerance = get(cfg, "lasso_tolerance", m_lasso_tolerance);
     m_lasso_minnorm = get(cfg, "lasso_minnorm", m_lasso_minnorm);
+    m_lasso_lambda_scale =
+        get<float>(cfg, "lasso_lambda_scale", m_lasso_lambda_scale);
 
     m_weighting_strategies =
         get<std::vector<std::string>>(cfg, "weighting_strategies",
@@ -273,7 +275,7 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
 
     std::vector<float> blob_threshold(nstrats, m_blob_thresh.value());
 
-    SolveParams sparams{gSolveParamsConfigMap.at(m_solve_config), 1000, m_whiten};
+    SolveParams sparams{gSolveParamsConfigMap.at(m_solve_config), 1000*m_lasso_lambda_scale, m_whiten};
     for (size_t ind = 0; ind < nstrats; ++ind) {
         const auto& strategy = m_weighting_strategies[ind];
         log->debug("cluster: {} strategy={}",
