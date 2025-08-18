@@ -215,11 +215,12 @@ local detectors = import "detectors.jsonnet";
         },
         uses: [wires]}, $.volumes),
 
-    /// MAY supply a function to return various response objects.  The "kind"
-    /// may be at least one of (sim, sp, splat).  Should return an object with
-    /// keys (fr, er, and rc).  All three are ARRAYS of appropriate response
-    /// config objects.
-    responses(kind, binning=$.binning.sim) :: {
+    /// MAY supply a function to return various response objects relevant in the
+    /// context of the given anode.  The "kind" may be at least one of (sim, sp,
+    /// splat).  Must return an object with keys (fr, er, and rc).  All three
+    /// are ARRAYS of appropriate response config objects.  Implementations are
+    /// free to ignore anode and/or kind if there is no distinction.
+    responses(anode, kind, binning=$.binning.sim) :: {
 
         /// Note, here we ignore "kind" which means user gets same regardless of
         /// application.  Real detector config may be more specific.
@@ -284,7 +285,7 @@ local detectors = import "detectors.jsonnet";
     /// the "morse" job for a way to estimate the extra smearing needed to match
     /// full sim+sigproc.
     splat(anode, reference_time=0.0, binning = $.binning.splat) ::
-        local res = $.responses("splat", binning);
+        local res = $.responses(anode, "splat", binning);
         pg.pnode({
             type: 'DepoFluxSplat',
             name: anode.name,
@@ -306,35 +307,38 @@ local detectors = import "detectors.jsonnet";
 
     /// MAY override to return a trio of pirs for the given field response.
     /// This is likely okay as-is for most detectors.
-    pirs(binning = $.binning.sim, res = $.responses("sim")) :: [ {
+    pirs(anode, binning = $.binning.sim, res=null) :: [ {
+        local resp = if std.type(res) == "null"
+                     then $.responses(anode, "sim", binning)
+                     else res,
         local tbinning = {
             start: binning.start,
             tick: binning.spacing,
             nticks: binning.number
         },
         type: 'PlaneImpactResponse',
-        name: 'PIR%splane%s' % [res.fr[0].name, plane],
+        name: 'PIR%splane%s' % [resp.fr[0].name, plane],
         data: tbinning {
             plane: plane,
-            field_response: wc.tn(res.fr[0]),
-            short_responses: [wc.tn(er) for er in res.er],
+            field_response: wc.tn(resp.fr[0]),
+            short_responses: [wc.tn(er) for er in resp.er],
             // Determines the TOTAL size of the convolution between multiple
             // ER's (or size of one ER), and the ADDITIONAL size to the FR size
             // for FR*ER.  HD tends to pick 100us, VD picks 200us.
             overall_short_padding: 200*wc.us,
 
-            long_responses: [wc.tn(rc) for rc in res.rc],
+            long_responses: [wc.tn(rc) for rc in resp.rc],
             // Determines the ADDITIONAL size to the time duration of the signal
             // for the convolution with "RC" aka "long" response.
             long_padding: 1.5 * wc.ms,
         },
-        uses: res.fr + res.er + res.rc,
+        uses: resp.fr + resp.er + resp.rc,
     } for plane in [0,1,2] ],
 
     /// MAY override to return a custom detector simulation.
     /// This is likely okay as-is for most detectors.
     signal(anode, binning = $.binning.sim) ::
-        local pirs = $.pirs(binning);
+        local pirs = $.pirs(anode, binning);
         pg.pnode({
             type: 'DepoTransform',
             name: anode.name,
@@ -410,7 +414,7 @@ local detectors = import "detectors.jsonnet";
     /// override default OmniChannelNoiseDB and OmnibusNoiseFilter .data
     /// respectively.
     noisefilter(anode, binning=$.binning.sp, chndb_data={}, onf_data={}) ::
-        local resp = $.responses("sp", binning);
+        local resp = $.responses(anode, "sp", binning);
         local chndb = {
             type: 'OmniChannelNoiseDB',
             name: anode.name,
@@ -463,7 +467,7 @@ local detectors = import "detectors.jsonnet";
     /// is too messy to provide a reasonable default.  A real detector omni
     /// object may call this with osp_data to overwrite OmnibusSigProc.data.
     sigproc(anode, binning=$.binning.sp, osp_data={}) :: 
-        local resp = $.responses("sp", binning);
+        local resp = $.responses(anode, "sp", binning);
 
         // Use a per-channel response if the detector defines a pcr file.
         local pcr = if std.objectHas($.detdata, "chresp")

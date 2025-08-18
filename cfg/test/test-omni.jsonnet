@@ -22,7 +22,11 @@ local testit(detname) = {
     sp: it.sigproc(anode),
 };
     
+function(dets=null)
+    local names = if std.type(dets) == "null"
+                  then std.objectFields(omnimap)
+                  else dets;
+    {[name]:testit(name) for name in names}
 
-{[name]:testit(name) for name in std.objectFields(omnimap)}
 
     
