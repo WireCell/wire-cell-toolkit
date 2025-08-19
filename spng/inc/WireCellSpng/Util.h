@@ -8,6 +8,7 @@
 #define WIRECELLTORCHUTIL
 
 #include <torch/torch.h>
+#include "WireCellUtil/Configuration.h"
 
 // Capitalized "Torch" namespace should not collide with any in torch, proper.
 namespace WireCell::Torch {
@@ -68,6 +69,14 @@ namespace WireCell::Torch {
                                          const std::vector<torch::Tensor>& responses,
                                          torch::IntArrayRef extra_shape = {0,0});
 
-}
 
+
+}
+namespace WireCell::SPNG {
+
+  void metadata_passthrough(
+    const WireCell::Configuration & metadata_in,
+    WireCell::Configuration & metadata_out,
+    const Json::Value & passing_values);
+}
 #endif

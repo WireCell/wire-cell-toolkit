@@ -109,3 +109,19 @@ torch::Tensor Torch::filtered_decon_2d_auto(const std::vector<torch::Tensor>& nu
     return filtered_decon_2d(numerator, denominator, shape);
 }
 
+void WireCell::SPNG::metadata_passthrough(
+    const WireCell::Configuration & metadata_in,
+    WireCell::Configuration & metadata_out,
+    const Json::Value & passing_values) {
+        // Throw
+        // if (!passing_values.isArray()) {
+        // }
+
+        // std::cout << "Passing values:" << passing_values << std::endl;
+        for (Json::ArrayIndex i = 0; i < passing_values.size(); ++i) {
+            const auto & name = passing_values[i].asString();
+            // std::cout << "Passing " << name << std::endl;
+            // std::cout << "In input? " << metadata_in.isMember(name) << std::endl;
+            metadata_out[name] = metadata_in[name];
+        }
+}

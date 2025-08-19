@@ -1,0 +1,14 @@
+digraph Overall {
+    node[shape=box]
+    data_loader[label="'Data Loader'"]
+    frame_to_tensor[label="FrameToTorchTensor"]
+
+
+    node[shape=oval]
+    data[label="Data"]
+    frame[label="Frame"]
+
+    data -> data_loader [arrowhead=none]
+    data_loader -> data
+    frame_to_tensor
+}

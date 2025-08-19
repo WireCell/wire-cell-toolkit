@@ -6,7 +6,7 @@
 [subrepo]
 	remote = git@github.com:WireCell/spng.git
 	branch = master
-	commit = 912e0f75e2412e1153eece1165b2a4b30c3350ea
+	commit = e959b89d22a904ffbca8cfb072eb810e21d53b5e
 	parent = 7032605fbed8a9a8e6025d8195224340856a0328
 	method = merge
-	cmdver = 0.4.7
+	cmdver = 0.4.9

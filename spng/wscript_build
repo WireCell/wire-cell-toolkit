@@ -1,1 +1,1 @@
-bld.smplpkg('WireCellSpng', use='WireCellIface LIBTORCH')
+bld.smplpkg('WireCellSpng', use='WireCellIface WireCellAux WireCellUtil LIBTORCH CUDA')
