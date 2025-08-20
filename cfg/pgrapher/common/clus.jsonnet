@@ -265,7 +265,7 @@ local wc = import "wirecell.jsonnet";
 
         // Use the sampler() function to provide properly formed elements to the
         // array-of-object argument "samplers".
-        retile(name="", retiler) :: {
+        retile(name="", retiler={}) :: {
             // local sampler_objs = [s.sobj for s in samplers],
             // local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             // local rc = parent.retiler(name, anodes, samplers, cut_time_low, cut_time_high),
@@ -306,7 +306,7 @@ local wc = import "wirecell.jsonnet";
         
 
         // Use an ImproveCluster_1 retiler for clustering retile operations
-        improve_retile_1(name="", improver) :: {
+        improve_retile_1(name="", improver={}) :: {
             type: "ClusterImprove_1",
             name: prefix+name,
             data: {
@@ -316,7 +316,7 @@ local wc = import "wirecell.jsonnet";
         },
 
         // Use an ImproveCluster_2 retiler for clustering retile operations
-        improve_retile_2(name="", improver) :: {
+        improve_retile_2(name="", improver={}) :: {
             type: "ClusterImprove_2",
             name: prefix+name,
             data: {
@@ -326,7 +326,7 @@ local wc = import "wirecell.jsonnet";
         },
 
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
-        steiner(name="", retiler, grouping="live", graph="steiner") :: {
+        steiner(name="", retiler={}, grouping="live", graph="steiner") :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
