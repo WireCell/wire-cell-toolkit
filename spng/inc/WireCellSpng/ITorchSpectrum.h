@@ -4,9 +4,10 @@
 #ifndef WIRECELLSPNG_ITORCHSPECTRUM
 #define WIRECELLSPNG_ITORCHSPECTRUM
 
+#include "WireCellSpng/Torch.h"
+
 #include "WireCellUtil/IComponent.h"
-#include <torch/torch.h>
-// #include "WireCellSpng/hash_util.h"
+
 #include <boost/compute/detail/lru_cache.hpp>
 
 namespace WireCell {

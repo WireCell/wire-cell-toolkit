@@ -1,7 +1,7 @@
 #ifndef WIRECELL_SPNG_ITORCHTENSOR
 #define WIRECELL_SPNG_ITORCHTENSOR
 
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
 #include "WireCellIface/IData.h"
 #include "WireCellUtil/Configuration.h"
 

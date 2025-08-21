@@ -6,7 +6,6 @@
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellIface/INamed.h"
-#include <cuda.h>
 
 WIRECELL_FACTORY(TorchTensorSetUnstacker, WireCell::SPNG::TorchTensorSetUnstacker,
                  WireCell::INamed,
@@ -44,7 +43,7 @@ SPNG::TorchTensorSetUnstacker::TorchTensorSetUnstacker()
 bool SPNG::TorchTensorSetUnstacker::operator()(const input_pointer& in, output_vector& outv) {
     outv.resize(m_multiplicity);
     //Default null ptrs
-    for (size_t ind = 0; ind < m_multiplicity; ++ind) {
+    for (int ind = 0; ind < m_multiplicity; ++ind) {
         outv[ind] = nullptr;
     }
 
@@ -69,7 +68,7 @@ bool SPNG::TorchTensorSetUnstacker::operator()(const input_pointer& in, output_v
     
     // std::cout << tensor_md["channel_map"] << std::endl;
 
-    for (int output_index = 0; output_index < outv.size(); ++output_index) {
+    for (size_t output_index = 0; output_index < outv.size(); ++output_index) {
         //Clone the tensor to take ownership of the memory and put into 
         //output 
         tensor_md["channel_map"] = in->tensors()->at(0)->metadata()["channel_map"][output_index];

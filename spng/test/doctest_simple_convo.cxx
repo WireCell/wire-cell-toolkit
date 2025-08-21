@@ -2,10 +2,7 @@
 #include "WireCellSpng/Stream.h" // for write() to ostream
 #include "WireCellUtil/Stream.h" // for boost iostreams
 
-#include <torch/torch.h>
-// Name collission for "CHECK" between torch and doctest.
-#undef CHECK
-#include "WireCellUtil/doctest.h"
+#include "WireCellSpng/Testing.h"
 
 #include <iostream>
 

@@ -83,7 +83,6 @@ styles
 *.debug
 *.svg
 AutoDict_*
-spng
 version.txt
 .cache
 .clangd

@@ -6,7 +6,6 @@
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellIface/INamed.h"
-#include <cuda.h>
 
 WIRECELL_FACTORY(TorchTensorSetReplicator, WireCell::SPNG::TorchTensorSetReplicator,
                  WireCell::INamed,
@@ -43,7 +42,7 @@ SPNG::TorchTensorSetReplicator::TorchTensorSetReplicator()
 bool SPNG::TorchTensorSetReplicator::operator()(const input_pointer& in, output_vector& outv) {
     outv.resize(m_multiplicity);
     //Default null ptrs
-    for (size_t ind = 0; ind < m_multiplicity; ++ind) {
+    for (int ind = 0; ind < m_multiplicity; ++ind) {
         outv[ind] = in;
     }
     return true;

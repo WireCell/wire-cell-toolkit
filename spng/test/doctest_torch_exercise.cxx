@@ -1,10 +1,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/TimeKeeper.h"
 
-#include <torch/torch.h>
-// Name collission for "CHECK" between torch and doctest.
-#undef CHECK
-#include "WireCellUtil/doctest.h"
+#include "WireCellSpng/Testing.h"
 
 #include <iostream>
 

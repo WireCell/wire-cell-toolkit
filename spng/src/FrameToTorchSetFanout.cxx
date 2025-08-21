@@ -6,7 +6,6 @@
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellIface/INamed.h"
-#include <cuda.h>
 
 WIRECELL_FACTORY(FrameToTorchSetFanout, WireCell::SPNG::FrameToTorchSetFanout,
                  WireCell::INamed,
@@ -103,7 +102,7 @@ SPNG::FrameToTorchSetFanout::FrameToTorchSetFanout()
 bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vector& outv) {
     outv.resize(m_multiplicity);
     //Default null ptrs
-    for (size_t ind = 0; ind < m_multiplicity; ++ind) {
+    for (int ind = 0; ind < m_multiplicity; ++ind) {
         outv[ind] = nullptr;
     }
 

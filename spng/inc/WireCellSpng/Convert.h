@@ -8,7 +8,7 @@
 #define WIRECELLTORCHCONVERT
 
 #include "WireCellIface/ITrace.h"
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
 #include <vector>
 
 namespace WireCell::Torch {

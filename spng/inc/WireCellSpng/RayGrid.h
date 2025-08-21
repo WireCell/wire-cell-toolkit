@@ -2,7 +2,7 @@
 #ifndef WIRECELL_SPNG_RAYGRID_RAYGRID_H
 #define WIRECELL_SPNG_RAYGRID_RAYGRID_H
 
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
 #include <stdexcept> // For std::runtime_error
 
 namespace WireCell {

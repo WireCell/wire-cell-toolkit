@@ -6,7 +6,6 @@
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellIface/INamed.h"
-#include <cuda.h>
 
 WIRECELL_FACTORY(TorchTensorSetCollator, WireCell::SPNG::TorchTensorSetCollator,
                  WireCell::INamed,
@@ -63,7 +62,7 @@ bool SPNG::TorchTensorSetCollator::operator()(const input_vector& inv, output_po
     }
 
 
-    if (m_multiplicity > 0 && (inv.size() != m_multiplicity)) {
+    if (m_multiplicity > 0 && (inv.size() != (size_t)m_multiplicity)) {
         THROW(ValueError()
             << errmsg{"Expected input multiplicity ({" + std::to_string(inv.size()) +
             "}) to match configuration ({" + std::to_string(m_multiplicity) + "})"});

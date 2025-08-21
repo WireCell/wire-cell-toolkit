@@ -2,7 +2,8 @@
 #ifndef WIRECELL_SPNG_RAYGRID_RAYTILING_H
 #define WIRECELL_SPNG_RAYGRID_RAYTILING_H
 
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
+
 #include <vector>
 #include <string>
 #include <numeric> // For std::iota

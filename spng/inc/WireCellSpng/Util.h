@@ -7,7 +7,7 @@
 #ifndef WIRECELLTORCHUTIL
 #define WIRECELLTORCHUTIL
 
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
 #include "WireCellUtil/Configuration.h"
 
 // Capitalized "Torch" namespace should not collide with any in torch, proper.

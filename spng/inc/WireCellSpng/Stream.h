@@ -32,7 +32,7 @@
 #define WIRECELLTORCHSTREAM
 
 #include <vector>
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
 
 // Same namespace as WireCellUtil/Stream.h.  Functions are overloaded.
 namespace WireCell::Stream {

@@ -3,7 +3,7 @@
 
 #include <map>
 #include <string>
-#include <torch/torch.h>
+#include "WireCellSpng/Torch.h"
 
 #include "RayGrid.h"
 

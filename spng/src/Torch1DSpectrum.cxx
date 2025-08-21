@@ -2,7 +2,7 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Exceptions.h"
-// #include <torch/torch.h>
+
 
 WIRECELL_FACTORY(Torch1DSpectrum, WireCell::SPNG::Torch1DSpectrum, WireCell::ITorchSpectrum, WireCell::IConfigurable)
 
