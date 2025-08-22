@@ -8,7 +8,7 @@
  #include "WireCellIface/IConfigurable.h"
  #include "WireCellUtil/Units.h"
  #include "WireCellIface/IFilterWaveform.h"
- 
+ #include <boost/compute/detail/lru_cache.hpp>
  namespace WireCell {
      namespace SPNG {
          class Torch1DSpectrum : public Aux::Logger, 

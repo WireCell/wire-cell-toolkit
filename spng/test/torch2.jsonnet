@@ -85,12 +85,11 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     field_response: wc.tn(the_field),#"FieldResponse:field%d"% anode.data.ident,
                     fr_plane_id: if iplane > 2 then 2 else iplane,
                     ADC_mV: 11702142857.142859,
-                    inter_gain: 1.0,
+                    gain: 1.0,
                     default_nchans : nchans[iplane],
                     default_nticks: 6000,
-                    default_period: 500.0, #512.0,
+                    readout_period: 500.0, #512.0,
                     extra_scale: 1.0,
-                    anode_num: anode.data.ident,
                     debug_force_cpu: debug_force_cpu,
 
                 }
@@ -631,12 +630,11 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     field_response: wc.tn(the_field),#"FieldResponse:field%d"% anode.data.ident,
                     fr_plane_id: if iplane > 2 then 2 else iplane,
                     ADC_mV: 11702142857.142859,
-                    inter_gain: 1.0,
+                    gain: 1.0,
                     default_nchans : nchans[iplane],
                     default_nticks: 6000,
-                    default_period: 500.0, #512.0,
+                    readout_period: 500.0,
                     extra_scale: 1.0,
-                    anode_num: 0,
                     debug_force_cpu: debug_force_cpu,
 
                 }
