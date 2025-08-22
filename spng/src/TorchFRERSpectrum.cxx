@@ -11,6 +11,7 @@
 WIRECELL_FACTORY(TorchFRERSpectrum, WireCell::SPNG::TorchFRERSpectrum, WireCell::ITorchSpectrum, WireCell::IConfigurable)
 
 using namespace WireCell;
+using namespace torch::indexing;
 
 SPNG::TorchFRERSpectrum::TorchFRERSpectrum() : Aux::Logger("TorchFRERSpectrum", "spng"), m_cache(5) {}
 
@@ -21,22 +22,16 @@ WireCell::Configuration SPNG::TorchFRERSpectrum::default_configuration() const
     Configuration cfg;
     cfg["anode_num"] = m_anode_num;
     cfg["elec_response"] = m_elec_response_name;
-    cfg["extra_scale"] = m_extra_scale;
-    // cfg["do_fft"] = m_do_fft;
     cfg["default_nticks"] = m_default_nticks;
     cfg["default_period"] = m_default_period;
     cfg["debug_force_cpu"] = m_debug_force_cpu;
     cfg["default_nchans"] = m_default_nchans;
-    // cfg["tick_period"] = m_tick_period;
-    // cfg["shaping"] = m_shaping;
-    // cfg["gain"] = m_gain;
-    cfg["inter_gain"] = m_inter_gain;
+
+    cfg["gain"] = m_gain;
     cfg["ADC_mV"] = m_ADC_mV;
 
     cfg["field_response"] = m_field_response_name;
     cfg["fr_plane_id"] = m_plane_id;
-    // cfg["do_fft"] = m_do_fft;
-    // cfg["do_average"] = m_do_average;
 
     return cfg;
 }
@@ -46,7 +41,6 @@ void SPNG::TorchFRERSpectrum::configure(const WireCell::Configuration& cfg)
     m_field_response_name = get(cfg, "field_response", m_field_response_name);
     m_elec_response_name = get(cfg, "elec_response", m_elec_response_name);
     m_plane_id = get(cfg, "fr_plane_id", m_plane_id);
-    m_extra_scale = get(cfg, "extra_scale", m_extra_scale);
 
     m_default_nticks = get(cfg, "default_nticks", m_default_nticks);
     m_default_nchans = get(cfg, "default_nchans", m_default_nchans);
@@ -54,7 +48,7 @@ void SPNG::TorchFRERSpectrum::configure(const WireCell::Configuration& cfg)
 
     m_debug_force_cpu = get(cfg, "debug_force_cpu", m_debug_force_cpu);
 
-    m_inter_gain = get(cfg, "inter_gain", m_inter_gain);
+    m_gain = get(cfg, "gain", m_gain);
     m_ADC_mV = get(cfg, "ADC_mV", m_ADC_mV);
     m_shape = {m_default_nchans, m_default_nticks};
 
@@ -185,11 +179,9 @@ void SPNG::TorchFRERSpectrum::configure(const WireCell::Configuration& cfg)
     auto ewave = m_elec_response->waveform_samples(tbins);
     auto accessor = elec_response_tensor.accessor<double,1>();
     for (int i = 0; i < m_fravg_nticks; ++i) {
-        accessor[i] = ewave[i]/* * m_inter_gain * m_ADC_mV * (-1)*/;
+        accessor[i] = ewave[i];
     }
-    // elec_response_tensor *= m_inter_gain * m_ADC_mV * (-1);
-    elec_response_tensor = (elec_response_tensor * m_inter_gain * m_ADC_mV * (-1));
-    // std::cout << elec_response_tensor << std::endl;
+    elec_response_tensor = (elec_response_tensor * m_gain * m_ADC_mV * (-1));
 
     {
         const std::string fname = "test_output_er.npz";
@@ -256,38 +248,32 @@ void SPNG::TorchFRERSpectrum::redigitize(
     auto the_tensor = torch::zeros(input_shape, torch::TensorOptions().dtype(torch::kFloat64));
     //If not, we need to create a new version
     // auto result_accessor = m_cache.get(input_shape).value().accessor<float,2>();
-    auto result_accessor = the_tensor.accessor<double,2>();
-    auto total_response_accessor = m_total_response.accessor<double,2>();
-    for (int irow = 0; irow < m_fravg_nchans; ++irow) {
-        // std::cout << "Redigitizing " << irow << std::endl;
-        int fcount = 1;
-        for (int i = 0; i < nticks; i++) {
-            double ctime = m_default_period*i;
-            // if (irow == 0) 
-            //         std::cout << i << " Ctime: " << ctime << std::endl;
-            if (fcount < m_fravg_nticks) {
-                while (ctime > fcount*m_fravg_period) {
-                    // if (irow == 0) std::cout << "\tftime: " << fcount*m_fravg_period << std::endl;
-                    fcount++;
-                    if (fcount >= m_fravg_nticks) break;
-                }
-            }
 
-            if (fcount < m_fravg_nticks) {
-                result_accessor[irow][i] = (
-                    (ctime - m_fravg_period*(fcount - 1)) / m_fravg_period * total_response_accessor[irow][fcount - 1] +
-                    (m_fravg_period*fcount - ctime) / m_fravg_period * total_response_accessor[irow][fcount]
-                );
-                // if (irow == 0) {
-                //     std::cout << "\t" << ctime << " " << fcount << " " << std::setprecision(10) << m_fravg_period*(fcount - 1) << " " << std::setprecision(10) << m_fravg_period*fcount << std::endl;
-                //     std::cout << "\tdiff: " << (ctime - m_fravg_period*(fcount - 1)) << " " << (m_fravg_period*fcount - ctime) << std::endl;
-                //     std::cout << "\t" << m_fravg_period << " " << total_response_accessor[irow][fcount - 1] << " " << total_response_accessor[irow][fcount] << std::endl;
-                //     std::cout << "\t" << result_accessor[irow][i] << std::endl;
-                // }
-            }
 
+    int fcount = 1;
+    for (int i = 0; i < nticks; i++) {
+        double ctime = m_default_period*i;
+        if (fcount < m_fravg_nticks) {
+            while (ctime > fcount*m_fravg_period) {
+                // if (irow == 0) std::cout << "\tftime: " << fcount*m_fravg_period << std::endl;
+                fcount++;
+                if (fcount >= m_fravg_nticks) break;
+            }
+        }
+
+        if (fcount < m_fravg_nticks) {
+
+            auto vals_fcount = m_total_response.index({Slice(), fcount});
+            auto vals_fcount_m1 = m_total_response.index({Slice(), fcount-1});
+
+            the_tensor.index_put_(
+                {(Slice(m_fravg_nchans), i)},
+                vals_fcount_m1 * ((ctime - m_fravg_period*(fcount - 1)) / m_fravg_period) +
+                vals_fcount * ((m_fravg_period*fcount - ctime) / m_fravg_period)
+            );
         }
     }
+    
     bool has_cuda = torch::cuda::is_available();
     torch::Device device((
         (has_cuda && !m_debug_force_cpu) ? 
@@ -327,7 +313,8 @@ torch::Tensor SPNG::TorchFRERSpectrum::spectrum(const std::vector<int64_t> & sha
 }
 
 torch::Tensor SPNG::TorchFRERSpectrum::spectrum() const {
-    return torch::zeros({m_default_nchans, m_default_nticks});
+    // return torch::zeros({m_default_nchans, m_default_nticks});
+    return m_total_response.clone();
 }
 
 /// Get any shifts of the response

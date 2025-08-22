@@ -51,14 +51,11 @@ namespace WireCell {
             bool m_do_average = false;
             int64_t m_fravg_nticks = 0, m_fravg_nchans = 0;
             double m_fravg_period;
-            double m_inter_gain, m_ADC_mV;
+            double m_gain, m_ADC_mV;
             double m_default_period;
 
             //Relevant for Cold Elec Response
             float m_extra_scale = 1.;
-            float m_tick_period = 0.;
-            double m_gain = 0.;
-            double m_shaping = 0.;
             int m_default_nticks = 0;
             int m_default_nchans = 0;
             bool m_do_fft = false;
