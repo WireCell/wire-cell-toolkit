@@ -35,6 +35,87 @@ WireCell::Configuration ChannelSelector::default_configuration() const
     return cfg;
 }
 
+/*
+  Interpret and return a list of channels for JSON like:
+
+  // just one channel
+  channels: 42,
+
+  or
+
+  // explicit list of channels
+  channels: [1,42,107],
+
+  or
+
+  // inclusive range of channels
+  channels: { first: 0, last: 2400 },
+
+  or
+
+  // all channels
+  channels: "all"
+*/
+void ChannelSelector::parse_channels(const Json::Value& jchannels)
+{
+    // single channel
+    if (jchannels.isInt()) {
+        m_channels.insert(jchannels.asInt());
+        return;
+    }
+
+    // array of explicit channels
+    if (jchannels.isArray()) {
+        const int nch = jchannels.size();
+        // ret.resize(nch);
+        for (int ind = 0; ind < nch; ++ind) {
+            // ret[ind] = jchannels[ind].asInt();
+            m_channels.insert(jchannels[ind].asInt());
+        }
+        return;
+    }
+
+    // as a string -- only implement All/all for now
+    // Possible extension can be an LLM that interprets the input string
+    // and spits out the vector of ints it thinks you want /s 
+    if (jchannels.isString()) {
+        auto as_string = jchannels.asString();
+        if ((as_string == "all") || (as_string == "All")) {
+            m_select_all_channels = true;
+        }
+        else {
+            THROW(RuntimeError() << errmsg{(
+                "Provided invalid string configuration (" +
+                as_string +
+                ") for ChannelSelector. Only All/all is implemented."
+            )});
+        }
+
+        return;
+    }
+
+    // else, assume an object
+    // range
+    if (jchannels.isObject() && jchannels.isMember("first") && jchannels.isMember("last")) {
+        const int chf = jchannels["first"].asInt();
+        const int chl = jchannels["last"].asInt();
+        const int nch = chl - chf + 1;
+        for (int ind = 0; ind < nch; ++ind) {
+            m_channels.insert(chf + ind);
+        }
+        return;
+    }
+
+
+    // If it's reached here, it's possibly misconfigured.
+    THROW(RuntimeError() << errmsg{(
+        "ChannelSelector's 'channels' field is possibly misconfigured: " +
+        jchannels.asString()
+    )});
+
+    return;
+}
+
 void ChannelSelector::configure(const WireCell::Configuration& cfg)
 {
     // tags need some order
@@ -46,10 +127,12 @@ void ChannelSelector::configure(const WireCell::Configuration& cfg)
         m_tags[ind] = jtags[ind].asString();
     }
 
-    // channels are just a bag
-    for (auto jchan : cfg["channels"]) {
-        m_channels.insert(jchan.asInt());
-    }
+    parse_channels(cfg["channels"]);
+    // m_channels.insert(m_channels.end(), channels.begin(), channels.end());
+    // // channels are just a bag
+    // for (auto jchan : cfg["channels"]) {
+    //     m_channels.insert(jchan.asInt());
+    // }
 
     auto tr = cfg["tag_rules"];
     if (tr.isNull() or tr.empty()) {
@@ -118,7 +201,7 @@ bool ChannelSelector::operator()(const input_pointer& in, output_pointer& out)
             // std::cerr << "\n [ChannelSelector] summary.size()=" << summary.size() << "\n";
             // end DEBUG
            auto threshold = summary.size() ? summary[trind] : -999; // added Ewerton 2023-10-04
-            if (m_channels.find(trace->channel()) == m_channels.end()) {
+            if ((!m_select_all_channels) && m_channels.find(trace->channel()) == m_channels.end()) {
                 continue;
             }
             tl.push_back(out_traces.size());
