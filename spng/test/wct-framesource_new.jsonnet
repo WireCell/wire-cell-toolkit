@@ -85,10 +85,22 @@ local parallel_pipes = [
   for n in std.range(0, std.length(tools.anodes) - 1)
 ],
 
+local selectors = [
+  g.pnode({
+      type: 'ChannelSelector',
+      name: 'chanselect-'+tools.anodes[n].name,
+      data: {
+          anode: wc.tn(tools.anodes[n]),
+          tags: ['raw'],           // ?? what do?
+          channels: std.range(2560 * n, 2560 * (n + 1) - 1)
+      },
+  }, nin=1, nout=1) for n in std.range(0, nanodes-1)
+],
 
 local simple_pipes = [
   g.pipeline([
                nf_pipes[n],
+               selectors[n],
              ],
              'parallel_pipe_%d' % n)
   for n in std.range(0, std.length(tools.anodes) - 1)
@@ -108,7 +120,8 @@ local fanout_apa_rules =
             //orig: ['wiener', 'gauss'],
             // gauss: 'gauss%d' % n, //uncommented Ewerton 2023-09-27
             // wiener: 'wiener%d' % n, //created Ewerton 2023-09-27
-            ['orig%d'%n]: 'orig',
+            // ['orig%d'%n]: 'orig',
+            ['raw%d'%n]: 'raw',
             // ['orig%d'%n]: 'orig',
         },
     }
@@ -134,30 +147,30 @@ local torch_nodes = torch_maker(
 local spng_decons = torch_nodes.spng_decons,
 local spng_stacked = torch_nodes.stacked_spng,
 
-local load_to_fanout = g.intern(
-  innodes=[frame_input],
-  outnodes=[fanout_graph],
-  edges = [
-    g.edge(frame_input, fanout_graph),
-  ]
-),
-
-// local fanout = g.pnode({
-//     type: "FrameFanout",
-//     name: "sn_mag_nf",
-//     data: {
-//         multiplicity: 4,
-//         tag_rules: fanout_apa_rules,
-//     },
-// }, nin=1, nout=4),
-
 // local load_to_fanout = g.intern(
 //   innodes=[frame_input],
-//   outnodes=[fanout],
+//   outnodes=[fanout_graph],
 //   edges = [
-//     g.edge(frame_input, fanout),
+//     g.edge(frame_input, fanout_graph),
 //   ]
 // ),
+
+local fanout = g.pnode({
+    type: "FrameFanout",
+    name: "sn_mag_nf",
+    data: {
+        multiplicity: 4,
+        tag_rules: fanout_apa_rules,
+    },
+}, nin=1, nout=4),
+
+local load_to_fanout = g.intern(
+  innodes=[frame_input],
+  outnodes=[fanout],
+  edges = [
+    g.edge(frame_input, fanout),
+  ]
+),
 
 local sink = sim.frame_sink,
 
@@ -182,12 +195,22 @@ local graph = if (spng_flag == 0) then
   else if (spng_flag == 2) then
     g.intern(
       innodes=[load_to_fanout],
+      centernodes=selectors,
       outnodes=[spng_stacked],
       edges = [
-        g.edge(load_to_fanout, spng_stacked, 0, 0),
-        g.edge(load_to_fanout, spng_stacked, 1, 1),
-        g.edge(load_to_fanout, spng_stacked, 2, 2),
-        g.edge(load_to_fanout, spng_stacked, 3, 3),
+        // g.edge(load_to_fanout, spng_stacked, 0, 0),
+        // g.edge(load_to_fanout, spng_stacked, 1, 1),
+        // g.edge(load_to_fanout, spng_stacked, 2, 2),
+        // g.edge(load_to_fanout, spng_stacked, 3, 3),
+        g.edge(load_to_fanout, selectors[0], 0),
+        g.edge(load_to_fanout, selectors[1], 1),
+        g.edge(load_to_fanout, selectors[2], 2),
+        g.edge(load_to_fanout, selectors[3], 3),        
+        
+        g.edge(selectors[0], spng_stacked, 0, 0),
+        g.edge(selectors[1], spng_stacked, 0, 1),
+        g.edge(selectors[2], spng_stacked, 0, 2),
+        g.edge(selectors[3], spng_stacked, 0, 3),
       ]
     ),
 
