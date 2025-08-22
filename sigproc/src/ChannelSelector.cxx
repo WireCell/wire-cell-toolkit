@@ -127,12 +127,8 @@ void ChannelSelector::configure(const WireCell::Configuration& cfg)
         m_tags[ind] = jtags[ind].asString();
     }
 
+    // Parse channel config
     parse_channels(cfg["channels"]);
-    // m_channels.insert(m_channels.end(), channels.begin(), channels.end());
-    // // channels are just a bag
-    // for (auto jchan : cfg["channels"]) {
-    //     m_channels.insert(jchan.asInt());
-    // }
 
     auto tr = cfg["tag_rules"];
     if (tr.isNull() or tr.empty()) {
