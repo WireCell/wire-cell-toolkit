@@ -107,7 +107,7 @@ base {
       super.elec {
         // The FE amplifier gain in units of Voltage/Charge.
         // gain : 14.0*wc.mV/wc.fC,
-        gain : std.extVar("elecGain")*wc.mV/wc.fC,
+        gain : 14.0*wc.mV/wc.fC,
 
         // The shaping (aka peaking) time of the amplifier shaper.
         shaping : 2.2*wc.us,

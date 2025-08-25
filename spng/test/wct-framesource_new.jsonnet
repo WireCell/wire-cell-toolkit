@@ -1,6 +1,7 @@
 function(
   input_file='tensor_frames.npz',
   skip_noise='False',
+  spng_flag = 1,
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
 local g = import 'pgraph.jsonnet',
@@ -124,12 +125,12 @@ local fanout_graph = g.fan.fanout('FrameFanout', simple_pipes, 'sn_mag_nf', fano
 local torch_maker = import 'torch2.jsonnet',
 local torch_nodes = torch_maker(
   tools,
-  debug_force_cpu=false,
-  apply_gaus=(std.extVar("ApplyGaus") == 1),
-  do_roi_filters=(std.extVar("ROI") == 1),
-  do_collate_apa=(std.extVar("CollateAPAs") == 1),
-  do_run_roi=(std.extVar("RunROI") == 1),
-  do_tiling=(std.extVar("DoTiling") == 1),
+  // debug_force_cpu=false,
+  // apply_gaus=(std.extVar("ApplyGaus") == 1),
+  // do_roi_filters=(std.extVar("ROI") == 1),
+  // do_collate_apa=(std.extVar("CollateAPAs") == 1),
+  // do_run_roi=(std.extVar("RunROI") == 1),
+  // do_tiling=(std.extVar("DoTiling") == 1),
 ),
 local spng_decons = torch_nodes.spng_decons,
 local spng_stacked = torch_nodes.stacked_spng,
@@ -161,7 +162,7 @@ local load_to_fanout = g.intern(
 
 local sink = sim.frame_sink,
 
-local spng_flag = std.extVar("SPNG"),
+//local spng_flag = std.extVar("SPNG"),
 
 local graph = if (spng_flag == 0) then
     g.pipeline([frame_input, parallel_graph, sink])

@@ -39,6 +39,26 @@ below to understand what MUST be provided and what MAY or SHOULD be provided in
 order to produce a valid omni object.
 
 
+Writing:
+
+Some guidance for adding support for a new omni.jsonnet file:
+
+0. Look up canonical detector name in detectors.jsonnet, add an entry if the
+detector is truly new.
+
+1. Make cfg/omni/<canonical-detector-name>/omni.jsonnet
+
+2. Make a "local" omni object inheriting from the one in this file.
+
+3. Read through this files omni object and add any entries to the new one that must deviate
+
+4. End the new file with the omni object.
+
+5. If variants are needed, inherit from the new omni object to further override
+and have the new file return an array of all omni objects.  Be sure each has a
+globally unique name.
+
+
 Using:
 
 The high-level configuration file is expected to have content similar to the
@@ -284,7 +304,7 @@ local detectors = import "detectors.jsonnet";
     /// An optional binning and reference time may be passed by the caller.  See
     /// the "morse" job for a way to estimate the extra smearing needed to match
     /// full sim+sigproc.
-    splat(anode, reference_time=0.0, binning = $.binning.splat) ::
+    splat(anode, reference_time=0.0, binning = $.binning.splat, splat_data = {}) ::
         local res = $.responses(anode, "splat", binning);
         pg.pnode({
             type: 'DepoFluxSplat',
@@ -302,7 +322,7 @@ local detectors = import "detectors.jsonnet";
                 /// measure this.  These values are not general.
                 smear_long: 2.0, // units of tick
                 smear_tran: 2.0, // in units of pitch
-            },
+            } + splat_data,
         }, nin=1, nout=1, uses=[anode, res.fr[0]]),
 
     /// MAY override to return a trio of pirs for the given field response.
@@ -397,18 +417,16 @@ local detectors = import "detectors.jsonnet";
             }
         }, nin=1, nout=1, uses=[anode]),
 
-    /// MUST override to return a noise filter for the anode context.
+    /// MUST override to return a noise filter for the anode context or call
+    /// this default and provided chndb_data and onf_data.
     ///
-    /// The noise filter is generally interpreted as something that is inserted
-    /// between raw ADC waveforms and signal processing.  It should consume and
-    /// produce ADC-level waveforms.  However, it need not re-apply integer
-    /// truncation to its output.
-    ///
-    /// NF is in general pretty messy and the default supplied here is NOT
-    /// adequate.
+    /// In the context of "omni" the "noise filter" is interpreted as something
+    /// that is optionally inserted between a producer of raw ADC waveforms and
+    /// the signal processing consumer.  It should consume and produce ADC-level
+    /// waveforms.  
     ///
     /// Note, detectors that require resampling should include a resampler along
-    /// with a noise filter in a pipeline..
+    /// with a noise filter and return a pipeline.
     ///
     /// A real detector omni object may pass chndb_data and/or onf_data to
     /// override default OmniChannelNoiseDB and OmnibusNoiseFilter .data
@@ -463,9 +481,8 @@ local detectors = import "detectors.jsonnet";
             } + onf_data,
         }, uses=[chndb, anode], nin=1, nout=1),
 
-    /// MUST override to return signal processing for the anode context.  This
-    /// is too messy to provide a reasonable default.  A real detector omni
-    /// object may call this with osp_data to overwrite OmnibusSigProc.data.
+
+    /// MUST override at least to call default with detector specific osp_data.
     sigproc(anode, binning=$.binning.sp, osp_data={}) :: 
         local resp = $.responses(anode, "sp", binning);
 

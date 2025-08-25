@@ -14,6 +14,9 @@ local wc = import 'wirecell.jsonnet';
 local omniapi = import "../../omni.jsonnet";
 
 
+// Currently, this grafts the "old style" configuration into the omni api.  As
+// such, some API arguments may be ignored.
+
 local tools_maker = import 'tools.jsonnet';
 local params = import 'simparams.jsonnet';
 local sim_maker = import 'sim.jsonnet';
@@ -21,9 +24,13 @@ local perfect = import 'chndb-base.jsonnet';
 local nf_maker = import 'nf.jsonnet';
 local sp_maker = import 'sp.jsonnet';
 
+local chndb_base = import 'chndb-base.jsonnet';
+
+local tools = tools_maker(params);
+local sp = sp_maker(params, tools, { sparse: true });
 
 
-      
+// Basic PDHD omni.      
 local omni = omniapi + {
     name: "pdhd",
     detname: "pdhd",
@@ -71,6 +78,47 @@ local omni = omniapi + {
         rc: [rcr, rcr]
     },
     
+
+    local make_chndb(anode, field, chndb_data = {}) = {
+        type: 'OmniChannelNoiseDB',
+        name: anode.name,
+        data: chndb_base(params, anode, field, anode.data.ident) {
+            dft:wc.tn($.dft)
+        } + chndb_data,
+        uses: [anode, field, $.dft],
+    },
+
+    //
+    noisefilter(anode, binning=$.binning.sp, chndb_data={}, onf_data={}) ::
+        local resp = $.responses(anode, "sp", binning);
+        local chndb = make_chndb(anode, resp.fr[0], chndb_data);
+        local nf = nf_maker(params, anode, chndb, anode.data.ident, anode.data.name);
+        nf + { data: onf_data },
+
+
+    // This disregards some arguments.
+    sigproc(anode, binning=$.binning.sp, osp_data={}) ::
+        sp.make_sigproc(anode),
+        
+
+
 };
 
-omni
+// SPNG PDHD omni
+local spng = import "spng.jsonnet";
+local omni_spng = omni + {
+    name: "pdhd-spng",
+    detname: "pdhd",
+
+    // This disregards some arguments.
+    sigproc(anode, binning=$.binning.sp, osp_data={}) ::
+        local resp = $.responses(anode, "sp", binning);
+        spng.sigproc(anode, resp, $.adc)
+
+        
+        
+
+};
+
+
+[omni, omni_spng]
