@@ -1,10 +1,8 @@
-/** SPNG library code must not #include torch headers directly and only #include this one.
 
-    Note, any doctest code should see Testing.h.
-*/
+#ifndef WIRECELL_SPNG_TORCHSCRIPT
+#define WIRECELL_SPNG_TORCHSCRIPT
 
-#ifndef WIRECELL_SPNG_TORCH
-#define WIRECELL_SPNG_TORCH
+#include "WireCellSpng/Torch.h"
 
 // Torch has a HUGE number of compiler warnings and apparently telling the
 // compiler they are "system headers" aka could be found via "-isystem" instead
@@ -33,7 +31,7 @@
 #pragma GCC diagnostic ignored "-Wc++20-extensions"
 #endif
 
-#include <torch/torch.h>  // should be only include site in entire spng!
+#include <torch/script.h>
 
 #if HAS_WARNING("-Wc++20-extensions")
 #pragma GCC diagnostic pop

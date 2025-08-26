@@ -2,7 +2,7 @@
 #include "WireCellSpng/Util.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
-#include <torch/script.h>
+#include "WireCellSpng/TorchScript.h"
 
 //do we rely on openMP...probably not..
 //#include <omp.h>

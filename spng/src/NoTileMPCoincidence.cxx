@@ -103,8 +103,8 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
     for (const auto & plane : face->planes()) {
         if (face->ident() == m_face_index) {//Only do this once
             std::cout << "Plane wires: " << plane->wires().size() << std::endl;
-            m_plane_nwires[plane->ident()] = plane->wires().size();
-            m_plane_wires_to_channels[plane->ident()] = torch::zeros({plane->wires().size()}, torch::TensorOptions().dtype(torch::kInt32));
+            m_plane_nwires[plane->ident()] = (int)plane->wires().size();
+            m_plane_wires_to_channels[plane->ident()] = torch::zeros({(int)plane->wires().size()}, torch::TensorOptions().dtype(torch::kInt32));
         }
     }
 
