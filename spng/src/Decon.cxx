@@ -129,6 +129,9 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
 
     //Get the Field x Elec. Response and do FFT in both dimensons
     auto frer_spectrum_tensor = base_frer_spectrum->spectrum(response_shape).clone();
+
+    
+
     frer_spectrum_tensor = torch::fft::rfft2(frer_spectrum_tensor);
 
     //Get the wire shift

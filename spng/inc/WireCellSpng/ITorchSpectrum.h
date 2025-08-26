@@ -8,8 +8,6 @@
 
 #include "WireCellUtil/IComponent.h"
 
-#include <boost/compute/detail/lru_cache.hpp>
-
 namespace WireCell {
 
 class ITorchSpectrum : public IComponent<ITorchSpectrum> {

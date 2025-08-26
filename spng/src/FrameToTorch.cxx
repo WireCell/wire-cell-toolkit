@@ -22,7 +22,7 @@ WireCell::Configuration SPNG::FrameToTorch::default_configuration() const
 bool SPNG::FrameToTorch::operator()(const input_pointer& in, output_pointer& out) {
     out = nullptr;
     if (!in) return true;
-    const size_t ntraces = in->traces()->size();
+    const long ntraces = in->traces()->size();
     
     log->debug("Ntraces: {}", ntraces);
 
@@ -32,7 +32,7 @@ bool SPNG::FrameToTorch::operator()(const input_pointer& in, output_pointer& out
     }
 
     
-    auto nticks = (*in->traces())[0]->charge().size();
+    const long nticks = (*in->traces())[0]->charge().size();
     log->debug("Making tensor of shape: {} {}", ntraces, nticks);
     torch::Tensor output_tensor = torch::zeros({ntraces, nticks});
     log->debug("Putting");

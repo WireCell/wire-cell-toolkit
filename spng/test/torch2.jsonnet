@@ -4,7 +4,7 @@ local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
 local spng_filters = import 'spng_filters.jsonnet';
 
-function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false, do_run_roi=false, do_tiling=false) {
+function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false, do_mp_finding=false) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
 
         local filter_settings = {
@@ -85,12 +85,11 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     field_response: wc.tn(the_field),#"FieldResponse:field%d"% anode.data.ident,
                     fr_plane_id: if iplane > 2 then 2 else iplane,
                     ADC_mV: 11702142857.142859,
-                    inter_gain: 1.0,
+                    gain: 1.0,
                     default_nchans : nchans[iplane],
                     default_nticks: 6000,
-                    default_period: 500.0, #512.0,
+                    readout_period: 500.0, #512.0,
                     extra_scale: 1.0,
-                    anode_num: anode.data.ident,
                     debug_force_cpu: debug_force_cpu,
 
                 }
@@ -522,10 +521,10 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     }, nin=1, nout=1) for i in std.range(0,1)
                 ]) for anode in tools.anodes
             ],
-            local torch_to_tensors_tiling = [
+            local torch_to_tensors_mp_finding = [
                 g.pnode({
                     type: 'TorchToTensor',
-                    name: 'torchtotensor_tiling_%d' % [anode.data.ident],
+                    name: 'torchtotensor_mp_finding_%d' % [anode.data.ident],
                     data: {},
                 }, nin=1, nout=1) for anode in tools.anodes
             ],
@@ -631,18 +630,17 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     field_response: wc.tn(the_field),#"FieldResponse:field%d"% anode.data.ident,
                     fr_plane_id: if iplane > 2 then 2 else iplane,
                     ADC_mV: 11702142857.142859,
-                    inter_gain: 1.0,
+                    gain: 1.0,
                     default_nchans : nchans[iplane],
                     default_nticks: 6000,
-                    default_period: 500.0, #512.0,
+                    readout_period: 500.0,
                     extra_scale: 1.0,
-                    anode_num: 0,
                     debug_force_cpu: debug_force_cpu,
 
                 }
             } for iplane in std.range(0, 2)],
             // local the_wire_filters = [if iplane > 1 then filters.torch_wire_filters[1] else filters.torch_wire_filters[0],
-
+        
             local spng_decons = [
                 g.pnode({
                     type: 'SPNGDecon',
@@ -663,6 +661,16 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                 nin=1, nout=1,
                 uses=[torch_frers[iplane], if iplane < 2 then filters.torch_wire_filters[0] else filters.torch_wire_filters[1]])
                 for iplane in std.range(0, 2)
+            ],
+
+            local post_decon_replicators = [
+                g.pnode({
+                    type: 'TorchTensorSetReplicator',
+                    name: 'post_decon_replicator_%d' % iplane,
+                    data: {multiplicity: 2,}
+
+                }, nin=1, nout=2)
+                for iplane in std.range(0,2)
             ],
 
             local spng_gaus_apps = [g.pnode({
@@ -689,90 +697,116 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
             },
             nin=1, nout=1, uses=[]) for iplane in std.range(0,2)],
 
-            local collators_for_tiling = [
+            local collators_for_mp_finding = [
                 g.pnode({
                     type: 'TorchTensorSetCollator',
-                    name: 'collate_tiling_%d' % anode.data.ident,
+                    name: 'collate_mp_finding_%d' % anode.data.ident,
                     data: {
-                        output_set_tag: 'collated_tiling_%d' %  anode.data.ident,
+                        output_set_tag: 'collated_mp_finding_%d' %  anode.data.ident,
                         multiplicity: 4,
                     },
                 }, nin=4, nout=1) for anode in tools.anodes
             ],
 
 
-            local tiling = [
+            local mp_finding = [
                 g.pnode({
                     type: 'SPNGNoTileMPCoincidence',
-                    name: 'tiling_%d' % anode.data.ident,
+                    name: 'mp_finding_%d' % anode.data.ident,
                     data: {
                         anode: wc.tn(anode),
                         target_plane_index: 0,
                         aux_plane_l_index: 2,
                         aux_plane_m_index: 1,
-                        output_torch_name: "tiling_%d_tensors.pt" % anode.data.ident,
+                        output_torch_name: "mp_finding_%d_tensors.pt" % anode.data.ident,
                     },
                 }, nin=1, nout=1, uses=[anode]) for anode in tools.anodes
             ],
 
-            local tensor_sinks_tiling = [g.pnode({
+            local roi_application = [
+                g.pnode({
+                    type: 'SPNGApplyROI',
+                    name: 'roi_app_%s' % plane,
+                    data: {
+                        ROI_tensor_index: 0,
+                        value_tensor_index: 0,
+                        output_set_tag: 'roi_applied_%s' %plane,
+                    },
+                }, nin=2, nout=1) for plane in ['u', 'v', 'w']
+            ],
+
+            local tensor_sinks_mp_finding = [g.pnode({
                 type: 'TensorFileSink',
-                name: 'tfsink_tiling_%d' % anode.data.ident,
+                name: 'tfsink_mp_finding_%d' % anode.data.ident,
                 data: {
-                    outname: 'testout_tiling_apa%d.tar' % anode.data.ident,
+                    outname: 'testout_mp_finding_apa%d.tar' % anode.data.ident,
                     prefix: ''
                 },
             }, nin=1, nout=0) for anode in tools.anodes],
 
             // local run_roi = false,
             local centers = torch_to_tensors + spng_decons + 
-                    spng_gaus_apps + apply_loose_rois + threshold_rois,
+                    spng_gaus_apps + apply_loose_rois + threshold_rois + post_decon_replicators + roi_application,
             
             local edges = [
-                // g.edge(fans_to_stacks, torch_to_tensors[0], 0),
-                // g.edge(fans_to_stacks, torch_to_tensors[1], 1),
-                // g.edge(fans_to_stacks, torch_to_tensors[2], 2),
-
                 g.edge(fans_to_stacks, spng_decons[0], 0),
                 g.edge(fans_to_stacks, spng_decons[1], 1),
                 g.edge(fans_to_stacks, spng_decons[2], 2),
 
-                g.edge(spng_decons[0], apply_loose_rois[0]),
-                g.edge(spng_decons[1], apply_loose_rois[1]),
-                g.edge(spng_decons[2], apply_loose_rois[2]),
-            ] + 
-            (if do_run_roi then [
+                g.edge(spng_decons[0], post_decon_replicators[0]),
+                g.edge(spng_decons[1], post_decon_replicators[1]),
+                g.edge(spng_decons[2], post_decon_replicators[2]),
+
+                g.edge(post_decon_replicators[0], apply_loose_rois[0], 0),
+                g.edge(post_decon_replicators[1], apply_loose_rois[1], 0),
+                g.edge(post_decon_replicators[2], apply_loose_rois[2], 0),
+
+                g.edge(post_decon_replicators[0], spng_gaus_apps[0], 1),
+                g.edge(post_decon_replicators[1], spng_gaus_apps[1], 1),
+                g.edge(post_decon_replicators[2], spng_gaus_apps[2], 1),
+
+                // g.edge(spng_decons[0], apply_loose_rois[0]),
+                // g.edge(spng_decons[1], apply_loose_rois[1]),
+                // g.edge(spng_decons[2], apply_loose_rois[2]),
+
                 g.edge(apply_loose_rois[0], threshold_rois[0]),
                 g.edge(apply_loose_rois[1], threshold_rois[1]),
                 g.edge(apply_loose_rois[2], threshold_rois[2]),
 
-                g.edge(threshold_rois[0], torch_to_tensors[0]),
-                g.edge(threshold_rois[1], torch_to_tensors[1]),
-                g.edge(threshold_rois[2], torch_to_tensors[2]),
-            ] else [
-                g.edge(apply_loose_rois[0], torch_to_tensors[0]),
-                g.edge(apply_loose_rois[1], torch_to_tensors[1]),
-                g.edge(apply_loose_rois[2], torch_to_tensors[2]),
-            ]) + [
+                g.edge(threshold_rois[0], roi_application[0], 0, 0),
+                g.edge(threshold_rois[1], roi_application[1], 0, 0),
+                g.edge(threshold_rois[2], roi_application[2], 0, 0),
+
+                g.edge(spng_gaus_apps[0], roi_application[0], 0, 1),
+                g.edge(spng_gaus_apps[1], roi_application[1], 0, 1),
+                g.edge(spng_gaus_apps[2], roi_application[2], 0, 1),
+
+                // g.edge(threshold_rois[0], torch_to_tensors[0]),
+                // g.edge(threshold_rois[1], torch_to_tensors[1]),
+                // g.edge(threshold_rois[2], torch_to_tensors[2]),
+   
+                g.edge(roi_application[0], torch_to_tensors[0]),
+                g.edge(roi_application[1], torch_to_tensors[1]),
+                g.edge(roi_application[2], torch_to_tensors[2]),
 
                 g.edge(torch_to_tensors[0], tensor_sinks[0]),
                 g.edge(torch_to_tensors[1], tensor_sinks[1]),
                 g.edge(torch_to_tensors[2], tensor_sinks[2]),
             ],
 
-            local tiling_centers = torch_to_tensors + spng_decons + 
+            local mp_finding_centers = torch_to_tensors + spng_decons + 
                     spng_gaus_apps + apply_loose_rois + threshold_rois +
                     [u_unstacker, v_unstacker, w_unstacker] +
                     std.flattenArrays(torch_to_tensors_unstacked) +
-                    collators_for_tiling + torch_to_tensors_tiling + tiling,
-            local tiling_edges = [
+                    collators_for_mp_finding + torch_to_tensors_mp_finding + mp_finding,
+            local mp_finding_edges = [
                     g.edge(fans_to_stacks, spng_decons[0], 0),
                     g.edge(fans_to_stacks, spng_decons[1], 1),
                     g.edge(fans_to_stacks, spng_decons[2], 2),
 
-                    // g.edge(spng_decons[0], spng_gaus_apps[0]),
-                    // g.edge(spng_decons[1], spng_gaus_apps[1]),
-                    // g.edge(spng_decons[2], spng_gaus_apps[2]),
+                    // g.edge(spng_decons[0], post_decon_replicators[0]),
+                    // g.edge(spng_decons[1], post_decon_replicators[1]),
+                    // g.edge(spng_decons[2], post_decon_replicators[2]),
 
                     // g.edge(spng_gaus_apps[0], apply_loose_rois[0]),
                     // g.edge(spng_gaus_apps[1], apply_loose_rois[1]),
@@ -782,6 +816,14 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     g.edge(spng_decons[1], apply_loose_rois[1]),
                     g.edge(spng_decons[2], apply_loose_rois[2]),
 
+                    // g.edge(post_decon_replicators[0], apply_loose_rois[0], 0),
+                    // g.edge(post_decon_replicators[1], apply_loose_rois[1], 0),
+                    // g.edge(post_decon_replicators[2], apply_loose_rois[2], 0),
+
+                    // g.edge(post_decon_replicators[0], spng_gaus_apps[0], 1),
+                    // g.edge(post_decon_replicators[1], spng_gaus_apps[1], 1),
+                    // g.edge(post_decon_replicators[2], spng_gaus_apps[2], 1),
+
                     g.edge(apply_loose_rois[0], threshold_rois[0]),
                     g.edge(apply_loose_rois[1], threshold_rois[1]),
                     g.edge(apply_loose_rois[2], threshold_rois[2]),
@@ -790,49 +832,49 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     g.edge(threshold_rois[1], v_unstacker),
                     g.edge(threshold_rois[2], w_unstacker),
 
-                    g.edge(u_unstacker, collators_for_tiling[0], 0, 0),
-                    g.edge(v_unstacker, collators_for_tiling[0], 0, 1),
-                    g.edge(w_unstacker, collators_for_tiling[0], 0, 2),
-                    g.edge(w_unstacker, collators_for_tiling[0], 1, 3),
+                    g.edge(u_unstacker, collators_for_mp_finding[0], 0, 0),
+                    g.edge(v_unstacker, collators_for_mp_finding[0], 0, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding[0], 0, 2),
+                    g.edge(w_unstacker, collators_for_mp_finding[0], 1, 3),
 
-                    g.edge(u_unstacker, collators_for_tiling[1], 1, 0),
-                    g.edge(v_unstacker, collators_for_tiling[1], 1, 1),
-                    g.edge(w_unstacker, collators_for_tiling[1], 2, 2),
-                    g.edge(w_unstacker, collators_for_tiling[1], 3, 3),
+                    g.edge(u_unstacker, collators_for_mp_finding[1], 1, 0),
+                    g.edge(v_unstacker, collators_for_mp_finding[1], 1, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding[1], 2, 2),
+                    g.edge(w_unstacker, collators_for_mp_finding[1], 3, 3),
 
-                    g.edge(u_unstacker, collators_for_tiling[2], 2, 0),
-                    g.edge(v_unstacker, collators_for_tiling[2], 2, 1),
-                    g.edge(w_unstacker, collators_for_tiling[2], 4, 2),
-                    g.edge(w_unstacker, collators_for_tiling[2], 5, 3),
+                    g.edge(u_unstacker, collators_for_mp_finding[2], 2, 0),
+                    g.edge(v_unstacker, collators_for_mp_finding[2], 2, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding[2], 4, 2),
+                    g.edge(w_unstacker, collators_for_mp_finding[2], 5, 3),
 
-                    g.edge(u_unstacker, collators_for_tiling[3], 3, 0),
-                    g.edge(v_unstacker, collators_for_tiling[3], 3, 1),
-                    g.edge(w_unstacker, collators_for_tiling[3], 6, 2),
-                    g.edge(w_unstacker, collators_for_tiling[3], 7, 3),
+                    g.edge(u_unstacker, collators_for_mp_finding[3], 3, 0),
+                    g.edge(v_unstacker, collators_for_mp_finding[3], 3, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding[3], 6, 2),
+                    g.edge(w_unstacker, collators_for_mp_finding[3], 7, 3),
 
-                    g.edge(collators_for_tiling[0], tiling[0]),
-                    g.edge(collators_for_tiling[1], tiling[1]),
-                    g.edge(collators_for_tiling[2], tiling[2]),
-                    g.edge(collators_for_tiling[3], tiling[3]),
+                    g.edge(collators_for_mp_finding[0], mp_finding[0]),
+                    g.edge(collators_for_mp_finding[1], mp_finding[1]),
+                    g.edge(collators_for_mp_finding[2], mp_finding[2]),
+                    g.edge(collators_for_mp_finding[3], mp_finding[3]),
 
 
-                    g.edge(tiling[0], torch_to_tensors_tiling[0]),
-                    g.edge(tiling[1], torch_to_tensors_tiling[1]),
-                    g.edge(tiling[2], torch_to_tensors_tiling[2]),
-                    g.edge(tiling[3], torch_to_tensors_tiling[3]),
+                    g.edge(mp_finding[0], torch_to_tensors_mp_finding[0]),
+                    g.edge(mp_finding[1], torch_to_tensors_mp_finding[1]),
+                    g.edge(mp_finding[2], torch_to_tensors_mp_finding[2]),
+                    g.edge(mp_finding[3], torch_to_tensors_mp_finding[3]),
 
-                    g.edge(torch_to_tensors_tiling[0], tensor_sinks_tiling[0]),
-                    g.edge(torch_to_tensors_tiling[1], tensor_sinks_tiling[1]),
-                    g.edge(torch_to_tensors_tiling[2], tensor_sinks_tiling[2]),
-                    g.edge(torch_to_tensors_tiling[3], tensor_sinks_tiling[3]),
+                    g.edge(torch_to_tensors_mp_finding[0], tensor_sinks_mp_finding[0]),
+                    g.edge(torch_to_tensors_mp_finding[1], tensor_sinks_mp_finding[1]),
+                    g.edge(torch_to_tensors_mp_finding[2], tensor_sinks_mp_finding[2]),
+                    g.edge(torch_to_tensors_mp_finding[3], tensor_sinks_mp_finding[3]),
 
             ],
 
             ret : g.intern(
                 innodes=[fans_to_stacks],
-                centernodes=(if do_tiling then tiling_centers else centers),
-                outnodes=(if do_tiling then tensor_sinks_tiling else tensor_sinks), #std.flattenArrays(tensor_sinks_unstacked),
-                edges=(if do_tiling then tiling_edges else edges),
+                centernodes=(if do_mp_finding then mp_finding_centers else centers),
+                outnodes=(if do_mp_finding then tensor_sinks_mp_finding else tensor_sinks), #std.flattenArrays(tensor_sinks_unstacked),
+                edges=(if do_mp_finding then mp_finding_edges else edges),
             ),
         }.ret,
 }

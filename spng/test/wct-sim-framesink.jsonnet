@@ -105,12 +105,13 @@ function(outname="tensor_frames.npz", skip_noise="False", do_depo="False") {
     g.pipeline([
                 (if skip_noise == "False" then sn_pipes[n] else signal_pipes[n]),
                 // sn_pipes[n]
-                // nf_pipes[n],
+                nf_pipes[n],
               ],
               'parallel_pipe_%d' % n)
     for n in std.range(0, std.length(tools.anodes) - 1)
   ],
-  local outtags = ['orig%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
+  // local outtags = ['orig%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
+  local outtags = ['raw%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
   local parallel_graph = f.fanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', 'sn_mag_nf', outtags),
 
 
