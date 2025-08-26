@@ -9,6 +9,9 @@
 
 #include "WireCellSpng/Torch.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellSpng/ITorchTensorSet.h"
+#include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/SimpleTorchTensorSet.h"
 
 // Capitalized "Torch" namespace should not collide with any in torch, proper.
 namespace WireCell::Torch {
@@ -78,5 +81,9 @@ namespace WireCell::SPNG {
     const WireCell::Configuration & metadata_in,
     WireCell::Configuration & metadata_out,
     const Json::Value & passing_values);
+    void save_torchtensor_data(const torch::Tensor& tensor, const std::string& filename);
+    void save_simpletensor_data(const ITorchTensorSet::pointer& in, const std::string& filename);
+    std::vector<torch::IValue> from_itensor(const ITorchTensorSet::pointer& in, bool is_gpu = false);
+    ITorchTensorSet::pointer to_itensor(const std::vector<torch::IValue>& inputs);
 }
 #endif

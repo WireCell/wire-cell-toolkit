@@ -76,7 +76,8 @@ int main(int argc, const char* argv[])
     auto torch_service = std::make_shared<SPNG::TorchService>();
     // Configure the TorchService
     WireCell::Configuration cfg;
-    const std::string model_path="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts";
+    const std::string model_path = argv[1];
+    //const std::string model_path="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts";
     cfg["model"] = model_path;
     cfg["device"] = "gpu0"; // Use GPU 0
     torch_service->configure(cfg);
@@ -87,7 +88,8 @@ int main(int argc, const char* argv[])
     // Deserialize the ScriptModule from a file using torch::jit::load().
     auto start = std::chrono::high_resolution_clock::now();
     //torch::Device device = torch::Device(torch::kCUDA,0);
-    //module = torch::jit::load(mname, device);
+    //module = 
+    // (mname, device);
     //module.to(at::kCUDA, dtype);
     torch::TensorOptions options = torch::TensorOptions().dtype(dtype);
     torch::Tensor iten = torch::rand({1, 3, 800, 600}, options);
