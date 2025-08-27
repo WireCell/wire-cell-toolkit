@@ -48,8 +48,6 @@ namespace WireCell {
 
             std::string m_anode_tn{"AnodePlane"};
             IAnodePlane::pointer m_anode;
-            //Expected number of ticks in each readout frame
-            int m_expected_nticks{-1};
 
             bool m_debug_force_cpu{false};
 
