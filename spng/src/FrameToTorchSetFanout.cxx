@@ -32,11 +32,6 @@ void SPNG::FrameToTorchSetFanout::configure(const WireCell::Configuration& confi
     m_debug_force_cpu = get(config, "debug_force_cpu", m_debug_force_cpu);
     m_unsqueeze_output = get(config, "unsqueeze_output", m_unsqueeze_output);
 
-    m_expected_nticks = get(config, "expected_nticks", m_expected_nticks);
-    log->debug("Got {}", m_expected_nticks);
-    // m_multiplicity = get(config, "multiplicity", m_multiplicity);
-    // log->debug("Got {}", m_multiplicity);
-
     //Get output groups (map WirePlaneId --> output index)
     if (config.isMember("output_groups")) {
         auto groups = config["output_groups"];
@@ -113,8 +108,10 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
     }
 
 
+    
     //Exit if no traces
-    const size_t ntraces = in->traces()->size();
+    auto traces = in->traces();
+    const size_t ntraces = traces->size();
     log->debug("Ntraces: {}", ntraces);
     log->debug("Tick (Period): {}", in->tick());
     if (ntraces == 0) {
@@ -122,6 +119,9 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
         return true;
     }
 
+    //Get the first trace and get its number of ticks
+    auto nticks = (*traces)[0]->charge().size();
+    std::cout << "Got " << nticks << std::endl;
 
     // for (auto face : m_anode->faces()) {
     //     if (!face) {   // A null face means one sided AnodePlane.
@@ -139,8 +139,8 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
 
     //TODO -- Consider turn on/off expecting a static number of ticks?
     for (const auto & [out_group, nchannels] : m_output_nchannels) {
-        log->debug("Making tensor of shape: {} {}", nchannels, m_expected_nticks);
-        torch::Tensor plane_tensor = torch::zeros({nchannels, m_expected_nticks}, torch::TensorOptions().dtype(torch::kFloat64));
+        log->debug("Making tensor of shape: {} {}", nchannels, nticks);
+        torch::Tensor plane_tensor = torch::zeros({nchannels, static_cast<int64_t>(nticks)}, torch::TensorOptions().dtype(torch::kFloat64));
         tensors.push_back(plane_tensor);
         accessors.push_back(tensors.back().accessor<double,2>());
     }
@@ -152,6 +152,7 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
         auto trace = (*in->traces())[i];
         auto chan = trace->channel();
 
+        // log->debug("Analyzing channel {}", chan);
         //Will throw if not found
         auto output_group = m_channel_to_output_group.at(chan);
         auto output_index = m_channel_map.at(chan);
