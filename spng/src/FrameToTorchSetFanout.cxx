@@ -121,23 +121,11 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
 
     //Get the first trace and get its number of ticks
     auto nticks = (*traces)[0]->charge().size();
-    std::cout << "Got " << nticks << std::endl;
-
-    // for (auto face : m_anode->faces()) {
-    //     if (!face) {   // A null face means one sided AnodePlane.
-    //                 //Throw?
-    //         continue;  // Can be "back" or "front" face.
-    //     }
-    //     for (auto plane : face->planes()) {
-    //         std::cout << "Plane: " << plane->planeid() << std::endl;
-    //     }
-    // }
 
     std::vector<at::TensorAccessor<double,2>> accessors;
     std::vector<torch::Tensor> tensors;
+    
     //Build up tenors + accessors to store input trace values
-
-    //TODO -- Consider turn on/off expecting a static number of ticks?
     for (const auto & [out_group, nchannels] : m_output_nchannels) {
         log->debug("Making tensor of shape: {} {}", nchannels, nticks);
         torch::Tensor plane_tensor = torch::zeros({nchannels, static_cast<int64_t>(nticks)}, torch::TensorOptions().dtype(torch::kFloat64));

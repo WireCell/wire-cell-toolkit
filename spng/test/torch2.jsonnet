@@ -591,10 +591,10 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
             local torch_roi_tight_spectra = [{
                     type: "Torch1DSpectrum",
                     name: "torch_1dspec_roi_tight",
-                    uses: [the_wiener_tight, filters.ROI_tight_lf],
+                    uses: [filters.the_wiener_tight, filters.ROI_tight_lf],
                     data: {
                         spectra: [
-                            wc.tn(the_wiener_tight),
+                            wc.tn(filters.wiener_tight_filters[iplane]),
                             wc.tn(filters.ROI_tight_lf),
                         ],
                         debug_force_cpu: debug_force_cpu,
@@ -735,6 +735,16 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                 }, nin=4, nout=1) for anode in tools.anodes
             ],
 
+            // local collators_for_dnnroi_u = [
+            //     g.pnode({
+            //         type: 'TorchTensorSetCollator',
+            //         name: 'collate_dnn_roi_u',
+            //         data: {
+            //             output_set_tag: 'collated_dnn_roi_u_%d' % anode.data.ident,
+            //             multiplicity: 2,
+            //         },
+            //     }, nin=2, nout=1) // for anode in tools.anodes
+            // ],
 
             local mp_finding = [
                 g.pnode({
@@ -761,6 +771,15 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     },
                 }, nin=2, nout=1) for plane in ['u', 'v', 'w']
             ],
+
+            // local dnn_rois = [
+            //     g.pnode({
+            //         type: 'SPNGDNNROI',
+            //         name: '_%d' % anode.data.ident,
+            //         data: {
+            //         },
+            //     }, nin=1, nout=1) for anode in tools.anodes
+            // ],
 
             local tensor_sinks_mp_finding = [g.pnode({
                 type: 'TensorFileSink',
@@ -844,28 +863,29 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     g.edge(fans_to_stacks, spng_decons[1], 1),
                     g.edge(fans_to_stacks, spng_decons[2], 2),
 
-                    g.edge(spng_decons[0], post_decon_replicators[0]),
-                    g.edge(spng_decons[1], post_decon_replicators[1]),
-                    g.edge(spng_decons[2], post_decon_replicators[2]),
+                    // g.edge(spng_decons[0], post_decon_replicators[0]),
+                    // g.edge(spng_decons[1], post_decon_replicators[1]),
+                    // g.edge(spng_decons[2], post_decon_replicators[2]),
 
-                    // g.edge(spng_gaus_apps[0], apply_loose_rois[0]),
-                    // g.edge(spng_gaus_apps[1], apply_loose_rois[1]),
-                    // g.edge(spng_gaus_apps[2], apply_loose_rois[2]),
 
                     // g.edge(spng_decons[0], apply_loose_rois[0]),
                     // g.edge(spng_decons[1], apply_loose_rois[1]),
                     // g.edge(spng_decons[2], apply_loose_rois[2]),
 
-                    g.edge(post_decon_replicators[0], apply_tight_rois[0], 0),
-                    g.edge(post_decon_replicators[1], apply_tight_rois[1], 0),
-                    g.edge(post_decon_replicators[2], apply_tight_rois[2], 0),
+                    // g.edge(post_decon_replicators[0], apply_tight_rois[0], 0),
+                    // g.edge(post_decon_replicators[0], apply_loose_rois[0], 1),
 
-                    g.edge(post_decon_replicators[0], spng_gaus_apps[0], 1),
-                    g.edge(post_decon_replicators[1], spng_gaus_apps[1], 1),
-                    g.edge(post_decon_replicators[2], spng_gaus_apps[2], 1),
+                    // g.edge(post_decon_replicators[1], apply_tight_rois[1], 0),
+                    // g.edge(post_decon_replicators[2], apply_tight_rois[2], 0),
+                    g.edge(spng_decons[0], apply_tight_rois[0], 0),
+                    g.edge(spng_decons[1], apply_tight_rois[1], 0),
+                    g.edge(spng_decons[2], apply_tight_rois[2], 0),
+                    
+                    // g.edge(post_decon_replicators[0], spng_gaus_apps[0], 1),
+                    // g.edge(post_decon_replicators[1], spng_gaus_apps[1], 1),
+                    // g.edge(post_decon_replicators[2], spng_gaus_apps[2], 1),
 
-                    g.edge(post_decon_replicators[0], apply_loose_rois[0], 2),
-                    g.edge(post_decon_replicators[1], apply_loose_rois[1], 2),
+                    // g.edge(post_decon_replicators[1], apply_loose_rois[1], 1),
 
                     g.edge(apply_tight_rois[0], threshold_rois[0]),
                     g.edge(apply_tight_rois[1], threshold_rois[1]),
@@ -901,8 +921,12 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     g.edge(collators_for_mp_finding[3], mp_finding[3]),
 
 
-                    // g.edge(mp_finding[0], torch_to_tensors_mp_finding[0]),
-                    g.edge(mp_finding[0], dnn_roi_node), //FIXME -- rename dnn_roi_node
+                    // g.edge(mp_finding[0], collators_for_dnnroi_u[0], 0, 0),
+                    // g.edge(apply_loose_rois[0], collators_for_dnnroi_u[0], 0, 1),
+                    // g.edge(collators_for_dnnroi_u[0], dnn_rois[0])
+
+
+                    g.edge(mp_finding[0], torch_to_tensors_mp_finding[0]),
                     g.edge(mp_finding[1], torch_to_tensors_mp_finding[1]),
                     g.edge(mp_finding[2], torch_to_tensors_mp_finding[2]),
                     g.edge(mp_finding[3], torch_to_tensors_mp_finding[3]),
@@ -913,8 +937,8 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     //For now let's save the output of DNNROI to a file
 
 
-                    // g.edge(torch_to_tensors_mp_finding[0], tensor_sinks_mp_finding[0]),
-                    g.edge(dnn_roi_node, tensor_sinks_mp_finding), //FIXME -- rename dnn_roi_node
+                    g.edge(torch_to_tensors_mp_finding[0], tensor_sinks_mp_finding[0]),
+                    // g.edge(dnn_roi_node, tensor_sinks_mp_finding[0]), //FIXME -- rename dnn_roi_node
                     g.edge(torch_to_tensors_mp_finding[1], tensor_sinks_mp_finding[1]),
                     g.edge(torch_to_tensors_mp_finding[2], tensor_sinks_mp_finding[2]),
                     g.edge(torch_to_tensors_mp_finding[3], tensor_sinks_mp_finding[3]),

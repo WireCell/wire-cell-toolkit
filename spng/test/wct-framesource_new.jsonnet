@@ -175,7 +175,7 @@ local load_to_fanout = g.intern(
 
 local sink = sim.frame_sink,
 
-//local spng_flag = std.extVar("SPNG"),
+local spng_flag = std.extVar("SPNG"),
 
 local graph = if (spng_flag == 0) then
     g.pipeline([frame_input, parallel_graph, sink])
@@ -227,7 +227,9 @@ local cmdline = {
     data: {
         plugins: [
           "WireCellGen", "WireCellPgraph", "WireCellSio", 
-          "WireCellSigProc", "WireCellRoot", "WireCellSpng"],
+          "WireCellSigProc",
+          "WireCellRoot",
+          "WireCellSpng"],
         apps: ["Pgrapher"]
     }
 },
