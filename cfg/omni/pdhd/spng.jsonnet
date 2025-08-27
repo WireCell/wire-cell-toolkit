@@ -10,12 +10,12 @@ local wc = import "wirecell.jsonnet";
 
 local filters = import "spng-filters.jsonnet";
 
-// Used by TorchFRERSpectrum but we really should remove it.
-local should_not_need(plane) = {
-    default_nchans : [800, 800, 480, 480][plane],
-    default_nticks: 6000,
-    default_period: 500*wc.ns,
-};
+// // Used by TorchFRERSpectrum but we really should remove it.
+// local should_not_need(plane) = {
+//     default_nchans : [800, 800, 480, 480][plane],
+//     default_nticks: 6000,
+//     default_period: 500*wc.ns,
+// };
     
 
 // Little helper
@@ -33,11 +33,10 @@ local apname(anode, plane) = anode.name + std.toString(plane);
             fr_plane_id: plane,
             // Should rename to like "ADC_count_per_voltage".  Units are NOT ADC/mV.
             ADC_mV: 1.0/adc.lsb_voltage,
-            // should rename to "gain"
-            inter_gain: adc.gain,
+            gain: adc.gain,
             // should remove
             anode_num: anode.data.ident,
-        } + should_not_need(plane),
+        },
         uses: [fr, er]
     }
 
@@ -56,29 +55,60 @@ local apname(anode, plane) = anode.name + std.toString(plane);
         },
     } nin=1, nout=1, uses=[wf, frer]),
 
+    output_groups(anode) :: {
+        groups: [
+            [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
+                wc.WirePlaneId(wc.Ulayer, 1, anode.data.ident)],
+            
+            [wc.WirePlaneId(wc.Vlayer, 0, anode.data.ident),
+                wc.WirePlaneId(wc.Vlayer, 1, anode.data.ident)],
+            
+            [wc.WirePlaneId(wc.Wlayer, 0, anode.data.ident)],
+            
+            [wc.WirePlaneId(wc.Wlayer, 1, anode.data.ident)],
+        ]
+    }
+
     // A 4-way fanout treating wrapped U and V as one group and W as two.
     fanout_uvww(anode) :: pg.pnode({
         type: 'FrameToTorchSetFanout',
         name: anode.name,
         data: {
             anode: wc.tn(anode),
+            output_groups: output_groups(anode).groups,
+            // output_groups: [
+            //     [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
+            //      wc.WirePlaneId(wc.Ulayer, 1, anode.data.ident)],
+                
+            //     [wc.WirePlaneId(wc.Vlayer, 0, anode.data.ident),
+            //      wc.WirePlaneId(wc.Vlayer, 1, anode.data.ident)],
+                
+            //     [wc.WirePlaneId(wc.Wlayer, 0, anode.data.ident)],
+                
+            //     [wc.WirePlaneId(wc.Wlayer, 1, anode.data.ident)],
+            // ],
 
-            /// fixme: why do we give this number?
-            expected_nticks: 6000,
-
-            output_groups: [
-                [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
-                 wc.WirePlaneId(wc.Ulayer, 1, anode.data.ident)],
-                
-                [wc.WirePlaneId(wc.Vlayer, 0, anode.data.ident),
-                 wc.WirePlaneId(wc.Vlayer, 1, anode.data.ident)],
-                
-                [wc.WirePlaneId(wc.Wlayer, 0, anode.data.ident)],
-                
-                [wc.WirePlaneId(wc.Wlayer, 1, anode.data.ident)],
-            ],
+            unsqueeze_output: true,//Should unsqueezed/'batched' output be mandatory?
         }
     }, nin=1, nout=4, uses=[anode]),
+
+    ww_stacker() :: g.pnode({ //Is this the right pattern?
+        type: 'TorchTensorSetStacker',
+        name: 'w_stacker',
+        data: {
+            output_set_tag: 'w_stacked',
+            multiplicity:2, //Probably don't need to specify this here
+        },
+    }, nin=2, nout=1),
+
+    tset_frame_fanin(anode) :: g.pnode({
+        type: 'TorchTensorSetToFrameFanin',
+        name: anode.name,
+        data: {
+            anode: wc.tn(anode),
+            input_groups: output_groups(anode).groups,
+        },
+    }),
 
     // Return a "sigproc subgraph" for the context of one anode.
     // For now, this gives a 1-in/4-out subgraph
@@ -86,17 +116,35 @@ local apname(anode, plane) = anode.name + std.toString(plane);
         local fr = resps.fr[0];
         local er = resps.er[0];
         local fout = fanout_uvww(anode);
+
+        // local stack_ww = ww_stacker();
+
         // local fin = fanin_uvww(anode);
-        local decons = [$.decon(anode, plane, $.frer(anode, plane, fr, er, adc)) for plane in [0,1,2,3]];
+        local decons = [
+            $.decon(anode, plane, $.frer(anode, plane, fr, er, adc)) for plane in [0,1,2,3]
+        ];
+        local fanin = tset_frame_fanin(anode);
+
         // Not finished, 
         pg.intern(
             innodes=[fout],
             outnodes=decons,
-            centernodes=[],
+            centernodes=[stack_ww],
             edges = [
                 pg.edge(fout, spng_decons[0], 0),
                 pg.edge(fout, spng_decons[1], 1),
+
+                // pg.edge(fout, stack_ww, 2, 0),
+                // pg.edge(fout, stack_ww, 3, 1),
+
                 pg.edge(fout, spng_decons[2], 2),
                 pg.edge(fout, spng_decons[3], 3),
+
+                pg.edge(spng_decons[0], fanin, 0, 0),
+                pg.edge(spng_decons[1], fanin, 0, 1),
+                pg.edge(spng_decons[2], fanin, 0, 2),
+                pg.edge(spng_decons[3], fanin, 0, 3),
+
             ])
         
+}
