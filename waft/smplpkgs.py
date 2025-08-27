@@ -400,12 +400,20 @@ def get_rpath(bld, uselst, local=True):
 @conf
 def smplpkg(bld, name, use='', app_use='', test_use=''):
 
-    use = list(set(to_list(use)))
-    use.sort()
-    app_use = list(set(use + to_list(app_use)))
-    app_use.sort()
-    test_use = list(set(use + to_list(test_use)))
-    test_use.sort()
+    # use = list(set(to_list(use)))
+    # use.sort()
+    # app_use = list(set(use + to_list(app_use)))
+    # app_use.sort()
+    # test_use = list(set(use + to_list(test_use)))
+    # test_use.sort()
+    use = to_list(use)
+    app_use = to_list(app_use) + use
+    test_use = to_list(test_use) + use
+
+
+    debug(f'smplpkgs: {name=} {use=}')
+    debug(f'smplpkgs: {name=} {app_use=}')
+    debug(f'smplpkgs: {name=} {test_use=}')
 
     if not hasattr(bld, 'smplpkg_names'):
         bld.smplpkg_names = list()
@@ -468,7 +476,7 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
         ei = ''
         if incdir:
             ei = 'inc' 
-        debug(f'smplpkgs: library: {name}')
+        debug(f'smplpkgs: library: {name} uses {use}')
         bld(features = 'cxx cxxshlib',
             name = name,
             source = source,
@@ -523,6 +531,8 @@ int main(int argc, char** argv) {
 
     if appsdir:
         for app in appsdir.ant_glob('*.cxx'):
+            debug(f'smplpkgs: {name=} {app=} {use=} {app_use=}')
+
             appbin = bld.path.find_or_declare(app.name.replace('.cxx',''))
             bld.program(source = [app], 
                         target = appbin,
