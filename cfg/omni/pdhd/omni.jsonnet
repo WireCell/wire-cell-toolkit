@@ -113,9 +113,9 @@ local omni_spng = omni + {
     // This disregards some arguments.
     sigproc(anode, binning=$.binning.sp, osp_data={}) ::
         local resp = $.responses(anode, "sp", binning);
-        spng.sigproc(anode, resp, $.adc)
+        spng.sigproc(anode, resp, $.adc),
 
-        
+
         
 
 };
