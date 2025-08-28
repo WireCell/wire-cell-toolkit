@@ -91,7 +91,7 @@ base {
                   }
 
               ],
-          } for n in std.range(0,3)],
+          } for n in std.range(0,std.extVar("nanodes")-1)],
 
       // This describes some rough, overall bounding box.  It's not
       // directly needed but can be useful on the Jsonnet side, for

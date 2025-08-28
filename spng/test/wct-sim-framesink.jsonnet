@@ -1,5 +1,5 @@
 # usage: wire-cell -l stdout wct-sim-check.jsonnet
-function(outname="tensor_frames.npz", skip_noise="False", do_depo="False") {
+function(outname="tensor_frames.npz", skip_noise="False", do_depo="False", nanodes=4) {
   local g = import 'pgraph.jsonnet',
   local f = import 'pgrapher/common/funcs.jsonnet',
   local wc = import 'wirecell.jsonnet',
@@ -113,6 +113,7 @@ function(outname="tensor_frames.npz", skip_noise="False", do_depo="False") {
   // local outtags = ['orig%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
   local outtags = ['raw%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
   local parallel_graph = f.fanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', 'sn_mag_nf', outtags),
+
 
 
   // local outname =
