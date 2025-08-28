@@ -1,0 +1,102 @@
+#+title: SPNG Data Model
+
+A driving strategy of SPNG is that an ~ITorchTensorSet~ is the only data type transferred between SPNG data flow graph nodes.  As the name implies, it holds a set of tensors.  It also holds "metadata" in the form of a dynamic structured object that follows the JSON data model.  Individual tensors are held in the set via an ~ITorchTensor~ which also have a "metadata" component.
+
+This data type defines minimal structure with generic and simple primitives (tensors and metadata objects).  However, the information that SPNG must process has substantial structure (eg, that if ~IFrame~) and thus a /data model/ is needed to define the conventions used to express structure in the relatively "flat" data types.
+
+This document defines the SPNG Data Model.  It is defined to be similar to the [[file:../../aux/docs/tensor-data-model.org][WCT Tensor Data Model]] but deviates in order to encourage the data forms to be immediately used in SPNG algorithms with minimal data transformation.  The model is intended to be sufficient for nearly perfect bidirectional conversion to and from the larger WCT data types (~IFrame~, etc).
+
+* Low level data model
+
+**  ~ITorchTensorSet~ 
+
+
+An ~ITorchTensorSet~ is considered a generic "bag" of ~ITorchTensor~ instances.  As such, the set does not itself have any interpretation or requirements.
+
+**  ~ITorchTensor~ 
+
+The tensor and metadata parts of an ~ITorchTensor~ are subject to the data model.
+
+*** metadata
+
+Every ~ITorchTensor~ metadata SHALL have these attributes:
+
+- ~datatype~ :: a string naming the SPNG Data Model element this ~ITorchTensor~ represents.
+- ~datapath~ :: a string unique to the ~ITorchTensorSet~.  This may be expressed as a ~/file/system/type/path~.
+
+An ~ITorchTensor~ metadata MAY have these attributes
+
+- ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent.
+- ~batched~ :: an integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.
+
+* High level data model
+
+The high level SPNG data model specifies how other data types are represented in the low level SPNG data model.
+
+** ~IFrame~
+
+The ~IFrame~ type and its constituent set of ~ITrace~ represent waveforms sampled over time from a set of electronics channels.  An ~IFrame~ is decomposed into a number of ~ITorchTensor~ instances, each with a ~datatype~ as defined in the following subsections.
+
+*** The "frame" tensor
+
+An ~ITorchTensor~ with ~datatype~ of "frame" represents the non-constituent parts of an ~IFrame~.  In addition to the required low-level metadata attributes, a frame provides:
+
+- ~ident~ :: required, integer (unbatched) or array of integer (batched) of the ~IFrame::ident()~ value.
+- ~time~ :: required, float (unbatched) or array of float (batched) of the ~IFrame::time()~ value.
+- ~period~ :: requied, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.
+
+No tensor part is provided by a "frame" tensor.
+
+#+begin_note
+~IFrame~ provides zero or more "frame tags".  These are (currently) not supported in the SPNG data model.  Trace tags are supported, as described below.
+#+end_note
+
+*** The "traces" tensor
+
+A "traces" tensor represents a tagged ~ITrace~ collection.  Unlike ~ITrace~, the "traces" tensor is always dense.  Like ~ITrace~ is it subject to positioning with respect to the parent frame reference time with a ~tbin~ attribute.
+
+The metadata attributes are:
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor represents.
+- ~tbin~ :: integer (unbatched) or array of integer (batched) of the number of sample periods from the frame reference time to the first (element 0) column / tick.  If omitted, a default value of zero may be assumed.
+
+The tensor part is 2D (unbatched) or 3D (batched) floating point tensor providing waveform samples.  The minor element (columns) runs over ticks so that each row corresponds to one electronics channel.  The 2D dimensions must span the maximum size over all batches though the tick ranges and channels may be batch specific.
+
+A consumer of a traces tensor may define a requirement in terms of grouping and ordering of channel / rows.  Typically, ordering by "WCT wire attachment number" is needed.  If a producer and consumer convention do not match, an converter node is required.
+
+#+begin_note
+The rastering process of combining sparse ~ITrace~ into a dense array must content with the fact that a given channel and tick pixel may be covered by multiple traces in the tagged set.  Generally, it is proper to combine the overlap by "adding" value.  In some special cases cases, a frame represents a binary (0/1) value and combination may be context specific (choice of Boolean OR vs AND combination).
+#+end_note
+
+*** The "chids" tensor
+
+The "chids" tensor represents the association of channel ID numbers to the rows of a traces tensor.  The metadata includes:
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor associates.
+
+
+The tensor part is 1D (unbatched, batched but common values) or 2D (batched, differing values) integer value providing the channel ID numbers.  The size of the minor shape is equal to the number of rows in the corresponding "traces" tensor.
+
+*** The "summaries" tensor
+
+The "summaries" tensor represents the tagged trace summary vectors in ~IFrame~.  It provides a per-trace (here, per-channel) floating point scalar value.  
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor represents.
+
+The tensor part is shaped same as "chids": 1D (unbatched, batched but common values) or 2D (batched, differing values) integer value providing the channel ID numbers.  The size of the minor shape is equal to the number of rows in the corresponding "traces" tensor.
+
+#+begin_note
+Converting from ~IFrame~ to SPNG data model requires a combining operation to be applied to the per-trace summary value in ~IFrame~ into a per-channel.  This operation is dependent on the meaning of the summary value.  Summation, length-weighted average or quadrature are some possible operations.
+#+end_note
+
+*** The "chmasks" tensor
+
+The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label to a set of individual trace samples at potentially very fine grain.  This is used to label pixels as "bad" or "noisy", etc.  In ~IFrame~ the CMMs are represented by highly structured maps, pairs, lists.  Here, we flatten.  The metadata provides:
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+
+The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).
+
