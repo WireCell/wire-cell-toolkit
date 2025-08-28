@@ -479,16 +479,15 @@ function(tools, debug_force_cpu=false) {
                     g.edge(do_loose_roi_filters[1], collators_for_dnn_roi[1], 0, 1),//V
 
                     // g.edge(collators_for_dnn_roi[0], torch_to_tensors[0]),
-                    // g.edge(collators_for_dnn_roi[1], torch_to_tensors[1]),
-
                     g.edge(collators_for_dnn_roi[0], dnn_rois[0]),
-                    g.edge(collators_for_dnn_roi[1], dnn_rois[1]),
-
                     g.edge(dnn_rois[0], roi_application[0], 0, 0),//U
-                    g.edge(dnn_rois[1], roi_application[1], 0, 0),//V
                     g.edge(do_gaus_filters[0], roi_application[0], 0, 1),//U
-                    g.edge(do_gaus_filters[1], roi_application[1], 0, 1),//V
                     g.edge(roi_application[0], torch_to_tensors[0]),
+
+                    // g.edge(collators_for_dnn_roi[1], torch_to_tensors[1]),
+                    g.edge(collators_for_dnn_roi[1], dnn_rois[1]),
+                    g.edge(dnn_rois[1], roi_application[1], 0, 0),//V
+                    g.edge(do_gaus_filters[1], roi_application[1], 0, 1),//V
                     g.edge(roi_application[1], torch_to_tensors[1]),
 
 
