@@ -38,24 +38,27 @@ local apname(anode, plane) = anode.name + std.toString(plane);
             anode_num: anode.data.ident,
         },
         uses: [fr, er]
-    }
+    },
 
     // Return a per-plane SPNG plan deconvolution node
-    decon(anode, plane, frer) :: pg.pnode({
+    decon(anode, plane, frer) ::
+    
         local wf = if plane > 1
-                   then spng_filters.torch_wire_filters[1]
-                   else spng_filters.torch_wire_filters[0],
-        type: 'SPNGDecon',
-        name: apname(anode, plane),
-        data: {
-            frer_spectrum: wc.tn(frer),
-            wire_filter: wc.tn(wf) ,
-            coarse_time_offset: 1000.0,
-            pad_wire_domain: (plane > 1), #Non-periodic planes get padded
-        },
-    } nin=1, nout=1, uses=[wf, frer]),
+                    then filters.torch_wire_filters[1]
+                    else filters.torch_wire_filters[0];
+        pg.pnode({
+            //Idk how to get this to work right
+            type: 'SPNGDecon',
+            name: apname(anode, plane),
+            data: {
+                frer_spectrum: wc.tn(frer),
+                wire_filter: wc.tn(wf) ,
+                coarse_time_offset: 1000.0,
+                pad_wire_domain: (plane > 1), #Non-periodic planes get padded
+            },
+        }, nin=1, nout=1, uses=[wf, frer]),
 
-    output_groups(anode) :: {
+    local output_groups(anode) = {
         groups: [
             [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
                 wc.WirePlaneId(wc.Ulayer, 1, anode.data.ident)],
@@ -67,10 +70,10 @@ local apname(anode, plane) = anode.name + std.toString(plane);
             
             [wc.WirePlaneId(wc.Wlayer, 1, anode.data.ident)],
         ]
-    }
+    },
 
     // A 4-way fanout treating wrapped U and V as one group and W as two.
-    fanout_uvww(anode) :: pg.pnode({
+    local fanout_uvww(anode) = pg.pnode({
         type: 'FrameToTorchSetFanout',
         name: anode.name,
         data: {
@@ -92,7 +95,7 @@ local apname(anode, plane) = anode.name + std.toString(plane);
         }
     }, nin=1, nout=4, uses=[anode]),
 
-    ww_stacker() :: g.pnode({ //Is this the right pattern?
+    ww_stacker() :: pg.pnode({ //Is this the right pattern?
         type: 'TorchTensorSetStacker',
         name: 'w_stacker',
         data: {
@@ -101,7 +104,7 @@ local apname(anode, plane) = anode.name + std.toString(plane);
         },
     }, nin=2, nout=1),
 
-    tset_frame_fanin(anode) :: g.pnode({
+    tset_frame_fanin(anode) :: pg.pnode({
         type: 'TorchTensorSetToFrameFanin',
         name: anode.name,
         data: {
