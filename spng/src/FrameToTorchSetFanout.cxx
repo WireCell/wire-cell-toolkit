@@ -154,14 +154,19 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
         int tbin = trace->tbin();
 
         for (size_t j = 0; j < ntbins; ++j) {
+            // Fixme: this should be a += as traces are allowed to overlap.
+            // More generally, the code to map traces into a tensor should be
+            // moved into a utility function.
             accessors[output_group][output_index][tbin + j] = charge_seq[j];
         }
     }
-    bool has_cuda = torch::cuda::is_available();
 
+    // Fixme: use an ITorchDevice.  see https://github.com/WireCell/spng/issues/7
+    bool has_cuda = torch::cuda::is_available();
     torch::Device device((
         (has_cuda && !m_debug_force_cpu) ? torch::kCUDA : torch::kCPU
     ));
+
     //Build up Tensors according to the output groups
     for (const auto & [output_index, nchannels] : m_output_nchannels) {
         

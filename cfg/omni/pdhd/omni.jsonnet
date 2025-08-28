@@ -11,6 +11,7 @@
 // v10_10_00d00
 
 local wc = import 'wirecell.jsonnet';
+local pg = import 'pgraph.jsonnet';
 local omniapi = import "../../omni.jsonnet";
 
 
@@ -113,7 +114,20 @@ local omni_spng = omni + {
     // This disregards some arguments.
     sigproc(anode, binning=$.binning.sp, osp_data={}) ::
         local resp = $.responses(anode, "sp", binning);
-        spng.sigproc(anode, resp, $.adc),
+        local sp = spng.sigproc(anode, resp, $.adc);
+        local f2t = pg.pnode({
+            type: 'FrameToTorch',
+            name: anode.name,
+            data: {
+            },
+        }, nin=1, nout=1);
+        local t2f = pg.pnode({
+            frame: 'TorchToFrame',
+            name: anode.name,
+            data: {
+            },
+        }, nin=1, nout=1);
+        pg.pipeline([f2t, sp, t2f], anode.name),
 
 
         

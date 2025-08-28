@@ -1,3 +1,25 @@
+/**
+   FrameToTorchSetFanout converts an input IFrame into sets of tensors.
+
+   The frame's set of traces is partitioned into multiple subsets based on a
+   selection on channel IDs.  Each subset of traces is transformed into a tensor
+   and sent out the corresponding output port.
+
+   Configuration:
+
+   - anode :: the type/name of the anode defining the scope of traces to consider.
+
+   - expected_nticks :: number of ticks that the dense output spans (FIXME:
+     should be renamed "nticks" to match global conventions).
+
+   - output_groups :: array of group definitions, the size of which sets the
+     output multiplicity.  Each group is an array of WirePlaneId values.  The
+     index of the group in the array of groups determines the output port to
+     which matching data will be placed.
+
+
+ */
+
 #ifndef WIRECELL_SPNG_FRAMETOTORCHSETFANOUT
 #define WIRECELL_SPNG_FRAMETOTORCHSETFANOUT
 

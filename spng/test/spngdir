@@ -1,0 +1,11 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+# This is a variant of the "spdir" workflow that adds an additional SP subgraph
+# with sigproc components replaced with spng components and includes comparing
+# between them.  It retains the "dir" name as the data content starts as depos
+# from ideal MIP tracks at fixed directions relative to the wire plane normal.
+#
+# It also differs in that wire-cell jobs do not rely on the "omnijob.jsonnet"
+# file but instead use the new omni object scheme.
+

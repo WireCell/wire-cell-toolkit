@@ -93,9 +93,6 @@ defined omni objects.
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
-// An omni object includes file2XXX and XXX2file methods.
-local fileio = import "fileio.jsonnet";
-
 // All canonical detectors should be registered in the detectors.jsonnet file
 // provided by wire-cell-data.
 local detectors = import "detectors.jsonnet";
@@ -548,24 +545,5 @@ local detectors = import "detectors.jsonnet";
         std.assertEqual("img" == "implemented"),        
 
 
-    /// FILE <--> Object converter config.
-    ///
-    /// Functions named like XXX_to_file and file_to_XXX method for XXX in
-    /// "depo", "frame, ...
-    ///
-    /// All SHOULD be overridden if the native data flow object types differ.
-    ///
-    /// May override with a subgraph that does internal type conversion.
-
-    frame_to_file(filename, prefix="") ::
-        fileio.frame_file_sink(filename, prefix),
-    file_to_frame(filename, prefix="") ::
-        fileio.frame_file_source(filename, prefix),
-
-    depos_to_file(filename, prefix="") ::
-        fileio.depo_file_sink(filename, prefix),
-    file_to_depos(filename, prefix="") ::
-        fileio.depo_file_source(filename, prefix),
-    
 
 }
