@@ -15,6 +15,7 @@ void TorchContext::connect(const std::string& devname,
                            const std::string& semname)
 {
     // Use almost 1/2 the memory and 3/4 the time.
+    // fixme: this does effectively nothing as it asserts only inside this code scope.
     torch::NoGradGuard no_grad;
 
     if (devname == "cpu") {
