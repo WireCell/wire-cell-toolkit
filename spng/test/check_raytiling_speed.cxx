@@ -3,7 +3,7 @@
 #include "WireCellSpng/Stopwatch.h"
 #include <fstream>
 
-using namespace WireCell::Spng::RayGrid;
+using namespace WireCell::SPNG::RayGrid;
 
 const double pitch_magnitude = 5;
 const double gaussian = 3;

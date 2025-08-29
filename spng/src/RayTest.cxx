@@ -3,12 +3,12 @@
 #include <stdexcept> // For std::invalid_argument
 #include <algorithm> // max/min
 
-namespace WireCell::Spng::RayGrid {
+namespace WireCell::SPNG::RayGrid {
 
     torch::Tensor get_gcd(const std::string& key)
     {
         // abbrev
-        const auto& gcd = WireCell::Spng::RayGrid::ray_grid_coordinates_data;
+        const auto& gcd = WireCell::SPNG::RayGrid::ray_grid_coordinates_data;
         auto it = gcd.find(key);
         if (it == gcd.end()) {
             return torch::tensor({});

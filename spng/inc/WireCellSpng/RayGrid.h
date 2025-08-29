@@ -6,7 +6,7 @@
 #include <stdexcept> // For std::runtime_error
 
 namespace WireCell {
-namespace Spng {
+namespace SPNG {
 namespace RayGrid {
 
 // --- Helper functions from funcs.py ---
@@ -184,7 +184,7 @@ private:
 };
 
 } // namespace RayGrid
-} // namespace Spng
+} // namespace SPNG
 } // namespace WireCell
 
 #endif // WIRECELL_SPNG_RAYGRID_RAYGRID_H

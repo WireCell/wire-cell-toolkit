@@ -8,7 +8,7 @@
 #include "WireCellUtil/doctest.h"
 
 using namespace torch::indexing;
-using namespace WireCell::Spng::RayGrid;
+using namespace WireCell::SPNG::RayGrid;
 
 TEST_CASE("spng ray grid three view") {
     std::cerr << "Running RayGrid tests..." << std::endl;

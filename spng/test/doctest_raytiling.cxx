@@ -1,6 +1,6 @@
 // test_raytiling.cpp
 #include "WireCellSpng/RayTiling.h"
-#include "WireCellSpng/RayGrid.h" // For WireCell::Spng::RayGrid::Coordinates
+#include "WireCellSpng/RayGrid.h" // For WireCell::SPNG::RayGrid::Coordinates
 #include "WireCellSpng/RayTest.h"
 
 #include <iostream>
@@ -10,7 +10,7 @@
 #undef CHECK
 #include "WireCellUtil/doctest.h"
 
-using WireCell::Spng::RayGrid::are_tensors_close;
+using WireCell::SPNG::RayGrid::are_tensors_close;
 
 TEST_CASE("spng ray grid tiling") {
     std::cerr << "Running RayTiling tests..." << std::endl;
@@ -18,24 +18,24 @@ TEST_CASE("spng ray grid tiling") {
     // --- Test Helper Functions ---
 
     // Test strip_pairs
-    torch::Tensor sp2 = WireCell::Spng::RayGrid::strip_pairs(2);
+    torch::Tensor sp2 = WireCell::SPNG::RayGrid::strip_pairs(2);
     torch::Tensor expected_sp2 = torch::tensor({{0, 1}}, torch::kLong);
     REQUIRE(are_tensors_close(sp2.to(torch::kDouble), expected_sp2.to(torch::kDouble)));
     std::cerr << "strip_pairs(2):\n" << sp2 << std::endl;
 
-    torch::Tensor sp3 = WireCell::Spng::RayGrid::strip_pairs(3);
+    torch::Tensor sp3 = WireCell::SPNG::RayGrid::strip_pairs(3);
     torch::Tensor expected_sp3 = torch::tensor({{0, 1}, {0, 2}, {1, 2}}, torch::kLong);
     REQUIRE(are_tensors_close(sp3.to(torch::kDouble), expected_sp3.to(torch::kDouble)));
     std::cerr << "strip_pairs(3):\n" << sp3 << std::endl;
 
-    torch::Tensor sp4 = WireCell::Spng::RayGrid::strip_pairs(4);
+    torch::Tensor sp4 = WireCell::SPNG::RayGrid::strip_pairs(4);
     torch::Tensor expected_sp4 = torch::tensor({{0, 1}, {0, 2}, {1, 2}, {0, 3}, {1, 3}, {2, 3}}, torch::kLong);
     REQUIRE(are_tensors_close(sp4.to(torch::kDouble), expected_sp4.to(torch::kDouble)));
     std::cerr << "strip_pairs(4):\n" << sp4 << std::endl;
 
     // Test expand_first
     torch::Tensor ten = torch::tensor({{1, 2}, {3, 4}}, torch::kDouble);
-    torch::Tensor expanded_ten = WireCell::Spng::RayGrid::expand_first(ten, 3);
+    torch::Tensor expanded_ten = WireCell::SPNG::RayGrid::expand_first(ten, 3);
     torch::Tensor expected_expanded_ten = torch::tensor({
         {{1, 2}, {3, 4}},
         {{1, 2}, {3, 4}},
@@ -45,13 +45,13 @@ TEST_CASE("spng ray grid tiling") {
     std::cerr << "expand_first:\n" << expanded_ten << std::endl;
 
     // Test strip_pair_edge_indices
-    torch::Tensor edge_indices = WireCell::Spng::RayGrid::strip_pair_edge_indices();
+    torch::Tensor edge_indices = WireCell::SPNG::RayGrid::strip_pair_edge_indices();
     torch::Tensor expected_edge_indices = torch::tensor({{0, 0}, {0, 1}, {1, 0}, {1, 1}}, torch::kLong);
     REQUIRE(are_tensors_close(edge_indices.to(torch::kDouble), expected_edge_indices.to(torch::kDouble)));
     std::cerr << "strip_pair_edge_indices:\n" << edge_indices << std::endl;
 
     // Test trivial_blobs
-    torch::Tensor t_blobs = WireCell::Spng::RayGrid::trivial_blobs();
+    torch::Tensor t_blobs = WireCell::SPNG::RayGrid::trivial_blobs();
     torch::Tensor expected_t_blobs = torch::tensor({{{0, 1}, {0, 1}}}, torch::kLong);
     REQUIRE(are_tensors_close(t_blobs.to(torch::kDouble), expected_t_blobs.to(torch::kDouble)));
     std::cerr << "trivial_blobs:\n" << t_blobs << std::endl;
@@ -63,7 +63,7 @@ TEST_CASE("spng ray grid tiling") {
             {{40, 50}, {60, 70}}
     }, torch::kLong);
     std::cerr << "bc_blobs=" << bc_blobs << "\n";
-    torch::Tensor bc_crossings = WireCell::Spng::RayGrid::blob_crossings(bc_blobs);
+    torch::Tensor bc_crossings = WireCell::SPNG::RayGrid::blob_crossings(bc_blobs);
     std::cerr << "bc_crossings:\n" << bc_crossings << std::endl;
 
     // Expected: (2 blobs, 1 pair, 4 edges, 2 ray indices)
@@ -85,7 +85,7 @@ TEST_CASE("spng ray grid tiling") {
     std::cerr << "fc_crossings:\n" << fc_crossings << std::endl;
     long fc_nviews = 2;
     torch::Tensor fc_v1, fc_r1, fc_v2, fc_r2;
-    std::tie(fc_v1, fc_r1, fc_v2, fc_r2) = WireCell::Spng::RayGrid::flatten_crossings(fc_crossings, fc_nviews);
+    std::tie(fc_v1, fc_r1, fc_v2, fc_r2) = WireCell::SPNG::RayGrid::flatten_crossings(fc_crossings, fc_nviews);
     
     // Expected:
     // v1: [0,0,0,0, 0,0,0,0] (repeated for 2 blobs * 4 crossings)
@@ -106,18 +106,18 @@ TEST_CASE("spng ray grid tiling") {
 
     // Test get_true_runs
     torch::Tensor activity1 = torch::tensor({false, true, true, false, true, false, true, true, true}, torch::kBool);
-    torch::Tensor runs1 = WireCell::Spng::RayGrid::get_true_runs(activity1);
+    torch::Tensor runs1 = WireCell::SPNG::RayGrid::get_true_runs(activity1);
     torch::Tensor expected_runs1 = torch::tensor({{1, 3}, {4, 5}, {6, 9}}, torch::kLong);
     REQUIRE(are_tensors_close(runs1.to(torch::kDouble), expected_runs1.to(torch::kDouble)));
     std::cerr << "get_true_runs(activity1):\n" << runs1 << std::endl;
 
     torch::Tensor activity2 = torch::tensor({false, false, false}, torch::kBool);
-    torch::Tensor runs2 = WireCell::Spng::RayGrid::get_true_runs(activity2);
+    torch::Tensor runs2 = WireCell::SPNG::RayGrid::get_true_runs(activity2);
     REQUIRE(runs2.numel() == 0);
     std::cerr << "get_true_runs(activity2):\n" << runs2 << std::endl;
 
     torch::Tensor activity3 = torch::tensor({true, true}, torch::kBool);
-    torch::Tensor runs3 = WireCell::Spng::RayGrid::get_true_runs(activity3);
+    torch::Tensor runs3 = WireCell::SPNG::RayGrid::get_true_runs(activity3);
     torch::Tensor expected_runs3 = torch::tensor({{0, 2}}, torch::kLong);
     REQUIRE(are_tensors_close(runs3.to(torch::kDouble), expected_runs3.to(torch::kDouble)));
     std::cerr << "get_true_runs(activity3):\n" << runs3 << std::endl;
@@ -127,7 +127,7 @@ TEST_CASE("spng ray grid tiling") {
     torch::Tensor hi_clamp = torch::tensor({-2, 5, 12, 18}, torch::kLong);
     long nmeasures = 10;
     torch::Tensor clamped_lo, clamped_hi;
-    std::tie(clamped_lo, clamped_hi) = WireCell::Spng::RayGrid::bounds_clamp(lo_clamp, hi_clamp, nmeasures);
+    std::tie(clamped_lo, clamped_hi) = WireCell::SPNG::RayGrid::bounds_clamp(lo_clamp, hi_clamp, nmeasures);
     torch::Tensor expected_clamped_lo = torch::tensor({0, 0, 10, 10}, torch::kLong);
     torch::Tensor expected_clamped_hi = torch::tensor({0, 5, 10, 10}, torch::kLong);
     REQUIRE(are_tensors_close(clamped_lo.to(torch::kDouble), expected_clamped_lo.to(torch::kDouble)));
@@ -143,10 +143,10 @@ TEST_CASE("spng ray grid tiling") {
         {{0.0, 0.0}, {0.0, 1.0}}, // View 1: vertical, pitch along y-axis
         {{0.0, 0.0}, {0.70710678, 0.70710678}} // View 2: diagonal, pitch along y=x
     }, torch::kDouble);
-    WireCell::Spng::RayGrid::Coordinates coords(views);
+    WireCell::SPNG::RayGrid::Coordinates coords(views);
 
     // Test trivial()
-    WireCell::Spng::RayGrid::Tiling tiling_trivial = WireCell::Spng::RayGrid::trivial();
+    WireCell::SPNG::RayGrid::Tiling tiling_trivial = WireCell::SPNG::RayGrid::trivial();
     std::cerr << "Trivial Tiling:\n" << tiling_trivial.as_string() << std::endl;
     REQUIRE(tiling_trivial.nblobs() == 1);
     REQUIRE(tiling_trivial.nviews() == 2);
@@ -163,7 +163,7 @@ TEST_CASE("spng ray grid tiling") {
             {{0, 10}, {20, 30}} // 1 blob, 2 views, 2 bounds
     }, torch::kLong);
     // long bi_nviews_n2 = 2;
-    torch::Tensor bi_insides_n2 = WireCell::Spng::RayGrid::blob_insides(coords, bi_blobs_n2, bi_crossings_n2);
+    torch::Tensor bi_insides_n2 = WireCell::SPNG::RayGrid::blob_insides(coords, bi_blobs_n2, bi_crossings_n2);
     torch::Tensor expected_bi_insides_n2 = torch::ones({1, 1, 4}, torch::kBool);
     REQUIRE(are_tensors_close(bi_insides_n2.to(torch::kDouble), expected_bi_insides_n2.to(torch::kDouble)));
     std::cerr << "blob_insides (nviews=2):\n" << bi_insides_n2 << std::endl;
@@ -172,7 +172,7 @@ TEST_CASE("spng ray grid tiling") {
     // Test blob_insides (nviews = 3)
     // This requires a more complex setup to get meaningful results.
     // Let's simulate a blob from `trivial()` and then add a third view.
-    WireCell::Spng::RayGrid::Tiling t_init = WireCell::Spng::RayGrid::trivial();
+    WireCell::SPNG::RayGrid::Tiling t_init = WireCell::SPNG::RayGrid::trivial();
     torch::Tensor initial_blobs = t_init.blobs; // (1, 2, 2)
     
     // Simulate adding a third view to initial_blobs.
@@ -181,7 +181,7 @@ TEST_CASE("spng ray grid tiling") {
     torch::Tensor hypothetical_third_view_bounds = torch::tensor({{{0, 100}}}, torch::kLong);
     torch::Tensor blobs_n3 = torch::cat({initial_blobs, hypothetical_third_view_bounds}, /*dim=*/1); // (1, 3, 2)
     
-    torch::Tensor crossings_n3 = WireCell::Spng::RayGrid::blob_crossings(blobs_n3); // (1, 3, 4, 2)
+    torch::Tensor crossings_n3 = WireCell::SPNG::RayGrid::blob_crossings(blobs_n3); // (1, 3, 4, 2)
 
 
     // long nviews_n3 = 3;
@@ -190,7 +190,7 @@ TEST_CASE("spng ray grid tiling") {
     // This is hard to set up with simple manual values without knowing the exact geometry.
     // Let's assume for now that all crossings are inside for a simple test.
     // A more robust test would involve specific coordinates and expected outcomes.
-    torch::Tensor insides_n3 = WireCell::Spng::RayGrid::blob_insides(coords, blobs_n3, crossings_n3);
+    torch::Tensor insides_n3 = WireCell::SPNG::RayGrid::blob_insides(coords, blobs_n3, crossings_n3);
     // For a simple test, if the blob is large enough, all might be true.
     // The actual values depend on 'coords' and 'blobs_n3'.
     std::cerr << "blob_insides (nviews=3):\n" << insides_n3 << std::endl;
@@ -201,7 +201,7 @@ TEST_CASE("spng ray grid tiling") {
     // blobs up to the penultimate layer supported by coords.
     // // Test blob_bounds
     // torch::Tensor bb_lo, bb_hi;
-    // std::tie(bb_lo, bb_hi) = WireCell::Spng::RayGrid::blob_bounds(coords, crossings_n3, nviews_n3, insides_n3);
+    // std::tie(bb_lo, bb_hi) = WireCell::SPNG::RayGrid::blob_bounds(coords, crossings_n3, nviews_n3, insides_n3);
     // std::cerr << "blob_bounds: lo=" << bb_lo << ", hi=" << bb_hi << std::endl;
     // // Assertions here would depend on the specific values of coords, crossings_n3, insides_n3.
     // // For a basic check, ensure they are not empty and have correct shape.
@@ -222,7 +222,7 @@ TEST_CASE("spng ray grid tiling") {
         false, true, true, true, false, true, true, false, false, true, true, true, false
     }, torch::kBool); // Runs: [1,4), [5,7), [9,12)
     
-    torch::Tensor new_blobs_eba = WireCell::Spng::RayGrid::expand_blobs_with_activity(eba_blobs, eba_lo, eba_hi, eba_activity);
+    torch::Tensor new_blobs_eba = WireCell::SPNG::RayGrid::expand_blobs_with_activity(eba_blobs, eba_lo, eba_hi, eba_activity);
     std::cerr << "expand_blobs_with_activity:\n" << new_blobs_eba << std::endl;
     // Expected output is complex and depends on intersections.
     // For eba_blobs[0]: lo=0, hi=10. Activity runs: [1,4), [5,7), [9,12).
@@ -237,13 +237,13 @@ TEST_CASE("spng ray grid tiling") {
 
 
     // Test apply_activity (just_blobs=true)
-    torch::Tensor aa_blobs = WireCell::Spng::RayGrid::trivial_blobs(); // (1, 2, 2)
+    torch::Tensor aa_blobs = WireCell::SPNG::RayGrid::trivial_blobs(); // (1, 2, 2)
     torch::Tensor aa_activity = torch::tensor({
         false, true, true, true, false, false, true, true, false, true, false
     }, torch::kBool); // Length 11. Runs: [1,4), [6,8), [9,10)
 
     std::variant<torch::Tensor, std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>> result_aa_just_blobs =
-        WireCell::Spng::RayGrid::apply_activity(coords, aa_blobs, aa_activity);
+        WireCell::SPNG::RayGrid::apply_activity(coords, aa_blobs, aa_activity);
 
     torch::Tensor final_blobs = std::get<torch::Tensor>(result_aa_just_blobs);
     std::cerr << "apply_activity (just_blobs=true):\n" << final_blobs << std::endl;

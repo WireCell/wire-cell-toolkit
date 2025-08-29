@@ -16,7 +16,7 @@ TEST_CASE("spng ray grid test of ray test") {
 
     // --- Test 1: Basic functionality with default parameters (CPU) ---
     std::cerr << "\n--- Test 1: CPU Tensors (Default Parameters) ---\n";
-    torch::Tensor pitches1 = WireCell::Spng::RayGrid::symmetric_views();
+    torch::Tensor pitches1 = WireCell::SPNG::RayGrid::symmetric_views();
 
     std::cerr << "\nGenerated pitches (shape " << pitches1.sizes() << ", device "
               << pitches1.device() << ", dtype " << pitches1.dtype() << "):\n"
@@ -29,7 +29,7 @@ TEST_CASE("spng ray grid test of ray test") {
     double custom_pitch_mag = 5.0;
     double custom_angle = 0.7853981633974483; // 45 degrees
 
-    torch::Tensor pitches2 = WireCell::Spng::RayGrid::symmetric_views(
+    torch::Tensor pitches2 = WireCell::SPNG::RayGrid::symmetric_views(
         custom_width, custom_height, custom_pitch_mag, custom_angle);
 
     std::cerr << "\nGenerated pitches (custom parameters, shape " << pitches2.sizes() << ", device "
@@ -42,7 +42,7 @@ TEST_CASE("spng ray grid test of ray test") {
         torch::Device cuda_device(torch::kCUDA);
         torch::TensorOptions cuda_options = torch::TensorOptions().device(cuda_device);
 
-        torch::Tensor pitches_cuda = WireCell::Spng::RayGrid::symmetric_views(
+        torch::Tensor pitches_cuda = WireCell::SPNG::RayGrid::symmetric_views(
             custom_width, custom_height, custom_pitch_mag, custom_angle, cuda_options);
 
         std::cerr << "\nGenerated pitches (CUDA) shape: " << pitches_cuda.sizes() << ", device "
