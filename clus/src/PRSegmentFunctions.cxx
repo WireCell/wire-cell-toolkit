@@ -1,7 +1,53 @@
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/DynamicPointCloud.h"
+#include "WireCellClus/ClusteringFuncs.h"
 
 namespace WireCell::Clus::PR {
-
+    void create_segment_point_cloud(SegmentPtr segment,
+                                const std::vector<geo_point_t>& path_points,
+                                const IDetectorVolumes::pointer& dv,
+                                const std::string& cloud_name)
+    {
+        if (!segment || !segment->cluster()) {
+            raise<RuntimeError>("create_segment_point_cloud: invalid segment or missing cluster");
+        }
+        
+        auto& cluster = *segment->cluster();
+        
+        // Create point-plane pairs
+        std::vector<std::pair<geo_point_t, WirePlaneId>> point_plane_pairs;
+        for (const auto& point : path_points) {
+            WirePlaneId wpid = dv->contained_by(point);
+            point_plane_pairs.emplace_back(point, wpid);
+        }
+        
+        // Get wpid_params (from detector configuration)
+        const auto& wpids = cluster.grouping()->wpids();
+        std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_params;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_V_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
+        std::set<int> apas;
+        Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+        
+        // Create DynamicPointCloud
+        auto dpc = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+        
+        // Create DPCPoints using factory function
+        auto dpc_points = Facade::make_points_direct(&cluster, dv, wpid_params, point_plane_pairs, true);
+        
+        // Add points to DynamicPointCloud
+        dpc->add_points(dpc_points);
+        
+        // Remove existing point cloud if it exists
+        if (segment->dpcloud(cloud_name)) {
+            segment->dpcloud(cloud_name, nullptr);
+        }
+        
+        // Associate with segment
+        segment->dpcloud(cloud_name, dpc);
+    }
 
     bool break_segment(Graph& graph, SegmentPtr seg, Point point, double max_dist/*=1e9*/)
     {

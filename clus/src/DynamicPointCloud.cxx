@@ -509,7 +509,8 @@ std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const
             } else {
                 temp_angle_uvw = cache_it->second;
             }
-            
+
+
             if (flag_wrap){
                 fill_wrap_points(cluster, test_point, wpid_test_point,  point.x_2d, point.y_2d, point.wpid_2d);
             }else{
@@ -521,6 +522,9 @@ std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const
 
                 }
             }
+            // std::cout << flag_wrap << " " << point.x << " " << point.y << " " << point.z << std::endl;
+            // std::cout << temp_angle_uvw[0] << " " << temp_angle_uvw[1] << " " << temp_angle_uvw[2] << " " << point.x_2d[0].back() << " " << point.y_2d[0].back() << " " << point.y_2d[1].back() << " " << point.y_2d[2].back() << std::endl;
+
         } 
         // else {
             // point.x_2d = {-1e12, -1e12, -1e12};
@@ -820,6 +824,7 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
         auto wires = anode->wires(channel_number);
         for (const auto &wire : wires) {
             auto wire_wpid = wire->planeid();
+           
             // std::cout << "Test: " << map_time_offset.size() <<  " " << map_time_offset.begin()->first << " " << wire_wpid.face() << std::endl;
             p_x[pind].push_back(time2drift(anode->faces()[wire_wpid.face()], map_time_offset.at(wire_wpid.face()), map_drift_speed.at(wire_wpid.face()), time));
             if (map_angles.find(wire_wpid.face()) == map_angles.end()) {
@@ -829,8 +834,18 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
                 angles.push_back(std::get<1>(wire_angles1));
                 angles.push_back(std::get<2>(wire_angles1));
             }
-            p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
+            
+            // Check if this wire is the same as the original wire (wire index, apa, face are all the same)
+            if (wire_wpid.apa() == wpid.apa() && wire_wpid.face() == wpid.face() && wire->index() == wind) {
+                // Use the original wire's angles to calculate p_y
+                p_y[pind].push_back(cos(angles[pind]) * point.z() - sin(angles[pind]) * point.y());
+            } else {
+                // Use the current algorithm
+                p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
+            }
             p_wpid[pind].push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()).ident());
+
+
         }
     }
     

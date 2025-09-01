@@ -132,10 +132,120 @@ public:
 
         // Process each main cluster
         size_t stm_count = 0;
-        if (check_stm_conditions(*main_cluster, main_to_associated[main_cluster] )) {
-            main_cluster->set_flag(Flags::STM);
-            stm_count++;
+
+        // validation check ... temporary ...
+        {
+            auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
+
+            const auto& steiner_pc = main_cluster->get_pc("steiner_pc");
+            const auto& coords = main_cluster->get_default_scope().coords;
+            const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+            const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+            const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+         // Add the two boundary points as additional extreme point groups
+            geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
+                                        y_coords[boundary_indices.first], 
+                                        z_coords[boundary_indices.first]);
+            geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
+                                        y_coords[boundary_indices.second], 
+                                        z_coords[boundary_indices.second]);
+            geo_point_t first_wcp = boundary_point_first;
+            geo_point_t last_wcp = boundary_point_second;
+
+            std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
+            auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
+
+            // hack the path_points according to WCP ...
+            path_points.clear();
+            path_points.emplace_back(2195.39, -869.317, 2090.5);
+            path_points.emplace_back(2193.19, -873.647, 2092);
+            path_points.emplace_back(2190.99, -878.843, 2095);
+            path_points.emplace_back(2188.79, -882.307, 2095);
+            path_points.emplace_back(2186.59, -885.771, 2095);
+            path_points.emplace_back(2184.38, -889.235, 2095);
+            path_points.emplace_back(2182.18, -894.431, 2098);
+            path_points.emplace_back(2182.18, -897.896, 2098);
+            path_points.emplace_back(2179.98, -901.36, 2098);
+            path_points.emplace_back(2177.78, -906.556, 2101);
+            path_points.emplace_back(2177.78, -910.02, 2101);
+            path_points.emplace_back(2173.37, -913.484, 2101);
+            path_points.emplace_back(2171.17, -918.68, 2104);
+            path_points.emplace_back(2168.97, -922.144, 2104);
+            path_points.emplace_back(2168.97, -925.608, 2104);
+            path_points.emplace_back(2166.77, -929.073, 2104);
+            path_points.emplace_back(2164.57, -928.206, 2105.5);
+            path_points.emplace_back(2164.57, -933.402, 2108.5);
+            path_points.emplace_back(2162.36, -936.867, 2108.5);
+            path_points.emplace_back(2160.16, -940.331, 2108.5);
+            path_points.emplace_back(2160.16, -943.795, 2108.5);
+            path_points.emplace_back(2157.96, -948.991, 2111.5);
+            path_points.emplace_back(2155.76, -952.455, 2111.5);
+            path_points.emplace_back(2153.56, -951.589, 2113);
+            path_points.emplace_back(2153.56, -955.053, 2113);
+            path_points.emplace_back(2153.56, -958.517, 2113);
+            path_points.emplace_back(2151.35, -961.982, 2113);
+            path_points.emplace_back(2149.15, -961.982, 2113);
+            path_points.emplace_back(2146.95, -967.178, 2116);
+            path_points.emplace_back(2146.95, -970.642, 2116);
+            path_points.emplace_back(2144.75, -974.106, 2116);
+            path_points.emplace_back(2142.55, -977.57, 2116);
+            path_points.emplace_back(2140.34, -982.766, 2119);
+            path_points.emplace_back(2138.14, -986.23, 2119);
+            path_points.emplace_back(2135.94, -987.096, 2117.5);
+            path_points.emplace_back(2135.94, -992.292, 2120.5);
+            path_points.emplace_back(2133.74, -994.025, 2120.5);
+            path_points.emplace_back(2133.74, -997.489, 2120.5);
+            path_points.emplace_back(2131.54, -998.355, 2122);
+            path_points.emplace_back(2131.54, -1001.82, 2122);
+            path_points.emplace_back(2129.33, -1004.42, 2123.5);
+            path_points.emplace_back(2127.13, -1005.28, 2122);
+            path_points.emplace_back(2124.93, -1010.48, 2125);
+            path_points.emplace_back(2124.93, -1012.21, 2128);
+            path_points.emplace_back(2120.53, -1014.81, 2129.5);
+            path_points.emplace_back(2120.53, -1018.27, 2129.5);
+            path_points.emplace_back(2120.53, -1032.13, 2129.5);
+
+            std::cout << path_points.size() << " Path Points: " << std::endl;
+            // for (const auto& point : path_points) {
+            //     std::cout << "Path point: x=" << point.x() << " y=" << point.y() << " z=" << point.z() << std::endl;
+            // }
+            // std::cout << std::endl;
+
+            // Create segment for tracking
+            auto segment = create_segment_for_cluster(*main_cluster, path_points);
+
+            geo_point_t test_p(10,10,10);
+            const auto& fit_seg_dpc = segment->dpcloud("main");
+            auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
+            double closest_3d_distance = sqrt(closest_result[0].second);
+            auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
+            auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
+            auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
+            std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
+            std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
+
+            m_track_fitter.add_segment(segment);
+            m_track_fitter.do_single_tracking(segment, false);
+            // Extract fit results from the segment
+            const auto& fits = segment->fits();
+            
+            // Print position, dQ, and dx for each fit point
+            std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            for (size_t i = 0; i < fits.size(); ++i) {
+                const auto& fit = fits[i];
+                std::cout << "  Point " << i << ": position=(" 
+                         << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+                         << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            }
+            std::cout << std::endl;
+
         }
+
+        // if (check_stm_conditions(*main_cluster, main_to_associated[main_cluster] )) {
+        //     main_cluster->set_flag(Flags::STM);
+        //     stm_count++;
+        // }
         
         (void)stm_count;
     }
@@ -1313,27 +1423,18 @@ private:
     
         // Step 3: Prepare segment data
         std::vector<PR::WCPoint> wcpoints;
-        std::vector<std::pair<geo_point_t, WirePlaneId>> point_plane_pairs;
-
         // const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
         // double cluster_t0 = cluster.get_flash().time();
-
+        // Step 4: Create segment connecting the vertices
+        auto segment = PR::make_segment();
+        
+        // create and associate Dynamic Point Cloud
         for (const auto& point : path_points) {
             PR::WCPoint wcp;
             wcp.point = point; 
             wcpoints.push_back(wcp);
-
-            // Create a WirePlaneId for the point
-            WirePlaneId wpid = m_dv->contained_by(point);
-
-            // WireCell::Point point_raw= transform->backward(point, cluster_t0, wpid.face(), wpid.apa());
-            point_plane_pairs.emplace_back(point, wpid);
         }
-        
-        
-        // Step 4: Create segment connecting the vertices
-        auto segment = PR::make_segment();
-        
+
         // Step 5: Configure the segment
         segment->wcpts(wcpoints).cluster(&cluster).dirsign(1); // direction: +1, 0, or -1
                
@@ -1341,39 +1442,7 @@ private:
         // for (size_t i=0;i!=path_points.size(); i++){
         //     std::cout << "A: " << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
         // }
-
-        // create and associate Dynamic Point Cloud
-
-        // // Step 1: Get wpid_params (from detector configuration)
-        // Get all the wire plane IDs from the grouping
-        const auto& wpids = cluster.grouping()->wpids();
-        // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
-        std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
-        std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
-        std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
-        std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
-        std::set<int> apas;
-        compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
-
-        // Step 2: Create DynamicPointCloud
-        auto dpc = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
-
-        // Step 3: Create DPCPoints using factory function (recommended)
-        auto dpc_points = Facade::make_points_direct(&cluster, m_dv, wpid_params, point_plane_pairs, true);
-
-        // std::cout << "Created DPCPoints: " << dpc_points.size() << std::endl;
-        // // Step 4: Add points to DynamicPointCloud
-        dpc->add_points(dpc_points);
-
-        // Step 5: Associate with segment
-        segment->dpcloud("main", dpc);
-
-        // // Now you can access the DynamicPointCloud:
-        // 
-        // if (retrieved_dpc) {
-        //     // Use DynamicPointCloud methods
-        //     auto points_info = retrieved_dpc->get_2d_points_info(some_point, radius, plane, face, apa);
-        // }
+        create_segment_point_cloud(segment, path_points, m_dv, "main");
 
         return segment;
     }
@@ -1716,9 +1785,7 @@ private:
         if (fitted_segments.size() <= 1) return false;
     
         int ntracks = 0;
-        // double total_track_length = 0;
         
-        // drift direction (1,0,0) same as prototype
         geo_point_t drift_dir_abs(1, 0, 0);
         
         // Loop through segments starting from index 1 (skip main segment)

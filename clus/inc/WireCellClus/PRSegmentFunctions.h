@@ -4,8 +4,11 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellIface/IDetectorVolumes.h"
 
 namespace WireCell::Clus::PR {
+
+    using geo_point_t = WireCell::Point;
 
     /// Replace the segment in the graph with two new segments that meet at a
     /// new vertex nearest to the point.
@@ -53,6 +56,17 @@ namespace WireCell::Clus::PR {
     /// @param seg The segment to calculate length for
     /// @return Geometric track length
     double segment_geometric_length(SegmentPtr seg);
+
+    /// Create and associate a DynamicPointCloud with a segment from path points
+    ///
+    /// @param segment The segment to associate the DynamicPointCloud with
+    /// @param path_points Vector of 3D points to process
+    /// @param dv Detector volume for wire plane ID determination
+    /// @param cloud_name Name for the DynamicPointCloud (default: "main")
+    void create_segment_point_cloud(SegmentPtr segment,
+                                    const std::vector<geo_point_t>& path_points,
+                                    const IDetectorVolumes::pointer& dv,
+                                    const std::string& cloud_name = "main");
 
     // Helper functions for external data (compatibility with existing workflows)
 
