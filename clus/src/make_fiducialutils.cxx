@@ -71,21 +71,21 @@ public:
         // Feed the dynamic data (live and dead groupings)
         fu->feed_dynamic(FiducialUtils::DynamicData{*live_grouping, *dead_grouping});
         
-        // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, 10*units::cm));
+        // validation ...
+        // {
+        // // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, 10*units::cm));
+        // // fu->inside_fiducial_volume(Point(250*units::cm, -80*units::cm, 30*units::cm));
+        // // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, -10*units::cm));
+        // // fu->inside_fiducial_volume(Point(25*units::cm, 60*units::cm, 10*units::cm));
+        // // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, 10*units::cm));
+        // // fu->inside_fiducial_volume(Point(250*units::cm, -80*units::cm, 1030*units::cm));
+        // // fu->inside_fiducial_volume(Point(250*units::cm, -80*units::cm, 960*units::cm));
+        // // fu->inside_fiducial_volume(Point(25*units::cm, 60*units::cm, 10*units::cm));
 
-        // fu->inside_fiducial_volume(Point(250*units::cm, -80*units::cm, 30*units::cm));
+        //     std::cout << "FiducialUtils check: " << fu->inside_dead_region(Point(0,0,2),0,0,2) << " " << fu->inside_dead_region(Point(41.8*units::cm, 26.5*units::cm,707.0*units::cm),0,0,2) << " " << fu->inside_dead_region(Point(41.8*units::cm, 16.5*units::cm,707.0*units::cm),0,0,2) << std::endl; 
 
-        // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, -10*units::cm));
 
-        // fu->inside_fiducial_volume(Point(25*units::cm, 60*units::cm, 10*units::cm));
-      
-        // fu->inside_fiducial_volume(Point(250*units::cm, 120*units::cm, 10*units::cm));
-
-        // fu->inside_fiducial_volume(Point(250*units::cm, -80*units::cm, 1030*units::cm));
-
-        // fu->inside_fiducial_volume(Point(250*units::cm, -80*units::cm, 960*units::cm));
-
-        // fu->inside_fiducial_volume(Point(25*units::cm, 60*units::cm, 10*units::cm));
+        // }
 
         live_grouping->set_fiducialutils(fu);
     }

@@ -43,9 +43,26 @@ namespace WireCell::Clus {
         
         // Check each plane (U=0, V=1, W=2)
         // Check if this wire at this time is dead
-        if (m_internal.live->is_wire_dead(apa, face, 0, wind_u, tind_u)) dead_view_count++;
+        if (m_internal.live->is_wire_dead(apa, face, 0, wind_u, tind_u)) dead_view_count++; 
         if (m_internal.live->is_wire_dead(apa, face, 1, wind_v, tind_v)) dead_view_count++;
         if (m_internal.live->is_wire_dead(apa, face, 2, wind_w, tind_w)) dead_view_count++;
+
+        // std::map<int, std::pair<int, int>>  dead_chs_u = m_internal.live->get_all_dead_chs(0,0,0);
+        // std::map<int, std::pair<int, int>>  dead_chs_v = m_internal.live->get_all_dead_chs(0,0,1);
+        // std::map<int, std::pair<int, int>>  dead_chs_w = m_internal.live->get_all_dead_chs(0,0,2);
+
+        // std::cout << tind_u << " " << wind_u << " " << wind_v << " " << wind_w << " " << m_internal.live->is_wire_dead(apa, face, 0, wind_u, tind_u) << " " << m_internal.live->is_wire_dead(apa, face, 1, wind_v, tind_v) << " " << m_internal.live->is_wire_dead(apa, face, 2, wind_w, tind_w) << " " << dead_view_count << " " << dead_chs_u.size() << " " << dead_chs_v.size() << " " << dead_chs_w.size() <<  std::endl;
+
+        // // Print dead channels for each view
+        // for (const auto& [ch, range] : dead_chs_u) {
+        //     std::cout << "Dead channel (U) " << ch << ": " << range.first << " - " << range.second << std::endl;
+        // }
+        // for (const auto& [ch, range] : dead_chs_v) {
+        //     std::cout << "Dead channel (V) " << ch << ": " << range.first << " - " << range.second << std::endl;
+        // }
+        // for (const auto& [ch, range] : dead_chs_w) {
+        //     std::cout << "Dead channel (W) " << ch << ": " << range.first << " - " << range.second << std::endl;
+        // }
 
         // Return true if number of dead views >= minimal_views
         return dead_view_count >= minimal_views;
