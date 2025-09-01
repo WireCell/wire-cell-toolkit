@@ -45,6 +45,9 @@ package_descriptions = [
     ('ZIO',      dict(incs=["zio/node.hpp"], libs=['zio'], pcname='libzio', mandatory=False,
                       extuses=("ZYRE","CZMQ","ZMQ"))),
 
+    ('GRPC', dict(incs=['grpcpp/grpcpp.h'], libs=['grpc++', 'grpc', 'gpr'], pcname='grpc++')),
+    ('PROTOBUF', dict(incs=['google/protobuf/message.h'], libs=['protobuf'], pcname='protobuf'))
+   
     # Note, this list may be modified (appended) in wscript files.
     # The list here represents the minimum wire-cell-toolkit requires.
 ]

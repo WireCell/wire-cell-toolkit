@@ -1,0 +1,2 @@
+bld.smplpkg('WireCellTriton', use='WireCellAux TRITON GRPC PROTOBUF',
+            test_use='WireCellPytorch LIBTORCH')
