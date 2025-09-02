@@ -92,6 +92,9 @@ void Grouping::fill_cache(GroupingCache& gc) const
                 double proj_center = center.dot(pitch_dir);
                 gc.proj_centers[face->ident()][layer-ndummy_layers] = proj_center;
                 gc.pitch_mags[face->ident()][layer-ndummy_layers] = coords.pitch_mags()[layer];
+                gc.ctpc_scopes[face->ident()][layer-ndummy_layers] =
+                    Tree::Scope{String::format("ctpc_f%dp%d", face->ident(), layer-ndummy_layers),
+                                {"x", "y"}, 1};
             }
         }
     }
@@ -148,8 +151,9 @@ size_t Grouping::hash() const
 
 const Grouping::kd2d_t& Grouping::kd2d(const int face, const int pind) const
 {
-    const auto sname = String::format("ctpc_f%dp%d", face, pind);
-    Tree::Scope scope = {sname, {"x", "y"}, 1};
+    // const auto sname = String::format("ctpc_f%dp%d", face, pind);
+    // Tree::Scope scope = {sname, {"x", "y"}, 1};
+    const auto& scope = this->cache().ctpc_scopes.at(face).at(pind);
     const auto& sv = m_node->value.scoped_view(scope);
     // std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
     return sv.kd();

@@ -131,7 +131,8 @@ local clus (
             bee_dir: bee_dir, // "data/0/0", // not used
             bee_zip: "mabc-%s-face%d.zip"%[anode.name, face],
             bee_detector: "sbnd",
-            grouping2file_prefix: "g2f",
+            grouping2file_prefix: "rec-apa%d"%[anode.data.ident],
+            // grouping2file_prefix: "",
             initial_index: index,   // New RSE configuration
             use_config_rse: true,  // Enable use of configured RSE
             runNo: LrunNo,

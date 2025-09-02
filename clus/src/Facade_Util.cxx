@@ -610,6 +610,7 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
 #pragma GCC diagnostic pop
 #include "WireCellUtil/Stream.h"
 
+#include <regex>
 
 /// @param arr: 2D array
 /// @param fname: file name
@@ -629,6 +630,49 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
 {
 
     typedef boost::multi_array<float, 2> MultiArray;
+    // ctpc: x, y, charge, charge_err, cident, wind, slice_index
+
+    using ostream_t = boost::iostreams::filtering_ostream;
+    ostream_t m_out;
+    custard::output_filters(m_out, filename);
+    if (m_out.empty()) {
+        raise<ValueError>("ten2file: unsupported outname: %s", filename.c_str());
+    }
+
+    const auto& gpcs = grouping.node()->value.local_pcs();
+    std::regex ctpc_name_pattern("^ctpc_f([0-9]+)p([0-9]+)$");
+    for (const auto& [name, pc] : gpcs) {
+        // std::cout << "grouping2file: gpc name: " << name << " npts: " << pc.size_major() << std::endl;
+        std::smatch matches;
+        if (!std::regex_match(name, matches, ctpc_name_pattern)) {
+            continue; // not a ctpc
+        }
+        // int apa_ident = -1; ///FIXME: figure this out
+        // int face_idx = -1;
+        // int plane_idx = -1;
+        // sscanf(name.c_str(), "ctpc_f%dp%d", &face_idx, &plane_idx);
+        // std::cout << " face_idx " << face_idx << " plane_idx " << plane_idx << std::endl;
+
+        size_t npts = pc.size_major();
+        MultiArray actpc(boost::extents[npts][7]);
+        const auto& x = pc.get("x")->elements<double>();
+        const auto& y = pc.get("y")->elements<double>();
+        const auto& charge = pc.get("charge")->elements<double>();
+        const auto& charge_err = pc.get("charge_err")->elements<double>();
+        const auto& cident = pc.get("cident")->elements<int>();
+        const auto& wind = pc.get("wind")->elements<int>();
+        const auto& slice_index = pc.get("slice_index")->elements<int>();
+        for (size_t i = 0; i < npts; ++i) {
+            actpc[i][0] = x[i];
+            actpc[i][1] = y[i];
+            actpc[i][2] = charge[i];
+            actpc[i][3] = charge_err[i];
+            actpc[i][4] = cident[i];
+            actpc[i][5] = wind[i];
+            actpc[i][6] = slice_index[i];
+        }
+        arr2file(actpc, name, m_out);
+    }
     size_t nblobs = 0;
     for (const auto& cluster : grouping.children()) {
         nblobs += cluster->children().size();
@@ -662,12 +706,13 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
         nedges += boost::num_edges(g);
     }
 
-    // x, y, z, q, bidx
-    MultiArray apoints(boost::extents[npoints][5]);
+    // x, y, z, q, bidx, cidx
+    MultiArray apoints(boost::extents[npoints][6]);
     // head node, tail node, weight
     MultiArray aedges(boost::extents[nedges][3]);
 
     // global point index
+    int gcidx = 0;
     int gpidx = 0;
     int geidx = 0;
     int gpoffset = 0;
@@ -687,6 +732,7 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
             const auto [tmppt, blob] = cluster->get_closest_point_blob({apoints[gpidx][0], apoints[gpidx][1], apoints[gpidx][2]});
             apoints[gpidx][3] = blob->charge()/blob->npoints();
             apoints[gpidx][4] = b2idx[blob];
+            apoints[gpidx][5] = gcidx;
         }
         auto erange = boost::edges(g);
         for (auto eit = erange.first; eit != erange.second; ++eit) {
@@ -700,14 +746,9 @@ void Facade::grouping2file(const Grouping& grouping, const std::string& filename
             geidx++;
         }
         gpoffset += boost::num_vertices(g);
+        gcidx += 1;
     }
 
-    using ostream_t = boost::iostreams::filtering_ostream;
-    ostream_t m_out;
-    custard::output_filters(m_out, filename);
-    if (m_out.empty()) {
-        raise<ValueError>("ten2file: unsupported outname: %s", filename.c_str());
-    }
     arr2file(ablobs, "blobs", m_out);
     arr2file(apoints, "points", m_out);
     arr2file(aedges, "ppedges", m_out);

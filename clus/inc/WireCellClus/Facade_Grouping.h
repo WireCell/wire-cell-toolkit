@@ -27,6 +27,8 @@ namespace WireCell::PointCloud::Facade {
         mapfp_t<double> proj_centers;
         mapfp_t<double> pitch_mags;
 
+        mapfp_t<Tree::Scope> ctpc_scopes;
+
         // #381 if you give a crap about dead_winds.  
 
     };

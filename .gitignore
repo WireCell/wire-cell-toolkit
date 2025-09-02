@@ -74,7 +74,8 @@ tmp
 README.tex
 larsoft-cfg
 *.dot
-configure
+configure*
+*.sh
 
 *.gz
 styles
