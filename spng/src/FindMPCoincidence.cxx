@@ -126,9 +126,9 @@ void WireCell::SPNG::FindMPCoincidence::configure(const WireCell::Configuration&
             // int ichan = 0;
             for (const auto & plane_chan : plane->channels()) {
                 int & ichan = plane_to_nchans[plane->ident()];
-                std::cout << "Plane & Chan: " << plane->ident() << " " << ichan << " " << plane_chan->ident() << " wires" << std::endl;
+                // std::cout << "Plane & Chan: " << plane->ident() << " " << ichan << " " << plane_chan->ident() << " wires" << std::endl;
                 for (const auto & w : plane_chan->wires()) {
-                    std::cout << "\t" << w->index() << " " <<  w->planeid().face() << std::endl;
+                    // std::cout << "\t" << w->index() << " " <<  w->planeid().face() << std::endl;
                     if (w->planeid().face() == face->ident()) { //Have to check against the target face
                         auto & temp_chans_to_wires = map[ichan];
                         // long these_nwires = static_cast<long>(temp_chans_to_wires.size());
@@ -159,13 +159,13 @@ void WireCell::SPNG::FindMPCoincidence::configure(const WireCell::Configuration&
             }
         }
 
-        std::cout << "Mapped channels to wires\n" << chan_to_wires_tensor << std::endl;
+        // std::cout << "Mapped channels to wires\n" << chan_to_wires_tensor << std::endl;
     }
 
     
-    for (const auto & plane : face->planes()) {
-        std::cout << "Wires to chans\n" << m_plane_wires_to_channels[plane->ident()] << std::endl;
-    }
+    // for (const auto & plane : face->planes()) {
+    //     std::cout << "Wires to chans\n" << m_plane_wires_to_channels[plane->ident()] << std::endl;
+    // }
 
 }
 

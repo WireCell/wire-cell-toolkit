@@ -152,7 +152,7 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
 
     for (size_t iplane = 0; iplane < plane_to_nchans.size(); ++iplane) {
         auto nchans = plane_to_nchans[iplane];
-        std::cout << iplane << " Making nchans/wires " << nchans << " " << max_nwires[iplane] << std::endl;
+        // std::cout << iplane << " Making nchans/wires " << nchans << " " << max_nwires[iplane] << std::endl;
         auto & chan_to_wires_tensor = m_plane_channels_to_wires[iplane];
         chan_to_wires_tensor = torch::full(
             {nchans, static_cast<long>(max_nwires[iplane])},
@@ -161,20 +161,20 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
             
         
         for (auto & [chan, wires] : m_chan_index_to_wires[iplane]) {
-            std::cout << "Chan: " << chan << " wires: " << wires.size() << std::endl;
+            // std::cout << "Chan: " << chan << " wires: " << wires.size() << std::endl;
             for (size_t iw = 0; iw < wires.size(); iw++) {
                 // chan_to_wires_tensor[chan][iw] = wires[iw];
                 chan_to_wires_tensor.index_put_({chan, static_cast<long>(iw)}, wires[iw]);
             }
         }
 
-        std::cout << "Mapped channels to wires\n" << chan_to_wires_tensor << std::endl;
+        // std::cout << "Mapped channels to wires\n" << chan_to_wires_tensor << std::endl;
     }
 
     
-    for (const auto & plane : face->planes()) {
-        std::cout << "Wires to chans\n" << m_plane_wires_to_channels[plane->ident()] << std::endl;
-    }
+    // for (const auto & plane : face->planes()) {
+    //     std::cout << "Wires to chans\n" << m_plane_wires_to_channels[plane->ident()] << std::endl;
+    // }
 
 }
 
