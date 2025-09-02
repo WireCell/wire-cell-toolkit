@@ -60,8 +60,6 @@ def options(opt):
     opt.add_option('--cxxstd', default='c++17',
                    help="Set the value for the compiler's --std= option, default 'c++17'")
     
-    opt.add_option('--with-triton-include', type='string', default='', help="Path to Triton include directory")
-    opt.add_option('--with-triton-lib', type='string', default='', help="Path to Triton library directory")
 
 
 def is_development():
@@ -96,25 +94,6 @@ def configure(cfg):
         debug(f'configure: forcing: {cfg.env.LIBDIR=} instead of lib64/, use explicit --libdir if you really want it')
     
 
-    triton_inc = cfg.options.with_triton_include
-    triton_lib = cfg.options.with_triton_lib
-    if triton_inc and triton_lib:
-        cfg.env.INCLUDES_TRITON = [triton_inc]
-        cfg.env.LIBPATH_TRITON = [triton_lib]
-        # Adjust the list of libs as needed for your usage:                                                                                                                                         
-        cfg.env.LIB_TRITON = [
-            'grpcclient',
-            'tritoncommonerror',
-            'tritoncommonmodelconfig',
-            'tritoncommonlogging',
-            'tritontableprinter',
-            'tritonthreadpool',
-            'tritonasyncworkqueue',
-        ]
-        cfg.msg('Triton headers', triton_inc)
-        cfg.msg('Triton libs', triton_lib)
-    else:
-        info('Triton not enabled (missing --with-triton-include and/or --with-triton-lib)')
     # Set to DEBUG to activate SPDLOG_DEBUG() macros or TRACE to activate both
     # those and SPDLOG_TRACE() levels.
     lu = cfg.options.with_spdlog_active_level.upper()

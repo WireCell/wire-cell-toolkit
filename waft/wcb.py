@@ -46,8 +46,18 @@ package_descriptions = [
                       extuses=("ZYRE","CZMQ","ZMQ"))),
 
     ('GRPC', dict(incs=['grpcpp/grpcpp.h'], libs=['grpc++', 'grpc', 'gpr'], pcname='grpc++')),
-    ('PROTOBUF', dict(incs=['google/protobuf/message.h'], libs=['protobuf'], pcname='protobuf'))
-   
+    ('PROTOBUF', dict(incs=['google/protobuf/message.h'], libs=['protobuf'], pcname='protobuf')),
+    ('TRITON', dict(incs=['grpc_client.h'],   
+    libs=[
+        'grpcclient',
+        'tritoncommonerror',
+        'tritoncommonmodelconfig',
+        'tritoncommonlogging',
+        'tritontableprinter',
+        'tritonthreadpool',
+        'tritonasyncworkqueue',
+    ],
+    mandatory=False))
     # Note, this list may be modified (appended) in wscript files.
     # The list here represents the minimum wire-cell-toolkit requires.
 ]
