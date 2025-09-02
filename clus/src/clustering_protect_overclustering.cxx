@@ -627,7 +627,7 @@ std::map<int, Cluster*> Separate_overclustering(Cluster *cluster)
     if (num <= 1) return {};
     if (num > 1000) {
         std::cout << "Warning: too many connected components: " << num
-                  << " nedges: " << num_edges
+                  // << " nedges: " << num_edges
                   << ", cluster length: " << cluster->get_length() / units::cm
                   << " cm, nblobs: " << cluster->children().size()
                   << ", npoints: " << cluster->npoints() << std::endl;
