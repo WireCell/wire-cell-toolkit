@@ -59,9 +59,9 @@ DNNROI::~DNNROI()
 
 void DNNROI::configure(const WireCell::Configuration& cfg)
 {
-   m_cfg.apa = get(cfg, "apa",m_cfg.apa);
+   //m_cfg.apa = get(cfg, "apa",m_cfg.apa);
    m_cfg.plane = get(cfg, "plane", m_cfg.plane); 
-   log->debug("DNNROI: Configuring with apa: {}, plane: {}", m_cfg.apa, m_cfg.plane);
+   log->debug("DNNROI: Configuring with plane: {}", m_cfg.plane);
    // Is it implemented already>
    /*
    auto apa = Factory::find_tn<IAnodePlane>(m_cfg.apa);
