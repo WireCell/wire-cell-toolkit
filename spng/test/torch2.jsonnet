@@ -591,7 +591,7 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
             local torch_roi_tight_spectra = [{
                     type: "Torch1DSpectrum",
                     name: "torch_1dspec_roi_tight",
-                    uses: [filters.the_wiener_tight, filters.ROI_tight_lf],
+                    uses: [filters.wiener_tight_filters[iplane], filters.ROI_tight_lf],
                     data: {
                         spectra: [
                             wc.tn(filters.wiener_tight_filters[iplane]),
@@ -854,7 +854,7 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
             ],
 
             local mp_finding_centers = torch_to_tensors + spng_decons + 
-                    spng_gaus_apps + apply_loose_rois + threshold_rois +
+                    spng_gaus_apps + apply_loose_rois + apply_tight_rois + threshold_rois +
                     [u_unstacker, v_unstacker, w_unstacker] +
                     std.flattenArrays(torch_to_tensors_unstacked) +
                     collators_for_mp_finding + torch_to_tensors_mp_finding + mp_finding,
