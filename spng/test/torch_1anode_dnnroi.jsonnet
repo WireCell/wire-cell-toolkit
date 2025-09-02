@@ -367,13 +367,13 @@ function(tools, debug_force_cpu=false) {
                     type: 'SPNGNoTileMPCoincidence',
                     name: 'mp_finding_%s' % plane,
                     data: {
-                        anode: wc.tn(tools.anode),
+                        anode: wc.tn(tools.anodes[0]),
                         target_plane_index: 0,
                         aux_plane_l_index: 2,
                         aux_plane_m_index: 1,
                         // output_torch_name: "mp_finding_%d_tensors.pt" % anode.data.ident,
                     },
-                }, nin=1, nout=1, uses=[tools.anode]) for plane in ['u', 'v']
+                }, nin=1, nout=1, uses=[tools.anodes[0]]) for plane in ['u', 'v']
             ],
 
             local roi_application = [

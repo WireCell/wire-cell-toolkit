@@ -109,7 +109,7 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
     }
 
     std::vector<int> plane_to_nchans(3);
-    std::vector<long> max_nwires(3, 0);
+    std::vector<size_t> max_nwires(3, 0);
     for (const auto & iface : m_anode->faces()) {
         //Hardcoding this until I figure out a better solution
         //Reset the collection plane
@@ -132,9 +132,16 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
                     std::cout << "\t" << w->index() << " " <<  w->planeid().face() << std::endl;
                     if (w->planeid().face() == face->ident()) { //Have to check against the target face
                         auto & temp_chans_to_wires = map[ichan];
-                        long these_nwires = static_cast<long>(temp_chans_to_wires.size());
+                        // long these_nwires = static_cast<long>(temp_chans_to_wires.size());
+                        
                         temp_chans_to_wires.push_back(w->index());
-                        if (these_nwires > max_nwires[plane->ident()]) max_nwires[plane->ident()] = these_nwires;
+                        if (temp_chans_to_wires.size() > max_nwires[plane->ident()])
+                            max_nwires[plane->ident()] = temp_chans_to_wires.size();
+                        // if ((these_nwires+1) > max_nwires[plane->ident()]) {
+                        //     max_nwires[plane->ident()] = these_nwires;
+                        //     std::cout << "Increasing max_nwires " << plane->ident() << " " << these_nwires << std::endl;
+                        // }
+                        
                         wires_to_chans_accessor[w->index()] = ichan;
                     }
                 }
@@ -145,16 +152,19 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
 
     for (size_t iplane = 0; iplane < plane_to_nchans.size(); ++iplane) {
         auto nchans = plane_to_nchans[iplane];
+        std::cout << iplane << " Making nchans/wires " << nchans << " " << max_nwires[iplane] << std::endl;
         auto & chan_to_wires_tensor = m_plane_channels_to_wires[iplane];
         chan_to_wires_tensor = torch::full(
-            {nchans, max_nwires[iplane]},
+            {nchans, static_cast<long>(max_nwires[iplane])},
             m_plane_nwires[iplane], //for default channel
             torch::TensorOptions().dtype(torch::kInt64));
             
         
         for (auto & [chan, wires] : m_chan_index_to_wires[iplane]) {
+            std::cout << "Chan: " << chan << " wires: " << wires.size() << std::endl;
             for (size_t iw = 0; iw < wires.size(); iw++) {
-                chan_to_wires_tensor[chan][iw] = wires[iw];
+                // chan_to_wires_tensor[chan][iw] = wires[iw];
+                chan_to_wires_tensor.index_put_({chan, static_cast<long>(iw)}, wires[iw]);
             }
         }
 
