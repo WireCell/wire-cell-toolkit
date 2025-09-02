@@ -7,7 +7,7 @@
 
 #include "RayGrid.h"
 
-namespace WireCell::Spng::RayGrid {
+namespace WireCell::SPNG::RayGrid {
 
     // Example data members dumped from the Python version of Coordinates for a
     // microboone-like detector.

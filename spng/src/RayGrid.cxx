@@ -1,7 +1,7 @@
 // RayGrid.cpp
 #include "WireCellSpng/RayGrid.h"
 
-namespace WireCell::Spng::RayGrid {
+namespace WireCell::SPNG::RayGrid {
 
 // --- Helper functions from funcs.py ---
 
@@ -385,4 +385,4 @@ namespace WireCell::Spng::RayGrid {
 
 
 
-} // namespace RayGrid::Spng::WireCell
+} // namespace RayGrid::SPNG::WireCell

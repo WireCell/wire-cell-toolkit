@@ -1,11 +1,11 @@
 // RayTiling.cpp
 #include "WireCellSpng/RayTiling.h"
-#include "WireCellSpng/RayGrid.h" // For WireCell::Spng::RayGrid::Coordinates
+#include "WireCellSpng/RayGrid.h" // For WireCell::SPNG::RayGrid::Coordinates
 #include <iostream>
 
 using namespace torch::indexing;
 
-namespace WireCell::Spng::RayGrid {
+namespace WireCell::SPNG::RayGrid {
 
 
     // --- Helper functions implementation ---
@@ -455,5 +455,5 @@ namespace WireCell::Spng::RayGrid {
     }
 
 
-} // namespace WireCell::Spng::RayGrid
+} // namespace WireCell::SPNG::RayGrid
 

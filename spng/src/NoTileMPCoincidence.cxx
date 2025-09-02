@@ -53,7 +53,7 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
     m_angle_in_radians = get(config, "angle_in_radians", m_angle_in_radians);
 
     //Get trivial blobs
-    m_trivial_blobs = WireCell::Spng::RayGrid::trivial_blobs();
+    m_trivial_blobs = WireCell::SPNG::RayGrid::trivial_blobs();
     //Create the views & coordinates used in RayGrid
 
 
@@ -221,8 +221,8 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
 
     tensor_map to_save;
 
-    WireCell::Spng::RayGrid::Coordinates m_raygrid_coords =
-            WireCell::Spng::RayGrid::Coordinates(m_raygrid_views);
+    WireCell::SPNG::RayGrid::Coordinates m_raygrid_coords =
+            WireCell::SPNG::RayGrid::Coordinates(m_raygrid_views);
     m_raygrid_coords.to(m_device);
 
     m_plane_channels_to_wires[m_target_plane_index] = m_plane_channels_to_wires[m_target_plane_index].to(m_device);

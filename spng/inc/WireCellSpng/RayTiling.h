@@ -11,7 +11,7 @@
 
 // Forward declaration of Coordinates class
 namespace WireCell {
-    namespace Spng {
+    namespace SPNG {
         namespace RayGrid {
             class Coordinates; // Forward declaration
         }
@@ -19,7 +19,7 @@ namespace WireCell {
 }
 
 
-namespace WireCell::Spng::RayGrid {
+namespace WireCell::SPNG::RayGrid {
 
     // --- Helper functions ---
 
@@ -220,6 +220,6 @@ namespace WireCell::Spng::RayGrid {
     retrieve_new_blob_bounds(const Coordinates& coords, const torch::Tensor& blobs,
                         const torch::Tensor& activity);
 
-} // namespace WireCell::Spng::RayGrid
+} // namespace WireCell::SPNG::RayGrid
 
 #endif // WIRECELL_SPNG_RAYGRID_RAYTILING_H

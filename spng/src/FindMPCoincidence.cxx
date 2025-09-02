@@ -52,7 +52,7 @@ void WireCell::SPNG::FindMPCoincidence::configure(const WireCell::Configuration&
     m_angle_in_radians = get(config, "angle_in_radians", m_angle_in_radians);
 
     //Get trivial blobs
-    m_trivial_blobs = WireCell::Spng::RayGrid::trivial_blobs();
+    m_trivial_blobs = WireCell::SPNG::RayGrid::trivial_blobs();
     //Create the views & coordinates used in RayGrid
 
 
@@ -213,8 +213,8 @@ bool WireCell::SPNG::FindMPCoincidence::operator()(const input_pointer& in, outp
 
     tensor_map to_save;
 
-    WireCell::Spng::RayGrid::Coordinates m_raygrid_coords =
-            WireCell::Spng::RayGrid::Coordinates(m_raygrid_views);
+    WireCell::SPNG::RayGrid::Coordinates m_raygrid_coords =
+            WireCell::SPNG::RayGrid::Coordinates(m_raygrid_views);
     m_raygrid_coords.to(m_device);
 
     m_plane_channels_to_wires[m_target_plane_index] = m_plane_channels_to_wires[m_target_plane_index].to(m_device);
@@ -313,7 +313,7 @@ bool WireCell::SPNG::FindMPCoincidence::operator()(const input_pointer& in, outp
         auto target_row = target_rows.index({Slice(), irow});
 
         // auto raygrid_row_l = element_tensor_l.to(m_device);
-        auto blobs = WireCell::Spng::RayGrid::apply_activity(m_raygrid_coords, m_trivial_blobs, l_row);
+        auto blobs = WireCell::SPNG::RayGrid::apply_activity(m_raygrid_coords, m_trivial_blobs, l_row);
 
         // std::cout << "First layer done" << std::endl;
         // std::cout << blobs.sizes() << std::endl;
@@ -333,7 +333,7 @@ bool WireCell::SPNG::FindMPCoincidence::operator()(const input_pointer& in, outp
         //     );
         // }
         // auto raygrid_row_m = element_tensor_m.to(m_device);
-        blobs = WireCell::Spng::RayGrid::apply_activity(m_raygrid_coords, blobs, m_row/*raygrid_row_m*/);
+        blobs = WireCell::SPNG::RayGrid::apply_activity(m_raygrid_coords, blobs, m_row/*raygrid_row_m*/);
         // {//Writing blobs with l & m
         //     std::cerr << "writing " << m_output_torch_name << "\n";
         //     std::ofstream output_file("blobs_m_" + m_output_torch_name, std::ios::out | std::ios::binary);
@@ -364,7 +364,7 @@ bool WireCell::SPNG::FindMPCoincidence::operator()(const input_pointer& in, outp
         tester = tester.to(m_device);
         auto target_active = (target_row/*raygrid_row_n*/ > tester);
         if (target_active.any().item<bool>()) {
-            auto mp3_blobs = WireCell::Spng::RayGrid::apply_activity(
+            auto mp3_blobs = WireCell::SPNG::RayGrid::apply_activity(
                 m_raygrid_coords, blobs, target_active
             );
 
@@ -391,7 +391,7 @@ bool WireCell::SPNG::FindMPCoincidence::operator()(const input_pointer& in, outp
         //MP2 means our target plane does not have activity overlapping with blobs from the first 2 layers
         auto target_inactive = (target_row == tester);
         if (target_inactive.any().item<bool>()) {
-            auto mp2_blobs = WireCell::Spng::RayGrid::apply_activity(
+            auto mp2_blobs = WireCell::SPNG::RayGrid::apply_activity(
                 m_raygrid_coords, blobs, target_inactive
             );
             

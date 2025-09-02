@@ -24,10 +24,10 @@ Every ~ITorchTensor~ metadata SHALL have these attributes:
 - ~datatype~ :: a string naming the SPNG Data Model element this ~ITorchTensor~ represents.
 - ~datapath~ :: a string unique to the ~ITorchTensorSet~.  This may be expressed as a ~/file/system/type/path~.
 
-An ~ITorchTensor~ metadata MAY have these attributes
+An ~ITorchTensor~ metadata MAY have these attributes or depending on datatype MUST.
 
-- ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent.
-- ~batched~ :: an integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.
+- ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent (but may be a parent).  A parent MUST precede all children in the ~ITorchTensor~.
+- ~batches~ :: an integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.
 
 * High level data model
 
@@ -97,6 +97,7 @@ Converting from ~IFrame~ to SPNG data model requires a combining operation to be
 The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label to a set of individual trace samples at potentially very fine grain.  This is used to label pixels as "bad" or "noisy", etc.  In ~IFrame~ the CMMs are represented by highly structured maps, pairs, lists.  Here, we flatten.  The metadata provides:
 
 - ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~label~ :: the label for one set of channel masks
 
 The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).
 

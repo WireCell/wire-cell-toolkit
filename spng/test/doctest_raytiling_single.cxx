@@ -1,5 +1,5 @@
 #include "WireCellSpng/RayTiling.h"
-#include "WireCellSpng/RayGrid.h" // For WireCell::Spng::RayGrid::Coordinates
+#include "WireCellSpng/RayGrid.h" // For WireCell::SPNG::RayGrid::Coordinates
 #include "WireCellSpng/RayTest.h"
 
 #include "WireCellUtil/Units.h"
@@ -8,7 +8,7 @@
 #undef CHECK
 #include "WireCellUtil/doctest.h"
 
-using namespace WireCell::Spng::RayGrid;
+using namespace WireCell::SPNG::RayGrid;
 using namespace WireCell;
 
 TEST_CASE("spng ray grid tiling one point one blob") {
