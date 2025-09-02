@@ -57,6 +57,9 @@ namespace WireCell::SPNG {
         /// } // end of scope
         const TorchContext& context() const { return m_ctx; }
 
+        /// Shorthand method to get the context's device.
+        torch::Device device() const { return m_ctx.device(); }
+
 
     protected:
 

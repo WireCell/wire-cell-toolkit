@@ -3,6 +3,18 @@
 
 namespace WireCell::SPNG {
 
+    /// Return a new TensorIndex with a subtree descending from given parents.
+    TensorIndex TensorIndex::subset(const std::vector<ITorchTensor::pointer>& seeds)
+    {
+        std::vector<ITorchTensor::pointer> tens;
+        for (const auto& seed : seeds) {
+            for (const auto& node : tree_node(seed)->depth()) {
+                tens.push_back(node.value);
+            }
+        }
+        return TensorIndex(tens);
+    }
+
     // All add()'s flow through this one.
     //
     void TensorIndex::add(ITorchTensor::pointer ten)

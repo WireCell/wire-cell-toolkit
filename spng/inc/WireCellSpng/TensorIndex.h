@@ -30,6 +30,9 @@ namespace WireCell::SPNG {
         /// Construct from tensors in a set.
         TensorIndex(ITorchTensorSet::pointer ts) : m_tens(ts->tensors()->begin(), ts->tensors()->end()) {}
 
+        /// Return a new TensorIndex with a subtree descending from given tree seeds in this TI.
+        TensorIndex subset(const std::vector<ITorchTensor::pointer>& seeds);
+
         /// A tree representing tensor parentage as expressed through the TDM
         /// "parent" metadata attribute.
         ///
@@ -81,6 +84,9 @@ namespace WireCell::SPNG {
         /// Return first tensors of a given datatype up to a maximum number.
         ITorchTensor::vector of_type(const std::string& datatype,
                                      size_t maxnum=std::numeric_limits<size_t>::max()) const;
+
+        /// Return flat vector of tensors in as-added order.
+        const std::vector<ITorchTensor::pointer>& all_tensors() const { return m_tens; };
 
     private:
         std::vector<ITorchTensor::pointer> m_tens;
