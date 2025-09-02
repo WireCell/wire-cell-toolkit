@@ -310,7 +310,7 @@ function(tools, debug_force_cpu=false) {
                     data: {multiplicity: (if iplane < 2 then 3 else 2),}
 
                 }, nin=1, nout=(if iplane < 2 then 3 else 2))
-                for iplane in std.range(0,3)
+                for iplane in std.range(0, 3)
             ],
 
 
@@ -318,7 +318,7 @@ function(tools, debug_force_cpu=false) {
                 g.pnode({
                     type: 'TorchTensorSetReplicator',
                     name: 'post_tight_replicator_%d' % iplane,
-                    data: {multiplicity: (if iplane < 2 then 3 else 2),}
+                    data: {multiplicity: (if iplane > 1 then 3 else 2),}
 
                 }, nin=1, nout=(if iplane > 1 then 3 else 2))
                 for iplane in std.range(0,3)
@@ -425,9 +425,9 @@ function(tools, debug_force_cpu=false) {
             }, nin=1, nout=0) for  plane in ['u', 'v', 'w1', 'w2']],
 
 
-            local mp_finding_centers = torch_to_tensors + spng_decons + 
+            local mp_finding_centers = torch_to_tensors + spng_decons +  post_decon_replicators +
                     do_gaus_filters + do_loose_roi_filters + do_tight_roi_filters +
-                    threshold_rois +
+                    threshold_rois + post_tight_replicators + roi_application +
                     collators_for_mp_finding + torch_to_tensors + mp_finding
                     + collators_for_dnn_roi + dnn_rois + tensor_sinks,
                     
