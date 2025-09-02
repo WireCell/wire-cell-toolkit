@@ -1,9 +1,9 @@
-#include "WireCellSpng/BaseNode.h"
+#include "WireCellSpng/ContextBase.h"
 
 
 namespace WireCell::SPNG {
 
-    WireCell::Configuration BaseNode::default_configuration() const
+    WireCell::Configuration ContextBase::default_configuration() const
     {
         Configuration cfg;
         cfg["device"] = "cpu";
@@ -11,7 +11,7 @@ namespace WireCell::SPNG {
         return cfg;
     }
 
-    void BaseNode::configure(const WireCell::Configuration& cfg)
+    void ContextBase::configure(const WireCell::Configuration& cfg)
     {
         auto devname = get<std::string>(cfg, "device", "cpu");
         auto semname = get<std::string>(cfg, "semaphore", "");
