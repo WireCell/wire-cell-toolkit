@@ -100,7 +100,7 @@ namespace WireCell::Clus {
                        num_points_dead ++;
                     }else{
                         const auto transform = m_sd.pcts->pc_transform(main_cluster.get_scope_transform(main_cluster.get_default_scope()));
-                        double cluster_t0 = main_cluster.get_flash().time();
+                        double cluster_t0 = main_cluster.get_cluster_t0();
                         auto temp_p_raw = transform->backward(temp_p, cluster_t0, test_wpid.face(), test_wpid.apa());
 
                         if (inside_dead_region(temp_p_raw, test_wpid.apa(), test_wpid.face())) num_points_dead ++;
@@ -145,7 +145,7 @@ namespace WireCell::Clus {
                 }else{
                     // convert temp_p to raw point and find apa etc ...
                     auto transform = m_sd.pcts->pc_transform(main_cluster.get_scope_transform(main_cluster.get_default_scope()));
-                    double cluster_t0 = main_cluster.get_flash().time();
+                    double cluster_t0 = main_cluster.get_cluster_t0();
                     auto temp_p_raw = transform->backward(temp_p, cluster_t0, test_wpid.face(), test_wpid.apa());
 
                     auto result_u = m_internal.live->get_closest_points(temp_p_raw,1.2*units::cm,test_wpid.apa(), test_wpid.face(), 0);

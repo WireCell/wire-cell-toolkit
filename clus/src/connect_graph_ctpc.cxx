@@ -153,7 +153,7 @@ void Graphs::connect_graph_ctpc(
                             geo_point_t test_p_raw = test_p;
                             if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()){
                                 const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_flash().time();
+                                double cluster_t0 = cluster.get_cluster_t0();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
@@ -190,7 +190,7 @@ void Graphs::connect_graph_ctpc(
                             geo_point_t test_p_raw = test_p;
                             if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()){
                                 const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_flash().time();
+                                double cluster_t0 = cluster.get_cluster_t0();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
@@ -226,7 +226,7 @@ void Graphs::connect_graph_ctpc(
                             geo_point_t test_p_raw = test_p;
                             if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()){
                                 const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_flash().time();
+                                double cluster_t0 = cluster.get_cluster_t0();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
@@ -573,7 +573,7 @@ void Graphs::connect_graph_ctpc_with_reference(
                             geo_point_t test_p_raw = test_p;
                             if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()) {
                                 const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_flash().time();
+                                double cluster_t0 = cluster.get_cluster_t0();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
@@ -611,7 +611,7 @@ void Graphs::connect_graph_ctpc_with_reference(
                             geo_point_t test_p_raw = test_p;
                             if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()) {
                                 const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_flash().time();
+                                double cluster_t0 = cluster.get_cluster_t0();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
@@ -648,7 +648,7 @@ void Graphs::connect_graph_ctpc_with_reference(
                             geo_point_t test_p_raw = test_p;
                             if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()) {
                                 const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_flash().time();
+                                double cluster_t0 = cluster.get_cluster_t0();
                                 test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());

@@ -215,15 +215,15 @@ public:
             // Create segment for tracking
             auto segment = create_segment_for_cluster(*main_cluster, path_points);
 
-            geo_point_t test_p(10,10,10);
-            const auto& fit_seg_dpc = segment->dpcloud("main");
-            auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
-            double closest_3d_distance = sqrt(closest_result[0].second);
-            auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
-            auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
-            auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
-            std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
-            std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
+            // geo_point_t test_p(10,10,10);
+            // const auto& fit_seg_dpc = segment->dpcloud("main");
+            // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
+            // double closest_3d_distance = sqrt(closest_result[0].second);
+            // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
+            // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
+            // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
+            // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
+            // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
 
             m_track_fitter.add_segment(segment);
             m_track_fitter.do_single_tracking(segment, false);
@@ -650,7 +650,7 @@ private:
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        double cluster_t0 = cluster.get_flash().time();
+        double cluster_t0 = cluster.get_cluster_t0();
         
         // Extract fit results from the segment
         const auto& fits = segment->fits();
@@ -970,7 +970,6 @@ private:
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        // double cluster_t0 = cluster.get_flash().time();
         
         // Extract fit results from the segment
         const auto& fits = segment->fits();
@@ -1222,7 +1221,6 @@ private:
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        // double cluster_t0 = cluster.get_flash().time();
         
         // Extract fit results from the segment
         const auto& fits = segment->fits();
@@ -1424,7 +1422,6 @@ private:
         // Step 3: Prepare segment data
         std::vector<PR::WCPoint> wcpoints;
         // const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        // double cluster_t0 = cluster.get_flash().time();
         // Step 4: Create segment connecting the vertices
         auto segment = PR::make_segment();
         
@@ -1467,7 +1464,7 @@ private:
         int num_tagged = 0;
 
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        double cluster_t0 = cluster.get_flash().time();
+        double cluster_t0 = cluster.get_cluster_t0();
         
         // Step 1: Tag points within search_range of existing tracks        
         for (size_t i = 0; i < N; i++) {

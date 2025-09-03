@@ -671,7 +671,15 @@ void TrackFitting::prepare_data() {
     }
 
 
-    std::cout << "Number of Measurements: " << m_charge_data.size() << std::endl;
+    // std::cout << "Number of Measurements: " << m_charge_data.size() << std::endl;
+    // for (const auto& [coord_key, charge_measurement] : m_charge_data) {
+    //     std::cout << "CoordReadout: (APA=" << coord_key.apa
+    //               << ", Time=" << coord_key.time
+    //               << ", Channel=" << coord_key.channel
+    //               << ") -> Charge=" << charge_measurement.charge
+    //               << ", ChargeErr=" << charge_measurement.charge_err
+    //               << ", Flag=" << charge_measurement.flag << std::endl;
+    // }
 }
 
 void TrackFitting::fill_global_rb_map() {
@@ -781,7 +789,7 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
         }
     }
 
-    // std::cout << "Test: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.front() << std::endl;
+    // std::cout << "Test b: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.front() << std::endl;
     
     // Fill in the middle part
     for (size_t i = 0; i != temp_wcps_vec.size(); i++) {
@@ -809,6 +817,9 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
             }
         }
     }
+
+    // std::cout << "Test m: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.back() << std::endl;
+
     
     // Fill in the end part
     {
@@ -830,7 +841,7 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
         }
     }
 
-    // std::cout << "Test: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.back() << std::endl;
+    // std::cout << "Test e: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.back() << std::endl;
 
     
     return pts;
@@ -842,7 +853,7 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
     // get the cluster from the segment
     auto cluster = segment->cluster();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    double cluster_t0 = cluster->get_flash().time();
+    double cluster_t0 = cluster->get_cluster_t0();
 
     if (flag_start) {
         // test start
@@ -1022,7 +1033,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     // Get cluster from segment
     auto cluster = segment->cluster();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    double cluster_t0 = cluster->get_flash().time();
+    double cluster_t0 = cluster->get_cluster_t0();
     // find the raw point ...
 
 
@@ -1094,8 +1105,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
         }
         
        
-        
-        // std::cout << "Cur: " << cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << std::endl;
+        std::cout << nearby_blobs_set.size() << " nearby blobs found for point " <<  cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << " " << dis_cut <<  std::endl;
         
         // Calculate adaptive distance cuts for each plane
         double dis_cut_u = dis_cut;
@@ -1130,67 +1140,80 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             dis_cut_v = max_time_slice_v * time_tick_width * 1.2;
         if (max_time_slice_w * time_tick_width * 1.2 < dis_cut_w)
             dis_cut_w = max_time_slice_w * time_tick_width * 1.2;
+
+        // std::cout << dis_cut_u << " " << dis_cut_v << " " << dis_cut_w << std::endl;
         
         // Process each nearby blob for wire range calculations
         for (const auto* blob : nearby_blobs_set) {
             int this_time_slice = blob->slice_index_min();
+
+            // std::cout << "Blob info: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() << " " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() << " " << blob->w_wire_index_min() << " " << blob->w_wire_index_max() << " " << this_time_slice << std::endl; 
             
             // Calculate remaining distance cuts accounting for time offset
-            double rem_dis_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
-            double rem_dis_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
-            double rem_dis_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
-            
-            if ((rem_dis_cut_u > 0 || rem_dis_cut_v > 0 || rem_dis_cut_w > 0) && abs(cur_time_slice - this_time_slice) <= time_tick_cut) {
-                
+            double rem_dis_sq_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
+            double rem_dis_sq_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
+            double rem_dis_sq_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
+
+            // std::cout << rem_dis_cut_u << " " << rem_dis_cut_v << " " << rem_dis_cut_w << " " << cur_time_slice << " " <<this_time_slice << " " << time_tick_cut << std::endl;
+
+            if ((rem_dis_sq_cut_u > 0 || rem_dis_sq_cut_v > 0 || rem_dis_sq_cut_w > 0) && abs(cur_time_slice - this_time_slice) <= time_tick_cut) {
+
                 // Calculate minimum wire distances
                 float min_u_dis, min_v_dis, min_w_dis;
                 
                 // U wire distance
                 if (cur_wire_u < blob->u_wire_index_min()) {
                     min_u_dis = blob->u_wire_index_min() - cur_wire_u;
-                } else if (cur_wire_u <= blob->u_wire_index_max()) {
+                } else if (cur_wire_u < blob->u_wire_index_max()) {
                     min_u_dis = 0;
                 } else {
-                    min_u_dis = cur_wire_u - blob->u_wire_index_max();
+                    min_u_dis = cur_wire_u - blob->u_wire_index_max()+1;
                 }
                 
                 // V wire distance
                 if (cur_wire_v < blob->v_wire_index_min()) {
                     min_v_dis = blob->v_wire_index_min() - cur_wire_v;
-                } else if (cur_wire_v <= blob->v_wire_index_max()) {
+                } else if (cur_wire_v < blob->v_wire_index_max()) {
                     min_v_dis = 0;
                 } else {
-                    min_v_dis = cur_wire_v - blob->v_wire_index_max();
+                    min_v_dis = cur_wire_v - blob->v_wire_index_max()+1;
                 }
                 
                 // W wire distance
                 if (cur_wire_w < blob->w_wire_index_min()) {
                     min_w_dis = blob->w_wire_index_min() - cur_wire_w;
-                } else if (cur_wire_w <= blob->w_wire_index_max()) {
+                } else if (cur_wire_w < blob->w_wire_index_max()) {
                     min_w_dis = 0;
                 } else {
-                    min_w_dis = cur_wire_w - blob->w_wire_index_max();
+                    min_w_dis = cur_wire_w - blob->w_wire_index_max()+1;
                 }
                 
                 // Use the dedicated calculate_ranges_simplified function
-                float range_u, range_v, range_w;
+                float range_sq_u, range_sq_v, range_sq_w;
                 WireCell::Clus::TrackFittingUtil::calculate_ranges_simplified(
                     angle_u, angle_v, angle_w,
-                    rem_dis_cut_u, rem_dis_cut_v, rem_dis_cut_w,
+                    rem_dis_sq_cut_u, rem_dis_sq_cut_v, rem_dis_sq_cut_w,
                     min_u_dis, min_v_dis, min_w_dis,
                     pitch_u, pitch_v, pitch_w,
-                    range_u, range_v, range_w);
-                
+                    range_sq_u, range_sq_v, range_sq_w);
+
+                // std::cout << "Cuts: " << range_sq_u << " " << range_sq_v << " " << range_sq_w << std::endl;
+
+
                 // If all ranges are positive, add wire indices to associations
-                if (range_u > 0 && range_v > 0 && range_w > 0) {
+                if (range_sq_u > 0 && range_sq_v > 0 && range_sq_w > 0) {
                     // Calculate wire limits
-                    float low_u_limit = cur_wire_u - sqrt(range_u) / pitch_u;
-                    float high_u_limit = cur_wire_u + sqrt(range_u) / pitch_u;
-                    float low_v_limit = cur_wire_v - sqrt(range_v) / pitch_v;
-                    float high_v_limit = cur_wire_v + sqrt(range_v) / pitch_v;
-                    float low_w_limit = cur_wire_w - sqrt(range_w) / pitch_w;
-                    float high_w_limit = cur_wire_w + sqrt(range_w) / pitch_w;
-                    
+                    float low_u_limit = cur_wire_u - sqrt(range_sq_u) / pitch_u;
+                    float high_u_limit = cur_wire_u + sqrt(range_sq_u) / pitch_u;
+                    float low_v_limit = cur_wire_v - sqrt(range_sq_v) / pitch_v;
+                    float high_v_limit = cur_wire_v + sqrt(range_sq_v) / pitch_v;
+                    float low_w_limit = cur_wire_w - sqrt(range_sq_w) / pitch_w;
+                    float high_w_limit = cur_wire_w + sqrt(range_sq_w) / pitch_w;
+
+                    // std::cout << low_u_limit << " " << high_u_limit << " "
+                    //           << low_v_limit << " " << high_v_limit << " "
+                    //           << low_w_limit << " " << high_w_limit << " " << this_time_slice << std::endl;
+
                     // Add U plane associations
                     for (int j = std::round(low_u_limit); j <= std::round(high_u_limit); j++) {
                         Coord2D coord(current_wpid.apa(), current_wpid.face(), 
@@ -1222,7 +1245,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
         }
     }
 
-    // std::cout << "Pixels: " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
+    std::cout << "Pixels: " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
 
     // Steiner Tree ... 
     if (cluster->has_graph("steiner_graph") && cluster->has_pc("steiner_pc")) {
@@ -1250,6 +1273,8 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                                pow(closest_point.y() - p.y(), 2) + 
                                pow(closest_point.z() - p.z(), 2));
 
+        std::cout << "Steiner " << temp_dis << " " << dis_cut << " " <<apa << " " << closest_point_wpid.apa() << " " << face << " " << closest_point_wpid.face() << std::endl;
+
         if (temp_dis < dis_cut && apa == closest_point_wpid.apa() && face == closest_point_wpid.face()){
             // Get graph algorithms interface
             const auto& ga = cluster->graph_algorithms(graph_name);
@@ -1259,6 +1284,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             // find the raw point ...
             auto closest_point_raw = transform->backward(closest_point, cluster_t0, apa, face);
 
+            std::cout << p << " " << closest_point << " "  << closest_point_raw << std::endl;
 
             auto cur_u = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 0);
             auto cur_v = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 1);
@@ -1269,7 +1295,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             int cur_wire_v = std::get<1>(cur_v);
             int cur_wire_w = std::get<1>(cur_w);
 
-            // std::cout << cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << std::endl;
+            std::cout << "TW: " << cluster_t0 << " " << std::get<0>(cur_u) << " " << cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << std::endl;
         
             // Calculate adaptive distance cuts (equivalent to original max_time_slice_u/v/w calculation)
             double dis_cut_u = dis_cut;
@@ -1473,7 +1499,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     // Get cluster from segment
     auto cluster = segment->cluster();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    double cluster_t0 = cluster->get_flash().time();
+    double cluster_t0 = cluster->get_cluster_t0();
 
     auto first_blob = segment->cluster()->children()[0];
     int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
@@ -1861,6 +1887,8 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
                               4/3. * mid_point_factor * units::cm);
         }
 
+        // std::cout << i << " " << distances.at(i) << " " << end_point_factor << " " << dis_cut << std::endl;
+
         // check point's apa and face ...
         // find the apa and face ...
         auto wpid = m_dv->contained_by(ptss.at(i).first);
@@ -1872,6 +1900,8 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 
             TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
             form_point_association(segment, ptss.at(i).first, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+
+            std::cout << i << " " << ptss.at(i).first << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
 
             if (i == 0 || i == 1 || i + 1 == ptss.size() || i + 2 == ptss.size()) {
                 examine_point_association(segment, ptss.at(i).first, temp_2dut, temp_2dvt, temp_2dwt, true, charge_cut);
@@ -1923,7 +1953,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
         }
     }
 
-    // std::cout << ptss.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
+    std::cout << "Form Map: " << ptss.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
     
     ptss = saved_pts;
 
@@ -2064,8 +2094,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto segment = pss_vec.at(i).second;
         auto cluster = segment->cluster();
         const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-        double cluster_t0 = cluster->get_flash().time();
-        
+        double cluster_t0 = cluster->get_cluster_t0();
+
         auto plane_data_u = point_info.get_plane_data(WirePlaneLayer_t::kUlayer);
         auto plane_data_v = point_info.get_plane_data(WirePlaneLayer_t::kVlayer);
         auto plane_data_w = point_info.get_plane_data(WirePlaneLayer_t::kWlayer);
@@ -2335,7 +2365,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto segment = pss_vec.at(i).second;
         auto cluster = segment->cluster();
         const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-        double cluster_t0 = cluster->get_flash().time();
+        double cluster_t0 = cluster->get_cluster_t0();
         auto test_wpid = m_dv->contained_by(pss_vec[i].first);
 
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
@@ -2406,7 +2436,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto segment = fine_tracking_path[i].second;
         auto cluster = segment->cluster();
         const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-        double cluster_t0 = cluster->get_flash().time();
+        double cluster_t0 = cluster->get_cluster_t0();
 
         int apa = saved_paf.at(i).first;
         int face = saved_paf.at(i).second;
@@ -3681,6 +3711,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         fill_global_rb_map();
     }
 
+    // std::cout << "Global Blob Map: " << global_rb_map.size() << std::endl;
+
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
@@ -3707,6 +3739,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
             }
         }
     }
+
+    std::cout << "After organization " << pts.size() << std::endl;
 
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
     for (const auto& pt : pts) {

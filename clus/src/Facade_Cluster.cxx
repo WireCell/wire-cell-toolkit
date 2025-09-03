@@ -194,6 +194,8 @@ std::vector<int> Cluster::add_corrected_points(
 {
     const double t0 = this->get_cluster_t0();
 
+    // std::cout << "T0: " << t0 << " " << this->get_flash().time() << std::endl;
+
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
     if (correction_name == "T0Correction") {
