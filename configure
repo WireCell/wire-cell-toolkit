@@ -34,6 +34,8 @@ env CC=gcc CXX=g++ FC=gfortran \
 --with-triton-lib=/cvmfs/larsoft.opensciencegrid.org/products/triton/v2_25_0d/Linux64bit+3.10-2.17-e26/lib64 \
 --with-protobuf-include=/cvmfs/larsoft.opensciencegrid.org/products/protobuf/v3_21_12a/Linux64bit+3.10-2.17-e26/include \
 --with-protobuf-lib=/cvmfs/larsoft.opensciencegrid.org/products/protobuf/v3_21_12a/Linux64bit+3.10-2.17-e26/lib \
+--with-grpc-include=/cvmfs/larsoft.opensciencegrid.org/products/grpc/v1_35_0c/Linux64bit+3.10-2.17-e26/include \
+--with-grpc-lib=/cvmfs/larsoft.opensciencegrid.org/products/grpc/v1_35_0c/Linux64bit+3.10-2.17-e26/lib \
 \ #--with-cuda="/usr/local/cuda" \
 \ #--with-cuda-lib="/usr/local/cuda/lib64" \
 \ #--with-libtorch="/home/yuhw/torch/libtorch" \
