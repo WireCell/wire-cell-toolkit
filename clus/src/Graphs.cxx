@@ -312,6 +312,8 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
         return result;
     }
     
+    // std::cout << "Level " << 0 << " " << start_vertex << std::endl;
+
     // Use BFS to find neighbors level by level
     std::queue<vertex_type> current_level;
     std::queue<vertex_type> next_level;
@@ -330,7 +332,9 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
         while (!current_level.empty()) {
             vertex_type current_vertex = current_level.front();
             current_level.pop();
-            
+
+            // std::cout << "Level " << level-1 << " " << current_vertex << std::endl;
+
             // Examine all adjacent vertices
             auto adjacent_vertices = boost::adjacent_vertices(current_vertex, m_graph);
             for (auto vi = adjacent_vertices.first; vi != adjacent_vertices.second; ++vi) {

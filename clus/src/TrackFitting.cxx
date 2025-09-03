@@ -1273,18 +1273,24 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                                pow(closest_point.y() - p.y(), 2) + 
                                pow(closest_point.z() - p.z(), 2));
 
-        std::cout << "Steiner " << temp_dis << " " << dis_cut << " " <<apa << " " << closest_point_wpid.apa() << " " << face << " " << closest_point_wpid.face() << std::endl;
+        // std::cout << "Steiner " << temp_dis << " " << dis_cut << " " <<apa << " " << closest_point_wpid.apa() << " " << face << " " << closest_point_wpid.face() << std::endl;
 
         if (temp_dis < dis_cut && apa == closest_point_wpid.apa() && face == closest_point_wpid.face()){
             // Get graph algorithms interface
             const auto& ga = cluster->graph_algorithms(graph_name);
+
+            // // Print Steiner graph statistics
+            // const auto& graph_steiner = cluster->get_graph("steiner_graph");
+            // std::cout << "Steiner graph: vertices = " << boost::num_vertices(graph_steiner)
+            //           << ", edges = " << boost::num_edges(graph_steiner) << std::endl;
+            
             // Find nearby points using graph traversal (equivalent to original nested loop)
             auto total_vertices_found = ga.find_neighbors_nlevel(closest_point_index, nlevel);
 
             // find the raw point ...
             auto closest_point_raw = transform->backward(closest_point, cluster_t0, apa, face);
 
-            std::cout << p << " " << closest_point << " "  << closest_point_raw << std::endl;
+            // std::cout << p << " " << closest_point << " "  << closest_point_raw << std::endl;
 
             auto cur_u = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 0);
             auto cur_v = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 1);
@@ -1295,7 +1301,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             int cur_wire_v = std::get<1>(cur_v);
             int cur_wire_w = std::get<1>(cur_w);
 
-            std::cout << "TW: " << cluster_t0 << " " << std::get<0>(cur_u) << " " << cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << std::endl;
+            std::cout << "B: " << cluster_t0 << " " << std::get<0>(cur_u) << " " << cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << " " << total_vertices_found.size() << " " << nlevel << std::endl;
         
             // Calculate adaptive distance cuts (equivalent to original max_time_slice_u/v/w calculation)
             double dis_cut_u = dis_cut;
@@ -1306,7 +1312,9 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             double max_time_slice_v = 0;
             double max_time_slice_w = 0;
 
-            std::map<int, std::tuple<int, int, int, int>> map_vertex_info;
+            std::map<int, std::tuple<int, int, int, int, int, int> > map_time_wires;
+
+            // std::map<int, std::tuple<int, int, int, int>> map_vertex_info;
             // Collect point indices 
             for (auto vertex_idx : total_vertices_found) {
                     auto vertex_wpid = wpid_array[vertex_idx];
@@ -1329,21 +1337,54 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                     int vertex_wire_v = std::get<1>(vertex_v);
                     int vertex_wire_w = std::get<1>(vertex_w);
 
-                    map_vertex_info[vertex_idx] = std::make_tuple(vertex_time_slice, vertex_wire_u, vertex_wire_v, vertex_wire_w);
+                    int umin = vertex_wire_u, umax = vertex_wire_u+1;
+                    int vmin = vertex_wire_v, vmax = vertex_wire_v+1;
+                    int wmin = vertex_wire_w, wmax = vertex_wire_w+1;
+                    auto it = map_time_wires.find(vertex_time_slice);
+                    if (it == map_time_wires.end()) {
+                        // No entry yet, insert new boundaries
+                        map_time_wires[vertex_time_slice] = std::make_tuple(umin, umax, vmin, vmax, wmin, wmax);
+                    } else {
+                        // Update boundaries if needed
+                        auto& tup = it->second;
+                        std::get<0>(tup) = std::min(std::get<0>(tup), umin);
+                        std::get<1>(tup) = std::max(std::get<1>(tup), umax);
+                        std::get<2>(tup) = std::min(std::get<2>(tup), vmin);
+                        std::get<3>(tup) = std::max(std::get<3>(tup), vmax);
+                        std::get<4>(tup) = std::min(std::get<4>(tup), wmin);
+                        std::get<5>(tup) = std::max(std::get<5>(tup), wmax);
+                    }
+            }
 
+            for (const auto& [vertex_time_slice, wire_ranges] : map_time_wires) {
+                int umin = std::get<0>(wire_ranges);
+                int umax = std::get<1>(wire_ranges);
+                int vmin = std::get<2>(wire_ranges);
+                int vmax = std::get<3>(wire_ranges);
+                int wmin = std::get<4>(wire_ranges);
+                int wmax = std::get<5>(wire_ranges);
+
+                for (auto vertex_wire_u = umin; vertex_wire_u < umax; ++vertex_wire_u) {
                     // Check U, V, W wire proximity
-                    if (abs(vertex_wire_u - cur_wire_u) <= 1) {
+                    if (abs(vertex_wire_u - cur_wire_u)*pitch_u<=dis_cut) {
                         if (abs(vertex_time_slice - cur_time_slice) > max_time_slice_u)
                             max_time_slice_u = abs(vertex_time_slice - cur_time_slice);
                     }
-                    if (abs(vertex_wire_v - cur_wire_v) <= 1) {
+                }
+                for (auto vertex_wire_v = vmin; vertex_wire_v < vmax; ++vertex_wire_v) {
+                    // Check U, V, W wire proximity
+                    if (abs(vertex_wire_v - cur_wire_v)*pitch_v<=dis_cut) {
                         if (abs(vertex_time_slice - cur_time_slice) > max_time_slice_v)
                             max_time_slice_v = abs(vertex_time_slice - cur_time_slice);
                     }
-                    if (abs(vertex_wire_w - cur_wire_w) <= 1) {
+                }
+                for (auto vertex_wire_w = wmin; vertex_wire_w < wmax; ++vertex_wire_w) {
+                    // Check U, V, W wire proximity
+                    if (abs(vertex_wire_w - cur_wire_w)*pitch_w<=dis_cut) {
                         if (abs(vertex_time_slice - cur_time_slice) > max_time_slice_w)
                             max_time_slice_w = abs(vertex_time_slice - cur_time_slice);
                     }
+                }
             }
 
             // Apply adaptive cuts (equivalent to original adaptive cut logic)
@@ -1354,21 +1395,24 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             if (max_time_slice_w * time_tick_width * 1.2 < dis_cut_w)
                 dis_cut_w = max_time_slice_w * time_tick_width * 1.2;
 
-                                    // std::cout << "Time tick: " << time_tick_width/units::mm << std::endl;
+            // std::cout << "Steiner dis: " << dis_cut_u << " " << dis_cut_v << " " << dis_cut_w << " " << std::endl;
 
+            // Process each nearby blob for wire range calculations (equivalent to final loop)
+            for (const auto& [vertex_time_slice, wire_ranges] : map_time_wires) {
+                int umin = std::get<0>(wire_ranges);
+                int umax = std::get<1>(wire_ranges);
+                int vmin = std::get<2>(wire_ranges); 
+                int vmax = std::get<3>(wire_ranges);
+                int wmin = std::get<4>(wire_ranges);
+                int wmax = std::get<5>(wire_ranges);
         
-            // // Process each nearby blob for wire range calculations (equivalent to final loop)
-            for (auto vertex_info : map_vertex_info){
-                // auto vertex_idx = vertex_info.first;
-                auto vertex_time_slice = std::get<0>(vertex_info.second);
-                auto vertex_wire_u = std::get<1>(vertex_info.second);
-                auto vertex_wire_v = std::get<2>(vertex_info.second);
-                auto vertex_wire_w = std::get<3>(vertex_info.second);
 
                 // Calculate remaining distance cuts accounting for time offset
                 double rem_dis_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - vertex_time_slice) * time_tick_width, 2);
                 double rem_dis_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - vertex_time_slice) * time_tick_width, 2);
                 double rem_dis_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - vertex_time_slice) * time_tick_width, 2);
+
+                // std::cout << rem_dis_cut_u << " " << rem_dis_cut_v << " " << rem_dis_cut_w << " " << std::endl;
 
                 if ((rem_dis_cut_u > 0 || rem_dis_cut_v > 0 || rem_dis_cut_w > 0) && abs(cur_time_slice - vertex_time_slice) <= time_tick_cut) {
                 
@@ -1376,28 +1420,28 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                 float min_u_dis, min_v_dis, min_w_dis;
                 
                 // U wire distance
-                if (cur_wire_u < vertex_wire_u - 1) {
-                    min_u_dis = vertex_wire_u - 1 - cur_wire_u;
-                } else if (cur_wire_u > vertex_wire_u + 1) {
-                    min_u_dis = cur_wire_u - vertex_wire_u - 1;
+                if (cur_wire_u < umin) {
+                    min_u_dis = umin - cur_wire_u;
+                } else if (cur_wire_u >= umax) {
+                    min_u_dis = cur_wire_u - umax + 1;
                 } else {
                     min_u_dis = 0;
                 }
 
                 // V wire distance
-                if (cur_wire_v < vertex_wire_v - 1) {
-                    min_v_dis = vertex_wire_v - 1 - cur_wire_v;
-                } else if (cur_wire_v > vertex_wire_v + 1) {
-                    min_v_dis = cur_wire_v - vertex_wire_v - 1;
+                if (cur_wire_v < vmin) {
+                    min_v_dis = vmin - cur_wire_v;
+                } else if (cur_wire_v >= vmax) {
+                    min_v_dis = cur_wire_v - vmax + 1;
                 } else {
                     min_v_dis = 0;
                 }
 
                 // W wire distance
-                if (cur_wire_w < vertex_wire_w - 1) {
-                    min_w_dis = vertex_wire_w - 1 - cur_wire_w;
-                } else if (cur_wire_w > vertex_wire_w + 1) {
-                    min_w_dis = cur_wire_w - vertex_wire_w - 1;
+                if (cur_wire_w < wmin) {
+                    min_w_dis = wmin - cur_wire_w;
+                } else if (cur_wire_w >= wmax) {
+                    min_w_dis = cur_wire_w - wmax + 1;
                 } else {
                     min_w_dis = 0;
                 }
@@ -1410,6 +1454,8 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                     min_u_dis, min_v_dis, min_w_dis,
                     pitch_u, pitch_v, pitch_w,
                     range_u, range_v, range_w);
+
+                // std::cout << min_u_dis << " " << min_v_dis << " " << min_w_dis << " " << range_u << " " << range_v << " " << range_w << std::endl;
                 
                     // If all ranges are positive, add wire indices to associations
                     if (range_u > 0 && range_v > 0 && range_w > 0) {
@@ -1490,6 +1536,9 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             }
         }
     }
+
+    // std::cout << "Pixels 2: " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
+
 
  }
 
