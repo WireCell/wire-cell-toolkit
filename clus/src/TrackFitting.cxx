@@ -4198,37 +4198,37 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         //     std::cout << "pts[" << i << "] = (" << pts[i].x() << ", " << pts[i].y() << ", " << pts[i].z() << ")" << std::endl;
         // }
 
-        // hack pts ...
-        pts.clear();
-        pts.push_back(WireCell::Point(2192.09, -872.848, 2094.53));
-        pts.push_back(WireCell::Point(2189.97, -878.182, 2095.57));
-        pts.push_back(WireCell::Point(2188.06, -882.53, 2096.41));
-        pts.push_back(WireCell::Point(2186.15, -886.879, 2097.25));
-        pts.push_back(WireCell::Point(2183.37, -891.079, 2098.36));
-        pts.push_back(WireCell::Point(2180.51, -898.565, 2099.78));
-        pts.push_back(WireCell::Point(2177.7, -905.317, 2101.2));
-        pts.push_back(WireCell::Point(2174.72, -912.331, 2102.5));
-        pts.push_back(WireCell::Point(2170.58, -918.449, 2104.41));
-        pts.push_back(WireCell::Point(2168.22, -925.268, 2105.48));
-        pts.push_back(WireCell::Point(2166.1, -929.509, 2106.5));
-        pts.push_back(WireCell::Point(2163.08, -936.788, 2108.1));
-        pts.push_back(WireCell::Point(2159.92, -942.301, 2109.39));
-        pts.push_back(WireCell::Point(2157.91, -947.826, 2110.62));
-        pts.push_back(WireCell::Point(2155.32, -951.674, 2111.93));
-        pts.push_back(WireCell::Point(2152.74, -958.492, 2113.46));
-        pts.push_back(WireCell::Point(2150.38, -963.231, 2114.67));
-        pts.push_back(WireCell::Point(2147.41, -967.608, 2116.04));
-        pts.push_back(WireCell::Point(2144.44, -971.985, 2117.41));
-        pts.push_back(WireCell::Point(2142.82, -978.976, 2118.24));
-        pts.push_back(WireCell::Point(2140.26, -983.316, 2119.43));
-        pts.push_back(WireCell::Point(2136.82, -990.357, 2120.85));
-        pts.push_back(WireCell::Point(2133.68, -997.199, 2122.16));
-        pts.push_back(WireCell::Point(2131.01, -1001.64, 2123.41));
-        pts.push_back(WireCell::Point(2127.42, -1006.39, 2125.27));
-        pts.push_back(WireCell::Point(2125.14, -1011.79, 2126.47));
-        pts.push_back(WireCell::Point(2121.17, -1018.17, 2128.31));
-        pts.push_back(WireCell::Point(2119.77, -1024.55, 2128.91));
-        //
+        // // hack pts ...
+        // pts.clear();
+        // pts.push_back(WireCell::Point(2192.09, -872.848, 2094.53));
+        // pts.push_back(WireCell::Point(2189.97, -878.182, 2095.57));
+        // pts.push_back(WireCell::Point(2188.06, -882.53, 2096.41));
+        // pts.push_back(WireCell::Point(2186.15, -886.879, 2097.25));
+        // pts.push_back(WireCell::Point(2183.37, -891.079, 2098.36));
+        // pts.push_back(WireCell::Point(2180.51, -898.565, 2099.78));
+        // pts.push_back(WireCell::Point(2177.7, -905.317, 2101.2));
+        // pts.push_back(WireCell::Point(2174.72, -912.331, 2102.5));
+        // pts.push_back(WireCell::Point(2170.58, -918.449, 2104.41));
+        // pts.push_back(WireCell::Point(2168.22, -925.268, 2105.48));
+        // pts.push_back(WireCell::Point(2166.1, -929.509, 2106.5));
+        // pts.push_back(WireCell::Point(2163.08, -936.788, 2108.1));
+        // pts.push_back(WireCell::Point(2159.92, -942.301, 2109.39));
+        // pts.push_back(WireCell::Point(2157.91, -947.826, 2110.62));
+        // pts.push_back(WireCell::Point(2155.32, -951.674, 2111.93));
+        // pts.push_back(WireCell::Point(2152.74, -958.492, 2113.46));
+        // pts.push_back(WireCell::Point(2150.38, -963.231, 2114.67));
+        // pts.push_back(WireCell::Point(2147.41, -967.608, 2116.04));
+        // pts.push_back(WireCell::Point(2144.44, -971.985, 2117.41));
+        // pts.push_back(WireCell::Point(2142.82, -978.976, 2118.24));
+        // pts.push_back(WireCell::Point(2140.26, -983.316, 2119.43));
+        // pts.push_back(WireCell::Point(2136.82, -990.357, 2120.85));
+        // pts.push_back(WireCell::Point(2133.68, -997.199, 2122.16));
+        // pts.push_back(WireCell::Point(2131.01, -1001.64, 2123.41));
+        // pts.push_back(WireCell::Point(2127.42, -1006.39, 2125.27));
+        // pts.push_back(WireCell::Point(2125.14, -1011.79, 2126.47));
+        // pts.push_back(WireCell::Point(2121.17, -1018.17, 2128.31));
+        // pts.push_back(WireCell::Point(2119.77, -1024.55, 2128.91));
+        // //
 
 
         // Generate 2D projections
