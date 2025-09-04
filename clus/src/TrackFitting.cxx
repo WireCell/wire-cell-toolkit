@@ -3126,7 +3126,9 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
             int row = it.row();
             int col = it.col();
             double value = it.value();
-            
+
+            // std::cout << "Row: " << row << ", Col: " << col << ", Value: " << value << std::endl;
+
             // Build 2D to 3D mapping
             if (map_2d_to_3d.find(col) != map_2d_to_3d.end()) {
                 map_2d_to_3d[col].insert(row);
@@ -3170,7 +3172,7 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
                 flag = 1;
             }
         }
-        
+        // std::cout << row << " " << sum1 << " " << sum2 << " " << flag << std::endl;
         average_count.at(row) = std::make_pair(sum1 / sum2, flag);
     }
     
@@ -3241,6 +3243,8 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
             }
         }
         
+        // std::cout << row << " " << sum[0] << " " << sum[1] << " " << sum[2] << std::endl;
+
         // Calculate overlap ratios
         if (sum[0] > 0) {
             results.at(row).first = sum[1] / sum[0];   // Previous neighbor ratio
@@ -3777,7 +3781,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                         double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
                         RU.insert(n_u, i) = value / total_err;
 
-                        // std::cout << time << " " << wire << " " << i << " " << value << " " << total_err << std::endl;
+                        // std::cout << n_u << " " << i << " " << time << " " << wire << " " << i << " " << value / total_err << std::endl;
                     }
                 }
             }
@@ -3836,10 +3840,13 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                         double charge_err = measurement.charge_err;
                         double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_col, 2) + pow(add_uncer_col, 2));
                         RW.insert(n_w, i) = value / total_err;
+
+                        // std::cout << n_w << " " << i << " " << time << " " << wire << " " << i << " " << value / total_err << std::endl;
+                    
                     }
                 }
             }
-            n_u++;
+            n_w++;
         }
 
 
@@ -3882,10 +3889,35 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     for (int k = 0; k < n_2D_v; k++) MV.insert(k, k) = 1;
     for (int k = 0; k < n_2D_w; k++) MW.insert(k, k) = 1;
     
+    // std::cout << "U: " << std::endl;
     std::vector<std::pair<double, double>> overlap_u = calculate_compact_matrix(MU, RUT, n_2D_u, n_3D_pos, 3);
+    // std::cout << "V: " <<std::endl;
     std::vector<std::pair<double, double>> overlap_v = calculate_compact_matrix(MV, RVT, n_2D_v, n_3D_pos, 3);
+    // std::cout << "W: " << std::endl;
     std::vector<std::pair<double, double>> overlap_w = calculate_compact_matrix(MW, RWT, n_2D_w, n_3D_pos, 2);
     
+//     for (size_t i=0;i!=n_3D_pos;i++){
+//         // std::cout << i << " " << reg_flag_u.at(i) << " " << reg_flag_v.at(i) << " " << reg_flag_w.at(i) << std::endl;
+//         std::cout << i << " " << (overlap_u.at(i).first + overlap_u.at(i).second)/2. << " " 
+//             << (overlap_v.at(i).first + overlap_v.at(i).second)/2. << " " 
+//             << (overlap_w.at(i).first + overlap_w.at(i).second)/2. << " " << std::endl;
+// //            << MU.coeffRef(i,i) << " " << MV.coeffRef(i,i) << " " << MW.coeffRef(i,i) << std::endl;
+//     } 
+
+        // int n_w = 0;
+        // for (const auto& [coord_key, result] : map_W_charge_2D) {
+        //     const auto& measurement = result.first;
+        //     const auto& Coord2D_set = result.second;    
+        //     int wire, time;
+        //     for (const auto& coord2d : Coord2D_set) {
+        //         wire = coord2d.wire;
+        //         time = coord2d.time;
+        //     }
+        //     std::cout << n_w << " " << wire << " " << time << " " << MW.coeffRef(n_w,n_w) << " " << measurement.charge << " " << measurement.charge_err << std::endl;
+        //     n_w++;
+        // }
+    
+
     // Add regularization based on dead channels and overlaps
     Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
 
@@ -3910,9 +3942,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 if (overlap_v[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_v[i].second - 1, 2);
                 if (overlap_w[i].second > m_params.overlap_th) weight += close_col_weight * pow(2 * overlap_w[i].second - 1, 2);
             }else if (i==n_3D_pos-1){
-                if (overlap_u[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_u[i].first - 1, 2);
-                if (overlap_v[i].second > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_v[i].first - 1, 2);
-                if (overlap_w[i].second > m_params.overlap_th) weight += close_col_weight * pow(2 * overlap_w[i].first - 1, 2);
+                if (overlap_u[i].first > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_u[i].first - 1, 2);
+                if (overlap_v[i].first > m_params.overlap_th) weight += close_ind_weight * pow(2 * overlap_v[i].first - 1, 2);
+                if (overlap_w[i].first > m_params.overlap_th) weight += close_col_weight * pow(2 * overlap_w[i].first - 1, 2);
             }else{
                 if (overlap_u.at(i).first + overlap_u.at(i).second > 2*m_params.overlap_th) weight += close_ind_weight * pow(overlap_u.at(i).first + overlap_u.at(i).second - 1,2);
                 if (overlap_v.at(i).first + overlap_v.at(i).second > 2*m_params.overlap_th) weight += close_ind_weight * pow(overlap_v.at(i).first + overlap_v.at(i).second - 1,2);
@@ -3924,15 +3956,17 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             
             if (i == 0) {
                 FMatrix.insert(0, 0) = -weight / dx_norm;
-                if (n_3D_pos > 1) FMatrix.insert(0, 1) = weight / dx_norm;
+                if (n_3D_pos > 1) FMatrix.insert(0, 1) = weight / ((dx[1] + 0.001*units::cm) / m_params.dx_norm_length) ;
             } else if (i == n_3D_pos - 1) {
                 FMatrix.insert(i, i) = -weight / dx_norm; 
-                FMatrix.insert(i, i-1) = weight / dx_norm;
+                FMatrix.insert(i, i-1) = weight / ((dx[i-1] + 0.001*units::cm) / m_params.dx_norm_length);
             } else {
                 FMatrix.insert(i, i) = -2.0 * weight / dx_norm;
-                FMatrix.insert(i, i+1) = weight / dx_norm;
-                FMatrix.insert(i, i-1) = weight / dx_norm;
+                FMatrix.insert(i, i+1) = weight / ((dx[i+1] + 0.001*units::cm) / m_params.dx_norm_length);
+                FMatrix.insert(i, i-1) = weight / ((dx[i-1] + 0.001*units::cm) / m_params.dx_norm_length);
             }
+            // std::cout << i << " " << flag_u << " " << flag_v << " " << flag_w << " " << overlap_u.at(i).first << " | " <<  overlap_u.at(i).second << " " << overlap_v.at(i).first << " | " <<  overlap_v.at(i).second << " " << overlap_w.at(i).first << " | " << overlap_w.at(i).second << " " << weight << " " << dx_norm << std::endl;
+            // std::cout << i << " " << FMatrix.coeff(i, i) << std::endl;
         }
     }
     
@@ -3948,6 +3982,12 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     Eigen::VectorXd b = RUT * MU * data_u_2D + RVT * MV * data_v_2D + RWT * MW * data_w_2D;
     Eigen::SparseMatrix<double> A = RUT * MU * RU + RVT * MV * RV + RWT * MW * RW + FMatrixT * FMatrix;
     
+    // for (int i = 0; i < b.size(); ++i) {
+    //     // Example: print or process each element of b
+    //     std::cout << "b[" << i << "] = " << b[i] << " " << A.coeff(i, i) << " " << lambda <<  " " << flag_dQ_dx_fit_reg << std::endl;
+    //     // You can add your processing logic here
+    // }
+
     solver.compute(A);
     pos_3D = solver.solveWithGuess(b, pos_3D_init);
     

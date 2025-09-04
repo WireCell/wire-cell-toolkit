@@ -226,7 +226,7 @@ public:
             // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
 
             m_track_fitter.add_segment(segment);
-            m_track_fitter.do_single_tracking(segment, false);
+            m_track_fitter.do_single_tracking(segment, true);
             // Extract fit results from the segment
             const auto& fits = segment->fits();
             
