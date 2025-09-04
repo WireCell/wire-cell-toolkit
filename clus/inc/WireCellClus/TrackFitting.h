@@ -245,9 +245,9 @@ namespace WireCell::Clus {
 
         // prepare for dQ/dx fitting
         double cal_gaus_integral(int tbin, int wbin, double t_center, double t_sigma, 
-                                       double w_center, double w_sigma, int flag, double nsigma);
+                                       double w_center, double w_sigma, int flag, double nsigma, int cur_ntime_ticks);
 
-        double cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma);
+        double cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma, int cur_ntime_ticks);
 
         void update_dQ_dx_data();
         void recover_original_charge_data();

@@ -2021,7 +2021,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
         }
     }
 
-    std::cout << "Form Map: " << ptss.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
+    // std::cout << "Form Map: " << ptss.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
     
     ptss = saved_pts;
 
@@ -2894,7 +2894,7 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
 
 
  double TrackFitting::cal_gaus_integral(int tbin, int wbin, double t_center, double t_sigma, 
-                                       double w_center, double w_sigma, int flag, double nsigma) {
+                                       double w_center, double w_sigma, int flag, double nsigma, int cur_ntime_ticks) {
     // flag = 0: no boundary effect, pure Gaussian, time or collection plane
     // flag = 1: taking into account boundary effect for induction plane
     // flag = 2: more complex induction plane response
@@ -2915,15 +2915,19 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
         
         // Time dimension integration 
         // If tbin = std::round(t_center), then bin spans [tbin-0.5, tbin+0.5]
-        result = 0.5 * (std::erf((tbin + 0.5 - t_center) / sqrt(2.) / t_sigma) - 
-                       std::erf((tbin - 0.5 - t_center) / sqrt(2.) / t_sigma));
+        result = 0.5 * (std::erf((tbin + 0.5*cur_ntime_ticks - t_center) / sqrt(2.) / t_sigma) - 
+                       std::erf((tbin - 0.5*cur_ntime_ticks - t_center) / sqrt(2.) / t_sigma));
         
         if (flag == 0) {
             // Pure Gaussian case - simple wire dimension integration
             // If wbin = std::round(w_center), then bin spans [wbin-0.5, wbin+0.5]
             result *= 0.5 * (std::erf((wbin + 0.5 - w_center) / sqrt(2.) / w_sigma) - 
                             std::erf((wbin - 0.5 - w_center) / sqrt(2.) / w_sigma));
-                            
+
+        // std::cout << tbin << " " << t_center << " " << t_sigma << " " << 0.5 * (std::erf((tbin + 0.5*cur_ntime_ticks - t_center) / sqrt(2.) / t_sigma) - 
+        //                std::erf((tbin - 0.5*cur_ntime_ticks - t_center) / sqrt(2.) / t_sigma)) << " | " <<  0.5 * (std::erf((wbin + 0.5 - w_center) / sqrt(2.) / w_sigma) - 
+        //                     std::erf((wbin - 0.5 - w_center) / sqrt(2.) / w_sigma)) << std::endl;
+
         } else if (flag == 1) {
             // Induction plane with bipolar response
             // All boundaries shift by -0.5 due to bin convention change
@@ -3036,13 +3040,15 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
 }
 
 
-double TrackFitting::cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma){
+double TrackFitting::cal_gaus_integral_seg(int tbin, int wbin, std::vector<double>& t_centers, std::vector<double>& t_sigmas, std::vector<double>& w_centers, std::vector<double>& w_sigmas, std::vector<double>& weights, int flag, double nsigma, int cur_ntime_ticks){
   double result = 0;
   double result1 = 0;
 
   for (size_t i=0;i!=t_centers.size();i++){
-    result += cal_gaus_integral(tbin,wbin,t_centers.at(i), t_sigmas.at(i), w_centers.at(i), w_sigmas.at(i),flag,nsigma) * weights.at(i);
+    result += cal_gaus_integral(tbin,wbin,t_centers.at(i), t_sigmas.at(i), w_centers.at(i), w_sigmas.at(i),flag,nsigma,cur_ntime_ticks) * weights.at(i);
     result1 += weights.at(i);
+
+    // std::cout << cal_gaus_integral(tbin,wbin,t_centers.at(i), t_sigmas.at(i), w_centers.at(i), w_sigmas.at(i),flag,nsigma,cur_ntime_ticks) << " " << weights.at(i) << std::endl;
   }
 
   result /= result1;
@@ -3350,8 +3356,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     // Update charge data for shared wires (uses existing toolkit function)
     update_dQ_dx_data();
     
-    const double DL = m_params.DL;                    // WAS: const double DL = 6.4e-6;
-    const double DT = m_params.DT;                    // WAS: const double DT = 9.8e-6;
+    const double DL = m_params.DL;                    // WAS: const double DL = 6.4e-7;
+    const double DT = m_params.DT;                    // WAS: const double DT = 9.8e-7;
     const double col_sigma_w_T = m_params.col_sigma_w_T;  // WAS: const double col_sigma_w_T = 0.188060 * 0.2;
     const double ind_sigma_u_T = m_params.ind_sigma_u_T;  // WAS: const double ind_sigma_u_T = 0.402993 * 0.3;
     const double ind_sigma_v_T = m_params.ind_sigma_v_T;  // WAS: const double ind_sigma_v_T = 0.402993 * 0.5;
@@ -3407,10 +3413,29 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         }
     }
 
-    int n_3D_pos = fine_tracking_path.size();
 
     std::cout << "dQ/dx: " << map_U_charge_2D.size() << " " << map_V_charge_2D.size() << " " << map_W_charge_2D.size() << std::endl;
+    // for (const auto& [coord_key, result] : map_U_charge_2D) {
+    //     std::cout << "CoordReadout: APA=" << coord_key.apa
+    //               << ", Time=" << coord_key.time
+    //               << ", Channel=" << coord_key.channel << std::endl;
+    //     const auto& measurement = result.first;
+    //     std::cout << "  Charge: " << measurement.charge
+    //               << ", ChargeErr: " << measurement.charge_err
+    //               << ", Flag: " << measurement.flag << std::endl;
+    //     std::cout << "  Associated Coord2D set size: " << result.second.size() << std::endl;
+    //     for (const auto& coord2d : result.second) {
+    //         std::cout << "    Coord2D: APA=" << coord2d.apa
+    //                   << ", Face=" << coord2d.face
+    //                   << ", Time=" << coord2d.time
+    //                   << ", Wire=" << coord2d.wire
+    //                   << ", Channel=" << coord2d.channel
+    //                   << ", Plane=" << coord2d.plane << std::endl;
+    //     }
+    // }
 
+
+    int n_3D_pos = fine_tracking_path.size();
     // need to separate measurements into U, V, W and form separate matrices ... 
     // need to store measurement --> U, V, W --> measurements
     int n_2D_u = map_U_charge_2D.size();
@@ -3449,6 +3474,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             } else {
                 data_u_2D(n_u) = 0;
             }
+            // std::cout << coord_key.time << " " << coord_key.channel << " " << measurement.charge << " " << measurement.charge_err << " " << data_u_2D(n_u) << std::endl;
             n_u++;
         }
         int n_v = 0;
@@ -3519,13 +3545,21 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         }
         
         dx[i] = (curr_rec_pos - prev_rec_pos).magnitude() + (curr_rec_pos - next_rec_pos).magnitude();
+
+        // std::cout << i << " " << dx[i] << std::endl;
     }
     
     // Build response matrices using geometry information
     for (int i = 0; i < n_3D_pos; i++) {
         WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
         auto segment = fine_tracking_path.at(i).second;
-        
+        auto cluster = segment->cluster();
+        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+        double cluster_t0 = cluster->get_cluster_t0();
+        auto first_blob = cluster->children()[0];
+        int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+
+
         int apa = paf.at(i).first;
         int face = paf.at(i).second;
                 
@@ -3555,10 +3589,6 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         double pitch_u = std::get<1>(geom_it->second);
         double pitch_v = std::get<2>(geom_it->second);
         double pitch_w = std::get<3>(geom_it->second);
-
-        // get first blob from the segment --> cluster, 
-        auto first_blob = segment->cluster()->children()[0];
-        int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
 
         
         // Calculate previous and next positions for Gaussian integration
@@ -3601,11 +3631,13 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         for (int j = 0; j < 5; j++) {
             // First half (prev to curr)
             WireCell::Point reco_pos = prev_rec_pos + (curr_rec_pos - prev_rec_pos) * (j + 0.5) / 5.0;
-            
-            double central_T = offset_t + slope_x * reco_pos.x();
-            double central_U = offset_u + (slope_yu * reco_pos.y() + slope_zu * reco_pos.z());
-            double central_V = offset_v + (slope_yv * reco_pos.y() + slope_zv * reco_pos.z());
-            double central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
+            // find out the raw position ...
+            auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, apa, face);
+
+            double central_T = offset_t + slope_x * reco_pos_raw.x();
+            double central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
+            double central_V = offset_v + (slope_yv * reco_pos_raw.y() + slope_zv * reco_pos_raw.z());
+            double central_W = offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z());
             double weight = (curr_rec_pos - prev_rec_pos).magnitude();
             
             // Calculate drift time and diffusion
@@ -3613,10 +3645,10 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             double diff_sigma_L = sqrt(2 * DL * drift_time);
             double diff_sigma_T = sqrt(2 * DT * drift_time);
             
-            double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width;
-            double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
-            double sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
-            double sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
+            double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L, 2)) / time_tick_width;
+            double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T, 2)) / pitch_u;
+            double sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T, 2)) / pitch_v;
+            double sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T, 2)) / pitch_w;
             
             centers_U.push_back(central_U);
             centers_V.push_back(central_V);
@@ -3630,21 +3662,25 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             
             // Second half (curr to next)
             reco_pos = next_rec_pos + (curr_rec_pos - next_rec_pos) * (j + 0.5) / 5.0;
-            
-            central_T = offset_t + slope_x * reco_pos.x();
-            central_U = offset_u + (slope_yu * reco_pos.y() + slope_zu * reco_pos.z());
-            central_V = offset_v + (slope_yv * reco_pos.y() + slope_zv * reco_pos.z());
-            central_W = offset_w + (slope_yw * reco_pos.y() + slope_zw * reco_pos.z());
+            reco_pos_raw = transform->backward(reco_pos, cluster_t0, apa, face);
+
+            central_T = offset_t + slope_x * reco_pos_raw.x();
+            central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
+            central_V = offset_v + (slope_yv * reco_pos_raw.y() + slope_zv * reco_pos_raw.z());
+            central_W = offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z());
             weight = (curr_rec_pos - next_rec_pos).magnitude();
 
             drift_time = std::max(m_params.min_drift_time, reco_pos.x() / time_tick_width * 0.5*units::us );
             diff_sigma_L = sqrt(2 * DL * drift_time);
             diff_sigma_T = sqrt(2 * DT * drift_time);
 
-            sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L * time_tick_width * cur_ntime_ticks, 2)) / time_tick_width;
-            sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T * pitch_u, 2)) / pitch_u;
-            sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T * pitch_v, 2)) / pitch_v;
-            sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T * pitch_w, 2)) / pitch_w;
+            // std::cout << drift_time << " " << DL << " " << DT << " " << diff_sigma_L << " " << diff_sigma_T << std::endl;
+
+
+            sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L, 2)) / time_tick_width;
+            sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T, 2)) / pitch_u;
+            sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T, 2)) / pitch_v;
+            sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T, 2)) / pitch_w;
             
             centers_U.push_back(central_U);
             centers_V.push_back(central_V);
@@ -3656,7 +3692,61 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             sigmas_W.push_back(sigma_T_w);
             sigmas_T.push_back(sigma_L);
         }
-        
+
+        // std::cout << i << " U ";
+        // for (size_t idx = 0; idx < centers_U.size(); ++idx) {
+        //     std::cout << centers_U[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " V ";
+        // for (size_t idx = 0; idx < centers_V.size(); ++idx) {
+        //     std::cout << centers_V[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " W ";
+        // for (size_t idx = 0; idx < centers_W.size(); ++idx) {
+        //     std::cout << centers_W[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " T ";
+        // for (size_t idx = 0; idx < centers_T.size(); ++idx) {
+        //     std::cout << centers_T[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " Weights ";
+        // for (size_t idx = 0; idx < weights.size(); ++idx) {
+        //     std::cout << weights[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout <<i << " SU ";
+        // for (size_t idx = 0; idx < sigmas_U.size(); ++idx) {
+        //     std::cout << sigmas_U[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " SV ";
+        // for (size_t idx = 0; idx < sigmas_V.size(); ++idx) {
+        //     std::cout << sigmas_V[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " SW ";
+        // for (size_t idx = 0; idx < sigmas_W.size(); ++idx) {
+        //     std::cout << sigmas_W[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << i << " ST ";
+        // for (size_t idx = 0; idx < sigmas_T.size(); ++idx) {
+        //     std::cout << sigmas_T[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
         // Fill response matrices using Gaussian integration
         int n_u = 0;
         std::set<std::pair<int, int>> set_UT;
@@ -3673,8 +3763,10 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
 
                 set_UT.insert(std::make_pair(wire, time));
 
+                // if (wire !=938 || time != 7176) continue;
+
                 if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4);
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
 
 
                     if (measurement.flag == 0 && value > 0) reg_flag_u[i] = 1; // Dead channel
@@ -3684,6 +3776,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                         double charge_err = measurement.charge_err;
                         double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
                         RU.insert(n_u, i) = value / total_err;
+
+                        // std::cout << time << " " << wire << " " << i << " " << value << " " << total_err << std::endl;
                     }
                 }
             }
@@ -3704,7 +3798,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 set_VT.insert(std::make_pair(wire, time));
 
                 if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4);
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
 
                     if (measurement.flag == 0 && value > 0) reg_flag_v[i] = 1; // Dead channel
 
@@ -3733,7 +3827,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 int time = coord2d.time;
                 set_WT.insert(std::make_pair(wire, time));
                 if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4);
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
 
                     if (measurement.flag == 0 && value > 0) reg_flag_w[i] = 1; // Dead channel
 
@@ -3752,7 +3846,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         // Additional dead channel checks
         if (reg_flag_u[i] == 0) { // apa, face
             for (size_t kk = 0; kk < centers_U.size(); kk++) {
-                if (set_UT.find(std::make_pair(int(centers_U[kk]), int(centers_T[kk]))) == set_UT.end()) {
+                if (set_UT.find(std::make_pair(std::round(centers_U[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_UT.end()) {
                     reg_flag_u[i] = 1;
                     break;
                 }
@@ -3760,7 +3854,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         }
         if (reg_flag_v[i] == 0) { // apa, face
             for (size_t kk = 0; kk < centers_V.size(); kk++) {
-                if (set_VT.find(std::make_pair(int(centers_V[kk]), int(centers_T[kk]))) == set_VT.end()) {
+                if (set_VT.find(std::make_pair(std::round(centers_V[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_VT.end()) {
                     reg_flag_v[i] = 1;
                     break;
                 }
@@ -3768,12 +3862,14 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         }
         if (reg_flag_w[i] == 0) { // apa, face
             for (size_t kk = 0; kk < centers_W.size(); kk++) {
-                if (set_WT.find(std::make_pair(int(centers_W[kk]), int(centers_T[kk]))) == set_WT.end()) {
+                if (set_WT.find(std::make_pair(std::round(centers_W[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_WT.end()) {
                     reg_flag_w[i] = 1;
                     break;
                 }
             }
         }
+        // std::cout << i << " " << reg_flag_u[i] << " " << reg_flag_v[i] << " " << reg_flag_w[i] << std::endl;
+
     }
     
     // Calculate compact matrices for overlap analysis
@@ -3861,6 +3957,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     
     // Extract dQ values and apply corrections
     dQ.resize(n_3D_pos);
+    for (int i=0;i!=n_3D_pos;i++){
+        dQ[i] = pos_3D(i);
+    }
  
     // Calculate predictions and reduced chi-squared
     pred_data_u_2D = RU * pos_3D;
