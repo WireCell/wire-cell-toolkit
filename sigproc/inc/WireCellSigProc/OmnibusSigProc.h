@@ -75,7 +75,7 @@ namespace WireCell {
             void init_overall_response(IFrame::pointer frame);
 
             void restore_baseline(WireCell::Array::array_xxf& arr);
-	    void rebase_waveform(WireCell::Array::array_xxf& arr, const int& nbins);
+	    void rebase_waveform(Eigen::Ref<Array::array_xxf> arr, const int& nbins);
             // This little struct is used to map between WCT channel idents
             // and internal OmnibusSigProc wire/channel numbers.  See
             // m_channel_map and m_channel_range below.
@@ -252,7 +252,7 @@ namespace WireCell {
             int m_mp_tick_resolution{4};
 
 	    //Rebase waveforms for each channel of spesific wire-plane. 
-	    std::vector<int> m_rebase_planes{}; 
+	    std::vector<int> m_rebase_planes{0,1,2}; 
             int m_rebase_nbins=200;
 
             bool m_isWrapped{false};

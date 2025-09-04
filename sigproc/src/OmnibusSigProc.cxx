@@ -364,6 +364,11 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
 void OmnibusSigProc::load_data(const input_pointer& in, int plane)
 {
     m_r_data[plane] = Array::array_xxf::Zero(m_fft_nwires[plane], m_fft_nticks);
+    // for (int i = 0; i < m_r_data[plane].rows(); ++i) {
+    //     for (int j = 0; j < m_r_data[plane].cols(); ++j) {
+    //         m_r_data[plane](i, j) = 7370;
+    //     }
+    // }
 
     auto traces = in->traces();
 
@@ -403,7 +408,8 @@ void OmnibusSigProc::load_data(const input_pointer& in, int plane)
     //rebase for this plane
     if (std::find(m_rebase_planes.begin(), m_rebase_planes.end(), plane) != m_rebase_planes.end()) {
         log->debug("rebase_waveform for plane {} with m_rebase_nbins = {}", plane, m_rebase_nbins);
-        rebase_waveform(m_r_data[plane],m_rebase_nbins);
+        auto m_r_data_ref = m_r_data[plane].block(0, 0, m_r_data[plane].rows(), m_nticks);
+        rebase_waveform(m_r_data_ref,m_rebase_nbins);
     }
 
     log->debug("call={} load plane index: {}, ntraces={}, input bad regions: {}",
@@ -770,6 +776,15 @@ void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& i
 
 void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
 {
+    // Fixme: this should be moved into configure()
+    auto ifr = Factory::find_tn<IFieldResponse>(m_field_response);
+    // Get full, "fine-grained" field responses defined at impact
+    // positions.
+    Response::Schema::FieldResponse fr = ifr->field_response();
+
+    // Make a new data set which is the average FR
+    Response::Schema::FieldResponse fravg = Response::wire_region_average(fr);
+
     m_period = frame->tick();
     {
         std::vector<int> tbins;
@@ -786,34 +801,29 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
         log->debug("call={} init nticks={} tbinmin={} tbinmax={}", m_count, m_nticks, tbinmin, tbinmax);
 
         if (m_fft_flag == 0) {
-            m_fft_nticks = m_nticks;
+            m_fft_nticks = m_nticks+fravg.planes[0].paths[0].current.size()/5;
+            log->debug("call={} init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
         }
         else {
-            m_fft_nticks = fft_best_length(m_nticks);
-            log->debug("call={} init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
+            m_fft_nticks = fft_best_length(m_nticks, false);
+            log->debug("call={} using fft_best_length init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
         }
         //
 
         m_pad_nticks = m_fft_nticks - m_nticks;
     }
 
-    // Fixme: this should be moved into configure()
-    auto ifr = Factory::find_tn<IFieldResponse>(m_field_response);
-    // Get full, "fine-grained" field responses defined at impact
-    // positions.
-    Response::Schema::FieldResponse fr = ifr->field_response();
-
-    // Make a new data set which is the average FR
-    Response::Schema::FieldResponse fravg = Response::wire_region_average(fr);
-
     for (int i = 0; i != 3; i++) {
         //
         if (m_fft_flag == 0) {
-            m_fft_nwires[i] = m_nwires[i];
+            m_fft_nwires[i] = m_nwires[i] + fravg.planes[0].paths.size() - 1;
+            log->debug("call={} init enlarge wire number in plane {} from {} to {}",
+                       m_count, i, m_nwires[i],
+                       m_fft_nwires[i]);
         }
         else {
-            m_fft_nwires[i] = fft_best_length(m_nwires[i] + fravg.planes[0].paths.size() - 1, 1);
-            log->debug("call={} init enlarge wire number in plane {} from {} to {}",
+            m_fft_nwires[i] = fft_best_length(m_nwires[i] + fravg.planes[0].paths.size() - 1, true);
+            log->debug("call={} using fft_best_length init enlarge wire number in plane {} from {} to {}",
                        m_count, i, m_nwires[i],
                        m_fft_nwires[i]);
         }
@@ -977,7 +987,7 @@ void OmnibusSigProc::restore_baseline(Array::array_xxf& arr)
 }
 
 
-void OmnibusSigProc::rebase_waveform(Array::array_xxf& arr,const int& n_bins)
+void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int& n_bins)
 {
     	for (int i = 0; i != arr.rows(); ++i) {
             Waveform::realseq_t signal(arr.cols());
