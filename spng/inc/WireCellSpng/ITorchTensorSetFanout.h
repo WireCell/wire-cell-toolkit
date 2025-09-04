@@ -6,7 +6,7 @@
 
 namespace WireCell {
 namespace SPNG {
-    /** A frame fan-out component takes 1 input TorchTensorSet and produces N
+    /** A fan-out component takes 1 input TorchTensorSet and produces N
      * TorchTensorSets.
 
      */

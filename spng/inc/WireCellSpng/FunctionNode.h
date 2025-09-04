@@ -1,25 +1,8 @@
-/** An SPNG::FunctionNode provides a base class to SPNG ITorchTensorFilter nodes.
- *
- * It overrides:
- *
- *   operator()(ITorchTensorSet::pointer in, ITorchTensorSet::pointer& out)
- *
- * and calls:
- *
- *   operator()(TensorIndex& in, ITensorSet::pointer& out)
- *
- * The index will only contain parent and their children tensors for which the
- * parent tensor passed the configured tensor selector.
- *
- * This indexed operator is called in a semaphore and nograd protected context.
- *
- * A subclass must assure IConfigurable and ITorchTensorSet are in the list of
- * interfaces given to WIRECELL_FACTORY().
- *
- * If the subclass itself is configurable it must marshal the config object from
- * the base default_configuration() and provide the config object to the base
- * configure().  See this class's methods if you need an example of how to do
- * this forwarding of the config object.
+/** This provides FunctionNode operating on SPNG TDM tensor sets.
+
+    See the datamodel.org document for more information on the SPNG Tensor Data
+    Model and the C++ class support.
+
  */
 
 #ifndef WIRECELL_SPNG_FUNCTIONNODE
@@ -28,12 +11,30 @@
 #include "WireCellSpng/ITorchTensorSetFilter.h"
 #include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/TensorSelector.h"
+#include "WireCellSpng/TensorRenaming.h"
 #include "WireCellSpng/TensorIndex.h"
 #include "WireCellIface/IConfigurable.h"
 
 namespace WireCell::SPNG {
 
-    class FunctionNode : public ContextBase, public TensorSelector, public WireCell::ITorchTensorSetFilter { 
+    /** Provide standard selection and datapath renaming for tensor sets and a
+     * base class for more rich operations.
+     *
+     * In particular the transform_tensors() method may be overridden in a base
+     * class to operate on selected tensors.  This should be done only in the
+     * case that the base class will NOT use any Torch operations.  To safely
+     * apply Torch operations, use the TorchFunctionNode as your base class.
+     * 
+     * This class is an IConfigurable and an IFrameToTorchSetFanout.  If used as
+     * a base class for your own data flow graph node, these two types must be
+     * included in the list of interfaces passed to your WIRECELL_FACTORY() CPP
+     *
+     * If the subclass is itself configurable it must marshal the config object
+     * from this base class's default_configuration() and forward the config
+     * object to this base class's configure().  This classes methods provide
+     * examples of how this marshalling must be done.
+     */       
+    class FunctionNode : public IConfigurable, public WireCell::ITorchTensorSetFilter { 
     public:
         FunctionNode() = default;
         virtual ~FunctionNode() = default;
@@ -43,24 +44,41 @@ namespace WireCell::SPNG {
         virtual WireCell::Configuration default_configuration() const;
 
         // ITorchTensorSetFilter
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        virtual bool operator()(const ITorchTensorSet::pointer& in, output_pointer& out) const;
 
-        virtual bool operator()(const TensorIndex& ti, output_pointer& out) = 0;
+        /// The FunctionNode API.  These are called by the operator() in the
+        /// order given here.  Any may be overridden by a subclass.  Such
+        /// overrides should likely still call these base class methods in order
+        /// to retain standard behaviors.
 
-        /// Configuration: see TorchContext and TensorSelector.
-        ///
-        /// Any tensor selection is applied only to parent tensors (see SPNG
-        /// torch data model).  Parent and children live and die together.
-        ///
-        /// If a parent fails to be explicitly accepted or rejected, it is
-        /// selected (accepted).
-        ///
-        /// Currently, renaming is not supported.
-        ///
-        /// The input tensors be placed in the context's device() and device()
-        /// may be used when a subclass needs to make a new tensor on the same
-        /// device.  Generally, a subclass should NOT make tensors on any other
-        /// device.
+        /// Index the input tensors.
+        virtual TensorIndex index_tensors(const ITorchTensorSet::pointer& in) const;
+
+        /// Apply standard and configurable selection rules.
+        virtual TensorIndex select_tensors(TensorIndex ti) const;
+        
+        /// Apply a transform.  Here, this is a no-op.  It may be overridden by
+        /// subclass.
+        virtual TensorIndex transform_tensors(TensorIndex ti) const;
+
+        // This method is NOT intended for user override but is overriden by
+        // TorchFunctionNode to establish the torch context prior to calling
+        // transform_tensors().
+        virtual TensorIndex sys_transform_tensors(TensorIndex ti) const;
+
+        /// Apply standard and configurable rename rules.
+        virtual TensorIndex rename_tensors(TensorIndex ti) const;
+
+        /// Copy the indexed tensors into a tensor set.  
+        ITorchTensorSet::pointer pack_tensors(TensorIndex ti) const;
+
+
+    protected:
+
+        /// Configuration: "tensor_selector".  See TensorSelector class for details.
+        TensorSelector m_selector;
+        /// Configuration: "tensor_renaming".  See TensorRenaming class for details.
+        TensorRenaming m_renaming;
 
     };
 }

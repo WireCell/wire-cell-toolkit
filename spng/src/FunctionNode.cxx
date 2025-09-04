@@ -1,61 +1,63 @@
 #include "WireCellSpng/FunctionNode.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/SimpleTorchTensorSet.h"
 
 namespace WireCell::SPNG {
 
     void FunctionNode::configure(const WireCell::Configuration& cfg)
     {
-        this->ContextBase::configure(cfg);
-        this->TensorSelector::configure(cfg);
+        m_selector.configure(cfg);
+        m_renaming.configure(cfg);
     }
     
     WireCell::Configuration FunctionNode::default_configuration() const
     {
-        auto tc_cfg = this->ContextBase::default_configuration();
-        auto ts_cfg = this->TensorSelector::default_configuration();
-        update(tc_cfg, ts_cfg);
-        return tc_cfg;
+        auto cfg1 = m_selector.default_configuration();
+        auto cfg2 = m_renaming.default_configuration();
+        return update(cfg1, cfg2); // FIXME: fix this update() function so 2nd arg is const.
     }
 
-
-
-    bool FunctionNode::operator()(const input_pointer& in, output_pointer& out)
+    TensorIndex FunctionNode::index_tensors(const ITorchTensorSet::pointer& in) const
     {
-        TorchSemaphore sem(context());
-        torch::NoGradGuard no_grad;
+        return TensorIndex(in);
+    }
 
-        // Note, this selection and on-device bookkeeping could probably be
-        // optimized to avoid some of the indexing.
+    
+    TensorIndex FunctionNode::select_tensors(TensorIndex ti) const
+    {
+        return m_selector.apply(ti);
+    }
+        
+    TensorIndex FunctionNode::transform_tensors(TensorIndex ti) const
+    {
+        return std::move(ti);
+    }
 
-        // Index to find parents
-        TensorIndex ti(in);
+    TensorIndex FunctionNode::sys_transform_tensors(TensorIndex ti) const
+    {
+        return transform_tensors(std::move(ti));
+    }
 
-        // Select matching parents
-        std::vector<ITorchTensor::pointer> keep;
-        for (auto child : ti.tree().child_values()) {
-            auto result = select_tensor(child);
-            if (result != TensorSelector::SelectionResult::kReject) keep.push_back(child);
-        }
-        TensorIndex sel_ti = ti.subset(keep);
-
-        auto dev = device();
-
-        // Assure tensors are on device
-        std::vector<ITorchTensor::pointer> on_dev;
-        for (auto ten : sel_ti.all_tensors()) {
-            if (ten->device() == dev) {
-                on_dev.push_back(ten);
-                continue;
-            }
-            auto md = ten->metadata();
-            auto tten = ten->tensor().to(dev);
-            on_dev.push_back(std::make_shared<SimpleTorchTensor>(tten, md));
-        }
-            
-        TensorIndex final_ti(on_dev);
-        return (*this)(final_ti, out);
+    TensorIndex FunctionNode::rename_tensors(TensorIndex ti) const
+    {
+        return m_renaming.apply(std::move(ti));
     }
     
-    // calls virtual bool operator()(const TensorIndex& ti, output_pointer& out) = 0;
+
+    ITorchTensorSet::pointer FunctionNode::pack_tensors(TensorIndex ti) const
+    {
+        return ti.as_set();
+    }
+
+
+    bool FunctionNode::operator()(const input_pointer& in, output_pointer& out) const
+    {
+        out = nullptr;
+        if (! in) { return true; } // EOS
+
+        // Weeeeee!
+        out = pack_tensors(rename_tensors(sys_transform_tensors(select_tensors(index_tensors(in)))));
+        return true;
+    }
 
 }
