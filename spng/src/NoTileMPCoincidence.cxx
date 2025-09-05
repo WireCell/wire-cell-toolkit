@@ -30,11 +30,13 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
     //Get the indices of the planes we're working with.
     //We apply MP2/MP3 finding to some target plane n
     //And we need planes l & m to determine those.
+    m_face_index = get(config, "face_index", m_face_index);
     m_target_plane_index = get(config, "target_plane_index", m_target_plane_index);
     m_aux_plane_l_index = get(config, "aux_plane_l_index", m_aux_plane_l_index);
     m_aux_plane_m_index = get(config, "aux_plane_m_index", m_aux_plane_m_index);
     m_output_torch_name = get(config, "output_torch_name", m_output_torch_name);
     m_debug_output = get(config, "debug_output", m_debug_output);
+    m_test_style = get(config, "test_style", m_test_style);
     //Check that we aren't requesting any of the same 2 planes
     if ((m_target_plane_index == m_aux_plane_l_index) ||
         (m_target_plane_index == m_aux_plane_m_index) ||
@@ -47,13 +49,13 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
         );
     }
 
-    m_readout_plane_width = get(config, "readout_plane_width", m_readout_plane_width);
-    m_readout_plane_height = get(config, "readout_plane_height", m_readout_plane_height);
-    m_pitch = get(config, "pitch", m_pitch);
-    m_angle_in_radians = get(config, "angle_in_radians", m_angle_in_radians);
+    m_readout_plane_width = get(config, "readout_plane_width", m_readout_plane_width); //Unused
+    m_readout_plane_height = get(config, "readout_plane_height", m_readout_plane_height); //Unused
+    m_pitch = get(config, "pitch", m_pitch); //Unused
+    m_angle_in_radians = get(config, "angle_in_radians", m_angle_in_radians); //Unused 
 
     //Get trivial blobs
-    m_trivial_blobs = WireCell::SPNG::RayGrid::trivial_blobs();
+    m_trivial_blobs = WireCell::SPNG::RayGrid::trivial_blobs(); //unused
     //Create the views & coordinates used in RayGrid
 
 
@@ -203,6 +205,30 @@ void WireCell::SPNG::NoTileMPCoincidence::convert_wires_to_channels(
     .to(torch::kFloat64);//And make it double
 }
 
+torch::Tensor WireCell::SPNG::NoTileMPCoincidence::make_indices(torch::Tensor & frame) {
+    auto reshaped = frame.reshape({-1, frame.size(-1)});
+    auto counts = reshaped.sum(-1);
+    auto max_size = torch::max(counts).item<long>();
+    auto results = torch::full({reshaped.size(0), max_size}, -1);
+
+    auto col_indices = reshaped.nonzero().index({"...", -1});
+    int64_t current_offset = 0;
+    for (int64_t i = 0; i < reshaped.size(0); ++i) {
+        auto count = counts.index({i}).item<int64_t>();
+        // std::cout << i << " " << count << std::endl;
+        if (count > 0) {
+            // Get the indices for the current row
+            auto current_col_indices = col_indices.slice(0, current_offset, current_offset + count);
+
+            // Fill the corresponding slice in the result tensor
+            results.index_put_({i, torch::indexing::Slice(0, count)}, current_col_indices.to(torch::kInt));
+        }
+        current_offset += count;
+    }
+
+    return results;
+}
+
 bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, output_pointer& out) {
     out = nullptr;
     if (!in) {
@@ -290,31 +316,102 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     auto m_rows = aux_tensor_m.index({0, m_plane_wires_to_channels[m_aux_plane_m_index], torch::indexing::Slice()});
     auto target_rows = target_tensor_n.index({0, m_plane_wires_to_channels[m_target_plane_index], torch::indexing::Slice()});
 
-    for (long int irow = 0; irow < aux_tensor_l.sizes().back(); ++irow) {
+    if (m_test_style == 0) {
 
-        auto l_row = l_rows.index({Slice(), irow});
-        auto m_row = m_rows.index({Slice(), irow});
+        for (long int irow = 0; irow < aux_tensor_l.size(-1); ++irow) {
+    
+            auto l_row = l_rows.index({Slice(), irow});
+            auto m_row = m_rows.index({Slice(), irow});
+    
+            auto l_hi = torch::where(l_row > 0)[0];
+            auto m_hi = torch::where(m_row > 0)[0];
+    
+            //Make Nl x Nm pairs of indices of the active wires (rays) in each plane
+            auto cross = torch::zeros({l_hi.size(0), m_hi.size(0), 2}, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+            // cross.index_put_({Slice(), Slice(), 1}, m_hi);
+            cross.index_put_({"...", 1}, m_hi);
+            cross = cross.permute({1, 0, 2});
+            cross.index_put_({"...", 0}, l_hi);
+            cross = cross.reshape({-1, 2});
+    
+            //Get the ray indices for each plane/view
+            auto r1 = cross.index({Slice(), 0});
+            auto r2 = cross.index({Slice(), 1});
+    
+            //Make view tensors in shapes of the ray pairs
+            auto view1 = torch::full_like(r1, 2, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+            auto view2 = torch::full_like(r1, 3, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+            auto view3 = torch::full_like(r1, 4, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+            //Also just a scalar
+            auto view3_short = torch::tensor(4, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+    
+            //Get the locations of crossing wires within view3
+            auto view3_locs = m_raygrid_coords.pitch_location(view1, r1, view2, r2, view3);
+    
+            //Convert the locations to pitch indices
+            auto results = m_raygrid_coords.pitch_index(
+                view3_locs,
+                view3_short
+            );
+            
+            if (m_debug_output) {
+                to_save.insert("index" + std::to_string(irow), results.to(torch::kCPU));
+                to_save.insert("locs" + std::to_string(irow), view3_locs.to(torch::kCPU));
+                auto view3_zy = torch::zeros({view3_locs.size(0), 2}, torch::TensorOptions(m_device).dtype(view3_locs.dtype()));
+                view3_zy.index_put_({Slice(), 0}, view3_locs*m_raygrid_coords.pitch_dir.index({4, 0}));
+                view3_zy.index_put_({Slice(), 1}, view3_locs*m_raygrid_coords.pitch_dir.index({4, 1}));
+                to_save.insert("locs_zy_" + std::to_string(irow), view3_zy.to(torch::kCPU));
+            }
 
-        auto l_hi = torch::where(l_row > 0)[0];
-        auto m_hi = torch::where(m_row > 0)[0];
+            //Make sure the returned indices are within the active volume
+            results = std::get<0>(at::_unique(results.index(
+                {torch::where((results >= 0) & (results < m_plane_nwires[m_target_plane_index]))[0]}
+            )));
+
+            //Get the corresponding statuses in the target plane
+            auto target_row = target_rows.index({results, irow});
+    
+            //MP3 means a high wire in the target plane
+            //overlaps with a crossing pair in the other two planes
+            auto mp3_indices = torch::nonzero(target_row);
+            output_tensor_active.index_put_({0, results.index({mp3_indices}), irow}, 1.);
+            
+            //MP2 means a low wire in the target plane
+            //overlaps with a crossing pair in the other two planes, is low
+            auto mp2_indices = torch::nonzero(target_row == 0);
+            output_tensor_inactive.index_put_({0, results.index({mp2_indices}), irow}, 1.);
+    
+        }
+    }
+    else {
+        //Put channel dimension last
+        l_rows = torch::transpose(l_rows, -1, -2);
+        m_rows = torch::transpose(m_rows, -1, -2);
+        target_rows = torch::transpose(target_rows, -1, -2);
+
+        auto l_hi_tensor = (l_rows > 0);
+        auto m_hi_tensor = (m_rows > 0);
+
+        auto l_counts = l_hi_tensor.sum(-1);
+        auto m_counts = m_hi_tensor.sum(-1);
+
+        auto indices_l = make_indices(l_rows);
+        auto indices_m = make_indices(m_rows);
 
         //Make Nl x Nm pairs of indices of the active wires (rays) in each plane
-        auto cross = torch::zeros({l_hi.size(0), m_hi.size(0), 2}, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
-        cross.index_put_({Slice(), Slice(), 1}, m_hi);
-        cross = cross.permute({1, 0, 2});
-        cross.index_put_({Slice(), Slice(), 0}, l_hi);
+        auto cross = torch::zeros({indices_l.size(0), indices_l.size(-1), indices_l.size(-1), 2}, torch::TensorOptions().dtype(indices_l.dtype()));
+        cross.index_put_({"...", 1}, indices_m.unsqueeze(1).expand({-1, indices_l.size(-1), -1}));
+        cross = cross.transpose(1,2);
+        cross.index_put_({"...", 0}, indices_l.unsqueeze(1).expand({-1, indices_m.size(-1), -1}));
         cross = cross.reshape({-1, 2});
-
         //Get the ray indices for each plane/view
-        auto r1 = cross.index({Slice(), 0});
-        auto r2 = cross.index({Slice(), 1});
+        auto r1 = cross.index({"...", 0});
+        auto r2 = cross.index({"...", 1});
 
-        //Make view tensors in shapes of the ray pairs
-        auto view1 = torch::full_like(r1, 2, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
-        auto view2 = torch::full_like(r1, 3, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
-        auto view3 = torch::full_like(r1, 4, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
-        //Also just a scalar
-        auto view3_short = torch::tensor(4, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+        auto view1 = torch::full_like(r1, 2, torch::TensorOptions().dtype(r1.dtype()));
+        auto view2 = torch::full_like(r1, 3, torch::TensorOptions().dtype(r1.dtype()));
+        auto view3 = torch::full_like(r1, 4, torch::TensorOptions().dtype(r1.dtype()));
+        auto view3_short = torch::tensor(4, torch::TensorOptions().dtype(r1.dtype()));
 
         //Get the locations of crossing wires within view3
         auto view3_locs = m_raygrid_coords.pitch_location(view1, r1, view2, r2, view3);
@@ -324,35 +421,8 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
             view3_locs,
             view3_short
         );
-        
-        if (m_debug_output) {
-            to_save.insert("index" + std::to_string(irow), results.to(torch::kCPU));
-            to_save.insert("locs" + std::to_string(irow), view3_locs.to(torch::kCPU));
-            auto view3_zy = torch::zeros({view3_locs.size(0), 2}, torch::TensorOptions(m_device).dtype(view3_locs.dtype()));
-            view3_zy.index_put_({Slice(), 0}, view3_locs*m_raygrid_coords.pitch_dir.index({4, 0}));
-            view3_zy.index_put_({Slice(), 1}, view3_locs*m_raygrid_coords.pitch_dir.index({4, 1}));
-            to_save.insert("locs_zy_" + std::to_string(irow), view3_zy.to(torch::kCPU));
-        }
-
-        //Make sure the returned indices are within the active volume
-        results = std::get<0>(at::_unique(results.index(
-            {torch::where((results >= 0) & (results < m_plane_nwires[m_target_plane_index]))[0]}
-        )));
-
-        //Get the corresponding statuses in the target plane
-        auto target_row = target_rows.index({results, irow});
-
-        //MP3 means a high wire in the target plane
-        //overlaps with a crossing pair in the other two planes
-        auto mp3_indices = torch::nonzero(target_row);
-        output_tensor_active.index_put_({0, results.index({mp3_indices}), irow}, 1.);
-        
-        //MP2 means a low wire in the target plane
-        //overlaps with a crossing pair in the other two planes, is low
-        auto mp2_indices = torch::nonzero(target_row == 0);
-        output_tensor_inactive.index_put_({0, results.index({mp2_indices}), irow}, 1.);
-
     }
+
 
     // //Have to transform back into channel basis
     convert_wires_to_channels(output_tensor_active, m_plane_channels_to_wires[m_target_plane_index]);
