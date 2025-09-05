@@ -2,16 +2,9 @@
 
 namespace WireCell::SPNG {
 
-    void FanoutNode::configure(const WireCell::Configuration& cfg)
+    FanoutNode::FanoutNode(const std::string& logname, const std::string& pkgname)
+        : FanBase(logname, pkgname)
     {
-        m_multiplicity = get(cfg, "multiplicity", m_multiplicity);
-    }
-
-    WireCell::Configuration FanoutNode::default_configuration() const
-    {
-        Configuration cfg;
-        cfg["multiplicity"] = m_multiplicity;
-        return cfg;
     }
 
     std::vector<std::string> FanoutNode::output_types()
@@ -27,15 +20,27 @@ namespace WireCell::SPNG {
     bool FanoutNode::operator()(const input_pointer& in, output_vector& outv) const
     {
         outv.clear();
-        if (! in) return true;  // EOS
+        if (! in) {
+            maybe_log(nullptr, "EOS");
+            ++m_count;
+            return true;
+        }
 
-        outv = separate_tensors(in);
+        outv = sys_separate_tensors(in);
+        ++m_count;
         return true;
     }
 
     ITorchTensorSet::vector FanoutNode::separate_tensors(const ITorchTensorSet::pointer& in) const
     {
+        // simply dup pointer M-ways
         return ITorchTensorSet::vector(m_multiplicity, in);
+    }
+
+    ITorchTensorSet::vector FanoutNode::sys_separate_tensors(const ITorchTensorSet::pointer& in) const
+    {
+        maybe_log(in, "separate");
+        return this->separate_tensors(in);
     }
 
 }

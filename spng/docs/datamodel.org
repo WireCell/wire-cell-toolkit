@@ -189,3 +189,6 @@ implement either the *separate* or *combine* methods, this is not recommended.
 Instead, it is expected that a ~FunctionNode~ or derived will be applied to the
 pre and/or post fanned tensor sets.
 
+* More information
+
+- [[https://www.phy.bnl.gov/~bviren/talks/wire-cell/topics/spng/tdm.pdf][Presentation by bv to SPNG group on the TDM]]

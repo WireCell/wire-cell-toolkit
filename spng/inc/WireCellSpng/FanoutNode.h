@@ -7,30 +7,30 @@
 #ifndef WIRECELL_SPNG_FANOUTNODE
 #define WIRECELL_SPNG_FANOUTNODE
 
-#include "WireCellIface/IConfigurable.h"
 #include "WireCellSpng/ITorchTensorSetFanout.h"
+#include "WireCellSpng/FanBase.h"
 
 namespace WireCell::SPNG {
 
     /// Provide a general ITorchTensorSet FanoutNode.
     ///
-    /// The input and output ITorchTensorSets adhere to the SPNG tensor data
-    /// model (TDM).
+    /// The is operates on TDM-compliant and non-TDM ITorchTensorSets.
     ///
     /// This class is intended to be used as-is to provide general purpose
-    /// fanout semantics.  It is possible to use this class as a base and
-    /// override the separate_tensors() method to provide novel behavior.
-    /// However, developers are urged to provide the novel behavior by using or
-    /// developing an FunctionNode or a TorchFunctionNode to operate on pre/post
-    /// fanned tensor sets.
-    class FanoutNode : public IConfigurable, public ITorchTensorSetFanout {
+    /// fanout semantics.
+    ///
+    /// See FanBase for configuration parameters.
+    /// 
+    /// It is possible but discouraged to use this class as a base and override
+    /// the separate_tensors() method to provide novel behavior.  Developers are
+    /// urged instead to provide the novel behavior in the form of a
+    /// FunctionNode or a TorchFunctionNode to operate on pre/post fanned tensor
+    /// sets.  If used as a base class, there are various requirements that must
+    /// be satisfied by the subclass.
+    class FanoutNode : public FanBase, public ITorchTensorSetFanout {
     public:
-        FanoutNode() = default;
+        FanoutNode(const std::string& logname="fanout", const std::string& pkgnam="spng");
         virtual ~FanoutNode() = default;
-
-        // IConfigurable
-        virtual void configure(const WireCell::Configuration& cfg);
-        virtual WireCell::Configuration default_configuration() const;
 
         // INode, override because we get multiplicity at run time.
         // FIXME: sigh, all the way up into iface, this method should be const!
@@ -39,21 +39,29 @@ namespace WireCell::SPNG {
         // IFanout
         virtual bool operator()(const ITorchTensorSet::pointer& in, ITorchTensorSet::vector& outv) const;
 
-        /// Separate the set into multiple a "multiplicity" number of sets.  The
-        /// default implementation is to simply copy the input pointer to all
-        /// outputs.  If more rich separation is required, this method may be
-        /// overridden in a base class.  However, developers are urged to
-        /// instead follow each fan out output port with standard FunctionNode
-        /// to select and/or rename desired subset of the tensor set.
+        /// Separate the set into multiple a "multiplicity" number of sets.
+        ///
+        /// The default implementation copy the input pointer to each output port.
+        ///
+        /// If a more rich separation is required, attempt to use preceding or
+        /// following FunctionNodes to perform filters.
+        ///
+        /// Last resort, this class may be inherited and this method overridden.
         virtual ITorchTensorSet::vector separate_tensors(const ITorchTensorSet::pointer& in) const;
+        virtual ITorchTensorSet::vector sys_separate_tensors(const ITorchTensorSet::pointer& in) const;
 
 
+    private:
         /// Configuration
         ///
         /// - multiplicity :: the fan-out multiplicity.
-
-    private:
         int m_multiplicity{2};
+
+        /// Configuration:
+        ///
+        /// - quiet ::  Set true to not call any logging.  Default is false.
+        bool m_quiet{false};
+
 
     };
 }

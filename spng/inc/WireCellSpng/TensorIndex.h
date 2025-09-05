@@ -171,6 +171,9 @@ namespace WireCell::SPNG {
         /// Return the metadata object.
         const Configuration& metadata() const { return m_md; }
 
+        /// Return a one-line string summarizing content.
+        std::string str() const;
+
     private:
         int m_ident{-1};
         Configuration m_md;

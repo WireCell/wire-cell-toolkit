@@ -41,15 +41,23 @@ namespace WireCell::SPNG {
     {
     public:
 
+        /// Call this from subclass constructor to pass unique logname.
+        TorchFunctionNode(const std::string& logname, const std::string& pkgnam="spng");
+        virtual ~TorchFunctionNode() = default;
+
         // IConfigurable to marshal configuration to/from base classes.
         virtual WireCell::Configuration default_configuration() const;
         virtual void configure(const WireCell::Configuration& cfg);
 
         /// Override this "system" method from FunctionNode in order to call
         /// transform_tensors() in a context guarded by the torch semaphore and
-        /// no-auto-grad-mode.  Subclass should override transform_tensors().
+        /// no-auto-grad-mode.  
         virtual TensorIndex sys_transform_tensors(TensorIndex ti) const;
         
+        /// Subclass should override:
+        // virtual TensorIndex transform_tensors(TensorIndex ti) const;
+
+
     };
 }
 

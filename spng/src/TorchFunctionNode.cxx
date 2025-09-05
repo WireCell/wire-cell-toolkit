@@ -1,8 +1,13 @@
 #include "WireCellSpng/TorchFunctionNode.h"
+#include "WireCellSpng/SimpleTorchTensor.h"
 
 
 namespace WireCell::SPNG {
 
+    TorchFunctionNode::TorchFunctionNode(const std::string& logname, const std::string& pkgname)
+        : FunctionNode(logname, pkgname)
+    {
+    }
 
     WireCell::Configuration TorchFunctionNode::default_configuration() const
     {
@@ -22,7 +27,23 @@ namespace WireCell::SPNG {
     {
         TorchSemaphore sem(context());
         torch::AutoGradMode enable_grad(false);
-        return this->transform_tensors(std::move(ti));
+
+        // Assure tensors are on the configured desired.  
+        auto dev = device();
+        TensorIndex ti_dev;
+
+        for (const auto& node : ti.tree().depth()) {
+            if (! node.value) { // skip empty root node
+                continue;
+            }
+            auto ten = node.value;
+            if (dev == ten->device()) {
+                ti_dev.add(ten);
+                continue;
+            }
+            ti_dev.add(std::make_shared<SimpleTorchTensor>(ten->tensor().to(dev), ten->metadata()));
+        }
+        return this->transform_tensors(std::move(ti_dev));
     }
 
 }
