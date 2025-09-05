@@ -43,7 +43,7 @@ local selectors = [
       name: 'chanselect-'+tools.anodes[n].name,
       data: {
           anode: wc.tn(tools.anodes[n]),
-          tags: ['raw'],           // ?? what do?
+          tags: ['raw0'],           // ?? what do?
           channels: std.range(2560 * n, 2560 * (n + 1) - 1)
       },
   }, nin=1, nout=1) for n in std.range(0, nanodes-1)

@@ -488,6 +488,24 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     multiplicity:4,
                 },
             }, nin=1, nout=4),
+            
+            local u_unstacker_face1 =  g.pnode({
+                type: 'TorchTensorSetUnstacker',
+                name: 'u_unstacker_face1',
+                data: {
+                    output_set_tag: 'u_stacked_face1',
+                    multiplicity:4,
+                },
+            }, nin=1, nout=4),
+            local v_unstacker_face1 =  g.pnode({
+                type: 'TorchTensorSetUnstacker',
+                name: 'v_unstacker_face1',
+                data: {
+                    output_set_tag: 'v_stacked_face1',
+                    multiplicity:4,
+                },
+            }, nin=1, nout=4),
+
             local w_unstacker =  g.pnode({
                 type: 'TorchTensorSetUnstacker',
                 name: 'w_unstacker',
@@ -693,9 +711,9 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                 g.pnode({
                     type: 'TorchTensorSetReplicator',
                     name: 'post_decon_replicator_%d' % iplane,
-                    data: {multiplicity: (if iplane < 2 then 3 else 2),}
+                    data: {multiplicity: 2,}
 
-                }, nin=1, nout=(if iplane < 2 then 3 else 2))
+                }, nin=1, nout=2)
                 for iplane in std.range(0,2)
             ],
 
@@ -724,15 +742,38 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
             },
             nin=1, nout=1, uses=[]) for iplane in std.range(0,2)],
 
+
+            local mp_finding_replicators = [
+                g.pnode({
+                    type: 'TorchTensorSetReplicator',
+                    name: '%s' % iplane,
+                    data: {multiplicity: 2,}
+
+                }, nin=1, nout=2)
+                for iplane in ['u', 'v']
+            ],
+
+
             local collators_for_mp_finding = [
                 g.pnode({
                     type: 'TorchTensorSetCollator',
                     name: 'collate_mp_finding_%d' % anode.data.ident,
                     data: {
                         output_set_tag: 'collated_mp_finding_%d' %  anode.data.ident,
-                        multiplicity: 4,
+                        multiplicity: 3,
                     },
-                }, nin=4, nout=1) for anode in tools.anodes
+                }, nin=3, nout=1) for anode in tools.anodes
+            ],
+
+            local collators_for_mp_finding_face1 = [
+                g.pnode({
+                    type: 'TorchTensorSetCollator',
+                    name: 'collate_mp_finding_%d_face1' % anode.data.ident,
+                    data: {
+                        output_set_tag: 'collated_mp_finding_%d_face1' %  anode.data.ident,
+                        multiplicity: 3,
+                    },
+                }, nin=3, nout=1) for anode in tools.anodes
             ],
 
             // local collators_for_dnnroi_u = [
@@ -752,10 +793,26 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     name: 'mp_finding_%d' % anode.data.ident,
                     data: {
                         anode: wc.tn(anode),
+                        face_index: 0,
                         target_plane_index: 0,
                         aux_plane_l_index: 2,
                         aux_plane_m_index: 1,
                         output_torch_name: "mp_finding_%d_tensors.pt" % anode.data.ident,
+                    },
+                }, nin=1, nout=1, uses=[anode]) for anode in tools.anodes
+            ],
+
+            local mp_finding_face1 = [
+                g.pnode({
+                    type: 'SPNGNoTileMPCoincidence',
+                    name: 'mp_finding_face1_%d' % anode.data.ident,
+                    data: {
+                        anode: wc.tn(anode),
+                        face_index: 1,
+                        target_plane_index: 0,
+                        aux_plane_l_index: 2,
+                        aux_plane_m_index: 1,
+                        output_torch_name: "mp_finding_face1_%d_tensors.pt" % anode.data.ident,
                     },
                 }, nin=1, nout=1, uses=[anode]) for anode in tools.anodes
             ],
@@ -766,10 +823,32 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     name: 'roi_app_%s' % plane,
                     data: {
                         ROI_tensor_index: 0,
-                        value_tensor_index: 0,
+                        value_tensor_index: 1,
                         output_set_tag: 'roi_applied_%s' %plane,
                     },
                 }, nin=2, nout=1) for plane in ['u', 'v', 'w']
+            ],
+
+            local mp_finding_ors = [
+                g.pnode({
+                    type: 'SPNGSimpleOpOr',
+                    name: 'mp_finding_or_%d' % anode.data.ident,
+                    data: {
+                        // ROI_tensor_index: 0,
+                        // value_tensor_index: 1,
+                        output_set_tag: 'mp_finding_or_%d' %anode.data.ident,
+                    },
+                }, nin=2, nout=1) for anode in tools.anodes
+            ],
+
+            local post_mp_stackers =  [g.pnode({
+                type: 'TorchTensorSetStacker',
+                name: 'mp_stacker_%d' % anode.data.ident,
+                data: {
+                    output_set_tag: 'mp_stacked_%d' % anode.data.ident,
+                    multiplicity:2,
+                },
+            }, nin=2, nout=1) for anode in tools.anodes
             ],
 
             // local dnn_rois = [
@@ -799,30 +878,30 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                 g.edge(fans_to_stacks, spng_decons[1], 1),
                 g.edge(fans_to_stacks, spng_decons[2], 2),
 
-                // g.edge(spng_decons[0], post_decon_replicators[0]),
-                // g.edge(spng_decons[1], post_decon_replicators[1]),
-                // g.edge(spng_decons[2], post_decon_replicators[2]),
+                g.edge(spng_decons[0], post_decon_replicators[0]),
+                g.edge(spng_decons[1], post_decon_replicators[1]),
+                g.edge(spng_decons[2], post_decon_replicators[2]),
 
-                // g.edge(post_decon_replicators[0], apply_loose_rois[0], 0),
-                // g.edge(post_decon_replicators[1], apply_loose_rois[1], 0),
-                // g.edge(post_decon_replicators[2], apply_loose_rois[2], 0),
+                g.edge(post_decon_replicators[0], apply_loose_rois[0], 0),
+                g.edge(post_decon_replicators[1], apply_loose_rois[1], 0),
+                g.edge(post_decon_replicators[2], apply_loose_rois[2], 0),
 
-                // g.edge(post_decon_replicators[0], spng_gaus_apps[0], 1),
-                // g.edge(post_decon_replicators[1], spng_gaus_apps[1], 1),
-                // g.edge(post_decon_replicators[2], spng_gaus_apps[2], 1),
+                g.edge(post_decon_replicators[0], spng_gaus_apps[0], 1),
+                g.edge(post_decon_replicators[1], spng_gaus_apps[1], 1),
+                g.edge(post_decon_replicators[2], spng_gaus_apps[2], 1),
 
-                g.edge(spng_decons[0], apply_loose_rois[0]),
-                g.edge(spng_decons[1], apply_loose_rois[1]),
-                g.edge(spng_decons[2], apply_loose_rois[2]),
+                // g.edge(spng_decons[0], apply_loose_rois[0]),
+                // g.edge(spng_decons[1], apply_loose_rois[1]),
+                // g.edge(spng_decons[2], apply_loose_rois[2]),
 
 
                 g.edge(apply_loose_rois[0], threshold_rois[0]),
                 g.edge(apply_loose_rois[1], threshold_rois[1]),
                 g.edge(apply_loose_rois[2], threshold_rois[2]),
 
-                g.edge(threshold_rois[0], torch_to_tensors[0]),
-                g.edge(threshold_rois[1], torch_to_tensors[1]),
-                g.edge(threshold_rois[2], torch_to_tensors[2]),
+                // g.edge(threshold_rois[0], torch_to_tensors[0]),
+                // g.edge(threshold_rois[1], torch_to_tensors[1]),
+                // g.edge(threshold_rois[2], torch_to_tensors[2]),
 
                 // g.edge(apply_loose_rois[0], torch_to_tensors[0]),
                 // g.edge(apply_loose_rois[1], torch_to_tensors[1]),
@@ -832,21 +911,21 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                 // g.edge(apply_loose_rois[1], threshold_rois[1]),
                 // g.edge(apply_loose_rois[2], threshold_rois[2]),
 
-                // g.edge(threshold_rois[0], roi_application[0], 0, 0),
-                // g.edge(threshold_rois[1], roi_application[1], 0, 0),
-                // g.edge(threshold_rois[2], roi_application[2], 0, 0),
+                g.edge(threshold_rois[0], roi_application[0], 0, 0),
+                g.edge(threshold_rois[1], roi_application[1], 0, 0),
+                g.edge(threshold_rois[2], roi_application[2], 0, 0),
 
-                // g.edge(spng_gaus_apps[0], roi_application[0], 0, 1),
-                // g.edge(spng_gaus_apps[1], roi_application[1], 0, 1),
-                // g.edge(spng_gaus_apps[2], roi_application[2], 0, 1),
+                g.edge(spng_gaus_apps[0], roi_application[0], 0, 1),
+                g.edge(spng_gaus_apps[1], roi_application[1], 0, 1),
+                g.edge(spng_gaus_apps[2], roi_application[2], 0, 1),
 
                 // g.edge(threshold_rois[0], torch_to_tensors[0]),
                 // g.edge(threshold_rois[1], torch_to_tensors[1]),
                 // g.edge(threshold_rois[2], torch_to_tensors[2]),
    
-                // g.edge(roi_application[0], torch_to_tensors[0]),
-                // g.edge(roi_application[1], torch_to_tensors[1]),
-                // g.edge(roi_application[2], torch_to_tensors[2]),
+                g.edge(roi_application[0], torch_to_tensors[0]),
+                g.edge(roi_application[1], torch_to_tensors[1]),
+                g.edge(roi_application[2], torch_to_tensors[2]),
 
                 g.edge(torch_to_tensors[0], tensor_sinks[0]),
                 g.edge(torch_to_tensors[1], tensor_sinks[1]),
@@ -855,9 +934,10 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
 
             local mp_finding_centers = torch_to_tensors + spng_decons + 
                     spng_gaus_apps + apply_loose_rois + apply_tight_rois + threshold_rois +
-                    [u_unstacker, v_unstacker, w_unstacker] +
+                    [u_unstacker, v_unstacker, w_unstacker, u_unstacker_face1, v_unstacker_face1] +
                     std.flattenArrays(torch_to_tensors_unstacked) +
-                    collators_for_mp_finding + torch_to_tensors_mp_finding + mp_finding,
+                    collators_for_mp_finding + collators_for_mp_finding_face1 + torch_to_tensors_mp_finding + mp_finding + mp_finding_replicators +
+                    mp_finding_face1 + post_mp_stackers,
             local mp_finding_edges = [
                     g.edge(fans_to_stacks, spng_decons[0], 0),
                     g.edge(fans_to_stacks, spng_decons[1], 1),
@@ -891,54 +971,107 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
                     g.edge(apply_tight_rois[1], threshold_rois[1]),
                     g.edge(apply_tight_rois[2], threshold_rois[2]),
 
-                    g.edge(threshold_rois[0], u_unstacker),
-                    g.edge(threshold_rois[1], v_unstacker),
+                    // g.edge(threshold_rois[0], u_unstacker),
+                    // g.edge(threshold_rois[1], v_unstacker),
                     g.edge(threshold_rois[2], w_unstacker),
+
+                    g.edge(threshold_rois[0], mp_finding_replicators[0]),//U
+                    g.edge(threshold_rois[1], mp_finding_replicators[1]),//V
+
+                    g.edge(mp_finding_replicators[0], u_unstacker, 0, 0),
+                    g.edge(mp_finding_replicators[1], v_unstacker, 0, 0),
+                    g.edge(mp_finding_replicators[0], u_unstacker_face1, 1, 0),
+                    g.edge(mp_finding_replicators[1], v_unstacker_face1, 1, 0),
 
                     g.edge(u_unstacker, collators_for_mp_finding[0], 0, 0),
                     g.edge(v_unstacker, collators_for_mp_finding[0], 0, 1),
                     g.edge(w_unstacker, collators_for_mp_finding[0], 0, 2),
-                    g.edge(w_unstacker, collators_for_mp_finding[0], 1, 3),
+                    g.edge(u_unstacker_face1, collators_for_mp_finding_face1[0], 0, 0),
+                    g.edge(v_unstacker_face1, collators_for_mp_finding_face1[0], 0, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding_face1[0], 1, 2),
 
                     g.edge(u_unstacker, collators_for_mp_finding[1], 1, 0),
                     g.edge(v_unstacker, collators_for_mp_finding[1], 1, 1),
                     g.edge(w_unstacker, collators_for_mp_finding[1], 2, 2),
-                    g.edge(w_unstacker, collators_for_mp_finding[1], 3, 3),
+                    g.edge(u_unstacker_face1, collators_for_mp_finding_face1[1], 1, 0),
+                    g.edge(v_unstacker_face1, collators_for_mp_finding_face1[1], 1, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding_face1[1], 3, 2),
 
                     g.edge(u_unstacker, collators_for_mp_finding[2], 2, 0),
                     g.edge(v_unstacker, collators_for_mp_finding[2], 2, 1),
                     g.edge(w_unstacker, collators_for_mp_finding[2], 4, 2),
-                    g.edge(w_unstacker, collators_for_mp_finding[2], 5, 3),
+                    g.edge(u_unstacker_face1, collators_for_mp_finding_face1[2], 2, 0),
+                    g.edge(v_unstacker_face1, collators_for_mp_finding_face1[2], 2, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding_face1[2], 5, 2),
 
                     g.edge(u_unstacker, collators_for_mp_finding[3], 3, 0),
                     g.edge(v_unstacker, collators_for_mp_finding[3], 3, 1),
                     g.edge(w_unstacker, collators_for_mp_finding[3], 6, 2),
-                    g.edge(w_unstacker, collators_for_mp_finding[3], 7, 3),
+                    g.edge(u_unstacker_face1, collators_for_mp_finding_face1[3], 3, 0),
+                    g.edge(v_unstacker_face1, collators_for_mp_finding_face1[3], 3, 1),
+                    g.edge(w_unstacker, collators_for_mp_finding_face1[3], 7, 2),
+
+                    // g.edge(u_unstacker, collators_for_mp_finding[1], 1, 0),
+                    // g.edge(v_unstacker, collators_for_mp_finding[1], 1, 1),
+                    // g.edge(w_unstacker, collators_for_mp_finding[1], 2, 2),
+                    // g.edge(w_unstacker, collators_for_mp_finding[1], 3, 3),
+
+                    // g.edge(u_unstacker, collators_for_mp_finding[2], 2, 0),
+                    // g.edge(v_unstacker, collators_for_mp_finding[2], 2, 1),
+                    // g.edge(w_unstacker, collators_for_mp_finding[2], 4, 2),
+                    // g.edge(w_unstacker, collators_for_mp_finding[2], 5, 3),
+
+                    // g.edge(u_unstacker, collators_for_mp_finding[3], 3, 0),
+                    // g.edge(v_unstacker, collators_for_mp_finding[3], 3, 1),
+                    // g.edge(w_unstacker, collators_for_mp_finding[3], 6, 2),
+                    // g.edge(w_unstacker, collators_for_mp_finding[3], 7, 3),
 
                     g.edge(collators_for_mp_finding[0], mp_finding[0]),
                     g.edge(collators_for_mp_finding[1], mp_finding[1]),
                     g.edge(collators_for_mp_finding[2], mp_finding[2]),
                     g.edge(collators_for_mp_finding[3], mp_finding[3]),
 
+                    g.edge(collators_for_mp_finding_face1[0], mp_finding_face1[0]),
+                    g.edge(collators_for_mp_finding_face1[1], mp_finding_face1[1]),
+                    g.edge(collators_for_mp_finding_face1[2], mp_finding_face1[2]),
+                    g.edge(collators_for_mp_finding_face1[3], mp_finding_face1[3]),
 
-                    // g.edge(mp_finding[0], collators_for_dnnroi_u[0], 0, 0),
-                    // g.edge(apply_loose_rois[0], collators_for_dnnroi_u[0], 0, 1),
-                    // g.edge(collators_for_dnnroi_u[0], dnn_rois[0])
+                    // g.edge(mp_finding[0], mp_finding_ors[0], 0, 0),
+                    // g.edge(mp_finding[1], mp_finding_ors[1], 0, 0),
+                    // g.edge(mp_finding[2], mp_finding_ors[2], 0, 0),
+                    // g.edge(mp_finding[3], mp_finding_ors[3], 0, 0),
 
+                    // g.edge(mp_finding_face1[0], mp_finding_ors[0], 0, 1),
+                    // g.edge(mp_finding_face1[1], mp_finding_ors[1], 0, 1),
+                    // g.edge(mp_finding_face1[2], mp_finding_ors[2], 0, 1),
+                    // g.edge(mp_finding_face1[3], mp_finding_ors[3], 0, 1),
 
-                    g.edge(mp_finding[0], torch_to_tensors_mp_finding[0]),
-                    g.edge(mp_finding[1], torch_to_tensors_mp_finding[1]),
-                    g.edge(mp_finding[2], torch_to_tensors_mp_finding[2]),
-                    g.edge(mp_finding[3], torch_to_tensors_mp_finding[3]),
+                    // g.edge(mp_finding_ors[0], torch_to_tensors_mp_finding[0]),
+                    // g.edge(mp_finding_ors[1], torch_to_tensors_mp_finding[1]),
+                    // g.edge(mp_finding_ors[2], torch_to_tensors_mp_finding[2]),
+                    // g.edge(mp_finding_ors[3], torch_to_tensors_mp_finding[3]),
 
-                    //Now, we have MP-found tensors for the U Plane for each APA
-                    //Need something to collate MP-finding & loose lf
-                    //then pass to DNNROI 
-                    //For now let's save the output of DNNROI to a file
+                    g.edge(mp_finding[0], post_mp_stackers[0], 0, 0),
+                    g.edge(mp_finding[1], post_mp_stackers[1], 0, 0),
+                    g.edge(mp_finding[2], post_mp_stackers[2], 0, 0),
+                    g.edge(mp_finding[3], post_mp_stackers[3], 0, 0),
 
+                    g.edge(mp_finding_face1[0], post_mp_stackers[0], 0, 1),
+                    g.edge(mp_finding_face1[1], post_mp_stackers[1], 0, 1),
+                    g.edge(mp_finding_face1[2], post_mp_stackers[2], 0, 1),
+                    g.edge(mp_finding_face1[3], post_mp_stackers[3], 0, 1),
+
+                    g.edge(post_mp_stackers[0], torch_to_tensors_mp_finding[0]),
+                    g.edge(post_mp_stackers[1], torch_to_tensors_mp_finding[1]),
+                    g.edge(post_mp_stackers[2], torch_to_tensors_mp_finding[2]),
+                    g.edge(post_mp_stackers[3], torch_to_tensors_mp_finding[3]),
+
+                    // g.edge(mp_finding[0], torch_to_tensors_mp_finding[0]),
+                    // g.edge(mp_finding[1], torch_to_tensors_mp_finding[1]),
+                    // g.edge(mp_finding[2], torch_to_tensors_mp_finding[2]),
+                    // g.edge(mp_finding[3], torch_to_tensors_mp_finding[3]),
 
                     g.edge(torch_to_tensors_mp_finding[0], tensor_sinks_mp_finding[0]),
-                    // g.edge(dnn_roi_node, tensor_sinks_mp_finding[0]), //FIXME -- rename dnn_roi_node
                     g.edge(torch_to_tensors_mp_finding[1], tensor_sinks_mp_finding[1]),
                     g.edge(torch_to_tensors_mp_finding[2], tensor_sinks_mp_finding[2]),
                     g.edge(torch_to_tensors_mp_finding[3], tensor_sinks_mp_finding[3]),
