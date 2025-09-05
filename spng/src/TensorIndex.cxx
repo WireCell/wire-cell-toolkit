@@ -2,7 +2,7 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 
 #include "WireCellUtil/Exceptions.h"
-
+#include <sstream>
 
 namespace WireCell::SPNG {
 
@@ -223,5 +223,26 @@ namespace WireCell::SPNG {
         }
         return it->second;
     }
+
+    std::string TensorIndex::str() const
+    {
+        std::stringstream ss;
+        ss << "TensorIndex id=" << m_ident << " ntensors=" << m_nodes.size()
+           << " nparents=" << nparents() << ":";
+        for (auto ten : tree().child_values()) {
+            auto md = ten->metadata();
+            ss << "[";
+            ss << md["datatype"].asString() <<":"<< md["datapath"].asString() << ":";
+            ss << "( ";
+            for (auto siz : ten->shape()) {
+                ss << siz << " ";
+            }
+            ss << "):" << ten->dtype() << ":" << ten->device();
+            ss << "] ";
+        }
+
+        return ss.str();        
+    }
+
 
 }

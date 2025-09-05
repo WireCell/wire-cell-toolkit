@@ -45,6 +45,17 @@ namespace WireCell::SPNG {
         ITorchTensor::shared_vector m_tv;
     };
 
+    class EmptyTorchTensorSet : public WireCell::ITorchTensorSet {
+      public:
+        
+        virtual ~EmptyTorchTensorSet() {}
+
+        virtual int ident() const { return -1; }
+        virtual Configuration metadata() const { return Configuration(); }
+        virtual ITorchTensor::shared_vector tensors() const { return std::make_shared<ITorchTensor::vector>(); }
+    };
+
+
 }  // namespace WireCell::SPNG
 
 #endif

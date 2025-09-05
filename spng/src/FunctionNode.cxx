@@ -4,22 +4,39 @@
 
 namespace WireCell::SPNG {
 
+    FunctionNode::FunctionNode(const std::string& logname, const std::string& pkgname)
+        : Aux::Logger(logname, pkgname)
+    {
+    }
+
     void FunctionNode::configure(const WireCell::Configuration& cfg)
     {
+        m_quiet = get<bool>(cfg, "quiet", m_quiet);
         m_selector.configure(cfg);
         m_renaming.configure(cfg);
     }
     
     WireCell::Configuration FunctionNode::default_configuration() const
     {
+        Configuration cfg;
+        cfg["quiet"] = m_quiet;
         auto cfg1 = m_selector.default_configuration();
         auto cfg2 = m_renaming.default_configuration();
-        return update(cfg1, cfg2); // FIXME: fix this update() function so 2nd arg is const.
+        update(cfg, cfg1);
+        update(cfg, cfg2);
+        return cfg;
     }
 
     TensorIndex FunctionNode::index_tensors(const ITorchTensorSet::pointer& in) const
     {
         return TensorIndex(in);
+    }
+    
+    TensorIndex FunctionNode::sys_index_tensors(const ITorchTensorSet::pointer& in) const
+    {
+        auto ti = index_tensors(in);
+        maybe_log(ti, "index");
+        return ti;              // copy elision
     }
 
     
@@ -35,7 +52,10 @@ namespace WireCell::SPNG {
 
     TensorIndex FunctionNode::sys_transform_tensors(TensorIndex ti) const
     {
-        return transform_tensors(std::move(ti));
+        maybe_log(ti, "pre-transform");
+        auto new_ti = transform_tensors(std::move(ti));
+        maybe_log(new_ti, "post-transform");
+        return new_ti;          // copy elision
     }
 
     TensorIndex FunctionNode::rename_tensors(TensorIndex ti) const
@@ -43,12 +63,23 @@ namespace WireCell::SPNG {
         return m_renaming.apply(std::move(ti));
     }
     
-
     ITorchTensorSet::pointer FunctionNode::pack_tensors(TensorIndex ti) const
     {
         return ti.as_set();
     }
 
+    ITorchTensorSet::pointer FunctionNode::sys_pack_tensors(TensorIndex ti) const
+    {
+        maybe_log(ti, "pack");
+        return pack_tensors(std::move(ti));
+    }
+
+    void FunctionNode::maybe_log(const TensorIndex& ti, const std::string& context) const
+    {
+        if (m_quiet) return;
+
+        log->debug("{}: {}", context, ti.str());
+    }
 
     bool FunctionNode::operator()(const input_pointer& in, output_pointer& out) const
     {
@@ -56,8 +87,9 @@ namespace WireCell::SPNG {
         if (! in) { return true; } // EOS
 
         // Weeeeee!
-        out = pack_tensors(rename_tensors(sys_transform_tensors(select_tensors(index_tensors(in)))));
+        out = sys_pack_tensors(rename_tensors(sys_transform_tensors(select_tensors(sys_index_tensors(in)))));
         return true;
     }
+
 
 }

@@ -3,6 +3,10 @@
 
 namespace WireCell::SPNG {
 
+    TorchFunctionNode::TorchFunctionNode(const std::string& logname, const std::string& pkgname)
+        : FunctionNode(logname, pkgname)
+    {
+    }
 
     WireCell::Configuration TorchFunctionNode::default_configuration() const
     {
