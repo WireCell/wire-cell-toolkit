@@ -22,7 +22,7 @@ The tensor and metadata parts of an ~ITorchTensor~ are subject to the data model
 Every ~ITorchTensor~ metadata SHALL have these attributes:
 
 - ~datatype~ :: a string naming the SPNG Data Model element this ~ITorchTensor~ represents.
-- ~datapath~ :: a string unique to the ~ITorchTensorSet~.  This may be expressed as a ~/file/system/type/path~.
+- ~datapath~ :: a string *unique* to the ~ITorchTensorSet~.  This may be expressed as a ~/file/system/type/path~.
 
 An ~ITorchTensor~ metadata MAY have these attributes or depending on datatype MUST.
 
@@ -100,4 +100,92 @@ The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label t
 - ~label~ :: the label for one set of channel masks
 
 The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).
+
+
+
+* SPNG support
+
+SPNG provides modular and extensible support in the form of data flow graph node
+classes.  Instances of these classes may be to provide general purpose
+operations and the classes may be used as inheritance bases for developing
+extended behavior.
+
+** FunctionNode
+
+An instance of the ~FunctionNode~ class provides standardized and configurable
+tensor selection and (datapath) renaming operations.  Its internal operations
+are illustrated as a mini flow graph:
+
+#+ATTR_ORG: :width 50%
+[[file:tdm-mini-dfg-func.png]]
+
+Each box represents a method call with default implementations.  All actual C++
+methods are named with a ~_tensors~ suffix.
+
+- index :: from an ~ITorchTensorSet~, form a ~TensorIndex~ from the input tensor
+  set.  A ~TensorIndex~ provides a flat representation matching the tensor set as
+  well as a tree representation formed with from any ~parent~ tensor metadata
+  attributes.  It also provides tensor lookup by ~datapath~.
+
+- select :: apply standardized and configurable selection rules.  A rule may
+  include one or both of an "accept" or "reject" regular expression pattern
+  matched against a tensor's ~datapath~.  The rules are applied to parent tensors
+  and their children will follow.
+
+- transform :: apply a transformation on the selected tensor index.  The
+  ~FunctionNode~ implements this as a no-op.
+
+- rename :: apply standardized and configurable renaming rules.  A rule consists
+  of a regular expression pattern and a format to apply if the pattern matches a
+  tensor's ~datapath~.  Renaming a parent will also rename the corresponding
+  ~parent~ metadata attribute of any children.
+
+- pack :: place the tensor in an index in their flat order into a ~ITorchTensorSet~.
+
+A subclass may override any of these methods in order to provide novel behavior.
+The most useful override is the *transform*.  A subclass may augment existing
+functionality of other methods by overriding and also calling them.
+
+** TorchFunctionNode
+
+The ~TorchFunctionNode~ inherits from ~FunctionNode~ so that a subclass may
+implement the ~transform~ method in a code context governed by a ~TorchContext~.
+This will provide semaphore governance and provide the subclass with a ~device()~
+method that returns a user-configurable device to assume.  An subclass ~transform~
+method is also assured that the tensors it consumes are on the configured
+device.
+
+
+** Fan nodes
+
+General purpose fan-out and fan-in node classes are provided.  These operate
+only on the ~ITorchTensorSet~ and ~ITorchTensor~ level and do not make a ~TorchIndex~.
+
+The internal structure of the ~FanoutNode~ is as:
+
+#+ATTR_ORG: :width 50%
+[[file:tdm-mini-dfg-fout.png]]
+
+The *separate* method will simply pass the input ~ITorchTensorSet~ pointer to all
+output ports.  No modification is made to the set.
+
+
+The internal structure of the ~FaninNode~ is as:
+
+#+ATTR_ORG: :width 50%
+[[file:tdm-mini-dfg-fin.png]]
+
+The *combine* method will simply form a new *ITorchTensorSet* that is the union of
+the input sets.  This implicitly assumes all ~datapath~ are unique.  If the
+upstream subgraph fails to assure this uniqueness the resulting tensor set will
+be badly formed but will contain all tensors.  Likewise the tensor set metadata
+is combined as a simple union.  In this case, if the input tensor sets have
+common keywords, only one will be retained in the output tensor set metadata.
+Again, the expectation is upstream ~FunctionNode~ instances will be applied to
+assure unique input to a fan in.
+
+And, in general, while it is possible to use either fan as a base class and
+implement either the *separate* or *combine* methods, this is not recommended.
+Instead, it is expected that a ~FunctionNode~ or derived will be applied to the
+pre and/or post fanned tensor sets.
 

@@ -8,27 +8,65 @@
 
 namespace WireCell::SPNG {
 
-    /// Manage a vector of tensors (ITorchTensor::pointer).
+    /// SPNG TDM compliant tensor management.
     ///
-    /// This indexes a set of tensors into a parentage tree and other structures
-    /// to allow fast lookup.  Tensors may be added over the life time of the
-    /// index.  Tensors may not be removed.  If a subset are required, make a
-    /// new TensorIndex and add the desired subset  
+    /// This indexes the set of TDM tensors in the following ways:
     ///
-    /// The index performs to de-duplication at the ITorchTensor::pointer level.
+    /// - named map :: a tensor may be retrieved by its datapath.
     ///
-    /// The index will generally raise ValueError exception if the TDM is violated.
+    /// - parentage tree :: the "parent" attribute is used to form a
+    ///   parent/child tree (NaryTree).  This allows quick parent/child, sibling
+    ///   and depth-first-descent relationship traversal.
+    ///
+    /// An index is "add-only", no removal and not in-place mutation is
+    /// supported.  To remove or mutate, one must make a new index from an
+    /// existing index.
+    ///
+    /// The TensorIndex requires and maintains SPNG TDM compliance.  Any tensors
+    /// retrieved from the index will be TDM compliant.  Any tensors given to
+    /// the index must be TDM compliant or a ValueError exception will be
+    /// raised.
+    ///
+    /// The index caries an ident number and metadata.  Their values are
+    /// intended to be provided by an initial ITorchTensorSet.  The index
+    /// otherwise ignores them.
+    ///
     class TensorIndex {
     public:
+
+        /// Construct empty.
         TensorIndex() = default;
         ~TensorIndex() = default;
 
-        /// Construct on an iterator range of ITorchTensor::pointer
-        template<typename It> TensorIndex(It beg, It end) : m_tens(beg, end) {}
-        template<typename Range> TensorIndex(Range& r) : m_tens(std::begin(r), std::end(r)) {}
-        
+        /// No copy constructor and copy assignment because this requires a deep
+        /// copy and we want to catch inadvertent copies due to badly designed
+        /// function calls.
+        TensorIndex(const TensorIndex& other) = delete;        
+        TensorIndex& operator=(const TensorIndex& rhs) = delete;
+
+        // If you really need a copy:
+        TensorIndex deepcopy() const;
+
+        TensorIndex(TensorIndex&& other) = default;
+        TensorIndex& operator=(TensorIndex&& rhs) = default;
+
         /// Construct from tensors in a set.
-        TensorIndex(ITorchTensorSet::pointer ts) : m_tens(ts->tensors()->begin(), ts->tensors()->end()) {}
+        TensorIndex(ITorchTensorSet::pointer ts); 
+
+        /// Construct empty of tensors but with ident number and metadata.
+        TensorIndex(int ident, const Configuration& md);
+
+        /// Construct from parts.
+        TensorIndex(int ident, const Configuration& md, const ITorchTensor::vector& tens);
+
+        /// Pack tensors, ident and metadata into a tensor set.
+        ITorchTensorSet::pointer as_set() const;
+
+        /// Return a new TensorIndex formed by depth first descent of the tree
+        /// starting at the nodes holding the given seeds.  Seeds not held are
+        /// ignored.  Caller may compare the nparents() on the returned index
+        /// the size of seeds() to check for loss.
+        TensorIndex subset(const std::vector<ITorchTensor::pointer>& seeds) const;
 
         /// A tree representing tensor parentage as expressed through the TDM
         /// "parent" metadata attribute.
@@ -50,6 +88,14 @@ namespace WireCell::SPNG {
         /// Return the tree node holding the tensor or nullptr.  Note, despite a
         /// bare pointer return, the index retains ownership.
         const tree_type* tree_node(ITorchTensor::pointer ten) const;
+
+        /// Return the parent tensor.  If ten lacks a parent (ie, is an ultimate
+        /// parent), nullptr is returned.
+        ITorchTensor::pointer parent(ITorchTensor::pointer ten) const;
+
+        /// Return vector of direct children of tensor.  Vector is empty is the
+        /// tensor is a leaf or if the tensor is not in the index.
+        ITorchTensor::vector children(ITorchTensor::pointer ten) const;
 
         /// Descend from node, adding all tensors found to this index.  Tensors
         /// are added in depth-first descent order.
@@ -82,8 +128,52 @@ namespace WireCell::SPNG {
         ITorchTensor::vector of_type(const std::string& datatype,
                                      size_t maxnum=std::numeric_limits<size_t>::max()) const;
 
+        /// Return flat vector of tensors in tree DFS order.
+        ///
+        /// The order of the vector is TDM-compliant.
+        ///
+        /// Note, if the goal is to simply iterate on all tensors, overhead of
+        /// constructing the intermediate vector can be avoided by using code
+        /// like:
+        /// @code{.cpp}
+        /// for (const auto& node : ti.tree().depth()) {
+        ///     if (! node.value) { // skip empty root node
+        ///         continue;
+        ///     }
+        ///     auto ten = node.value->tensor();
+        ///     // ...
+        /// }
+        /// @endcode
+        ITorchTensor::vector tensors() const;
+
+        /// Return top level parents in sibling order from the tree.
+        ///
+        /// Note, if the goal is to simply iterate on parent tensors, the
+        /// overhead of forming the intermediate vector can be avoided by using
+        /// code like:
+        ///
+        /// @code{.cpp}
+        /// for (auto iten : ti.tree().child_values()) {
+        ///     auto ten = iten->tensor();
+        ///     // ...
+        /// }
+        /// @endcode
+        ITorchTensor::vector parents() const;
+
+        /// Return the number of top-level parents.
+        ///
+        /// This is equal to the parents().size() but avoids forming the vector.
+        size_t nparents() const;
+
+        /// Return the ident number.
+        int ident() const { return m_ident; }
+
+        /// Return the metadata object.
+        const Configuration& metadata() const { return m_md; }
+
     private:
-        std::vector<ITorchTensor::pointer> m_tens;
+        int m_ident{-1};
+        Configuration m_md;
 
         tree_type m_root{nullptr};
         std::unordered_map<std::string, ITorchTensor::pointer> m_bypath;

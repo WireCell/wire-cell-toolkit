@@ -6,7 +6,7 @@ local spng_filters = import 'spng_filters.jsonnet';
 
 function(tools, debug_force_cpu=false) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
-
+            
         local filter_settings = {
             debug_force_cpu: debug_force_cpu,
         },
@@ -76,8 +76,16 @@ function(tools, debug_force_cpu=false) {
         
    
         stacked_spng : {
+            //TODO: Model information should be coming from wct-framesrouce jsonnet
+            local SPNGTorchService = {
+                type: "SPNGTorchService",
+                name: "dnnroi",
+                data:{
+                    model: "/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+                    device: "gpu",
+                }
+            },
             local tf_fans = make_fanout(tools.anodes[0]),
-
             local u_stacker =  g.pnode({
                 type: 'TorchTensorSetStacker',
                 name: 'u_stacker',
@@ -302,7 +310,7 @@ function(tools, debug_force_cpu=false) {
                     data: {multiplicity: (if iplane < 2 then 3 else 2),}
 
                 }, nin=1, nout=(if iplane < 2 then 3 else 2))
-                for iplane in std.range(0,3)
+                for iplane in std.range(0, 3)
             ],
 
 
@@ -310,7 +318,7 @@ function(tools, debug_force_cpu=false) {
                 g.pnode({
                     type: 'TorchTensorSetReplicator',
                     name: 'post_tight_replicator_%d' % iplane,
-                    data: {multiplicity: (if iplane < 2 then 3 else 2),}
+                    data: {multiplicity: (if iplane > 1 then 3 else 2),}
 
                 }, nin=1, nout=(if iplane > 1 then 3 else 2))
                 for iplane in std.range(0,3)
@@ -393,8 +401,18 @@ function(tools, debug_force_cpu=false) {
                     type: 'SPNGDNNROI',
                     name: 'dnnroi_%s' % plane,
                     data: {
+                        
+                        plane: plane,
+                        input_scale: 1.0/4000,
+                        input_offset: 0.0,
+                        mask_threshold: 0.5,
+                        output_scale: 1.0,
+                        output_offset: 0.0,
+                        nchunks: 4,
+                        forward: wc.tn(SPNGTorchService),
+
                     },
-                }, nin=1, nout=1) for plane in ['u', 'v']
+                }, nin=1, nout=1, uses=[SPNGTorchService]) for plane in ['u', 'v']
             ],
 
             local tensor_sinks = [g.pnode({
@@ -407,9 +425,9 @@ function(tools, debug_force_cpu=false) {
             }, nin=1, nout=0) for  plane in ['u', 'v', 'w1', 'w2']],
 
 
-            local mp_finding_centers = torch_to_tensors + spng_decons + 
+            local mp_finding_centers = torch_to_tensors + spng_decons +  post_decon_replicators +
                     do_gaus_filters + do_loose_roi_filters + do_tight_roi_filters +
-                    threshold_rois +
+                    threshold_rois + post_tight_replicators + roi_application +
                     collators_for_mp_finding + torch_to_tensors + mp_finding
                     + collators_for_dnn_roi + dnn_rois + tensor_sinks,
                     

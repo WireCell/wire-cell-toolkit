@@ -35,18 +35,7 @@ local nanodes = std.length(tools.anodes),
 
 
 local frame_input = fileio.frame_tensor_file_source(input_file),
-// local frame_input = fileio.frame_file_source('frames.tar', tags=outtags),
 
-// local parallel_pipes = [
-//   g.pipeline([
-
-//                nf_pipes[n],
-//                sp_pipes[n],
-//                magnifyio.decon_pipe[n],
-//              ],
-//              'parallel_pipe_%d' % n)
-//   for n in std.range(0, std.length(tools.anodes) - 1)
-// ],
 
 local selectors = [
   g.pnode({

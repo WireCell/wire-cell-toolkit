@@ -18,8 +18,8 @@ namespace WireCell {
 
             // The plane index number (in 0,1,2) to determine which
             // channels span the data.
-            int plane{-1};
-
+           // int plane{-1};
+            std::string plane{"na"};
             // If true, sort the selected channels by their channel ID
             // value.  If false, the ordering given by the channel
             // placement (ordered according to the so called "wire
