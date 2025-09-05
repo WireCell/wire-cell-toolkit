@@ -9,7 +9,6 @@
 #define WIRECELL_SPNG_FUNCTIONNODE
 
 #include "WireCellSpng/ITorchTensorSetFilter.h"
-#include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/TensorSelector.h"
 #include "WireCellSpng/TensorRenaming.h"
 #include "WireCellSpng/TensorIndex.h"
@@ -25,7 +24,7 @@ namespace WireCell::SPNG {
      * case that the base class will NOT use any Torch operations.  To safely
      * apply Torch operations, use the TorchFunctionNode as your base class.
      * 
-     * This class is an IConfigurable and an IFrameToTorchSetFanout.  If used as
+     * This class is an IConfigurable and an ITorchTensorSetFilter.  If used as
      * a base class for your own data flow graph node, these two types must be
      * included in the list of interfaces passed to your WIRECELL_FACTORY() CPP
      *

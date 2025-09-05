@@ -22,7 +22,7 @@
 
 namespace WireCell::SPNG {
 
-    class ContextBase {
+    class ContextBase : public IConfigurable {
     public:
 
         ContextBase() = default;
@@ -52,7 +52,7 @@ namespace WireCell::SPNG {
         /// wrapper that lives for the duration of a code-scope.
         ///
         /// void mymeth() {
-        ///   TorchSemaphore sem(m_ctx);
+        ///   TorchSemaphore sem(context());
         ///   ... code using a torch device
         /// } // end of scope
         const TorchContext& context() const { return m_ctx; }
