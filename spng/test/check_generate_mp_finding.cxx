@@ -208,6 +208,32 @@ int main(int argc, char* argv[])
     std::cout << valid_range << std::endl;
     std::cout << results.index({valid_range}) << std::endl;
 
+    // auto valid_counts = valid_range.sum(-1);
+    // auto valid_max_size = torch::max(valid_counts).item<long>();
+
+    
+    auto mega_frame_4_reshaped = mega_frame_4.reshape({-1, mega_frame_4.size(-1)});
+    auto mp2 = torch::zeros_like(mega_frame_4_reshaped);
+    auto mp3 = torch::zeros_like(mega_frame_4_reshaped);
+    // long current_offset = 0;
+    for (long i = 0; i < mega_frame_4_reshaped.size(0); ++i) {
+        
+        auto these_indices = results.index({i, valid_range.index({i})});
+        // auto target_row = mega_frame_4_reshaped.index({i, indices});
+        mp3.index_put_({i, these_indices}, mega_frame_4_reshaped.index({i, these_indices}));
+        mp2.index_put_({i, these_indices}, (mega_frame_4_reshaped.index({i, these_indices}) == 0));
+        // std::cout << target_row << std::endl;
+        
+        // // Get the indices for the current row
+        // auto current_col_indices = col_indices.slice(0, current_offset, current_offset + count);
+        // // Fill the corresponding slice in the result tensor
+        // results.index_put_({i, torch::indexing::Slice(0, count)}, current_col_indices.to(torch::kInt));
+        // current_offset += count;
+    }
+    std::cout << mega_frame_4_reshaped << std::endl;
+    std::cout << mp2.reshape({nframes, nsamps, -1}) << std::endl;
+    std::cout << mp3.reshape({nframes, nsamps, -1}) << std::endl;
+
     // std::cout << results.index(torch::where((results >= 0) & (results < std::round(width/pitch_magnitude)))) << std::endl;
     // std::vector<int> results_counts;
     // long index = 0;
