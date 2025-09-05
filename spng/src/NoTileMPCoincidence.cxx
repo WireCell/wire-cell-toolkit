@@ -206,30 +206,6 @@ void WireCell::SPNG::NoTileMPCoincidence::convert_wires_to_channels(
     .to(torch::kFloat64);//And make it double
 }
 
-torch::Tensor WireCell::SPNG::NoTileMPCoincidence::make_indices(torch::Tensor & frame) {
-    auto reshaped = frame.reshape({-1, frame.size(-1)});
-    auto counts = reshaped.sum(-1);
-    auto max_size = torch::max(counts).item<long>();
-    auto results = torch::full({reshaped.size(0), max_size}, -1);
-
-    auto col_indices = reshaped.nonzero().index({"...", -1});
-    int64_t current_offset = 0;
-    for (int64_t i = 0; i < reshaped.size(0); ++i) {
-        auto count = counts.index({i}).item<int64_t>();
-        // std::cout << i << " " << count << std::endl;
-        if (count > 0) {
-            // Get the indices for the current row
-            auto current_col_indices = col_indices.slice(0, current_offset, current_offset + count);
-
-            // Fill the corresponding slice in the result tensor
-            results.index_put_({i, torch::indexing::Slice(0, count)}, current_col_indices.to(torch::kInt));
-        }
-        current_offset += count;
-    }
-
-    return results;
-}
-
 bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, output_pointer& out) {
     out = nullptr;
     if (!in) {

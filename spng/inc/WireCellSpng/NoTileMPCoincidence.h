@@ -27,7 +27,6 @@ namespace SPNG {
     private:
 
         void convert_wires_to_channels(torch::Tensor & input, torch::Tensor & indices);
-        torch::Tensor make_indices(torch::Tensor & frame);
         int m_rebin_val{-1};
         int m_target_plane_index{0};
         int m_aux_plane_l_index{1};
