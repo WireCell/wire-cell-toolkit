@@ -78,16 +78,21 @@ namespace WireCell::SPNG {
     {
         if (m_quiet) return;
 
-        log->debug("{}: {}", context, ti.str());
+        log->debug("{}: call={}: {}", context, m_count, ti.str());
     }
 
     bool FunctionNode::operator()(const input_pointer& in, output_pointer& out) const
     {
         out = nullptr;
-        if (! in) { return true; } // EOS
+        if (! in) {
+            log->debug("EOS: call={}", m_count);
+            ++m_count;
+            return true;
+        }
 
         // Weeeeee!
         out = sys_pack_tensors(rename_tensors(sys_transform_tensors(select_tensors(sys_index_tensors(in)))));
+        ++m_count;
         return true;
     }
 

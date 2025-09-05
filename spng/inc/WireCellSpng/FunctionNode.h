@@ -96,7 +96,9 @@ namespace WireCell::SPNG {
 
         /// Configuration: quiet.  Set true to not call any logging.  Default is false.
         bool m_quiet{false};
-        
+
+        /// Keep track of calls
+        mutable size_t m_count{0};
 
     };
 }
