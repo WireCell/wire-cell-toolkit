@@ -154,7 +154,7 @@ public:
             geo_point_t last_wcp = boundary_point_second;
 
             std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
-            // last_wcp = geo_point_t(215.532, -95.1674, 211.193);
+            last_wcp = geo_point_t(215.532, -95.1674, 211.193);
 
             auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
 
@@ -219,6 +219,8 @@ public:
             int kink_num = find_first_kink(segment);
             std::cout << "Kink " << kink_num << std::endl;
 
+            bool flag_proton = detect_proton(segment, kink_num, fitted_segments);
+            std::cout << "Proton " << flag_proton << std::endl;
 
         }
 
@@ -986,6 +988,8 @@ private:
             paf.push_back(fit.paf);
         }
 
+        // std::cout << fitted_segments.size() << " " << fine_tracking_path.size() << std::endl;
+
         if (fine_tracking_path.empty()) {
             return false;
         }
@@ -1022,12 +1026,15 @@ private:
             double seg_length = segment_track_length(fitted_segments[i]);
             double seg_dQ_dx = segment_median_dQ_dx(fitted_segments[i]) * units::cm / 50000;
             
+
+            // std::cout << i << " " << dis/units::cm << " " << seg_length/units::cm << " " << seg_dQ_dx << std::endl;
+
             if (dis < 1*units::cm && seg_length > 4*units::cm && seg_dQ_dx > 0.5) {
                 return false;
             }
 
             // Check for delta rays
-            if (dis > 10*units::cm && seg_length > 4*units::cm) {
+            if (dis > 10*units::cm && seg_length > 4*units::cm ) {
                 geo_point_t p2(seg_fits.back().point.x() - seg_fits.front().point.x(),
                         seg_fits.back().point.y() - seg_fits.front().point.y(),
                         seg_fits.back().point.z() - seg_fits.front().point.z()); 
@@ -1056,6 +1063,8 @@ private:
                 } else {
                     p3.set(back_point.x() - front_point.x(), back_point.y() - front_point.y(), back_point.z() - front_point.z());
                 }
+
+                // std::cout << p2 << " " << p3 << std::endl;
 
                 // Judge direction for delta ray detection
                 if ((p2.angle(p1)/3.1415926*180. < 20 || 
@@ -1148,8 +1157,13 @@ private:
             if (end_L - L[i] < 35*units::cm && end_L - L[i] > 3*units::cm) {
                 vec_x.push_back(end_L - L[i]);
                 vec_y.push_back(dQ_dx[i]);
+                
+                // std::cout << ncount << " " << vec_x.back() << " " << vec_y.back() << std::endl;
+
                 ncount++;
             }
+           
+
 
             if (end_L - L[i] < 20*units::cm) {
                 vec_xp.push_back(end_L - L[i]);
