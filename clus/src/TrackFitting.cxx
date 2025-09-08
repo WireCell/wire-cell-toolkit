@@ -363,10 +363,6 @@ void TrackFitting::BuildGeometry(){
 
 }
 
-geo_point_t TrackFitting::adjust_rough_path(PR::Segment& segment){
-    return geo_point_t(0,0,0);
-}
-
 IAnodePlane::pointer TrackFitting::get_anode(int apa_ident) const {
     if (!m_grouping) {
         std::cerr << "TrackFitting: No grouping available to get anode" << std::endl;
@@ -4200,70 +4196,70 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         //     std::cout << "pts[" << i << "] = (" << pts[i].x() << ", " << pts[i].y() << ", " << pts[i].z() << ")" << std::endl;
         // }
 
-        if (flag_hack){
-            // hack pts ...
-            pts.clear();
-            pts.push_back(WireCell::Point(219.209*units::cm, -87.2848*units::cm, 209.453*units::cm));
-            pts.push_back(WireCell::Point(219.011*units::cm, -87.8189*units::cm, 209.55*units::cm));
-            pts.push_back(WireCell::Point(218.613*units::cm, -88.663*units::cm, 209.722*units::cm));
-            pts.push_back(WireCell::Point(218.329*units::cm, -89.169*units::cm, 209.853*units::cm));
-            pts.push_back(WireCell::Point(218.09*units::cm, -89.8885*units::cm, 209.969*units::cm));
-            pts.push_back(WireCell::Point(217.858*units::cm, -90.3128*units::cm, 210.076*units::cm));
-            pts.push_back(WireCell::Point(217.627*units::cm, -90.7371*units::cm, 210.184*units::cm));
-            pts.push_back(WireCell::Point(217.423*units::cm, -91.4211*units::cm, 210.266*units::cm));
-            pts.push_back(WireCell::Point(217.111*units::cm, -91.8551*units::cm, 210.423*units::cm));
-            pts.push_back(WireCell::Point(216.84*units::cm, -92.3369*units::cm, 210.55*units::cm));
-            pts.push_back(WireCell::Point(216.248*units::cm, -92.7898*units::cm, 210.798*units::cm));
+        // if (flag_hack){
+        //     // hack pts ...
+        //     pts.clear();
+        //     pts.push_back(WireCell::Point(219.209*units::cm, -87.2848*units::cm, 209.453*units::cm));
+        //     pts.push_back(WireCell::Point(219.011*units::cm, -87.8189*units::cm, 209.55*units::cm));
+        //     pts.push_back(WireCell::Point(218.613*units::cm, -88.663*units::cm, 209.722*units::cm));
+        //     pts.push_back(WireCell::Point(218.329*units::cm, -89.169*units::cm, 209.853*units::cm));
+        //     pts.push_back(WireCell::Point(218.09*units::cm, -89.8885*units::cm, 209.969*units::cm));
+        //     pts.push_back(WireCell::Point(217.858*units::cm, -90.3128*units::cm, 210.076*units::cm));
+        //     pts.push_back(WireCell::Point(217.627*units::cm, -90.7371*units::cm, 210.184*units::cm));
+        //     pts.push_back(WireCell::Point(217.423*units::cm, -91.4211*units::cm, 210.266*units::cm));
+        //     pts.push_back(WireCell::Point(217.111*units::cm, -91.8551*units::cm, 210.423*units::cm));
+        //     pts.push_back(WireCell::Point(216.84*units::cm, -92.3369*units::cm, 210.55*units::cm));
+        //     pts.push_back(WireCell::Point(216.248*units::cm, -92.7898*units::cm, 210.798*units::cm));
             
-            // pts.clear();
-            // pts.push_back(WireCell::Point(216.165*units::cm, -93.8529*units::cm, 210.894*units::cm));
-            // pts.push_back(WireCell::Point(215.996*units::cm, -94.3005*units::cm, 210.942*units::cm));
-            // pts.push_back(WireCell::Point(215.888*units::cm, -94.8903*units::cm, 211.002*units::cm));
-            // pts.push_back(WireCell::Point(215.38*units::cm, -95.4503*units::cm, 211.276*units::cm));
-            // pts.push_back(WireCell::Point(215.128*units::cm, -96.2677*units::cm, 211.414*units::cm));
-            // pts.push_back(WireCell::Point(214.801*units::cm, -96.7483*units::cm, 211.583*units::cm));
-            // pts.push_back(WireCell::Point(214.429*units::cm, -97.4961*units::cm, 211.745*units::cm));
-            // pts.push_back(WireCell::Point(214.225*units::cm, -98.0668*units::cm, 211.862*units::cm));
-            // pts.push_back(WireCell::Point(213.766*units::cm, -98.833*units::cm, 212.054*units::cm));
-            // pts.push_back(WireCell::Point(213.401*units::cm, -99.5325*units::cm, 212.199*units::cm));
-            // pts.push_back(WireCell::Point(213.182*units::cm, -100.042*units::cm, 212.303*units::cm));
-            // pts.push_back(WireCell::Point(212.763*units::cm, -100.63*units::cm, 212.518*units::cm));
-            // pts.push_back(WireCell::Point(212.414*units::cm, -101.107*units::cm, 212.697*units::cm));
-            // pts.push_back(WireCell::Point(212.25*units::cm, -101.563*units::cm, 212.785*units::cm));
-            // pts.push_back(WireCell::Point(212.086*units::cm, -102.018*units::cm, 212.872*units::cm));
-            // pts.push_back(WireCell::Point(212.224*units::cm, -102.854*units::cm, 212.839*units::cm));
-            //
+        //     // pts.clear();
+        //     // pts.push_back(WireCell::Point(216.165*units::cm, -93.8529*units::cm, 210.894*units::cm));
+        //     // pts.push_back(WireCell::Point(215.996*units::cm, -94.3005*units::cm, 210.942*units::cm));
+        //     // pts.push_back(WireCell::Point(215.888*units::cm, -94.8903*units::cm, 211.002*units::cm));
+        //     // pts.push_back(WireCell::Point(215.38*units::cm, -95.4503*units::cm, 211.276*units::cm));
+        //     // pts.push_back(WireCell::Point(215.128*units::cm, -96.2677*units::cm, 211.414*units::cm));
+        //     // pts.push_back(WireCell::Point(214.801*units::cm, -96.7483*units::cm, 211.583*units::cm));
+        //     // pts.push_back(WireCell::Point(214.429*units::cm, -97.4961*units::cm, 211.745*units::cm));
+        //     // pts.push_back(WireCell::Point(214.225*units::cm, -98.0668*units::cm, 211.862*units::cm));
+        //     // pts.push_back(WireCell::Point(213.766*units::cm, -98.833*units::cm, 212.054*units::cm));
+        //     // pts.push_back(WireCell::Point(213.401*units::cm, -99.5325*units::cm, 212.199*units::cm));
+        //     // pts.push_back(WireCell::Point(213.182*units::cm, -100.042*units::cm, 212.303*units::cm));
+        //     // pts.push_back(WireCell::Point(212.763*units::cm, -100.63*units::cm, 212.518*units::cm));
+        //     // pts.push_back(WireCell::Point(212.414*units::cm, -101.107*units::cm, 212.697*units::cm));
+        //     // pts.push_back(WireCell::Point(212.25*units::cm, -101.563*units::cm, 212.785*units::cm));
+        //     // pts.push_back(WireCell::Point(212.086*units::cm, -102.018*units::cm, 212.872*units::cm));
+        //     // pts.push_back(WireCell::Point(212.224*units::cm, -102.854*units::cm, 212.839*units::cm));
+        //     //
 
-            // pts.clear();
-            // pts.push_back(WireCell::Point(219.209 * units::cm, -87.2848 * units::cm, 209.453 * units::cm));
-            // pts.push_back(WireCell::Point(218.997 * units::cm, -87.8182 * units::cm, 209.557 * units::cm));
-            // pts.push_back(WireCell::Point(218.806 * units::cm, -88.253 * units::cm, 209.641 * units::cm));
-            // pts.push_back(WireCell::Point(218.615 * units::cm, -88.6879 * units::cm, 209.725 * units::cm));
-            // pts.push_back(WireCell::Point(218.337 * units::cm, -89.1079 * units::cm, 209.836 * units::cm));
-            // pts.push_back(WireCell::Point(218.051 * units::cm, -89.8565 * units::cm, 209.978 * units::cm));
-            // pts.push_back(WireCell::Point(217.77 * units::cm, -90.5317 * units::cm, 210.12 * units::cm));
-            // pts.push_back(WireCell::Point(217.472 * units::cm, -91.2331 * units::cm, 210.25 * units::cm));
-            // pts.push_back(WireCell::Point(217.058 * units::cm, -91.8449 * units::cm, 210.441 * units::cm));
-            // pts.push_back(WireCell::Point(216.822 * units::cm, -92.5268 * units::cm, 210.548 * units::cm));
-            // pts.push_back(WireCell::Point(216.61 * units::cm, -92.9509 * units::cm, 210.65 * units::cm));
-            // pts.push_back(WireCell::Point(216.308 * units::cm, -93.6788 * units::cm, 210.81 * units::cm));
-            // pts.push_back(WireCell::Point(215.992 * units::cm, -94.2301 * units::cm, 210.939 * units::cm));
-            // pts.push_back(WireCell::Point(215.791 * units::cm, -94.7826 * units::cm, 211.062 * units::cm));
-            // pts.push_back(WireCell::Point(215.532 * units::cm, -95.1674 * units::cm, 211.193 * units::cm));
-            // pts.push_back(WireCell::Point(215.274 * units::cm, -95.8492 * units::cm, 211.346 * units::cm));
-            // pts.push_back(WireCell::Point(215.038 * units::cm, -96.3231 * units::cm, 211.467 * units::cm));
-            // pts.push_back(WireCell::Point(214.741 * units::cm, -96.7608 * units::cm, 211.604 * units::cm));
-            // pts.push_back(WireCell::Point(214.444 * units::cm, -97.1985 * units::cm, 211.741 * units::cm));
-            // pts.push_back(WireCell::Point(214.282 * units::cm, -97.8976 * units::cm, 211.824 * units::cm));
-            // pts.push_back(WireCell::Point(214.026 * units::cm, -98.3316 * units::cm, 211.943 * units::cm));
-            // pts.push_back(WireCell::Point(213.682 * units::cm, -99.0357 * units::cm, 212.085 * units::cm));
-            // pts.push_back(WireCell::Point(213.368 * units::cm, -99.7199 * units::cm, 212.216 * units::cm));
-            // pts.push_back(WireCell::Point(213.101 * units::cm, -100.164 * units::cm, 212.341 * units::cm));
-            // pts.push_back(WireCell::Point(212.742 * units::cm, -100.639 * units::cm, 212.527 * units::cm));
-            // pts.push_back(WireCell::Point(212.514 * units::cm, -101.179 * units::cm, 212.647 * units::cm));
-            // pts.push_back(WireCell::Point(212.117 * units::cm, -101.817 * units::cm, 212.831 * units::cm));
-            // pts.push_back(WireCell::Point(211.977 * units::cm, -102.455 * units::cm, 212.891 * units::cm));
-        }    
+        //     // pts.clear();
+        //     // pts.push_back(WireCell::Point(219.209 * units::cm, -87.2848 * units::cm, 209.453 * units::cm));
+        //     // pts.push_back(WireCell::Point(218.997 * units::cm, -87.8182 * units::cm, 209.557 * units::cm));
+        //     // pts.push_back(WireCell::Point(218.806 * units::cm, -88.253 * units::cm, 209.641 * units::cm));
+        //     // pts.push_back(WireCell::Point(218.615 * units::cm, -88.6879 * units::cm, 209.725 * units::cm));
+        //     // pts.push_back(WireCell::Point(218.337 * units::cm, -89.1079 * units::cm, 209.836 * units::cm));
+        //     // pts.push_back(WireCell::Point(218.051 * units::cm, -89.8565 * units::cm, 209.978 * units::cm));
+        //     // pts.push_back(WireCell::Point(217.77 * units::cm, -90.5317 * units::cm, 210.12 * units::cm));
+        //     // pts.push_back(WireCell::Point(217.472 * units::cm, -91.2331 * units::cm, 210.25 * units::cm));
+        //     // pts.push_back(WireCell::Point(217.058 * units::cm, -91.8449 * units::cm, 210.441 * units::cm));
+        //     // pts.push_back(WireCell::Point(216.822 * units::cm, -92.5268 * units::cm, 210.548 * units::cm));
+        //     // pts.push_back(WireCell::Point(216.61 * units::cm, -92.9509 * units::cm, 210.65 * units::cm));
+        //     // pts.push_back(WireCell::Point(216.308 * units::cm, -93.6788 * units::cm, 210.81 * units::cm));
+        //     // pts.push_back(WireCell::Point(215.992 * units::cm, -94.2301 * units::cm, 210.939 * units::cm));
+        //     // pts.push_back(WireCell::Point(215.791 * units::cm, -94.7826 * units::cm, 211.062 * units::cm));
+        //     // pts.push_back(WireCell::Point(215.532 * units::cm, -95.1674 * units::cm, 211.193 * units::cm));
+        //     // pts.push_back(WireCell::Point(215.274 * units::cm, -95.8492 * units::cm, 211.346 * units::cm));
+        //     // pts.push_back(WireCell::Point(215.038 * units::cm, -96.3231 * units::cm, 211.467 * units::cm));
+        //     // pts.push_back(WireCell::Point(214.741 * units::cm, -96.7608 * units::cm, 211.604 * units::cm));
+        //     // pts.push_back(WireCell::Point(214.444 * units::cm, -97.1985 * units::cm, 211.741 * units::cm));
+        //     // pts.push_back(WireCell::Point(214.282 * units::cm, -97.8976 * units::cm, 211.824 * units::cm));
+        //     // pts.push_back(WireCell::Point(214.026 * units::cm, -98.3316 * units::cm, 211.943 * units::cm));
+        //     // pts.push_back(WireCell::Point(213.682 * units::cm, -99.0357 * units::cm, 212.085 * units::cm));
+        //     // pts.push_back(WireCell::Point(213.368 * units::cm, -99.7199 * units::cm, 212.216 * units::cm));
+        //     // pts.push_back(WireCell::Point(213.101 * units::cm, -100.164 * units::cm, 212.341 * units::cm));
+        //     // pts.push_back(WireCell::Point(212.742 * units::cm, -100.639 * units::cm, 212.527 * units::cm));
+        //     // pts.push_back(WireCell::Point(212.514 * units::cm, -101.179 * units::cm, 212.647 * units::cm));
+        //     // pts.push_back(WireCell::Point(212.117 * units::cm, -101.817 * units::cm, 212.831 * units::cm));
+        //     // pts.push_back(WireCell::Point(211.977 * units::cm, -102.455 * units::cm, 212.891 * units::cm));
+        // }    
 
         // Generate 2D projections
         pu.clear();
