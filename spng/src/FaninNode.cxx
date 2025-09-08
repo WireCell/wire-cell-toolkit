@@ -1,5 +1,7 @@
 #include "WireCellSpng/FaninNode.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
+#include "WireCellUtil/String.h"
+#include "WireCellUtil/Exceptions.h"
 
 namespace WireCell::SPNG {
 
@@ -17,13 +19,13 @@ namespace WireCell::SPNG {
 
     bool FaninNode::operator()(const input_vector& inv, output_pointer& out) const
     {
-        if (invec.size() != m_multiplicity) {
-            raise<ValueError>("unexpected multiplicity, got:%d want:%d", invec.size(), m_multiplicity);
+        if (inv.size() != m_multiplicity) {
+            raise<ValueError>("unexpected multiplicity, got:%d want:%d", inv.size(), m_multiplicity);
         }
 
         out=nullptr;
 
-        size_t neos = std::count(invec.begin(), invec.end(), nullptr);
+        size_t neos = std::count(inv.begin(), inv.end(), nullptr);
         if (neos) {
             maybe_log(nullptr, String::format("EOS in %d of %d at call=%d", 
                                               neos, m_multiplicity, m_count));

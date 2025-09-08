@@ -23,7 +23,7 @@ namespace WireCell::SPNG {
         /// Configuration
         ///
         /// - multiplicity :: the fan-out multiplicity.
-        int m_multiplicity{2};
+        size_t m_multiplicity{2};
 
         /// Configuration:
         ///

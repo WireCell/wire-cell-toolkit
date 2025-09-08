@@ -10,7 +10,7 @@ namespace WireCell::SPNG {
 
     void FanBase::configure(const WireCell::Configuration& cfg)
     {
-        m_multiplicity = get(cfg, "multiplicity", m_multiplicity);
+        m_multiplicity = get(cfg, "multiplicity", (int)m_multiplicity);
         m_quiet = get<bool>(cfg, "quiet", m_quiet);
 
     }
@@ -18,7 +18,7 @@ namespace WireCell::SPNG {
     WireCell::Configuration FanBase::default_configuration() const
     {
         Configuration cfg;
-        cfg["multiplicity"] = m_multiplicity;
+        cfg["multiplicity"] = (int)m_multiplicity;
         cfg["quiet"] = m_quiet;
         return cfg;
     }
@@ -32,11 +32,11 @@ namespace WireCell::SPNG {
             return;
         }
 
-
         const size_t ntens = ts->tensors()->size();
 
         try {
-            TensorIndex ti(ts); // maybe too expensive just for a line of log file...
+            // A little expensive just for a line of log file.  Set quiet=false to avoid.
+            TensorIndex ti(ts);
             size_t nparents = ti.nparents();
             log->debug("{}: call={}, {} tensors, {} parents (TDM)", context, m_count, ntens, nparents);
         }
