@@ -154,63 +154,9 @@ public:
             geo_point_t last_wcp = boundary_point_second;
 
             std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
+            // last_wcp = geo_point_t(215.532, -95.1674, 211.193);
+
             auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
-
-            // hack the path_points according to WCP ...
-            // path_points.clear();
-            // path_points.emplace_back(2195.39, -869.317, 2090.5);
-            // path_points.emplace_back(2193.19, -873.647, 2092);
-            // path_points.emplace_back(2190.99, -878.843, 2095);
-            // path_points.emplace_back(2188.79, -882.307, 2095);
-            // path_points.emplace_back(2186.59, -885.771, 2095);
-            // path_points.emplace_back(2184.38, -889.235, 2095);
-            // path_points.emplace_back(2182.18, -894.431, 2098);
-            // path_points.emplace_back(2182.18, -897.896, 2098);
-            // path_points.emplace_back(2179.98, -901.36, 2098);
-            // path_points.emplace_back(2177.78, -906.556, 2101);
-            // path_points.emplace_back(2177.78, -910.02, 2101);
-            // path_points.emplace_back(2173.37, -913.484, 2101);
-            // path_points.emplace_back(2171.17, -918.68, 2104);
-            // path_points.emplace_back(2168.97, -922.144, 2104);
-            // path_points.emplace_back(2168.97, -925.608, 2104);
-            // path_points.emplace_back(2166.77, -929.073, 2104);
-            // path_points.emplace_back(2164.57, -928.206, 2105.5);
-            // path_points.emplace_back(2164.57, -933.402, 2108.5);
-            // path_points.emplace_back(2162.36, -936.867, 2108.5);
-            // path_points.emplace_back(2160.16, -940.331, 2108.5);
-            // path_points.emplace_back(2160.16, -943.795, 2108.5);
-            // path_points.emplace_back(2157.96, -948.991, 2111.5);
-            // path_points.emplace_back(2155.76, -952.455, 2111.5);
-            // path_points.emplace_back(2153.56, -951.589, 2113);
-            // path_points.emplace_back(2153.56, -955.053, 2113);
-            // path_points.emplace_back(2153.56, -958.517, 2113);
-            // path_points.emplace_back(2151.35, -961.982, 2113);
-            // path_points.emplace_back(2149.15, -961.982, 2113);
-            // path_points.emplace_back(2146.95, -967.178, 2116);
-            // path_points.emplace_back(2146.95, -970.642, 2116);
-            // path_points.emplace_back(2144.75, -974.106, 2116);
-            // path_points.emplace_back(2142.55, -977.57, 2116);
-            // path_points.emplace_back(2140.34, -982.766, 2119);
-            // path_points.emplace_back(2138.14, -986.23, 2119);
-            // path_points.emplace_back(2135.94, -987.096, 2117.5);
-            // path_points.emplace_back(2135.94, -992.292, 2120.5);
-            // path_points.emplace_back(2133.74, -994.025, 2120.5);
-            // path_points.emplace_back(2133.74, -997.489, 2120.5);
-            // path_points.emplace_back(2131.54, -998.355, 2122);
-            // path_points.emplace_back(2131.54, -1001.82, 2122);
-            // path_points.emplace_back(2129.33, -1004.42, 2123.5);
-            // path_points.emplace_back(2127.13, -1005.28, 2122);
-            // path_points.emplace_back(2124.93, -1010.48, 2125);
-            // path_points.emplace_back(2124.93, -1012.21, 2128);
-            // path_points.emplace_back(2120.53, -1014.81, 2129.5);
-            // path_points.emplace_back(2120.53, -1018.27, 2129.5);
-            // path_points.emplace_back(2120.53, -1032.13, 2129.5);
-
-            // std::cout << path_points.size() << " Path Points: " << std::endl;
-            // for (const auto& point : path_points) {
-            //     std::cout << "Path point: x=" << point.x() << " y=" << point.y() << " z=" << point.z() << std::endl;
-            // }
-            // std::cout << std::endl;
 
             // Create segment for tracking
             auto segment = create_segment_for_cluster(*main_cluster, path_points);
@@ -226,7 +172,7 @@ public:
             // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
 
             m_track_fitter.add_segment(segment);
-            m_track_fitter.do_single_tracking(segment, true);
+            m_track_fitter.do_single_tracking(segment, true, true, false, true);
             // Extract fit results from the segment
             const auto& fits = segment->fits();
             
@@ -239,6 +185,40 @@ public:
                          << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
             }
             std::cout << std::endl;
+
+            std::cout << "After search other tracks" << std::endl;
+            std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+            fitted_segments.push_back(segment);
+            search_other_tracks(*main_cluster, fitted_segments);
+
+            std::cout << fitted_segments.size() << std::endl;
+            // {
+            //     // Extract fit results from the segment
+            //     const auto& fits = fitted_segments.back()->fits();
+                
+            //     // Print position, dQ, and dx for each fit point
+            //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            //     for (size_t i = 0; i < fits.size(); ++i) {
+            //         const auto& fit = fits[i];
+            //         std::cout << "  Point " << i << ": position=(" 
+            //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+            //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            //     }
+            //     std::cout << std::endl;   
+            // }
+            bool flag_other_tracks = check_other_tracks(*main_cluster, fitted_segments);
+            std::cout << "Check other Tracks: " << flag_other_tracks << std::endl;
+
+            bool flag_other_clusters = check_other_clusters(*main_cluster, main_to_associated[main_cluster]);
+            std::cout << "Check other Clusters: " << flag_other_clusters << std::endl;
+
+            geo_point_t mid_point(0,0,0);
+            auto adjusted_path_points = adjust_rough_path(*main_cluster, mid_point);
+            std::cout << "Adjust path " << mid_point << std::endl;
+
+            int kink_num = find_first_kink(segment);
+            std::cout << "Kink " << kink_num << std::endl;
+
 
         }
 
@@ -403,6 +383,8 @@ private:
             
             refl_angles.at(i) = angle1;
             para_angles.at(i) = angle2;
+
+            // std::cout << i << " " << angle1 << " " << angle2 << std::endl;
         }
 
         // Second part: Analyze charge and find breakpoints
@@ -435,6 +417,8 @@ private:
                 sum_angles = sqrt(sum_angles / nsum);
             }
             
+            // std::cout << i << " " << min_dQ_dx << " " << para_angles.at(i) << " " << refl_angles.at(i) <<" " << sum_angles << std::endl;
+
             // First breakpoint condition: Low charge with significant angles
             if (min_dQ_dx < 1000 && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
                 std::cout << "Mid_Point_Break: " << i << " " << refl_angles.at(i) << " " 
@@ -477,6 +461,7 @@ private:
         }
 
         std::vector<geo_point_t> out_path_points;
+
 
         if (flag_crawl){
             // Start to Crawl
@@ -584,14 +569,16 @@ private:
             
             mid_p = curr_wcp;
 
-            std::cout << "First, Center: " << steiner_x[first_index] << " " << steiner_y[first_index] 
-                    << " " << steiner_z[first_index] << " " << steiner_x[curr_index] << " " 
-                    << steiner_y[curr_index] << " " << steiner_z[curr_index] << std::endl;
+            
             
             // Calculate distance from current to last point
             double dis = std::sqrt(std::pow(steiner_x[curr_index] - steiner_x[last_index], 2) + 
                                 std::pow(steiner_y[curr_index] - steiner_y[last_index], 2) + 
                                 std::pow(steiner_z[curr_index] - steiner_z[last_index], 2));
+
+            std::cout << "First, Center: " << steiner_x[first_index] << " " << steiner_y[first_index] 
+                    << " " << steiner_z[first_index] << " " << steiner_x[curr_index] << " " 
+                    << steiner_y[curr_index] << " " << steiner_z[curr_index] << " " << dis/units::cm << std::endl;
             
             if (dis > 1.0 * units::cm) {
                 // Find path from first to current point
@@ -602,6 +589,7 @@ private:
                 const std::vector<size_t>& path2_indices = 
                     cluster.graph_algorithms("steiner_graph").shortest_path(curr_index, last_index);
                 
+                std::list<size_t> path2_indices_list(path2_indices.begin(), path2_indices.end());
                 // Combine paths, removing duplicate middle point
                 // Copy first path to temporary storage
                 std::vector<size_t> temp_path_indices = path1_indices;
@@ -617,9 +605,14 @@ private:
                     }
                 }
                 
+                // std::cout << temp_path_indices.size() << " " << count << " " << path2_indices.size() << std::endl;
+
                 // Remove from end of temp_path_indices
                 for (int i = 0; i != count; i++) {
-                    temp_path_indices.pop_back();
+                    if (i!=count-1){
+                         temp_path_indices.pop_back();
+                    }
+                    path2_indices_list.pop_front();
                 }
                 
                 // Add first path (without overlapping end)
@@ -628,7 +621,7 @@ private:
                 }
                 
                 // Add second path (without overlapping beginning)
-                for (size_t idx : path2_indices) {
+                for (size_t idx : path2_indices_list) {
                     out_path_points.emplace_back(steiner_x[idx], steiner_y[idx], steiner_z[idx]);
                 }
                 
@@ -737,6 +730,8 @@ private:
             
             refl_angles.at(i) = angle1;
             para_angles.at(i) = angle2;
+
+            // std::cout << i << " " << angle1 << " " << angle2 << std::endl;
         }
         
         // Calculate average angles in a 5-point window
@@ -762,6 +757,8 @@ private:
             if (nsum != 0) sum_angles = sqrt(sum_angles / nsum);
             ave_angles.at(i) = sum_angles;
             max_numbers.at(i) = max_num;
+
+            // std::cout << i << " " << sum_angles << " " << max_num << std::endl;
         }
         
         // Look for kink candidates
@@ -799,6 +796,9 @@ private:
                         angle3p = std::acos(v11.dot(v21) / (v11.magnitude() * v21.magnitude())) / 3.1415926 * 180.0;
                     }
                 }
+
+                // std::cout << i << " " << angle3 << " " << angle3p << " " << v10.magnitude()/units::cm << " " << v20.magnitude()/units::cm << std::endl;
+
                 
                 // need to calculate current_point_raw ...
                 WireCell::Point current_point_raw= transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
@@ -1502,6 +1502,9 @@ private:
                     else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
                     else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
                 }
+
+                // std::cout << i << " " << closest_3d_distance << " " << min_dis_u/units::cm << " " << min_dis_v/units::cm << " " << min_dis_w/units::cm << std::endl;
+
             }
             
             // Additional tagging based on 2D projections and dead channels
@@ -1520,6 +1523,7 @@ private:
                 }
             }
         }
+        // std::cout << num_tagged << " " << N << std::endl;
         (void) num_tagged;
 
         // Step 2: Get Steiner_Graph and its terminals ...
@@ -1725,7 +1729,7 @@ private:
             auto new_segment = create_segment_for_cluster(cluster, path_points);
         
             m_track_fitter.add_segment(new_segment);
-            m_track_fitter.do_single_tracking(new_segment);
+            m_track_fitter.do_single_tracking(new_segment, true, true, false);
 
             fitted_segments.push_back(new_segment);
         }
@@ -1749,11 +1753,15 @@ private:
             double coverage_x = boundary_points.first.x() - boundary_points.second.x();
             
             // Get cluster length using the toolkit's built-in function
-            double length = cluster->get_length();
+            double length = sqrt(pow(boundary_points.first.x() - boundary_points.second.x(), 2) +
+                                pow(boundary_points.first.y() - boundary_points.second.y(), 2) +
+                                pow(boundary_points.first.z() - boundary_points.second.z(), 2));
             
             // Get closest points between main cluster and current cluster
             std::tuple<int, int, double> results = main_cluster.get_closest_points(*cluster);
             
+            // std::cout << "ABC: " << coverage_x/units::cm <<  " " << length/units::cm << " " << std::get<2>(results)/units::cm << std::endl;
+
             // Apply the same conditions as in the prototype:
             // - Distance between clusters < 25 cm
             // - Absolute coverage in X > 0.75 cm  
@@ -1793,6 +1801,8 @@ private:
             double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / 50000.;
             double track_length_threshold = segment_track_length_threshold(segment, 75000./units::cm) / units::cm;
             
+            
+
             // Calculate direction vector (geometric path from front to back)
             const auto& fits = segment->fits();
             if (fits.empty()) continue;  // Skip if no fits available
@@ -1806,8 +1816,10 @@ private:
             );
             
             // Calculate geometric length using helper function (maps to get_track_length(2))
-            double straightness_ratio = segment_geometric_length(segment) / segment_track_length(segment);
-            
+            double straightness_ratio = dir1.magnitude() / segment_track_length(segment);
+
+            // std::cout << track_length1 << " " << track_medium_dQ_dx << " " << track_length_threshold << " " << dir1 << " " << straightness_ratio << std::endl;
+
             // Main logic from prototype
             if (track_length1 > 5 && track_medium_dQ_dx > 0.4) {
                 ntracks++;

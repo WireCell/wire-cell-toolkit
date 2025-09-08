@@ -1,5 +1,7 @@
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/TrackFitting_Util.h"
+#include "WireCellClus/PRSegmentFunctions.h"
+
 #include "WireCellUtil/Logging.h"
 
 
@@ -4046,7 +4048,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     recover_original_charge_data();
 }
 
-void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data) {
+void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_hack) {
       // Clear all internal tracking vectors
     fine_tracking_path.clear();
     dQ.clear();
@@ -4198,38 +4200,70 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         //     std::cout << "pts[" << i << "] = (" << pts[i].x() << ", " << pts[i].y() << ", " << pts[i].z() << ")" << std::endl;
         // }
 
-        // // hack pts ...
-        // pts.clear();
-        // pts.push_back(WireCell::Point(2192.09, -872.848, 2094.53));
-        // pts.push_back(WireCell::Point(2189.97, -878.182, 2095.57));
-        // pts.push_back(WireCell::Point(2188.06, -882.53, 2096.41));
-        // pts.push_back(WireCell::Point(2186.15, -886.879, 2097.25));
-        // pts.push_back(WireCell::Point(2183.37, -891.079, 2098.36));
-        // pts.push_back(WireCell::Point(2180.51, -898.565, 2099.78));
-        // pts.push_back(WireCell::Point(2177.7, -905.317, 2101.2));
-        // pts.push_back(WireCell::Point(2174.72, -912.331, 2102.5));
-        // pts.push_back(WireCell::Point(2170.58, -918.449, 2104.41));
-        // pts.push_back(WireCell::Point(2168.22, -925.268, 2105.48));
-        // pts.push_back(WireCell::Point(2166.1, -929.509, 2106.5));
-        // pts.push_back(WireCell::Point(2163.08, -936.788, 2108.1));
-        // pts.push_back(WireCell::Point(2159.92, -942.301, 2109.39));
-        // pts.push_back(WireCell::Point(2157.91, -947.826, 2110.62));
-        // pts.push_back(WireCell::Point(2155.32, -951.674, 2111.93));
-        // pts.push_back(WireCell::Point(2152.74, -958.492, 2113.46));
-        // pts.push_back(WireCell::Point(2150.38, -963.231, 2114.67));
-        // pts.push_back(WireCell::Point(2147.41, -967.608, 2116.04));
-        // pts.push_back(WireCell::Point(2144.44, -971.985, 2117.41));
-        // pts.push_back(WireCell::Point(2142.82, -978.976, 2118.24));
-        // pts.push_back(WireCell::Point(2140.26, -983.316, 2119.43));
-        // pts.push_back(WireCell::Point(2136.82, -990.357, 2120.85));
-        // pts.push_back(WireCell::Point(2133.68, -997.199, 2122.16));
-        // pts.push_back(WireCell::Point(2131.01, -1001.64, 2123.41));
-        // pts.push_back(WireCell::Point(2127.42, -1006.39, 2125.27));
-        // pts.push_back(WireCell::Point(2125.14, -1011.79, 2126.47));
-        // pts.push_back(WireCell::Point(2121.17, -1018.17, 2128.31));
-        // pts.push_back(WireCell::Point(2119.77, -1024.55, 2128.91));
-        // //
+        if (flag_hack){
+            // hack pts ...
+            // pts.clear();
+            // pts.push_back(WireCell::Point(219.209*units::cm, -87.2848*units::cm, 209.453*units::cm));
+            // pts.push_back(WireCell::Point(219.011*units::cm, -87.8189*units::cm, 209.55*units::cm));
+            // pts.push_back(WireCell::Point(218.613*units::cm, -88.663*units::cm, 209.722*units::cm));
+            // pts.push_back(WireCell::Point(218.329*units::cm, -89.169*units::cm, 209.853*units::cm));
+            // pts.push_back(WireCell::Point(218.09*units::cm, -89.8885*units::cm, 209.969*units::cm));
+            // pts.push_back(WireCell::Point(217.858*units::cm, -90.3128*units::cm, 210.076*units::cm));
+            // pts.push_back(WireCell::Point(217.627*units::cm, -90.7371*units::cm, 210.184*units::cm));
+            // pts.push_back(WireCell::Point(217.423*units::cm, -91.4211*units::cm, 210.266*units::cm));
+            // pts.push_back(WireCell::Point(217.111*units::cm, -91.8551*units::cm, 210.423*units::cm));
+            // pts.push_back(WireCell::Point(216.84*units::cm, -92.3369*units::cm, 210.55*units::cm));
+            // pts.push_back(WireCell::Point(216.248*units::cm, -92.7898*units::cm, 210.798*units::cm));
+            
+            // pts.clear();
+            // pts.push_back(WireCell::Point(216.165*units::cm, -93.8529*units::cm, 210.894*units::cm));
+            // pts.push_back(WireCell::Point(215.996*units::cm, -94.3005*units::cm, 210.942*units::cm));
+            // pts.push_back(WireCell::Point(215.888*units::cm, -94.8903*units::cm, 211.002*units::cm));
+            // pts.push_back(WireCell::Point(215.38*units::cm, -95.4503*units::cm, 211.276*units::cm));
+            // pts.push_back(WireCell::Point(215.128*units::cm, -96.2677*units::cm, 211.414*units::cm));
+            // pts.push_back(WireCell::Point(214.801*units::cm, -96.7483*units::cm, 211.583*units::cm));
+            // pts.push_back(WireCell::Point(214.429*units::cm, -97.4961*units::cm, 211.745*units::cm));
+            // pts.push_back(WireCell::Point(214.225*units::cm, -98.0668*units::cm, 211.862*units::cm));
+            // pts.push_back(WireCell::Point(213.766*units::cm, -98.833*units::cm, 212.054*units::cm));
+            // pts.push_back(WireCell::Point(213.401*units::cm, -99.5325*units::cm, 212.199*units::cm));
+            // pts.push_back(WireCell::Point(213.182*units::cm, -100.042*units::cm, 212.303*units::cm));
+            // pts.push_back(WireCell::Point(212.763*units::cm, -100.63*units::cm, 212.518*units::cm));
+            // pts.push_back(WireCell::Point(212.414*units::cm, -101.107*units::cm, 212.697*units::cm));
+            // pts.push_back(WireCell::Point(212.25*units::cm, -101.563*units::cm, 212.785*units::cm));
+            // pts.push_back(WireCell::Point(212.086*units::cm, -102.018*units::cm, 212.872*units::cm));
+            // pts.push_back(WireCell::Point(212.224*units::cm, -102.854*units::cm, 212.839*units::cm));
+            //
 
+            pts.clear();
+            pts.push_back(WireCell::Point(219.209 * units::cm, -87.2848 * units::cm, 209.453 * units::cm));
+            pts.push_back(WireCell::Point(218.997 * units::cm, -87.8182 * units::cm, 209.557 * units::cm));
+            pts.push_back(WireCell::Point(218.806 * units::cm, -88.253 * units::cm, 209.641 * units::cm));
+            pts.push_back(WireCell::Point(218.615 * units::cm, -88.6879 * units::cm, 209.725 * units::cm));
+            pts.push_back(WireCell::Point(218.337 * units::cm, -89.1079 * units::cm, 209.836 * units::cm));
+            pts.push_back(WireCell::Point(218.051 * units::cm, -89.8565 * units::cm, 209.978 * units::cm));
+            pts.push_back(WireCell::Point(217.77 * units::cm, -90.5317 * units::cm, 210.12 * units::cm));
+            pts.push_back(WireCell::Point(217.472 * units::cm, -91.2331 * units::cm, 210.25 * units::cm));
+            pts.push_back(WireCell::Point(217.058 * units::cm, -91.8449 * units::cm, 210.441 * units::cm));
+            pts.push_back(WireCell::Point(216.822 * units::cm, -92.5268 * units::cm, 210.548 * units::cm));
+            pts.push_back(WireCell::Point(216.61 * units::cm, -92.9509 * units::cm, 210.65 * units::cm));
+            pts.push_back(WireCell::Point(216.308 * units::cm, -93.6788 * units::cm, 210.81 * units::cm));
+            pts.push_back(WireCell::Point(215.992 * units::cm, -94.2301 * units::cm, 210.939 * units::cm));
+            pts.push_back(WireCell::Point(215.791 * units::cm, -94.7826 * units::cm, 211.062 * units::cm));
+            pts.push_back(WireCell::Point(215.532 * units::cm, -95.1674 * units::cm, 211.193 * units::cm));
+            pts.push_back(WireCell::Point(215.274 * units::cm, -95.8492 * units::cm, 211.346 * units::cm));
+            pts.push_back(WireCell::Point(215.038 * units::cm, -96.3231 * units::cm, 211.467 * units::cm));
+            pts.push_back(WireCell::Point(214.741 * units::cm, -96.7608 * units::cm, 211.604 * units::cm));
+            pts.push_back(WireCell::Point(214.444 * units::cm, -97.1985 * units::cm, 211.741 * units::cm));
+            pts.push_back(WireCell::Point(214.282 * units::cm, -97.8976 * units::cm, 211.824 * units::cm));
+            pts.push_back(WireCell::Point(214.026 * units::cm, -98.3316 * units::cm, 211.943 * units::cm));
+            pts.push_back(WireCell::Point(213.682 * units::cm, -99.0357 * units::cm, 212.085 * units::cm));
+            pts.push_back(WireCell::Point(213.368 * units::cm, -99.7199 * units::cm, 212.216 * units::cm));
+            pts.push_back(WireCell::Point(213.101 * units::cm, -100.164 * units::cm, 212.341 * units::cm));
+            pts.push_back(WireCell::Point(212.742 * units::cm, -100.639 * units::cm, 212.527 * units::cm));
+            pts.push_back(WireCell::Point(212.514 * units::cm, -101.179 * units::cm, 212.647 * units::cm));
+            pts.push_back(WireCell::Point(212.117 * units::cm, -101.817 * units::cm, 212.831 * units::cm));
+            pts.push_back(WireCell::Point(211.977 * units::cm, -102.455 * units::cm, 212.891 * units::cm));
+        }    
 
         // Generate 2D projections
         pu.clear();
@@ -4315,12 +4349,15 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     }
     
     // Convert internal results to PR::Fit objects
+    std::vector<geo_point_t> path_points;
+    path_points.reserve(fine_tracking_path.size());
     for (size_t i = 0; i < npoints; ++i) {
         PR::Fit fit;
         
         // Set the fitted 3D point
         fit.point = fine_tracking_path[i].first;
-        
+        path_points.push_back(fit.point);
+
         // Set physics quantities
         fit.dQ =  dQ[i];
         fit.dx = dx[i];
@@ -4339,6 +4376,11 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         fit.flag_fix = false;        
         segment_fits.push_back(fit);
     }
+
+    
+    // replace point cloud after track fitting ...
+    PR::create_segment_point_cloud(segment, path_points, m_dv, "main");
+
     
     // Assign the fits to the segment
     segment->fits(segment_fits);
