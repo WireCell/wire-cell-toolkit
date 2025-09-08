@@ -17,29 +17,16 @@ namespace WireCell::SPNG {
 
     bool FaninNode::operator()(const input_vector& inv, output_pointer& out) const
     {
-        if (inv.empty()) {
-            // This should not happen, may indicate a bad graph config.  But, it's not EOS
-            out = std::make_shared<EmptyTorchTensorSet>();
-            maybe_log(nullptr, "EMPTY");
-            ++m_count;
-            return true;
+        if (invec.size() != m_multiplicity) {
+            raise<ValueError>("unexpected multiplicity, got:%d want:%d", invec.size(), m_multiplicity);
         }
 
         out=nullptr;
-        // Output EOS if any input is EOS.
-        int neos = 0;
-        for (const auto& one : inv) {
-            if (!one) {
-                ++neos;
-            }
-        }
-        if (neos == m_multiplicity) {
-            maybe_log(nullptr, "EOS");
-            ++m_count;
-            return true;
-        }
-        if (neos) {             // should never happen
-            maybe_log(nullptr, "partial-EOS");
+
+        size_t neos = std::count(invec.begin(), invec.end(), nullptr);
+        if (neos) {
+            maybe_log(nullptr, String::format("EOS in %d of %d at call=%d", 
+                                              neos, m_multiplicity, m_count));
             ++m_count;
             return true;
         }
