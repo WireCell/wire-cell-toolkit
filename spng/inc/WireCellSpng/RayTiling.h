@@ -86,6 +86,7 @@ namespace WireCell::SPNG::RayGrid {
     /**
      * @brief Finds all consecutive regions values above threshold and returns their half-open ranges.
      * @param activity A 1D real or boolean torch::Tensor.  If real, threshold is applied to form bool.
+     * @param threshold The value applied to elements defining boundary between in-region and out-region.
      * @return A 2D torch::Tensor of shape (N_runs, 2), where N_runs is the number of consecutive True segments.
      * Each row is [start_index, end_index_half_open). Returns an empty tensor if no True runs are found.
      */

@@ -57,11 +57,13 @@ namespace WireCell::SPNG {
     /// These function are expected to take a COMMON base datapath and will
     /// generate a per-tensor datapath following a fixed schema.  Eg:
     ///
+    /// @code
     /// <base>/frame
     /// <base>/traces/<tag>
     /// <base>/chids/<tag>
     /// <base>/summaries/<tag>
     /// <base>/chmasks/<label>
+    /// @endcode
     ///
     /// If you try hard to work-around this convention, you MUST change the
     /// "parent" metadata of the produced tensors so that it points your

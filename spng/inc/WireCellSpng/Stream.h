@@ -5,26 +5,32 @@
 
    Example:
 
+   @code{cpp}
      #include <boost/iostreams/filtering_stream.hpp>
 
      std::string aname;
      torch::tensor aten;
+   @endcode
 
    Writing:
 
+   @code{cpp}
      boost::iostreams::filtering_ostream m_out;
      output_filters(m_out, m_outname);
      if (m_out.size() < 1) { error(); }
      write(m_out, aname, aten);
      m_out.flush();
      m_out.pop();
+   @endcode
 
    Reading:
 
+   @code{cpp}
      input_filters(m_in, m_inname);
      if (m_in.size() < 1) { error(); }
      read(m_in, aname, aten);
      if (!m_in) { error(); }
+   @endcode
 
  */
 
