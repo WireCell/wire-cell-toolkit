@@ -8,7 +8,7 @@ Aux::SimpleFrame::SimpleFrame(int ident, double time, const ITrace::vector& trac
   : m_ident(ident)
   , m_time(time)
   , m_tick(tick)
-  , m_traces(new ITrace::vector(traces.begin(), traces.end()))
+  , m_traces(std::make_shared<ITrace::vector>(traces.begin(), traces.end()))
   , m_cmm(cmm)
 {
 }
@@ -25,6 +25,7 @@ Aux::SimpleFrame::SimpleFrame(int ident, double time, double tick)
   : m_ident(ident)
   , m_time(time)
   , m_tick(tick)
+  , m_traces(std::make_shared<ITrace::vector>())
 {
 }
 
