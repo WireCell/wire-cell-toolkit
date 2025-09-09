@@ -4,30 +4,29 @@
 
 * Introduction
 
-The most popular paradigm in which to use WCT that of data flow
-programming (DFP).  This constructs a WCT job as a directed graph
-which vertices or /nodes/ made up of executable and potentially
-configurable WCT components.  A node has a well defined or variable
-number of /input ports/ and /output ports/.  As such, these kinds of graph
-are sometimes called "port graphs" and the "p" in "pgraph" stands for
-"port".  Each port allows passage of data objects of a specific
-interface type (~IData~).  A valid graph has exactly one edge to or from
-every port and both ports on either end of the edge must pass the same
-data type.
+The most popular way to construct WCT jobs is via its support for "data flow
+programming" (DFP).  The "programming" here means constructing a graph with
+vertices or /nodes/ representing operations on data that is transferred on /edges/.
 
-Describing the connectivity of such a graph is both simple and
-complex.  In the end, one must simply provide a configuration in the
-form of a flat list of node configuration objects.  Each node
-configuration object must have a ~type~ attribute naming a WCT component
-type.  A ~name~ attribute must also be supplied if more than one
-instance of a ~type~ exists in the list and it must be unique among all
-instances of common ~type~.  A ~name~ is otherwise optional.  The list of
-nodes is accompanied with a list edges where each edge is expressed as
-an ordered pair of ~<type>:<name>~.
+Each node has a /component type/ (mapped to a C++ class, first argument to the
+~WIRECELL_FACTORY()~ CPP macro call) and an instance name and a set number of
+/input ports/ and /output ports/.  These kinds of graph are sometimes called "port
+graphs" and the "p" in "pgraph" stands for "port".  Each port allows passage of
+data objects of a specific interface type (a subclass of ~IData~) as determined by
+the C++ node class on either end of the edge.  A valid graph has exactly one
+edge between any pair of ports.
 
-While very simple in representation, properly forming and reasoning
-about complex graphs configurations is more difficult.  To help with
-this, WCT provides the ~pgraph.jsonnet~ library of functions.
+WCT is described with a simple list of component configuration objects.  Many of
+these objects will configure individual nodes in the graph, but other "tool" or
+"service" components are also included.  One component is special and defines
+the edges of the graph in terms of ~<type>:<name>~" pair.  The ~<type>~ is the
+/component type/ and the ~<name>~ is an /instance name/ to make the node unique when
+multiple nodes of the same component type may exist.  If exactly one instance of
+a component type exists, it can be identified with just ~<type>~.
+
+While very simple in representation, properly forming and reasoning about
+complex graphs configurations is more difficult.  To help with this, WCT
+provides the ~pgraph.jsonnet~ library of functions.
 
 * ~pgraph~ concepts
 
@@ -180,6 +179,152 @@ described above simple.
 ** Edge insertion
 
 ** Aggregate closed component graphs
+
+* C++ graph node classes
+
+** C++ component configuration
+
+The configuration in Jsonnet gets to an /instance/ of a C++ component that
+inherits from ~IConfigurable~ via the method
+
+#+begin_src c++
+  void configure(const Configuration& cfg);
+#+end_src
+
+The ~Configuration~ class is a C++ object equivalent to the JSON component
+configuration object described above.  The C++ ~IConfigurable~ component should
+interpret the ~Configuration~ object for a set of established attributes, handle
+type conversion, default values and raise exception if required values are
+missing or the wrong type or have illegal value.
+
+The ~configure()~ method is guaranteed to be called in a single-threaded context.
+In most WCT jobs, ~configure()~ is called once and there is no "reconfigure".  Though, generally, class implementations should assume ~configure()~ may be called more than once.
+
+An ~IConfigurable~ class may also provide default values with the method
+
+#+begin_src c++
+  Configuration default_configuration() const;
+#+end_src
+
+Any configuration provided by the user will be merged into this default object
+by the WCT's configuration manager.  This method is also called in a
+single-threaded context.
+
+** Common C++ configuration idioms
+
+An ~IConfigurable~ should use doxygen comments to state configuration parameters.
+These comments may be placed anywhere in the class definition and often located
+on attributes.  For example:
+
+#+begin_src c++
+  private:
+      /// Configuration: "nticks"
+      ///
+      /// An integer specifying the number of samples.
+      int m_nticks{6000};
+#+end_src
+
+Then in the two methods descried above:
+
+#+begin_src c++
+  Configuration MyClass::default_configuration() const {
+      Configuration cfg;
+      cfg["nticks"] = m_nticks;
+      return cfg;
+  }
+  void MyClass::configure(const Configuration& cfg) {
+      m_ticks = get(cfg, "nticks", m_ticks);
+  }
+#+end_src
+
+** C++ graph class inheritance.
+
+A C++ class inheriting from ~INode~ is a graph node class.  Almost all graph node
+classes inherit from an interface further down the inheritance tree which
+specifies the category of node (source, sink, function, fanin, fanout, etc) and
+the types of data passed by nodes.  Eg an ~IFrameFilter~ node is an
+~IFunction<IFrame,IFrame>~ node.  The reminder of this section describes
+requirements on C++ class nodes
+
+** Registration of a concrete component.
+
+Every C++ node class must be registered with the WCT "named factory".  The
+details of this factory are found elsewhere.  The node developer merely must add
+lines in the node ~.cxx~ file like:
+
+#+begin_src c++
+  #include "WireCellUtil/NamedFactory.h"
+  WIRECELL_FACTORY(<component-type-name>, <class>, <comma separated list of interfaces>)
+#+end_src
+
+For example, the "digitizer" node from the simulation is registered as:
+
+#+begin_example
+WIRECELL_FACTORY(Digitizer, WireCell::Gen::Digitizer,
+                 WireCell::INamed,
+                 WireCell::IFrameFilter,
+                 WireCell::IConfigurable)
+#+end_example
+
+If a node class inherits from a concrete class, its interfaces must also be
+listed.  For example, the ~Digitizer~ inheres from a very prolific base called
+~Aux::Logger~ which is an ~INamed~.
+
+** Callable DFP graph node operator and its return value.
+
+Every node "executes" by a graph engine calling that nodes callable operator:
+
+#+begin_src c++
+  bool operator()(/*node type-specific arguments*/) const;
+#+end_src
+
+The arguments passed depend on the node.  Except for sources and sinks that have
+a single argument, an input and an output argument are passed.  For example,
+~Digitizer~ gets an input and an output ~IFrame::pointer~.  Some nodes such as
+fanins and fanouts or queued-out types, get a vector argument.  Some special
+nodes may have a tuple.
+
+For all nodes except for source nodes, the boolean return value is ignored by a
+graph execution engine.  For a source node it is critical to return ~false~ once
+there is no more data to produce.  But, see next section about EOS.
+
+
+** End-of-stream (EOS) protocol for data flow graph nodes
+
+Every node must participate in the end-of-stream (EOS) protocol.  An EOS is used
+to indicate exactly what its name says: a stream of objects has ended.  It is
+conceptually modeled after NULL-terminated C strings.
+
+An EOS marker always starts with a source node.  After the last "real" object is
+output by a source node, it must send out exactly one EOS, still returning true.
+If the graph engine calls the source again, and that source can not start a new
+stream, then it must return ~false~.  Every other node must check for EOS on input
+and forward EOS to all output.  Thus an EOS propagates through the graph.
+
+When an EOS is encountered, the node should perform any flushing of cached data.
+Often jobs will exit after an EOS completes its passage through the graph.  But,
+if a source restarts a new stream then the graph will keep executing.
+
+An EOS is always a ~nullptr~ but its placement depends on the type of argument to
+the node's callable operator.
+
+- scalar (eg, shared pointer) marks EOS as a ~nullptr~.
+- vector (eg input to fanin, output to fanout) marks EOS as a vector full of ~nullptr~.
+- queue (eg, Drifter) places an ~nullptr~ into its output vector, usually at the end.
+
+Specifically, an empty vector for a fanin/fanout is illegal and something has
+gone horribly wrong.  A queued-out node may have an empty vector if it simply
+has not produced anything.  Asynchronous branch/merge nodes have data on just
+one port so any port with EOS means EOS.
+
+** Not-EOS
+
+Some ~IData~ is a collection of other ~IData~.  For example, an ~IFrame~ has a vector
+of ~ITrace~.  Such aggregate data types can have empty collections.  These are NOT
+EOS.  If an aggregate type with an empty collection is input to a node, it still
+must be processed and a valid output produced.  Typically, this means the output
+likewise is in some ways "empty".
+
 
 * Meta :noexport:
 

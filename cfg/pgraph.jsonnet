@@ -371,4 +371,37 @@ local wc = import "wirecell.jsonnet";
 
     },                          // fan
 
+    // Convert a graph to a WC configuration array with an "app".  A known
+    // "program" can add additional configuration.  Known programs currently
+    // include only "wire-cell". which will look for a special "wire-cell"
+    // object.  Pass empty string to turn exclude it.
+    main :: function(graph, app='Pgrapher', plugins = [], program="wire-cell")
+        // Here, "core" means: in WCT and restricted to WCT core dependencies.
+        // No ROOT, Torch, HDF5, etc.  O.w., more the merrier in this list.
+        local core_plugins = [ "WireCellSio", "WireCellAux", "WireCellApps",
+                               "WireCellGen", "WireCellSigProc", "WireCellImg" ];
+        local app_plugins = {
+            'TbbFlow': ["WireCellTbb"],
+            'Pgrapher': ["WireCellPgraph"],
+        };
+
+        local uses = $.uses(graph);
+        local all_plugins = std.set(core_plugins + app_plugins[app] + plugins);
+        local appcfg = {
+            type: app,
+            data: {
+                edges: $.edges(graph)
+            },
+        };
+        local cmdline = {
+            "": [],
+            "wire-cell" : [{
+                type: "wire-cell",
+                data: {
+                    plugins: all_plugins,
+                    apps: [appcfg.type]
+                }
+            }],
+        };
+        cmdline[program] + $.uses(graph) + [appcfg]
 }
