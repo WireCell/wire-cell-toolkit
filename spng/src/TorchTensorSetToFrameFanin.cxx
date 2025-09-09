@@ -78,7 +78,7 @@ void SPNG::TorchTensorSetToFrameFanin::configure(const WireCell::Configuration& 
 std::vector<std::string> SPNG::TorchTensorSetToFrameFanin::input_types()
 {
     const std::string tname = std::string(typeid(ITorchTensorSet).name());
-    log->debug("Got {}", m_multiplicity);
+    // log->debug("Got {}", m_multiplicity);
     std::vector<std::string> ret(m_multiplicity, tname);
     return ret;
 }
@@ -87,22 +87,19 @@ std::vector<std::string> SPNG::TorchTensorSetToFrameFanin::input_types()
 SPNG::TorchTensorSetToFrameFanin::TorchTensorSetToFrameFanin()
     : Aux::Logger("TorchTensorSetToFrameFanin", "spng") {}
 
-bool SPNG::TorchTensorSetToFrameFanin::operator()(const input_vector& inv, output_pointer& out) {
+bool SPNG::TorchTensorSetToFrameFanin::operator()(const input_vector& inv, output_pointer& out)
+{
     out = nullptr;
 
-    size_t neos = 0;
-    for (const auto& in : inv) {
-        if (!in) {
-            ++neos;
-        }
-    }
-
+    size_t neos = std::count(inv.begin(), inv.end(), nullptr);
     if (neos) {
-        log->debug("EOS with {}", neos);
+        log->debug("EOS in {} of {} at call={}", neos, m_multiplicity, m_count);
+        ++m_count;
         return true;
     }
 
-    ITrace::vector itraces;
+    log->debug("multiplicity {} at call={}", m_multiplicity, m_count);
+    auto itraces = std::make_shared<ITrace::vector>();
     //Loop over the TorchTensorSets in the TorchTensorSet vector
     for (size_t input_group = 0; input_group < inv.size(); ++input_group) {
         const auto & channel_map = m_per_group_channel_map[input_group];
@@ -122,13 +119,14 @@ bool SPNG::TorchTensorSetToFrameFanin::operator()(const input_vector& inv, outpu
             for (int j = 0; j < ncols; ++j) {
                 charge[j] = accessor[0][i][j];
             }
-            auto trace = new Aux::SimpleTrace(channel, 0/*tbin*/, charge);
-            itraces.push_back(ITrace::pointer(trace));
+            auto trace = std::make_shared<Aux::SimpleTrace>(channel, 0/*tbin*/, charge);
+            itraces->push_back(trace);
         }
     }
 
-    out = std::make_shared<Aux::SimpleFrame>(
-        0, 0., std::make_shared<ITrace::vector>(itraces), 0.);
+    log->debug("Make ident-less frame with {} traces at call={}", itraces->size(), m_count);
+    out = std::make_shared<Aux::SimpleFrame>(0, 0., itraces, 0.);
 
+    ++m_count;
     return true;
 }

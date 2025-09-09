@@ -11,7 +11,9 @@
 namespace WireCell {
     namespace SPNG {
 
-        // Fan out 1 frame to N set at construction or configuration time.
+        /**
+           TorchSetToFrameFanin converts a non-TDM tensor set to IFrame.
+        */
         class TorchTensorSetToFrameFanin
             : public Aux::Logger,
               public ITorchTensorSetToFrameFanin, public IConfigurable {
@@ -49,8 +51,8 @@ namespace WireCell {
             std::string m_anode_tn{"AnodePlane"};
             IAnodePlane::pointer m_anode;
 
-            WireCell::Configuration m_cfg;
-            // Log::logptr_t log;
+            size_t m_count{0};
+
         };
     }  // namespace Aux
 }  // namespace WireCell

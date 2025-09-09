@@ -7,8 +7,10 @@
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellIface/INamed.h"
 
-WIRECELL_FACTORY(FrameToTorchSetFanout, WireCell::SPNG::FrameToTorchSetFanout,
+WIRECELL_FACTORY(FrameToTorchSetFanout,
+                 WireCell::SPNG::FrameToTorchSetFanout,
                  WireCell::INamed,
+                 WireCell::IConfigurable,
                  WireCell::SPNG::IFrameToTorchSetFanout)
 
 
@@ -85,7 +87,8 @@ void SPNG::FrameToTorchSetFanout::configure(const WireCell::Configuration& confi
 std::vector<std::string> SPNG::FrameToTorchSetFanout::output_types()
 {
     const std::string tname = std::string(typeid(ITorchTensorSet).name());
-    log->debug("Got {}", m_multiplicity);
+    // no need to log this.  graph engines will yell if user gets it wrong
+    // log->debug("Got {}", m_multiplicity);
     std::vector<std::string> ret(m_multiplicity, tname);
     return ret;
 }
@@ -94,28 +97,29 @@ std::vector<std::string> SPNG::FrameToTorchSetFanout::output_types()
 SPNG::FrameToTorchSetFanout::FrameToTorchSetFanout()
     : Aux::Logger("FrameToTorchSetFanout", "spng") {}
 
-bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vector& outv) {
-    outv.resize(m_multiplicity);
-    //Default null ptrs
-    for (int ind = 0; ind < m_multiplicity; ++ind) {
-        outv[ind] = nullptr;
-    }
+bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vector& outv)
+{
+    outv.clear();
+    outv.resize(m_multiplicity, nullptr); // default with EOS
 
-    //Nothing in, nothing out
+    // Nothing in, nothing out
     if (!in) {  //  pass on EOS
-        log->debug("Exiting");
+        log->debug("EOS at call={}", m_count);
+        ++m_count;
         return true;
     }
 
-
-    
-    //Exit if no traces
+    // Exit if no traces
     auto traces = in->traces();
     const size_t ntraces = traces->size();
     log->debug("Ntraces: {}", ntraces);
     log->debug("Tick (Period): {}", in->tick());
     if (ntraces == 0) {
-        log->debug("No traces, exiting");
+        auto empty = std::shared_ptr<EmptyTorchTensorSet>();
+        outv.clear();
+        outv.resize(m_multiplicity, empty);
+        log->debug("No traces, sending empty tensor sets at call={}", m_count);
+        ++m_count;
         return true;
     }
 
@@ -128,7 +132,7 @@ bool SPNG::FrameToTorchSetFanout::operator()(const input_pointer& in, output_vec
     //Build up tenors + accessors to store input trace values
     for (const auto & [out_group, nchannels] : m_output_nchannels) {
         log->debug("Making tensor of shape: {} {}", nchannels, nticks);
-        torch::Tensor plane_tensor = torch::zeros({nchannels, static_cast<int64_t>(nticks)}, torch::TensorOptions().dtype(torch::kFloat64));
+        torch::Tensor plane_tensor = torch::zeros({nchannels, static_cast<int64_t>(nticks)}, torch::TensorOptions().dtype(torch::kFloat64)); // fixme: should be 32bit float?
         tensors.push_back(plane_tensor);
         accessors.push_back(tensors.back().accessor<double,2>());
     }
