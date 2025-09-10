@@ -50,6 +50,35 @@ namespace WireCell::SPNG {
         virtual void configure(const WireCell::Configuration& cfg);
         virtual WireCell::Configuration default_configuration() const;
 
+        /// Subclass should call this method to register each "kind" of tensor
+        /// it expects to find.  The "kind" string is defined by the subclass
+        /// and will be reflected to an attribute of an object that may be
+        /// provided by the user configuration parameter "input_tensors".
+        ///
+        /// The subclass should issue all of its register_input() calls prior to
+        /// calling the base class default_configuration() in order that any
+        /// default_datapaths can be added to the default configuration object.
+        void register_input(const std::string& kind, const std::string& default_datapath="");
+
+        /// After the subclass calls this base class's configure() it may call
+        /// input_datapath() to learn the user's configured choice.
+        ///
+        /// The datapath may be used with the TensorIndex to get the tensor.
+        ///
+        /// Any error results in an empty string being returned.
+        std::string input_datapath(const std::string& kind) const;
+
+        /// Symmetric with register_input() / "output_tensors" configuration
+        /// parameter.  See its comments above for details.
+        void register_output(const std::string& kind, const std::string& default_datapath="");
+
+        /// Symmetric with input_datapath().
+        ///
+        /// The datapath may be used to add a new tensor to the output
+        /// TensorIndex.
+        std::string output_datapath(const std::string& kind) const;
+
+
         // ITorchTensorSetFilter
         virtual bool operator()(const ITorchTensorSet::pointer& in, output_pointer& out) const;
 
@@ -96,6 +125,9 @@ namespace WireCell::SPNG {
 
         /// Configuration: quiet.  Set true to not call any logging.  Default is false.
         bool m_quiet{false};
+
+        std::map<std::string, std::string> m_input_datapath, m_output_datapath;
+        
 
         /// Keep track of calls
         mutable size_t m_count{0};

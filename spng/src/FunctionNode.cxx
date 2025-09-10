@@ -9,13 +9,16 @@ namespace WireCell::SPNG {
     {
     }
 
-    void FunctionNode::configure(const WireCell::Configuration& cfg)
+    void FunctionNode::register_input(const std::string& kind, const std::string& default_datapath)
     {
-        m_quiet = get<bool>(cfg, "quiet", m_quiet);
-        m_selector.configure(cfg);
-        m_renaming.configure(cfg);
+        m_input_datapath[kind] = default_datapath;
     }
-    
+
+    void FunctionNode::register_output(const std::string& kind, const std::string& default_datapath)
+    {
+        m_output_datapath[kind] = default_datapath;
+    }
+
     WireCell::Configuration FunctionNode::default_configuration() const
     {
         Configuration cfg;
@@ -24,14 +27,60 @@ namespace WireCell::SPNG {
         auto cfg2 = m_renaming.default_configuration();
         update(cfg, cfg1);
         update(cfg, cfg2);
+
+        for (const auto& [kind, datapath] : m_input_datapath) {
+            cfg["input_datapath"][kind] = datapath;
+        }
+        for (const auto& [kind, datapath] : m_output_datapath) {
+            cfg["output_datapath"][kind] = datapath;
+        }
+
         return cfg;
+    }
+
+    void FunctionNode::configure(const WireCell::Configuration& cfg)
+    {
+        m_quiet = get<bool>(cfg, "quiet", m_quiet);
+        m_selector.configure(cfg);
+        m_renaming.configure(cfg);
+
+        auto its = cfg["input_tensors"];
+        if (its.isObject()) {
+            for (const auto& kind : its.getMemberNames()) {
+                m_input_datapath[kind] = its[kind].asString();
+            }
+        }
+        auto ots = cfg["output_tensors"];
+        if (ots.isObject()) {
+            for (const auto& kind : ots.getMemberNames()) {
+                m_output_datapath[kind] = ots[kind].asString();
+            }
+        }
+    }
+    
+    std::string FunctionNode::input_datapath(const std::string& kind) const
+    {
+        auto it = m_input_datapath.find(kind);
+        if (it == m_input_datapath.end()) {
+            return "";
+        }
+        return it->second;
+    }
+
+    std::string FunctionNode::output_datapath(const std::string& kind) const
+    {
+        auto it = m_output_datapath.find(kind);
+        if (it == m_output_datapath.end()) {
+            return "";
+        }
+        return it->second;
     }
 
     TensorIndex FunctionNode::index_tensors(const ITorchTensorSet::pointer& in) const
     {
         return TensorIndex(in);
     }
-    
+
     TensorIndex FunctionNode::sys_index_tensors(const ITorchTensorSet::pointer& in) const
     {
         auto ti = index_tensors(in);
@@ -39,7 +88,6 @@ namespace WireCell::SPNG {
         return ti;              // copy elision
     }
 
-    
     TensorIndex FunctionNode::select_tensors(TensorIndex ti) const
     {
         return m_selector.apply(ti);
@@ -95,6 +143,5 @@ namespace WireCell::SPNG {
         ++m_count;
         return true;
     }
-
 
 }

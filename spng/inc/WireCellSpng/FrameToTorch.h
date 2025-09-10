@@ -21,7 +21,6 @@ namespace WireCell {
             // INode, override because we get multiplicity at run time.
             // virtual std::vector<std::string> output_types() {return };
 
-            // IFanout
             virtual bool operator()(const input_pointer& in, output_pointer& out);
 
             // IConfigurable
