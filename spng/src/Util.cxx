@@ -127,14 +127,10 @@ void WireCell::SPNG::metadata_passthrough(
 }
 
     void WireCell::SPNG::save_torchtensor_data(const  torch::Tensor& tensor, const std::string& filename) {
-        // Create a map<string, torch::Tensor> to hold the tensor with a unique key
-        torch::serialize::OutputArchive archive;
-    
-        // Store the tensor with a unique key
-        archive.write("tensor", tensor);
-    
+        //write the torch::Tensor in a file using torch::save
         try {
-            // Save the tensor in one file
+            torch::serialize::OutputArchive archive;
+            archive.write("tensor", tensor.cpu());
             archive.save_to(filename);
         } catch (const c10::Error& e) {
             std::cerr << "Util::save_torchtensor_data  Error saving tensor: " << e.what() << std::endl;
@@ -230,4 +226,16 @@ std::vector<torch::IValue> WireCell::SPNG::from_itensor(const ITorchTensorSet::p
         ret.emplace_back(ten);  
     }
     return ret;
+}
+
+std::string WireCell::SPNG::tensor_shape_string(const at::Tensor& t) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < t.sizes().size(); ++i) {
+        oss << t.sizes()[i];
+        if (i != t.sizes().size() - 1)
+            oss << ", ";
+    }
+    oss << "]";
+    return oss.str();
 }

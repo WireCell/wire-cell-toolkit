@@ -107,17 +107,7 @@ void DNNROI::finalize()
 
 }
 
-std::string tensor_shape_string(const at::Tensor& t) {
-    std::ostringstream oss;
-    oss << "[";
-    for (size_t i = 0; i < t.sizes().size(); ++i) {
-        oss << t.sizes()[i];
-        if (i != t.sizes().size() - 1)
-            oss << ", ";
-    }
-    oss << "]";
-    return oss.str();
-}
+
 
 
 bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
@@ -132,88 +122,69 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     
      //TODO -- Loop over input tensors
     auto tensors = in->tensors();
-    if (tensors->empty()) {
-        log->debug("DNNROI: No tensors in input set");
-        return false;
+    if(tensors->size()!=3) {
+        log->error("DNNROI: Expecting 3 input tensors, got {}", tensors->size());
+        return false;   
+    } 
+    torch::Tensor a = tensors->at(2)->tensor().clone(); //target plane
+    torch::Tensor b = tensors->at(1)->tensor().clone(); //MP2
+    torch::Tensor c = tensors->at(0)->tensor().clone(); //MP3
+    //print the shapes of the tensors
+    log->debug("DNNROI: Input tensor a shape: {}", tensor_shape_string(a));
+    log->debug("DNNROI: Input tensor b shape: {}", tensor_shape_string(b));
+    log->debug("DNNROI: Input tensor c shape: {}", tensor_shape_string(c));
+
+    a = a*m_cfg.input_scale + m_cfg.input_offset;
+    b = b*m_cfg.input_scale + m_cfg.input_offset;
+    c = c*m_cfg.input_scale + m_cfg.input_offset;
+
+    // b and c have 1500 ticks and a has 6000 ticks
+    //assert that both b and c have the same number of ticks
+    if(b.size(2) != c.size(2)) {
+        log->error("DNNROI: Expecting aux_tensor_l and aux_tensor_m to have the same number of ticks, got {} and {}", b.size(2), c.size(2));
+        return false;   
     }
-    //TimeKeeper tk(fmt::format("call={}",m_save_count));
-    //Process Each TorchTensors in input set to torch::Tensor
-    //std::vector<torch::Tensor> ch_tensors; //induction planes
-    ROIData ch_tensors; //induction planes
-    ROIData coll_tensors; //collection planes
-    //save the metadata tags from the input tensors
-    log->debug("DNNROI: Processing {} tensors", tensors->size());
-    for (size_t i = 0; i < tensors->size(); ++i) {
-        auto tensor = tensors->at(i)->tensor();
-        // process tensor to torch_tensor to write to ch_tensors
-
-        // Check the tensor tags (metadata)
-        auto metadata = tensors->at(i)->metadata();
-        if (metadata.isMember("tag") && !metadata["tag"].asString().empty()) {
-            log->debug("DNNROI: Found tag in metadata: {}", metadata["tag"].asString());
-        } else {
-            log->warn("DNNROI: No tag found in metadata for tensor {}", i);
-        }
-
-        torch::Tensor scaled = tensor*m_cfg.input_scale + m_cfg.input_offset;
-
-        if(i==0){
-            //save scaled tensor
-            save_torchtensor_data(scaled, "scaled_tensor_0.pt");
-        }
-
-        //  ch_eigen.push_back(Array::downsample(arr, m_cfg.tick_per_slice, 1));
-        auto tick_per_slice = m_cfg.tick_per_slice;
-        auto nticks = tensor.size(1); //0 is channel, 1 is time
-        int nticks_ds = nticks / tick_per_slice;
-        //keep all the dimensions unchanged, select range from 0, nticks_ds* tick_per_slice
-        //This will downsample the tensor by tick_per_slice
-        auto trimmed = tensor.index({"...",torch::indexing::Slice(0, nticks_ds * tick_per_slice)}); 
-        //save the trimmed tensor
-        if(i==0){
-            save_torchtensor_data(trimmed, "trimmed_tensor_0.pt");
-        }
-
-        //now reshape the tensor
-        auto reshaped = trimmed.view({tensor.size(0), nticks_ds, tick_per_slice});
-        //save the reshaped tensor
-        if(i==0){
-            save_torchtensor_data(reshaped, "reshaped_tensor_0.pt");
-        }
-        //reshaped tensor has the dimensions [channels, downsampled_time, tick_per_slice]
-        //now take the mean along the last dimension (tick_per_slice)
-        auto downsampled = reshaped.mean(2);
-        //save the downsampled tensor
-        if(i==0){   
-            save_torchtensor_data(downsampled, "downsampled_tensor_0.pt");
-        }
-
-        //now cscale and offset the downsampled tensor
-        auto dscaled = downsampled * m_cfg.input_scale + m_cfg.input_offset;
-        auto nchannels = dscaled.size(0); //number of channels 
-        if(nchannels == 800){
-            ch_tensors.tensors.push_back(dscaled); //induction plane
-            ch_tensors.r_tags.push_back(metadata["tag"].asString()); //store the tag
-        }
-        else {
-            coll_tensors.tensors.push_back(dscaled); //collection plane
-            coll_tensors.r_tags.push_back(metadata["tag"].asString()); //store the tag
-        }
-    }
-    for (size_t i = 0; i < ch_tensors.tensors.size(); ++i) {
-        log->debug("DNNROI: Tensor {} shape: {} tags: {} ", i, tensor_shape_string(ch_tensors.tensors[i]),ch_tensors.r_tags[i]);
-    }
+    int tick_per_slice = a.size(2) / b.size(2);
+    log->debug("DNNROI: tick_per_slice: {}", tick_per_slice);
+    int nticks_a = a.size(2); 
+    log->debug("DNNROI: nticks_a: {}", nticks_a);
+    int nticks_ds_a = nticks_a / tick_per_slice;
+    log->debug("DNNROI: nticks_ds_a: {}", nticks_ds_a);
+    //preprocessing of the target tensor
+    //shape of the each tensor is [1, 800, 6000] for a and [1, 800, 1500] for b and c
+    //downsample a to have the same number of ticks as b and c
+    torch::Tensor a_trimmed = a.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, nticks_ds_a * tick_per_slice)});
+    log->debug("DNNROI: a_trimmed shape: {}", tensor_shape_string(a_trimmed));
+    torch::Tensor a_reshaped = a_trimmed.view({a_trimmed.size(0), a_trimmed.size(1), nticks_ds_a, tick_per_slice});
+    log->debug("DNNROI: a_reshaped shape: {}", tensor_shape_string(a_reshaped));
+    torch::Tensor a_ds = torch::mean(a_reshaped, 3);
+    log->debug("DNNROI: a_ds shape: {}", tensor_shape_string(a_ds));
+    std::vector<torch::Tensor> to_save = {a_ds};
+    //save the tensors to a file for debugging
+   // torch::save(to_save, "DNNROI_debug.pt");
     
-    //stack vector of tensors along a new dimension (0)
-    auto img = torch::stack(ch_tensors.tensors, 0); //stack all the tensors along a new dimension (0)
-    //img is now a 3D stacked tensors 
-    auto transposed = img.transpose(1,2); //transposition into ntags, nticks_ds, nchannels
-    auto batch = torch::unsqueeze(transposed, 0); //add a batch dimension at the start
-    //chunking -->Check the edging effects.
-    auto chunks = batch.chunk(m_cfg.nchunks, 2); // chunk the batch into m_cfg.nchunks along the time dimension (2)
+    
+    //Do the stacking along a new dimension [3, 800, 1500]
+    //now a_ds, b and c have the same shape [1, 800, 1500]
+    torch::Tensor stacked = torch::stack({a_ds, b, c}, 1);
+    //torch::Tensor stacked = torch::stack({a_ds, b, c}, 0);
+    log->debug("DNNROI: Stacked shape: {}", tensor_shape_string(stacked));
+    stacked = stacked.squeeze(0); //remove the batch dimension if needed [3, 800, 1500]
+    log->debug("DNNROI: Stacked shape after squeeze: {}", tensor_shape_string(stacked));
+    //transpose the stacked tensor
+    auto batch = torch::stack({torch::transpose(stacked, 1, 2)},0);
+
+    log->debug("DNNROI: Batch shape: {}", tensor_shape_string(batch));
+    
+    //now the chunking
+    //now chunk along the channel dimension (2)
+    int nchunks = m_cfg.nchunks;
+    auto chunks = batch.chunk(nchunks, 2); // chunk the batch into
+
+    //TO DO: Later on we want to forward the chunks in parallel without data having to leave the GPU
     std::vector<torch::Tensor> outputs;
     for (auto& chunk : chunks) {
-        log->debug("DNNROI: Chunk shape: {}, nchunks {}", chunk.sizes()[1], m_cfg.nchunks);
+        log->debug("DNNROI: Chunk shape: {}, nchunks {}", chunk.sizes()[3], m_cfg.nchunks);
         std::vector<torch::IValue> inputs = {chunk};
         log->debug("DNNROI: Chunk shape: {}", tensor_shape_string(chunk));
         auto iitens = to_itensor(inputs); // convert inputs to ITorchTensorSet        
@@ -222,34 +193,49 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
         auto oitens = m_forward->forward(iitens);
         //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(oitens->tensors()->at(0)->tensor()));
         //torch::Tensor out_chunk = oitens.toTensor().to(torch::kCUDA); // keep the data in gpu if needed for other stuff.
-        torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor().cpu(); // convert ITorchTensorSet to torch::Tensor
-        //AB: Mostly for the debugging purposes, we can remove it later.
-       // torch::Tensor out_chunk = from_itensor(iitens, m_is_gpu)[0].toTensor().cpu(); // convert ITorchTensorSet to torch::Tensor
-        outputs.push_back(out_chunk);
+        torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor(); // convert ITorchTensorSet to torch::Tensor
+        //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(out_chunk));
+        outputs.push_back(out_chunk.clone());
     }
-    
-    torch::Tensor out_tensor = torch::cat(outputs, 2); // concatenate the output chunks along the time dimension (2)
-    //save the out_tensor
-    save_torchtensor_data(out_tensor, "out_tensor.pt");
-    auto mask = out_tensor.gt(m_cfg.mask_thresh);
-    auto finalized_tensor = out_tensor*mask.to(out_tensor.dtype()); // apply the mask to the output tensor  
-    finalized_tensor = finalized_tensor * m_cfg.output_scale + m_cfg.output_offset; // scale and offset the output tensor
-    //save the finalized tensor
-    save_torchtensor_data(finalized_tensor, "finalized_tensor.pt");
-    //std::vector<ITorchTensor::pointer>processed_tensors;
+
+    //now concatenate along the time dimensions (3)
+    torch::Tensor output = torch::cat(outputs, 3);
+    log->debug("DNNROI: Output shape: {}", tensor_shape_string(output));
+    //shape of the output is [1, 1, 1500, 800] 
+    //we want to reshape it to [1, 3, 800, 1500] to match the input shape
+    //so that we can replace the target plane with the output tensor
+    //output = output.view({1, 3, 800, nticks_ds_a * tick_per_slice});
+    //now create the output tensor with the same information as input tensor but replacing target plane with output tensor
     auto shared_vec = std::make_shared<ITorchTensor::vector>();
-    for(int i = 0; i < finalized_tensor.size(0); ++i) {
-        auto single_tensor = finalized_tensor[i].detach().clone(); // detach and clone the tensor to avoid modifying the original tensor
-        auto meta = tensors->at(i)->metadata(); // get the metadata from the original tensors
-        shared_vec->push_back(
-            std::make_shared<SimpleTorchTensor>(single_tensor,meta));
-    }
-      
+    //now post processing
+    output = output * m_cfg.output_scale + m_cfg.output_offset;
+    output = output.squeeze(); //remove the batch and channel dimensions [1,1,1500,600] --> [1500,600]
+    log->debug("DNNROI: Output shape after squeeze: {}", tensor_shape_string(output));
+    //transpose the output to have the same shape as input [1500,600] --> [600, 1500]
+    output = torch::transpose(output, 0, 1);
+    log->debug("DNNROI: Output shape after transpose: {}", tensor_shape_string(output));
+    output = output.unsqueeze(0); //add the batch dimension back [1, 800
+    //now upsampe the output to have the same number of ticks as input
+    output = output.repeat({1, 1, tick_per_slice}); //repeat along the time dimension
+    log->debug("DNNROI: Output shape after upsampling: {}", tensor_shape_string(output));
+    //trim the output to have the same number of ticks as input
+    output = output.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, nticks_a)});
+    log->debug("DNNROI: Output shape after trimming: {}", tensor_shape_string(output));
+    //now the output tensor has the same shape as input tensor a [1, 800, 6000]
+    //save the output tensor for debugging
+    to_save.push_back(output);
+    torch::save(to_save, "DNNROI_debug_output.pt");
+    //split the output into 3 tensors
+    log->debug("DNNROI: Final Output shape after unsqueeze: {}", tensor_shape_string(output));
+    auto out_ptr = std::make_shared<SimpleTorchTensor>(output, tensors->at(0)->metadata());
+    //first make Simple TorchTensor for each output tensor
+    shared_vec->push_back(out_ptr);
+
     out = std::make_shared<SimpleTorchTensorSet>(
-        in->ident(), in->metadata(), shared_vec
+        in->ident(), in->metadata(),
+        shared_vec
     );
-    //save out tensor set
-    save_simpletensor_data(out, "out_tensor_set.pt");
     
+    log->debug("DNNROI: Finished processing, returning output with {} tensors", out->tensors()->size());
     return true;
 }
