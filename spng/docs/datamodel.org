@@ -99,7 +99,7 @@ The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label t
 - ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
 - ~label~ :: the label for one set of channel masks
 
-The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).
+The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).  The dtype is ~torch::kLong~.
 
 
 
