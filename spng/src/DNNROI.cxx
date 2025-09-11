@@ -193,7 +193,7 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
         auto oitens = m_forward->forward(iitens);
         //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(oitens->tensors()->at(0)->tensor()));
         //torch::Tensor out_chunk = oitens.toTensor().to(torch::kCUDA); // keep the data in gpu if needed for other stuff.
-        torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor().cpu(); // convert ITorchTensorSet to torch::Tensor
+        torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor(); // convert ITorchTensorSet to torch::Tensor
         //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(out_chunk));
         outputs.push_back(out_chunk.clone());
     }
