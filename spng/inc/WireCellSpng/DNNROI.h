@@ -88,9 +88,10 @@ namespace WireCell {
             bool save_negative_charge{false};
         };
 
-        struct ROIData{
-            std::vector<std::string> r_tags;
-            std::vector<torch::Tensor> tensors;
+        //ROI data has target plane and mp2 and mp3 planes
+        struct ROIData {
+            std::vector<torch::Tensor> tensors; //induction planes
+            std::vector<std::string> r_tags; //tags associated with each tensor
         };
 
         class DNNROI : public Aux::Logger, 
