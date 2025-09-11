@@ -76,6 +76,7 @@ namespace WireCell::Torch {
 
 }
 namespace WireCell::SPNG {
+    std::string tensor_shape_string(const torch::Tensor& t);
 
   void metadata_passthrough(
     const WireCell::Configuration & metadata_in,

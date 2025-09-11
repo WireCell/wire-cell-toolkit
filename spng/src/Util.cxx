@@ -228,7 +228,7 @@ std::vector<torch::IValue> WireCell::SPNG::from_itensor(const ITorchTensorSet::p
     return ret;
 }
 
-std::string WireCell::SPNG::tensor_shape_string(const at::Tensor& t) {
+std::string WireCell::SPNG::tensor_shape_string(const torch::Tensor& t) {
     std::ostringstream oss;
     oss << "[";
     for (size_t i = 0; i < t.sizes().size(); ++i) {
