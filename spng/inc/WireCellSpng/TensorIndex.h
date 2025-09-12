@@ -158,6 +158,8 @@ namespace WireCell::SPNG {
         ///     // ...
         /// }
         /// @endcode
+        ///
+        /// Use `tree().children()` if you want tree nodes instead of values.
         ITorchTensor::vector parents() const;
 
         /// Return the number of top-level parents.

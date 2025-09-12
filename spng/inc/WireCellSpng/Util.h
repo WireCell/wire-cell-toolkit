@@ -1,6 +1,9 @@
 /**
    Utility functions for Torch tensors.
 
+   This is meant to collect small utilities that "should" be in libtorch, proper.
+
+
    In future, this may be moved into the "pytorch/" sub-package.
  */
 
@@ -13,10 +16,45 @@
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 
+#include <type_traits> // For std::enable_if and std::is_same
+
 // Capitalized "Torch" namespace should not collide with any in torch, proper.
 namespace WireCell::Torch {
 
-    // All tensors here are 2D unless indicated otherwise.
+    // Map C++ types to torch::Dtype
+    template <typename T, typename Enable=void>
+    struct CppTypeToTorchDtype { }; // error about a .value missing?  You are using an usupported dtype.
+
+    // Specializations for types expected in SPNG with some examples where they may be found.
+    // "traces"
+    template <> struct CppTypeToTorchDtype<float> { static constexpr torch::Dtype value = torch::kFloat32; };
+    // "summaries"
+    template <> struct CppTypeToTorchDtype<double> { static constexpr torch::Dtype value = torch::kFloat64; };
+    // "chids", "chmasks"
+    template <> struct CppTypeToTorchDtype<int> { static constexpr torch::Dtype value = torch::kInt32; };
+    // indices 
+    template <> struct CppTypeToTorchDtype<long> { static constexpr torch::Dtype value = torch::kInt64; };
+    // pixel masks
+    template <> struct CppTypeToTorchDtype<bool> { static constexpr torch::Dtype value = torch::kBool; };
+    // Be thoughtful when extending this list.
+
+
+    // Cast torch tensor to dtype with C++ type.
+    template <typename T>
+    torch::Tensor to_dtype(const torch::Tensor& tensor) {
+        return tensor.to(CppTypeToTorchDtype<T>::value);
+    }
+
+
+    /// Convert a 1D tensor to a C++ vector of a given type.
+    template<typename T>
+    std::vector<T> to_vector(const torch::Tensor& tensor) {
+        torch::Tensor row_tensor = to_dtype<T>(tensor).to(torch::kCPU).contiguous();
+        return std::vector<T>(row_tensor.data_ptr<float>(),
+                              row_tensor.data_ptr<float>() + row_tensor.numel());
+    }
+
+    
 
 
     // Return 2D tensor of shape with ten filling lower corner and remaining
@@ -75,15 +113,22 @@ namespace WireCell::Torch {
 
 
 }
+
 namespace WireCell::SPNG {
+    // FIXME: this probably should be moved into WireCell::Torch.
     std::string tensor_shape_string(const torch::Tensor& t);
 
+    // FIXME: Remove.  This already exists Configuration.h as update()
   void metadata_passthrough(
     const WireCell::Configuration & metadata_in,
     WireCell::Configuration & metadata_out,
     const Json::Value & passing_values);
+
+    // FIXME: Remove.  This is not util'ish but io'ish.  It also does not seem to be used anywerhe.
     void save_torchtensor_data(const torch::Tensor& tensor, const std::string& filename);
     void save_simpletensor_data(const ITorchTensorSet::pointer& in, const std::string& filename);
+
+    // FIXME:  Remove, eventually.  Not generic, obsoleted by TDM
     std::vector<torch::IValue> from_itensor(const ITorchTensorSet::pointer& in, bool is_gpu = false);
     ITorchTensorSet::pointer to_itensor(const std::vector<torch::IValue>& inputs);
 }

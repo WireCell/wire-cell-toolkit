@@ -1,11 +1,11 @@
-#include "WireCellSpng/FrameToTDM.h"
+#include "WireCellSpng/FrameToTdm.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellAux/FrameTools.h"
 #include "WireCellUtil/NamedFactory.h"
 
-WIRECELL_FACTORY(SPNGFrameToTDM,
-                 WireCell::SPNG::FrameToTDM,
+WIRECELL_FACTORY(SPNGFrameToTdm,
+                 WireCell::SPNG::FrameToTdm,
                  WireCell::INamed,
                  WireCell::IConfigurable,
                  WireCell::SPNG::IFrameToTorchSet)
@@ -13,16 +13,16 @@ WIRECELL_FACTORY(SPNGFrameToTDM,
 
 namespace WireCell::SPNG {
 
-    FrameToTDM::FrameToTDM()
-        : Aux::Logger("FrameToTDM", "spng")
+    FrameToTdm::FrameToTdm()
+        : Aux::Logger("FrameToTdm", "spng")
     {
     }
  
-   FrameToTDM::~FrameToTDM()
+   FrameToTdm::~FrameToTdm()
    {
    }
 
-    WireCell::Configuration FrameToTDM::default_configuration() const
+    WireCell::Configuration FrameToTdm::default_configuration() const
     {
         Configuration cfg = this->ContextBase::default_configuration();
         cfg["basepath"] = m_basepath;
@@ -31,7 +31,7 @@ namespace WireCell::SPNG {
         return cfg;
     }
     
-    void FrameToTDM::configure(const WireCell::Configuration& cfg)
+    void FrameToTdm::configure(const WireCell::Configuration& cfg)
     {
         this->ContextBase::configure(cfg);
         std::string anode = cfg["anode"].asString();
@@ -107,7 +107,7 @@ namespace WireCell::SPNG {
 
     }
     
-    bool FrameToTDM::operator()(const input_pointer& inframe, output_pointer& outtens) 
+    bool FrameToTdm::operator()(const input_pointer& inframe, output_pointer& outtens) 
     {
         // fixme; inherit from context base and do the guard dance. 
 
@@ -142,7 +142,7 @@ namespace WireCell::SPNG {
 
 
 
-    ITorchTensor::pointer FrameToTDM::frame_itensor(const IFrame::pointer& iframe) const
+    ITorchTensor::pointer FrameToTdm::frame_itensor(const IFrame::pointer& iframe) const
     {
         Configuration md;
         int ident = iframe->ident();
@@ -156,7 +156,7 @@ namespace WireCell::SPNG {
     }
 
 
-    ITorchTensor::vector FrameToTDM::chmask_tensors(const IFrame::pointer& iframe, const std::string& parent) const
+    ITorchTensor::vector FrameToTdm::chmask_tensors(const IFrame::pointer& iframe, const std::string& parent) const
     {
         const auto chmasks = iframe->masks();
         const int ident = iframe->ident();
@@ -179,7 +179,7 @@ namespace WireCell::SPNG {
         return tens;
     }
 
-    torch::Tensor FrameToTDM::chmask_tensor(const Waveform::ChannelMasks& cms) const
+    torch::Tensor FrameToTdm::chmask_tensor(const Waveform::ChannelMasks& cms) const
     {
         /* We must convert this fiddly structure
            typedef std::pair<int, int> BinRange;
@@ -208,7 +208,7 @@ namespace WireCell::SPNG {
 
         
     // Return trace indices for tag.  
-    std::vector<size_t> FrameToTDM::tag_indices(const IFrame::pointer& iframe, const std::string& tag) const
+    std::vector<size_t> FrameToTdm::tag_indices(const IFrame::pointer& iframe, const std::string& tag) const
     {
         // FIXME: this could go into aux's FrameTools.h
         std::vector<size_t> inds;
@@ -225,7 +225,7 @@ namespace WireCell::SPNG {
 
     /// Return subset of channel IDs from have that are consistent with group.
     /// Sort according to global channel order.
-    std::vector<int> FrameToTDM::group_channels(const std::vector<int>& have,
+    std::vector<int> FrameToTdm::group_channels(const std::vector<int>& have,
                                                 const Group& group) const
     {
         std::set<int> want(group.channels.begin(), group.channels.end());
@@ -262,7 +262,7 @@ namespace WireCell::SPNG {
 
 
     /// Run through the rules
-    ITorchTensor::vector FrameToTDM::rules_tensors(
+    ITorchTensor::vector FrameToTdm::rules_tensors(
         const IFrame::pointer& iframe,
         const std::string& parent) const
     {

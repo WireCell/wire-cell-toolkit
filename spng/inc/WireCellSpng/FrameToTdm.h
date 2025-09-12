@@ -5,35 +5,34 @@
 
 #include "WireCellSpng/IFrameToTorchSet.h"
 #include "WireCellSpng/ContextBase.h"
-#include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/Waveform.h" // for ChannelMasks
 
 namespace WireCell::SPNG {
 
-    /// A FrameToTDM converts an IFrame to an ITorchTensorSet following SPNG
+    /// A FrameToTdm converts an IFrame to an ITorchTensorSet following SPNG
     /// torch data model.
     ///
-    /// The IFrame and TDM "frame" data models tensors produced by FrameToTDM
+    /// The IFrame and Tdm "frame" data models tensors produced by FrameToTdm
     /// are not exactly equivalent for two reasons.
     ///
     /// Sparse vs dense: IFrame is, in general, a sparse set of ITrace.  ITrace may
     /// overlap, even when they are in the same tagged trace set.  How their
-    /// overlap is accumulated is not specified by IFrame.  FrameToTDM will use
+    /// overlap is accumulated is not specified by IFrame.  FrameToTdm will use
     /// additive accumulation to resolve any overlaps.
     ///
-    /// Channel groups: For each tagged traces tag, FrameToTDM allows a number
+    /// Channel groups: For each tagged traces tag, FrameToTdm allows a number
     /// of "channel groups" to be defined.  The intersection of tagged traces
     /// and channels in a group determine the rows of a traces tensor and
     /// elements of a summaries tensor.  It is possible to specify group
     /// channels not represented in a tagged traces collection and vice versa.
     ///
-    class FrameToTDM : public ContextBase, public Aux::Logger, public IFrameToTorchSet {
+    class FrameToTdm : public ContextBase, public Aux::Logger, public IFrameToTorchSet {
     public:
 
-        FrameToTDM();
-        virtual ~FrameToTDM();
+        FrameToTdm();
+        virtual ~FrameToTdm();
 
         // IFunction
         virtual bool operator()(const input_pointer& in, output_pointer& out);
@@ -51,7 +50,7 @@ namespace WireCell::SPNG {
 
         /// DATAPATHS:
         ///
-        /// The FrameToTDM accepts user-defined datapaths assigned to each output tensor.
+        /// The FrameToTdm accepts user-defined datapaths assigned to each output tensor.
         ///
         /// A penultimate datapath for an output tensor is constructed as:
         ///
