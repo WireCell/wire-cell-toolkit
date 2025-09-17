@@ -29,11 +29,27 @@ void Graph::set_enable_em(bool flag) { m_enable_em = flag; }
 
 bool Graph::connect(Node* tail, Node* head, size_t tpind, size_t hpind)
 {
-    Port& tport = tail->output_ports()[tpind];
-    Port& hport = head->input_ports()[hpind];
+    auto& tports = tail->output_ports();
+    auto& hports = head->input_ports();
+
+    if (tpind >= tports.size()) {
+        l->critical("tail port multiplicity mismatch with {}: {} >= {}", tail->ident(), tpind, tports.size());
+        raise<ValueError>("tail port signature mismatch");
+    }
+
+    if (hpind >= hports.size()) {
+        l->critical("head port multiplicity mismatch with {}: {} >= {}", head->ident(), hpind, hports.size());
+        raise<ValueError>("tail port signature mismatch");
+    }
+
+    Port& tport = tports[tpind];
+    Port& hport = hports[hpind];
+
     if (tport.signature() != hport.signature()) {
-        l->critical("port signature mismatch: \"{}\" != \"{}\"", tport.signature(), hport.signature());
-        THROW(ValueError() << errmsg{"port signature mismatch"});
+        l->critical("port signature mismatch: {}[{}] -> {}[{}]",
+                    tail->ident(), tport.signature(),
+                    head->ident(), hport.signature());
+        raise<ValueError>("port signature mismatch");
         return false;
     }
 
