@@ -4,21 +4,11 @@
 env CC=gcc CXX=g++ FC=gfortran \
 ./wcb configure \
 --build-debug="-O2 -ggdb3 -w" \
-\ #--with-zio="/home/yuhw/sl7/zio" \
-\ #--with-zio-lib="/home/yuhw/sl7/zio/lib64" \
 --with-tbb="$TBBROOT" \
 --with-jsoncpp="$JSONCPP_FQ_DIR" \
-\ #--with-jsonnet="$JSONNET_FQ_DIR" \
-\ #--with-jsonnet="/home/yuhw/jsonnet/install/" \
-\ #--with-jsonnet-include="/home/yuhw/jsonnet/go-jsonnet/cpp-jsonnet/include" \
-\ #--with-jsonnet-lib="/home/yuhw/jsonnet/go-jsonnet/cpp-jsonnet" \
-\ #--with-jsonnet-libs=gojsonnet \
 --with-jsonnet-include="$GOJSONNET_FQ_DIR/include" \
 --with-jsonnet-lib="$GOJSONNET_FQ_DIR/lib" \
-\ #--with-gojsonnet-include="/home/yuhw/jsonnet/go-jsonnet/c-bindings" \
-\ #--with-gojsonnet-lib="/home/yuhw/jsonnet/go-jsonnet/c-bindings" \
 --with-eigen-include="$EIGEN_DIR/include/eigen3/" \
-\ #--with-eigen-include="/home/yuhw/sw/eigen-3.3.7/" \
 --with-root="$ROOTSYS" \
 --with-fftw="$FFTW_FQ_DIR" \
 --with-fftw-include="$FFTW_INC" \
@@ -30,14 +20,12 @@ env CC=gcc CXX=g++ FC=gfortran \
 --with-hdf5="$HDF5_FQ_DIR" \
 --with-spdlog-include="$SPDLOG_INC" \
 --with-spdlog-lib="$SPDLOG_LIB" \
---with-triton-include= /cvmfs/larsoft.opensciencegrid.org/products/triton/v2_25_0d/Linux64bit+3.10-2.17-e26/include \
---with-triton-lib=/cvmfs/larsoft.opensciencegrid.org/products/triton/v2_25_0d/Linux64bit+3.10-2.17-e26/lib64 \
---with-protobuf-include=/cvmfs/larsoft.opensciencegrid.org/products/protobuf/v3_21_12a/Linux64bit+3.10-2.17-e26/include \
---with-protobuf-lib=/cvmfs/larsoft.opensciencegrid.org/products/protobuf/v3_21_12a/Linux64bit+3.10-2.17-e26/lib \
---with-grpc-include=/cvmfs/larsoft.opensciencegrid.org/products/grpc/v1_35_0c/Linux64bit+3.10-2.17-e26/include \
---with-grpc-lib=/cvmfs/larsoft.opensciencegrid.org/products/grpc/v1_35_0c/Linux64bit+3.10-2.17-e26/lib \
-\ #--with-cuda="/usr/local/cuda" \
-\ #--with-cuda-lib="/usr/local/cuda/lib64" \
-\ #--with-libtorch="/home/yuhw/torch/libtorch" \
+--with-protobuf-include="$PROTOBUF_INC/" \
+--with-protobuf-lib="$PROTOBUF_LIB" \
+--with-grpc="$GRPC_FQ_DIR" \
+--with-grpc-include="$GRPC_INC" \
+--with-grpc-lib="$GRPC_LIB" \
+--with-triton-include="$TRITON_INC" \
+--with-triton-lib="$TRITON_LIB" \
 --with-libtorch="$LIBTORCH_FQ_DIR/" --with-libtorch-libs torch,torch_cpu,c10 \
---prefix=/exp/dune/app/users/meghna/v10_04_03d01/opt
+--prefix=/exp/dune/app/users/yuhw/opt/
