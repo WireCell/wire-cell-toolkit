@@ -3,7 +3,7 @@
 #env CC=clang CXX=clang++ FC=gfortran \
 env CC=gcc CXX=g++ FC=gfortran \
 ./wcb configure \
---build-debug="-O2 -ggdb3 -w" \
+--build-debug="-O3 -g -fno-omit-frame-pointer" \
 --with-tbb="$TBBROOT" \
 --with-jsoncpp="$JSONCPP_FQ_DIR" \
 --with-jsonnet-include="$GOJSONNET_FQ_DIR/include" \
