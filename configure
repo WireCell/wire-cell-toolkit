@@ -1,0 +1,31 @@
+#/bin/env bash
+
+#env CC=clang CXX=clang++ FC=gfortran \
+env CC=gcc CXX=g++ FC=gfortran \
+./wcb configure \
+--build-debug="-O2 -ggdb3 -w" \
+--with-tbb="$TBBROOT" \
+--with-jsoncpp="$JSONCPP_FQ_DIR" \
+--with-jsonnet-include="$GOJSONNET_FQ_DIR/include" \
+--with-jsonnet-lib="$GOJSONNET_FQ_DIR/lib" \
+--with-eigen-include="$EIGEN_DIR/include/eigen3/" \
+--with-root="$ROOTSYS" \
+--with-fftw="$FFTW_FQ_DIR" \
+--with-fftw-include="$FFTW_INC" \
+--with-fftw-lib="$FFTW_LIBRARY" \
+--with-fftwthreads="$FFTW_FQ_DIR" \
+--boost-includes="$BOOST_INC" \
+--boost-libs="$BOOST_LIB" \
+--boost-mt \
+--with-hdf5="$HDF5_FQ_DIR" \
+--with-spdlog-include="$SPDLOG_INC" \
+--with-spdlog-lib="$SPDLOG_LIB" \
+--with-protobuf-include="$PROTOBUF_INC/" \
+--with-protobuf-lib="$PROTOBUF_LIB" \
+--with-grpc="$GRPC_FQ_DIR" \
+--with-grpc-include="$GRPC_INC" \
+--with-grpc-lib="$GRPC_LIB" \
+--with-triton-include="$TRITON_INC" \
+--with-triton-lib="$TRITON_LIB" \
+--with-libtorch="$LIBTORCH_FQ_DIR/" --with-libtorch-libs torch,torch_cpu,c10 \
+--prefix=/exp/dune/app/users/yuhw/opt/

@@ -59,6 +59,7 @@ def options(opt):
 
     opt.add_option('--cxxstd', default='c++17',
                    help="Set the value for the compiler's --std= option, default 'c++17'")
+    
 
 
 def is_development():
@@ -92,6 +93,7 @@ def configure(cfg):
         cfg.env.LIBDIR = cfg.env.LIBDIR[:-2]
         debug(f'configure: forcing: {cfg.env.LIBDIR=} instead of lib64/, use explicit --libdir if you really want it')
     
+
     # Set to DEBUG to activate SPDLOG_DEBUG() macros or TRACE to activate both
     # those and SPDLOG_TRACE() levels.
     lu = cfg.options.with_spdlog_active_level.upper()
