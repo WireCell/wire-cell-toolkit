@@ -12,7 +12,8 @@
 namespace WireCell {
 namespace SPNG {
     class Decon : public Aux::Logger,
-                    public WireCell::ITorchTensorSetFilter, public WireCell::IConfigurable {
+                  public ITorchTensorSetFilter,
+                  public IConfigurable {
     public:
         Decon( );
         virtual ~Decon();

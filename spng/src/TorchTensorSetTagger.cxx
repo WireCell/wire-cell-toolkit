@@ -5,9 +5,11 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/ITorchSpectrum.h"
 
-WIRECELL_FACTORY(SPNGTorchTensorSetTagger, WireCell::SPNG::TorchTensorSetTagger,
+WIRECELL_FACTORY(SPNGTorchTensorSetTagger,
+                 WireCell::SPNG::TorchTensorSetTagger,
+                 WireCell::SPNG::ITorchTensorSetFilter,
                  WireCell::INamed,
-                 WireCell::ITorchTensorSetFilter, WireCell::IConfigurable)
+                 WireCell::IConfigurable)
 
 WireCell::SPNG::TorchTensorSetTagger::TorchTensorSetTagger()
   : Aux::Logger("SPNGTorchTensorSetTagger", "spng") {

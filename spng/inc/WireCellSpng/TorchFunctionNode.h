@@ -7,12 +7,13 @@
 namespace WireCell::SPNG {
 
     /** A TorchFunctionNode adds torch device, semaphore and autograd guards.
-
         
-        This is intended to be used as a base class for a subclass to implement
-        transform_tensors() with code that calls Torch operators.  If your
-        subclass does not require any Torch operators, inherit from FunctionNode
-        instead.
+        This class is not particularly useful stand-alone (use FunctionNode
+        instead) and is intended to be used as a base class in order to
+        implement transform_tensors() with code that calls Torch operators.
+
+        If implementing transform_tensors() without any Torch operators inherit
+        from FunctionNode instead.
 
         This class provides a device() method so that the subclass may know the
         user-configured torch device.  This is required when the subclass has no
@@ -24,18 +25,21 @@ namespace WireCell::SPNG {
         assure torch autograd is disabled.  It also assures that all tensors
         provided to the method are on the device().
 
-
-        This class is an IConfigurable and an ITorchTensorSetFilter.  These two
-        types must be included in the list of interfaces passed to the
-        subclass's call to the WIRECELL_FACTORY() CPP macro.
-       
-        If the subclass is itself configurable it must marshal the config object
-        from this base class's default_configuration() and forward the config
-        object to this base class's configure().  This classes methods provide
-        examples of how this marshalling must be done.  See this class's
-        IConfigurable implementation for an example of this marshaling of the
-        configuration object.
+        Your subclass must assure the following:
+        
+        1) Include this list of interfaces in the subclass's WIRECELL_FACTORY().
      
+            INamed, IConfigurable, ITorchTensorSetFilter
+     
+        2) Have the subclass constructor call `TorchFunctionNode("myname")`
+        constructor to set a custom logging name.
+     
+        3) If the subclass is itself an IConfigurable, it must marshal the
+        configuration object to/from FunctionNode::IConfigurable methods.  See
+        implementation of these methods in FunctionNode for examples how to do
+        this.
+
+
      */
     class TorchFunctionNode : public FunctionNode, public ContextBase
     {

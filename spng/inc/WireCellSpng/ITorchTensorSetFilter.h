@@ -5,7 +5,7 @@
 #include "WireCellIface/IFunctionNode.h"
 #include "WireCellSpng/ITorchTensorSet.h"
 
-namespace WireCell {
+namespace WireCell::SPNG {
 
     /** A torch tensor filter is something that applies some transformation
      * on its input torch tensor to produce and output torch tennsor.

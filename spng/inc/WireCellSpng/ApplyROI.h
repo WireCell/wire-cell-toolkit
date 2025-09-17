@@ -12,7 +12,8 @@
 namespace WireCell {
 namespace SPNG {
     class ApplyROI : public Aux::Logger,
-                    public WireCell::SPNG::ITorchTensorSetFanin, public WireCell::IConfigurable {
+                     public ITorchTensorSetFanin,
+                     public IConfigurable {
     public:
         ApplyROI( );
         virtual ~ApplyROI();

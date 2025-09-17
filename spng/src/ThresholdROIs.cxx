@@ -9,9 +9,11 @@
 
 // #include "WireCellSpng/ITorchColdElecResponse.h"
 
-WIRECELL_FACTORY(SPNGThresholdROIs, WireCell::SPNG::ThresholdROIs,
+WIRECELL_FACTORY(SPNGThresholdROIs,
+                 WireCell::SPNG::ThresholdROIs,
+                 WireCell::SPNG::ITorchTensorSetFilter,
                  WireCell::INamed,
-                 WireCell::ITorchTensorSetFilter, WireCell::IConfigurable)
+                 WireCell::IConfigurable)
 
 WireCell::SPNG::ThresholdROIs::ThresholdROIs()
   : Aux::Logger("SPNGThresholdROIs", "spng") {

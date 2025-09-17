@@ -10,9 +10,11 @@
 
 using tensor_map = torch::Dict<std::string, torch::Tensor>;
 using namespace torch::indexing;
-WIRECELL_FACTORY(SPNGFindMPCoincidence, WireCell::SPNG::FindMPCoincidence,
+WIRECELL_FACTORY(SPNGFindMPCoincidence,
+                 WireCell::SPNG::FindMPCoincidence,
+                 WireCell::SPNG::ITorchTensorSetFilter,
                  WireCell::INamed,
-                 WireCell::ITorchTensorSetFilter, WireCell::IConfigurable)
+                 WireCell::IConfigurable)
 
 WireCell::SPNG::FindMPCoincidence::FindMPCoincidence()
   : Aux::Logger("SPNGFindMPCoincidence", "spng") {

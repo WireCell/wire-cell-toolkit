@@ -5,7 +5,7 @@
 
 #include "WireCellSpng/ITorchSetToFrame.h"
 #include "WireCellSpng/ContextBase.h"
-#include "WireCellAux/Logger.h"
+#include "WireCellSpng/Logger.h"
 
 namespace WireCell::SPNG {
 
@@ -14,7 +14,7 @@ namespace WireCell::SPNG {
     ///
     /// Caution: this class does not handled batched tensors!  Run an unbatcher
     /// node prior if you need to convert batched.
-    class TdmToFrame: public ContextBase, public Aux::Logger, public ITorchSetToFrame  {
+    class TdmToFrame: public ContextBase, public Logger, public ITorchSetToFrame  {
     public:
 
         TdmToFrame();
@@ -38,8 +38,6 @@ namespace WireCell::SPNG {
         ///
         /// default takes first frame in set.
         std::variant<int, std::string> m_find_frame;
-
-        mutable size_t m_count{0};
 
     };
 }

@@ -7,6 +7,8 @@
 
 int main(int argc, char* argv[])
 {
+    // std::cerr << argv[0] << "\n";
+
     // 0:prog 1:text 2:pattern 3:format
     if (argc < 3 || argc > 4) {
         std::cerr << "usage: check-regex \"string\" \"regex\" [\"format\"]\n";

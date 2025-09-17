@@ -37,7 +37,7 @@ std::tuple<int, std::string, std::string> parseTag(const std::string& tag) {
 WIRECELL_FACTORY(SPNGDNNROI,// name of the factory
     WireCell::SPNG::DNNROI, // name of the class
     WireCell::INamed, // name of the interface 1 (allows object to have unique name)
-    WireCell::ITorchTensorSetFilter, // interface 2 (process ITorchTensorSet)
+    WireCell::SPNG::ITorchTensorSetFilter, // interface 2 (process ITorchTensorSet)
     WireCell::SPNG::ITorchForward, //interface 2 (process ITorchForward)
     WireCell::IConfigurable // interface 3 (allows configuration)
     )

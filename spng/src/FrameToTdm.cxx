@@ -14,7 +14,7 @@ WIRECELL_FACTORY(SPNGFrameToTdm,
 namespace WireCell::SPNG {
 
     FrameToTdm::FrameToTdm()
-        : Aux::Logger("FrameToTdm", "spng")
+        : Logger("FrameToTdm", "spng")
     {
     }
  
@@ -25,17 +25,24 @@ namespace WireCell::SPNG {
     WireCell::Configuration FrameToTdm::default_configuration() const
     {
         Configuration cfg = this->ContextBase::default_configuration();
-        cfg["basepath"] = m_basepath;
-        cfg["frame_relpath"] = m_frame_relpath;
-        // and many more.  See comments in header.
+        Configuration cfg2 = this->Logger::default_configuration();
+        update(cfg, cfg2);
+        
+        cfg["basepath"] = m_basepath.string();
+        cfg["frame_relpath"] = m_frame_relpath.string();
+
+        // And many more.  See comments in header and spng/docs/frametotdm.org.
         return cfg;
     }
     
     void FrameToTdm::configure(const WireCell::Configuration& cfg)
     {
         this->ContextBase::configure(cfg);
+        this->Logger::configure(cfg);
+
         std::string anode = cfg["anode"].asString();
         m_anode = Factory::find_tn<IAnodePlane>(anode);
+
 
         // build global channel order.  FIXME: we may not actually need to keep
         // m_anode after this....
@@ -48,10 +55,11 @@ namespace WireCell::SPNG {
             m_wpid_channels[wpid].insert(chid);
         }
 
-        m_basepath = get<std::string>(cfg, "basepath", m_basepath);
-        m_frame_relpath = get<std::string>(cfg, "frame_relpath", m_basepath);
+        m_basepath = get<std::string>(cfg, "basepath", m_basepath.string());
+        m_frame_relpath = get<std::string>(cfg, "frame_relpath", m_frame_relpath.string());
 
         m_chmasks.clear();
+        m_chmasks[""] = "chmasks/{label}"; // default relpath
         auto jchmasks = cfg["chmasks"];
         if (jchmasks.isObject()) {
             for (const auto& label : jchmasks.getMemberNames()) {
@@ -136,6 +144,9 @@ namespace WireCell::SPNG {
 
         Configuration empty;
         outtens = std::make_shared<SimpleTorchTensorSet>(inframe->ident(), empty, tensors);
+
+
+
         ++m_count;
         return true;
     }
@@ -150,7 +161,8 @@ namespace WireCell::SPNG {
         md["time"] = iframe->time();
         md["period"] = iframe->tick();
         md["datatype"] = "frame";
-        md["datapath"] = fmt::format(m_basepath + m_frame_relpath, fmt::arg("ident", ident));
+        auto fullpath = m_basepath / m_frame_relpath;
+        md["datapath"] = fmt::format(fullpath.string(), fmt::arg("ident", ident));
         // no parent, no batches
         return std::make_shared<SimpleTorchTensor>(md);
     }
@@ -161,18 +173,27 @@ namespace WireCell::SPNG {
         const auto chmasks = iframe->masks();
         const int ident = iframe->ident();
         ITorchTensor::vector tens;
-        for (const auto& [label, relpath] : m_chmasks) {
-            auto it = chmasks.find(label);
-            if (it == chmasks.end()) {
-                log->warn("requested channel mask \"{}\" not in frame ident {} at call={}",
-                          label, ident, m_count);
-                continue;
+
+        for (const auto& [label, cms] : chmasks) {
+
+            auto ten = chmask_tensor(cms);
+
+            std::string relpath = "";
+            for (const auto& maybe : std::vector<std::string>({label, ""})) {
+                auto it = m_chmasks.find(maybe);
+                if (it == m_chmasks.end()) {
+                    continue;
+                }
+                relpath = it->second;
+                break;
             }
-            auto ten = chmask_tensor(it->second);
+
             Configuration md;
             md["datatype"] = "chmasks";
-            md["datapath"] = fmt::format(m_basepath + relpath,
-                                         fmt::arg("ident", ident), fmt::arg("label", label));
+            auto fullpath = m_basepath / relpath;
+            md["datapath"] = fmt::format(fullpath.string(),
+                                         fmt::arg("ident", ident),
+                                         fmt::arg("label", label));
             md["parent"] = parent;
             tens.push_back(std::make_shared<SimpleTorchTensor>(ten, md));
         }
@@ -181,6 +202,8 @@ namespace WireCell::SPNG {
 
     torch::Tensor FrameToTdm::chmask_tensor(const Waveform::ChannelMasks& cms) const
     {
+
+
         /* We must convert this fiddly structure
            typedef std::pair<int, int> BinRange;
            typedef std::vector<BinRange> BinRangeList;
@@ -366,7 +389,8 @@ namespace WireCell::SPNG {
                     Configuration md = common_md;
                     md["tbin"] = (int)tbeg;
                     md["datatype"] = "traces";
-                    md["datapath"] = fmt::format(m_basepath + group.relpath,
+                    auto fullpath = m_basepath / group.relpath;
+                    md["datapath"] = fmt::format(fullpath.string(),
                                                  fmt::arg("ident", frame_ident),
                                                  fmt::arg("tag",   tag),
                                                  fmt::arg("index", rule_index),
@@ -386,7 +410,8 @@ namespace WireCell::SPNG {
 
                     Configuration md = common_md;
                     md["datatype"] = "summaries";
-                    md["datapath"] = fmt::format(m_basepath + group.relpath,
+                    auto fullpath = m_basepath / group.relpath;
+                    md["datapath"] = fmt::format(fullpath.string(),
                                                  fmt::arg("ident", frame_ident),
                                                  fmt::arg("tag",   tag),
                                                  fmt::arg("index", rule_index),
@@ -404,7 +429,8 @@ namespace WireCell::SPNG {
                     }
                     Configuration md = common_md;
                     md["datatype"] = "chids";
-                    md["datapath"] = fmt::format(m_basepath + group.relpath,
+                    auto fullpath = m_basepath / group.relpath;
+                    md["datapath"] = fmt::format(fullpath.string(),
                                                  fmt::arg("ident", frame_ident),
                                                  fmt::arg("tag",   tag),
                                                  fmt::arg("index", rule_index),

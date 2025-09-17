@@ -59,6 +59,13 @@ namespace WireCell::SPNG {
         /// Construct from parts.
         TensorIndex(int ident, const Configuration& md, const ITorchTensor::vector& tens);
 
+        /// Return a new index that represents the union of this and other.
+        ///
+        /// When a datapath collision occurs, the tensor from "other" is
+        /// included (same behavior of Python's dict.update).  If the opposite
+        /// is desired simply swap "this" and "other".
+        TensorIndex update(const TensorIndex& other) const;
+
         /// Pack tensors, ident and metadata into a tensor set.
         ITorchTensorSet::pointer as_set() const;
 
@@ -99,17 +106,17 @@ namespace WireCell::SPNG {
 
         /// Descend from node, adding all tensors found to this index.  Tensors
         /// are added in depth-first descent order.
-        void add(const tree_type& node);
+        void add(const tree_type& node, bool ignore_duplicate=false);
 
         /// Add tensors to the index via iterator range.
-        template<typename It> void add(It beg, It end) {
+        template<typename It> void add(It beg, It end, bool ignore_duplicate=false) {
             for (It it = beg; it != end; ++it) {
-                add(*it);
+                add(*it, ignore_duplicate);
             }
         }
 
         // Add from a tensor set.
-        void add(ITorchTensorSet::pointer ts);
+        void add(ITorchTensorSet::pointer ts, bool ignore_duplicate=false);
 
         /// Add a single tensor.
         ///
@@ -118,7 +125,11 @@ namespace WireCell::SPNG {
         /// This method strictly enforces the TDM.  This is intentional.  Do not
         /// relax it.  If you cause it to throw an exception, fix upstream so
         /// that tensors that obey the SPNG TDM are provided.
-        void add(ITorchTensor::pointer ten);
+        ///
+        /// By default, an exception is thrown when attempting to add a tensor
+        /// with datapath of an tensor in the index.  If ignore_duplicate=true,
+        /// quietly skip adding the tensor, keeping the original.
+        void add(ITorchTensor::pointer ten, bool ignore_duplicate=false);
 
 
         /// Return tensor at datapath or nullptr if no such path.
@@ -169,6 +180,9 @@ namespace WireCell::SPNG {
 
         /// Return the ident number.
         int ident() const { return m_ident; }
+
+        /// Return the number of tensors
+        size_t ntensors() const { return m_nodes.size(); }
 
         /// Return the metadata object.
         const Configuration& metadata() const { return m_md; }

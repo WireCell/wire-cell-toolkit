@@ -1,5 +1,19 @@
 #include "WireCellSpng/Util.h"
 #include <cmath>
+#include <sstream>
+
+
+namespace WireCell::Torch {
+
+    std::string to_string(const torch::Device& device)
+    {
+        std::stringstream ss;
+        ss << device;
+        return ss.str();        
+    }
+
+}
+
 using namespace WireCell;
 
 torch::Tensor Torch::gaussian1d(double mean, double sigma,

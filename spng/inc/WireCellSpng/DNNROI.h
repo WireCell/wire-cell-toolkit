@@ -95,8 +95,8 @@ namespace WireCell {
         };
 
         class DNNROI : public Aux::Logger, 
-                      public ITorchTensorSetFilter,                      
-                      public IConfigurable {
+                       public ITorchTensorSetFilter,                      
+                       public IConfigurable {
         public:
             DNNROI( );
             virtual ~DNNROI();

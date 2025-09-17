@@ -52,7 +52,13 @@ namespace WireCell::SPNG {
         return SelectionResult::kNoMatch;
     }
 
-    TensorIndex TensorSelector::apply(const TensorIndex& index, bool keep_unselected) const
+    TensorIndex TensorSelector::apply(const TensorIndex& index, bool keep_unselected, bool consider_parents) const
+    {
+        if (consider_parents) return apply_parents(index, keep_unselected);
+        return apply_all(index, keep_unselected);
+    }
+
+    TensorIndex TensorSelector::apply_parents(const TensorIndex& index, bool keep_unselected) const
     {
         TensorIndex ti(index.ident(), index.metadata());
         for (auto iten : index.tree().child_values()) { // top level parents
@@ -72,5 +78,29 @@ namespace WireCell::SPNG {
         return ti;
     }
 
+    TensorIndex TensorSelector::apply_all(const TensorIndex& index, bool keep_unselected) const
+    {
+        TensorIndex ti(index.ident(), index.metadata());
+        for (const auto& node : ti.tree().depth()) {
+            auto iten = node.value;
+
+            if (! iten) { // skip empty root node
+                continue;
+            }
+            
+            auto res = select_tensor(iten);
+
+            if (res == SelectionResult::kReject) {
+                continue;
+            }
+
+            if (res == SelectionResult::kNoMatch && !keep_unselected) {
+                continue;
+            }
+            
+            ti.add(node);
+        }        
+        return ti;
+    }
 }
 

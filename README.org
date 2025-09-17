@@ -30,6 +30,7 @@ Additional ~README~ information is available in the WCT sub packages:
 - [[file:root/README.org][root]]
 - [[file:sigproc/README.org][sigproc]]
 - [[file:sio/README.org][sio]]
+- [[file:spng/README.org][spng]]
 - [[file:tbb/README.org][tbb]]
 - [[file:test/README.org][test]]
 - [[file:util/README.org][util]]
@@ -56,13 +57,18 @@ The dependencies for the ~WireCellUtil~ package are required.  The rest are opti
 Some external dependencies have explicit minimum required versions:
 
 - TBB (oneAPI) 2021.1.1
-- Boost 1.75.0
+- Boost 1.80.0
 - Eigen 3.4.0
+- FFTW 3.3.10
+- JsonCPP 1.9.4
+- SPDLOG 1.9.2 with external fmtlib
+- Jsonnet (better, Go-Jsonnet) 0.19.1
 
 You may provide the necessary external software dependencies in a manner of your own choosing and some options include:
 
 - Packages provided by your OS or built "by hand".
 - [[https://github.com/WireCell/wire-cell-spack][Spack-based install]] automatically builds all (non-OS) externals and WCT itself
+- The [[https://github.com/brettviren/winch][winch]] tool can build podman containers with WCT.
 - Some WCT releases are built at FNAL as a UPS product named =wirecell=.
 - Exploit the above with a [[https://github.com/WireCell/wire-cell-singularity][Singularity container and CVMFS]].
 

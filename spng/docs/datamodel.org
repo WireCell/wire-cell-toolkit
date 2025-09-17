@@ -135,6 +135,10 @@ methods are named with a ~_tensors~ suffix.
 - transform :: apply a transformation on the selected tensor index.  The
   ~FunctionNode~ implements this as a no-op.
 
+- combine :: apply a combination of input and transformed tensor indices.  The
+  ~FunctionNode~ implements a configurable choice from a set of possible
+  combination algorithms.
+
 - rename :: apply standardized and configurable renaming rules.  A rule consists
   of a regular expression pattern and a format to apply if the pattern matches a
   tensor's ~datapath~.  Renaming a parent will also rename the corresponding
@@ -146,6 +150,21 @@ A subclass may override any of these methods in order to provide novel behavior.
 The most useful override is the *transform*.  A subclass may augment existing
 functionality of other methods by overriding and also calling them.
 
+*** Configuring FunctionNode
+
+tbd: comprehensive configuration guide.
+
+*** Comments / caveats
+
+The ~FunctionNode~, as described above, effectively implements a mini DFP graph
+passing a tensor index instead of a tensor set.  This monolithic subgraph could
+be separated into individual "selection", "transform", and "rename" function
+nodes.  The "combine" operation here is different than we will see in the fanin
+below.  It is a set-operation (keep input, keep transformed, union of both
+preferring either input or transformed).  In resembles "selection" but to
+implement as that in one has to contend with how to allow duplicate datapaths in
+a set or index.  For now we keep this monolith.
+
 ** TorchFunctionNode
 
 The ~TorchFunctionNode~ inherits from ~FunctionNode~ so that a subclass may
@@ -155,6 +174,10 @@ method that returns a user-configurable device to assume.  An subclass ~transfor
 method is also assured that the tensors it consumes are on the configured
 device.
 
+
+*** Configuring TorchFunctionNode
+
+tbd: comprehensive configuration guide.
 
 ** Fan nodes
 

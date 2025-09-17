@@ -13,7 +13,8 @@
 namespace WireCell {
 namespace SPNG {
     class NoTileMPCoincidence : public Aux::Logger,
-                    public WireCell::ITorchTensorSetFilter, public WireCell::IConfigurable {
+                                public ITorchTensorSetFilter,
+                                public IConfigurable {
     public:
         NoTileMPCoincidence( );
         virtual ~NoTileMPCoincidence();

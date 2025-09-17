@@ -6,9 +6,11 @@
 #include "WireCellSpng/ITorchSpectrum.h"
 #include "WireCellSpng/Util.h"
 
-WIRECELL_FACTORY(SPNGApply1DSpectrum, WireCell::SPNG::Apply1DSpectrum,
+WIRECELL_FACTORY(SPNGApply1DSpectrum,
+                 WireCell::SPNG::Apply1DSpectrum,
+                 WireCell::SPNG::ITorchTensorSetFilter,
                  WireCell::INamed,
-                 WireCell::ITorchTensorSetFilter, WireCell::IConfigurable)
+                 WireCell::IConfigurable)
 
 WireCell::SPNG::Apply1DSpectrum::Apply1DSpectrum()
   : Aux::Logger("SPNGApply1DSpectrum", "spng") {

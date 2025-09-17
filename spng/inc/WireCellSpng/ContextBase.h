@@ -22,7 +22,7 @@
 
 namespace WireCell::SPNG {
 
-    class ContextBase : public IConfigurable {
+    class ContextBase : public virtual IConfigurable {
     public:
 
         ContextBase() = default;

@@ -10,10 +10,19 @@
 
 #include <regex>
 
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGTdmToFrame,
+                 WireCell::SPNG::TdmToFrame,
+                 WireCell::INamed,
+                 WireCell::IConfigurable,
+                 WireCell::SPNG::ITorchSetToFrame)
+
+
 namespace WireCell::SPNG {
 
     TdmToFrame::TdmToFrame()
-        : Aux::Logger("TdmToFrame", "spng")
+        : Logger("TdmToFrame", "spng")
     {
     }
 

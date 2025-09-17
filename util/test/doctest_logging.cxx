@@ -12,6 +12,27 @@
 
 using namespace WireCell;
 
+TEST_CASE("logging params")
+{
+    auto b = Log::logger("params");
+    // Three styles
+    b->debug("x={} y={}", fmt::arg("x", 42), fmt::arg("y", 6.9));
+
+    // can not mix "automatic" and "manual"
+    // b->debug("x={} y={1}", fmt::arg("x", 42), fmt::arg("y", 6.9));
+
+    // Positional
+    b->debug("x={0} y={1}", fmt::arg("x", 42), fmt::arg("y", 6.9));
+
+    // Keyword
+    b->debug("x={x} y={y}", fmt::arg("x", 42), fmt::arg("y", 6.9));
+
+    // Can mix positional and keyword.
+    b->debug("x={0} y={y}", fmt::arg("x", 42), fmt::arg("y", 6.9));
+    b->debug("x={x} y={1}", fmt::arg("x", 42), fmt::arg("y", 6.9));
+
+}
+
 TEST_CASE("logging various")
 {
     spdlog::level::level_enum active_level = (spdlog::level::level_enum)SPDLOG_ACTIVE_LEVEL;

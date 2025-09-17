@@ -5,9 +5,11 @@
 
 #include "WireCellSpng/IFrameToTorchSet.h"
 #include "WireCellSpng/ContextBase.h"
+#include "WireCellSpng/Logger.h"
 #include "WireCellIface/IAnodePlane.h"
-#include "WireCellAux/Logger.h"
 #include "WireCellUtil/Waveform.h" // for ChannelMasks
+
+#include "boost/filesystem.hpp"
 
 namespace WireCell::SPNG {
 
@@ -28,7 +30,10 @@ namespace WireCell::SPNG {
     /// elements of a summaries tensor.  It is possible to specify group
     /// channels not represented in a tagged traces collection and vice versa.
     ///
-    class FrameToTdm : public ContextBase, public Aux::Logger, public IFrameToTorchSet {
+    class FrameToTdm : public ContextBase,
+                       public Logger,
+                       public virtual IConfigurable,
+                       public virtual IFrameToTorchSet {
     public:
 
         FrameToTdm();
@@ -37,65 +42,39 @@ namespace WireCell::SPNG {
         // IFunction
         virtual bool operator()(const input_pointer& in, output_pointer& out);
         
-        // IConfigurable
+        /// CONFIGURATION:
+        ///
+        /// FrameToTdm has sophisticated configuration but most uses can rely on
+        /// defaults for most parameters.  See the document
+        /// spng/docs/frametotdm.org for details.
+
         virtual void configure(const WireCell::Configuration& cfg);
         virtual WireCell::Configuration default_configuration() const;
         
 
     private:
 
-        /// Torch context configuration. 
-        ///
-        /// This is a ContextBase.  See that class for configuration.
+        /// The basepath for the datapaths of all output tensors.
+        boost::filesystem::path m_basepath = "/frames/{ident}";
 
-        /// DATAPATHS:
+        /// Configuration: "frame_relpath"
         ///
-        /// The FrameToTdm accepts user-defined datapaths assigned to each output tensor.
-        ///
-        /// A penultimate datapath for an output tensor is constructed as:
-        ///
-        ///   datapath = basepath + relpath
-        ///
-        /// Just prior to use, each datapath is formatted to interpolate any
-        /// format codes like "{parameter}" with the following set of parameters:
-        ///
-        /// All tensors:
-        ///
-        /// - ident :: IFrame::ident() value
-        ///
-        /// In addition, channel masks take:
-        ///
-        /// - label :: the relevant label for a channel mask
-        ///
-        /// In addition, tenors made by "rules" take:
-        ///
-        /// - tag :: the rule's tag
-        /// - index :: the 0-based index of the group in the group array.
-        /// - part :: the relevant kind of frame "part" ("traces", "summaries", "chids").
+        /// The path under basepath to place the parent "frame" tensor.
+        boost::filesystem::path m_frame_relpath = "frame";
 
         /// Configuration: "anode"
         ///
         /// The type:name of an anode plane component.
         IAnodePlane::pointer m_anode;
 
-        /// Configuration: "basepath"
-        ///
-        /// The path APPENDED all individual relpaths with no special
-        /// intervening character added.  If using filesystem-like paths, you
-        /// must explicitly include a "/" either at end of your basepath or
-        /// begin of all relpaths.
-        std::string m_basepath = "/frames/{ident}/";
-
-        /// Configuration: "frame_relpath"
-        ///
-        /// The path under basepath that the parent "frame" tensor is placed.
-        std::string m_frame_relpath = "frame";
-
         /// Configuration: "chmasks"
         ///
-        /// A map between a channel mask label ("bad", "noisy", etc) and a
-        /// relative path pattern.  See DATAPATHS.  Only channel mask labels
-        /// given are converted to tensors.
+        /// Each "label" key in the "channel mask map" is converted to a
+        /// "chmasks" TDM tensor.  The datapath of each label may be customized
+        /// by providing a "chmasks" object that maps label attribute key to a
+        /// "relpath" string.  During conversion, the empty string ("") label
+        /// entry will be used if the label is not found in the "chmasks"
+        /// configuration object.  This default relpath is "chmasks/{label}".
         std::map<std::string, std::string> m_chmasks;
 
         /// Configuration: "rules"
@@ -121,14 +100,18 @@ namespace WireCell::SPNG {
         ///     group.  If both wpids and channels are given, a union of
         ///     channels are found.
         ///
-        ///   - relpath :: A datapath relative to basepath under which
-        ///     "traces/", "chids/", "summaries/" are placed.  This must be
-        ///     unique across all group objects to avoid conflicts.  It is
-        ///     recommended that the "tag" name be an element of this relative
-        ///     path and a way to distinguish each group. 
+        ///   - relpath :: A datapath relative to basepath under which the parts
+        ///     "traces", "chids", "summaries" are placed.  This must be unique
+        ///     across all group objects to avoid conflicts.  It is recommended
+        ///     to include the '{tag}' if not empty and '{index}' if more than
+        ///     one group is in the array and '{part}' if multiple parts are
+        ///     extracted.
         ///
         struct Group {
-            std::string relpath; // relative to basepath
+            // The path relative to basepath for each part tensor in the group.
+            boost::filesystem::path relpath {
+                "tags/{tag}/rules/{rule}/groups/{group}/{part}"
+            };
             std::string name;    // optional, "" by default
             std::set<int> wpids;
             std::set<int> channels;
@@ -146,9 +129,6 @@ namespace WireCell::SPNG {
 
         // All the channels in a wireplane ID
         std::unordered_map<int, std::set<int> > m_wpid_channels;
-
-
-        mutable size_t m_count{0};
 
     private:
 

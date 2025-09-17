@@ -3,6 +3,14 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Exceptions.h"
 
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGFaninNode,
+                 WireCell::SPNG::FaninNode,
+                 WireCell::SPNG::ITorchTensorSetFanin,
+                 WireCell::IConfigurable,
+                 WireCell::INamed);
+
 namespace WireCell::SPNG {
 
     FaninNode::FaninNode(const std::string& logname, const std::string& pkgname)
@@ -17,7 +25,7 @@ namespace WireCell::SPNG {
         return ret;
     }
 
-    bool FaninNode::operator()(const input_vector& inv, output_pointer& out) const
+    bool FaninNode::operator()(const input_vector& inv, output_pointer& out) 
     {
         if (inv.size() != m_multiplicity) {
             raise<ValueError>("unexpected multiplicity, got:%d want:%d", inv.size(), m_multiplicity);
@@ -27,8 +35,8 @@ namespace WireCell::SPNG {
 
         size_t neos = std::count(inv.begin(), inv.end(), nullptr);
         if (neos) {
-            maybe_log(nullptr, String::format("EOS in %d of %d at call=%d", 
-                                              neos, m_multiplicity, m_count));
+            logit(String::format("EOS in %d of %d at call=%d", 
+                                 neos, m_multiplicity, m_count));
             ++m_count;
             return true;
         }
@@ -56,7 +64,7 @@ namespace WireCell::SPNG {
     ITorchTensorSet::pointer FaninNode::sys_combine_tensors(const ITorchTensorSet::vector& inv) const
     {
         auto out = combine_tensors(inv);
-        maybe_log(out, "combine");
+        logit(out, "combine");
         return out;
     }
 

@@ -12,7 +12,7 @@
 #include "WireCellSpng/TensorSelector.h"
 #include "WireCellSpng/TensorRenaming.h"
 #include "WireCellSpng/TensorIndex.h"
-#include "WireCellAux/Logger.h"
+#include "WireCellSpng/Logger.h"
 #include "WireCellIface/IConfigurable.h"
 
 namespace WireCell::SPNG {
@@ -39,11 +39,13 @@ namespace WireCell::SPNG {
      * implementation of these methods in FunctionNode for examples how to do
      * this.
      */       
-    class FunctionNode : public Aux::Logger, public IConfigurable, public WireCell::ITorchTensorSetFilter { 
+    class FunctionNode : public Logger,
+                         public virtual IConfigurable,
+                         public ITorchTensorSetFilter { 
     public:
 
         // Subclass SHOULD call this to provide a subclass-specific log name
-        FunctionNode(const std::string& logname="function", const std::string& pkgnam="spng");
+        FunctionNode(const std::string& logname="SPNGFunctionNode", const std::string& pkgnam="spng");
         virtual ~FunctionNode() = default;
 
         // IConfigurable
@@ -80,7 +82,7 @@ namespace WireCell::SPNG {
 
 
         // ITorchTensorSetFilter
-        virtual bool operator()(const ITorchTensorSet::pointer& in, output_pointer& out) const;
+        virtual bool operator()(const ITorchTensorSet::pointer& in, output_pointer& out);
 
         /// The FunctionNode API.  These are called by the operator() in the
         /// order given here.  Any may be overridden by a subclass.  Such
@@ -120,17 +122,34 @@ namespace WireCell::SPNG {
         /// Configuration: "tensor_renaming".  See TensorRenaming class for details.
         TensorRenaming m_renaming;
 
-        /// Emit standard log line for the state of the tensor index.
-        virtual void maybe_log(const TensorIndex& ti, const std::string& context="") const;
+        /// Configuration: "keep_unselected" (default true)
+        ///
+        /// IF true, any tensors not explicitly selected or rejected are
+        /// selected.  If false, they are rejected.
+        bool m_keep_unselected{true};
 
-        /// Configuration: quiet.  Set true to not call any logging.  Default is false.
-        bool m_quiet{false};
+        /// Configuration: "select_parents" (default true)
+        ///
+        /// If true, the selector is applied only to ultimate parents (children
+        /// of the tree root node).  Any tree descendants will follow the
+        /// parent.  If false, the selector is applied to all tensors.
+        bool m_select_parents{true};
+
+        /// Configuration: "combine_policy" (string, default="union_replace")
+        ///
+        /// Control how tensor index that is produced by the "transform" call
+        /// is combined with the input tensor index.  Supported policies are:
+        ///
+        /// - union_replace :: a transformed tensor will replace an input tensor that has the same datapath.
+        ///
+        /// - union_keep :: an input tensor of the same datapath as a transformed tensor is kept.
+        ///
+        /// - input_only :: the transform is pure side-effect and the input tensor index is not modified.
+        ///
+        /// - transformed_only :: only the transformed index is kept
+        std::string m_combine_policy{"union_replace"};
 
         std::map<std::string, std::string> m_input_datapath, m_output_datapath;
-        
-
-        /// Keep track of calls
-        mutable size_t m_count{0};
 
     };
 }

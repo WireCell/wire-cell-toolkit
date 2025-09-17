@@ -4,46 +4,20 @@
 namespace WireCell::SPNG {
 
     FanBase::FanBase(const std::string& logname, const std::string& pkgname)
-        : Aux::Logger(logname, pkgname)
+        : Logger(logname, pkgname)
     {
     }
 
     void FanBase::configure(const WireCell::Configuration& cfg)
     {
+        this->Logger::configure(cfg);
         m_multiplicity = get(cfg, "multiplicity", (int)m_multiplicity);
-        m_quiet = get<bool>(cfg, "quiet", m_quiet);
-
     }
 
     WireCell::Configuration FanBase::default_configuration() const
     {
-        Configuration cfg;
+        Configuration cfg = this->Logger::default_configuration();
         cfg["multiplicity"] = (int)m_multiplicity;
-        cfg["quiet"] = m_quiet;
         return cfg;
     }
-
-    void FanBase::maybe_log(const ITorchTensorSet::pointer& ts, const std::string context) const
-    {
-        if (m_quiet) return;
-
-        if (!ts) {
-            log->debug("{}: call={}", context, m_count);
-            return;
-        }
-
-        const size_t ntens = ts->tensors()->size();
-
-        try {
-            // A little expensive just for a line of log file.  Set quiet=false to avoid.
-            TensorIndex ti(ts);
-            size_t nparents = ti.nparents();
-            log->debug("{}: call={}, {} tensors, {} parents (TDM)", context, m_count, ntens, nparents);
-        }
-        catch (const ValueError& err) {
-            log->debug("{}: call={}, {} tensors (not TDM)", context, m_count, ntens);
-        }
-    }
-
-
 }

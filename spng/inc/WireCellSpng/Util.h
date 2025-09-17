@@ -21,6 +21,9 @@
 // Capitalized "Torch" namespace should not collide with any in torch, proper.
 namespace WireCell::Torch {
 
+    /// Return a torch device as a string.
+    std::string to_string(const torch::Device& device);
+
     // Map C++ types to torch::Dtype
     template <typename T, typename Enable=void>
     struct CppTypeToTorchDtype { }; // error about a .value missing?  You are using an usupported dtype.
@@ -37,7 +40,6 @@ namespace WireCell::Torch {
     // pixel masks
     template <> struct CppTypeToTorchDtype<bool> { static constexpr torch::Dtype value = torch::kBool; };
     // Be thoughtful when extending this list.
-
 
     // Cast torch tensor to dtype with C++ type.
     template <typename T>

@@ -29,7 +29,7 @@ namespace WireCell::SPNG {
     /// be satisfied by the subclass.
     class FaninNode : public FanBase, public ITorchTensorSetFanin {
     public:
-        FaninNode(const std::string& logname="fanin", const std::string& pkgnam="spng");
+        FaninNode(const std::string& logname="SPNGFaninNode", const std::string& pkgnam="spng");
         virtual ~FaninNode() = default;
 
         // INode, override because we get multiplicity at run time.
@@ -37,7 +37,7 @@ namespace WireCell::SPNG {
         virtual std::vector<std::string> input_types();
 
         // IFanin
-        virtual bool operator()(const ITorchTensorSet::vector& inv, ITorchTensorSet::pointer& out) const;
+        virtual bool operator()(const ITorchTensorSet::vector& inv, ITorchTensorSet::pointer& out);
 
         /// Combine "multiplicity" number of sets into one.
         ///

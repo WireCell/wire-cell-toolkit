@@ -1,4 +1,11 @@
 #include "WireCellSpng/FanoutNode.h"
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGFanoutNode,
+                 WireCell::SPNG::FanoutNode,
+                 WireCell::SPNG::ITorchTensorSetFanout,
+                 WireCell::IConfigurable,
+                 WireCell::INamed);
 
 namespace WireCell::SPNG {
 
@@ -17,11 +24,11 @@ namespace WireCell::SPNG {
         return ret;
     }
 
-    bool FanoutNode::operator()(const input_pointer& in, output_vector& outv) const
+    bool FanoutNode::operator()(const input_pointer& in, output_vector& outv) 
     {
         outv.clear();
         if (! in) {
-            maybe_log(nullptr, "EOS");
+            logit("EOS");
             ++m_count;
             return true;
         }
@@ -39,7 +46,7 @@ namespace WireCell::SPNG {
 
     ITorchTensorSet::vector FanoutNode::sys_separate_tensors(const ITorchTensorSet::pointer& in) const
     {
-        maybe_log(in, "separate");
+        logit(in, "separate");
         return this->separate_tensors(in);
     }
 

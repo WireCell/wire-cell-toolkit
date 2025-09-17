@@ -1,5 +1,6 @@
 #include "WireCellSpng/ContextBase.h"
 
+#include <iostream> // debug
 
 namespace WireCell::SPNG {
 

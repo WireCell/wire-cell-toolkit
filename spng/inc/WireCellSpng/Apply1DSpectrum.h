@@ -12,7 +12,8 @@
 namespace WireCell {
 namespace SPNG {
     class Apply1DSpectrum : public Aux::Logger,
-                    public WireCell::ITorchTensorSetFilter, public WireCell::IConfigurable {
+                            public WireCell::SPNG::ITorchTensorSetFilter,
+                            public WireCell::IConfigurable {
     public:
         Apply1DSpectrum( );
         virtual ~Apply1DSpectrum();

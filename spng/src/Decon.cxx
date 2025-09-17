@@ -10,9 +10,11 @@
 
 // #include "WireCellSpng/ITorchColdElecResponse.h"
 
-WIRECELL_FACTORY(SPNGDecon, WireCell::SPNG::Decon,
+WIRECELL_FACTORY(SPNGDecon,
+                 WireCell::SPNG::Decon,
+                 WireCell::SPNG::ITorchTensorSetFilter,
                  WireCell::INamed,
-                 WireCell::ITorchTensorSetFilter, WireCell::IConfigurable)
+                 WireCell::IConfigurable)
 
 WireCell::SPNG::Decon::Decon()
   : Aux::Logger("SPNGDecon", "spng") {

@@ -12,7 +12,8 @@
 namespace WireCell {
 namespace SPNG {
     class ThresholdROIs : public Aux::Logger,
-                    public WireCell::ITorchTensorSetFilter, public WireCell::IConfigurable {
+                          public ITorchTensorSetFilter,
+                          public IConfigurable {
     public:
         ThresholdROIs( );
         virtual ~ThresholdROIs();

@@ -56,9 +56,22 @@ namespace WireCell::SPNG {
         return ti;
     }
 
+    TensorIndex TensorIndex::update(const TensorIndex& other) const
+    {
+        // Note, the "sign" of the which index wins a datapath collision for the
+        // update() method is opposite from the add() method.  So, here start
+        // with a copy of the "other" and then add "this" with any collisions
+        // ignored.
+
+        TensorIndex ti = other.deepcopy();
+        ti.add(m_root, true);
+        return ti;
+    }
+
+
     // All add()'s flow through this one.
     //
-    void TensorIndex::add(ITorchTensor::pointer ten)
+    void TensorIndex::add(ITorchTensor::pointer ten, bool ignore_duplicate)
     {
         if (! ten) {
             // quietly ignore nullptr
@@ -78,6 +91,9 @@ namespace WireCell::SPNG {
             raise<ValueError>("no datapath for tensor");
         }
         if (m_bypath.find(dpath) != m_bypath.end()) {
+            if (ignore_duplicate) {
+                return;
+            }
             raise<ValueError>("duplicate datapath: %s", dpath);
         }
         {                       // precheck for TDM compliance
@@ -112,7 +128,7 @@ namespace WireCell::SPNG {
         m_nodes[ten] = pnode->insert(ten);
     }
 
-    void TensorIndex::add(ITorchTensorSet::pointer ts) {
+    void TensorIndex::add(ITorchTensorSet::pointer ts, bool ignore_duplicate) {
         if (!ts) {
             // quietly ignore dup
             return;
@@ -121,17 +137,17 @@ namespace WireCell::SPNG {
         ITorchTensor::shared_vector tens = ts->tensors();
         for (auto cit = tens->begin(); cit != tens->end(); ++cit) {
             ITorchTensor::pointer ten = *cit;
-            add(ten);
+            add(ten, ignore_duplicate);
         }
     }
 
-    void TensorIndex::add(const TensorIndex::tree_type& tree)
+    void TensorIndex::add(const TensorIndex::tree_type& tree, bool ignore_duplicate)
     {
         for (const auto& node : tree.depth()) { // DFS 
             if (! node.value) { // skip empty root node
                 continue;
             }
-            add(node.value);
+            add(node.value, ignore_duplicate);
         }
     }
 

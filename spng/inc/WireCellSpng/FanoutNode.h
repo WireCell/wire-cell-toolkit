@@ -29,7 +29,7 @@ namespace WireCell::SPNG {
     /// be satisfied by the subclass.
     class FanoutNode : public FanBase, public ITorchTensorSetFanout {
     public:
-        FanoutNode(const std::string& logname="fanout", const std::string& pkgnam="spng");
+        FanoutNode(const std::string& logname="SPNGFanoutNode", const std::string& pkgnam="spng");
         virtual ~FanoutNode() = default;
 
         // INode, override because we get multiplicity at run time.
@@ -37,7 +37,7 @@ namespace WireCell::SPNG {
         virtual std::vector<std::string> output_types();
 
         // IFanout
-        virtual bool operator()(const ITorchTensorSet::pointer& in, ITorchTensorSet::vector& outv) const;
+        virtual bool operator()(const ITorchTensorSet::pointer& in, ITorchTensorSet::vector& outv);
 
         /// Separate the set into multiple a "multiplicity" number of sets.
         ///
@@ -52,16 +52,8 @@ namespace WireCell::SPNG {
 
 
     private:
-        /// Configuration
-        ///
-        /// - multiplicity :: the fan-out multiplicity.
-        int m_multiplicity{2};
 
-        /// Configuration:
-        ///
-        /// - quiet ::  Set true to not call any logging.  Default is false.
-        bool m_quiet{false};
-
+        /// Configuration: See FanBase for more.
 
     };
 }

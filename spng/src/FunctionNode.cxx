@@ -2,10 +2,19 @@
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGFunctionNode,
+                 WireCell::SPNG::FunctionNode,
+                 WireCell::SPNG::ITorchTensorSetFilter,
+                 WireCell::IConfigurable,
+                 WireCell::INamed);
+
+
 namespace WireCell::SPNG {
 
     FunctionNode::FunctionNode(const std::string& logname, const std::string& pkgname)
-        : Aux::Logger(logname, pkgname)
+        : Logger(logname, pkgname)
     {
     }
 
@@ -21,8 +30,8 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration FunctionNode::default_configuration() const
     {
-        Configuration cfg;
-        cfg["quiet"] = m_quiet;
+        Configuration cfg = this->Logger::default_configuration();
+
         auto cfg1 = m_selector.default_configuration();
         auto cfg2 = m_renaming.default_configuration();
         update(cfg, cfg1);
@@ -35,12 +44,17 @@ namespace WireCell::SPNG {
             cfg["output_datapath"][kind] = datapath;
         }
 
+        cfg["keep_unselected"] = m_keep_unselected;
+        cfg["select_parents"] = m_select_parents;
+        cfg["combine_policy"] = m_combine_policy;
+
         return cfg;
     }
 
     void FunctionNode::configure(const WireCell::Configuration& cfg)
     {
-        m_quiet = get<bool>(cfg, "quiet", m_quiet);
+        this->Logger::configure(cfg);
+
         m_selector.configure(cfg);
         m_renaming.configure(cfg);
 
@@ -55,6 +69,27 @@ namespace WireCell::SPNG {
             for (const auto& kind : ots.getMemberNames()) {
                 m_output_datapath[kind] = ots[kind].asString();
             }
+        }
+
+        m_keep_unselected = get(cfg, "keep_unselected", m_keep_unselected);
+        m_select_parents = get(cfg, "select_parents", m_select_parents);
+        m_combine_policy = get(cfg, "combine_policy", m_combine_policy);
+
+        bool okay = false;
+        std::vector<std::string> known_policy = {
+            "union_replace",
+            "union_keep",
+            "input_only",
+            "transformed_only"
+        };
+        for (const auto& one : known_policy) {
+            if (m_combine_policy == one) {
+                okay=true;
+                break;
+            }
+        }
+        if (! okay) {
+            raise<ValueError>("unsupported combine policy: \"%s\"", m_combine_policy);
         }
     }
     
@@ -84,13 +119,13 @@ namespace WireCell::SPNG {
     TensorIndex FunctionNode::sys_index_tensors(const ITorchTensorSet::pointer& in) const
     {
         auto ti = index_tensors(in);
-        maybe_log(ti, "index");
+        logit(ti, "index");
         return ti;              // copy elision
     }
 
     TensorIndex FunctionNode::select_tensors(TensorIndex ti) const
     {
-        return m_selector.apply(ti);
+        return m_selector.apply(ti, m_keep_unselected, m_select_parents);
     }
         
     TensorIndex FunctionNode::transform_tensors(TensorIndex ti) const
@@ -100,10 +135,21 @@ namespace WireCell::SPNG {
 
     TensorIndex FunctionNode::sys_transform_tensors(TensorIndex ti) const
     {
-        maybe_log(ti, "pre-transform");
+        logit(ti, "pre-transform");
         auto new_ti = transform_tensors(std::move(ti));
-        maybe_log(new_ti, "post-transform");
-        return new_ti;          // copy elision
+        logit(new_ti, "post-transform");
+
+        if (m_combine_policy == "input_only") {
+            return ti;
+        }
+        if (m_combine_policy == "transformed_only") {
+            return new_ti;
+        }
+        if (m_combine_policy == "union_keep") {
+            return new_ti.update(ti); // ti wins datapath collisions
+        }
+        // default is union_replace.
+        return ti.update(new_ti); // new_ti wins
     }
 
     TensorIndex FunctionNode::rename_tensors(TensorIndex ti) const
@@ -118,28 +164,23 @@ namespace WireCell::SPNG {
 
     ITorchTensorSet::pointer FunctionNode::sys_pack_tensors(TensorIndex ti) const
     {
-        maybe_log(ti, "pack");
+        logit(ti, "pack");
         return pack_tensors(std::move(ti));
     }
 
-    void FunctionNode::maybe_log(const TensorIndex& ti, const std::string& context) const
-    {
-        if (m_quiet) return;
-
-        log->debug("{}: call={}: {}", context, m_count, ti.str());
-    }
-
-    bool FunctionNode::operator()(const input_pointer& in, output_pointer& out) const
+    bool FunctionNode::operator()(const input_pointer& in, output_pointer& out) 
     {
         out = nullptr;
         if (! in) {
-            log->debug("EOS: call={}", m_count);
+            logit("EOS");
             ++m_count;
             return true;
         }
 
+        logit(in, "input");
         // Weeeeee!
         out = sys_pack_tensors(rename_tensors(sys_transform_tensors(select_tensors(sys_index_tensors(in)))));
+        logit(in, "output");
         ++m_count;
         return true;
     }

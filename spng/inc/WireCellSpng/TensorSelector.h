@@ -67,14 +67,20 @@ namespace WireCell::SPNG {
         enum class SelectionResult { kNoMatch=0, kAccept=1, kReject=2 };
         SelectionResult select_tensor(const ITorchTensor::pointer ten) const;
 
-        /// Apply the selection rules to the parent tensors in the index
-        /// (children of the root tree node).  Children live or die with their
-        /// parent.  If keep_unselected is true (default) then any parent that
-        /// is neither accepted nor rejected is considered accepted.  If false,
-        /// it is considered rejected.
-        TensorIndex apply(const TensorIndex& index, bool keep_unselected=true) const;
+        /// Apply the selection rules to tensors in the index.
+        ///
+        /// If `keep_unselected` is true (default) then any parent that is
+        /// neither accepted nor rejected is considered accepted.  If false, it
+        /// is considered rejected.
+        ///
+        /// If `consider_parents` is true (default) then the rules are applied
+        /// only to the top most parent tensors (direct children of the tree
+        /// root).  Their tree descendants will live or die with the parent.  If
+        /// false, apply selection rules to all tensors.
+        TensorIndex apply(const TensorIndex& index, bool keep_unselected=true, bool consider_parents=true) const;
 
-
+        TensorIndex apply_parents(const TensorIndex& index, bool keep_unselected=true) const;
+        TensorIndex apply_all(const TensorIndex& index, bool keep_unselected=true) const;
 
     private:
 
