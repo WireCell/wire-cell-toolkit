@@ -85,7 +85,7 @@ function(
                 name: "dnnroi",
                 data:{
                     model: ts_model_file,//"/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
-                    device: "gpu",
+                    device: (if debug_force_cpu then 'cpu' else 'gpu'),
                 }
             },
             local tf_fans = make_fanout(tools.anodes[0]),

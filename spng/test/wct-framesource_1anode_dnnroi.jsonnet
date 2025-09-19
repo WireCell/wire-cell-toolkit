@@ -2,6 +2,7 @@ function(
   input_file='tensor_frames.npz',
   do_spng=true,
   ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+  device='gpu',
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
 local g = import 'pgraph.jsonnet',
@@ -78,7 +79,7 @@ local ts = {
     name: "dnnroi",
     data: {
         model: ts_model_file,//"ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
-        device: "cpu", // "gpucpu",
+        device: (if device == 'gpu' then 'gpucpu' else 'cpu'), // "gpucpu",
         concurrency: 1,
     },
 },
@@ -130,19 +131,22 @@ local torch_maker = import 'torch_1anode_dnnroi.jsonnet',
 local torch_nodes = torch_maker(
   tools,
   ts_model_file=ts_model_file,
+  // debug_force_cpu=(device=='cpu'),
 ),
 local spng_stacked = torch_nodes.stacked_spng,
+
+local frame_output = fileio.frame_tensor_file_sink('toolkit_dnnroi_output.tar', mode='tagged'),
 local sim = sim_maker(params, tools),
 local sink = sim.frame_sink,
 
 local sp_graph = g.intern(
     innodes=[frame_input],
     centernodes=selectors + [toolkit_pipe],
-    outnodes=[sink],
+    outnodes=[frame_output],
     edges = [
       g.edge(frame_input, selectors[0]),
       g.edge(selectors[0], toolkit_pipe),
-      g.edge(toolkit_pipe, sink),
+      g.edge(toolkit_pipe, frame_output),
     ]
 ),
 
