@@ -1,5 +1,8 @@
 function(
   input_file='tensor_frames.npz',
+  do_spng=true,
+  ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+  device='gpu',
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
 local g = import 'pgraph.jsonnet',
@@ -49,6 +52,44 @@ local selectors = [
   }, nin=1, nout=1) for n in std.range(0, nanodes-1)
 ],
 
+local sp_override = {
+    sparse: false,
+    use_roi_debug_mode: true,
+    use_roi_refinement: true,
+    save_negtive_charge: false,
+    use_multi_plane_protection: true,
+    process_planes: [0, 1, 2],
+    debug_no_frer: false,
+    debug_no_wire_filter: false,
+    break_roi_loop1_tag: "",
+    break_roi_loop2_tag: "",
+    shrink_roi_tag: "",
+    extend_roi_tag: "",
+    // decon_charge_tag: "",
+    do_not_mp_protect_traditional: true, // do_not_mp_protect_traditional to 
+                                         // make a clear ref, defualt is false
+    mp_tick_resolution: 4,
+},
+
+local sp = sp_maker(params, tools, sp_override),
+local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes],
+local dnnroi = import 'perfect_pdhd/dnnroi.jsonnet',
+local ts = {
+    type: "TorchService",
+    name: "dnnroi",
+    data: {
+        model: ts_model_file,//"ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
+        device: (if device == 'gpu' then 'gpucpu' else 'cpu'), // "gpucpu",
+        concurrency: 1,
+    },
+},
+
+local toolkit_pipe = g.pipeline([
+  sp_pipes[0],
+  dnnroi(tools.anodes[0], ts, output_scale=1.0, nticks=params.daq.nticks, nchunks=1)
+]),
+
+
 // local simple_pipes = [
 //   g.pipeline([
 //                nf_pipes[n],
@@ -89,26 +130,25 @@ local fanout_apa_rules =
 local torch_maker = import 'torch_1anode_dnnroi.jsonnet',
 local torch_nodes = torch_maker(
   tools,
+  ts_model_file=ts_model_file,
+  debug_force_cpu=(device=='cpu'),
 ),
 local spng_stacked = torch_nodes.stacked_spng,
 
+local frame_output = fileio.frame_tensor_file_sink('toolkit_dnnroi_output.tar', mode='tagged'),
+local sim = sim_maker(params, tools),
+local sink = sim.frame_sink,
 
-// local fanout = g.pnode({
-//     type: "FrameFanout",
-//     name: "sn_mag_nf",
-//     data: {
-//         multiplicity: 4,
-//         tag_rules: fanout_apa_rules,
-//     },
-// }, nin=1, nout=4),
-
-// local load_to_fanout = g.intern(
-//   innodes=[frame_input],
-//   outnodes=[fanout],
-//   edges = [
-//     g.edge(frame_input, fanout),
-//   ]
-// ),
+local sp_graph = g.intern(
+    innodes=[frame_input],
+    centernodes=selectors + [toolkit_pipe],
+    outnodes=[frame_output],
+    edges = [
+      g.edge(frame_input, selectors[0]),
+      g.edge(selectors[0], toolkit_pipe),
+      g.edge(toolkit_pipe, frame_output),
+    ]
+),
 
 local graph = 
     g.intern(
@@ -121,10 +161,12 @@ local graph =
       ]
     ),
 
+local target_graph = (if do_spng then graph else sp_graph),
+
 local app = {
   type: 'Pgrapher',
   data: {
-    edges: g.edges(graph),
+    edges: g.edges(target_graph),
   },
 },
 
@@ -132,15 +174,17 @@ local cmdline = {
     type: "wire-cell",
     data: {
         plugins: [
-          "WireCellGen", "WireCellPgraph", "WireCellSio", 
+          "WireCellGen",
+          "WireCellPgraph",
+          "WireCellSio", 
           "WireCellSigProc",
           "WireCellRoot",
-          "WireCellSpng"],
+          "WireCellSpng"] + (if do_spng then [] else ["WireCellPytorch"]),
         apps: ["Pgrapher"]
     }
 },
 
 
 // Finally, the configuration sequence which is emitted.
-ret: [cmdline] + g.uses(graph) + [app]
+ret: [cmdline] + g.uses(target_graph) + [app]
 }.ret

@@ -31,6 +31,7 @@ void WireCell::SPNG::ThresholdROIs::configure(const WireCell::Configuration& con
     m_output_tensor_tag = get(config, "output_tensor_tag", m_output_tensor_tag);
     m_unsqueeze_input = get(config, "unsqueeze_input", m_unsqueeze_input);
     m_threshold_rms_factor = get(config, "threshold_rms_factor", m_threshold_rms_factor);
+    m_debug_force_cpu = get(config, "debug_force_cpu", m_debug_force_cpu);
     log->debug("Will tag with Set:{} Tensor:{}", m_output_set_tag.asString(),
                m_output_tensor_tag.asString());
     log->debug("Will find ROIs with threshold_rms_factor {}", m_threshold_rms_factor);

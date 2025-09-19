@@ -4,7 +4,10 @@ local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
 local spng_filters = import 'spng_filters.jsonnet';
 
-function(tools, debug_force_cpu=false) {
+function(
+    tools, debug_force_cpu=false,
+    ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
             
         local filter_settings = {
@@ -81,8 +84,8 @@ function(tools, debug_force_cpu=false) {
                 type: "SPNGTorchService",
                 name: "dnnroi",
                 data:{
-                    model: "/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
-                    device: "gpu",
+                    model: ts_model_file,//"/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+                    device: (if debug_force_cpu then 'cpu' else 'gpu'),
                 }
             },
             local tf_fans = make_fanout(tools.anodes[0]),
@@ -379,6 +382,7 @@ function(tools, debug_force_cpu=false) {
                         target_plane_index: 0,
                         aux_plane_l_index: 2,
                         aux_plane_m_index: 1,
+                        debug_force_cpu: debug_force_cpu,
                         // output_torch_name: "mp_finding_%d_tensors.pt" % anode.data.ident,
                     },
                 }, nin=1, nout=1, uses=[tools.anodes[0]]) for plane in ['u', 'v']
