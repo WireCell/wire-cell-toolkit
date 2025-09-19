@@ -131,7 +131,7 @@ local torch_maker = import 'torch_1anode_dnnroi.jsonnet',
 local torch_nodes = torch_maker(
   tools,
   ts_model_file=ts_model_file,
-  // debug_force_cpu=(device=='cpu'),
+  debug_force_cpu=(device=='cpu'),
 ),
 local spng_stacked = torch_nodes.stacked_spng,
 

@@ -382,6 +382,7 @@ function(
                         target_plane_index: 0,
                         aux_plane_l_index: 2,
                         aux_plane_m_index: 1,
+                        debug_force_cpu: debug_force_cpu,
                         // output_torch_name: "mp_finding_%d_tensors.pt" % anode.data.ident,
                     },
                 }, nin=1, nout=1, uses=[tools.anodes[0]]) for plane in ['u', 'v']

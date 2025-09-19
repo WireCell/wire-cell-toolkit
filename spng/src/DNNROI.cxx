@@ -146,17 +146,22 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     }
     int tick_per_slice = a.size(2) / b.size(2);
     log->debug("DNNROI: tick_per_slice: {}", tick_per_slice);
+    
     int nticks_a = a.size(2); 
     log->debug("DNNROI: nticks_a: {}", nticks_a);
+    
     int nticks_ds_a = nticks_a / tick_per_slice;
     log->debug("DNNROI: nticks_ds_a: {}", nticks_ds_a);
+    
     //preprocessing of the target tensor
     //shape of the each tensor is [1, 800, 6000] for a and [1, 800, 1500] for b and c
     //downsample a to have the same number of ticks as b and c
     torch::Tensor a_trimmed = a.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, nticks_ds_a * tick_per_slice)});
     log->debug("DNNROI: a_trimmed shape: {}", tensor_shape_string(a_trimmed));
+    
     torch::Tensor a_reshaped = a_trimmed.view({a_trimmed.size(0), a_trimmed.size(1), nticks_ds_a, tick_per_slice});
     log->debug("DNNROI: a_reshaped shape: {}", tensor_shape_string(a_reshaped));
+    
     torch::Tensor a_ds = torch::mean(a_reshaped, 3);
     log->debug("DNNROI: a_ds shape: {}", tensor_shape_string(a_ds));
     std::vector<torch::Tensor> to_save = {a_ds};
