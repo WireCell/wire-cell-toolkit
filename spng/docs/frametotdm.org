@@ -64,7 +64,7 @@ results in 4 "groups" (collection planes on either face are not contiguous).
 Here are the "kind" labels
 
 - frames :: a folder of data from ~IFrame~ followed by the frame's "ident" number
-- tags :: this folder holds subfolders named by the trace tags in the frame.  When a frame lacks trace tags, then all traces are extracted as a tensor and the tag is "none".
+- tags :: this folder holds subfolders named by the trace tags in the frame.  When a frame lacks trace tags, then all traces are extracted.  The tag name is then interpreted to be "null".
 - groups :: followed by a group index.  Each group is a configurable selection of channels.
 - chmasks :: not shown in the above example, but this holds channel mask tensors each by its label.
   
@@ -103,7 +103,7 @@ The examples above may be configured with:
  basepath = "/frames/{ident}
  frame_relpath = "frame"
  chmask_relpath = "chmasks/{label}"
- relpath = "tags/{tag}/rules/{rule}/groups/{group}/{part}"
+ relpath = "tags/{tag}/rules/{rule}/groups/{group}/{datatype}"
 #+end_example
 The last ~relpath~ may be specified on a per-rule (per-tag) basis.  Rules are
 described below.  The formatting is applied to the full path.
@@ -112,10 +112,10 @@ The parameters available for formatting:
 
 - ident :: the ~IFrame::ident()~
 - label :: the channel mask label (only for chmasks paths)
-- tag :: the trace tag of a rule
+- tag :: the name for the trace tag of a rule.  If the trace tag for selection was "" (all traces) then ~tag~ as used for formatting is "null".
 - rule :: the rule index number
 - group :: the group index number (not unique across rules).
-- part :: the TDM "datatype" of the tensor (frame, traces, summaries, chids, chmasks).  This may be used for any tensor but most useful for use in rules.
+- datatype :: the TDM "datatype" of the tensor (frame, traces, summaries, chids, chmasks).  This may be used for any tensor but most useful for use in rules.
 
 
 * ~FrameToTdm~ configuration
@@ -126,7 +126,8 @@ The ~FrameToTdm~ extacts channel-level information from ~IFrame~ to tensors
 according to "rules".  Each rule consists of a trace "tag" and a "groups" array.
 
 The "tag" determines which trace tag the rule applies.  The special empty string
-("") tag will select all traces.
+("") tag will select all traces.  Note, an emptry string ~tag~ used formatting
+becomes the string "null".
 
 Each element ("group") in the "groups" array defines a set of channels and,
 optionally, a relative path for tensors derived via the group.  The tensors

@@ -87,7 +87,8 @@ namespace WireCell::SPNG {
         ///   Multiple rules may have the same tag, which will lead to waveform
         ///   duplication.  The special tag "" (empty string) will instead apply
         ///   to all non-tagged traces.  Such an all-trace rule will not produce
-        ///   any summaries tensor.
+        ///   any summaries tensor.  Note, when "tag" is used in formatting a
+        ///   path, a tag of "" is spelled as "null".
         ///
         /// - groups :: An array of "group objects" that defines how traces are
         ///   organized into "traces" tensors.  A group object has the following
@@ -104,13 +105,14 @@ namespace WireCell::SPNG {
         ///     "traces", "chids", "summaries" are placed.  This must be unique
         ///     across all group objects to avoid conflicts.  It is recommended
         ///     to include the '{tag}' if not empty and '{index}' if more than
-        ///     one group is in the array and '{part}' if multiple parts are
+        ///     one group is in the array and '{datatype}' if multiple parts are
         ///     extracted.
         ///
         struct Group {
-            // The path relative to basepath for each part tensor in the group.
+            /// The path relative to basepath for each part tensor in the group.
+            /// See spng/docs/frametotdm.org
             boost::filesystem::path relpath {
-                "tags/{tag}/rules/{rule}/groups/{group}/{part}"
+                "tags/{tag}/rules/{rule}/groups/{group}/{datatype}"
             };
             std::string name;    // optional, "" by default
             std::set<int> wpids;
@@ -156,6 +158,11 @@ namespace WireCell::SPNG {
 
         /// Convert tensors according to the rules.
         ITorchTensor::vector rules_tensors(const IFrame::pointer& iframe, const std::string& parent) const;
+
+        // Helper for some datatypes with common patterns.
+        ITorchTensor::pointer make_datatype(const std::string& datatype,
+                                            const boost::filesystem::path& relpath,
+                                            torch::Tensor ten, Configuration md) const;
 
     };
 }

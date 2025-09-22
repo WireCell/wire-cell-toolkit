@@ -61,24 +61,23 @@ namespace WireCell::SPNG {
         std::string comma = "";
         std::stringstream ss;
         for (auto siz : ten->shape()) {
-            ss << comma << siz << " ";
+            ss << comma << siz;
             comma = ", ";
         }
 
 
         std::string parent = get<std::string>(md, "parent", "");;
         if (parent.size()) {
-            parent = "<--" + parent;
-            
-            log->debug("{} <{}> {} ({}) <{}> @{} {}",
-                       context,
-                       get<std::string>(md, "datatype", ""),
-                       get<std::string>(md, "datapath", ""),
-                       ss.str(),
-                       ten->dtype(),
-                       Torch::to_string(ten->device()),
-                       parent);
-        }
+            parent = "<-- " + parent;
+        }            
+        log->debug("{} <{}> {} ({}) <{}> @{} {}",
+                   context,
+                   get<std::string>(md, "datatype", ""),
+                   get<std::string>(md, "datapath", ""),
+                   ss.str(),
+                   ten->dtype(),
+                   Torch::to_string(ten->device()),
+                   parent);
 
         if (m_verbose == 1) return;
 

@@ -52,8 +52,8 @@ namespace WireCell::Torch {
     template<typename T>
     std::vector<T> to_vector(const torch::Tensor& tensor) {
         torch::Tensor row_tensor = to_dtype<T>(tensor).to(torch::kCPU).contiguous();
-        return std::vector<T>(row_tensor.data_ptr<float>(),
-                              row_tensor.data_ptr<float>() + row_tensor.numel());
+        return std::vector<T>(row_tensor.data_ptr<T>(),
+                              row_tensor.data_ptr<T>() + row_tensor.numel());
     }
 
     

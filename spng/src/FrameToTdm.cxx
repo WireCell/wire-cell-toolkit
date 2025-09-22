@@ -3,6 +3,7 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellAux/FrameTools.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Fmt.h"
 
 WIRECELL_FACTORY(SPNGFrameToTdm,
                  WireCell::SPNG::FrameToTdm,
@@ -82,10 +83,16 @@ namespace WireCell::SPNG {
             }
             
             std::string tag = get<std::string>(jrule, "tag");
+            if (tag == "null" or tag == "*") {
+                tag = "";
+            }
             Rule rule{tag};
             for (const auto& jgroup : jgroups) {
+                Group group;
                 auto relpath = get<std::string>(jgroup, "relpath");
-                Group group{relpath};
+                if (relpath.size()) {
+                    group.relpath = relpath;
+                }
                 auto wpids = get<std::vector<int>>(jgroup, "wpids", {});
                 for (int wpid : wpids) {
                     group.wpids.insert(wpid);
@@ -95,7 +102,8 @@ namespace WireCell::SPNG {
                 }
 
                 if (group.wpids.empty() && group.channels.empty()) {
-                    log->warn("neither wpids nor channels for tag {}, group relpath", tag, relpath);
+                    log->warn("neither wpids nor channels for tag \"{}\", group at relpath {}",
+                              tag, relpath);
                     continue;
                 }
 
@@ -121,7 +129,7 @@ namespace WireCell::SPNG {
 
         outtens = nullptr;
         if (!inframe) {
-            log->debug("EOS at call={}", m_count);
+            logit("EOS");
             ++m_count;
             return true;
         }
@@ -145,7 +153,7 @@ namespace WireCell::SPNG {
         Configuration empty;
         outtens = std::make_shared<SimpleTorchTensorSet>(inframe->ident(), empty, tensors);
 
-
+        logit(outtens, "output");
 
         ++m_count;
         return true;
@@ -162,7 +170,9 @@ namespace WireCell::SPNG {
         md["period"] = iframe->tick();
         md["datatype"] = "frame";
         auto fullpath = m_basepath / m_frame_relpath;
-        md["datapath"] = fmt::format(fullpath.string(), fmt::arg("ident", ident));
+        auto fullpathstr = fmt::format(fullpath.string(), fmt::arg("ident", ident));
+        log->debug("frame tensor datapath: {}", fullpathstr);
+        md["datapath"] = fullpathstr;
         // no parent, no batches
         return std::make_shared<SimpleTorchTensor>(md);
     }
@@ -189,13 +199,10 @@ namespace WireCell::SPNG {
             }
 
             Configuration md;
-            md["datatype"] = "chmasks";
-            auto fullpath = m_basepath / relpath;
-            md["datapath"] = fmt::format(fullpath.string(),
-                                         fmt::arg("ident", ident),
-                                         fmt::arg("label", label));
+            md["ident"] = ident;
+            md["label"] = label;
             md["parent"] = parent;
-            tens.push_back(std::make_shared<SimpleTorchTensor>(ten, md));
+            tens.push_back(make_datatype("chmasks", relpath, ten, md));
         }
         return tens;
     }
@@ -235,7 +242,7 @@ namespace WireCell::SPNG {
     {
         // FIXME: this could go into aux's FrameTools.h
         std::vector<size_t> inds;
-        if (tag == "*" || tag.empty()) { // all
+        if (tag.empty()) { // all
             const size_t ntraces = iframe->traces()->size();
             inds.resize(ntraces);
             std::iota(inds.begin(), inds.end(), 0);
@@ -283,6 +290,32 @@ namespace WireCell::SPNG {
     }
 
 
+    
+    ITorchTensor::pointer FrameToTdm::make_datatype(
+        const std::string& datatype, const boost::filesystem::path& relpath,
+        torch::Tensor ten, Configuration md) const
+    {
+        md["datatype"] = datatype;
+        auto fullpath = m_basepath / relpath;
+        log->debug("making datatype {} with fullpath {}", datatype, fullpath.string());
+        try {
+            // md["datapath"] = fmt::format(fullpath.string(),
+            //                              fmt::arg("ident", md["ident"].asInt()),
+            //                              fmt::arg("tag",   md["tag"].asString()),
+            //                              fmt::arg("rule", md["rule"].asInt()),
+            //                              fmt::arg("group", md["group"].asInt()),
+            //                              fmt::arg("part",  part));
+            md["datapath"] = Fmt::format(fullpath.string(), md);
+        }
+        catch (const fmt::format_error& err) {
+            log->critical("failed to format for datatype \"{}\" using {} with {}",
+                          datatype, fullpath.string(), md);
+            raise<ValueError>("failed to format tensor path, bad config?");
+        }
+
+        return std::make_shared<SimpleTorchTensor>(ten, md);
+    }
+
 
     /// Run through the rules
     ITorchTensor::vector FrameToTdm::rules_tensors(
@@ -315,7 +348,9 @@ namespace WireCell::SPNG {
                 tag_chids.push_back(all_traces[ind]->channel());
             }
 
+            int group_index = -1;
             for (const auto& group : rule.groups) {
+                ++group_index;
 
                 // Vector of output ordered channel IDs
                 auto ordered_chids = group_channels(tag_chids, group);
@@ -370,9 +405,10 @@ namespace WireCell::SPNG {
                 // Common md for all parts: traces, summaries, chids.
                 Configuration common_md;
                 common_md["ident"] = frame_ident;
-                common_md["index"] = rule_index;
+                common_md["rule"] = rule_index;
+                common_md["group"] = group_index;
                 common_md["parent"] = parent;
-                common_md["tag"] = tag;
+                common_md["tag"] = tag.empty() ? "null" : tag;
 
                 // Build traces tensor
                 {
@@ -386,18 +422,11 @@ namespace WireCell::SPNG {
                         ten.index({tir.row, torch::indexing::Slice(col_beg, col_end)}) += tmp;
                     }
 
+                    // traces have extra md
                     Configuration md = common_md;
                     md["tbin"] = (int)tbeg;
-                    md["datatype"] = "traces";
-                    auto fullpath = m_basepath / group.relpath;
-                    md["datapath"] = fmt::format(fullpath.string(),
-                                                 fmt::arg("ident", frame_ident),
-                                                 fmt::arg("tag",   tag),
-                                                 fmt::arg("index", rule_index),
-                                                 fmt::arg("part",  "traces"));
-                    tensors.push_back(std::make_shared<SimpleTorchTensor>(ten, md));
+                    tensors.push_back(make_datatype("traces", group.relpath, ten, md));
                 }
-
 
                 // Build summaries tensor
                 auto summary = iframe->trace_summary(tag);
@@ -407,35 +436,17 @@ namespace WireCell::SPNG {
                         const double value = summary[tir.index];
                         ten.index({tir.row}) += value;
                     }
-
-                    Configuration md = common_md;
-                    md["datatype"] = "summaries";
-                    auto fullpath = m_basepath / group.relpath;
-                    md["datapath"] = fmt::format(fullpath.string(),
-                                                 fmt::arg("ident", frame_ident),
-                                                 fmt::arg("tag",   tag),
-                                                 fmt::arg("index", rule_index),
-                                                 fmt::arg("part",  "summaries"));
-                    tensors.push_back(std::make_shared<SimpleTorchTensor>(ten, md));
+                    tensors.push_back(make_datatype("summaries", group.relpath, ten, common_md));
                 }
 
-
-                // Build chids tennsor
+                // Build chids tensor
                 {
                     torch::Tensor ten = torch::zeros({nrows}, torch::kInt);
                     for (const auto& tir : tirs) {
                         int chid = tir.trace->channel();
                         ten.index_put_({tir.row}, chid); // no accumulate
                     }
-                    Configuration md = common_md;
-                    md["datatype"] = "chids";
-                    auto fullpath = m_basepath / group.relpath;
-                    md["datapath"] = fmt::format(fullpath.string(),
-                                                 fmt::arg("ident", frame_ident),
-                                                 fmt::arg("tag",   tag),
-                                                 fmt::arg("index", rule_index),
-                                                 fmt::arg("part",  "chids"));
-                    tensors.push_back(std::make_shared<SimpleTorchTensor>(ten, md));
+                    tensors.push_back(make_datatype("chids", group.relpath, ten, common_md));
                 }                
             } // groups
         } // rules
