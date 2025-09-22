@@ -178,7 +178,6 @@ local cmdline = {
           "WireCellPgraph",
           "WireCellSio", 
           "WireCellSigProc",
-          "WireCellRoot",
           "WireCellSpng"] + (if do_spng then [] else ["WireCellPytorch"]),
         apps: ["Pgrapher"]
     }
