@@ -1,8 +1,9 @@
 function(
   input_file='tensor_frames.npz',
+  output_path='spng%s.tar',     // MUST give %s for gpu and NOT for cpu.
+  device='gpu',
   do_spng=true,
   ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
-  device='gpu',
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
 local g = import 'pgraph.jsonnet',
@@ -127,18 +128,11 @@ local fanout_apa_rules =
 
 
 
-local torch_maker = import 'torch_1anode_dnnroi.jsonnet',
-local torch_nodes = torch_maker(
-  tools,
-  ts_model_file=ts_model_file,
-  debug_force_cpu=(device=='cpu'),
-),
-local spng_stacked = torch_nodes.stacked_spng,
-
-local frame_output = fileio.frame_tensor_file_sink('toolkit_dnnroi_output.tar', mode='tagged'),
 local sim = sim_maker(params, tools),
 local sink = sim.frame_sink,
 
+// OSP
+local frame_output = fileio.frame_tensor_file_sink(output_path, mode='tagged'),
 local sp_graph = g.intern(
     innodes=[frame_input],
     centernodes=selectors + [toolkit_pipe],
@@ -150,6 +144,16 @@ local sp_graph = g.intern(
     ]
 ),
 
+// SPNG.
+
+local torch_maker = import 'torch_1anode_dnnroi.jsonnet',
+local torch_nodes = torch_maker(
+  tools,
+  ts_model_file=ts_model_file,
+  output_path=output_path,
+  debug_force_cpu=(device=='cpu'),
+),
+local spng_stacked = torch_nodes.stacked_spng,
 local graph = 
     g.intern(
       innodes=[frame_input],
