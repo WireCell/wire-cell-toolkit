@@ -124,8 +124,8 @@ bool Gen::Retagger::operator()(const input_pointer& inframe, output_pointer& out
                 osummary.insert(osummary.end(), summary.begin(), summary.end());
             }
         }
-        std::cerr << "Retagger: tagging trace set: " << otag << " with " << otraces.size() << " traces, "
-                  << osummary.size() << " summary\n";
+        // std::cerr << "Retagger: tagging trace set: " << otag << " with " << otraces.size() << " traces, "
+        //           << osummary.size() << " summary\n";
 
         sfout->tag_traces(otag, otraces, osummary);
     }

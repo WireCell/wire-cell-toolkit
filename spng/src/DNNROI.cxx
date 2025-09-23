@@ -164,7 +164,7 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     
     torch::Tensor a_ds = torch::mean(a_reshaped, 3);
     log->debug("DNNROI: a_ds shape: {}", tensor_shape_string(a_ds));
-    std::vector<torch::Tensor> to_save = {a_ds};
+    //std::vector<torch::Tensor> to_save = {a_ds};
     //save the tensors to a file for debugging
    // torch::save(to_save, "DNNROI_debug.pt");
     
@@ -228,8 +228,8 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     log->debug("DNNROI: Output shape after trimming: {}", tensor_shape_string(output));
     //now the output tensor has the same shape as input tensor a [1, 800, 6000]
     //save the output tensor for debugging
-    to_save.push_back(output);
-    torch::save(to_save, "DNNROI_debug_output.pt");
+    //to_save.push_back(output);
+    //torch::save(to_save, "DNNROI_debug_output.pt");
     //split the output into 3 tensors
     log->debug("DNNROI: Final Output shape after unsqueeze: {}", tensor_shape_string(output));
     auto out_ptr = std::make_shared<SimpleTorchTensor>(output, tensors->at(0)->metadata());

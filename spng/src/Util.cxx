@@ -131,11 +131,8 @@ void WireCell::SPNG::metadata_passthrough(
         // if (!passing_values.isArray()) {
         // }
 
-        // std::cout << "Passing values:" << passing_values << std::endl;
         for (Json::ArrayIndex i = 0; i < passing_values.size(); ++i) {
             const auto & name = passing_values[i].asString();
-            // std::cout << "Passing " << name << std::endl;
-            // std::cout << "In input? " << metadata_in.isMember(name) << std::endl;
             metadata_out[name] = metadata_in[name];
         }
 }
@@ -199,12 +196,7 @@ ITorchTensorSet::pointer WireCell::SPNG::to_itensor(const std::vector<torch::IVa
 
             if(ten.scalar_type() != torch::kFloat32) {
                 ten = ten.to(torch::kFloat32);
-                std::cout << "Converted tensor " << i << " to float32." << std::endl;
             }
-
-            std::cout << "Tensor " << i << ": shape=" << ten.sizes() 
-            << ", dtype=" << ten.dtype() 
-            << ", device=" << ten.device() << std::endl;
 
             // No forced dtype or device conversion here to preserve input tensors as-is
             auto stp = std::make_shared<SimpleTorchTensor>(ten);
