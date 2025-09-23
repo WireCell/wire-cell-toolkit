@@ -1,0 +1,146 @@
+#!/bin/bash
+
+# This encapsulates and simplifies the jobs for "campaign 0".
+#
+# See:
+# https://github.com/WireCell/spng/issues/26
+
+
+die () {
+    echo "$@" 1>&2
+    exit 1
+}
+
+usage () {
+    cat <<EOF
+usage: campaign0 [optional] [required]
+
+Optional:
+  -t|--tech    <spng|osp>             (default: osp)
+  -d|--device  <cpu|gpu>              (default: cpu)
+  -l|--logdir  <path/to/log/output/>  (default: parent of output)
+
+Required:
+  -i|--input   <path/to/input.npz>
+  -o|--output  <path/to/output.npz>
+  -c|--config  <path/to/config.jsonnet>
+  -m|--model   <path/to/dnnroi-model.ts>
+
+With spng device, the output must have a "%s".
+
+The directory holding this script is appended to WIRECELL_PATH.
+
+EOF
+    exit 1
+}
+
+MYTEMP=$(getopt --options 't:d:l:i:o:c:m:' --longoptions 'tech:device:logdir:input:output:config:model:' -- "$@")
+if [ $? -ne 0 ] ; then
+    usage
+fi
+
+# optional
+tech="osp"
+device="cpu"
+logdir=""
+
+# required
+input=""
+output=""
+config=""
+model=""
+while true; do
+    case "$1" in
+
+        # optional
+        '-t'|'--tech') tech="$2"; shift 2;;
+        '-d'|'--device') device="$2"; shift 2;;
+        '-l'|'--logdir') logdir="$2"; shift 2;;
+
+        # required
+        '-i'|'--input') input="$2"; shift 2;;
+        '-o'|'--output') output="$2"; shift 2;;
+        '-c'|'--config') config="$2"; shift 2;;
+        '-m'|'--model') model="$2"; shift 2;;
+        
+        '--') shift; break ;;
+
+        '') break;;
+        *) usage;;
+    esac
+done
+
+if [ -z "$input" ] ; then
+    die "-i|--input <filename> is required"
+fi
+if [ -z "$output" ] ; then
+    die "-o|--output <filename> is required"
+fi
+if [ -z "$config" ] ; then
+    die "-c|--config <jsonnet> is required"
+fi
+if [ -z "$model" ] ; then
+    die "-m|--model <model.ts> is required"
+fi
+
+do_spng="false"
+if [ "$tech" = "spng" ] ; then
+    # Fixme: we have asymmetry in config that we we must fix
+    if [[ "$output" != *"%"* ]]; then
+        die "spng requires a '%s' in the output filename, got: $output"
+    fi
+    do_spng="true"
+elif [ "$tech" != "osp" ] ; then
+    die "unknown tech: $tech"
+fi
+
+if [[ " cpu gpu " != *"$device"* ]] ; then
+    die "unknown device: $device"
+fi
+
+if [ -z "$logdir" ] ; then
+    logdir="$(dirname "$output")"
+fi
+mkdir -p "$logdir"
+
+export WIRECELL_PATH="$WIRECELL_PATH":"$(dirname "$(realpath "$BASH_SOURCE")")"
+
+resolve () {
+
+    local filename="$1"
+
+    if [[ -f "$filename" ]]; then
+        realpath "$filename"
+        return 0
+    fi
+
+    local path_list=".:$2" # Colon-separated list of paths, e.g., "/bin:/usr/bin"
+    local IFS=":" # Set Internal Field Separator to colon for path splitting
+
+    for p in $path_list; do
+        local full_path="${p}/${filename}"
+        if [[ -f "$full_path" ]]; then
+            realpath "$full_path"
+            return 0 # Found the file, return success
+        fi
+    done
+    
+    return 1 # File not found in any of the paths
+}
+
+model="$(resolve "$model" "$WIRECELL_PATH")"
+input="$(resolve "$input" "$WIRECELL_PATH")"
+config="$(resolve "$config" "$WIRECELL_PATH")"
+
+# echo $model
+# echo $input
+# echo $config
+set -x
+wire-cell -l $logdir/log -L debug \
+          -C elecGain=7.8 -C nanodes=1  \
+          -A input_file="$input" \
+          -A output_path="$output" \
+          --tla-code do_spng=$do_spng -A device=$device \
+          -A ts_model_file="$model" \
+          "$config" 1>$logdir/out 2>$logdir/err
+
