@@ -31,13 +31,14 @@ With spng device, the output must have a "%s".
 The directory holding this script is appended to WIRECELL_PATH.
 
 EOF
-    exit 1
 }
 
-MYTEMP=$(getopt --options 't:d:l:i:o:c:m:' --longoptions 'tech:device:logdir:input:output:config:model:' -- "$@")
+MYTEMP=$(getopt --options 't:d:l:i:o:c:m:' --longoptions 'tech:,device:,logdir:,input:,output:,config:,model:' -- "$@")
 if [ $? -ne 0 ] ; then
     usage
+    die ""
 fi
+# echo "${MYTEMP[@]}"
 
 # optional
 tech="osp"
@@ -65,21 +66,26 @@ while true; do
         
         '--') shift; break ;;
 
-        '') break;;
-        *) usage;;
+        '') shift; break;;
+
+        *) usage; die "script is broken";;
     esac
 done
 
 if [ -z "$input" ] ; then
+    usage
     die "-i|--input <filename> is required"
 fi
 if [ -z "$output" ] ; then
+    usage
     die "-o|--output <filename> is required"
 fi
 if [ -z "$config" ] ; then
+    usage
     die "-c|--config <jsonnet> is required"
 fi
 if [ -z "$model" ] ; then
+    usage
     die "-m|--model <model.ts> is required"
 fi
 
