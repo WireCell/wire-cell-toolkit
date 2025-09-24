@@ -60,6 +60,11 @@ namespace WireCell::SPNG {
         /// Shorthand method to get the context's device.
         torch::Device device() const { return m_ctx.device(); }
 
+        /// Return a tensor options object of the given dtype on the device.
+        torch::TensorOptions tensor_options(torch::ScalarType dtype = torch::kFloat32) const {
+            return m_ctx.options(dtype);
+        }
+
         /// Return version of input that assures it is on the device.
         torch::Tensor to(torch::Tensor ten) const;
 
