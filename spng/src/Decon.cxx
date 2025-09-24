@@ -23,6 +23,13 @@ WireCell::SPNG::Decon::Decon()
 
 WireCell::SPNG::Decon::~Decon() {};
 
+WireCell::Configuration WireCell::SPNG::Decon::default_configuration() const
+{
+    Configuration cfg;
+    cfg["tensor_index"] = m_tensor_index;
+    return cfg;
+};
+
 
 void WireCell::SPNG::Decon::configure(const WireCell::Configuration& config) {
 
@@ -48,6 +55,8 @@ void WireCell::SPNG::Decon::configure(const WireCell::Configuration& config) {
     m_output_tensor_tag = get(config, "output_tensor_tag", m_output_tensor_tag);
     log->debug("Will tag with Set:{} Tensor:{}", m_output_set_tag.asString(),
                m_output_tensor_tag.asString());
+
+    m_tensor_index = get(config, "tensor_index", m_tensor_index);
 }
 
 bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& out) {
@@ -74,7 +83,7 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     //     log->debug("Tensor {} has shape {} {}", i, this_sizes[0], this_sizes[1]);
     // }
 
-    auto tensor_clone = in->tensors()->at(0)->tensor().clone();
+    auto tensor_clone = in->tensors()->at(m_tensor)->tensor().clone();
     
     if (m_unsqueeze_input)
         tensor_clone = torch::unsqueeze(tensor_clone, 0);

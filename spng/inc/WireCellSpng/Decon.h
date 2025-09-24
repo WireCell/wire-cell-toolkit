@@ -37,6 +37,11 @@ namespace SPNG {
         bool m_debug_force_cpu = false;
         bool m_pad_wire_domain = false;
         
+        /// Configuration: tensor_index (default=0)
+        ///
+        /// Set the index of the traces tensor in the tensor set to process.
+        int m_tensor_index{0};
+
         Json::Value m_output_set_tag{"Decon2D"}, m_output_tensor_tag{"Default"};
         Json::Value m_passthrough{Json::arrayValue};
     };
