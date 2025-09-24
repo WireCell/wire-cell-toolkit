@@ -307,6 +307,11 @@
     /// example usage: 
     TrackDepos :: self.Component + { type: "TrackDepos" },
 
+    /// Return count up to but not including end.  This is simply a convenient
+    /// alias for a half-open range because std.range()'s gives an inclusive
+    /// count.
+    iota(end) :: std.range(0, end-1),
+
     /// Return canonical "type:name" or just "type" if no name from a
     /// configuration object.  Use this instead of bare names to
     /// better guard against typos and changes in dependent
