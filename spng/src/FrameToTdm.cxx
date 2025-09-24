@@ -25,9 +25,7 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration FrameToTdm::default_configuration() const
     {
-        Configuration cfg = this->ContextBase::default_configuration();
-        Configuration cfg2 = this->Logger::default_configuration();
-        update(cfg, cfg2);
+        Configuration cfg = this->Logger::default_configuration();
         
         cfg["basepath"] = m_basepath.string();
         cfg["frame_relpath"] = m_frame_relpath.string();
@@ -38,7 +36,6 @@ namespace WireCell::SPNG {
     
     void FrameToTdm::configure(const WireCell::Configuration& cfg)
     {
-        this->ContextBase::configure(cfg);
         this->Logger::configure(cfg);
 
         std::string anode = cfg["anode"].asString();
@@ -125,8 +122,6 @@ namespace WireCell::SPNG {
     
     bool FrameToTdm::operator()(const input_pointer& inframe, output_pointer& outtens) 
     {
-        // fixme; inherit from context base and do the guard dance. 
-
         outtens = nullptr;
         if (!inframe) {
             logit("EOS");
@@ -228,11 +223,12 @@ namespace WireCell::SPNG {
             const int64_t chid = chid_int;
             for (const auto& br : brl) {
                 const auto& [beg,end] = br;
-                tens.emplace_back(torch::tensor({batch, chid, (int64_t)beg, (int64_t)end},
-                                                torch::kInt64));
+                auto ten = torch::tensor({batch, chid, (int64_t)beg, (int64_t)end},
+                                         torch::kInt32);
+                tens.emplace_back(ten);
             }
         }
-        return torch::vstack(tens).to(device());
+        return torch::vstack(tens);
         // Caller handles metadata.
     }
 
@@ -297,14 +293,8 @@ namespace WireCell::SPNG {
     {
         md["datatype"] = datatype;
         auto fullpath = m_basepath / relpath;
-        log->debug("making datatype {} with fullpath {}", datatype, fullpath.string());
+        // log->debug("making datatype {} with fullpath {}", datatype, fullpath.string());
         try {
-            // md["datapath"] = fmt::format(fullpath.string(),
-            //                              fmt::arg("ident", md["ident"].asInt()),
-            //                              fmt::arg("tag",   md["tag"].asString()),
-            //                              fmt::arg("rule", md["rule"].asInt()),
-            //                              fmt::arg("group", md["group"].asInt()),
-            //                              fmt::arg("part",  part));
             md["datapath"] = Fmt::format(fullpath.string(), md);
         }
         catch (const fmt::format_error& err) {

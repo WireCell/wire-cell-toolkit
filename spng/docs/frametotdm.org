@@ -120,6 +120,14 @@ The parameters available for formatting:
 
 * ~FrameToTdm~ configuration
 
+** Basics
+
+- ~anode~ :: type/name of the anode providing context for the frame.
+  
+- ~basepath~ :: the base or root path for all output tensors
+
+- ~frame_relpath~ :: the relative path for the "frame" datatype tensor
+
 ** Rules
 
 The ~FrameToTdm~ extacts channel-level information from ~IFrame~ to tensors
@@ -154,3 +162,13 @@ integers.  All channels consistent with the any wpid are included.  The
 The optional "relpath" rule group option specifies the relpath for the derived
 tensors.  If omitted the default, as described above, is used.
 
+** Chmasks
+
+The ~chmasks~ configuration provides an object that provides channel mask map
+information.  It maps a CMM "label" key to the relative path for a corresponding
+output channel masks tensor.
+
+** Non-config
+
+- device :: FrameToTdm implicitly uses CPU-only.  Downstream consumers that
+  require GPU should inherit from ~ContextBase~ and use ~to()~ on input tensors.

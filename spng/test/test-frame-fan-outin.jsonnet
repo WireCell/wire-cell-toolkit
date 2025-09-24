@@ -7,7 +7,7 @@ local io = import "fileio.jsonnet";
 
 
 /// Note, different input may require selecting a different anodeid to get any activity.
-function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-outin.npz", paradigm="orig", anodeid="3")
+function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-outin.npz", paradigm="orig", anodeid="3", device="cpu")
     local source = io.depo_file_source(input);
     local omni = omnimap[name];
     local anode = omni.anodes[std.parseInt(anodeid)];
@@ -32,6 +32,8 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
 
     local all_fans = {
         local ngroups = std.length(groups),
+
+        // This option runs the initial mainline, non-TDM SPNG nodes
         orig: {
             multiplicity: ngroups,
             fanout : pg.pnode({
@@ -54,6 +56,8 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
             }, nin=ngroups, nout=1, uses=[anode]),
 
         },
+
+        // This option runs the TDM-compliant nodes
         tdm: {
             multiplicity: ngroups,
             local frametotdm = pg.pnode({
@@ -83,7 +87,13 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
                     name: "group%s"%g,
                     data: {
                         verbose: verbose,
-                        // todo: select
+                        tensor_selection: [
+                            { accept: "/frames/\\d+/frame" },
+                            { accept: "/frames/\\d+/tags/null/rules/0/groups/%d/.*" % g },
+                        ],
+                        keep_unselected: false,
+                        select_parents: false,
+                        combine_policy: "produced_only",
                     },
                 }, nin=1, nout=1, uses=[]) for g in group_iota],
             
@@ -115,6 +125,7 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
                            outnodes=[fans.fanin],
                            edges=[pg.edge(fans.fanout, fans.fanin, n, n)
                                   for n in std.range(0, fans.multiplicity-1)]);
-    local sink = io.frame_file_sink(output);
+    //local sink = io.frame_file_sink(output);
+    local sink = pg.pnode({ type: "DumpFrames" }, nin=1, nout=0);
     local graph = pg.pipeline([source, drift, signal, noise, digitize, body, sink]);
     pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])

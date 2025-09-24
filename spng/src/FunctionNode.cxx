@@ -80,10 +80,11 @@ namespace WireCell::SPNG {
             "union_replace",
             "union_keep",
             "input_only",
-            "transformed_only"
+            "produced_only"
         };
         for (const auto& one : known_policy) {
             if (m_combine_policy == one) {
+                log->debug("combine policy: {}", m_combine_policy);
                 okay=true;
                 break;
             }
@@ -119,13 +120,19 @@ namespace WireCell::SPNG {
     TensorIndex FunctionNode::sys_index_tensors(const ITorchTensorSet::pointer& in) const
     {
         auto ti = index_tensors(in);
-        logit(ti, "index");
+        logit(ti, "indexed");
         return ti;              // copy elision
     }
 
     TensorIndex FunctionNode::select_tensors(TensorIndex ti) const
     {
         return m_selector.apply(ti, m_keep_unselected, m_select_parents);
+    }
+    TensorIndex FunctionNode::sys_select_tensors(TensorIndex ti) const
+    {
+        auto new_ti = select_tensors(std::move(ti));
+        logit(new_ti, "selected");
+        return new_ti;
     }
         
     TensorIndex FunctionNode::transform_tensors(TensorIndex ti) const
@@ -135,14 +142,13 @@ namespace WireCell::SPNG {
 
     TensorIndex FunctionNode::sys_transform_tensors(TensorIndex ti) const
     {
-        logit(ti, "pre-transform");
         auto new_ti = transform_tensors(std::move(ti));
-        logit(new_ti, "post-transform");
+        logit(new_ti, "transformed");
 
         if (m_combine_policy == "input_only") {
             return ti;
         }
-        if (m_combine_policy == "transformed_only") {
+        if (m_combine_policy == "produced_only") {
             return new_ti;
         }
         if (m_combine_policy == "union_keep") {
@@ -156,6 +162,14 @@ namespace WireCell::SPNG {
     {
         return m_renaming.apply(std::move(ti));
     }
+
+    TensorIndex FunctionNode::sys_rename_tensors(TensorIndex ti) const
+    {
+        logit(ti, "combined");
+        auto new_ti = m_renaming.apply(std::move(ti));
+        logit(new_ti, "renamed");        
+        return new_ti;
+    }
     
     ITorchTensorSet::pointer FunctionNode::pack_tensors(TensorIndex ti) const
     {
@@ -164,8 +178,10 @@ namespace WireCell::SPNG {
 
     ITorchTensorSet::pointer FunctionNode::sys_pack_tensors(TensorIndex ti) const
     {
-        logit(ti, "pack");
-        return pack_tensors(std::move(ti));
+        auto ts = pack_tensors(std::move(ti));
+        logit(ts, "packed");
+        return ts;
+
     }
 
     bool FunctionNode::operator()(const input_pointer& in, output_pointer& out) 
@@ -179,8 +195,8 @@ namespace WireCell::SPNG {
 
         logit(in, "input");
         // Weeeeee!
-        out = sys_pack_tensors(rename_tensors(sys_transform_tensors(select_tensors(sys_index_tensors(in)))));
-        logit(in, "output");
+        out = sys_pack_tensors(sys_rename_tensors(sys_transform_tensors(sys_select_tensors(sys_index_tensors(in)))));
+        logit(out, "output");
         ++m_count;
         return true;
     }

@@ -4,7 +4,6 @@
 #define WIRECELL_SPNG_FRAMETOTDM
 
 #include "WireCellSpng/IFrameToTorchSet.h"
-#include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/Logger.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellUtil/Waveform.h" // for ChannelMasks
@@ -30,8 +29,7 @@ namespace WireCell::SPNG {
     /// elements of a summaries tensor.  It is possible to specify group
     /// channels not represented in a tagged traces collection and vice versa.
     ///
-    class FrameToTdm : public ContextBase,
-                       public Logger,
+    class FrameToTdm : public Logger,
                        public virtual IConfigurable,
                        public virtual IFrameToTorchSet {
     public:
@@ -159,7 +157,8 @@ namespace WireCell::SPNG {
         /// Convert tensors according to the rules.
         ITorchTensor::vector rules_tensors(const IFrame::pointer& iframe, const std::string& parent) const;
 
-        // Helper for some datatypes with common patterns.
+        // Helper for some datatypes with common patterns.  All torch::Tensor go
+        // through here.
         ITorchTensor::pointer make_datatype(const std::string& datatype,
                                             const boost::filesystem::path& relpath,
                                             torch::Tensor ten, Configuration md) const;
