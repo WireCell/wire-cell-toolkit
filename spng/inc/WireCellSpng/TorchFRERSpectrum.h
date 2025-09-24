@@ -1,9 +1,17 @@
-/** This component provides field response data as read in from a "WCT
- * field response" JSON file */
+/** The TorchFRERSpectrum provides a detector response as a simple 2D tensor.
+
+    The response is the convolution of field and electronics responses provided
+    by their usual WCT components.
+
+    This component is a BaseContext and will place tensors returned according to
+    the "device" configuration parameter.
+
+ */
 
 #ifndef WIRECELLSPNG_TORCHFRERSPECTRUM
 #define WIRECELLSPNG_TORCHFRERSPECTRUM
-#include "WireCellAux/Logger.h"
+#include "WireCellSpng/Logger.h"
+#include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/ITorchSpectrum.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/Units.h"
@@ -15,9 +23,10 @@
 
 namespace WireCell {
     namespace SPNG {
-        class TorchFRERSpectrum : public Aux::Logger, 
-                                public ITorchSpectrum,
-                                public IConfigurable {
+        class TorchFRERSpectrum : Logger, 
+                                  ContextBase,
+                                  public ITorchSpectrum,
+                                  virtual public IConfigurable {
         public:
             // Create directly with the JSON data file or delay that
             // for configuration.
@@ -28,7 +37,7 @@ namespace WireCell {
             // ITorchSpectrum
             virtual torch::Tensor spectrum() const;
             virtual torch::Tensor spectrum(const std::vector<int64_t> & shape);
-        //  virtual std::vector<int64_t> shape() const;
+            virtual std::vector<int64_t> shape() const { return m_shape; }
 
             // IConfigurable
             virtual void configure(const WireCell::Configuration& config);
@@ -47,7 +56,6 @@ namespace WireCell {
             Response::Schema::FieldResponse m_field_response,
                                             m_field_response_avg;
             
-            bool m_debug_force_cpu = false;
             //Relevant for Field Response
             int m_plane_id = 0;
             bool m_do_average = false;
@@ -62,6 +70,8 @@ namespace WireCell {
             int m_default_nchans = 0;
             bool m_do_fft = false;
             
+            std::vector<int64_t> m_shape;
+
         };
 
     }  // namespace spng
