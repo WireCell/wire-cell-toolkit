@@ -17,29 +17,31 @@ WIRECELL_FACTORY(SPNGDecon,
                  WireCell::IConfigurable)
 
 WireCell::SPNG::Decon::Decon()
-  : Aux::Logger("SPNGDecon", "spng") {
-
+  : Logger("SPNGDecon", "spng")
+{
 }
 
 WireCell::SPNG::Decon::~Decon() {};
 
 WireCell::Configuration WireCell::SPNG::Decon::default_configuration() const
 {
-    Configuration cfg;
+    auto cfg = this->ContextBase::default_configuration();
     cfg["tensor_index"] = m_tensor_index;
     return cfg;
 };
 
 
-void WireCell::SPNG::Decon::configure(const WireCell::Configuration& config) {
+void WireCell::SPNG::Decon::configure(const WireCell::Configuration& config)
+{
+    this->ContextBase::configure(config);
 
     m_passthrough.append("channel_map");
 
     m_frer_spectrum = get(config, "frer_spectrum", m_frer_spectrum);
-    base_frer_spectrum = Factory::find_tn<ITorchSpectrum>(m_frer_spectrum);
+    m_base_frer_spectrum = Factory::find_tn<ITorchSpectrum>(m_frer_spectrum);
 
     m_wire_filter = get(config, "wire_filter", m_wire_filter);
-    base_wire_filter = Factory::find_tn<ITorchSpectrum>(m_wire_filter);
+    m_base_wire_filter = Factory::find_tn<ITorchSpectrum>(m_wire_filter);
 
     m_coarse_time_offset = get(config, "coarse_time_offset", m_coarse_time_offset);
     m_pad_wire_domain = get(config, "pad_wire_domain", m_pad_wire_domain);
@@ -62,10 +64,12 @@ void WireCell::SPNG::Decon::configure(const WireCell::Configuration& config) {
 bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& out) {
     out = nullptr;
     if (!in) {
-        log->debug("EOS ");
+        logit("EOS");
+        ++m_count;
         return true;
     }
-    log->debug("Running Decon");
+
+    logit(in, "decon");
 
     // //Get the cloned tensor from the input
     // size_t ntensors = in->tensors()->size();
@@ -83,7 +87,18 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     //     log->debug("Tensor {} has shape {} {}", i, this_sizes[0], this_sizes[1]);
     // }
 
-    auto tensor_clone = in->tensors()->at(m_tensor_index)->tensor().clone();
+    // Get input tensor at set index, assure it is on our device.
+    auto orig_tensor = in->tensors()->at(m_tensor_index)->tensor();
+    if (! orig_tensor.numel()) {
+        log->warn("empty torch tensor at index {} at call={}, passing through",
+                  m_count, m_tensor_index);
+        out = in;
+        ++m_count;
+        return true;
+    }
+
+    // Why do we clone?
+    auto tensor_clone = to(orig_tensor.clone());
     
     if (m_unsqueeze_input)
         tensor_clone = torch::unsqueeze(tensor_clone, 0);
@@ -100,11 +115,11 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     
     // TODO -- Padding in time domain then trim
     //      -- Later down the line overlap/add for extended readout
-    //Always Pad in time because of non-periodicity in this domain
-
+    // Always Pad in time because of non-periodicity in this domain
+    
     if (m_pad_wire_domain) {
         // auto input_length = shape[0];
-        auto response_length = base_frer_spectrum->shape()[0];
+        auto response_length = m_base_frer_spectrum->shape()[0];
 
         auto padding_size = response_length - 1;
 
@@ -138,15 +153,13 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     //FFT on chan dim
     tensor_clone = torch::fft::fft(tensor_clone, std::nullopt, 1);
 
-    //Get the Field x Elec. Response and do FFT in both dimensons
-    auto frer_spectrum_tensor = base_frer_spectrum->spectrum(response_shape).clone();
-
-    
+    //Get the Field x Elec. Response and do FFT in both dimensions.  Assure it is on our device.
+    auto frer_spectrum_tensor = to(m_base_frer_spectrum->spectrum(response_shape).clone());
 
     frer_spectrum_tensor = torch::fft::rfft2(frer_spectrum_tensor);
 
     //Get the wire shift
-    int wire_shift = base_frer_spectrum->shifts()[0];
+    int wire_shift = m_base_frer_spectrum->shifts()[0];
     log->debug("Preparing to shift by {} wires in", wire_shift);
 
     //Apply to input data
@@ -155,7 +168,7 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
 
     //Get the Wire filter -- already FFT'd
     //TODO -- fix the log here because of HfFilter weirdness
-    auto wire_filter_tensor = base_wire_filter->spectrum({response_shape[0]});
+    auto wire_filter_tensor = m_base_wire_filter->spectrum({response_shape[0]});
 
     //Multiply along the wire dimension
     if (!m_debug_no_wire_filter)
@@ -166,7 +179,7 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     
     //Shift along time dimension
     int time_shift = (int) (
-        (m_coarse_time_offset + base_frer_spectrum->shifts()[1]) /
+        (m_coarse_time_offset + m_base_frer_spectrum->shifts()[1]) /
         in->metadata()["period"].asDouble()
     );
 
@@ -179,13 +192,12 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     if (m_pad_wire_domain) {
         //This selects the post-roll block
         using namespace torch::indexing;
-        // auto unpadded_width = shape[0] - (base_frer_spectrum->shape()[0]-1);
-        // auto unpadded_width = shape[0] - (base_frer_spectrum->shape()[0]-1);
+        // auto unpadded_width = shape[0] - (m_base_frer_spectrum->shape()[0]-1);
+        // auto unpadded_width = shape[0] - (m_base_frer_spectrum->shape()[0]-1);
         tensor_clone = tensor_clone.index({
             Slice(), //Over all of the planes
             Slice(None, original_nchans) //0 to N orig channels
         });
-        log->debug("Unpadded to {}", tensor_clone.sizes()[1]);
     }
 
     if (m_unsqueeze_input)
@@ -195,7 +207,7 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
 
     tensor_md["tag"] = m_output_tensor_tag;
     metadata_passthrough(in->tensors()->at(0)->metadata(), tensor_md, m_passthrough);
-    // log->debug("Passed channel_map\n{}", tensor_md["channel_map"]);
+
     set_md["tag"] = m_output_set_tag;
     auto output_tensor = std::make_shared<SimpleTorchTensor>(tensor_clone, tensor_md);
     std::vector<ITorchTensor::pointer> itv{
@@ -205,9 +217,13 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
         in->ident(), set_md,
         std::make_shared<std::vector<ITorchTensor::pointer>>(itv)
     );
-    log->debug("Tagged output with Set:{} Tensor:{}",
-               out->metadata()["tag"],
-               out->tensors()->at(0)->metadata()["tag"]);
 
+    logit(out, "deconed");
+
+    // log->debug("Tagged output with Set:{} Tensor:{}",
+    //            out->metadata()["tag"],
+    //            out->tensors()->at(0)->metadata()["tag"]);
+
+    ++m_count;
     return true;
 }
