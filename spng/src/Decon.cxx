@@ -83,7 +83,7 @@ bool WireCell::SPNG::Decon::operator()(const input_pointer& in, output_pointer& 
     //     log->debug("Tensor {} has shape {} {}", i, this_sizes[0], this_sizes[1]);
     // }
 
-    auto tensor_clone = in->tensors()->at(m_tensor)->tensor().clone();
+    auto tensor_clone = in->tensors()->at(m_tensor_index)->tensor().clone();
     
     if (m_unsqueeze_input)
         tensor_clone = torch::unsqueeze(tensor_clone, 0);

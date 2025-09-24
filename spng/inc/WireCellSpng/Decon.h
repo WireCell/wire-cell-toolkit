@@ -20,10 +20,7 @@ namespace SPNG {
 
         virtual bool operator()(const input_pointer& in, output_pointer& out);
         virtual void configure(const WireCell::Configuration& config);
-        virtual WireCell::Configuration default_configuration() const {
-            Configuration cfg;
-            return cfg;
-        };
+        virtual WireCell::Configuration default_configuration() const;
     private:
         std::string m_frer_spectrum{"FRERSpectrum"};
         std::string m_wire_filter{"Torch1DSpectrum"};
