@@ -142,8 +142,6 @@ namespace WireCell::Clus {
 
         void clear_segments();
  
-        // after the first round of track fitting, adjust the rough path ...
-        WireCell::Point adjust_rough_path(PR::Segment& segment);
 
         // collect charge
         void prepare_data();
