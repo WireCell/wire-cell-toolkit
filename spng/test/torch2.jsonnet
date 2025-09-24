@@ -7,7 +7,9 @@ local spng_filters = import 'spng_filters.jsonnet';
 function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false, do_mp_finding=false) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
 
-        local filters = spng_filters(debug_force_cpu = debug_force_cpu)
+    local device = if debug_force_cpu then "cpu" else "gpu",
+
+        local filters = spng_filters(device)
 
         local make_fanout(anode, name=null) = {
             ret : g.pnode({

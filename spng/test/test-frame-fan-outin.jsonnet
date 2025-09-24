@@ -8,7 +8,6 @@ local io = import "fileio.jsonnet";
 /// WARNING: is this detector agnostic? I don't think so.
 
 local spng_filters = import "spng_filters.jsonnet";
-local filters = spng_filters();
 
 /// Note, different input may require selecting a different anodeid to get any activity.
 function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-outin.npz", paradigm="orig", anodeid="3", device="cpu")
@@ -21,6 +20,7 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
     local noise = omni.noise(anode);
     local digitize = omni.digitize(anode);
     local verbose = 2;
+    local filters = spng_filters(device);
 
     local groups = [
         [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
@@ -131,6 +131,7 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
                         default_nticks: 6000,
                         readout_period: 500*wc.ns,
                         extra_scale: 1.0,
+                        device: device,
                     },
                     uses: [fr, er],
                 };
@@ -169,7 +170,8 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
                             coarse_time_offset: 1000,
                             pad_wire_domain: (group > 1), #Non-periodic planes get padded
                             use_fft_best_length: true,
-                            unsqueeze_input: false,
+                            unsqueeze_input: true,
+                            device: device,
                         },
                     }, nin=1, nout=1, uses=[frer, wire_filter]),
                 ]) for group in wc.iota(ngroups)],
