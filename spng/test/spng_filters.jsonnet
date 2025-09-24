@@ -1,6 +1,6 @@
 local wc = import 'wirecell.jsonnet';
 
-function(filter_settings) {
+function(debug_force_cpu=false) {
 
         ROI_loose_lf : {
             data: {
@@ -50,7 +50,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(gaus_filter),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
 
@@ -131,7 +131,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wiener_wide_u),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
         local torch_wiener_wide_only_v = {
@@ -142,7 +142,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wiener_wide_v),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
         local torch_wiener_wide_only_w = {
@@ -153,7 +153,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wiener_wide_w),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
 
@@ -172,7 +172,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wiener_tight_u),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
         local torch_wiener_tight_only_v = {
@@ -183,7 +183,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wiener_tight_v),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
         local torch_wiener_tight_only_w = {
@@ -194,7 +194,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wiener_tight_w),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
                 },
         },
 
@@ -237,7 +237,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wire_filters[0]),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
 
                 },
             },
@@ -249,7 +249,7 @@ function(filter_settings) {
                     spectra: [
                         wc.tn(wire_filters[1]),
                     ],
-                    debug_force_cpu: filter_settings.debug_force_cpu,
+                    debug_force_cpu: debug_force_cpu,
 
                 },
             },

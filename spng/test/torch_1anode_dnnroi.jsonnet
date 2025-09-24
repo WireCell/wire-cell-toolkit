@@ -11,10 +11,7 @@ function(
 ) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
             
-        local filter_settings = {
-            debug_force_cpu: debug_force_cpu,
-        },
-        local filters = spng_filters(filter_settings),
+        local filters = spng_filters(debug_force_cpu = debug_force_cpu),
 
         local make_fanout(anode, name=null) = {
             ret : g.pnode({
