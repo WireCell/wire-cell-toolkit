@@ -12,6 +12,7 @@
 
 #include "WireCellSpng/Torch.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellSpng/ITorchTensorSet.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
@@ -68,16 +69,50 @@ namespace WireCell::Torch {
                              int64_t npoints, double xmin, double xmax,
                              torch::TensorOptions options = torch::TensorOptions());
 
-    // Return a shape large enough to assure linear convolution if the given
-    // tensors and another tensor of shape extra_shape were cyclically
-    // convolved.
-    //
-    // Each element of shape is the sum of corresponding dimension size reduced
-    // by the number of tensors.  If there is no intention to include an
-    // additional tensor of shape extra_shape, this inflates from the strict
-    // minimum required size to avoid cyclic artifacts by 1.
+    // Return a tensor sizes() as a vector.
+    inline
+    std::vector<int64_t> vshape(const torch::IntArrayRef& sizes) {
+        return std::vector<int64_t>(sizes.begin(), sizes.end());
+    }
+    inline
+    std::vector<int64_t> vshape(const torch::Tensor& ten) {
+        return vshape(ten.sizes());
+    }
+
+    /// Return a shape large enough to assure linear convolution if the given
+    /// tensors and another tensor of shape extra_shape were cyclically
+    /// convolved.
+    ///
+    /// Scalar form
+    template<typename T>
+    T linear_shape(const T& a, const T& b) { return a + b - 1; }
+
+    /// Vector form
+    template<typename T>
+    std::vector<T> linear_shape(const std::vector<T>& a, const std::vector<T>& b)
+    {
+        const size_t ndima = a.size();
+        const size_t ndimb = b.size();
+        if (ndima != ndimb) {
+            raise<ValueError>("linear_shape ndim mismatch %d != %d", ndima, ndimb);
+        }
+        std::vector<T> res(ndima);
+        for (size_t ind=0; ind<ndima; ++ind) {
+            res[ind] = linear_shape(a[ind], b[ind]);
+        }
+        return res;
+    }        
+
+    inline
+    std::vector<int64_t> linear_shape(const torch::IntArrayRef& a, const torch::IntArrayRef& b)
+    {
+        return linear_shape(vshape(a), vshape(b));
+    }
+    // A cumulative version.
     std::vector<int64_t> linear_shape(const std::vector<torch::Tensor>& tens, 
-                                      torch::IntArrayRef extra_shape = {0,0});
+                                      torch::IntArrayRef extra_shape);
+    std::vector<int64_t> linear_shape(const std::vector<torch::Tensor>& tens, 
+                                      std::vector<int64_t> extra_shape);
 
 
     // Perform 2D, multi-array cyclic convolution in the given shape.

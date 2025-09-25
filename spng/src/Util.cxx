@@ -30,14 +30,20 @@ torch::Tensor Torch::gaussian1d(double mean, double sigma,
 std::vector<int64_t> Torch::linear_shape(const std::vector<torch::Tensor>& tens, 
                                          torch::IntArrayRef extra_shape)
 {
-    // Find shape that assures linear convolution.
-    std::vector<int64_t> shape = {extra_shape[0], extra_shape[1]};
+    return linear_shape(tens, vshape(extra_shape));
+}
+std::vector<int64_t> Torch::linear_shape(const std::vector<torch::Tensor>& tens, 
+                                         std::vector<int64_t> shape)
+{
+    // start with whatever user may give in input "extra" shape
     for (const auto& ten : tens) {
         auto sizes = ten.sizes();
-        shape[0] += sizes[0] - 1;
-        shape[1] += sizes[1] - 1;
+        const int64_t ndim = sizes.size();
+        for (int64_t ind=0; ind<ndim; ++ind) {
+            shape[ind] += sizes[0] - 1;
+        }
     }
-    return shape;
+    return std::move(shape);
 }
 
 
