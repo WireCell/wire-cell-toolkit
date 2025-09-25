@@ -1,7 +1,23 @@
 #include "WireCellSpng/TensorDataModel.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 
+#include <regex>
+
 namespace WireCell::SPNG {
+
+
+    ITorchTensor::vector find_tensors(const ITorchTensorSet::pointer& ts, const std::string& datapath_regex)
+    {
+        auto match = std::regex(datapath_regex);
+        ITorchTensor::vector found;
+        for (auto iten : *(ts->tensors())) {
+            const auto dp = datapath(iten);
+            if (std::regex_match(dp, match)) {
+                found.push_back(iten);
+            }
+        }
+        return found;
+    }
 
 
     ITorchTensor::pointer make_tensor(const std::string& datatype,

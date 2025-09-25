@@ -27,11 +27,17 @@ Every ~ITorchTensor~ metadata SHALL have these attributes:
 An ~ITorchTensor~ metadata MAY have these attributes or depending on datatype MUST.
 
 - ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent (but may be a parent).  A parent MUST precede all children in the ~ITorchTensor~.
-- ~batches~ :: an integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.
+- ~batches~ :: an integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.  
 
 * High level data model
 
 The high level SPNG data model specifies how other data types are represented in the low level SPNG data model.
+
+Various parameters take different forms depending on if the set of tensors are considered "batched" or not.  The type of such parameter are:
+
+- scalar if the array is not batched ("unbatched").
+- scalar if batched but with a common value across all batches ("batched but common").
+- array if value differs across the batches ("batched, changing").
 
 ** ~IFrame~
 
@@ -43,7 +49,7 @@ An ~ITorchTensor~ with ~datatype~ of "frame" represents the non-constituent part
 
 - ~ident~ :: required, integer (unbatched) or array of integer (batched) of the ~IFrame::ident()~ value.
 - ~time~ :: required, float (unbatched) or array of float (batched) of the ~IFrame::time()~ value.
-- ~period~ :: requied, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.
+- ~period~ :: required, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.
 
 No tensor part is provided by a "frame" tensor.
 
@@ -58,6 +64,7 @@ A "traces" tensor represents a tagged ~ITrace~ collection.  Unlike ~ITrace~, the
 The metadata attributes are:
 
 - ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~period~ :: required, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.  This replicates the ~period~ value in the parent.
 - ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor represents.
 - ~tbin~ :: integer (unbatched) or array of integer (batched) of the number of sample periods from the frame reference time to the first (element 0) column / tick.  If omitted, a default value of zero may be assumed.
 

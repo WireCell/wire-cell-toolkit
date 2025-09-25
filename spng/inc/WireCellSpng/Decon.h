@@ -23,7 +23,23 @@ namespace SPNG {
         virtual bool operator()(const input_pointer& in, output_pointer& out);
         virtual void configure(const WireCell::Configuration& config);
         virtual WireCell::Configuration default_configuration() const;
+
+    protected:
+
+        // The actual deconvolution.  The input tensor provides ADC waveforms
+        // and is assumed to be batched.  The sampling period must be provided.
+        virtual torch::Tensor decon(torch::Tensor waveforms, double period) const;
+
+        // Helper to get the input itensor
+        ITorchTensor::pointer get_input(const ITorchTensorSet::pointer& in, size_t index=0) const;
+        
+        // Helper to prepare the output tensor.
+        virtual ITorchTensorSet::pointer make_output(const ITorchTensorSet::pointer& intenset,
+                                                     const ITorchTensor::pointer& inten,
+                                                     torch::Tensor outten) const;
+
     private:
+
         std::string m_frer_spectrum{"FRERSpectrum"};
         std::string m_wire_filter{"Torch1DSpectrum"};
         std::shared_ptr<ITorchSpectrum> m_base_frer_spectrum, m_base_wire_filter;
@@ -36,14 +52,15 @@ namespace SPNG {
         bool m_debug_force_cpu = false;
         bool m_pad_wire_domain = false;
         
-        /// Configuration: tensor_index (default=0)
-        ///
-        /// Set the index of the traces tensor in the tensor set to process.
-        int m_tensor_index{0};
-
         Json::Value m_output_set_tag{"Decon2D"}, m_output_tensor_tag{"Default"};
         Json::Value m_passthrough{Json::arrayValue};
+
+        /// Configuration: tensor_index (default = 0)
+        ///
+        /// The index for the input tensor in the tensor set on which to operate.
+        int m_tensor_index{0};
     };
+
 }
 }
 
