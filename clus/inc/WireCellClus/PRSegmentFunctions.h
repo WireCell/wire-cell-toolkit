@@ -77,6 +77,10 @@ namespace WireCell::Clus::PR {
                                     const std::string& cloud_name = "fit");
 
 
+    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit");
+
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm );
+
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
 
 

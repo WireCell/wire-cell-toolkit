@@ -2,6 +2,7 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellUtil/Units.h"
 
 namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
@@ -69,6 +70,282 @@ namespace WireCell::Clus::PR {
         create_segment_point_cloud(segment, fit_points, dv, cloud_name);
   
     }
+
+
+    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name){
+        double min_dist = 1e9;
+        WireCell::Point closest_point(0,0,0);
+        
+        if (!seg) {
+            raise<RuntimeError>("get_closest_point: invalid segment");
+        }
+        
+        auto dpc = seg->dpcloud(cloud_name);
+        if (!dpc) {
+            raise<RuntimeError>("get_closest_point: segment missing DynamicPointCloud with name " + cloud_name);
+        }
+        
+        const auto& points = dpc->get_points();
+        if (points.empty()) {
+            raise<RuntimeError>("get_closest_point: DynamicPointCloud has no points");
+        }
+        
+        // Use KD-tree to find the closest point
+        auto& kd_tree = dpc->kd3d();
+        auto knn_results = kd_tree.knn(1, point);
+        
+        if (!knn_results.empty()) {
+            size_t closest_index = knn_results[0].first;
+            min_dist = std::sqrt(knn_results[0].second); // knn returns squared distance
+            
+            // Get the actual point from the DynamicPointCloud
+            const auto& dpc_point = points[closest_index];
+            closest_point = WireCell::Point(dpc_point.x, dpc_point.y, dpc_point.z);
+        }
+        
+        return {min_dist, closest_point};
+    }
+
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold){
+        auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
+        WireCell::Point test_p = tmp_results.second;
+
+        WireCell::Vector drift_dir_abs(1,0,0);
+        
+        const auto& fits = seg->fits();
+        if (fits.empty()) {
+            WireCell::Point p1 = WireCell::Point(0,0,0);
+            WireCell::Vector dir(0,0,0);
+            return std::make_tuple(p1, dir, dir, false);
+        }
+
+        std::vector<double> refl_angles(fits.size(), 0);
+        std::vector<double> para_angles(fits.size(), 0);
+        
+        // Start the angle search
+        for (size_t i = 0; i < fits.size(); i++) {
+            double angle1 = 0;
+            double angle2 = 0;
+            
+            for (int j = 0; j < 6; j++) {
+                WireCell::Vector v10(0,0,0);
+                WireCell::Vector v20(0,0,0);
+                
+                if (i >= (j+1)*2) {
+                    v10 = fits[i].point - fits[i-(j+1)*2].point;
+                } else {
+                    v10 = fits[i].point - fits.front().point;
+                }
+                
+                if (i+(j+1)*2 < fits.size()) {
+                    v20 = fits[i+(j+1)*2].point - fits[i].point;
+                } else {
+                    v20 = fits.back().point - fits[i].point;
+                }
+                
+                if (j == 0) {
+                    double dot_product = v10.dot(v20);
+                    double mag_product = v10.magnitude() * v20.magnitude();
+                    if (mag_product > 0) {
+                        angle1 = std::acos(std::max(-1.0, std::min(1.0, dot_product / mag_product))) / M_PI * 180.0;
+                    }
+                    
+                    double drift_dot1 = v10.dot(drift_dir_abs);
+                    double drift_dot2 = v20.dot(drift_dir_abs);
+                    double drift_mag1 = v10.magnitude();
+                    double drift_mag2 = v20.magnitude();
+                    
+                    double drift_angle1 = 90.0, drift_angle2 = 90.0;
+                    if (drift_mag1 > 0) drift_angle1 = std::acos(std::max(-1.0, std::min(1.0, drift_dot1 / drift_mag1))) / M_PI * 180.0;
+                    if (drift_mag2 > 0) drift_angle2 = std::acos(std::max(-1.0, std::min(1.0, drift_dot2 / drift_mag2))) / M_PI * 180.0;
+                    
+                    angle2 = std::max(std::abs(drift_angle1 - 90.0), std::abs(drift_angle2 - 90.0));
+                } else {
+                    if (v10.magnitude() != 0 && v20.magnitude() != 0) {
+                        double dot_product = v10.dot(v20);
+                        double mag_product = v10.magnitude() * v20.magnitude();
+                        double current_angle1 = std::acos(std::max(-1.0, std::min(1.0, dot_product / mag_product))) / M_PI * 180.0;
+                        angle1 = std::min(current_angle1, angle1);
+                        
+                        double drift_dot1 = v10.dot(drift_dir_abs);
+                        double drift_dot2 = v20.dot(drift_dir_abs);
+                        double drift_mag1 = v10.magnitude();
+                        double drift_mag2 = v20.magnitude();
+                        
+                        double drift_angle1 = 90.0, drift_angle2 = 90.0;
+                        if (drift_mag1 > 0) drift_angle1 = std::acos(std::max(-1.0, std::min(1.0, drift_dot1 / drift_mag1))) / M_PI * 180.0;
+                        if (drift_mag2 > 0) drift_angle2 = std::acos(std::max(-1.0, std::min(1.0, drift_dot2 / drift_mag2))) / M_PI * 180.0;
+                        
+                        double current_angle2 = std::max(std::abs(drift_angle1 - 90.0), std::abs(drift_angle2 - 90.0));
+                        angle2 = std::min(current_angle2, angle2);
+                    }
+                }
+            }
+            
+            refl_angles[i] = angle1;
+            para_angles[i] = angle2;
+        }
+
+        bool flag_check = false;
+        int save_i = -1;
+        bool flag_switch = false;
+        bool flag_search = false;
+        
+        for (size_t i = 0; i < fits.size(); i++) {
+            // Check if close to test point
+            double dist_to_test = (test_p - fits[i].point).magnitude();
+            if (dist_to_test < 0.1 * units::cm) flag_check = true;
+            
+            // Check distance constraints
+            double dist_to_front = (fits[i].point - fits.front().point).magnitude();
+            double dist_to_back = (fits[i].point - fits.back().point).magnitude();
+            double dist_to_start = (fits[i].point - start_p).magnitude();
+            
+            if (dist_to_front < 1*units::cm || 
+                dist_to_back < 1*units::cm || 
+                dist_to_start < 1*units::cm) continue;
+            
+            if (flag_check) {
+                // Calculate average and max dQ/dx in local region
+                double ave_dQ_dx = 0; 
+                int ave_count = 0;
+                double max_dQ_dx = fits[i].dQ / (fits[i].dx + 1e-9);
+                
+                for (int j = -2; j <= 2; j++) {
+                    int idx = i + j;
+                    if (idx >= 0 && idx < static_cast<int>(fits.size())) {
+                        double local_dQ_dx = fits[idx].dQ / (fits[idx].dx + 1e-9);
+                        ave_dQ_dx += local_dQ_dx;
+                        ave_count++;
+                        if (local_dQ_dx > max_dQ_dx) max_dQ_dx = local_dQ_dx;
+                    }
+                }
+                if (ave_count != 0) ave_dQ_dx /= ave_count;
+                
+                // Calculate angle sums
+                double sum_angles = 0;
+                double nsum = 0;
+                double sum_angles1 = 0;
+                double nsum1 = 0;
+                
+                for (int j = -2; j <= 2; j++) {
+                    int idx = i + j;
+                    if (idx >= 0 && idx < static_cast<int>(fits.size())) {
+                        if (para_angles[idx] > 10) {
+                            sum_angles += pow(refl_angles[idx], 2);
+                            nsum++;
+                        }
+                        if (para_angles[idx] > 7.5) {
+                            sum_angles1 += pow(refl_angles[idx], 2);
+                            nsum1++;
+                        }
+                    }
+                }
+                if (nsum != 0) sum_angles = sqrt(sum_angles / nsum);
+                if (nsum1 != 0) sum_angles1 = sqrt(sum_angles1 / nsum1);
+                
+                // Apply kink detection criteria
+                if (para_angles[i] > 10 && refl_angles[i] > 30 && sum_angles > 15) {
+                    save_i = i;
+                    break;
+                } else if (para_angles[i] > 7.5 && refl_angles[i] > 45 && sum_angles1 > 25) {
+                    save_i = i;
+                    break;
+                } else if (para_angles[i] > 15 && refl_angles[i] > 27 && sum_angles > 12.5) {
+                    save_i = i;
+                    break;
+                } else if (para_angles[i] > 15 && refl_angles[i] > 22 && sum_angles > 19 && 
+                          max_dQ_dx > dQ_dx_threshold*1.5 && ave_dQ_dx > dQ_dx_threshold) {
+                    save_i = i;
+                    flag_search = true;
+                    break;
+                }
+            }
+        }
+        
+        // Return results
+        if (save_i > 0 && save_i+1 < static_cast<int>(fits.size())) {
+            WireCell::Point p = fits[save_i].point;
+            
+            WireCell::Point prev_p(0,0,0);
+            WireCell::Point next_p(0,0,0);
+            int num_p = 0;
+            int num_p1 = 0;
+            
+            double length1 = 0;
+            double length2 = 0;
+            WireCell::Point last_p1, last_p2;
+            
+            // Calculate direction vectors by averaging nearby points
+            for (int i = 1; i < 10; i++) {
+                if (save_i >= i) {
+                    length1 += (fits[save_i-i].point - fits[save_i-i+1].point).magnitude();
+                    prev_p = prev_p + fits[save_i-i].point;
+                    last_p1 = fits[save_i-i].point;
+                    num_p++;
+                }
+                if (save_i+i < static_cast<int>(fits.size())) {
+                    length2 += (fits[save_i+i].point - fits[save_i+i-1].point).magnitude();
+                    next_p = next_p + fits[save_i+i].point;
+                    last_p2 = fits[save_i+i].point;
+                    num_p1++;
+                }
+            }
+            
+            double length1_1 = (last_p1 - fits[save_i].point).magnitude();
+            double length2_1 = (last_p2 - fits[save_i].point).magnitude();
+            
+            // Check for direction switch
+            if (std::abs(length2 - length2_1) < 0.03 * length2_1 && length1 * length2_1 > 1.06 * length2 * length1_1) {
+                flag_switch = true;
+                flag_search = true;
+            } else if (std::abs(length1 - length1_1) < 0.03 * length1_1 && length2 * length1_1 > 1.06 * length1 * length2_1) {
+                flag_search = true;
+            }
+            
+            prev_p = prev_p * (1.0/num_p);
+            next_p = next_p * (1.0/num_p1);
+            
+            WireCell::Vector dir = (p - prev_p).norm();
+            WireCell::Vector dir1 = (p - next_p).norm();
+            
+            // Calculate local charge density
+            double sum_dQ = 0, sum_dx = 0;
+            for (int i = -2; i <= 2; i++) {
+                int idx = save_i + i;
+                if (idx >= 0 && idx < static_cast<int>(fits.size())) {
+                    sum_dQ += fits[idx].dQ;
+                    sum_dx += fits[idx].dx;
+                }
+            }
+            
+            if (flag_search) {
+                if (flag_switch) {
+                    return std::make_tuple(p, dir1, dir, true);
+                } else {
+                    return std::make_tuple(p, dir, dir1, true);
+                }
+            } else if (sum_dQ / (sum_dx + 1e-9) > 25000/units::cm) { //not too low ...
+                if (flag_switch) {
+                    return std::make_tuple(p, dir1, dir, false);
+                } else {
+                    return std::make_tuple(p, dir, dir1, false);
+                }
+            } else {
+                if (flag_switch) {
+                    return std::make_tuple(p, dir1, dir, true);
+                } else {
+                    return std::make_tuple(p, dir, dir1, true);
+                }
+            }
+        } else {
+            WireCell::Point p1 = fits.back().point;
+            WireCell::Vector dir(0,0,0);
+            return std::make_tuple(p1, dir, dir, false);
+        }
+    }
+
+
 
 
     bool break_segment(Graph& graph, SegmentPtr seg, Point point, double max_dist/*=1e9*/)
