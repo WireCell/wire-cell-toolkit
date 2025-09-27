@@ -41,6 +41,7 @@ namespace WireCell::Clus::PR {
     /// @param seg The segment containing fit data
     /// @return Median dQ/dx value (0 if no valid fits)
     double segment_median_dQ_dx(SegmentPtr seg);
+    double segment_rms_dQ_dx(SegmentPtr seg);
     
     /// Calculate track length above dQ/dx threshold
     ///

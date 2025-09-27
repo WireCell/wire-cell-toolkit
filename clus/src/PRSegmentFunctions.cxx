@@ -331,6 +331,39 @@ namespace WireCell::Clus::PR {
         
         return vec_dQ_dx[median_index];
     }
+    
+    double segment_rms_dQ_dx(SegmentPtr seg)
+    {
+        auto& fits = seg->fits();
+        if (fits.empty()) {
+            return 0.0;
+        }
+        
+        std::vector<double> vec_dQ_dx;
+        vec_dQ_dx.reserve(fits.size());
+        
+        for (auto& fit : fits) {
+            if (fit.valid() && fit.dx > 0 && fit.dQ >= 0) {
+                // Add small epsilon to avoid division by zero (same as original)
+                vec_dQ_dx.push_back(fit.dQ / (fit.dx + 1e-9));
+            }
+        }
+        
+        if (vec_dQ_dx.empty()) {
+            return 0.0;
+        }
+        
+        // Calculate mean
+        double sum = std::accumulate(vec_dQ_dx.begin(), vec_dQ_dx.end(), 0.0);
+        double mean = sum / vec_dQ_dx.size();
+        
+        // Calculate variance
+        double sq_sum = std::inner_product(vec_dQ_dx.begin(), vec_dQ_dx.end(), vec_dQ_dx.begin(), 0.0);
+        double variance = sq_sum / vec_dQ_dx.size() - mean * mean;
+        
+        return std::sqrt(variance);
+    }
+
 
     double segment_track_length_threshold(SegmentPtr seg, double threshold)
     {
