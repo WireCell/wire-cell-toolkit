@@ -238,6 +238,70 @@ namespace WireCell::Clus::PR {
         return length;
     }
 
+    double segment_track_max_deviation(SegmentPtr seg, int n1, int n2){
+        double max_deviation = 0.0;
+
+        const auto& fits = seg->fits();
+        if (fits.empty()) {
+            return 0.0;
+        }
+        
+        if (n1<0 && n2 <0){
+            n1 = 0;
+            n2 = static_cast<int>(fits.size()) - 1;
+        }
+
+        // Handle default values and clamp indices (following WCPPID logic)
+        if (n1 < 0) n1 = 0;
+        if (n1 >= static_cast<int>(fits.size())) n1 = static_cast<int>(fits.size()) - 1;
+        if (n2 < 0) n2 = static_cast<int>(fits.size()) - 1;
+        if (n2 >= static_cast<int>(fits.size())) n2 = static_cast<int>(fits.size()) - 1;
+        
+        // Ensure n1 <= n2
+        if (n1 > n2) std::swap(n1, n2);
+        
+        if (n1 != n2) {
+            const Point& p1 = fits[n1].point;
+            const Point& p2 = fits[n2].point;
+            WireCell::Vector line_vec = p2 - p1;
+            double line_length_sq = line_vec.magnitude2();
+            
+            for (int i = n1; i <= n2; i++) {
+                const Point& test_point = fits[i].point;
+                
+                if (line_length_sq > 0) {
+                    // Calculate distance from point to line using projection
+                    WireCell::Vector point_vec = test_point - p1;
+                    double projection = point_vec.dot(line_vec) / line_length_sq;
+                    
+                    // Clamp projection to line segment bounds
+                    projection = std::max(0.0, std::min(1.0, projection));
+                    
+                    // Find closest point on line segment
+                    Point closest_on_line = p1 + line_vec * projection;
+                    
+                    // Calculate distance
+                    double distance = (test_point - closest_on_line).magnitude();
+                    
+                    if (distance > max_deviation) {
+                        max_deviation = distance;
+                    }
+                } else {
+                    // Line has zero length, distance is just point-to-point distance
+                    double distance = (test_point - p1).magnitude();
+                    if (distance > max_deviation) {
+                        max_deviation = distance;
+                    }
+                }
+            }
+        }
+        
+        return max_deviation;
+    }
+        
+        
+
+
     double segment_median_dQ_dx(SegmentPtr seg)
     {
         auto& fits = seg->fits();

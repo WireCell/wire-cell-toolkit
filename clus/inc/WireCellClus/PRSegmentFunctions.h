@@ -31,7 +31,9 @@ namespace WireCell::Clus::PR {
     /// @return Track length
     double segment_track_length(SegmentPtr seg, int flag = 0, int n1 = -1, int n2 = -1, WireCell::Vector dir_perp = WireCell::Vector(0,0,0));
     double segment_track_direct_length(SegmentPtr seg, int n1 = -1, int n2 = -1, WireCell::Vector dir_perp = WireCell::Vector(0,0,0));
-    
+    double segment_track_max_deviation(SegmentPtr seg, int n1 = -1, int n2 = -1);
+
+
     /// Calculate median dQ/dx for a segment
     ///
     /// Extracts dQ and dx from segment's fits and calculates median dQ/dx.
