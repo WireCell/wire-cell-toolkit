@@ -71,6 +71,10 @@ namespace WireCell::Clus::PR {
         double fit_distance() {
             return m_fit.distance(m_wcpt.point);
         };
+        
+        double get_dis(WireCell::Point point){
+            return m_fit.distance(point);
+        };
 
     private:
 
