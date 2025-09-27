@@ -142,7 +142,7 @@ namespace WireCell::Clus::PR {
         }
 
         /** Return true if fit information has been filled */
-        bool valid() {
+        bool valid() const {
             if (index < 0 || range < 0) return false;
             return true;
         }
