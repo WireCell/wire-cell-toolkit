@@ -77,6 +77,9 @@ namespace WireCell::Clus::PR {
                                     const std::string& cloud_name = "fit");
 
 
+    bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
+
+
 }
 
 #endif

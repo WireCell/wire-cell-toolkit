@@ -396,5 +396,17 @@ namespace WireCell::Clus::PR {
     }
 
 
+    bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2){
+        //  std::cout << ks1 << " " << ks2 << " " << ratio1 << " " << ratio2 << " " << sqrt(pow(ks2/0.06,2)+pow((ratio2-1)/0.06,2)) << " " << ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 << " " <<  ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 << " " << std::endl;
+        if (ks1-ks2 >= 0.0) return false;
+        if (sqrt(pow(ks2/0.06,2)+pow((ratio2-1)/0.06,2))< 1.4 && ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > -0.02) return false;
+
+        if (ks1 - ks2 < -0.02 && ((ks2 > 0.09 && fabs(ratio2-1) >0.1) || ratio2 > 1.5 || ks2 > 0.2)) return true;
+        if ( ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 < 0) return true;
+
+        return false;
+    }
+
+
 
 }
