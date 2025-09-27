@@ -684,6 +684,101 @@ namespace WireCell::Clus::PR {
         return false;
     }
 
+    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx){
+        bool flag_shower_trajectory = false;
+        double length = segment_track_length(seg, 0);
+
+        // Too long
+        if (length > 50 * units::cm) return flag_shower_trajectory;
+        
+        const auto& fits = seg->fits();
+        if (fits.empty()) return flag_shower_trajectory;
+        
+        int ncount = std::round(length / step_size);
+        if (ncount == 0) ncount = 1;
+        
+        std::vector<std::pair<int,int>> sections(ncount);
+        for (int i = 0; i < ncount; i++) {
+            sections[i] = std::make_pair(
+                std::round(fits.size() / ncount * i),
+                std::round(fits.size() / ncount * (i + 1))
+            );
+        }
+        sections.back().second = fits.size() - 1;
+        
+        int n_shower_like = 0;
+        WireCell::Vector drift_dir(1, 0, 0);
+        
+        for (size_t j = 0; j < ncount; j++) {
+            int first_idx = sections[j].first;
+            int second_idx = sections[j].second;
+            
+            if (first_idx >= static_cast<int>(fits.size())) first_idx = fits.size() - 1;
+            if (second_idx >= static_cast<int>(fits.size())) second_idx = fits.size() - 1;
+            
+            WireCell::Vector dir_1 = fits[first_idx].point - fits[second_idx].point;
+            if (dir_1.magnitude() > 0) {
+                dir_1 = dir_1.norm();
+            }
+            
+            double tmp_dQ_dx = segment_median_dQ_dx(seg) / (mip_dQ_dx);
+            
+            // Calculate angle difference
+            double dot_product = drift_dir.dot(dir_1);
+            double angle_rad = std::acos(std::max(-1.0, std::min(1.0, dot_product)));
+            double angle_diff = std::abs(angle_rad / M_PI * 180.0 - 90.0);
+            
+            if (angle_diff > 10) { // Not parallel case
+                double direct_length = segment_track_direct_length(seg, first_idx, second_idx, WireCell::Vector(0,0,0));
+                double integrated_length = segment_track_length(seg, 0, first_idx, second_idx, WireCell::Vector(0,0,0));
+                double max_dev = segment_track_max_deviation(seg, first_idx, second_idx);
+                
+                double length_ratio;
+                if (direct_length == 0) length_ratio = 1;
+                else length_ratio = direct_length / integrated_length;
+                
+                if (tmp_dQ_dx * 0.11 + 2 * length_ratio < 2.03 && 
+                    tmp_dQ_dx < 2 && 
+                    length_ratio < 0.95 && 
+                    (angle_diff < 60 || integrated_length < 10 * units::cm || 
+                     (integrated_length >= 10 * units::cm && max_dev > 0.75 * units::cm))) {
+                    n_shower_like++;
+                }
+            } else { // Parallel case
+                WireCell::Vector dir_2 = drift_dir.cross(dir_1);
+                if (dir_2.magnitude() > 0) {
+                    dir_2 = dir_2.norm();
+                }
+                
+                double direct_length = segment_track_direct_length(seg, first_idx, second_idx, dir_2);
+                double integrated_length = segment_track_length(seg, 0, first_idx, second_idx, dir_2);
+                double max_dev = segment_track_max_deviation(seg, first_idx, second_idx);
+                
+                double length_ratio;
+                if (direct_length == 0) length_ratio = 1;
+                else length_ratio = direct_length / integrated_length;
+                
+                if (tmp_dQ_dx * 0.11 + 2 * length_ratio < 2.06 && 
+                    tmp_dQ_dx < 2 && 
+                    length_ratio < 0.97 && 
+                    (integrated_length < 10 * units::cm || 
+                     (integrated_length >= 10 * units::cm && max_dev > 0.75 * units::cm))) {
+                    n_shower_like++;
+                }
+            }
+        }
+        
+        if (n_shower_like >= 0.5 * sections.size()) {
+            flag_shower_trajectory = true;
+        }
+        
+        // Set the flag on the segment if it's identified as shower trajectory
+        if (flag_shower_trajectory) {
+            seg->set_flags(SegmentFlags::kShowerTrajectory);
+        }
+        
+        return flag_shower_trajectory;
+    }
 
 
 }

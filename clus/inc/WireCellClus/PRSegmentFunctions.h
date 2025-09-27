@@ -83,6 +83,8 @@ namespace WireCell::Clus::PR {
 
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
 
+    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx = 50000 / units::cm);
+
 
 }
 
