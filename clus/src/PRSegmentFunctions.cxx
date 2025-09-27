@@ -780,5 +780,98 @@ namespace WireCell::Clus::PR {
         return flag_shower_trajectory;
     }
 
+    WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg){
+        const auto& fits = seg->fits();
+        if (fits.size() < 2) {
+            return WireCell::Vector(0, 0, 0);
+        }
+        
+        WireCell::Point p(0, 0, 0);
+        int flag_dir = seg->dirsign();
+        
+        if (flag_dir == 1) {
+            // Forward direction: from first point using next few points
+            for (size_t i = 1; i < 5 && i < fits.size(); i++) {
+                p = p + (fits[i].point - fits[0].point);
+            }
+        } else if (flag_dir == -1) {
+            // Backward direction: from last point using previous few points
+            for (size_t i = 1; i < 5 && (fits.size() - i - 1) < fits.size(); i++) {
+                if (fits.size() - i - 1 < fits.size()) {
+                    p = p + (fits[fits.size() - i - 1].point - fits.back().point);
+                }
+            }
+        } else {
+            // Default case (flag_dir == 0): use forward direction
+            for (size_t i = 1; i < 5 && i < fits.size(); i++) {
+                p = p + (fits[i].point - fits[0].point);
+            }
+        }
+        
+        WireCell::Vector v1(p.x(), p.y(), p.z());
+        if (v1.magnitude() > 0) {
+            v1 = v1.norm();
+        }
+        return v1;
+    }
+    
+    WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut){
+        const auto& fits = seg->fits();
+        if (fits.empty()) {
+            return WireCell::Vector(0, 0, 0);
+        }
+        
+        WireCell::Point p1(0, 0, 0);
+        int ncount = 0;
+        
+        for (size_t i = 0; i < fits.size(); i++) {
+            double dis = (fits[i].point - p).magnitude();
+            if (dis < dis_cut) {
+                p1 = p1 + fits[i].point;
+                ncount++;
+            }
+        }
+        
+        if (ncount == 0) {
+            return WireCell::Vector(0, 0, 0);
+        }
+        
+        WireCell::Point avg_point = p1 * (1.0 / ncount);
+        WireCell::Vector v1 = avg_point - p;
+        if (v1.magnitude() > 0) {
+            v1 = v1.norm();
+        }
+        return v1;
+    }
+    
+    WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start){
+        const auto& fits = seg->fits();
+        if (fits.empty() || start >= static_cast<int>(fits.size()) || start <= 0) {
+            std::cout << "bad start point in segment_cal_dir_3vector" << std::endl;
+            return WireCell::Vector(0, 0, 0);
+        }
+        
+        WireCell::Point p(0, 0, 0);
+        
+        if (direction == 1) {
+            // Forward direction
+            for (int i = start; i < start + num_points - 1 && i < static_cast<int>(fits.size()); i++) {
+                p = p + (fits[i].point - fits[start - 1].point);
+            }
+        } else if (direction == -1) {
+            // Backward direction
+            for (int i = start; i < start + num_points - 1 && (fits.size() - i - 1) < fits.size(); i++) {
+                if (fits.size() - start < fits.size()) {
+                    p = p + (fits[fits.size() - i - 1].point - fits[fits.size() - start].point);
+                }
+            }
+        }
+        
+        WireCell::Vector v1(p.x(), p.y(), p.z());
+        if (v1.magnitude() > 0) {
+            v1 = v1.norm();
+        }
+        return v1;
+    }
 
 }

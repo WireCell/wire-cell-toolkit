@@ -85,6 +85,9 @@ namespace WireCell::Clus::PR {
 
     bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx = 50000 / units::cm);
 
+    WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg);
+    WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut);
+    WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start);
 
 }
 
