@@ -1013,23 +1013,23 @@ namespace WireCell::Clus::PR {
         return results;
     }
    
-    double cal_kine_range(double L, int particle_type, const Clus::ParticleDataSet::pointer& particle_data){
+    double cal_kine_range(double L, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data){
 
         IScalarFunction::pointer range_function = nullptr;
-        
-        if (abs(particle_type) == 11) {        // electron
+
+        if (abs(pdg_code) == 11) {        // electron
             range_function = particle_data->get_range_function("electron");
         }
-        else if (abs(particle_type) == 13) {   // muon
+        else if (abs(pdg_code) == 13) {   // muon
             range_function = particle_data->get_range_function("muon");
         }
-        else if (abs(particle_type) == 211) {  // pion
+        else if (abs(pdg_code) == 211) {  // pion
             range_function = particle_data->get_range_function("pion");
         }
-        else if (abs(particle_type) == 321) {  // kaon
+        else if (abs(pdg_code) == 321) {  // kaon
             range_function = particle_data->get_range_function("kaon");
         }
-        else if (abs(particle_type) == 2212) { // proton
+        else if (abs(pdg_code) == 2212) { // proton
             range_function = particle_data->get_range_function("proton");
         }
         
@@ -1146,30 +1146,30 @@ namespace WireCell::Clus::PR {
         return std::make_tuple(false, 0, 0, 0.0);
     }
 
-    // 4-momentum: px, py, pz, E and the kine_energy ...
-    std::vector<double> segment_cal_4mom(SegmentPtr segment, int particle_type, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx){
+    // 4-momentum: E, px, py, pz, 
+    WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx){
         double length = segment_track_length(segment, 0);
         double kine_energy = 0;
 
-        std::vector<double> results(5,0.0); // 4-momentum: px, py, pz, E and the kine_energy ...
+        WireCell::D4Vector<double> results(0.0, 0.0, 0.0, 0.0); // 4-momentum: E, px, py, pz
 
         if (length < 4*units::cm){
             kine_energy = segment_cal_kine_dQdx(segment, recomb_model); // short track 
         }else if (segment->flags_any(PR::SegmentFlags::kShowerTrajectory)){
             kine_energy = segment_cal_kine_dQdx(segment, recomb_model);
         }else{
-            kine_energy = cal_kine_range(length, particle_type, particle_data);
+            kine_energy = cal_kine_range(length, pdg_code, particle_data);
         }
-        results[4] = kine_energy;
+        // results[4] = kine_energy;
 
-        double particle_mass = particle_data->get_particle_mass(particle_type);
+        double particle_mass = particle_data->get_particle_mass(pdg_code);
 
-        results[3]= kine_energy + particle_mass;
+        results[0]= kine_energy + particle_mass;
         double mom = sqrt(pow(results[3],2) - pow(particle_mass,2));
         auto v1 = segment_cal_dir_3vector(segment);
-        results[0] = mom * v1.x();
-        results[1] = mom * v1.y();
-        results[2] = mom * v1.z();
+        results[1] = mom * v1.x();
+        results[2] = mom * v1.y();
+        results[3] = mom * v1.z();
 
         return results;
     }

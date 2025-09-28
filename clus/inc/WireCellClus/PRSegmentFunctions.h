@@ -4,6 +4,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellUtil/D4Vector.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellClus/ParticleDataSet.h"
@@ -96,13 +97,13 @@ namespace WireCell::Clus::PR {
 
     std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
 
-    double cal_kine_range(double L, int particle_type, const Clus::ParticleDataSet::pointer& particle_data);
+    double cal_kine_range(double L, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data);
 
-    // success, flag_dir, particle_type, particle_score
+    // success, flag_dir, pdg_code, particle_score
     std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
 
-    // 4-momentum: px, py, pz, E and the kine_energy ...
-    std::vector<double> segment_cal_4mom(SegmentPtr segment, int particle_type, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 50000/units::cm);
+    // 4-momentum: E, px, py, pz
+    WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 50000/units::cm);
 }
 
 #endif
