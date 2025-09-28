@@ -23,6 +23,7 @@ namespace WireCell {
             // Access functions
             IScalarFunction::pointer get_dEdx_function(const std::string& particle) const;
             IScalarFunction::pointer get_range_function(const std::string& particle) const;
+            double get_particle_mass(int pdg_code) const;
             
             // Get available particles
             std::vector<std::string> get_particles() const;

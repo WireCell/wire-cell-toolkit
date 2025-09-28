@@ -1043,7 +1043,7 @@ namespace WireCell::Clus::PR {
     }
 
     // success, flag_dir, particle_type, particle_score
-    std::tuple<bool, int, int, double> do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx){
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx){
         
         if (L.size() != dQ_dx.size() || L.empty() || !segment) {
             return std::make_tuple(false, 0, 0, 0.0);
@@ -1144,6 +1144,34 @@ namespace WireCell::Clus::PR {
         
         // Reset before return - failure case
         return std::make_tuple(false, 0, 0, 0.0);
+    }
+
+    // 4-momentum: px, py, pz, E and the kine_energy ...
+    std::vector<double> segment_cal_4mom(SegmentPtr segment, int particle_type, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx){
+        double length = segment_track_length(segment, 0);
+        double kine_energy = 0;
+
+        std::vector<double> results(5,0.0); // 4-momentum: px, py, pz, E and the kine_energy ...
+
+        if (length < 4*units::cm){
+            kine_energy = segment_cal_kine_dQdx(segment, recomb_model); // short track 
+        }else if (segment->flags_any(PR::SegmentFlags::kShowerTrajectory)){
+            kine_energy = segment_cal_kine_dQdx(segment, recomb_model);
+        }else{
+            kine_energy = cal_kine_range(length, particle_type, particle_data);
+        }
+        results[4] = kine_energy;
+
+        double particle_mass = particle_data->get_particle_mass(particle_type);
+
+        results[3]= kine_energy + particle_mass;
+        double mom = sqrt(pow(results[3],2) - pow(particle_mass,2));
+        auto v1 = segment_cal_dir_3vector(segment);
+        results[0] = mom * v1.x();
+        results[1] = mom * v1.y();
+        results[2] = mom * v1.z();
+
+        return results;
     }
 
 }

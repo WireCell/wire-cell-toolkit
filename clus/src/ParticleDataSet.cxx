@@ -1,5 +1,6 @@
 #include "WireCellClus/ParticleDataSet.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Units.h"
 
 WIRECELL_FACTORY(ParticleDataSet, WireCell::Clus::ParticleDataSet, WireCell::IConfigurable)
 
@@ -57,4 +58,28 @@ std::vector<std::string> Clus::ParticleDataSet::get_particles() const {
         particles.push_back(pair.first);
     }
     return particles;
+}
+
+double Clus::ParticleDataSet::get_particle_mass(int pdg_code) const {
+    // Particle Data Group (PDG) codes and their masses in MeV/c^2
+    static const std::map<int, double> pdg_mass_map = {
+        {11, 0.5109989461},    // electron
+        {-11, 0.5109989461},   // positron
+        {13, 105.6583745},     // muon
+        {-13, 105.6583745},    // anti-muon
+        {211, 139.57039},      // charged pion
+        {-211, 139.57039},     // charged pion
+        {321, 493.677},        // charged kaon
+        {-321, 493.677},       // charged kaon
+        {2212, 938.2720813},   // proton
+        {-2212, 938.2720813}   // anti-proton
+    };
+    
+    auto it = pdg_mass_map.find(pdg_code);
+    if (it != pdg_mass_map.end()) {
+        return it->second * units::MeV; // Convert to internal units (MeV/c^2)
+    } else {
+        return 0.0; // Unknown particle type
+    }
+
 }
