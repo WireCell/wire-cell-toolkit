@@ -4,6 +4,7 @@
 #include "WireCellClus/PRCommon.h"
 #include "WireCellClus/PRGraphType.h"
 #include "WireCellUtil/Flagged.h"
+#include "WireCellAux/ParticleInfo.h"
 
 namespace WireCell::Clus::PR {
 
@@ -60,6 +61,18 @@ namespace WireCell::Clus::PR {
     public:
 
         // Getters
+        const std::shared_ptr<Aux::ParticleInfo>& particle_info() const { return m_particle_info; }
+        std::shared_ptr<Aux::ParticleInfo>& particle_info() { return m_particle_info; }
+
+        // Chainable setter
+        Segment& particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo) {
+            m_particle_info = pinfo;
+            return *this; 
+        }
+        
+        // Convenience method to check if particle info is available
+        bool has_particle_info() const { return m_particle_info != nullptr; }
+
 
         /// Get the const vector of fits.
         const std::vector<Fit>& fits() const { return m_fits; }
@@ -98,6 +111,7 @@ namespace WireCell::Clus::PR {
 
         int m_dirsign{0};
 
+        std::shared_ptr<Aux::ParticleInfo> m_particle_info{nullptr};
 
         // Still must consider adding:
         // + pcloud_fit

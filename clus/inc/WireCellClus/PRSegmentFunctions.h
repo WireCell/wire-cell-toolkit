@@ -104,6 +104,8 @@ namespace WireCell::Clus::PR {
 
     // 4-momentum: E, px, py, pz
     WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 50000/units::cm);
+
+    
 }
 
 #endif
