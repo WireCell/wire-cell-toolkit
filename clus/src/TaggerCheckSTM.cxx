@@ -58,7 +58,7 @@ public:
         }
 
         // Configure the LinterpFunction - similar to how drifter is configured
-        auto linterp_name = get<std::string>(config, "linterp_function", "Muon");
+        auto linterp_name = get<std::string>(config, "linterp_function", "MuonDeDx");
         if (!linterp_name.empty()) {
             m_linterp_function = Factory::find_tn<IScalarFunction>(linterp_name);
             if (!m_linterp_function) {
