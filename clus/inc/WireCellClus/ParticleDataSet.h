@@ -8,10 +8,12 @@
 #include <string>
 
 namespace WireCell {
-    namespace CLUS {
+    namespace Clus {
         
         class ParticleDataSet : public IConfigurable {
         public:
+            typedef std::shared_ptr<ParticleDataSet> pointer;
+            
             ParticleDataSet();
             virtual ~ParticleDataSet();
             

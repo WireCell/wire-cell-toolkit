@@ -1,6 +1,7 @@
 #include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
+#include "WireCellClus/ParticleDataSet.h"
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -33,7 +34,7 @@ struct edge_base_t {
  * for Short Track Muon (STM) characteristics and sets the STM flag when conditions are met.
  * This function works on clusters that have already been processed by clustering_recovering_bundle.
  */
-class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel {
+class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData {
 public:
     TaggerCheckSTM() {
         // Initialize with default preset
@@ -44,7 +45,8 @@ public:
     virtual void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedPCTS::configure(config); 
-        NeedRecombModel::configure(config);  
+        NeedRecombModel::configure(config);
+        NeedParticleData::configure(config);  
 
         m_grouping_name = get<std::string>(config, "grouping", "live");
 
@@ -57,19 +59,6 @@ public:
             std::cout << "TaggerCheckSTM: No TrackFitting config file specified, using defaults" << std::endl;
         }
 
-        // Configure the LinterpFunction - similar to how drifter is configured
-        auto linterp_name = get<std::string>(config, "linterp_function", "MuonDeDx");
-        if (!linterp_name.empty()) {
-            m_linterp_function = Factory::find_tn<IScalarFunction>(linterp_name);
-            if (!m_linterp_function) {
-                std::cout << "TaggerCheckSTM: Failed to find LinterpFunction: " <<  linterp_name << std::endl;
-                THROW(ValueError() << errmsg{"Failed to find LinterpFunction: " + linterp_name});
-            }
-            std::cout << "TaggerCheckSTM: Successfully configured LinterpFunction: " << linterp_name << std::endl;
-        } else {
-            std::cout << "TaggerCheckSTM: No LinterpFunction configured" << std::endl;
-        }
-
     }
     
     virtual Configuration default_configuration() const {
@@ -78,9 +67,9 @@ public:
         cfg["detector_volumes"] = "DetectorVolumes";
         cfg["pc_transforms"] = "PCTransformSet";
         cfg["recombination_model"] = "BoxRecombination";  
+        cfg["particle_dataset"] = "ParticleDataSet"; 
 
         cfg["trackfitting_config_file"] = ""; 
-        cfg["linterp_function"] = "";  // empty means user must provide
 
         return cfg;
     }
@@ -244,8 +233,6 @@ private:
     std::string m_grouping_name{"live"};
     std::string m_trackfitting_config_file;  // Path to TrackFitting config file
     mutable TrackFitting m_track_fitter; 
-
-    WireCell::IScalarFunction::pointer m_linterp_function;
 
     void load_trackfitting_config(const std::string& config_file) {
         try {
@@ -1190,10 +1177,10 @@ private:
             std::vector<double> muon_ref_p(ncount_p);
 
             for (size_t i = 0; i != ncount; i++) {
-                muon_ref[i] = m_linterp_function->scalar_function((vec_x[i])/units::cm);
+                muon_ref[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm);
             }
             for (size_t i = 0; i != ncount_p; i++) {
-                muon_ref_p[i] = m_linterp_function->scalar_function((vec_xp[i])/units::cm);
+                muon_ref_p[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_xp[i])/units::cm);
             }
 
             // Perform KS-like tests using kslike_compare
@@ -1391,7 +1378,7 @@ private:
 
         for (size_t i = 0; i != ncount; i++) {
             test_data[i] = vec_y[i];
-            ref_muon[i] = m_linterp_function->scalar_function((vec_x[i] + offset_length) / units::cm);
+            ref_muon[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i] + offset_length) / units::cm);
             ref_flat[i] = 50e3;
         }
 

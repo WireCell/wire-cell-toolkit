@@ -83,13 +83,13 @@ local wc = import "wirecell.jsonnet";
             },
         },
 
-        tagger_check_stm(name="", trackfitting_config_file="", linterp_function="", recombination_model="") :: {
+        tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
                 grouping: "live",           // Which grouping to process
                 trackfitting_config_file: trackfitting_config_file, 
-                linterp_function: linterp_function,
+                particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
             } + dv_cfg + pcts_cfg
         },

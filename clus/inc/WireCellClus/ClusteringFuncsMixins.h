@@ -5,11 +5,14 @@
 #define WIRECELLCLUS_CLUSTERINGFUNCSMIXINS
 
 #include "WireCellClus/IPCTransform.h"
+#include "WireCellClus/ParticleDataSet.h"
 
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellIface/IFiducial.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Exceptions.h"
 
 #include "WireCellUtil/PointTree.h"
 
@@ -29,6 +32,26 @@ namespace WireCell::Clus {
     struct NeedRecombModel {
         IRecombinationModel::pointer m_recomb_model;
         void configure(const WireCell::Configuration &cfg);
+    };
+
+    // A mixin to get particle_data_set
+    class NeedParticleData {
+        ParticleDataSet::pointer m_particle_data;
+        std::string m_particle_data_name{"ParticleDataSet"};
+        
+    public:
+        void configure(const WireCell::Configuration& config) {
+            m_particle_data_name = get<std::string>(config, "particle_dataset", m_particle_data_name);
+            auto configurable = Factory::find_tn<IConfigurable>(m_particle_data_name);
+            m_particle_data = std::dynamic_pointer_cast<ParticleDataSet>(configurable);
+            if (!m_particle_data) {
+                THROW(ValueError() << errmsg{"Failed to find or cast ParticleDataSet: " + m_particle_data_name});
+            }
+        }
+        
+    protected:
+        ParticleDataSet::pointer particle_data() { return m_particle_data; }
+        const ParticleDataSet::pointer particle_data() const { return m_particle_data; }
     };
 
     // A mixin to get an IFiducial

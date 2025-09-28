@@ -1,14 +1,14 @@
 #include "WireCellClus/ParticleDataSet.h"
 #include "WireCellUtil/NamedFactory.h"
 
-WIRECELL_FACTORY(ParticleDataSet, WireCell::CLUS::ParticleDataSet, WireCell::IConfigurable)
+WIRECELL_FACTORY(ParticleDataSet, WireCell::Clus::ParticleDataSet, WireCell::IConfigurable)
 
 using namespace WireCell;
 
-CLUS::ParticleDataSet::ParticleDataSet() {}
-CLUS::ParticleDataSet::~ParticleDataSet() {}
+Clus::ParticleDataSet::ParticleDataSet() {}
+Clus::ParticleDataSet::~ParticleDataSet() {}
 
-void CLUS::ParticleDataSet::configure(const WireCell::Configuration& config) {
+void Clus::ParticleDataSet::configure(const WireCell::Configuration& config) {
     // Configure dE/dx functions
     if (config.isMember("dedx_functions")) {
         const auto& dedx_config = config["dedx_functions"];
@@ -34,24 +34,24 @@ void CLUS::ParticleDataSet::configure(const WireCell::Configuration& config) {
     }
 }
 
-WireCell::Configuration CLUS::ParticleDataSet::default_configuration() const {
+WireCell::Configuration Clus::ParticleDataSet::default_configuration() const {
     Configuration cfg;
     cfg["dedx_functions"] = Json::Value(Json::objectValue);
     cfg["range_functions"] = Json::Value(Json::objectValue);
     return cfg;
 }
 
-IScalarFunction::pointer CLUS::ParticleDataSet::get_dEdx_function(const std::string& particle) const {
+IScalarFunction::pointer Clus::ParticleDataSet::get_dEdx_function(const std::string& particle) const {
     auto it = m_dedx_functions.find(particle);
     return (it != m_dedx_functions.end()) ? it->second : nullptr;
 }
 
-IScalarFunction::pointer CLUS::ParticleDataSet::get_range_function(const std::string& particle) const {
+IScalarFunction::pointer Clus::ParticleDataSet::get_range_function(const std::string& particle) const {
     auto it = m_range_functions.find(particle);
     return (it != m_range_functions.end()) ? it->second : nullptr;
 }
 
-std::vector<std::string> CLUS::ParticleDataSet::get_particles() const {
+std::vector<std::string> Clus::ParticleDataSet::get_particles() const {
     std::vector<std::string> particles;
     for (const auto& pair : m_dedx_functions) {
         particles.push_back(pair.first);
