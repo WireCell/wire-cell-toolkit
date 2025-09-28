@@ -6,6 +6,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/IRecombinationModel.h"
+#include "WireCellClus/ParticleDataSet.h"
 
 namespace WireCell::Clus::PR {
 
@@ -77,7 +78,7 @@ namespace WireCell::Clus::PR {
                                     const IDetectorVolumes::pointer& dv,
                                     const std::string& cloud_name = "fit");
 
-
+ 
     std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit");
 
     std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm );
@@ -92,6 +93,8 @@ namespace WireCell::Clus::PR {
 
     double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model);
     double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model);
+
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
 }
 
 #endif

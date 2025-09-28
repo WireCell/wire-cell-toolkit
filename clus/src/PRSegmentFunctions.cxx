@@ -3,7 +3,10 @@
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellUtil/KSTest.h"
 #include <cmath>
+#include <numeric>
+#include <algorithm>
 
 namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
@@ -913,7 +916,7 @@ namespace WireCell::Clus::PR {
             // Calculate dE/dx using Box model inverse formula from original code
             double dE = recomb_model->dE(dQ, dX);
 
-            // std::cout << dQ << " " << dX << " " << dE << std::endl;
+            std::cout << dQ << " " << dX << " " << dE << std::endl;
 
             // Apply bounds (same as original)
             if (dE < 0) dE = 0;
@@ -954,5 +957,61 @@ namespace WireCell::Clus::PR {
         
         return kine_energy;
     }
+
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx){
+        
+        double end_L = L.back() + 0.15*units::cm - offset_length;
+        
+        int ncount = 0;
+        std::vector<double> vec_x;
+        std::vector<double> vec_y;
+        
+        for (size_t i = 0; i != L.size(); i++) {
+            if (end_L - L.at(i) < compare_range && end_L - L.at(i) > 0) { // check up to compared range
+                vec_x.push_back(end_L - L.at(i));
+                vec_y.push_back(dQ_dx.at(i));
+                ncount++;
+            }
+        }
+        
+        // Create reference vectors for different particles
+        std::vector<double> muon_ref(ncount);
+        std::vector<double> const_ref(ncount, MIP_dQdx);  // MIP-like constant
+        std::vector<double> proton_ref(ncount);
+        std::vector<double> electron_ref(ncount);
+        
+        for (size_t i = 0; i != ncount; i++) {
+            muon_ref[i] = particle_data->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm) /units::cm;
+            proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm)/ units::cm;
+            electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm)/ units::cm;
+        }
+        
+        // Perform KS-like tests using kslike_compare
+        double ks1 = WireCell::kslike_compare(vec_y, muon_ref);
+        double ratio1 = std::accumulate(muon_ref.begin(), muon_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+        
+        double ks2 = WireCell::kslike_compare(vec_y, const_ref);
+        double ratio2 = std::accumulate(const_ref.begin(), const_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+        
+        double ks3 = WireCell::kslike_compare(vec_y, proton_ref);
+        double ratio3 = std::accumulate(proton_ref.begin(), proton_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+        
+        double ks4 = WireCell::kslike_compare(vec_y, electron_ref);
+        double ratio4 = std::accumulate(electron_ref.begin(), electron_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+        
+        std::vector<double> results;
+        // Convert bool result to double (1.0 for true, 0.0 for false)
+        results.push_back(eval_ks_ratio(ks1, ks2, ratio1, ratio2) ? 1.0 : 0.0); // direction metric
+        results.push_back(sqrt(pow(ks1, 2) + pow(ratio1-1, 2))); // muon information
+        results.push_back(sqrt(pow(ks3, 2) + pow(ratio3-1, 2))); // proton information  
+        results.push_back(sqrt(pow(ks4, 2) + pow(ratio4-1, 2))); // electron information
+        
+        return results;
+    }
+
 
 }
