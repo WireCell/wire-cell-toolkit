@@ -916,7 +916,7 @@ namespace WireCell::Clus::PR {
             // Calculate dE/dx using Box model inverse formula from original code
             double dE = recomb_model->dE(dQ, dX);
 
-            std::cout << dQ << " " << dX << " " << dE << std::endl;
+            // std::cout << dQ << " " << dX << " " << dE << std::endl;
 
             // Apply bounds (same as original)
             if (dE < 0) dE = 0;
@@ -1012,6 +1012,34 @@ namespace WireCell::Clus::PR {
         
         return results;
     }
+   
+    double cal_kine_range(double L, int particle_type, const Clus::ParticleDataSet::pointer& particle_data){
 
+        IScalarFunction::pointer range_function = nullptr;
+        
+        if (abs(particle_type) == 11) {        // electron
+            range_function = particle_data->get_range_function("electron");
+        }
+        else if (abs(particle_type) == 13) {   // muon
+            range_function = particle_data->get_range_function("muon");
+        }
+        else if (abs(particle_type) == 211) {  // pion
+            range_function = particle_data->get_range_function("pion");
+        }
+        else if (abs(particle_type) == 321) {  // kaon
+            range_function = particle_data->get_range_function("kaon");
+        }
+        else if (abs(particle_type) == 2212) { // proton
+            range_function = particle_data->get_range_function("proton");
+        }
+        
+        if (!range_function) {
+            // Default to muon if particle type not recognized
+            range_function = particle_data->get_range_function("muon");
+        }
+        
+        double kine_energy = range_function->scalar_function(L/units::cm) * units::MeV;
+        return kine_energy;
+    }
 
 }

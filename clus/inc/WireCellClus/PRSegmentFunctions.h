@@ -95,6 +95,8 @@ namespace WireCell::Clus::PR {
     double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model);
 
     std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
+
+    double cal_kine_range(double L, int particle_type, const Clus::ParticleDataSet::pointer& particle_data);
 }
 
 #endif
