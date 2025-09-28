@@ -97,6 +97,10 @@ namespace WireCell::Clus::PR {
     std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
 
     double cal_kine_range(double L, int particle_type, const Clus::ParticleDataSet::pointer& particle_data);
+
+    // success, flag_dir, particle_type, particle_score
+    std::tuple<bool, int, int, double> do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm );
+
 }
 
 #endif

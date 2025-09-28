@@ -1042,4 +1042,108 @@ namespace WireCell::Clus::PR {
         return kine_energy;
     }
 
+    // success, flag_dir, particle_type, particle_score
+    std::tuple<bool, int, int, double> do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx){
+        
+        if (L.size() != dQ_dx.size() || L.empty() || !segment) {
+            return std::make_tuple(false, 0, 0, 0.0);
+        }
+        
+        std::vector<double> rL(L.size(), 0);
+        std::vector<double> rdQ_dx(L.size(), 0);
+        
+        // Get reverse vectors
+        for (size_t i = 0; i != L.size(); i++) {
+            rL.at(i) = L.back() - L.at(L.size() - 1 - i);
+            rdQ_dx.at(i) = dQ_dx.at(L.size() - 1 - i);
+        }
+        
+        std::vector<double> result_forward = do_track_comp(L, dQ_dx, compare_range, offset_length, particle_data, MIP_dQdx);
+        std::vector<double> result_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx);
+        
+        // Direction determination
+        bool flag_forward = static_cast<bool>(std::round(result_forward.at(0)));
+        bool flag_backward = static_cast<bool>(std::round(result_backward.at(0)));
+        
+        // Calculate length from path (total walk length over fits or wcpts)
+        double length = segment_track_length(segment, 0);
+
+
+        // // Calculate straight-line distance between endpoints (length1 equivalent)
+        // double length1 = 0.0;
+        // auto& fits = segment->fits();
+        // length1 = (fits.front().point - fits.back().point).magnitude();
+        
+        // Forward particle type determination
+        int forward_particle_type = 13; // default muon
+        double min_forward_val = result_forward.at(1);
+        if (result_forward.at(2) < min_forward_val) {
+            min_forward_val = result_forward.at(2);
+            forward_particle_type = 2212; // proton
+        }
+        if (result_forward.at(3) < min_forward_val && length < 20*units::cm) {
+            min_forward_val = result_forward.at(3);
+            forward_particle_type = 11; // electron
+        }
+        
+        // Backward particle type determination  
+        int backward_particle_type = 13; // default muon
+        double min_backward_val = result_backward.at(1);
+        if (result_backward.at(2) < min_backward_val) {
+            min_backward_val = result_backward.at(2);
+            backward_particle_type = 2212; // proton
+        }
+        if (result_backward.at(3) < min_backward_val && length < 20*units::cm) {
+            min_backward_val = result_backward.at(3);
+            backward_particle_type = 11; // electron
+        }
+        
+        // Decision logic
+        int flag_dir = 0;
+        int particle_type = 0;
+        double particle_score = 0.0;
+        
+        if (flag_forward == 1 && flag_backward == 0) {
+            flag_dir = 1;
+            particle_type = forward_particle_type;
+            particle_score = min_forward_val;
+            return std::make_tuple(true, flag_dir, particle_type, particle_score);
+        }
+        else if (flag_forward == 0 && flag_backward == 1) {
+            flag_dir = -1;
+            particle_type = backward_particle_type;
+            particle_score = min_backward_val;
+            return std::make_tuple(true, flag_dir, particle_type, particle_score);
+        }
+        else if (flag_forward == 1 && flag_backward == 1) {
+            if (min_forward_val < min_backward_val) {
+                flag_dir = 1;
+                particle_type = forward_particle_type;
+                particle_score = min_forward_val;
+            }
+            else {
+                flag_dir = -1;
+                particle_type = backward_particle_type;
+                particle_score = min_backward_val;
+            }
+            return std::make_tuple(true, flag_dir, particle_type, particle_score);
+        }
+        else if (flag_forward == 0 && flag_backward == 0 && flag_force) {
+            if (min_forward_val < min_backward_val) {
+                particle_score = min_forward_val;
+                particle_type = forward_particle_type;
+                flag_dir = 1;
+            }
+            else {
+                particle_score = min_backward_val;
+                particle_type = backward_particle_type;
+                flag_dir = -1;
+            }
+            return std::make_tuple(true, flag_dir, particle_type, particle_score);
+        }
+        
+        // Reset before return - failure case
+        return std::make_tuple(false, 0, 0, 0.0);
+    }
+
 }
