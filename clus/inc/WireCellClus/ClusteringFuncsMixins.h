@@ -7,6 +7,7 @@
 #include "WireCellClus/IPCTransform.h"
 
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IRecombinationModel.h"
 #include "WireCellIface/IFiducial.h"
 #include "WireCellUtil/Configuration.h"
 
@@ -21,6 +22,12 @@ namespace WireCell::Clus {
     // "detector_volumes" : string type/name of an IDetectorVolumes
     struct NeedDV {
         IDetectorVolumes::pointer m_dv;
+        void configure(const WireCell::Configuration &cfg);
+    };
+
+    // A mixin to get a IRecombinationModel
+    struct NeedRecombModel {
+        IRecombinationModel::pointer m_recomb_model;
         void configure(const WireCell::Configuration &cfg);
     };
 

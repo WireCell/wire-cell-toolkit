@@ -5,6 +5,7 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IRecombinationModel.h"
 
 namespace WireCell::Clus::PR {
 
@@ -89,6 +90,8 @@ namespace WireCell::Clus::PR {
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start);
 
+    double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model);
+    double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model);
 }
 
 #endif

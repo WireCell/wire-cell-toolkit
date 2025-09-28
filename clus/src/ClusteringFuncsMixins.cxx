@@ -10,6 +10,11 @@ void NeedDV:: configure(const WireCell::Configuration &cfg)
     auto tn = get<std::string>(cfg, "detector_volumes", "DetectorVolumes");
     m_dv = Factory::find_tn<IDetectorVolumes>(tn);
 }
+void NeedRecombModel:: configure(const WireCell::Configuration &cfg)
+{
+    auto tn = get<std::string>(cfg, "recombination_model", "BoxRecombination");
+    m_recomb_model = Factory::find_tn<IRecombinationModel>(tn);
+}
 
 void NeedFiducial:: configure(const WireCell::Configuration &cfg)
 {

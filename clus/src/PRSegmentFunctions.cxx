@@ -3,6 +3,7 @@
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Units.h"
+#include <cmath>
 
 namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
@@ -872,6 +873,86 @@ namespace WireCell::Clus::PR {
             v1 = v1.norm();
         }
         return v1;
+    }
+
+    double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model){
+        if (!seg || !recomb_model) {
+            return 0.0;
+        }
+        
+        auto& fits = seg->fits();
+        if (fits.empty()) {
+            return 0.0;
+        }
+        
+        double kine_energy = 0.0;
+        
+        
+        for (size_t i = 0; i < fits.size(); i++) {
+            if (!fits[i].valid() || fits[i].dx <= 0) continue;
+            
+            double dX = fits[i].dx;
+            double dQ = fits[i].dQ;
+            if (i == 0 && fits.size() > 1) {
+                // First point: check against distance to next point
+                double dis = (fits[1].point - fits[0].point).magnitude();
+                if (dX> dis * 1.5) {
+                    dX = dis;
+                }
+            } else if (i + 1 == fits.size() && fits.size() > 1) {
+                // Last point: check against distance to previous point
+                double dis = (fits[i].point - fits[i-1].point).magnitude();
+                if (dX > dis * 1.5) {
+                    dX = dis;
+                }
+            }
+            // std::cout << i << " " << fits[i].dQ << " " << fits[i].dx/units::cm << " " << dX/units::cm << std::endl;
+            // Filter out unreasonable values (same threshold as original)
+            if (dQ/dX / (43e3/units::cm) > 1000) dQ = 0;
+            
+            // Calculate dE/dx using Box model inverse formula from original code
+            double dE = recomb_model->dE(dQ, dX);
+
+            // std::cout << dQ << " " << dX << " " << dE << std::endl;
+
+            // Apply bounds (same as original)
+            if (dE < 0) dE = 0;
+            if (dE > 50 * units::MeV / units::cm * dX) dE = 50 * units::MeV / units::cm * dX;
+
+            // Calculate path length with special handling for first and last points
+            kine_energy += dE;
+        }
+        
+        return kine_energy;
+    }
+    
+    double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model){
+        if (vec_dQ.size() != vec_dx.size() || vec_dQ.empty() || !recomb_model) {
+            return 0.0;
+        }
+        
+        double kine_energy = 0.0;
+        
+        for (size_t i = 0; i < vec_dQ.size(); i++) {
+              // Calculate dQ/dx with units conversion (same as original)
+            double dQ = vec_dQ[i];
+            double dx = vec_dx[i];
+            
+            // Filter out unreasonable values (same threshold as original)
+            if (dQ/dx / (43e3/units::cm) > 1000) dQ = 0;
+            
+            // Calculate dE/dx using Box model inverse formula from original code
+            double dE = recomb_model->dE(dQ, dx);
+            
+            // Apply bounds (same as original)
+            if (dE < 0) dE = 0;
+            if (dE > 50 * units::MeV / units::cm * dx) dE = 50 * units::MeV / units::cm * dx;
+
+            // Calculate path length with special handling for first and last points
+            kine_energy += dE;
+        }
+        
+        return kine_energy;
     }
 
 }

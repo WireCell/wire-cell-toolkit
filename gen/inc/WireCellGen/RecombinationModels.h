@@ -18,6 +18,7 @@ namespace WireCell {
             MipRecombination(double Rmip = 0.7, double Wi = 23.6 * units::eV / (-1 * units::eplus));
             virtual ~MipRecombination();
             virtual double operator()(double dE, double dX = 0.0);
+            virtual double dE(double dQ, double dX);
             virtual void configure(const WireCell::Configuration& config);
             virtual WireCell::Configuration default_configuration() const;
         };
@@ -36,6 +37,7 @@ namespace WireCell {
                                double Wi = 23.6 * units::eV / (-1 * units::eplus));
             virtual ~BirksRecombination();
             virtual double operator()(double dE, double dX = 0.0);
+            virtual double dE(double dQ, double dX);
             virtual void configure(const WireCell::Configuration& config);
             virtual WireCell::Configuration default_configuration() const;
         };
@@ -53,6 +55,7 @@ namespace WireCell {
                              double Wi = 23.6 * units::eV / (-1 * units::eplus));
             virtual ~BoxRecombination();
             virtual double operator()(double dE, double dX = 0.0);
+            virtual double dE(double dQ, double dX);
             virtual void configure(const WireCell::Configuration& config);
             virtual WireCell::Configuration default_configuration() const;
         };

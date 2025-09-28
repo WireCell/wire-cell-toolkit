@@ -33,7 +33,7 @@ struct edge_base_t {
  * for Short Track Muon (STM) characteristics and sets the STM flag when conditions are met.
  * This function works on clusters that have already been processed by clustering_recovering_bundle.
  */
-class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS {
+class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel {
 public:
     TaggerCheckSTM() {
         // Initialize with default preset
@@ -44,6 +44,8 @@ public:
     virtual void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedPCTS::configure(config); 
+        NeedRecombModel::configure(config);  
+
         m_grouping_name = get<std::string>(config, "grouping", "live");
 
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
@@ -74,7 +76,8 @@ public:
         Configuration cfg;
         cfg["grouping"] = m_grouping_name;
         cfg["detector_volumes"] = "DetectorVolumes";
-        cfg["pc_transforms"] = "PCTransformSet";  
+        cfg["pc_transforms"] = "PCTransformSet";
+        cfg["recombination_model"] = "BoxRecombination";  
 
         cfg["trackfitting_config_file"] = ""; 
         cfg["linterp_function"] = "";  // empty means user must provide
@@ -2328,6 +2331,11 @@ private:
 
             std::cout << "Finish second round of fitting" << std::endl;
             
+            // // hack to test recombination model usage  ... 
+            // double kine_energy = segment_cal_kine_dQdx(adjusted_segment, m_recomb_model);
+            // std::cout << "Kine energy: " << kine_energy/units::MeV << std::endl;
+            // // check ...
+
 
             std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
             std::vector<double> dQ, dx;
