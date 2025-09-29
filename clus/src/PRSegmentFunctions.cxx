@@ -1319,7 +1319,7 @@ namespace WireCell::Clus::PR {
         if (pdg_code != 0) {
             // Calculate 4-momentum using the identified particle type
             auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
-                        
+
             // Create ParticleInfo with the identified particle
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
                 pdg_code,                    // PDG code
@@ -1347,5 +1347,47 @@ namespace WireCell::Clus::PR {
         }
     }
 
+     void segment_determine_shower_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print){
+        segment->dirsign(0);
+        double length = segment_track_length(segment, 0);
+        
+        // hack for now ...
+        int pdg_code = 11;
+        
+        if (start_n==1 && end_n >1){
+            segment->dirsign(-1);
+        }else if (start_n > 1 && end_n == 1){
+            segment->dirsign(1);
+        }else{
+            segment_determine_dir_track(segment, start_n, end_n, particle_data, recomb_model, MIP_dQdx, false);
+            if (segment->particle_info()->pdg() != 11){
+                segment->dirsign(0);
+            }
+        }
+                
+        auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
 
+        // Create ParticleInfo with the identified particle
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg_code,                    // PDG code
+            particle_data->get_particle_mass(pdg_code), // mass
+            particle_data->pdg_to_name(pdg_code),       // name
+            four_momentum                     // 4-momentum
+        );
+                
+        // Store particle info in segment (this would require adding particle_info to Segment class)
+        segment->particle_info(pinfo);
+
+         if (flag_print ) {
+            std::cout << "Segment PID: PDG=" << pdg_code 
+                      << ", Length=" << length / units::cm << " cm"
+                      << ", Direction=" << segment->dirsign() 
+                      << (segment->dir_weak() ? " (weak)" : "") 
+                      << ", Medium dQ/dx=" << segment_median_dQ_dx(segment) / (MIP_dQdx) 
+                      << " MIP"
+                      << std::endl;
+        }
+
+
+     }
 }
