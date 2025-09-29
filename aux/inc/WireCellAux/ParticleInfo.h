@@ -85,6 +85,9 @@ namespace WireCell::Aux {
                                    const WireCell::Point& momentum_3vec,
                                    int id = 0);
 
+        double particle_score() const { return m_particle_score; }
+        void set_particle_score(double score) { m_particle_score = score; }
+
     private:
         // Core data members
         int m_pdg_code;
@@ -94,6 +97,7 @@ namespace WireCell::Aux {
         WireCell::D4Vector<double> m_four_momentum;  // (E, px, py, pz)
         int m_id;
         double m_charge;
+        double m_particle_score{-1.0}; // Optional score for particle ID confidence
 
         // Internal helper methods
         void update_kinematics();     // Recalculate energy/momentum relationships

@@ -83,3 +83,26 @@ double Clus::ParticleDataSet::get_particle_mass(int pdg_code) const {
     }
 
 }
+
+std::string Clus::ParticleDataSet::pdg_to_name(int pdg_code) const {
+    // Particle Data Group (PDG) codes and their names
+    static const std::map<int, std::string> pdg_name_map = {
+        {11, "electron"},
+        {-11, "positron"},
+        {13, "muon"},
+        {-13, "anti-muon"},
+        {211, "pi_plus"},
+        {-211, "pi_minus"},
+        {321, "K_plus"},
+        {-321, "K_minus"},
+        {2212, "proton"},
+        {-2212, "anti-proton"}
+    };
+    
+    auto it = pdg_name_map.find(pdg_code);
+    if (it != pdg_name_map.end()) {
+        return it->second;
+    } else {
+        return "unknown";
+    }
+}

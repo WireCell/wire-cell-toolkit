@@ -1174,4 +1174,178 @@ namespace WireCell::Clus::PR {
         return results;
     }
 
+    void segment_determine_dir_track(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print) {
+        if (!segment || !particle_data) {
+            return;
+        }
+        
+        // Reset direction flag
+        segment->dirsign(0);
+        
+        const auto& fits = segment->fits();
+        int npoints = fits.size();
+        int start_n1 = 0, end_n1 = npoints - 1;
+        
+        // If more than one point, exclude the vertex
+        if (end_n != 1) {
+            end_n1 = npoints - 2;
+            npoints -= 1;
+        }
+        if (start_n != 1) {
+            npoints -= 1;
+            start_n1 = 1;
+        }
+        
+        if (npoints == 0 || end_n1 < start_n1) return;
+        
+        std::vector<double> L(npoints, 0);
+        std::vector<double> dQ_dx(npoints, 0);
+        
+        double dis = 0;
+        for (int i = start_n1; i <= end_n1; i++) {
+            L.at(i - start_n1) = dis;
+            if (fits[i].dx > 0) {
+                dQ_dx.at(i - start_n1) = fits[i].dQ / (fits[i].dx + 1e-9);
+            }
+            if (i + 1 < static_cast<int>(fits.size())) {
+                dis += (fits[i+1].point - fits[i].point).magnitude();
+            }
+        }
+        
+        int pdg_code = 0;
+        double particle_score = 0.0;
+        
+        if (npoints >= 2) { // reasonably long
+            bool tmp_flag_pid = false;
+            
+            if (start_n == 1 && end_n == 1 && npoints >= 15) {
+                // Can use the dQ/dx to do PID and direction
+                auto result = segment_do_track_pid(segment, L, dQ_dx, 35*units::cm, 1*units::cm, true, particle_data);
+                tmp_flag_pid = std::get<0>(result);
+                if (tmp_flag_pid) {
+                    segment->dirsign(std::get<1>(result));
+                    pdg_code = std::get<2>(result);
+                    particle_score = std::get<3>(result);
+                }
+                
+                if (!tmp_flag_pid) {
+                    result = segment_do_track_pid(segment, L, dQ_dx, 15*units::cm, 1*units::cm, true, particle_data);
+                    tmp_flag_pid = std::get<0>(result);
+                    if (tmp_flag_pid) {
+                        segment->dirsign(std::get<1>(result));
+                        pdg_code = std::get<2>(result);
+                        particle_score = std::get<3>(result);
+                    }
+                }
+            } else {
+                // Can use the dQ/dx to do PID and direction
+                auto result = segment_do_track_pid(segment, L, dQ_dx, 35*units::cm, 0*units::cm, false, particle_data);
+                tmp_flag_pid = std::get<0>(result);
+                if (tmp_flag_pid) {
+                    segment->dirsign(std::get<1>(result));
+                    pdg_code = std::get<2>(result);
+                    particle_score = std::get<3>(result);
+                }
+                
+                if (!tmp_flag_pid) {
+                    result = segment_do_track_pid(segment, L, dQ_dx, 15*units::cm, 0*units::cm, false, particle_data);
+                    tmp_flag_pid = std::get<0>(result);
+                    if (tmp_flag_pid) {
+                        segment->dirsign(std::get<1>(result));
+                        pdg_code = std::get<2>(result);
+                        particle_score = std::get<3>(result);
+                    }
+                }
+            }
+        }
+        
+        double length = segment_track_length(segment, 0);
+        
+        // Short track what to do???
+        if (pdg_code == 0) {
+            // Calculate median dQ/dx
+            double medium_dQ_dx = segment_median_dQ_dx(segment);
+            if (medium_dQ_dx > MIP_dQdx * 1.75) {
+                pdg_code = 2212; // proton
+            } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
+                pdg_code = 13; // muon
+            } else if (medium_dQ_dx < MIP_dQdx * 1.5 && length < 4*units::cm) {
+                pdg_code = 13;
+            }
+        }
+        
+        // Electron and both end contain stuff
+        if (abs(pdg_code) == 11 && (start_n > 1 && end_n > 1)) {
+            segment->dir_weak(true);
+            segment->dirsign(0);
+            if (particle_score < 0.15) pdg_code = 13;
+        } else if (abs(pdg_code) == 11 && ((start_n > 1 && segment->dirsign() == -1) || (end_n > 1 && segment->dirsign() == 1))) {
+            segment->dir_weak(true);
+            segment->dirsign(0);
+            if (particle_score < 0.15) pdg_code = 13;
+        } else if (length < 1.5*units::cm) {
+            segment->dir_weak(true);
+        }
+        
+        // Vertex activities
+        if (length < 1.5*units::cm && (start_n == 1 || end_n == 1)) {
+            if (start_n == 1 && end_n > 2) {
+                segment->dirsign(-1);
+                double medium_dQ_dx = segment_median_dQ_dx(segment);
+                if (medium_dQ_dx > MIP_dQdx * 1.75) {
+                    pdg_code = 2212;
+                } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
+                    pdg_code = 211;
+                }
+            } else if (end_n == 1 && start_n > 2) {
+                segment->dirsign(1);
+                double medium_dQ_dx = segment_median_dQ_dx(segment);
+                if (medium_dQ_dx > MIP_dQdx * 1.75) {
+                    pdg_code = 2212;
+                } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
+                    pdg_code = 211;
+                }
+            }
+        }
+        
+        // If the particle score is really bad, make it a shower
+        if (length > 10*units::cm && particle_score > 1.0 && particle_score < 100) {
+            pdg_code = 11;
+            particle_score = 200;
+            segment->dirsign(0);
+        }
+        
+        // Set particle mass and calculate 4-momentum
+        if (pdg_code != 0) {
+            // Calculate 4-momentum using the identified particle type
+            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
+                        
+            // Create ParticleInfo with the identified particle
+            auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                pdg_code,                    // PDG code
+                particle_data->get_particle_mass(pdg_code), // mass
+                particle_data->pdg_to_name(pdg_code),       // name
+                four_momentum                     // 4-momentum
+            );
+            
+            // Set additional properties if available
+            pinfo->set_particle_score(particle_score); // This method would need to be added
+            
+            // Store particle info in segment (this would require adding particle_info to Segment class)
+            segment->particle_info(pinfo);
+        }
+                
+        if (flag_print && pdg_code != 0) {
+            std::cout << "Segment PID: PDG=" << pdg_code 
+                      << ", Score=" << particle_score 
+                      << ", Length=" << length / units::cm << " cm"
+                      << ", Direction=" << segment->dirsign() 
+                      << (segment->dir_weak() ? " (weak)" : "") 
+                      << ", Medium dQ/dx=" << segment_median_dQ_dx(segment) / (MIP_dQdx) 
+                      << " MIP"
+                      << std::endl;
+        }
+    }
+
+
 }

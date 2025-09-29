@@ -88,7 +88,7 @@ namespace WireCell::Clus::PR {
 
         /// Get the sign +1/0/-1 (was "flag_dir" in WCT).
         int dirsign() const { return m_dirsign; }
-
+        bool dir_weak() const { return m_dir_weak; }
 
         // Chainable setters
 
@@ -102,6 +102,8 @@ namespace WireCell::Clus::PR {
             else m_dirsign = dirsign > 0 ? 1 : -1;
             return *this;
         }
+        Segment& dir_weak(bool weak) { m_dir_weak = weak; return *this; }
+
 
 
     private:
@@ -110,6 +112,7 @@ namespace WireCell::Clus::PR {
         std::vector<Fit> m_fits;
 
         int m_dirsign{0};
+        bool m_dir_weak{false};
 
         std::shared_ptr<Aux::ParticleInfo> m_particle_info{nullptr};
 
