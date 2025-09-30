@@ -77,6 +77,12 @@ namespace WireCell {
         return cfg.asInt();
     }
     template <>
+    inline int64_t convert<int64_t>(const Configuration& cfg, const int64_t& def)
+    {
+        if (cfg.isNull()) return def;
+        return cfg.asInt64();
+    }
+    template <>
     inline float convert<float>(const Configuration& cfg, const float& def)
     {
         if (cfg.isNull()) return def;
@@ -113,6 +119,16 @@ namespace WireCell {
         std::vector<int> ret(cfg.size());
         std::transform(cfg.begin(), cfg.end(), ret.begin(),
                        [](const auto& e) { return e.asInt(); });
+        return ret;
+    }
+    template <>
+    inline  // fixme: ignores default
+        std::vector<int64_t>
+        convert<std::vector<int64_t> >(const Configuration& cfg, const std::vector<int64_t>& def)
+    {
+        std::vector<int64_t> ret(cfg.size());
+        std::transform(cfg.begin(), cfg.end(), ret.begin(),
+                       [](const auto& e) { return e.asInt64(); });
         return ret;
     }
     template <>
