@@ -84,7 +84,7 @@ namespace WireCell::SPNG {
             size_t nrows = cmten.size(0);
             Waveform::ChannelMasks cms;
             for (size_t irow=0; irow<nrows; ++irow) {
-                auto cmvec = Torch::to_vector<int>(cmten[irow]);
+                auto cmvec = to_vector<int>(cmten[irow]);
                 int batch = cmvec[0];
                 if (batch) {
                     raise<ValueError>("TdmToFrame got batched channel masks tensor.  Precede this node with an unbatcher node");
@@ -132,7 +132,7 @@ namespace WireCell::SPNG {
                 log->critical("frame corrupt: {} channels and {} traces", nchannels, ntraces);
                 raise<ValueError>("frame corrupt: channel/trace count mismatch");
             }
-            auto chids_vector = Torch::to_vector<int>(chids_tensor);
+            auto chids_vector = to_vector<int>(chids_tensor);
                 
             auto traces_metadata = traces_itensor->metadata();
             const int tbin = traces_metadata["tbin"].asInt();
@@ -140,7 +140,7 @@ namespace WireCell::SPNG {
             const size_t beg = all_traces->size();
             for (size_t row=0; row < ntraces; ++row) {
                 
-                auto charge = Torch::to_vector<float>(traces_tensor);
+                auto charge = to_vector<float>(traces_tensor);
 
                 const int chid = chids_vector[row];
                 auto itrace = std::make_shared<Aux::SimpleTrace>(chid, tbin, charge);
@@ -154,7 +154,7 @@ namespace WireCell::SPNG {
             auto summaries_itensor = frame.summaries[tag];
             if (summaries_itensor) {
                 auto summaries_tensor = summaries_itensor->tensor().to(torch::kCPU);
-                auto summaries = Torch::to_vector<double>(summaries_tensor);
+                auto summaries = to_vector<double>(summaries_tensor);
                 sf->tag_traces(tag, indices, summaries);
             }
             else {

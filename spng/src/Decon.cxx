@@ -7,6 +7,7 @@
 #include "WireCellSpng/ITorchSpectrum.h"
 #include "WireCellUtil/FFTBestLength.h"
 #include "WireCellSpng/Util.h"
+#include "WireCellSpng/TensorTools.h"
 
 // #include "WireCellSpng/ITorchColdElecResponse.h"
 

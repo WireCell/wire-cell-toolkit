@@ -11,7 +11,7 @@
 #include "WireCellSpng/Torch.h"
 #include <vector>
 
-namespace WireCell::Torch {
+namespace WireCell::SPNG {
 
     // Raster a 2D tensor with values from traces.
     //

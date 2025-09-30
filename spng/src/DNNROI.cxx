@@ -2,16 +2,32 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/Util.h"
-#include "WireCellUtil/NamedFactory.h"
+#include "WireCellSpng/TensorTools.h"
+
+#include "WireCellAux/PlaneTools.h"
 
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/ITrace.h"
-#include "WireCellAux/PlaneTools.h"
+
+#include "WireCellUtil/NamedFactory.h"
 
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <tuple>
+
+static
+std::string tensor_shape_string(const torch::Tensor& t) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < t.sizes().size(); ++i) {
+        oss << t.sizes()[i];
+        if (i != t.sizes().size() - 1)
+            oss << ", ";
+    }
+    oss << "]";
+    return oss.str();
+}
 
 
 //read the tag to get the apa, filter-name and filter-type information

@@ -38,6 +38,7 @@ namespace WireCell::SPNG {
         /// The semnam can be empty or a WCT component "type:name".  If empty,
         /// the "Semaphore" type with an instance "torch-<devname>" is
         /// constructed.
+        ///
         void connect(const std::string& devname="cpu", const std::string& semname="");
 
         /// Return a device object

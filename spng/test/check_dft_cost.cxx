@@ -1,5 +1,5 @@
 // This is some test from gemini to try to estimate fft cost from first
-// principles and then measure it.  Conclusion: estimation is not so good.
+// principles and then measure it.  Conclusion: estimation does not match measurement..
 
 #include <vector>
 #include <algorithm> // For std::max

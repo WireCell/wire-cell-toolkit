@@ -5,6 +5,7 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/ITorchSpectrum.h"
 #include "WireCellSpng/Util.h"
+#include "WireCellSpng/TensorTools.h"
 
 WIRECELL_FACTORY(SPNGApply1DSpectrum,
                  WireCell::SPNG::Apply1DSpectrum,

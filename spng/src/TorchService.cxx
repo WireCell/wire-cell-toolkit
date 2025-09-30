@@ -3,6 +3,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellSpng/TorchScript.h"
+#include "WireCellSpng/TensorTools.h"
 
 //do we rely on openMP...probably not..
 //#include <omp.h>

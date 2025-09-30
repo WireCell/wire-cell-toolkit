@@ -76,7 +76,7 @@ namespace WireCell::SPNG {
                    get<std::string>(md, "datapath", ""),
                    ss.str(),
                    ten->dtype(),
-                   Torch::to_string(ten->device()),
+                   to_string(ten->device()),
                    parent);
 
         if (m_verbose == 1) return;

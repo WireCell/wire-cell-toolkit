@@ -109,6 +109,14 @@ The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label t
 The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).  The dtype is ~torch::kLong~.
 
 
+* Separation and combination
+
+TDM allows for tensors sets to be passed as well as individual tensors.  For
+example, a set with tensors representing a "frame" and its parts can be input to
+a node which outputs a single ~ITorchTensor~ with a "traces" datatype.  This
+single tensor can be consumed by a tensor filter, etc.  The downstream results
+of this per-tensor processing can be reunited with the "frame" and other tensor
+parts.  The reassembled "frame" tensor set may then be converted to an ~IFrame~.
 
 * SPNG support
 

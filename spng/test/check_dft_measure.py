@@ -15,13 +15,16 @@ from matplotlib.backends.backend_pdf import PdfPages
 import sys
 import os
 import math
-import numpy as np # For handling potential NaN values
+import numpy
 from itertools import product
+import matplotlib.lines as mlines
 
 cpu_linestyle='None'
 cpu_marker='.'
+cpu_color='gray'
 gpu_linestyle='None'
 gpu_marker='x'
+gpu_color='black'
 
 #fft_func_names = ('fft', 'rfft', 'ifft', 'irfft', 'fft2', 'rfft2', 'ifft2', 'irfft2')
 fft_func_names = ('fft', 'ifft')
@@ -142,53 +145,74 @@ def largest_prime_factor(n):
     return max_prime
 
 
-def max_prime_colors(sizes):
-    #         0       1    2        3      4     5       6     7
-    colors = ["black",None,"red", "green", None, "blue", None, "orange"]
-    primes = [largest_prime_factor(s) for s in sizes]
-    return [colors[0 if p > 7 else p] for p in primes]
+
+def just_small_primes(sizes, times, small_prime_colors):
+    '''
+    return smaller (sizes,times,colors) that contain only small prime sizes.
+    '''
+    max_prime = max(small_prime_colors.keys())
+
+    lpf = numpy.array([largest_prime_factor(s) for s in sizes])
+    inds = lpf <= max_prime
+
+    s = sizes[inds]
+    t = times[inds]
+    small = lpf[inds]
+    c = [small_prime_colors[p] for p in small]
+    return s,t,c
+
 
 def plot_raw_timings(df, function_names, cuda_available, pdf):
     """
     Generates and saves 'Raw timing plots' to the PDF.
     """
+    small_prime_colors = {2:"red", 3:"green", 5:"blue", 7:"orange",
+                          #11:"purple", 13:"brown", 17:"olive", 19:"cyan"
+                          }
+
+
     print("\nGenerating 'Raw timing plots':")
     for func_name in function_names:
         fig, ax = plt.subplots(figsize=(10, 6)) # Create a new figure for each plot
         
-        # Plot CPU data
-        cpu_col_name = f'{func_name}_cpu_ms'
-        if cpu_col_name in df.columns:
-            colors = max_prime_colors(df['size'])
-            #ax.plot(df['size'], df[cpu_col_name], marker=cpu_marker, linestyle=cpu_linestyle, label='CPU')
-            ax.scatter(df['size'], df[cpu_col_name], c=colors,
-                    marker=cpu_marker, linestyle=cpu_linestyle, label='CPU')
 
-        
         # Plot GPU data if available
         gpu_col_name = f'{func_name}_gpu_ms'
         if cuda_available and gpu_col_name in df.columns:
-            ax.plot(df['size'], df[gpu_col_name], marker=gpu_marker, linestyle=gpu_linestyle, label='GPU')
+            ax.plot(df['size'], df[gpu_col_name], c=gpu_color,
+                    marker=gpu_marker, linestyle=gpu_linestyle, label='GPU', zorder=10)
+            s,t,c = just_small_primes(df['size'], df[gpu_col_name], small_prime_colors)
+            ax.scatter(s, t, c=c, marker=gpu_marker, linestyle='None', zorder=11)
+
+        # Plot CPU data
+        cpu_col_name = f'{func_name}_cpu_ms'
+        if cpu_col_name in df.columns:
+
+            # all data
+            ax.plot(df['size'], df[cpu_col_name], c=cpu_color,
+                    marker=cpu_marker, linestyle=cpu_linestyle, label='CPU', zorder=20)
+            s,t,c = just_small_primes(df['size'], df[cpu_col_name], small_prime_colors)
+            ax.scatter(s, t, c=c, marker=cpu_marker, linestyle='None', zorder=21)
+
+
+        handles, _ = ax.get_legend_handles_labels();
+        handles += [
+            mlines.Line2D([], [], color=c, label=str(n), linestyle='None', marker=cpu_marker)
+            for n,c in small_prime_colors.items()]
+
         
         ax.set_title(f'Raw Timing for {func_name.upper()} Function')
         ax.set_xlabel('Tensor Dimension Size')
         ax.set_ylabel('Execution Time (ms)')
-        ax.legend()
+        ax.legend(handles=handles)
         ax.grid(True, which="both", ls="--", c='0.7')
-        
-        # Use log scale for Y-axis if the data range is very large
-        y_data = []
-        if cpu_col_name in df.columns: y_data.extend(df[cpu_col_name].dropna().tolist())
-        if cuda_available and gpu_col_name in df.columns: y_data.extend(df[gpu_col_name].dropna().tolist())
-        
-        if y_data:
-            min_val = min(val for val in y_data if val > 0)
-            max_val = max(y_data)
-            ax.set_yscale('log')
+
+        ax.set_yscale('log')
                 
         pdf.savefig(fig) # Save the current figure to the PDF
         plt.close(fig)   # Close the figure to free memory
         print(f" - Plot created: Raw Timing for {func_name.upper()}")
+
 
 def plot_best_timings_speedup(df, function_names, cuda_available, faster_size_map, pdf):
     """
@@ -243,6 +267,7 @@ def plot_best_timings_speedup(df, function_names, cuda_available, faster_size_ma
         pdf.savefig(fig) # Save the current figure to the PDF
         plt.close(fig)   # Close the figure to free memory
         print(f" - Plot created: Speedup Ratio (Absolute Fastest) for {func_name.upper()}")
+
 
 def plot_memory_ratios(df, function_names, cuda_available, faster_size_map, pdf):
     """

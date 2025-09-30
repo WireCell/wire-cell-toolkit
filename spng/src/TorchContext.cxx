@@ -35,8 +35,8 @@ namespace WireCell::SPNG {
         }
         m_devname = devname;
             
-
-        auto m_semname = semname;
+        
+        m_semname = semname;
         if (m_semname.empty()) {
             m_semname = "Semaphore:torch-" + m_devname;
         }
