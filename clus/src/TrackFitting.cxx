@@ -4373,12 +4373,11 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         segment_fits.push_back(fit);
     }
 
-    
-    // replace point cloud after track fitting ...
-    PR::create_segment_point_cloud(segment, path_points, m_dv, "main");
-
-    
     // Assign the fits to the segment
     segment->fits(segment_fits);
-    
+
+    // replace point cloud after track fitting ...
+    PR::create_segment_point_cloud(segment, path_points, m_dv, "main");
+    PR::create_segment_fit_point_cloud(segment, m_dv, "fit");
+
 }

@@ -139,7 +139,11 @@ namespace WireCell::Clus {
 
 
         void add_segment(std::shared_ptr<PR::Segment> segment);
-
+        /**
+         * Get the set of segments currently stored in this TrackFitting instance.
+         * @return Set of shared pointers to PR::Segment
+         */
+        std::set<std::shared_ptr<PR::Segment>> get_segments() const { return m_segments; }
         void clear_segments();
  
 

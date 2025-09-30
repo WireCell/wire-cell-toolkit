@@ -110,6 +110,49 @@ namespace WireCell::Clus::PR {
         return {min_dist, closest_point};
     }
 
+    std::tuple<double, double, double> segment_get_closest_2d_distances(SegmentPtr seg, const WireCell::Point& point, int apa, int face, const std::string& cloud_name) {
+        if (!seg) {
+            raise<RuntimeError>("segment_get_closest_2d_distances: invalid segment");
+        }
+
+        auto dpc = seg->dpcloud(cloud_name);
+        if (!dpc) {
+            raise<RuntimeError>("segment_get_closest_2d_distances: segment missing DynamicPointCloud with name 'fit'");
+        }
+        
+        const auto& points = dpc->get_points();
+        if (points.empty()) {
+            raise<RuntimeError>("segment_get_closest_2d_distances: DynamicPointCloud has no points");
+        }
+        
+        // Initialize minimum distances for each plane (U=0, V=1, W=2)
+        double min_dist_u = 1e9;
+        double min_dist_v = 1e9; 
+        double min_dist_w = 1e9;
+        
+        // Search through all points in the fit point cloud
+        for (const auto& fit_point : points) {
+            WireCell::Point fit_wp(fit_point.x, fit_point.y, fit_point.z);
+            
+            // For 2D distance calculation, we need to project to wire planes
+            // This is a simplified version - you may need to use proper wire geometry
+            
+            // U plane (typically angled wires) - distance in Y-Z plane  
+            double dist_u = std::sqrt(std::pow(point.y() - fit_wp.y(), 2) + std::pow(point.z() - fit_wp.z(), 2));
+            if (dist_u < min_dist_u) min_dist_u = dist_u;
+            
+            // V plane (typically angled wires) - distance in Y-Z plane with different projection
+            double dist_v = std::sqrt(std::pow(point.y() - fit_wp.y(), 2) + std::pow(point.z() - fit_wp.z(), 2));
+            if (dist_v < min_dist_v) min_dist_v = dist_v;
+            
+            // W plane (collection wires, typically parallel to Y) - distance in X-Z plane
+            double dist_w = std::sqrt(std::pow(point.x() - fit_wp.x(), 2) + std::pow(point.z() - fit_wp.z(), 2));
+            if (dist_w < min_dist_w) min_dist_w = dist_w;
+        }
+        
+        return std::make_tuple(min_dist_u, min_dist_v, min_dist_w);
+    }
+
     std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold){
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
@@ -1390,4 +1433,171 @@ namespace WireCell::Clus::PR {
 
 
      }
+
+    void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
+        std::map<Facade::Cluster*, std::set<SegmentPtr> > map_cluster_segs;
+        for (auto seg : segments){
+            if (seg->cluster()){
+                map_cluster_segs[seg->cluster()].insert(seg); 
+            }
+        }
+        
+        for (auto it : map_cluster_segs){
+            auto clus = it.first;
+            auto& segs = it.second;
+            
+            // get the default point cloud from cluster
+            const auto& points = clus->points();
+
+             // Get the graph directly
+            const auto& graph = clus->find_graph("basic_pid");
+
+            std::map<SegmentPtr, std::vector<geo_point_t>> map_segment_points;
+            std::map<int, std::pair<SegmentPtr, double>> map_pindex_segment;
+            //std::cout << "Cluster has " << npoints << " points and " << segs.size() << " segments." << std::endl;
+            //std::cout << "Number of vertices in the graph: " << boost::num_vertices(graph) << std::endl;
+            
+            // core algorithms
+             
+            // define steiner terminal for segments ...
+            for (auto seg: segs){
+                auto& fits = seg->fits();
+                if (fits.size() > 2){
+                    for (size_t i = 1; i+1 < fits.size(); i++){
+                        geo_point_t gp = {fits[i].point.x(), fits[i].point.y(), fits[i].point.z()};
+                        // use cluster to get the indices of the closest 5 points
+                        auto closest_results = clus->kd_knn(5, gp);
+                        for (const auto& [point_index, distance] : closest_results) {
+                            if (map_pindex_segment.find(point_index) == map_pindex_segment.end()) {
+                                map_pindex_segment[point_index] = std::make_pair(seg, distance);
+                                break;
+                            }
+                        }
+                    }
+                }else{
+                    geo_point_t gp = {(fits[0].point.x()+fits[1].point.x())/2., (fits[0].point.y()+fits[1].point.y())/2., (fits[0].point.z()+fits[1].point.z())/2.};
+                    auto closest_results = clus->kd_knn(5, gp);
+                    for (const auto& [point_index, distance] : closest_results) {
+                        if (map_pindex_segment.find(point_index) == map_pindex_segment.end()) {
+                            map_pindex_segment[point_index] = std::make_pair(seg, distance);
+                            break;
+                        }
+                    }
+                }
+            }
+
+
+            // these are terminals ...
+            if (map_pindex_segment.size()>0){
+               
+                // Convert terminals from int to vertex_type
+                std::vector<WireCell::Clus::Graphs::Weighted::vertex_type> terminals;
+                for (auto it = map_pindex_segment.begin(); it!=map_pindex_segment.end(); it++){
+                    terminals.push_back(static_cast<WireCell::Clus::Graphs::Weighted::vertex_type>(it->first));
+                }
+
+                auto vor = WireCell::Clus::Graphs::Weighted::voronoi(graph, terminals);
+                
+                // Now we can find the nearest terminal for every vertex in the graph
+                // The Voronoi diagram provides:
+                // - vor.terminal[v]: the nearest terminal vertex for vertex v
+                // - vor.distance[v]: the distance to the nearest terminal for vertex v
+                std::map<int, std::pair<int, double>> vertex_to_nearest_terminal;
+                // Iterate through all vertices in the graph
+                const int num_graph_vertices = boost::num_vertices(graph);
+                for (int vertex_idx = 0; vertex_idx < num_graph_vertices; ++vertex_idx) {
+                    // Get the nearest terminal for this vertex
+                    int nearest_terminal_idx = vor.terminal[vertex_idx];
+                    double distance_to_terminal = vor.distance[vertex_idx];
+                    // Store the mapping
+                    vertex_to_nearest_terminal[vertex_idx] = std::make_pair(nearest_terminal_idx, distance_to_terminal);
+                }
+                // std::cout << "Debug: Number of graph vertices: " << num_graph_vertices << std::endl;
+                // now examine to remove ghost points ....
+                for (size_t i=0;i!=num_graph_vertices;i++){
+                    if (map_pindex_segment.find(vertex_to_nearest_terminal.at(i).first) == map_pindex_segment.end()) continue;
+                    geo_point_t gp(points[0][i], points[1][i], points[2][i]);
+                    auto main_sg = map_pindex_segment[vertex_to_nearest_terminal.at(i).first].first;
+
+                    auto point_wpid = clus->wire_plane_id(i);
+                    auto apa = point_wpid.apa();
+                    auto face = point_wpid.face();
+
+                    // use the dynamic point cloud of fit, and then derive distances ... 
+                    // Get 3D closest point using the "fit" point cloud
+                    std::pair<double, WireCell::Point> closest_dis_point = segment_get_closest_point(main_sg, gp, "fit");
+
+                    // Calculate 2D distances for each wire plane (U, V, W) using APA/face information
+                    std::tuple<double, double, double> closest_2d_dis = segment_get_closest_2d_distances(main_sg, gp, apa, face, "fit");
+                    
+                    std::tuple<double, double, double> min_2d_dis = closest_2d_dis;
+                
+                    // check against main_sg;
+                    bool flag_change = true;
+                
+                    // Compare against all segments in the cluster to find minimum 2D distances
+                    for (auto seg : segs) {
+                       if (main_sg == seg) continue;
+                    
+                        // Get 2D distances for this segment
+                        std::tuple<double, double, double> temp_2d_dis = segment_get_closest_2d_distances(seg, gp, apa, face, "fit");
+                        // Update minimum distances for each plane
+                        if (std::get<0>(temp_2d_dis) < std::get<0>(min_2d_dis)) std::get<0>(min_2d_dis) = std::get<0>(temp_2d_dis);
+                        if (std::get<1>(temp_2d_dis) < std::get<1>(min_2d_dis)) std::get<1>(min_2d_dis) = std::get<1>(temp_2d_dis);
+                        if (std::get<2>(temp_2d_dis) < std::get<2>(min_2d_dis)) std::get<2>(min_2d_dis) = std::get<2>(temp_2d_dis);
+                    }
+                
+                    if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis)) // all closest
+                    flag_change = false;
+                    else if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) ) //&& (std::get<2>(closest_2d_dis) < scaling_2d * search_range || closest_dis_point.first < search_range)) // 2 closest
+                    flag_change = false;
+                    else if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis) ) //&& (std::get<1>(closest_2d_dis) < scaling_2d * search_range || closest_dis_point.first < search_range))
+                    flag_change = false;
+                    else if (std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis) ) //&& (std::get<0>(closest_2d_dis) < scaling_2d * search_range || closest_dis_point.first < search_range))
+                    flag_change = false;
+                    else if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && (closest_dis_point.first < search_range || (std::get<1>(closest_2d_dis) < scaling_2d * search_range &&  std::get<2>(closest_2d_dis) < scaling_2d * search_range)) )
+                    flag_change = false;
+                    else if (std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && (closest_dis_point.first < search_range || (std::get<0>(closest_2d_dis) < scaling_2d * search_range &&  std::get<2>(closest_2d_dis) < scaling_2d * search_range) ))
+                    flag_change = false;
+                    else if (std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis) && (closest_dis_point.first < search_range || (std::get<1>(closest_2d_dis) < scaling_2d * search_range &&  std::get<0>(closest_2d_dis) < scaling_2d * search_range) ))
+                    flag_change = false;
+
+                    // deal with dead channels ...
+                    if (!flag_change){
+                        auto grouping = clus->grouping();
+                        int ch_range = 0; // Default channel range for dead channel checking
+                        
+                        // Check U plane (pind=0) for dead channels
+                        if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 0) && std::get<0>(closest_2d_dis) > scaling_2d * search_range){
+                            if (std::get<1>(closest_2d_dis) < scaling_2d * search_range ||  std::get<2>(closest_2d_dis) < scaling_2d * search_range)
+                                flag_change = true;
+                        // Check V plane (pind=1) for dead channels
+                        }else if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 1) && std::get<1>(closest_2d_dis) > scaling_2d * search_range){
+                            if (std::get<0>(closest_2d_dis) < scaling_2d * search_range ||  std::get<2>(closest_2d_dis) < scaling_2d * search_range)
+                                flag_change = true;
+                        // Check W plane (pind=2) for dead channels
+                        }else if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 2) && std::get<2>(closest_2d_dis) > scaling_2d * search_range){
+                            if (std::get<1>(closest_2d_dis) < scaling_2d * search_range ||  std::get<0>(closest_2d_dis) < scaling_2d * search_range)
+                                flag_change = true;
+                        }
+                   } 
+                
+                    // change the point's clustering ...
+                    if (!flag_change){
+                        map_segment_points[main_sg].push_back(gp);
+                    }
+                }
+            }
+
+
+            // convert points to geo_point_t format
+            // add points to segments ... 
+            for (const auto& [seg, geo_points] : map_segment_points) {
+                create_segment_point_cloud(seg, geo_points, dv, cloud_name);
+            }
+
+
+
+        }
+    }
 }

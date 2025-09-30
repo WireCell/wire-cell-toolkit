@@ -227,6 +227,13 @@ public:
         }
         
         (void)stm_count;
+
+        // hack ... 
+        {
+            auto segs = m_track_fitter.get_segments();
+            clustering_points_segments(segs,m_dv);
+        }
+
     }
 
 private:
