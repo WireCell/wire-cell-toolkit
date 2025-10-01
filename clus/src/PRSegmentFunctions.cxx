@@ -1595,9 +1595,309 @@ namespace WireCell::Clus::PR {
             for (const auto& [seg, geo_points] : map_segment_points) {
                 create_segment_point_cloud(seg, geo_points, dv, cloud_name);
             }
-
-
-
         }
+    }
+
+    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut){
+        segment->dirsign(0);
+        const auto& fits = segment->fits();
+        
+        if (fits.empty()) return false;
+        
+        // Get the fit point cloud for KD-tree queries
+        auto dpcloud_fit = segment->dpcloud("fit");
+        if (!dpcloud_fit) return false;
+        
+        // Get the associated point cloud 
+        auto dpcloud_assoc = segment->dpcloud(cloud_name);
+        if (!dpcloud_assoc) return false;
+        
+        const auto& assoc_points = dpcloud_assoc->get_points();
+        if (assoc_points.empty()) return false;
+        
+        // Initialize vectors to store analysis results for each fit point
+        std::vector<std::vector<WireCell::Point>> local_points_vec(fits.size());
+        std::vector<std::tuple<double, double, double>> vec_rms_vals(fits.size(), std::make_tuple(0,0,0));
+        std::vector<double> vec_dQ_dx(fits.size(), 0);
+        std::vector<WireCell::Vector> vec_dir(fits.size());
+        
+        // Build KD-tree index for fit points and associate points with nearest fit point
+        auto& kd_tree_fit = dpcloud_fit->kd3d();
+        
+        for (const auto& pt : assoc_points) {
+            WireCell::Point test_p(pt.x, pt.y, pt.z);
+            auto results = kd_tree_fit.knn(1, test_p);
+            if (!results.empty()) {
+                size_t closest_fit_idx = results.front().first;
+                local_points_vec.at(closest_fit_idx).push_back(test_p);
+            }
+        }
+        
+        WireCell::Vector drift_dir_abs(1, 0, 0);  // Drift direction
+        
+        // Calculate local directions and RMS spreads for each fit point
+        for (size_t i = 0; i < local_points_vec.size(); i++) {
+            // Calculate local direction from neighboring fit points
+            WireCell::Vector v1(0, 0, 0);
+            for (size_t j = 1; j < 3; j++) {
+                if (i + j < fits.size()) {
+                    v1 += WireCell::Vector(
+                        fits[i+j].point.x() - fits[i].point.x(),
+                        fits[i+j].point.y() - fits[i].point.y(),
+                        fits[i+j].point.z() - fits[i].point.z()
+                    );
+                }
+                if (i >= j) {
+                    v1 += WireCell::Vector(
+                        fits[i].point.x() - fits[i-j].point.x(),
+                        fits[i].point.y() - fits[i-j].point.y(),
+                        fits[i].point.z() - fits[i-j].point.z()
+                    );
+                }
+            }
+            
+            WireCell::Vector dir_1 = v1.magnitude() > 0 ? v1.norm() : WireCell::Vector(1, 0, 0);
+            vec_dir.at(i) = dir_1;
+            
+            // Set up orthogonal coordinate system
+            WireCell::Vector dir_2, dir_3;
+            double angle_deg = std::acos(dir_1.dot(drift_dir_abs)) * 180.0 / M_PI;
+            
+            if (angle_deg < 7.5) {
+                dir_1 = WireCell::Vector(1, 0, 0);
+                dir_2 = WireCell::Vector(0, 1, 0);
+                dir_3 = WireCell::Vector(0, 0, 1);
+            } else {
+                dir_2 = drift_dir_abs.cross(dir_1).norm();
+                dir_3 = dir_1.cross(dir_2);
+            }
+            
+            // Project associated points onto the local coordinate system
+            std::vector<std::tuple<double, double, double>> vec_projs;
+            for (const auto& pt : local_points_vec.at(i)) {
+                double proj_1 = dir_1.dot(pt);
+                double proj_2 = dir_2.dot(pt);
+                double proj_3 = dir_3.dot(pt);
+                vec_projs.push_back(std::make_tuple(proj_1, proj_2, proj_3));
+            }
+            
+            // Calculate RMS spread in each direction
+            int ncount = local_points_vec.at(i).size();
+            if (ncount > 1) {
+                WireCell::Point fit_pt(fits[i].point.x(), fits[i].point.y(), fits[i].point.z());
+                std::tuple<double, double, double> means = std::make_tuple(
+                    dir_1.dot(fit_pt),
+                    dir_2.dot(fit_pt),
+                    dir_3.dot(fit_pt)
+                );
+                
+                for (const auto& proj : vec_projs) {
+                    std::get<0>(vec_rms_vals.at(i)) += std::pow(std::get<0>(proj) - std::get<0>(means), 2);
+                    std::get<1>(vec_rms_vals.at(i)) += std::pow(std::get<1>(proj) - std::get<1>(means), 2);
+                    std::get<2>(vec_rms_vals.at(i)) += std::pow(std::get<2>(proj) - std::get<2>(means), 2);
+                }
+                
+                std::get<0>(vec_rms_vals.at(i)) = std::sqrt(std::get<0>(vec_rms_vals.at(i)) / ncount);
+                std::get<1>(vec_rms_vals.at(i)) = std::sqrt(std::get<1>(vec_rms_vals.at(i)) / ncount);
+                std::get<2>(vec_rms_vals.at(i)) = std::sqrt(std::get<2>(vec_rms_vals.at(i)) / ncount);
+            }
+            
+            // Calculate dQ/dx
+            vec_dQ_dx.at(i) = fits[i].dQ / (fits[i].dx + 1e-9) / MIP_dQdx;
+        }
+        
+        // Analyze spread characteristics
+        double max_spread = 0;
+        double large_spread_length = 0;
+        double total_effective_length = 0;
+        double total_length = 0;
+        
+        // bool flag_prev = false;
+        for (size_t i = 0; i + 1 < local_points_vec.size(); i++) {
+            double length = std::sqrt(
+                std::pow(fits[i+1].point.x() - fits[i].point.x(), 2) +
+                std::pow(fits[i+1].point.y() - fits[i].point.y(), 2) +
+                std::pow(fits[i+1].point.z() - fits[i].point.z(), 2)
+            );
+            total_length += length;
+            
+            if (std::get<2>(vec_rms_vals.at(i)) != 0) {
+                total_effective_length += length;
+                if (std::get<2>(vec_rms_vals.at(i)) > rms_cut) {
+                    large_spread_length += length;
+                    // flag_prev = true;
+                }
+                if (std::get<2>(vec_rms_vals.at(i)) > max_spread) {
+                    max_spread = std::get<2>(vec_rms_vals.at(i));
+                }
+            }
+        }
+        
+        // Determine direction based on spread analysis
+        int flag_dir = 0;
+        
+        // Check if this looks like a shower based on spread
+        bool is_shower_like = (
+            (max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
+             total_effective_length > 3*units::cm && total_effective_length < 15*units::cm && 
+             (large_spread_length > 2.7*units::cm || large_spread_length > 0.35 * total_effective_length)) ||
+            (max_spread > 0.8*units::cm && large_spread_length > 0.3 * total_effective_length && 
+             total_effective_length >= 15*units::cm) ||
+            (max_spread > 1.0*units::cm && large_spread_length > 0.4 * total_effective_length)
+        );
+        
+        if (is_shower_like) {
+            WireCell::Vector main_dir1, main_dir2;
+            bool flag_skip_angle1 = false;
+            bool flag_skip_angle2 = false;
+            
+            // Create copies of points since segment_cal_dir_3vector expects non-const reference
+            WireCell::Point front_pt = fits.front().point;
+            WireCell::Point back_pt = fits.back().point;
+            
+            if (fits.front().point.z() < fits.back().point.z()) {
+                main_dir1 = segment_cal_dir_3vector(segment, front_pt, 15*units::cm);
+                main_dir2 = segment_cal_dir_3vector(segment, back_pt, 6*units::cm);
+                double angle1 = std::acos(main_dir1.dot(drift_dir_abs)) * 180.0 / M_PI;
+                if (std::fabs(angle1 - 90) < 10) flag_skip_angle1 = true;
+            } else {
+                main_dir1 = segment_cal_dir_3vector(segment, front_pt, 6*units::cm);
+                main_dir2 = segment_cal_dir_3vector(segment, back_pt, 15*units::cm);
+                double angle2 = std::acos(main_dir2.dot(drift_dir_abs)) * 180.0 / M_PI;
+                if (std::fabs(angle2 - 90) < 10) flag_skip_angle2 = true;
+            }
+            
+            // Group consecutive segments with large spread in forward direction
+            // Each tuple: (start_index, end_index, max_rms_in_range)
+            std::vector<std::tuple<int, int, double>> threshold_segs;
+            
+            for (size_t i = 0; i < vec_dQ_dx.size(); i++) {
+                double angle = std::acos(main_dir1.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                if ((angle < 30 || (flag_skip_angle1 && angle < 60)) && 
+                    (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4 || vec_dQ_dx.at(i) > 1.6)) {
+                    
+                    if (threshold_segs.empty()) {
+                        // Start new segment group
+                        threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                    } else {
+                        // Check if continuous with previous group
+                        if (i == std::get<1>(threshold_segs.back()) + 1) {
+                            // Extend existing group
+                            std::get<1>(threshold_segs.back()) = i;
+                            if (std::get<2>(threshold_segs.back()) < std::get<2>(vec_rms_vals.at(i))) {
+                                std::get<2>(threshold_segs.back()) = std::get<2>(vec_rms_vals.at(i));
+                            }
+                        } else {
+                            // Start new group (gap detected)
+                            threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                        }
+                    }
+                }
+            }
+            
+            // Calculate total and max continuous length for forward direction
+            double total_length1 = 0, max_length1 = 0;
+            for (const auto& seg : threshold_segs) {
+                int start_n = std::get<0>(seg);
+                if (start_n > 0) start_n--;  // Include one segment before
+                int end_n = std::get<1>(seg);
+                
+                double tmp_length = 0;
+                for (int i = start_n; i < end_n && i + 1 < (int)fits.size(); i++) {
+                    tmp_length += std::sqrt(
+                        std::pow(fits[i+1].point.x() - fits[i].point.x(), 2) +
+                        std::pow(fits[i+1].point.y() - fits[i].point.y(), 2) +
+                        std::pow(fits[i+1].point.z() - fits[i].point.z(), 2)
+                    );
+                }
+                total_length1 += tmp_length;
+                if (tmp_length > max_length1) max_length1 = tmp_length;
+            }
+            
+            // Group consecutive segments with large spread in backward direction
+            threshold_segs.clear();
+            
+            for (int i = vec_dQ_dx.size() - 1; i >= 0; i--) {
+                double angle = 180 - std::acos(main_dir2.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                if ((angle < 30 || (flag_skip_angle2 && angle < 60)) && 
+                    (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4 || vec_dQ_dx.at(i) > 1.6)) {
+                    
+                    if (threshold_segs.empty()) {
+                        // Start new segment group
+                        threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                    } else {
+                        // Check if continuous with previous group (decrementing)
+                        if (i == std::get<1>(threshold_segs.back()) - 1) {
+                            // Extend existing group
+                            std::get<1>(threshold_segs.back()) = i;
+                            if (std::get<2>(threshold_segs.back()) < std::get<2>(vec_rms_vals.at(i))) {
+                                std::get<2>(threshold_segs.back()) = std::get<2>(vec_rms_vals.at(i));
+                            }
+                        } else {
+                            // Start new group (gap detected)
+                            threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                        }
+                    }
+                }
+            }
+            
+            // Calculate total and max continuous length for backward direction
+            double total_length2 = 0, max_length2 = 0;
+            for (const auto& seg : threshold_segs) {
+                int start_n = std::get<0>(seg);
+                if (start_n < (int)fits.size() - 1) start_n++;  // Include one segment after
+                int end_n = std::get<1>(seg);
+                
+                double tmp_length = 0;
+                for (int i = start_n; i > end_n && i > 0; i--) {
+                    tmp_length += std::sqrt(
+                        std::pow(fits[i-1].point.x() - fits[i].point.x(), 2) +
+                        std::pow(fits[i-1].point.y() - fits[i].point.y(), 2) +
+                        std::pow(fits[i-1].point.z() - fits[i].point.z(), 2)
+                    );
+                }
+                total_length2 += tmp_length;
+                if (tmp_length > max_length2) max_length2 = tmp_length;
+            }
+            
+            // Compare using both total and max continuous lengths
+            if (total_length1 + max_length1 > 1.1 * (total_length2 + max_length2)) {
+                flag_dir = 1;
+            } else if (1.1 * (total_length1 + max_length1) < total_length2 + max_length2) {
+                flag_dir = -1;
+            }
+        } else {
+            // Not shower-like, use simpler direction determination
+            if (total_length < 5*units::cm) {
+                if (!segment_is_shower_trajectory(segment)) segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model);
+                // For short segments, could call determine_dir_track here if needed
+            } else {
+                // Count consistent directions at each end
+                WireCell::Point front_pt = fits.front().point;
+                WireCell::Point back_pt = fits.back().point;
+                WireCell::Vector main_dir_front = segment_cal_dir_3vector(segment, front_pt, 6*units::cm); 
+                int ncount_front = 0;
+                for (size_t i = 0; i < vec_dQ_dx.size(); i++) {
+                    double angle = std::acos(main_dir_front.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                    if (angle < 30) ncount_front++;
+                }
+
+                WireCell::Vector main_dir_back = segment_cal_dir_3vector(segment, back_pt, 6*units::cm);
+                int ncount_back = 0;
+                for (int i = vec_dQ_dx.size() - 1; i >= 0; i--) {
+                    double angle = 180 - std::acos(main_dir_back.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                    if (angle < 30) ncount_back++;
+                }
+                
+                if (1.2 * ncount_front < ncount_back) {
+                    flag_dir = -1;
+                } else if (ncount_front > 1.2 * ncount_back) {
+                    flag_dir = 1;
+                }
+            }
+        }
+        
+        segment->dirsign(flag_dir);
+        return (flag_dir != 0);
     }
 }

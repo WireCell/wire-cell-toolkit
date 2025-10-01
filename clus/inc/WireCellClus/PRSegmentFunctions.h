@@ -88,7 +88,7 @@ namespace WireCell::Clus::PR {
 
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
 
-    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx = 50000 / units::cm);
+    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm);
 
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut);
@@ -112,6 +112,8 @@ namespace WireCell::Clus::PR {
     void segment_determine_shower_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false);
 
     void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
+
+    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name = "associate_points", double MIP_dQdx = 43000/units::cm, double rms_cut= 0.4*units::cm);
 }
 
 #endif
