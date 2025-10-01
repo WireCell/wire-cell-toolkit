@@ -153,9 +153,63 @@ decon kernel.
 The ~DeconKernel~ factors into a "frontend" that constructs the natural-sized and
 relatively small interval-space tensor and a "backend" that handles
 mutex-protected queries and their padding and forward DFT.  This implies that a
-generic, non-component ~TensorCache~ class can be developed and reused in future
-~ITorchSpectrum~ components.
+generic, non-component +~TensorCache+ ~ThreadSafeCache~ class (using keys of shape
+and values of ~ITorchTensor::pointer~) has been developed and can be reused in
+future ~ITorchSpectrum~ components.
 
+
+* Issues
+
+** Shifts
+
+A "shift" here means some relative displacement of some feature, such as a peak,
+between the peak location in the filter, response or measure tensors and in the
+tensor resulting from the convolution.
+
+Categories of "shifts" considered:
+
+- An "artificial" shift occurs when a filter or response is provided in
+  artificially rolled or wrapped form.  For example, wire filters tend to be
+  provided with a peak in their central sample.  Likewise, "wiener" and "gauss"
+  filters, though they may be plotted on a zero-centered axis, they are often
+  provided with their peak placed in the middle of their arrays.  These peaks
+  are intended physically induce a "stationary" convolution.  That is, they are
+  intended to broaden or narrow features in the measure and not move them.
+  However, providing them in array-centered forms instead of
+  zero-sample-centered forms will induce an artificial shift equal to half their
+  array size.
+
+- A "natural" shift occurs due to a filter or response truly having some peak
+  that is not at zero.  For example, all FRs are peaked rather toward the high
+  times (columns) in the FR tensor.  ERs are also peaked away from zero.  When
+  used in deconvolution, these positive natural shifts in these responses cause
+  any peaks in the measure to be shifted back to earlier times (lower column
+  numbers) in the convolution result.
+
+- A "logical" shift can occur when a measure or kernel tensor is padded.
+  Padding is required in order to make convolution via DFT method be linear and
+  avoid cyclic-aliasing.  The "shift" here is really about proper labeling of
+  samples in channel or time space and it can include a desire to avoid having
+  to consider the cyclic nature of the convolution output.
+
+Correcting artificial shifts is straight-forward.  A natural shift in a filter
+leads to shifting a measured feature so that it appears /later/ in the convolution
+result.  Contrary, a natural shift in a response leads leads to shifting a
+measured feature so that it appears /earlier/ in the convolution result.  Features
+can appear "wrapped" in the convolution response do to its cyclical nature.  A
+late measure feature can be pushed forward beyond the end of the array by a
+filter shift or an early feature can be backed up before the beginning of the
+array by a response shift.  Both result in the feature wrapping around to the
+other end.
+
+If we /roll/ the convolution response by the size of the response array (minus 1)
+we can avoid this wrapping.  The earliest measured information shows up in
+column zero of the convolution result and the latest shows up in the last
+column.  The zeroth column represents "negative time", or at least time before
+the first sample of the measure.
+
+The ~ITorchSpectrum~ provides a ~shifts()~ method to communicate to the consumer the
+recommended size of this roll.
 
 
 
