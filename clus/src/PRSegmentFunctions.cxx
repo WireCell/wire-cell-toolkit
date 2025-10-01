@@ -1390,7 +1390,7 @@ namespace WireCell::Clus::PR {
         }
     }
 
-     void segment_determine_shower_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print){
+     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print){
         segment->dirsign(0);
         double length = segment_track_length(segment, 0);
         
@@ -2047,6 +2047,7 @@ namespace WireCell::Clus::PR {
                 }
             }
         }
+        (void)max_cont_weighted_length; // Currently unused
         
         // Determine if this is shower topology based on spread patterns
         if ((max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
