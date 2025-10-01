@@ -1,0 +1,161 @@
+#+title: SPNG Deconvolution
+
+* Overview
+
+The original signal processing (OSP) in WCT convolves the measured ADC waveforms
+across adjacent channels with a kernel formed as the ratio of filters and
+responses.  They are listed with their approximate sizes in bins of channel and
+time samples.
+
+- 2D field response (21, 200)
+- 1D electronics response (1,20)
+- 1D channel filter (21,1)
+- 1D time filter (1, 100)  (two of them: "gauss" and "wiener")
+- 1D "RC" aka long electronics response (1,10000)
+
+To avoid any cyclic aliasing due to applying the Fourier method of convolution,
+the waveform, response and filter arrays must all be padded in interval space to
+a common larger value.  Each dimension size must be the sum of the corresponding
+dimension size of its parts with one less for each element of the kernel.  This
+is the usual "M+N-1" rule extended to multiple convolutions.  1D responses are
+broadcast across their dimension of size 1 and should not be included in the
+count.
+
+Assuming a PDHD U plane of size (800,6000) and ignoring the "RC" response for
+now, the padded dimension sizes would be:
+
+- channel :: $800 + 21 + 21- 2 = 840$
+- time :: $6000 + 200 + 20 + 100 - 3 = 6315$
+
+The following graph represents most of the processing that must be done.
+
+[[file:decon-flow.png]] 
+
+It omits two important issues.
+
+First, the 1D "RC" response deconvolution can be applied to the result.  As is
+done in OSP, this requires the Fourier space signal "S" to be brought back to
+interval space in order to pad it to accomodate the long RC response.  The RC
+deconvolution then requires a large but 1D FFT round trip.  The RC could be
+accommodated from the start but this would more than double the memory required.
+
+The second omission is that OSP performs two deconvoutions each with a different
+time filter ("gauss" and "wiener"), drawn as "Ft" in the diagram.  If redundant
+FFTs are to be avoided, the program must retain two "F/R" tensors.
+
+A comment on the long RC, the one relevant to MicroBooNE extends longer than the
+nominal 3ms DUNE readout.  In streaming (SNB) mode, this will require the "tail"
+of the signal processing to be snipped and added to more than one subsequent
+chunk.
+
+* Design considerations 
+
+To map the computation to a WCT data flow graph we must consider some computational optimization issues.
+
+First, the value of the "F/R" kernel depends on a few parameters that may vary over "space" and "time":
+
+1. The kernel content and size depends on the anode plane (U, V or W).
+2. The kernel content may depend on the anode.
+3. The final shape is driven by (fixed) kernel size and potentially varying measure size.
+
+
+In a single job, we can be assured that type 1 variation must be accommodated.
+This requires a unique kernel to be brought to each node that processes data
+from a given plane type.
+
+Type 2 variation must be supported because current PDHD requires "bad" and
+"nominal" FRs and because current job configurations will load and process all
+four of the PDHD anodes in a single job.  This is done out of historical
+inertia.  For future, in particularly for DUNE FD, there are technical arguments
+to define per-anode jobs and these would not need to account for Type 2
+variation.  However, other arguments favor multiple anodes processed in a
+multi-threaded WCT graph when GPU resource management issues are included.
+
+No case of Type 3 variation is currently known to exist.  However, there is a
+strong likelihood that DUNE FD will be a source fo trigger records with at least
+two sizes.  Or three when considering the SNB case.  SNB trigger records will
+almost certainly be handled by special jobs so we ignore them here.  In "normal"
+running, in a single "run", we may expect "short" low energy and "nominal"
+length trigger records.
+
+The variability of the kernel size over run time and the need to consume the
+same kernel in different DFP graph nodes pose problems related thread safety and
+minimizing memory usage and repeating computation.  Two options have been
+identified:
+
+1. User-configuration predetermines all possible kernel shapes.  The kernel
+   source component pre-calculates all corresponding kernels and stores these in
+   a map using shape as keys.  The map is held constant during subsequent calls
+   from the multi-threaded context.  An error value (empty kernel) or exception
+   is raised when a consumer requests and unknown shape.
+
+   This option puts a burden on users but allows for simpler code and faster
+   runtime while producing a less flexible DFP. 
+
+2. The kernel source dynamically generates kernels of a given shape.  Each
+   request must use a mutext to protect the entire request (checking cache,
+   producing novel shaped kernel, filling cache), blocking all other concurrent
+   requests.
+
+   This option simplifies user configuration while making code more complicated
+   and slower while producing a more flexible DFP.
+
+On balance, option 2 will be followed.  If the performance is problematic and/or
+the user configuration burden overestimated then option 1 can be provided at a
+later time.
+
+* Design
+
+An ~ITorchSpectrum~ class ~DeconKernel~ (~SPNGDeconKernel~ DFP node type name) will be
+implemented to provide the "F/R" kernel.  It's main method is:
+
+#+begin_src cpp
+    virtual torch::Tensor spectrum(const std::vector<int64_t> & measure_shape);
+#+end_src
+
+This is queried with the shape of measure tensor (ignoring batch dimension).
+The returned tensor is of the *padded shape* larger than the measured shape used
+in the query.
+
+An ~ITorchTensorFilter~ class ~KernelConvolve~ (~SPNGKernelConvolve~ DFP node type
+name) will be implemented to perform the following:
+
+1. Query an ~ITorchSpectrum~ for the kernel using the input measure tensor's shape.
+2. Use the returned kernel shape as a padding target to apply to the input measure tensor.
+3. Apply forward 2D DFT to measure.
+4. Multiply with kernel.
+5. Apply inverse 2D DFT to measure.
+6. Apply shifts.
+7. Optionally crop.
+
+
+Both components must collude on these points:
+
+1. The query shape is that of the measure, the returned kernel is padded assuming the query shape.
+2. The kernel provided in Fourier space representation.
+3. The DFT ordering (eg, r2c rfft on time then c2c fft on channel dimensions vs symmetric c2c on both dimensions).
+
+
+The crop is made optional so that ~KernelConvolve~ component can be used in both
+windowed (nominal trigger records) and chunked-streaming (SNB) processing modes.
+
+Note, this design is generic for application beyond just SP decon.  It can form
+the core for an SPNG-style detector simulation.
+
+Here is a variant flow graph showing this factoring.
+
+[[file:decon-components.png]]
+
+This figure draws out some design features.  First, the ~KernelConvolve~ node, as
+the name implies, is generic.  It merely operates as a decon node if given a
+decon kernel.
+
+The ~DeconKernel~ factors into a "frontend" that constructs the natural-sized and
+relatively small interval-space tensor and a "backend" that handles
+mutex-protected queries and their padding and forward DFT.  This implies that a
+generic, non-component ~TensorCache~ class can be developed and reused in future
+~ITorchSpectrum~ components.
+
+
+
+

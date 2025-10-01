@@ -1,40 +1,50 @@
 digraph deconflow {
+    rankdir=LR
     // interval
     node[shape=box]
-    m[label="m = 2D measure",color=red] mp
-    r[label="r = 2D response"] rp
-    fc[label="1D channel\nfilter"] fcp
-    ft[label="1D time\nfilter"] ftp
+    m[label="m = 2D measure\n(800,6000)",color=red]
+    mp[label="2D measure\n(padded)"]
+
+    fr[label="2D field\nresponse\n(21,200)"]
+    frp[label="2D field\nresponse\n(padded)"]
+
+    er[label="1D elec\nresponse\n(t=200)"]
+    erp[label="1D elec\nresponse\n(padded)"]
+
+    fc[label="1D channel\nfilter\n(c=21)"]
+    fcp[label="1D channel\nfilter\n(padded)"]
+    ft[label="1D time\nfilter\n(t=100)"]
+    ftp[label="1D time\nfilter\n(padded)"]
     sasis[label="signal\ndecon'ed"]
     sfull[label="signal\nshifted"]
     s[label="signal\ncropped"]
 
     node[shape=ellipse]
-    maxshape[label="max measure\nshape\nconfig",color=red]
-    mshape[label="m.shape",color=red]
-    rshape[label="r.shape"]
-    fftshape[label="shape"]
     bestshape[label="shape"]
 
     // Fourier
     node[shape=circle]
     M[color=red]
     R[color=blue]
+    ER
+    FR
     Fc
     Ft
-    F[label="F = 2D\nfilter", color=blue]
+    F[label="F", color=blue]
+    FdivR[label="F/R"]
+
     S
 
     // operations
     node[shape=diamond]
-    shape_m[label="get\nshape",color=red]
-    shape_r[label="get\nshape"]
     pad_m[label="pad"]
-    pad_r[label="pad"]
+    pad_fr[label="pad"]
+    pad_er[label="pad"]
     pad_fc[label="pad"]
     pad_ft[label="pad"]
     fft_m[label="2D \nDFT"]
-    fft_r[label="2D \nDFT"]
+    fft_fr[label="2D \nDFT"]
+    fft_er[label="1D \nDFT"]
     fft_fc[label="1D \nDFT"]
     fft_ft[label="1D \nDFT"]
     infft[label="2D inv\nDFT"]
@@ -42,25 +52,39 @@ digraph deconflow {
     fft_shape[label="FFT min\nshape\nm+r-1"]
     best_shape[label="FFT best\nshape"]
     decon[label="decon\nM*F/R"]
+    frer_mult[label="FR*ER"]
     shift
     crop
 
-    maxshape->fft_shape[color=red]
-    m->shape_m->mshape->fft_shape[color=red]
-    r->shape_r->rshape->fft_shape->fftshape
-    fftshape->best_shape->bestshape
+    m->fft_shape
+    fr->fft_shape
+    er->fft_shape
+    fc->fft_shape
+    ft->fft_shape
+
+    fft_shape->best_shape->bestshape
+
     
     bestshape->pad_m
-    bestshape->pad_r
+    bestshape->pad_fr
+    bestshape->pad_er
     bestshape->pad_fc
     bestshape->pad_ft
 
     m->pad_m->mp->fft_m->M->decon
-    r->pad_r->rp->fft_r->R->decon
+    fr->pad_fr->frp->fft_fr->FR->frer_mult
+    er->pad_er->erp->fft_er->ER->frer_mult
 
-    fc->pad_fc->fcp->fft_fc->Fc->cross
-    ft->pad_ft->ftp->fft_ft->Ft->cross->F->decon
+    fc->pad_fc->fcp->fft_fc->Fc
+    ft->pad_ft->ftp->fft_ft->Ft
 
-    decon->S->infft->sasis->shift->sfull->crop->s;
+    frer_mult->R
+    Fc->cross
+    Ft->cross
+    cross->F
+    R->FdivR
+    F->FdivR
+
+    FdivR->decon->S->infft->sasis->shift->sfull->crop->s;
 
     }
