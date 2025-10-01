@@ -1900,4 +1900,273 @@ namespace WireCell::Clus::PR {
         segment->dirsign(flag_dir);
         return (flag_dir != 0);
     }
+
+    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx){
+        int flag_dir = 0;
+        bool flag_shower_topology = tmp_val; 
+        const auto& fits = segment->fits();
+
+        if (fits.empty()) return false;
+        
+        // Get the fit point cloud for KD-tree queries
+        auto dpcloud_fit = segment->dpcloud("fit");
+        if (!dpcloud_fit) return false;
+        
+        // Get the associated point cloud 
+        auto dpcloud_assoc = segment->dpcloud("associated");
+        if (!dpcloud_assoc) return false;
+        
+        const auto& assoc_points = dpcloud_assoc->get_points();
+        if (assoc_points.empty()) return false;
+
+        // Initialize vectors to store analysis results for each fit point
+        std::vector<std::vector<WireCell::Point>> local_points_vec(fits.size());
+        std::vector<std::tuple<double, double, double>> vec_rms_vals(fits.size(), std::make_tuple(0,0,0));
+        std::vector<double> vec_dQ_dx(fits.size(), 0);
+        
+        // Build KD-tree index for fit points and associate points with nearest fit point
+        auto& kd_tree_fit = dpcloud_fit->kd3d();
+        
+        for (const auto& pt : assoc_points) {
+            WireCell::Point test_p(pt.x, pt.y, pt.z);
+            auto results = kd_tree_fit.knn(1, test_p);
+            if (!results.empty()) {
+                size_t closest_fit_idx = results.front().first;
+                local_points_vec.at(closest_fit_idx).push_back(test_p);
+            }
+        }
+        
+        WireCell::Vector drift_dir_abs(1, 0, 0);  // Drift direction
+        
+        // Calculate local directions and RMS spreads for each fit point
+        for (size_t i = 0; i < local_points_vec.size(); i++) {
+            // Calculate local direction from neighboring fit points
+            WireCell::Vector v1(0, 0, 0);
+            for (size_t j = 1; j < 3; j++) {
+                if (i + j < fits.size()) {
+                    v1 += WireCell::Vector(
+                        fits[i+j].point.x() - fits[i].point.x(),
+                        fits[i+j].point.y() - fits[i].point.y(),
+                        fits[i+j].point.z() - fits[i].point.z()
+                    );
+                }
+                if (i >= j) {
+                    v1 += WireCell::Vector(
+                        fits[i].point.x() - fits[i-j].point.x(),
+                        fits[i].point.y() - fits[i-j].point.y(),
+                        fits[i].point.z() - fits[i-j].point.z()
+                    );
+                }
+            }
+            
+            WireCell::Vector dir_1 = v1.magnitude() > 0 ? v1.norm() : WireCell::Vector(1, 0, 0);
+            
+            // Set up orthogonal coordinate system
+            WireCell::Vector dir_2, dir_3;
+            double angle_deg = std::acos(dir_1.dot(drift_dir_abs)) * 180.0 / M_PI;
+            
+            if (angle_deg < 7.5) {
+                dir_1 = WireCell::Vector(1, 0, 0);
+                dir_2 = WireCell::Vector(0, 1, 0);
+                dir_3 = WireCell::Vector(0, 0, 1);
+            } else {
+                dir_2 = drift_dir_abs.cross(dir_1).norm();
+                dir_3 = dir_1.cross(dir_2);
+            }
+            
+            // Project associated points onto the local coordinate system
+            std::vector<std::tuple<double, double, double>> vec_projs;
+            for (const auto& pt : local_points_vec.at(i)) {
+                double proj_1 = dir_1.dot(pt);
+                double proj_2 = dir_2.dot(pt);
+                double proj_3 = dir_3.dot(pt);
+                vec_projs.push_back(std::make_tuple(proj_1, proj_2, proj_3));
+            }
+            
+            // Calculate RMS spread in each direction
+            int ncount = local_points_vec.at(i).size();
+            if (ncount > 1) {
+                WireCell::Point fit_pt(fits[i].point.x(), fits[i].point.y(), fits[i].point.z());
+                std::tuple<double, double, double> means = std::make_tuple(
+                    dir_1.dot(fit_pt),
+                    dir_2.dot(fit_pt),
+                    dir_3.dot(fit_pt)
+                );
+                
+                for (const auto& proj : vec_projs) {
+                    std::get<0>(vec_rms_vals.at(i)) += std::pow(std::get<0>(proj) - std::get<0>(means), 2);
+                    std::get<1>(vec_rms_vals.at(i)) += std::pow(std::get<1>(proj) - std::get<1>(means), 2);
+                    std::get<2>(vec_rms_vals.at(i)) += std::pow(std::get<2>(proj) - std::get<2>(means), 2);
+                }
+                
+                std::get<0>(vec_rms_vals.at(i)) = std::sqrt(std::get<0>(vec_rms_vals.at(i)) / ncount);
+                std::get<1>(vec_rms_vals.at(i)) = std::sqrt(std::get<1>(vec_rms_vals.at(i)) / ncount);
+                std::get<2>(vec_rms_vals.at(i)) = std::sqrt(std::get<2>(vec_rms_vals.at(i)) / ncount);
+            }
+            
+            // Calculate dQ/dx
+            vec_dQ_dx.at(i) = fits[i].dQ / (fits[i].dx + 1e-9) / MIP_dQ_dx;
+        }
+        
+        // Analyze spread characteristics
+        double max_spread = 0;
+        double large_spread_length = 0;
+        double total_effective_length = 0;
+        
+        double max_cont_length = 0;
+        double max_cont_weighted_length = 0;
+        double cont_length = 0;
+        double cont_weighted_length = 0;
+        bool flag_prev = false;
+        
+        for (size_t i = 0; i + 1 < local_points_vec.size(); i++) {
+            double length = std::sqrt(
+                std::pow(fits[i+1].point.x() - fits[i].point.x(), 2) +
+                std::pow(fits[i+1].point.y() - fits[i].point.y(), 2) +
+                std::pow(fits[i+1].point.z() - fits[i].point.z(), 2)
+            );
+            
+            if (std::get<2>(vec_rms_vals.at(i)) != 0) {
+                total_effective_length += length;
+                if (std::get<2>(vec_rms_vals.at(i)) > 0.4 * units::cm) {
+                    large_spread_length += length;
+                    cont_length += length;
+                    cont_weighted_length += length * std::get<2>(vec_rms_vals.at(i));
+                    flag_prev = true;
+                } else {
+                    if (flag_prev && cont_length > max_cont_length) {
+                        max_cont_length = cont_length;
+                        max_cont_weighted_length = cont_weighted_length;
+                    }
+                    cont_length = 0;
+                    cont_weighted_length = 0;
+                    flag_prev = false;
+                }
+                if (std::get<2>(vec_rms_vals.at(i)) > max_spread) {
+                    max_spread = std::get<2>(vec_rms_vals.at(i));
+                }
+            }
+        }
+        
+        // Determine if this is shower topology based on spread patterns
+        if ((max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
+             total_effective_length > 3*units::cm && total_effective_length < 15*units::cm && 
+             (large_spread_length > 2.7*units::cm || large_spread_length > 0.35 * total_effective_length)) ||
+            (max_spread > 0.8*units::cm && large_spread_length > 0.3 * total_effective_length && 
+             total_effective_length >= 15*units::cm) ||
+            (max_spread > 0.8*units::cm && large_spread_length > 8*units::cm && 
+             large_spread_length > 0.18 * total_effective_length) ||
+            (max_spread > 1.0*units::cm && large_spread_length > 0.4 * total_effective_length) ||
+            (max_spread > 1.0*units::cm && large_spread_length > 5*units::cm && 
+             large_spread_length > 0.23 * total_effective_length)) {
+            
+            flag_shower_topology = true;
+        }
+        
+        // If identified as shower topology, determine direction
+        if (flag_shower_topology) {
+            // Group consecutive segments with large spread in forward direction
+            std::vector<std::tuple<int, int, double>> threshold_segs;
+            
+            for (size_t i = 0; i < vec_dQ_dx.size(); i++) {
+                if (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4) {
+                    if (threshold_segs.empty()) {
+                        threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                    } else {
+                        if (i == std::get<1>(threshold_segs.back()) + 1) {
+                            // Extend existing group
+                            std::get<1>(threshold_segs.back()) = i;
+                            if (std::get<2>(threshold_segs.back()) < std::get<2>(vec_rms_vals.at(i))) {
+                                std::get<2>(threshold_segs.back()) = std::get<2>(vec_rms_vals.at(i));
+                            }
+                        } else {
+                            // Start new group
+                            threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                        }
+                    }
+                }
+            }
+            
+            // Calculate total and max continuous length for forward direction
+            double total_length1 = 0, max_length1 = 0;
+            for (const auto& seg : threshold_segs) {
+                int start_n = std::get<0>(seg);
+                if (start_n > 0) start_n--;
+                int end_n = std::get<1>(seg);
+                
+                double tmp_length = 0;
+                for (int i = start_n; i < end_n && i + 1 < (int)fits.size(); i++) {
+                    tmp_length += std::sqrt(
+                        std::pow(fits[i+1].point.x() - fits[i].point.x(), 2) +
+                        std::pow(fits[i+1].point.y() - fits[i].point.y(), 2) +
+                        std::pow(fits[i+1].point.z() - fits[i].point.z(), 2)
+                    );
+                }
+                total_length1 += tmp_length;
+                if (tmp_length > max_length1) max_length1 = tmp_length;
+            }
+            
+            // Group consecutive segments with large spread in backward direction
+            threshold_segs.clear();
+            
+            for (int i = vec_dQ_dx.size() - 1; i >= 0; i--) {
+                if (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4) {
+                    if (threshold_segs.empty()) {
+                        threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                    } else {
+                        if (i == std::get<1>(threshold_segs.back()) - 1) {
+                            // Extend existing group
+                            std::get<1>(threshold_segs.back()) = i;
+                            if (std::get<2>(threshold_segs.back()) < std::get<2>(vec_rms_vals.at(i))) {
+                                std::get<2>(threshold_segs.back()) = std::get<2>(vec_rms_vals.at(i));
+                            }
+                        } else {
+                            // Start new group
+                            threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
+                        }
+                    }
+                }
+            }
+            
+            // Calculate total and max continuous length for backward direction
+            double total_length2 = 0, max_length2 = 0;
+            for (const auto& seg : threshold_segs) {
+                int start_n = std::get<0>(seg);
+                if (start_n < (int)fits.size() - 1) start_n++;
+                int end_n = std::get<1>(seg);
+                
+                double tmp_length = 0;
+                for (int i = start_n; i > end_n && i > 0; i--) {
+                    tmp_length += std::sqrt(
+                        std::pow(fits[i-1].point.x() - fits[i].point.x(), 2) +
+                        std::pow(fits[i-1].point.y() - fits[i].point.y(), 2) +
+                        std::pow(fits[i-1].point.z() - fits[i].point.z(), 2)
+                    );
+                }
+                total_length2 += tmp_length;
+                if (tmp_length > max_length2) max_length2 = tmp_length;
+            }
+            
+            // Determine direction based on spread comparison
+            if (total_length1 + max_length1 > 1.1 * (total_length2 + max_length2)) {
+                flag_dir = 1;
+            } else if (1.1 * (total_length1 + max_length1) < total_length2 + max_length2) {
+                flag_dir = -1;
+            }
+            
+            // Override shower topology for very long segments with little spread
+            double tmp_total_length = segment_track_length(segment, 0);
+            if (tmp_total_length > 50*units::cm && 
+                total_length1 < 0.25 * tmp_total_length && 
+                total_length2 < 0.25 * tmp_total_length) {
+                flag_dir = 0;
+                flag_shower_topology = false;
+            }
+        }
+
+        if (flag_shower_topology) segment->set_flags(SegmentFlags::kShowerTopology);
+        segment->dirsign(flag_dir);
+        return flag_shower_topology;
+    }
+
 }
