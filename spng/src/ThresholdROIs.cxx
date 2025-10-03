@@ -4,6 +4,7 @@
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/Util.h"
+#include "WireCellSpng/TensorTools.h"
 
 // #include "WireCellSpng/ITorchFieldResponse.h"
 

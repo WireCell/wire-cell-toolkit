@@ -1,0 +1,178 @@
+#+title: Wire-Cell Toolkit Developer Guidelines.
+
+* Philosophy
+
+This section describes the high-level developer "philosophy" of WCT.
+
+1. WCT is based on components implementing interfaces in plugin libraries.
+
+   - Understand what these words mean before developing WCT.
+
+2. WCT code is detector-independent.
+
+   - In rare cases that code must be detector-specific it MUST be provided as a
+     component that is used (or not) based on user configuration.
+
+3. WCT is user-configurable.
+
+   - Do not hard-wire values that can be provided by user configuration.
+
+   - Only provide defaults that are generic and sane. 
+
+4. WCT is modular
+
+   - Consider new plugin, component, class, method, function for your new feature.
+
+   - Avoid implementing monolithic code blocks.
+
+5. WCT code is well factored.
+
+   - Don't Repeat Yourself.
+
+   - Avoid the copy-paste programming paradigm.
+
+   - Factor common concepts to common code.
+
+   - LLMs and lazy programmers both tend to violate this - don't be either creature.
+
+6. WCT mostly consists of a set of core libraries and plugin libraries and one optional program.
+
+   - Core libraries: ~WireCell{Aux,Iface,Util}~.
+
+   - Core plugins: ~WireCell{Apps,Gen,SigProc,Img,Sio,Pgraph,Tbb}~
+
+   - Optional plugins: ~WireCell{Clus,Hio,Pytorch,Root,Zio,...}~
+
+   - The optional ~wire-cell~ command line provides "stand-alone" usage of the WCT libraries.
+
+     - Ancillary programs are also provided (~wcwires~, ~wcsonnet~) 
+
+   - WCT-in-a-framework-app (eg in /art/ or PHLEX) is an expected common use.
+
+7. WCT plugins cleave along software dependency and topic lines.  
+
+   - All code depending on ROOT goes in the WireCellRoot plugin.
+
+   - Large concepts belong in their own plugin ("sim", "sigproc", "img", "clus").
+
+   - Plugins must not depend on other WCT plugins.
+
+
+* General
+
+1. Use C++-17, do not use C or very old C++ idioms.
+
+* Style
+
+1. Follow a uniform formatting for the code you write.
+
+2. Follow existing formatting for code you modify.
+
+3. Do not omit "{}" with multi-line if statements.
+
+   #+begin_src c++
+     // Bad
+     if (foo)
+         do_bar();
+     // Better
+     if (foo) do_bar();
+     // Best
+     if (foo) {
+         do_bar();
+     }
+   #+end_src
+
+4. Place opening "{" on "if" and "else" on same line.
+   #+begin_src c++
+     // good
+     if (true) {
+         tru();
+     }
+     else {
+         fls();
+     }
+
+   #+end_src
+
+4. Place opening "{" for class, struct and function on own line.
+   #+begin_src c++
+     void bad() {
+         return 0;
+     }
+     int good()
+     {
+         return 42;
+     }
+     int one_line_okay() { return 42; }
+   #+end_src
+
+* Comments
+
+1. Document API by placing doc comments in header files for **every** class,
+   public method, function and configuration parameter.
+
+2. Use ~///~ or ~/** */~ for API documentation so that Doxygen processes the comments.
+
+3. May use ~//~ or ~/* */~ for non-documentation comments.
+
+4. Follow ~//~ with a space before the comment text.
+
+
+* Idioms
+
+1. Avoid deeply nested ~if~ branches and ~for~ loops.
+   - Move nested bodies into method or function.
+   - Short circuit loops.
+
+#+begin_src c++
+  // Bad
+  for (auto x : thing) {
+      if (x > thres) {
+          for (auto y : other_thing) {
+              /// long code block
+              /// finally doing
+              /// something....
+          }
+      }
+  }
+
+  // Better
+  void finally_do_something() { ... }
+  for (auto x : thing) {
+      if (x <= thres) {
+          continue;
+      }
+      for (auto y : other_thing) {
+          finally_do_something();
+      }
+  }
+#+end_src     
+
+
+* Testing
+
+1. Do add "code unit" tests as ~<pkg>/test/doctest_<name>.cxx~ C++.
+
+2. Do add "job unit" tests as ~<pkg>/test/test_<name>.bats~ Bash.
+
+3. Tests must not require input arguments or input files.
+   - ~<pkg>/test/check_<name>.cxx~ can be added when user input is absolutely required.
+
+
+* Logging
+
+1. Do not use ~std::cerr~ or ~std::cout~.
+
+2. Do use [[file:util/docs/logging.org][logging]] and follow its message level guidelines.
+
+* Errors
+
+1. Throw appropriate exception from ~WireCellUtil/Exceptions.h~ and do not throw others.
+
+1. Use ~raise<T>("message with %s codes", "formatting")~ to throw exception ~T~.
+   - There is older ~THROW()~ macro, avoid bare ~throw~.
+
+2. In your ~IConfigurable::configure()~, per-validate all configuration and freely
+   throw exceptions.
+   - Throwing in ~INode::operator()~ will generally abort the entire program.
+

@@ -5,6 +5,7 @@
 
 #include "WireCellAux/SimpleTrace.h"
 #include "WireCellAux/SimpleFrame.h"
+#include "WireCellAux/FrameTools.h" // for taginfo()
 
 #include "WireCellUtil/Waveform.h"
 
@@ -32,7 +33,7 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration TdmToFrame::default_configuration() const
     {
-        Configuration cfg = this->ContextBase::default_configuration();
+        Configuration cfg;
         cfg["frame"] = 0;
         return cfg;
     }
@@ -40,8 +41,6 @@ namespace WireCell::SPNG {
         
     void TdmToFrame::configure(const WireCell::Configuration& cfg)
     {
-        this->ContextBase::configure(cfg);
-
         auto jff = cfg["frame"];
         if (jff.isInt()) {
             m_find_frame = jff.asInt(); // index
@@ -72,6 +71,7 @@ namespace WireCell::SPNG {
             raise<ValueError>("failed to retrieve frame tensor from set.  Fix you configuration?");
         }
 
+        logit(ti, "input");
 
         Waveform::ChannelMaskMap cmm;
         for (const auto& [label, chmasks_itensor] : frame.chmasks) {
@@ -80,11 +80,11 @@ namespace WireCell::SPNG {
                 continue;
             }
 
-            auto cmten = chmasks_itensor->tensor();
+            auto cmten = chmasks_itensor->tensor().to(torch::kCPU);
             size_t nrows = cmten.size(0);
             Waveform::ChannelMasks cms;
             for (size_t irow=0; irow<nrows; ++irow) {
-                auto cmvec = Torch::to_vector<int>(cmten[irow]);
+                auto cmvec = to_vector<int>(cmten[irow]);
                 int batch = cmvec[0];
                 if (batch) {
                     raise<ValueError>("TdmToFrame got batched channel masks tensor.  Precede this node with an unbatcher node");
@@ -114,7 +114,7 @@ namespace WireCell::SPNG {
                 continue;
             }
                 
-            auto traces_tensor = traces_itensor->tensor();
+            auto traces_tensor = traces_itensor->tensor().to(torch::kCPU);
             const size_t ntraces = traces_tensor.size(0);
             if (!ntraces) {
                 log->warn("empty traces tensor for tag \"{}\"", tag);
@@ -126,13 +126,13 @@ namespace WireCell::SPNG {
                 log->critical("frame corrupt: no chids tensor for tag \"{}\"", tag);
                 raise<ValueError>("frame corrupt: no chids tensor");
             }
-            auto chids_tensor = chids_itensor->tensor();
+            auto chids_tensor = chids_itensor->tensor().to(torch::kCPU);
             const size_t nchannels = chids_tensor.size(0);
             if (nchannels != ntraces) {
                 log->critical("frame corrupt: {} channels and {} traces", nchannels, ntraces);
                 raise<ValueError>("frame corrupt: channel/trace count mismatch");
             }
-            auto chids_vector = Torch::to_vector<int>(chids_tensor);
+            auto chids_vector = to_vector<int>(chids_tensor);
                 
             auto traces_metadata = traces_itensor->metadata();
             const int tbin = traces_metadata["tbin"].asInt();
@@ -140,7 +140,7 @@ namespace WireCell::SPNG {
             const size_t beg = all_traces->size();
             for (size_t row=0; row < ntraces; ++row) {
                 
-                auto charge = Torch::to_vector<float>(traces_tensor);
+                auto charge = to_vector<float>(traces_tensor);
 
                 const int chid = chids_vector[row];
                 auto itrace = std::make_shared<Aux::SimpleTrace>(chid, tbin, charge);
@@ -153,8 +153,8 @@ namespace WireCell::SPNG {
 
             auto summaries_itensor = frame.summaries[tag];
             if (summaries_itensor) {
-                auto summaries_tensor = summaries_itensor->tensor();
-                auto summaries = Torch::to_vector<double>(summaries_tensor);
+                auto summaries_tensor = summaries_itensor->tensor().to(torch::kCPU);
+                auto summaries = to_vector<double>(summaries_tensor);
                 sf->tag_traces(tag, indices, summaries);
             }
             else {
@@ -163,6 +163,8 @@ namespace WireCell::SPNG {
         }
 
         out = sf;
+        log->debug("call={} output frame: {}", m_count, Aux::taginfo(out));
+
         ++m_count;
         return true;
     }

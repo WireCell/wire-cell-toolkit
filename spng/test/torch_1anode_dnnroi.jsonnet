@@ -7,13 +7,13 @@ local spng_filters = import 'spng_filters.jsonnet';
 function(
     tools, debug_force_cpu=false,
     ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+    output_path="testout_mp_finding_%s.tar",
 ) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
             
-        local filter_settings = {
-            debug_force_cpu: debug_force_cpu,
-        },
-        local filters = spng_filters(filter_settings),
+    local device = if debug_force_cpu then "cpu" else "gpu",
+
+        local filters = spng_filters(device),
 
         local make_fanout(anode, name=null) = {
             ret : g.pnode({
@@ -423,7 +423,7 @@ function(
                 type: 'TensorFileSink',
                 name: 'tfsink_mp_finding_%s' % plane,
                 data: {
-                    outname: 'testout_mp_finding_%s.tar' % plane,
+                    outname: output_path % plane,
                     prefix: ''
                 },
             }, nin=1, nout=0) for  plane in ['u', 'v', 'w1', 'w2']],

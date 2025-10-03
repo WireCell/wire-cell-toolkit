@@ -3,6 +3,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellSpng/TorchScript.h"
+#include "WireCellSpng/TensorTools.h"
 
 //do we rely on openMP...probably not..
 //#include <omp.h>
@@ -67,7 +68,6 @@ void SPNG::TorchService::configure(const WireCell::Configuration& cfg)
     log->debug("TorchService configured for device: {}", m_device.str());
     
     const std::string model_path = Persist::resolve(cfg["model"].asString());
-    std::cout<<"Model_path "<<model_path<<std::endl;
     
     if (model_path.empty()) {
         log->critical("no TorchScript model file provided");
@@ -146,6 +146,5 @@ ITorchTensorSet::pointer SPNG::TorchService::forward(const ITorchTensorSet::poin
     }
 
     ITorchTensorSet::pointer ret = SPNG::to_itensor({oival});
-    std::cout<<"TorchService::forward output shape: "<<ret->tensors()->at(0)->tensor().sizes()<<std::endl;
     return ret;
 }

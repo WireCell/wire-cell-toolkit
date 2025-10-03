@@ -1,4 +1,4 @@
-#include "WireCellSpng/Util.h"
+#include "WireCellSpng/Convo.h"
 #include "WireCellSpng/Stream.h" // for write() to ostream
 #include "WireCellUtil/Stream.h" // for boost iostreams
 
@@ -37,19 +37,19 @@ static void do_simple_convo(const std::vector<INT>& signal_shape,
     torch::Tensor resp;
     {
         const auto n0 = response_shape[0];
-        auto g0 = Torch::gaussian1d(n0/2, sigma, {n0}, 0, n0-1, topt);
+        auto g0 = SPNG::gaussian1d(n0/2, sigma, {n0}, 0, n0-1, topt);
         const auto n1 = response_shape[1];
-        auto g1 = Torch::gaussian1d(n1/2, sigma, {n1}, 0, n1-1, topt);
+        auto g1 = SPNG::gaussian1d(n1/2, sigma, {n1}, 0, n1-1, topt);
         resp = torch::outer(g0,g1);
     }
     resp = resp / torch::max(resp); // unit gain.
     write(out, "response.npy", resp);
 
 
-    auto full_shape = Torch::linear_shape({resp}, signal_shape);
+    auto full_shape = SPNG::linear_shape({resp}, signal_shape);
 
-    auto kernel = Torch::convo_spec({resp}, full_shape);
-    auto full_signal = Torch::pad(signal, 0.0, full_shape);
+    auto kernel = SPNG::convo_spec({resp}, full_shape);
+    auto full_signal = SPNG::pad(signal, 0.0, full_shape);
 
     auto meas_spec = torch::fft::fft2(full_signal)*kernel;
     auto meas = torch::real(torch::fft::ifft2(meas_spec));

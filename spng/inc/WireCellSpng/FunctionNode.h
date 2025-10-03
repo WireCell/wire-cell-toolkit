@@ -111,7 +111,9 @@ namespace WireCell::SPNG {
         // "inject" code to for regardless of subclass overrides of non-sys_*
         // methods.
         virtual TensorIndex sys_index_tensors(const ITorchTensorSet::pointer& in) const;
+        virtual TensorIndex sys_select_tensors(TensorIndex ti) const;
         virtual TensorIndex sys_transform_tensors(TensorIndex ti) const;
+        virtual TensorIndex sys_rename_tensors(TensorIndex ti) const;
         virtual ITorchTensorSet::pointer sys_pack_tensors(TensorIndex ti) const;
 
 
@@ -146,7 +148,7 @@ namespace WireCell::SPNG {
         ///
         /// - input_only :: the transform is pure side-effect and the input tensor index is not modified.
         ///
-        /// - transformed_only :: only the transformed index is kept
+        /// - produced_only :: keep only the tensors that survive selection and transformation.
         std::string m_combine_policy{"union_replace"};
 
         std::map<std::string, std::string> m_input_datapath, m_output_datapath;

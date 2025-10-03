@@ -42,6 +42,12 @@ namespace WireCell::SPNG {
         return get<int>(ten, "batches", 0);
     }
 
+
+    /// Return tensors of matching datapath regex string
+    ITorchTensor::vector find_tensors(const ITorchTensorSet::pointer& ts,
+                                      const std::string& datapath_regex);
+
+
     /// Make a minimally compliant tensor.
     ITorchTensor::pointer make_tensor(const std::string& datatype,
                                       const std::string& datapath,

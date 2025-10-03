@@ -19,16 +19,15 @@ public:
     virtual torch::Tensor spectrum() const = 0;
     // virtual torch::Tensor spectrum(const std::vector<int64_t> & shape) = 0;
 
+    /// FIXME: this method and probably shape() should be removed.
     virtual torch::Tensor spectrum(const std::vector<int64_t> & shape) = 0;
 
-    /// Get the base shape of the response
-    virtual const std::vector<int64_t> & shape() const {return m_shape;};
+    /// Get the base/original shape of the response.
+    virtual std::vector<int64_t> shape() const = 0;
 
     /// Get any shifts of the response
     virtual std::vector<int64_t> shifts() const = 0;
 
-protected:
-    std::vector<int64_t> m_shape;
 };
 
 }  // namespace WireCell

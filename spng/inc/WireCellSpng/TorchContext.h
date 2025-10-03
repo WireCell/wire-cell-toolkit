@@ -38,11 +38,18 @@ namespace WireCell::SPNG {
         /// The semnam can be empty or a WCT component "type:name".  If empty,
         /// the "Semaphore" type with an instance "torch-<devname>" is
         /// constructed.
+        ///
         void connect(const std::string& devname="cpu", const std::string& semname="");
 
+        /// Return a device object
         torch::Device device() const { return m_dev; }
         std::string devname() const { return m_devname; }
         std::string semname() const { return m_semname; }
+
+        /// Return a tensor objections object for the given dtype on the device.
+        torch::TensorOptions options(torch::ScalarType dtype = torch::kFloat32) const {
+            return torch::TensorOptions(dtype).device(m_dev);
+        }
 
         bool is_gpu() const { return m_dev.is_cuda();}
 
@@ -53,6 +60,7 @@ namespace WireCell::SPNG {
         /// For a scope-based context manager, use a TorchSemaphore.
         void enter() const;
         void exit() const;
+
 
       private:
 

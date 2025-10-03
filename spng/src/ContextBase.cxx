@@ -18,5 +18,14 @@ namespace WireCell::SPNG {
         auto semname = get<std::string>(cfg, "semaphore", "");
         m_ctx.connect(devname, semname);
     }
+    
+    torch::Tensor ContextBase::to(torch::Tensor ten) const
+    {
+        if (device() == ten.device()) {
+            return ten;
+        }
+        return ten.to(device());
+    }
+
 
 }

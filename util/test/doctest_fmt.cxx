@@ -41,4 +41,15 @@ TEST_CASE("fmtlib named parameters") {
         
     }
 
+    {
+        std::string have = "/frames/{ident}/tags/{tag}/rules/{rule}/groups/{group}/{datatype}";
+        auto got = fmt::format(have,
+                               fmt::arg("ident", 0),
+                               fmt::arg("tag",   ""),
+                               fmt::arg("rule", 1),
+                               fmt::arg("group", 2),
+                               fmt::arg("datatype", "traces"));
+        
+        std::cerr << got << "\n";
+    }
 }

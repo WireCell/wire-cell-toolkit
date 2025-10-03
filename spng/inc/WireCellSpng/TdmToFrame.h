@@ -4,7 +4,6 @@
 #define WIRECELL_SPNG_TDMTOFRAME
 
 #include "WireCellSpng/ITorchSetToFrame.h"
-#include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/Logger.h"
 
 namespace WireCell::SPNG {
@@ -12,9 +11,13 @@ namespace WireCell::SPNG {
     /// A TdmToFrame will output an IFrame from an input TDM-compliant "frame"
     /// tensor collection.
     ///
+    /// It will explicitly move all input tensors to the CPU.  This is not
+    /// configurable.
+    ///
     /// Caution: this class does not handled batched tensors!  Run an unbatcher
     /// node prior if you need to convert batched.
-    class TdmToFrame: public ContextBase, public Logger, public ITorchSetToFrame  {
+    ///
+    class TdmToFrame: public Logger, public ITorchSetToFrame  {
     public:
 
         TdmToFrame();

@@ -29,6 +29,7 @@ namespace WireCell::SPNG {
         outv.clear();
         if (! in) {
             logit("EOS");
+            outv.resize(m_multiplicity, nullptr);
             ++m_count;
             return true;
         }

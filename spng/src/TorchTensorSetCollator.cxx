@@ -80,7 +80,6 @@ bool SPNG::TorchTensorSetCollator::operator()(const input_vector& inv, output_po
             Configuration tensor_md;
             if (input_metadata.isMember("channel_map")) {
                 tensor_md["channel_map"] = input_metadata["channel_map"];
-                std::cout << "Storing channel map" << std::endl;
             }
 
             tensor_md["tag"] = combined_tag;

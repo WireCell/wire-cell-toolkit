@@ -42,6 +42,7 @@ namespace WireCell::SPNG {
         }
         
         out = sys_combine_tensors(inv);
+        logit(out, "fanned");
         ++m_count;
         return true;
     }

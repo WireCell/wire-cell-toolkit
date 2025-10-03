@@ -1,4 +1,6 @@
 /// A TDM-compliant version of the original SPNG::Decon node.
+///
+/// See the TdmDecon class comments and the spng/docs/tdmdecon.org doc for details.
 
 #ifndef WIRECELL_SPNG_TDMDECON
 #define WIRECELL_SPNG_TDMDECON

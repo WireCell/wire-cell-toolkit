@@ -73,7 +73,6 @@ tmp
 *.md
 README.tex
 larsoft-cfg
-*.dot
 configure
 
 *.gz

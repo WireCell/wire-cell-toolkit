@@ -300,9 +300,7 @@ namespace WireCell::SPNG::RayGrid {
                         ray_jump.index_put_({il, im}, crossing(rl0, rm1) - p);
                         ray_jump.index_put_({im, il}, crossing(rm0, rl1) - p);
                     } catch (const std::runtime_error& e) {
-                        // Python: print(f'skipping parallel view pair: {il=} {im=}')
-                        // In C++, we'll just print to stderr or a log.
-                        std::cerr << "skipping parallel view pair: il=" << il << " im=" << im << ": " << e.what() << std::endl;
+                        // std::cerr << "skipping parallel view pair: il=" << il << " im=" << im << ": " << e.what() << std::endl;
 
                     }
                 }

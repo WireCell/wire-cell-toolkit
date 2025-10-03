@@ -273,6 +273,10 @@ namespace WireCell {
                 if (!ok) {
                     return false;
                 }
+                if (outv.size() != nout) {
+                    raise<ValueError>("fanout produced fan of size %s, expected %s",
+                                      outv.size(), nout);
+                }
                 // std::cerr << "SplitFanout: " << nout << " " << outv.size() << std::endl;
                 for (size_t ind = 0; ind < nout; ++ind) {
                     oports[ind].put(outv[ind]);

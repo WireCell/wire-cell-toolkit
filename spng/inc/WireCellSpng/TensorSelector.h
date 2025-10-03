@@ -65,7 +65,7 @@ namespace WireCell::SPNG {
         /// A kNoMatch means no accept and not reject matched.  Interpreting
         /// this is application defined.
         enum class SelectionResult { kNoMatch=0, kAccept=1, kReject=2 };
-        SelectionResult select_tensor(const ITorchTensor::pointer ten) const;
+        SelectionResult select_tensor(ITorchTensor::pointer ten) const;
 
         /// Apply the selection rules to tensors in the index.
         ///
@@ -73,13 +73,15 @@ namespace WireCell::SPNG {
         /// neither accepted nor rejected is considered accepted.  If false, it
         /// is considered rejected.
         ///
-        /// If `consider_parents` is true (default) then the rules are applied
+        /// If `select_parents` is true (default) then the rules are applied
         /// only to the top most parent tensors (direct children of the tree
         /// root).  Their tree descendants will live or die with the parent.  If
         /// false, apply selection rules to all tensors.
-        TensorIndex apply(const TensorIndex& index, bool keep_unselected=true, bool consider_parents=true) const;
+        TensorIndex apply(const TensorIndex& index, bool keep_unselected=true, bool select_parents=true) const;
 
+        // Helper.  Loop over and consider only the ultimate parents.
         TensorIndex apply_parents(const TensorIndex& index, bool keep_unselected=true) const;
+        // Helper.  Loop over and consider all tensors.
         TensorIndex apply_all(const TensorIndex& index, bool keep_unselected=true) const;
 
     private:
@@ -90,6 +92,9 @@ namespace WireCell::SPNG {
 
         std::vector<SelectionRule> m_selection_rules;
 
+        // Helper.  Return true if tensor should be added to index.  Used by apply_{parents,all}().
+        // The "kind" is "parent" or "tensor" and just for debugging.
+        bool apply_one(ITorchTensor::pointer ten, bool keep_unselected, const std::string& kind="") const;
     };
 
 }

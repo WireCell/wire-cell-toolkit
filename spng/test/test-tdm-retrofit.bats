@@ -14,12 +14,12 @@ run_fans () {
     local cfg="$(relative_path test-frame-fan-outin.jsonnet)"
     local name="fans-anode${anode}-${paradigm}"
     local log="$name.log"
-    local out="name.npz"
+    local out="$name.npz"
 
 
     run_idempotently -s $cfg -s $depos -t $log -t $out -- \
                      wire-cell -l $log -L debug \
-                       -A anodeid=0 -A input=$depos -A output=$out -A paradigm=$paradigm $cfg
+                       -A anodeid=$anode -A input=$depos -A output=$out -A paradigm=$paradigm $cfg
 
 }
 
