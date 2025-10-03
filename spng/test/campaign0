@@ -21,10 +21,13 @@ Optional:
   -l|--logdir  <path/to/log/output/>  (default: parent of output)
 
 Required:
-  -i|--input   <path/to/input.npz>
+  -i|--input   <path/to/input.npz> OR generate
   -o|--output  <path/to/output.npz>
   -c|--config  <path/to/config.jsonnet>
   -m|--model   <path/to/dnnroi-model.ts>
+
+Conditional:
+  -s|--seed    If input is generate, a seed is required
 
 With spng device, the output must have a "%s".
 
@@ -33,7 +36,7 @@ The directory holding this script is appended to WIRECELL_PATH.
 EOF
 }
 
-MYTEMP=$(getopt --options 't:d:l:i:o:c:m:' --longoptions 'tech:,device:,logdir:,input:,output:,config:,model:' -- "$@")
+MYTEMP=$(getopt --options 't:d:l:i:o:c:m:s:' --longoptions 'tech:,device:,logdir:,input:,output:,config:,model:,seed:' -- "$@")
 if [ $? -ne 0 ] ; then
     usage
     die ""
@@ -57,6 +60,9 @@ while true; do
         '-t'|'--tech') tech="$2"; shift 2;;
         '-d'|'--device') device="$2"; shift 2;;
         '-l'|'--logdir') logdir="$2"; shift 2;;
+
+        # conditional
+        '-s'|'--seed') seed="$2"; shift 2;;
 
         # required
         '-i'|'--input') input="$2"; shift 2;;
@@ -87,6 +93,11 @@ fi
 if [ -z "$model" ] ; then
     usage
     die "-m|--model <model.ts> is required"
+fi
+
+if [[ $input == "generate" && -z "$seed" ]]; then
+    usage 
+    die "-s|--seed <seed value> is required"
 fi
 
 do_spng="false"
@@ -135,7 +146,26 @@ resolve () {
 }
 
 model="$(resolve "$model" "$WIRECELL_PATH")"
-input="$(resolve "$input" "$WIRECELL_PATH")"
+##Check if we want to generate depo-lines
+if [ $input == "generate" ]; then
+    echo "Will generate depos + sim"
+
+    #do generation -- need to check the positions
+    now=$(date +%N)
+    #change the input to the specific depo_lines file
+    input="${now}_depo_lines.npz"
+    set -x
+    wcpy gen depo-lines -o ${input} -s 1 -t 100 \
+        -c "0,0,0" -d "-3.5,6.0,2.3" --track-info omit \
+        -S ${seed}
+    set +x
+
+    #Tell cfg to expect to simulate
+    do_sim="true"
+else
+  input="$(resolve "$input" "$WIRECELL_PATH")"
+  do_sim="false"
+fi
 config="$(resolve "$config" "$WIRECELL_PATH")"
 
 # echo $model
@@ -147,6 +177,14 @@ wire-cell -l $logdir/log -L debug \
           -A input_file="$input" \
           -A output_path="$output" \
           --tla-code do_spng=$do_spng -A device=$device \
+          --tla-code do_sim=$do_sim \
           -A ts_model_file="$model" \
           "$config" 1>$logdir/out 2>$logdir/err
+set +x
 
+#Clean up the depo output
+if [ $do_sim == "true" ]; then
+    echo "Will remove " $input
+    set -x
+    rm $input
+fi
