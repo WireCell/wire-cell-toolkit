@@ -168,6 +168,7 @@ $ TDIR=$PREFIX/lib/python3.11/site-packages/torch \
   --boost-include=$PREFIX/include \
   --with-jsonnet-libs=gojsonnet \
   --with-cuda-lib=/usr/lib/x86_64-linux-gnu,$PREFIX/targets/x86_64-linux/lib \
+  --with-cuda-include=$PREFIX/targets/x86_64-linux/include/ \
   --with-libtorch=$TDIR \
   --with-libtorch-include=$TDIR/include,$TDIR/include/torch/csrc/api/include \
   --with-libtorch-lib=$TDIR/lib
