@@ -1,0 +1,112 @@
+#+title: Wire-Cell Toolkit Configuration
+
+* Overview
+
+WCT is highly configurable.  This makes compiled WCT plugin libraries very
+flexible but this does impose some complexity on WCT C++ development and WCT
+configuration file authoring.  This topic provides some guidance.
+
+* Developing configurable WCT components
+
+** Preliminaries
+
+Almost all WCT configuration information is in the form of a ~Configuration~ type
+(a JsonCPP ~Json::Value~).  A single interface exists to exchange configuration
+information between user and a C++ component.  This is done by the pair of
+~IConfigurable~ interface methods:
+
+- ~Configuration default_configuration()~ :: Return a default configuration as determined by the component developer.  
+
+- ~void configure(const Configure& cfg)~ :: Accept a user configuration as determined by the user.
+
+When a component is used as part of WCT's ~Main~ object (virtually all use except
+in some unit tests) the object passed to ~configure()~ is the default object with
+any user information providing overrides.
+
+The ~default_configuration()~ object need not provide all attributes accepted or
+expected by the ~configure()~ method.
+
+** Interpreting a configuration object
+
+Historically and in general, each ~configure()~ method must invent its own way to
+carefully validate and interpret the configuration method.  It SHOULD fully
+complete this task in ~configure()~ and not store any ~Configuration~ object.
+
+** Configuration structs
+
+A new addition to WCT is the "configuration struct" pattern.  All new
+~IConfigurable~ components should use this and existing ones should be
+retrofitted, effort willing.  This method explicitly defines the supported
+configuration schema as a C++ struct and then uses provided serialization
+methods.  This assures the schema is clear to developers and users and provides
+strong validation and interpretation while also greatly simplifying
+configuration related code.
+
+To use a configuration struct follow these steps in your ~IConfigurable~ component.
+
+*** Define the configuration struct and configuration related parts of component class
+
+Provide default values, including ways to mark illegal values, and include
+Doxygen-aware comments.  The struct can take any name but a good scheme is to
+append ~Config~ to the component class name.
+
+#+begin_src cpp
+  // In MyComponent.h
+
+  struct MyComponentConfig {
+      /// Required integer giving the number of foos to quax.  
+      int number = -1;
+      /// Required string giving the title of the whammy.
+      std::string title = "";
+      /// Optional boolean saying if the baz will be active (default is true).
+      bool isActive = true;
+      /// A floating point weight to apply to the gizmotron (default=1.0)
+      double weight = 1.0;
+  };
+
+  class MyComponent : public IConfigurable () {
+  public:
+      // IConfigurable API
+      virtual void configure(const WireCell::Configuration& config);
+      virtual WireCell::Configuration default_configuration() const;
+
+      // Other API methods
+  private:
+      MyComponentConfig m_cfg;    // the config struct
+  };
+#+end_src
+
+*** Implement the configuration related methods
+
+The ~boost::hana~ support will assure proper schema which makes basic conversion a
+one-line function call.  You should still check any other assumptions such as
+that all required parameters do not hold an illegal value.
+
+#+begin_src cpp
+  #include "WireCellUtil/HanaJsonCPP.h"
+
+  Configuration MyComponent::default_configuration() const {
+      return to_json(m_cfg);
+  }
+  void MyComponent::configure(const Configuration& cfg) const {  
+      from_json(m_cfg, cfg);
+      if (m_cfg.number <= 0 ) {
+          raise<ValueError>("number must be postitive definite");
+      }
+      // etc with other checks
+  }
+#+end_src
+
+*** Use the configuration struct
+
+The configuration struct is just a struct.  After the validation done in
+~configure()~, code can use it in a fully trusting manner.
+
+#+begin_src cpp
+  void MyComponent::some_method() const {
+      for (int ind=0; ind<m_cfg.number; ++ind) {
+          quax_a_foo(ind, m.cfg.title);
+      }
+  }
+
+#+end_src
