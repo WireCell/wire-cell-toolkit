@@ -36,7 +36,7 @@ namespace WireCell {
 
             // ITorchSpectrum
             virtual torch::Tensor spectrum() const;
-            virtual torch::Tensor spectrum(const std::vector<int64_t> & shape);
+            virtual torch::Tensor spectrum(const std::vector<int64_t> & shape) const;
             virtual std::vector<int64_t> shape() const { return m_shape; }
 
             // IConfigurable

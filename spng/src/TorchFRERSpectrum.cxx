@@ -165,7 +165,7 @@ namespace WireCell::SPNG {
 
     }
 
-    torch::Tensor SPNG::TorchFRERSpectrum::spectrum(const std::vector<int64_t> & shape)
+    torch::Tensor SPNG::TorchFRERSpectrum::spectrum(const std::vector<int64_t> & shape) const
     {
 
         auto the_tensor = torch::zeros(shape, tensor_options());

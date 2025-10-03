@@ -3,11 +3,14 @@
 #include "WireCellUtil/Stream.h" // for boost iostreams
 
 #include "WireCellSpng/Testing.h"
+#include "WireCellSpng/Torch.h"
 
 #include <iostream>
 
 using namespace WireCell;
 using namespace WireCell::Stream;
+using torch::nn::functional::pad;
+using torch::nn::functional::PadFuncOptions;
 
 // torch's moral equivalent to size_t is:
 using INT = int64_t;
@@ -49,7 +52,12 @@ static void do_simple_convo(const std::vector<INT>& signal_shape,
     auto full_shape = SPNG::linear_shape({resp}, signal_shape);
 
     auto kernel = SPNG::convo_spec({resp}, full_shape);
-    auto full_signal = SPNG::pad(signal, 0.0, full_shape);
+    //auto full_signal = SPNG::pad(signal, 0.0, full_shape);
+    // Do "end padding".
+    auto full_signal = pad(signal, PadFuncOptions({
+                0, full_shape[0] - signal_shape[0],
+                0, full_shape[1] - signal_shape[1],
+            }).mode(torch::kConstant)); // defaults to 0
 
     auto meas_spec = torch::fft::fft2(full_signal)*kernel;
     auto meas = torch::real(torch::fft::ifft2(meas_spec));

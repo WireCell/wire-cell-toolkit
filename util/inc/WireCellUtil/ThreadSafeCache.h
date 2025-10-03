@@ -44,6 +44,11 @@ namespace WireCell {
             }
         }
 
+        void reset_capacity(size_t capacity) {
+            capacity_ = capacity;
+            shrink(capacity);
+        }
+
         // The size() method is const and only reads cache_map_ size, so it can use shared_lock.
         size_t size() const {
             shared_lock lock(mutex_);
@@ -73,6 +78,16 @@ namespace WireCell {
             return it_list->second; // Return the value
         }
 
+        /// Shrink cache to given size.  If size is zero, shrink to capacity - 1 to allow room for one put().
+        void shrink(size_t size = 0) {
+            if (!size) size = capacity_ - 1;
+            while (cache_map_.size() > size) {
+                Key lru_key = cache_list_.back().first;
+                cache_map_.erase(lru_key);
+                cache_list_.pop_back();
+            }
+        }
+
         void put(const Key& key, const Value& value) {
             unique_lock lock(mutex_); // Exclusive lock for writing
 
@@ -84,12 +99,9 @@ namespace WireCell {
                 cache_list_.splice(cache_list_.begin(), cache_list_, it_list); // Move to front
             } else {
                 // Key does not exist: add new item
-                if (cache_map_.size() >= capacity_) {
-                    // Cache is full, evict LRU item (from the back of the list)
-                    Key lru_key = cache_list_.back().first;
-                    cache_map_.erase(lru_key);
-                    cache_list_.pop_back();
-                }
+
+                shrink();
+
                 // Insert new item at the front (MRU)
                 cache_list_.emplace_front(key, value);
                 cache_map_[key] = cache_list_.begin(); // Map key to new list iterator
@@ -175,12 +187,9 @@ namespace WireCell {
                 cache_list_.splice(cache_list_.begin(), cache_list_, it_list); // Move to front
             } else {
                 // Key does not exist: add new item
-                if (cache_map_.size() >= capacity_) {
-                    // Cache is full, evict LRU item
-                    Key lru_key = cache_list_.back().first;
-                    cache_map_.erase(lru_key);
-                    cache_list_.pop_back();
-                }
+
+                shrink();
+
                 // Insert new item at the front (MRU)
                 cache_list_.emplace_front(key, value);
                 cache_map_[key] = cache_list_.begin(); // Map key to new list iterator
@@ -219,12 +228,8 @@ namespace WireCell {
                 // Key not found. Compute while still holding the exclusive lock.
                 Value computed_value = compute_func();
 
-                if (cache_map_.size() >= capacity_) {
-                    // Cache is full, evict LRU item
-                    Key lru_key = cache_list_.back().first;
-                    cache_map_.erase(lru_key);
-                    cache_list_.pop_back();
-                }
+                shrink();
+
                 // Insert new item at the front (MRU)
                 cache_list_.emplace_front(key, computed_value);
                 cache_map_[key] = cache_list_.begin(); // Map key to new list iterator

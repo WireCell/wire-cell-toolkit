@@ -63,7 +63,7 @@ namespace WireCell::SPNG {
         return torch::zeros({m_default_length});
     }
 
-    torch::Tensor Torch1DSpectrum::spectrum(const std::vector<int64_t> & shape)
+    torch::Tensor Torch1DSpectrum::spectrum(const std::vector<int64_t> & shape) const
     {
         // TODO -- add in throw if not 1D shape
 

@@ -58,13 +58,6 @@ namespace WireCell::SPNG {
                               row_tensor.data_ptr<T>() + row_tensor.numel());
     }
 
-    
-
-
-    // Return 2D tensor of shape with ten filling lower corner and remaining
-    // elements holding the given value.
-    torch::Tensor pad(torch::Tensor ten, double value, torch::IntArrayRef shape);
-
     // Return a sampled, normalized 1D Gausian pdf.
     torch::Tensor gaussian1d(double mean, double sigma,
                              int64_t npoints, double xmin, double xmax,
@@ -81,7 +74,9 @@ namespace WireCell::SPNG {
     }
 
     
-
+    // Note, removed pad() as it was too limiting and was never used.  Use
+    // torch::nn::pad().  See spng/test/doctest_simple_convo.cxx for one
+    // example.
 
 }
 

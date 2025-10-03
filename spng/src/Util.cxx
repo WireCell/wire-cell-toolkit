@@ -25,20 +25,6 @@ namespace WireCell::SPNG {
     }
 
 
-
-    torch::Tensor pad(torch::Tensor ten, double value, torch::IntArrayRef shape)
-    {
-        using torch::indexing::Slice;
-
-        torch::Tensor padded = torch::zeros(shape, ten.options()) + value;
-        auto s = ten.sizes();
-        padded.index_put_({
-                Slice(0,std::min(s[0], shape[0])),
-                Slice(0,std::min(s[1], shape[1]))
-            }, ten);
-        return padded;    
-    }
-
 }
 
 

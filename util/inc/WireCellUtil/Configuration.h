@@ -12,7 +12,7 @@
 
 namespace WireCell {
 
-    /** The Wire Cell Toolkit configuration layer uses Json::Value
+    /** The Wire Cell Toolkit configuration layer uses CppJSON Json::Value
         objects for its transient data model.
 
         The Configuration type is a recursive in that one
@@ -47,6 +47,10 @@ namespace WireCell {
          each IConfigurable implementation.
 
        - name :: an optional Instance Name.  If not given, the default instance of the type will be used.
+
+       See also WireCellUtil/HanaJsonCPP.h for a way to serialize between
+       Configuration and C++ struct.  Components are encouraged to use structs
+       and HanaJsonCPP::{to,from}_json() for all configuration parsing needs.
      */
 
     typedef Json::Value Configuration;
@@ -229,6 +233,8 @@ namespace WireCell {
 
     /// Return a hash of the content of the config.
     size_t hash(const Configuration& cfg);
+
+
 
 }  // namespace WireCell
 

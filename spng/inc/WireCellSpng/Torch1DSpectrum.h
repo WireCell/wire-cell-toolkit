@@ -27,7 +27,7 @@ namespace WireCell::SPNG {
 
         // ITorchSpectrum
         virtual torch::Tensor spectrum() const;
-        virtual torch::Tensor spectrum(const std::vector<int64_t> & shape);
+        virtual torch::Tensor spectrum(const std::vector<int64_t> & shape) const;
         virtual std::vector<int64_t> shape() const { return m_shape; }
 
         // IConfigurable
@@ -40,7 +40,7 @@ namespace WireCell::SPNG {
         torch::Tensor m_total_spectrum;
         std::vector<std::shared_ptr<IFilterWaveform>> m_spectra{};
         std::vector<torch::Tensor> m_spectrum_tensors{};
-        boost::compute::detail::lru_cache<std::vector<int64_t>, torch::Tensor> m_cache;
+        mutable boost::compute::detail::lru_cache<std::vector<int64_t>, torch::Tensor> m_cache;
 
         int64_t m_default_length = 0;
 
