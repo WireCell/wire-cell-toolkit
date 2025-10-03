@@ -21,7 +21,7 @@ Optional:
   -l|--logdir  <path/to/log/output/>  (default: parent of output)
 
 Required:
-  -i|--input   <path/to/input.npz>
+  -i|--input   <path/to/input.npz> OR generate
   -o|--output  <path/to/output.npz>
   -c|--config  <path/to/config.jsonnet>
   -m|--model   <path/to/dnnroi-model.ts>
@@ -135,7 +135,23 @@ resolve () {
 }
 
 model="$(resolve "$model" "$WIRECELL_PATH")"
-input="$(resolve "$input" "$WIRECELL_PATH")"
+##Check if we want to generate depo-lines
+if [ $input == "generate" ]; then
+    echo "Will generate depos + sim"
+
+    #do generation -- need to check the positions
+    now=$(date +%N)
+    input="${now}_depo_lines.npz"
+    wcpy gen depo-lines -o ${input} -s 1 -t 100 \
+        -c "0,0,0" -d "-3.5,6.0,2.3" --track-info omit
+
+    #change the input to the specific depo_lines file
+    #Tell cfg to expect to simulate
+    do_sim="true"
+else
+  input="$(resolve "$input" "$WIRECELL_PATH")"
+  do_sim="false"
+fi
 config="$(resolve "$config" "$WIRECELL_PATH")"
 
 # echo $model
@@ -147,6 +163,13 @@ wire-cell -l $logdir/log -L debug \
           -A input_file="$input" \
           -A output_path="$output" \
           --tla-code do_spng=$do_spng -A device=$device \
+          --tla-code do_sim=$do_sim \
           -A ts_model_file="$model" \
           "$config" 1>$logdir/out 2>$logdir/err
 
+
+#Clean up the depo output
+if [ $do_sim == "true" ]; then
+    echo "Will remove " $input
+    rm $input
+fi
