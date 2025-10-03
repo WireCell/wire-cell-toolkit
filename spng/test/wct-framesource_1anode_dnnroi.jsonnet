@@ -3,6 +3,7 @@ function(
   do_spng=true,
   ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
   device='gpu',
+  do_sim=false,
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
 local g = import 'pgraph.jsonnet',
@@ -19,6 +20,7 @@ local perfect = import 'perfect_pdhd/chndb-base.jsonnet',
 local nf_maker = import 'perfect_pdhd/nf.jsonnet',
 local sp_maker = import 'perfect_pdhd/sp.jsonnet',
 local magoutput = 'protodunehd-sim-check.root',
+local sim = sim_maker(params, tools),
 
 local params = base {
   lar: super.lar {
@@ -35,9 +37,49 @@ local tools = tools_maker(params),
 local nanodes = std.length(tools.anodes),
 
 // local outtags = ['raw%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
+local depo_source  = g.pnode({
+    type: 'DepoFileSource',
+    data: { inname: input_file } // "depos.tar.bz2"
+}, nin=0, nout=1),
 
 
-local frame_input = fileio.frame_tensor_file_source(input_file),
+local anode_iota = std.range(0, nanodes-1),
+local anode_idents = [anode.data.ident for anode in tools.anodes],
+local chndb = [{
+  type: 'OmniChannelNoiseDB',
+  name: 'ocndbperfect%d' % n,
+  data: perfect(params, tools.anodes[n], tools.field, n){dft:wc.tn(tools.dft)},
+  uses: [tools.anodes[n], tools.field, tools.dft],
+} for n in anode_iota],
+local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n) for n in std.range(0, std.length(tools.anodes) - 1)],
+
+local drifter = sim.drifter,
+local setdrifter = g.pnode({
+    type: 'DepoSetDrifter',
+    data: {
+        drifter: "Drifter"
+    }   
+  }, nin=1, nout=1, uses=[drifter]),
+local bagger = sim.make_bagger(),
+local sn_pipes = sim.splusn_pipelines,
+local parallel_pipes = [
+  g.pipeline([
+              sn_pipes[n],
+              nf_pipes[n],
+            ],
+            'parallel_pipe_%d' % n)
+  for n in std.range(0, std.length(tools.anodes) - 1)
+],
+// local outtags = ['orig%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
+local outtags = ['raw%d' % n for n in std.range(0, std.length(tools.anodes) - 1)],
+local parallel_graph = f.fanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', 'sn_mag_nf', outtags),
+
+local sim_graph = g.pipeline([depo_source, setdrifter, parallel_graph]),
+
+local frame_input = (
+  if do_sim
+  then sim_graph
+  else fileio.frame_tensor_file_source(input_file)),
 
 
 local selectors = [
@@ -136,7 +178,6 @@ local torch_nodes = torch_maker(
 local spng_stacked = torch_nodes.stacked_spng,
 
 local frame_output = fileio.frame_tensor_file_sink('toolkit_dnnroi_output.tar', mode='tagged'),
-local sim = sim_maker(params, tools),
 local sink = sim.frame_sink,
 
 local sp_graph = g.intern(
