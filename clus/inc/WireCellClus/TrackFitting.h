@@ -299,6 +299,7 @@ namespace WireCell::Clus {
 
         // track trajectory fitting // should fit all APA ...
         void trajectory_fit(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec, int charge_div_method = 1, double div_sigma = 0.6*units::cm);
+        WireCell::Point fit_point(WireCell::Point& init_p, int i, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw);
 
         // examine trajectory ...
         std::vector<WireCell::Point> examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec);

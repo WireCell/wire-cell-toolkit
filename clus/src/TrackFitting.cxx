@@ -3015,6 +3015,222 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 }
 
 
+WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw){
+    // Check if the point index exists in the 3D to 2D mapping
+    auto point_it = m_3d_to_2d.find(i);
+    if (point_it == m_3d_to_2d.end()) {
+        return init_p; // Return original point if no 2D associations found
+    }
+    
+    const auto& point_info = point_it->second;
+    
+    // Get plane data for each wire plane
+    auto plane_data_u = point_info.get_plane_data(WirePlaneLayer_t::kUlayer);
+    auto plane_data_v = point_info.get_plane_data(WirePlaneLayer_t::kVlayer);
+    auto plane_data_w = point_info.get_plane_data(WirePlaneLayer_t::kWlayer);
+    
+    int n_2D_u = 2 * plane_data_u.associated_2d_points.size();
+    int n_2D_v = 2 * plane_data_v.associated_2d_points.size();
+    int n_2D_w = 2 * plane_data_w.associated_2d_points.size();
+    
+    // Set up Eigen matrices and vectors
+    Eigen::VectorXd temp_pos_3D(3), data_u_2D(n_2D_u), data_v_2D(n_2D_v), data_w_2D(n_2D_w);
+    Eigen::VectorXd temp_pos_3D_init(3);
+    Eigen::SparseMatrix<double> RU(n_2D_u, 3);
+    Eigen::SparseMatrix<double> RV(n_2D_v, 3);
+    Eigen::SparseMatrix<double> RW(n_2D_w, 3);
+    
+    // Initialize with input point
+    temp_pos_3D_init(0) = init_p.x();
+    temp_pos_3D_init(1) = init_p.y();
+    temp_pos_3D_init(2) = init_p.z();
+    
+    // Initialize data vectors to zero
+    data_u_2D.setZero();
+    data_v_2D.setZero();
+    data_w_2D.setZero();
+    
+    // Fill U plane data
+    int index = 0;
+    for (auto it = plane_data_u.associated_2d_points.begin(); it != plane_data_u.associated_2d_points.end(); it++) {
+        // Get charge measurement
+        CoordReadout charge_key(it->apa, it->time, it->channel);
+        double charge = m_params.default_charge_th, charge_err = m_params.default_charge_err; // Default values (100, 1000 from WCP)
+
+        auto charge_it = m_charge_data.find(charge_key);
+        if (charge_it != m_charge_data.end()) {
+            charge = charge_it->second.charge;
+            charge_err = charge_it->second.charge_err;
+        }
+
+        if (charge < m_params.default_charge_th) {
+            charge = m_params.default_charge_th;
+            charge_err = m_params.default_charge_err;
+        }
+
+        // Get division factor
+        double div_factor = 1.0;
+        auto apa_face_key = std::make_pair(it->apa, it->face);
+        auto div_key = std::make_tuple(it->time, it->wire, i);
+        auto div_it1 = map_Udiv_fac.find(apa_face_key);
+        if (div_it1 != map_Udiv_fac.end()) { 
+            auto div_it2 = div_it1->second.find(div_key);
+            if (div_it2 != div_it1->second.end()) {
+                div_factor = div_it2->second; 
+            }
+        }
+
+        double scaling = (charge / charge_err) * div_factor;
+        
+        if (plane_data_u.quantity < m_params.scaling_quality_th) {
+            if (plane_data_u.quantity != 0) {
+                scaling *= pow(plane_data_u.quantity / m_params.scaling_quality_th, 1);
+            } else {
+                scaling *= m_params.scaling_ratio;
+            }
+        } 
+       
+        
+        if (scaling != 0) {
+            data_u_2D(2 * index) = scaling * (it->wire - offset_u);
+            data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
+            
+            RU.insert(2 * index, 1) = scaling * slope_yu;     // Y --> U
+            RU.insert(2 * index, 2) = scaling * slope_zu;     // Z --> U
+            RU.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
+        }
+        index++;
+    }
+    
+    // Fill V plane data
+    index = 0;
+    for (auto it = plane_data_v.associated_2d_points.begin(); it != plane_data_v.associated_2d_points.end(); it++) {
+        // Get charge measurement
+        CoordReadout charge_key(it->apa, it->time, it->channel);
+        double charge = m_params.default_charge_th, charge_err = m_params.default_charge_err; // Default values
+
+        auto charge_it = m_charge_data.find(charge_key);
+        if (charge_it != m_charge_data.end()) {
+            charge = charge_it->second.charge;
+            charge_err = charge_it->second.charge_err;
+        }
+
+        if (charge < m_params.default_charge_th) {
+            charge = m_params.default_charge_th;
+            charge_err = m_params.default_charge_err;
+        }
+
+        // Get division factor
+        double div_factor = 1.0;
+        auto apa_face_key = std::make_pair(it->apa, it->face);
+        auto div_key = std::make_tuple(it->time, it->wire, i);
+        auto div_it1 = map_Vdiv_fac.find(apa_face_key);
+        if (div_it1 != map_Vdiv_fac.end()) { 
+            auto div_it2 = div_it1->second.find(div_key);
+            if (div_it2 != div_it1->second.end()) {
+                div_factor = div_it2->second; 
+            }
+        }
+
+        double scaling = (charge / charge_err) * div_factor;
+        
+        if (plane_data_v.quantity < m_params.scaling_quality_th) {
+            if (plane_data_v.quantity != 0) {
+                scaling *= pow(plane_data_v.quantity / m_params.scaling_quality_th, 1);
+            } else {
+                scaling *= m_params.scaling_ratio;
+            }
+        } 
+        
+        if (scaling != 0) {
+            data_v_2D(2 * index) = scaling * (it->wire - offset_v);
+            data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
+            
+            RV.insert(2 * index, 1) = scaling * slope_yv;     // Y --> V
+            RV.insert(2 * index, 2) = scaling * slope_zv;     // Z --> V
+            RV.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
+        }
+        index++;
+    }
+    
+    // Fill W plane data
+    index = 0;
+    for (auto it = plane_data_w.associated_2d_points.begin(); it != plane_data_w.associated_2d_points.end(); it++) {
+        // Get charge measurement
+        CoordReadout charge_key(it->apa, it->time, it->channel);
+        double charge = m_params.default_charge_th, charge_err = m_params.default_charge_err; // Default values
+
+        auto charge_it = m_charge_data.find(charge_key);
+        if (charge_it != m_charge_data.end()) {
+            charge = charge_it->second.charge;
+            charge_err = charge_it->second.charge_err;
+        }
+
+        if (charge < m_params.default_charge_th) {
+            charge = m_params.default_charge_th;
+            charge_err = m_params.default_charge_err;
+        }
+
+        // Get division factor
+        double div_factor = 1.0;
+        auto apa_face_key = std::make_pair(it->apa, it->face);
+        auto div_key = std::make_tuple(it->time, it->wire, i);
+        auto div_it1 = map_Wdiv_fac.find(apa_face_key);
+        if (div_it1 != map_Wdiv_fac.end()) { 
+            auto div_it2 = div_it1->second.find(div_key);
+            if (div_it2 != div_it1->second.end()) {
+                div_factor = div_it2->second; 
+            }
+        }
+
+        double scaling = (charge / charge_err) * div_factor;
+        
+        if (plane_data_w.quantity < m_params.scaling_quality_th) {
+            if (plane_data_w.quantity != 0) {
+                scaling *= pow(plane_data_w.quantity / m_params.scaling_quality_th, 1);
+            } else {
+                scaling *= m_params.scaling_ratio;
+            }
+        } 
+        
+        if (scaling != 0) {
+            data_w_2D(2 * index) = scaling * (it->wire - offset_w);
+            data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
+            
+            RW.insert(2 * index, 2) = scaling * slope_zw;     // Z --> W
+            RW.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
+        }
+        index++;
+    }
+    
+    // Solve the least squares problem
+    Eigen::SparseMatrix<double> RUT = RU.transpose();
+    Eigen::SparseMatrix<double> RVT = RV.transpose();
+    Eigen::SparseMatrix<double> RWT = RW.transpose();
+    
+    Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
+    Eigen::VectorXd b = RUT * data_u_2D + RVT * data_v_2D + RWT * data_w_2D;
+    Eigen::SparseMatrix<double> A = RUT * RU + RVT * RV + RWT * RW;
+    
+    solver.compute(A);
+    temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
+    
+    WireCell::Point final_p;
+    
+    // Check if solver succeeded
+    if (std::isnan(solver.error())) {
+        // Return initialization if solver failed
+        final_p = WireCell::Point(temp_pos_3D_init(0), temp_pos_3D_init(1), temp_pos_3D_init(2));
+    } else {
+        // Return fitted result
+        final_p = WireCell::Point(temp_pos_3D(0), temp_pos_3D(1), temp_pos_3D(2));
+    }
+    
+    return final_p;
+}
+
+
+
 // track trajectory fitting // should fit all APA ...
 void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec, int charge_div_method, double div_sigma){
     if (pss_vec.empty()) return;
