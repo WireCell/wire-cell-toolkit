@@ -125,30 +125,15 @@ namespace WireCell::Clus::PR {
             raise<RuntimeError>("segment_get_closest_2d_distances: DynamicPointCloud has no points");
         }
         
-        // Initialize minimum distances for each plane (U=0, V=1, W=2)
-        double min_dist_u = 1e9;
-        double min_dist_v = 1e9; 
-        double min_dist_w = 1e9;
+        // Use DynamicPointCloud's optimized method to get 2D distances for each plane
+        auto closest_2d_u = dpc->get_closest_2d_point_info(point, 0, face, apa);  // U plane
+        auto closest_2d_v = dpc->get_closest_2d_point_info(point, 1, face, apa);  // V plane  
+        auto closest_2d_w = dpc->get_closest_2d_point_info(point, 2, face, apa);  // W plane
         
-        // Search through all points in the fit point cloud
-        for (const auto& fit_point : points) {
-            WireCell::Point fit_wp(fit_point.x, fit_point.y, fit_point.z);
-            
-            // For 2D distance calculation, we need to project to wire planes
-            // This is a simplified version - you may need to use proper wire geometry
-            
-            // U plane (typically angled wires) - distance in Y-Z plane  
-            double dist_u = std::sqrt(std::pow(point.y() - fit_wp.y(), 2) + std::pow(point.z() - fit_wp.z(), 2));
-            if (dist_u < min_dist_u) min_dist_u = dist_u;
-            
-            // V plane (typically angled wires) - distance in Y-Z plane with different projection
-            double dist_v = std::sqrt(std::pow(point.y() - fit_wp.y(), 2) + std::pow(point.z() - fit_wp.z(), 2));
-            if (dist_v < min_dist_v) min_dist_v = dist_v;
-            
-            // W plane (collection wires, typically parallel to Y) - distance in X-Z plane
-            double dist_w = std::sqrt(std::pow(point.x() - fit_wp.x(), 2) + std::pow(point.z() - fit_wp.z(), 2));
-            if (dist_w < min_dist_w) min_dist_w = dist_w;
-        }
+        // Extract distances for each plane (U=0, V=1, W=2)
+        double min_dist_u = std::get<0>(closest_2d_u);
+        double min_dist_v = std::get<0>(closest_2d_v);
+        double min_dist_w = std::get<0>(closest_2d_w);
         
         return std::make_tuple(min_dist_u, min_dist_v, min_dist_w);
     }

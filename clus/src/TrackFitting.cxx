@@ -2169,7 +2169,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
     // Get cluster and transformation info
     auto cluster = segment->cluster();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    double cluster_t0 = cluster->get_cluster_t0();
+    // double cluster_t0 = cluster->get_cluster_t0();
     
     // Collect all segments from the graph for comparison
     std::vector<std::shared_ptr<PR::Segment>> all_segments;
@@ -2202,14 +2202,14 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
         auto offset_u = std::get<1>(offset_it->second);
         auto slope_x = std::get<0>(slope_it->second);
         auto slope_yu = std::get<1>(slope_it->second).first;
-        auto slope_zu = std::get<1>(slope_it->second).second;
+        // auto slope_zu = std::get<1>(slope_it->second).second;
         
         // Convert wire/time coordinates to 3D position
         double raw_x = (coord.time - offset_t) / slope_x;
-        double wire_pos = coord.wire - offset_u;
+        double raw_y = (coord.wire - offset_u)/slope_yu;
         
         // Create a test point (simplified - may need proper wire geometry)
-        WireCell::Point test_point(raw_x, 0, 0); // Y,Z will be determined by wire geometry
+        WireCell::Point test_point(raw_x, raw_y, 0); // Y,Z will be determined by wire geometry
         
         // Get distances to main segment and all other segments
         auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
@@ -2247,9 +2247,11 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
         auto offset_t = std::get<0>(offset_it->second);
         auto offset_v = std::get<2>(offset_it->second);
         auto slope_x = std::get<0>(slope_it->second);
+        auto slope_yv = std::get<2>(slope_it->second).first;
         
         double raw_x = (coord.time - offset_t) / slope_x;
-        WireCell::Point test_point(raw_x, 0, 0);
+        double raw_y = (coord.wire - offset_v)/slope_yv;
+        WireCell::Point test_point(raw_x, raw_y, 0);
         
         auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
         double min_dis_track = std::get<1>(main_distances); // V plane distance
@@ -2285,9 +2287,11 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
         auto offset_t = std::get<0>(offset_it->second);
         auto offset_w = std::get<3>(offset_it->second);
         auto slope_x = std::get<0>(slope_it->second);
+        auto slope_yw = std::get<3>(slope_it->second).first;
         
         double raw_x = (coord.time - offset_t) / slope_x;
-        WireCell::Point test_point(raw_x, 0, 0);
+        double raw_y = (coord.wire - offset_w)/slope_yw;
+        WireCell::Point test_point(raw_x, raw_y, 0);
         
         auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
         double min_dis_track = std::get<2>(main_distances); // W plane distance
@@ -2682,6 +2686,11 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
     temp_2dwt.quantity = results.at(2);
 
  }
+
+void form_map_graph(bool flag_exclusion, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut){
+
+}
+
 
 void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut) {
     // Implementation of form_map function
