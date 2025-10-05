@@ -3594,6 +3594,162 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     pss_vec = fine_tracking_path;
 }
 
+std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec){
+    // Create local trajectory data structures
+    std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> pss_vec;
+    std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+    std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> temp_fine_tracking_path;
+    std::vector<std::pair<int, int>> saved_paf;
+    
+    // Initialize pss_vec from input vectors
+    if (final_ps_vec.size() != init_ps_vec.size()) {
+        return std::vector<WireCell::Point>(); // Return empty if sizes don't match
+    }
+    
+    for (size_t i = 0; i < final_ps_vec.size(); i++) {
+        pss_vec.push_back(std::make_pair(final_ps_vec[i], segment));
+    }
+    
+    // First pass: apply skip_trajectory_point logic
+    int skip_count = 0;
+    for (size_t i = 0; i < pss_vec.size(); i++) {
+        WireCell::Point p = final_ps_vec[i];
+        
+        // Get APA and face information
+        auto test_wpid = m_dv->contained_by(p);
+        auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
+        
+        // Apply skip trajectory point check
+        bool flag_skip = skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
+        
+        // Vertex points (first and last) should not be skipped
+        if (i == 0 || i + 1 == final_ps_vec.size()) {
+            flag_skip = false;
+        }
+        
+        // Protection against too many consecutive skips
+        if (flag_skip) {
+            skip_count++;
+            if (skip_count <= 3) {
+                continue;
+            } else {
+                skip_count = 0;
+            }
+        }
+        
+        // Store points for trajectory smoothing
+        temp_fine_tracking_path.push_back(std::make_pair(init_ps_vec[i], segment));
+        fine_tracking_path.push_back(std::make_pair(p, segment));
+        saved_paf.push_back(std::make_pair(test_wpid.apa(), test_wpid.face()));
+    }
+    
+    // Second pass: Apply trajectory smoothing (area-based correction)
+    for (size_t i = 0; i < fine_tracking_path.size(); i++) {
+        bool flag_replace = false;
+        
+        // Check triangle area for smoothness (-1, +1 neighbors)
+        if (i != 0 && i + 1 != fine_tracking_path.size()) {
+            double a = sqrt(pow(fine_tracking_path[i-1].first.x() - fine_tracking_path[i].first.x(), 2) +
+                          pow(fine_tracking_path[i-1].first.y() - fine_tracking_path[i].first.y(), 2) +
+                          pow(fine_tracking_path[i-1].first.z() - fine_tracking_path[i].first.z(), 2));
+            double b = sqrt(pow(fine_tracking_path[i+1].first.x() - fine_tracking_path[i].first.x(), 2) +
+                          pow(fine_tracking_path[i+1].first.y() - fine_tracking_path[i].first.y(), 2) +
+                          pow(fine_tracking_path[i+1].first.z() - fine_tracking_path[i].first.z(), 2));
+            double c = sqrt(pow(fine_tracking_path[i-1].first.x() - fine_tracking_path[i+1].first.x(), 2) +
+                          pow(fine_tracking_path[i-1].first.y() - fine_tracking_path[i+1].first.y(), 2) +
+                          pow(fine_tracking_path[i-1].first.z() - fine_tracking_path[i+1].first.z(), 2));
+            
+            double s = (a + b + c) / 2.0;
+            double area1 = sqrt(s * (s - a) * (s - b) * (s - c));
+            
+            // Compare with original point
+            a = sqrt(pow(fine_tracking_path[i-1].first.x() - temp_fine_tracking_path[i].first.x(), 2) +
+                    pow(fine_tracking_path[i-1].first.y() - temp_fine_tracking_path[i].first.y(), 2) +
+                    pow(fine_tracking_path[i-1].first.z() - temp_fine_tracking_path[i].first.z(), 2));
+            b = sqrt(pow(fine_tracking_path[i+1].first.x() - temp_fine_tracking_path[i].first.x(), 2) +
+                    pow(fine_tracking_path[i+1].first.y() - temp_fine_tracking_path[i].first.y(), 2) +
+                    pow(fine_tracking_path[i+1].first.z() - temp_fine_tracking_path[i].first.z(), 2));
+            
+            s = (a + b + c) / 2.0;
+            double area2 = sqrt(s * (s - a) * (s - b) * (s - c));
+
+            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) {
+                flag_replace = true;
+            }
+        }
+
+        // -2, +1 neighbor check
+        if ((!flag_replace) && i >= 2 && i + 1 != fine_tracking_path.size()) {
+            double a = sqrt(pow(fine_tracking_path[i-2].first.x() - fine_tracking_path[i].first.x(), 2) +
+                          pow(fine_tracking_path[i-2].first.y() - fine_tracking_path[i].first.y(), 2) +
+                          pow(fine_tracking_path[i-2].first.z() - fine_tracking_path[i].first.z(), 2));
+            double b = sqrt(pow(fine_tracking_path[i+1].first.x() - fine_tracking_path[i].first.x(), 2) +
+                          pow(fine_tracking_path[i+1].first.y() - fine_tracking_path[i].first.y(), 2) +
+                          pow(fine_tracking_path[i+1].first.z() - fine_tracking_path[i].first.z(), 2));
+            double c = sqrt(pow(fine_tracking_path[i-2].first.x() - fine_tracking_path[i+1].first.x(), 2) +
+                          pow(fine_tracking_path[i-2].first.y() - fine_tracking_path[i+1].first.y(), 2) +
+                          pow(fine_tracking_path[i-2].first.z() - fine_tracking_path[i+1].first.z(), 2));
+            double s = (a + b + c) / 2.0;
+            double area1 = sqrt(s * (s - a) * (s - b) * (s - c));
+
+            a = sqrt(pow(fine_tracking_path[i-2].first.x() - temp_fine_tracking_path[i].first.x(), 2) +
+                    pow(fine_tracking_path[i-2].first.y() - temp_fine_tracking_path[i].first.y(), 2) +
+                    pow(fine_tracking_path[i-2].first.z() - temp_fine_tracking_path[i].first.z(), 2));
+            b = sqrt(pow(fine_tracking_path[i+1].first.x() - temp_fine_tracking_path[i].first.x(), 2) +
+                    pow(fine_tracking_path[i+1].first.y() - temp_fine_tracking_path[i].first.y(), 2) +
+                    pow(fine_tracking_path[i+1].first.z() - temp_fine_tracking_path[i].first.z(), 2));
+            s = (a + b + c) / 2.0;
+            double area2 = sqrt(s * (s - a) * (s - b) * (s - c));
+            
+            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) {
+                flag_replace = true;	
+            }
+        }
+        
+        // -1, +2 neighbor check
+        if ((!flag_replace) && i > 0 && i + 2 < fine_tracking_path.size()) {
+            double a = sqrt(pow(fine_tracking_path[i-1].first.x() - fine_tracking_path[i].first.x(), 2) +
+                          pow(fine_tracking_path[i-1].first.y() - fine_tracking_path[i].first.y(), 2) +
+                          pow(fine_tracking_path[i-1].first.z() - fine_tracking_path[i].first.z(), 2));
+            double b = sqrt(pow(fine_tracking_path[i+2].first.x() - fine_tracking_path[i].first.x(), 2) +
+                          pow(fine_tracking_path[i+2].first.y() - fine_tracking_path[i].first.y(), 2) +
+                          pow(fine_tracking_path[i+2].first.z() - fine_tracking_path[i].first.z(), 2));
+            double c = sqrt(pow(fine_tracking_path[i-1].first.x() - fine_tracking_path[i+2].first.x(), 2) +
+                          pow(fine_tracking_path[i-1].first.y() - fine_tracking_path[i+2].first.y(), 2) +
+                          pow(fine_tracking_path[i-1].first.z() - fine_tracking_path[i+2].first.z(), 2));
+            double s = (a + b + c) / 2.0;
+            double area1 = sqrt(s * (s - a) * (s - b) * (s - c));
+
+            a = sqrt(pow(fine_tracking_path[i-1].first.x() - temp_fine_tracking_path[i].first.x(), 2) +
+                    pow(fine_tracking_path[i-1].first.y() - temp_fine_tracking_path[i].first.y(), 2) +
+                    pow(fine_tracking_path[i-1].first.z() - temp_fine_tracking_path[i].first.z(), 2));
+            b = sqrt(pow(fine_tracking_path[i+2].first.x() - temp_fine_tracking_path[i].first.x(), 2) +
+                    pow(fine_tracking_path[i+2].first.y() - temp_fine_tracking_path[i].first.y(), 2) +
+                    pow(fine_tracking_path[i+2].first.z() - temp_fine_tracking_path[i].first.z(), 2));
+            s = (a + b + c) / 2.0;
+            double area2 = sqrt(s * (s - a) * (s - b) * (s - c));
+            
+            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) {
+                flag_replace = true;
+            }
+        }
+        
+        // Replace with original point if flagged
+        if (flag_replace) {
+            fine_tracking_path[i] = temp_fine_tracking_path[i];
+        }
+    }
+    
+    // Extract the final trajectory points
+    std::vector<WireCell::Point> result_ps;
+    for (const auto& point_pair : fine_tracking_path) {
+        result_ps.push_back(point_pair.first);
+    }
+    
+    return result_ps;
+}
+
+
 bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
       // Extract APA and face information
     int apa = apa_face.first;
