@@ -172,8 +172,55 @@ namespace WireCell::Clus {
 
         void organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit);
 
+        // use the m_graph to organize ...
+        void organize_segments_path(double low_dis_limit, double end_point_limit);
+        // use m_graph, after first round of fitting
+        void organize_segments_path_2nd(double low_dis_limit, double end_point_limit);
+        // use m_graph, after second round of fitting 
+        void organize_segments_path_3rd(double step_size);
 
-    
+    private:
+        // Helper functions for organize_segments_path methods
+        
+        /**
+         * Check and reset vertices that are too close together
+         * @param edge_range The range of edges (segments) to check
+         */
+        void check_and_reset_close_vertices();
+        
+        /**
+         * Get segment vertices in correct order (start, end)
+         * @param segment The segment to process
+         * @param ed The edge descriptor
+         * @param start_v Output: pointer to start vertex
+         * @param end_v Output: pointer to end vertex
+         * @param vd1 Output: descriptor for vertex 1
+         * @param vd2 Output: descriptor for vertex 2
+         * @return true if successful, false otherwise
+         */
+        bool get_ordered_segment_vertices(
+            std::shared_ptr<PR::Segment> segment,
+            const PR::edge_descriptor& ed,
+            std::shared_ptr<PR::Vertex>& start_v,
+            std::shared_ptr<PR::Vertex>& end_v,
+            PR::node_descriptor& vd1,
+            PR::node_descriptor& vd2
+        );
+        
+        /**
+         * Generate 2D projections and create fit vector from 3D points
+         * @param segment The segment for which to generate fits
+         * @param pts The 3D points
+         * @return Vector of Fit objects with 3D points and 2D projections
+         */
+        std::vector<PR::Fit> generate_fits_with_projections(
+            std::shared_ptr<PR::Segment> segment,
+            const std::vector<WireCell::Point>& pts
+        );
+
+    public:
+        
+        
 
                 /// Internal coordinate (can be more complex)
         struct Coord2D {

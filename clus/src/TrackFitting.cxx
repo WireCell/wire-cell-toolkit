@@ -803,6 +803,574 @@ void TrackFitting::fill_global_rb_map() {
     std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
 } 
 
+// ============================================================================
+// Helper functions for organize_segments_path methods
+// ============================================================================
+
+void TrackFitting::check_and_reset_close_vertices() {
+    if (!m_graph) return;
+    
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        auto segment = edge_bundle.segment;
+        if (!segment) continue;
+        
+        // Get vertices connected to this segment
+        auto vd1 = boost::source(*e_it, *m_graph);
+        auto vd2 = boost::target(*e_it, *m_graph);
+        auto& v1_bundle = (*m_graph)[vd1];
+        auto& v2_bundle = (*m_graph)[vd2];
+        auto start_v = v1_bundle.vertex;
+        auto end_v = v2_bundle.vertex;
+        
+        if (!start_v || !end_v) continue;
+        
+        // Determine which vertex corresponds to which end of the segment
+        const auto& segment_wcpts = segment->wcpts();
+        if (segment_wcpts.empty()) continue;
+        
+        // Check vertex ordering by comparing with segment endpoints
+        if (start_v->wcpt().index != segment_wcpts.front().index) {
+            std::swap(start_v, end_v);
+            std::swap(vd1, vd2);
+        }
+        
+        // Check if vertices are too close together
+        double vertex_distance = sqrt(
+            pow(start_v->fit().point.x() - end_v->fit().point.x(), 2) +
+            pow(start_v->fit().point.y() - end_v->fit().point.y(), 2) +
+            pow(start_v->fit().point.z() - end_v->fit().point.z(), 2)
+        );
+        
+        if (vertex_distance < 0.01 * units::cm) {
+            // Reset vertices to original points if they are endpoints (degree 1)
+            if (boost::degree(vd1, *m_graph) == 1) {
+                PR::Fit start_fit = start_v->fit();
+                start_fit.point = start_v->wcpt().point;
+                start_v->fit(start_fit);
+            }
+            if (boost::degree(vd2, *m_graph) == 1) {
+                PR::Fit end_fit = end_v->fit();
+                end_fit.point = end_v->wcpt().point;
+                end_v->fit(end_fit);
+            }
+        }
+    }
+}
+
+bool TrackFitting::get_ordered_segment_vertices(
+    std::shared_ptr<PR::Segment> segment,
+    const PR::edge_descriptor& ed,
+    std::shared_ptr<PR::Vertex>& start_v,
+    std::shared_ptr<PR::Vertex>& end_v,
+    PR::node_descriptor& vd1,
+    PR::node_descriptor& vd2
+) {
+    if (!m_graph || !segment) return false;
+    
+    // Get vertices connected to this segment
+    vd1 = boost::source(ed, *m_graph);
+    vd2 = boost::target(ed, *m_graph);
+    auto& v1_bundle = (*m_graph)[vd1];
+    auto& v2_bundle = (*m_graph)[vd2];
+    start_v = v1_bundle.vertex;
+    end_v = v2_bundle.vertex;
+    
+    if (!start_v || !end_v) return false;
+    
+    // Determine which vertex corresponds to which end of the segment
+    const auto& segment_wcpts = segment->wcpts();
+    if (segment_wcpts.empty()) return false;
+    
+    // Check vertex ordering by comparing with segment endpoints
+    if (start_v->wcpt().index != segment_wcpts.front().index) {
+        std::swap(start_v, end_v);
+        std::swap(vd1, vd2);
+    }
+    
+    return true;
+}
+
+std::vector<PR::Fit> TrackFitting::generate_fits_with_projections(
+    std::shared_ptr<PR::Segment> segment,
+    const std::vector<WireCell::Point>& pts
+) {
+    std::vector<PR::Fit> fits;
+    if (!segment || pts.empty()) return fits;
+    
+    auto cluster = segment->cluster();
+    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+    double cluster_t0 = cluster->get_cluster_t0();
+    
+    for (size_t i = 0; i != pts.size(); i++) {
+        PR::Fit fit;
+        fit.point = pts.at(i);
+        fit.dQ = 0;
+        fit.dx = -1;
+        fit.reduced_chi2 = 0;
+        
+        // Generate 2D projections
+        auto test_wpid = m_dv->contained_by(pts.at(i));
+        if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
+            int apa = test_wpid.apa();
+            int face = test_wpid.face();
+            
+            auto p_raw = transform->backward(pts.at(i), cluster_t0, apa, face);
+            WirePlaneId wpid(kAllLayers, face, apa);
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+            
+            if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
+                auto offset_t = std::get<0>(offset_it->second);
+                auto offset_u = std::get<1>(offset_it->second);
+                auto offset_v = std::get<2>(offset_it->second);
+                auto offset_w = std::get<3>(offset_it->second);
+                auto slope_x = std::get<0>(slope_it->second);
+                auto slope_yu = std::get<1>(slope_it->second).first;
+                auto slope_zu = std::get<1>(slope_it->second).second;
+                auto slope_yv = std::get<2>(slope_it->second).first;
+                auto slope_zv = std::get<2>(slope_it->second).second;
+                auto slope_yw = std::get<3>(slope_it->second).first;
+                auto slope_zw = std::get<3>(slope_it->second).second;
+                
+                fit.pu = offset_u + (slope_yu * p_raw.y() + slope_zu * p_raw.z());
+                fit.pv = offset_v + (slope_yv * p_raw.y() + slope_zv * p_raw.z());
+                fit.pw = offset_w + (slope_yw * p_raw.y() + slope_zw * p_raw.z());
+                fit.pt = offset_t + slope_x * p_raw.x();
+                fit.paf = std::make_pair(apa, face);
+            }
+        }
+        
+        fits.push_back(fit);
+    }
+    
+    return fits;
+}
+
+void TrackFitting::organize_segments_path_3rd(double step_size){
+    if (!m_graph) return;
+    
+    // First pass: check for vertices that are too close together
+    check_and_reset_close_vertices();
+    
+    // Second pass: organize segments path with uniform step size
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        auto segment = edge_bundle.segment;
+        if (!segment) continue;
+        
+        // Get ordered vertices
+        std::shared_ptr<PR::Vertex> start_v, end_v;
+        PR::node_descriptor vd1, vd2;
+        if (!get_ordered_segment_vertices(segment, *e_it, start_v, end_v, vd1, vd2)) continue;
+        
+        // Check if vertices are endpoints (degree == 1)
+        bool flag_startv_end = (boost::degree(vd1, *m_graph) == 1);
+        bool flag_endv_end = (boost::degree(vd2, *m_graph) == 1);
+        
+        std::vector<WireCell::Point> pts, curr_pts;
+        
+        // Get current fitted path from the segment
+        if (!segment->fits().empty()) {
+            for (const auto& fit : segment->fits()) {
+                curr_pts.push_back(fit.point);
+            }
+        } else {
+            // If no fits, use original wcpts
+            for (const auto& wcpt : segment->wcpts()) {
+                curr_pts.push_back(wcpt.point);
+            }
+        }
+        
+        // Examine end points
+        curr_pts = examine_end_ps_vec(segment, curr_pts, flag_startv_end, flag_endv_end);
+        
+        WireCell::Point start_p = curr_pts.front();
+        WireCell::Point end_p = curr_pts.back();
+        
+        // Build points with uniform step size
+        pts.push_back(start_p);
+        double extra_dis = 0;
+        
+        for (size_t i = 0; i != curr_pts.size(); i++) {
+            WireCell::Point p1 = curr_pts.at(i);
+            
+            double dis_end = sqrt(pow(p1.x() - end_p.x(), 2) + pow(p1.y() - end_p.y(), 2) + pow(p1.z() - end_p.z(), 2));
+            if (dis_end < step_size) continue;
+            
+            double dis_prev = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+            
+            if (dis_prev + extra_dis > step_size) {
+                extra_dis += dis_prev;
+                while (extra_dis > step_size) {
+                    WireCell::Point tmp_p(
+                        pts.back().x() + (p1.x() - pts.back().x()) / dis_prev * step_size,
+                        pts.back().y() + (p1.y() - pts.back().y()) / dis_prev * step_size,
+                        pts.back().z() + (p1.z() - pts.back().z()) / dis_prev * step_size
+                    );
+                    pts.push_back(tmp_p);
+                    dis_prev = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+                    extra_dis -= step_size;
+                }
+            } else if (dis_prev + extra_dis < step_size) {
+                extra_dis += dis_prev;
+                continue;
+            } else {
+                pts.push_back(p1);
+                extra_dis = 0;
+            }
+        }
+        
+        // Handle end point properly
+        {
+            double dis1 = sqrt(pow(pts.back().x() - end_p.x(), 2) + pow(pts.back().y() - end_p.y(), 2) + pow(pts.back().z() - end_p.z(), 2));
+            
+            if (dis1 < step_size * 0.6) {
+                if (pts.size() <= 1) {
+                    // Do nothing
+                } else {
+                    double dis2 = sqrt(pow(pts.back().x() - pts.at(pts.size()-2).x(), 2) + 
+                                     pow(pts.back().y() - pts.at(pts.size()-2).y(), 2) + 
+                                     pow(pts.back().z() - pts.at(pts.size()-2).z(), 2));
+                    double dis3 = (dis1 + dis2) / 2.0;
+                    
+                    WireCell::Point tmp_p(
+                        pts.at(pts.size()-2).x() + (pts.back().x() - pts.at(pts.size()-2).x()) / dis2 * dis3,
+                        pts.at(pts.size()-2).y() + (pts.back().y() - pts.at(pts.size()-2).y()) / dis2 * dis3,
+                        pts.at(pts.size()-2).z() + (pts.back().z() - pts.at(pts.size()-2).z()) / dis2 * dis3
+                    );
+                    pts.pop_back();
+                    pts.push_back(tmp_p);
+                }
+            } else if (dis1 > step_size * 1.6) {
+                int npoints = std::round(dis1 / step_size);
+                WireCell::Point p_save = pts.back();
+                for (int j = 0; j + 1 < npoints; j++) {
+                    WireCell::Point p(
+                        p_save.x() + (end_p.x() - p_save.x()) / npoints * (j + 1),
+                        p_save.y() + (end_p.y() - p_save.y()) / npoints * (j + 1),
+                        p_save.z() + (end_p.z() - p_save.z()) / npoints * (j + 1)
+                    );
+                    pts.push_back(p);
+                }
+            }
+            
+            pts.push_back(end_p);
+        }
+        
+        // Ensure there is no single point
+        if (pts.size() == 1) {
+            pts.push_back(end_p);
+        }
+        
+        // Generate 2D projections and store fit points in the segment
+        segment->fits(generate_fits_with_projections(segment, pts));
+    }
+}
+
+void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_point_limit){
+    if (!m_graph) return;
+    
+    // First pass: check for vertices that are too close together
+    check_and_reset_close_vertices();
+    
+    // Second pass: organize segments path with 2D projection
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        auto segment = edge_bundle.segment;
+        if (!segment) continue;
+        
+        // Get ordered vertices
+        std::shared_ptr<PR::Vertex> start_v, end_v;
+        PR::node_descriptor vd1, vd2;
+        if (!get_ordered_segment_vertices(segment, *e_it, start_v, end_v, vd1, vd2)) continue;
+        
+        // Check if vertices are endpoints (degree == 1)
+        bool flag_startv_end = (boost::degree(vd1, *m_graph) == 1);
+        bool flag_endv_end = (boost::degree(vd2, *m_graph) == 1);
+        
+        std::vector<WireCell::Point> pts, curr_pts;
+        
+        // Get current fitted path from the segment
+        if (!segment->fits().empty()) {
+            for (const auto& fit : segment->fits()) {
+                curr_pts.push_back(fit.point);
+            }
+        } else {
+            // If no fits, use original wcpts
+            for (const auto& wcpt : segment->wcpts()) {
+                curr_pts.push_back(wcpt.point);
+            }
+        }
+        
+        // Examine end points
+        curr_pts = examine_end_ps_vec(segment, curr_pts, flag_startv_end, flag_endv_end);
+        
+        WireCell::Point start_p, end_p;
+        
+        // Process start vertex
+        if (!start_v->fit().flag_fix) {
+            start_p = curr_pts.front();
+            
+            if (flag_startv_end) {
+                WireCell::Point p2 = curr_pts.front();
+                double dis1 = 0;
+                for (auto it = curr_pts.begin(); it != curr_pts.end(); it++) {
+                    p2 = *it;
+                    dis1 = sqrt(pow(start_p.x() - p2.x(), 2) + pow(start_p.y() - p2.y(), 2) + pow(start_p.z() - p2.z(), 2));
+                    if (dis1 > low_dis_limit) break;
+                }
+                if (dis1 != 0) {
+                    start_p = WireCell::Point(
+                        start_p.x() + (start_p.x() - p2.x()) / dis1 * end_point_limit,
+                        start_p.y() + (start_p.y() - p2.y()) / dis1 * end_point_limit,
+                        start_p.z() + (start_p.z() - p2.z()) / dis1 * end_point_limit
+                    );
+                }
+            }
+            
+            // Set fit point for start vertex
+            PR::Fit start_fit = start_v->fit();
+            start_fit.point = start_p;
+            start_v->fit(start_fit);
+        } else {
+            start_p = start_v->fit().point;
+        }
+        
+        // Process end vertex
+        if (!end_v->fit().flag_fix) {
+            end_p = curr_pts.back();
+            
+            if (flag_endv_end) {
+                WireCell::Point p2 = curr_pts.back();
+                double dis1 = 0;
+                for (auto it = curr_pts.rbegin(); it != curr_pts.rend(); it++) {
+                    p2 = *it;
+                    dis1 = sqrt(pow(end_p.x() - p2.x(), 2) + pow(end_p.y() - p2.y(), 2) + pow(end_p.z() - p2.z(), 2));
+                    if (dis1 > low_dis_limit) break;
+                }
+                if (dis1 != 0) {
+                    end_p = WireCell::Point(
+                        end_p.x() + (end_p.x() - p2.x()) / dis1 * end_point_limit,
+                        end_p.y() + (end_p.y() - p2.y()) / dis1 * end_point_limit,
+                        end_p.z() + (end_p.z() - p2.z()) / dis1 * end_point_limit
+                    );
+                }
+            }
+            
+            // Set fit point for end vertex
+            PR::Fit end_fit = end_v->fit();
+            end_fit.point = end_p;
+            end_v->fit(end_fit);
+        } else {
+            end_p = end_v->fit().point;
+        }
+        
+        // Build the middle points
+        pts.push_back(start_p);
+        for (size_t i = 0; i != curr_pts.size(); i++) {
+            WireCell::Point p1 = curr_pts.at(i);
+            double dis = low_dis_limit;
+            double dis1 = sqrt(pow(p1.x() - end_p.x(), 2) + pow(p1.y() - end_p.y(), 2) + pow(p1.z() - end_p.z(), 2));
+            if (pts.size() > 0) {
+                dis = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+            }
+            
+            if (dis1 < low_dis_limit * 0.8) {
+                continue;
+            } else if (dis < low_dis_limit * 0.8) {
+                continue;
+            } else if (dis < low_dis_limit * 1.6) {
+                pts.push_back(p1);
+            } else {
+                int npoints = std::round(dis / low_dis_limit);
+                WireCell::Point p_save = pts.back();
+                for (int j = 0; j != npoints; j++) {
+                    WireCell::Point p(
+                        p_save.x() + (p1.x() - p_save.x()) / npoints * (j + 1),
+                        p_save.y() + (p1.y() - p_save.y()) / npoints * (j + 1),
+                        p_save.z() + (p1.z() - p_save.z()) / npoints * (j + 1)
+                    );
+                    pts.push_back(p);
+                }
+            }
+        }
+        
+        // Handle final connection to end point
+        {
+            double dis1 = sqrt(pow(pts.back().x() - end_p.x(), 2) + pow(pts.back().y() - end_p.y(), 2) + pow(pts.back().z() - end_p.z(), 2));
+            if (dis1 < low_dis_limit * 0.2) {
+                if (pts.size() > 1) pts.pop_back();
+            } else if (dis1 > low_dis_limit * 1.6) {
+                int npoints = std::round(dis1 / low_dis_limit);
+                WireCell::Point p_save = pts.back();
+                for (int j = 0; j + 1 < npoints; j++) {
+                    WireCell::Point p(
+                        p_save.x() + (end_p.x() - p_save.x()) / npoints * (j + 1),
+                        p_save.y() + (end_p.y() - p_save.y()) / npoints * (j + 1),
+                        p_save.z() + (end_p.z() - p_save.z()) / npoints * (j + 1)
+                    );
+                    pts.push_back(p);
+                }
+            }
+            pts.push_back(end_p);
+        }
+        
+        // Handle case where only one point exists
+        if (pts.size() == 1) {
+            pts.push_back(end_p);
+        }
+        
+        // Generate 2D projections and store fit points in the segment
+        segment->fits(generate_fits_with_projections(segment, pts));
+    }
+}
+
+
+void TrackFitting::organize_segments_path(double low_dis_limit, double end_point_limit){
+    if (!m_graph) return;
+    
+    // Iterate over all edges (segments) in the graph
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        auto segment = edge_bundle.segment;
+        if (!segment) continue;
+        
+        // Get ordered vertices
+        std::shared_ptr<PR::Vertex> start_v, end_v;
+        PR::node_descriptor vd1, vd2;
+        if (!get_ordered_segment_vertices(segment, *e_it, start_v, end_v, vd1, vd2)) continue;
+        
+        // Check if vertices are endpoints (degree == 1)
+        bool flag_startv_end = (boost::degree(vd1, *m_graph) == 1);
+        bool flag_endv_end = (boost::degree(vd2, *m_graph) == 1);
+        
+        std::vector<WireCell::Point> pts;
+        std::vector<WireCell::Point> temp_wcps_vec;
+        
+        // Convert WCPoints to Points
+        for (const auto& wcp : segment->wcpts()) {
+            temp_wcps_vec.push_back(wcp.point);
+        }
+        
+        WireCell::Point start_p, end_p;
+        
+        // Process start vertex
+        if (!start_v->fit().flag_fix) {
+            start_p = temp_wcps_vec.front();
+            
+            if (flag_startv_end) {
+                WireCell::Point p2 = temp_wcps_vec.front();
+                double dis1 = 0;
+                for (auto it = temp_wcps_vec.begin(); it != temp_wcps_vec.end(); it++) {
+                    p2 = *it;
+                    dis1 = sqrt(pow(start_p.x() - p2.x(), 2) + pow(start_p.y() - p2.y(), 2) + pow(start_p.z() - p2.z(), 2));
+                    if (dis1 > low_dis_limit) break;
+                }
+                if (dis1 != 0) {
+                    start_p = WireCell::Point(
+                        start_p.x() + (start_p.x() - p2.x()) / dis1 * end_point_limit,
+                        start_p.y() + (start_p.y() - p2.y()) / dis1 * end_point_limit,
+                        start_p.z() + (start_p.z() - p2.z()) / dis1 * end_point_limit
+                    );
+                }
+            }
+            
+            // Set fit point for start vertex
+            PR::Fit start_fit = start_v->fit();
+            start_fit.point = start_p;
+            start_v->fit(start_fit);
+        } else {
+            start_p = start_v->fit().point;
+        }
+        
+        // Process end vertex
+        if (!end_v->fit().flag_fix) {
+            end_p = temp_wcps_vec.back();
+            
+            if (flag_endv_end) {
+                WireCell::Point p2 = temp_wcps_vec.back();
+                double dis1 = 0;
+                for (auto it = temp_wcps_vec.rbegin(); it != temp_wcps_vec.rend(); it++) {
+                    p2 = *it;
+                    dis1 = sqrt(pow(end_p.x() - p2.x(), 2) + pow(end_p.y() - p2.y(), 2) + pow(end_p.z() - p2.z(), 2));
+                    if (dis1 > low_dis_limit) break;
+                }
+                if (dis1 != 0) {
+                    end_p = WireCell::Point(
+                        end_p.x() + (end_p.x() - p2.x()) / dis1 * end_point_limit,
+                        end_p.y() + (end_p.y() - p2.y()) / dis1 * end_point_limit,
+                        end_p.z() + (end_p.z() - p2.z()) / dis1 * end_point_limit
+                    );
+                }
+            }
+            
+            // Set fit point for end vertex
+            PR::Fit end_fit = end_v->fit();
+            end_fit.point = end_p;
+            end_v->fit(end_fit);
+        } else {
+            end_p = end_v->fit().point;
+        }
+        
+        // Build the middle points
+        pts.push_back(start_p);
+        for (size_t i = 0; i != temp_wcps_vec.size(); i++) {
+            WireCell::Point p1 = temp_wcps_vec.at(i);
+            double dis = low_dis_limit;
+            double dis1 = sqrt(pow(p1.x() - end_p.x(), 2) + pow(p1.y() - end_p.y(), 2) + pow(p1.z() - end_p.z(), 2));
+            if (pts.size() > 0) {
+                dis = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
+            }
+            
+            if (dis1 < low_dis_limit * 0.8) {
+                continue;
+            } else if (dis < low_dis_limit * 0.8) {
+                continue;
+            } else if (dis < low_dis_limit * 1.6) {
+                pts.push_back(p1);
+            } else {
+                int npoints = std::round(dis / low_dis_limit);
+                WireCell::Point p_save = pts.back();
+                for (int j = 0; j != npoints; j++) {
+                    WireCell::Point p(
+                        p_save.x() + (p1.x() - p_save.x()) / npoints * (j + 1),
+                        p_save.y() + (p1.y() - p_save.y()) / npoints * (j + 1),
+                        p_save.z() + (p1.z() - p_save.z()) / npoints * (j + 1)
+                    );
+                    pts.push_back(p);
+                }
+            }
+        }
+        
+        // Handle final connection to end point
+        {
+            double dis1 = sqrt(pow(pts.back().x() - end_p.x(), 2) + pow(pts.back().y() - end_p.y(), 2) + pow(pts.back().z() - end_p.z(), 2));
+            if (dis1 < low_dis_limit * 0.2) {
+                if (pts.size() > 1) pts.pop_back();
+            } else if (dis1 > low_dis_limit * 1.6) {
+                int npoints = std::round(dis1 / low_dis_limit);
+                WireCell::Point p_save = pts.back();
+                for (int j = 0; j + 1 < npoints; j++) {
+                    WireCell::Point p(
+                        p_save.x() + (end_p.x() - p_save.x()) / npoints * (j + 1),
+                        p_save.y() + (end_p.y() - p_save.y()) / npoints * (j + 1),
+                        p_save.z() + (end_p.z() - p_save.z()) / npoints * (j + 1)
+                    );
+                    pts.push_back(p);
+                }
+            }
+            pts.push_back(end_p);
+        }
+        
+        // Generate 2D projections and store fit points in the segment
+        segment->fits(generate_fits_with_projections(segment, pts));
+    }
+}
 
 std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit, double end_point_limit) {
     std::vector<WireCell::Point> pts;
