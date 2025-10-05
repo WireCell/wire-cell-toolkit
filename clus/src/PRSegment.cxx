@@ -9,25 +9,25 @@ namespace WireCell::Clus::PR {
         }
     }
 
-    int Segment::get_fit_index(int i){
+    int Segment::fit_index(int i){
         if (i < 0 || i >= m_fits.size()) {
             throw std::out_of_range("Invalid fit index");
         }
         return m_fits[i].index;
     }
-    void Segment::set_fit_index(int i, int idx){
+    void Segment::fit_index(int i, int idx){
         if (i < 0 || i >= m_fits.size()) {
             throw std::out_of_range("Invalid fit index");
         }
         m_fits[i].index = idx;
     }
-    bool Segment::get_fit_flag_skip(int i){
+    bool Segment::fit_flag_skip(int i){
         if (i < 0 || i >= m_fits.size()) {
             throw std::out_of_range("Invalid fit index");
         }
         return m_fits[i].flag_fix;
     }
-    void Segment::set_fit_flag_skip(int i, bool flag){
+    void Segment::fit_flag_skip(int i, bool flag){
         if (i < 0 || i >= m_fits.size()) {
             throw std::out_of_range("Invalid fit index");
         }

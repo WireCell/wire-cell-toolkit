@@ -20,9 +20,6 @@ namespace WireCell::Clus::PR {
         kUndefined = 0,
         /// The vertex is determined to location of neutrino interaction.
         kNeutrinoVertex = 1<<1,
-        /// Same meaning as WCP's "flag_fit_fix".
-        kFitFix = 1<<2,
-
     };
 
     /** A PR::Vertex instance represents a connection with one or more PR::Segment intances.
@@ -68,15 +65,17 @@ namespace WireCell::Clus::PR {
         Vertex& fit(const Fit& fit) { m_fit = fit; return *this; }
 
         // index and range ...
-        void set_fit_index(int idx) { m_fit.index = idx; }
-        int get_fit_index() const { return m_fit.index; }
-        void set_fit_range(double range) { m_fit.range = range; }
-        double get_fit_range() const { return m_fit.range; }
+        void fit_index(int idx) { m_fit.index = idx; }
+        int fit_index() const { return m_fit.index; }
+        void fit_range(double range) { m_fit.range = range; }
+        double fit_range() const { return m_fit.range; }
+        void flag_fix(bool flag){m_fit.flag_fix = flag;}
+        bool flag_fix() const {return m_fit.flag_fix; };
 
         //
         void reset_fit_prop(){
             // Clear the kFitFix flag using keep_flags with inverted mask
-            this->keep_flags(static_cast<VertexFlags>(~static_cast<int>(VertexFlags::kFitFix)));
+            // this->keep_flags(static_cast<VertexFlags>(~static_cast<int>(VertexFlags::kFitFix)));
             m_fit.reset();
         }
 

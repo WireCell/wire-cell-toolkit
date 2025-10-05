@@ -2687,8 +2687,209 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
 
  }
 
-void form_map_graph(bool flag_exclusion, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut){
+void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut){
+    // Clear existing mappings
+    m_3d_to_2d.clear();
+    m_2d_to_3d.clear();
+
+    // Reset fit properties for all vertices first
+    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        auto vd = *vp.first;
+        auto& v_bundle = (*m_graph)[vd];
+        if (v_bundle.vertex) {
+            bool flag_fix = v_bundle.vertex->flag_fix();
+            v_bundle.vertex->reset_fit_prop();
+            v_bundle.vertex->flag_fix(flag_fix);
+        }
+    }
+
+    // Collect segments and reset their fit properties
+    std::vector<std::shared_ptr<PR::Segment>> segments;
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (edge_bundle.segment) {
+            segments.push_back(edge_bundle.segment);
+            edge_bundle.segment->reset_fit_prop();
+        }
+    }
+
+    int count = 0;
     
+    // Process each segment
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (!edge_bundle.segment) continue;
+        
+        auto segment = edge_bundle.segment;
+        auto& fits = segment->fits();
+        if (fits.empty()) continue;
+
+        // Get start and end vertices for this segment
+        auto vd1 = boost::source(*e_it, *m_graph);
+        auto vd2 = boost::target(*e_it, *m_graph);
+        auto& v_bundle1 = (*m_graph)[vd1];
+        auto& v_bundle2 = (*m_graph)[vd2];
+        
+        std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
+        
+        if (v_bundle1.vertex && v_bundle2.vertex) {
+            // Determine which vertex is start and which is end by comparing with first/last fit points
+            auto& first_fit = fits.front();
+            auto& last_fit = fits.back();
+            
+            double dist1_first = (v_bundle1.vertex->fit().point - first_fit.point).magnitude();
+            double dist1_last = (v_bundle1.vertex->fit().point - last_fit.point).magnitude();
+            
+            if (dist1_first < dist1_last) {
+                start_v = v_bundle1.vertex;
+                end_v = v_bundle2.vertex;
+            } else {
+                start_v = v_bundle2.vertex;
+                end_v = v_bundle1.vertex;
+            }
+        }
+
+        // Calculate distances between consecutive fit points
+        std::vector<double> distances;
+        for (size_t i = 0; i + 1 < fits.size(); i++) {
+            distances.push_back((fits[i+1].point - fits[i].point).magnitude());
+        }
+
+        std::vector<WireCell::Point> saved_pts;
+        std::vector<int> saved_index;
+        std::vector<bool> saved_skip;
+
+        // Process each fit point
+        for (size_t i = 0; i < fits.size(); i++) {
+            double dis_cut;
+            
+            if (i == 0) {
+                dis_cut = std::min(distances.empty() ? 0.0 : distances[0] * end_point_factor, 
+                                  4.0/3.0 * end_point_factor * units::cm);
+                if (start_v && start_v->fit_range() < 0) {
+                    start_v->fit_range(dis_cut);
+                } else if (start_v && dis_cut < start_v->fit_range()) {
+                    start_v->fit_range(dis_cut);
+                }
+            } else if (i + 1 == fits.size()) {
+                dis_cut = std::min(distances.empty() ? 0.0 : distances.back() * end_point_factor, 
+                                  4.0/3.0 * end_point_factor * units::cm);
+                if (end_v && end_v->fit_range() < 0) {
+                    end_v->fit_range(dis_cut);
+                } else if (end_v && dis_cut < end_v->fit_range()) {
+                    end_v->fit_range(dis_cut);
+                }
+            } else {
+                double dist_prev = i > 0 ? distances[i-1] : 0.0;
+                double dist_next = i < distances.size() ? distances[i] : 0.0;
+                dis_cut = std::min(std::max(dist_prev * mid_point_factor, dist_next * mid_point_factor), 
+                                  4.0/3.0 * mid_point_factor * units::cm);
+            }
+
+            // Not the first and last point - process middle points
+            if (i != 0 && i + 1 != fits.size()) {
+                TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+                form_point_association(segment, fits[i].point, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+
+                if (flag_exclusion) {
+                    update_association(segment, temp_2dut, temp_2dvt, temp_2dwt);
+                }
+
+                // Examine point association
+                bool is_end_point = (i == 1 || i + 2 == fits.size());
+                examine_point_association(segment, fits[i].point, temp_2dut, temp_2dvt, temp_2dwt, is_end_point, charge_cut);
+
+                if (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0) {
+                    // Store in mapping structures
+                    m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
+                    m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kVlayer, temp_2dvt);
+                    m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kWlayer, temp_2dwt);
+
+                    // Fill reverse mappings
+                    for (const auto& coord : temp_2dut.associated_2d_points) {
+                        m_2d_to_3d[coord].insert(count);
+                    }
+                    for (const auto& coord : temp_2dvt.associated_2d_points) {
+                        m_2d_to_3d[coord].insert(count);
+                    }
+                    for (const auto& coord : temp_2dwt.associated_2d_points) {
+                        m_2d_to_3d[coord].insert(count);
+                    }
+
+                    saved_pts.push_back(fits[i].point);
+                    saved_index.push_back(count);
+                    saved_skip.push_back(false);
+                    count++;
+                }
+            } else if (i == 0) {
+                // First point
+                saved_pts.push_back(fits[i].point);
+                saved_index.push_back(count);
+                saved_skip.push_back(true);
+                if (start_v && start_v->fit_index() == -1) {
+                    start_v->fit_index(count);
+                    count++;
+                }
+            } else if (i + 1 == fits.size()) {
+                // Last point
+                saved_pts.push_back(fits[i].point);
+                saved_index.push_back(count);
+                saved_skip.push_back(true);
+                if (end_v && end_v->fit_index() == -1) {
+                    end_v->fit_index(count);
+                    count++;
+                }
+            }
+        }
+
+        // Set fit associate vector for the segment
+        segment->set_fit_associate_vec(saved_pts, saved_index, saved_skip, m_dv, "fit");
+    }
+
+    // Deal with all vertices again
+    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        auto vd = *vp.first;
+        auto& v_bundle = (*m_graph)[vd];
+        if (!v_bundle.vertex) continue;
+        
+        auto vertex = v_bundle.vertex;
+        double dis_cut = vertex->fit_range();
+        int vertex_count = vertex->fit_index();
+        
+        if (dis_cut > 0 && vertex_count >= 0) {
+            WireCell::Point pt = vertex->fit().point;
+
+            TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+            
+            // For vertex, we need to pass a dummy segment - use first available segment
+            std::shared_ptr<PR::Segment> dummy_segment = nullptr;
+            if (!segments.empty()) {
+                dummy_segment = segments[0];
+            }
+            
+            if (dummy_segment) {
+                form_point_association(dummy_segment, pt, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+                examine_point_association(dummy_segment, pt, temp_2dut, temp_2dvt, temp_2dwt, true, charge_cut);
+
+                // Store vertex associations
+                m_3d_to_2d[vertex_count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
+                m_3d_to_2d[vertex_count].set_plane_data(WirePlaneLayer_t::kVlayer, temp_2dvt);
+                m_3d_to_2d[vertex_count].set_plane_data(WirePlaneLayer_t::kWlayer, temp_2dwt);
+
+                // Fill reverse mappings
+                for (const auto& coord : temp_2dut.associated_2d_points) {
+                    m_2d_to_3d[coord].insert(vertex_count);
+                }
+                for (const auto& coord : temp_2dvt.associated_2d_points) {
+                    m_2d_to_3d[coord].insert(vertex_count);
+                }
+                for (const auto& coord : temp_2dwt.associated_2d_points) {
+                    m_2d_to_3d[coord].insert(vertex_count);
+                }
+            }
+        }
+    }
 }
 
 

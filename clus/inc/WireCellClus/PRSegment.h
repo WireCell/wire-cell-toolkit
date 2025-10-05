@@ -110,10 +110,10 @@ namespace WireCell::Clus::PR {
 
         // reset fit properties ...
         void reset_fit_prop(); 
-        int get_fit_index(int i);
-        void set_fit_index(int i, int idx);
-        bool get_fit_flag_skip(int i);
-        void set_fit_flag_skip(int i, bool flag);
+        int fit_index(int i);
+        void fit_index(int i, int idx);
+        bool fit_flag_skip(int i);
+        void fit_flag_skip(int i, bool flag);
 
         void set_fit_associate_vec(std::vector<WireCell::Point >& tmp_fit_pt_vec, std::vector<int>& tmp_fit_index, std::vector<bool>& tmp_fit_skip, const IDetectorVolumes::pointer& dv,const std::string& cloud_name="fit");
         
