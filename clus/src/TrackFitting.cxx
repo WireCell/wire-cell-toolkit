@@ -2163,6 +2163,155 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
  }
 
+void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt){
+    if (!m_graph || !segment) return;
+    
+    // Get cluster and transformation info
+    auto cluster = segment->cluster();
+    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+    double cluster_t0 = cluster->get_cluster_t0();
+    
+    // Collect all segments from the graph for comparison
+    std::vector<std::shared_ptr<PR::Segment>> all_segments;
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (edge_bundle.segment && edge_bundle.segment != segment) {
+            all_segments.push_back(edge_bundle.segment);
+        }
+    }
+    
+    // Process U plane (plane 0)
+    std::set<Coord2D> save_2dut;
+    for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++) {
+        const auto& coord = *it;
+        
+        // Convert 2D coordinates to 3D point using existing geometry infrastructure
+        // Get APA/face info from the coordinate
+        int apa = coord.apa;
+        int face = coord.face;
+        
+        // Create a test point in raw coordinates
+        WirePlaneId wpid(kUlayer, face, apa);
+        auto offset_it = wpid_offsets.find(WirePlaneId(kAllLayers, face, apa));
+        auto slope_it = wpid_slopes.find(WirePlaneId(kAllLayers, face, apa));
+        
+        if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) continue;
+        
+        auto offset_t = std::get<0>(offset_it->second);
+        auto offset_u = std::get<1>(offset_it->second);
+        auto slope_x = std::get<0>(slope_it->second);
+        auto slope_yu = std::get<1>(slope_it->second).first;
+        auto slope_zu = std::get<1>(slope_it->second).second;
+        
+        // Convert wire/time coordinates to 3D position
+        double raw_x = (coord.time - offset_t) / slope_x;
+        double wire_pos = coord.wire - offset_u;
+        
+        // Create a test point (simplified - may need proper wire geometry)
+        WireCell::Point test_point(raw_x, 0, 0); // Y,Z will be determined by wire geometry
+        
+        // Get distances to main segment and all other segments
+        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
+        double min_dis_track = std::get<0>(main_distances); // U plane distance
+        
+        double min_dis1_track = 1e9;
+        for (const auto& other_seg : all_segments) {
+            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
+            double temp_dis = std::get<0>(other_distances); // U plane distance
+            if (temp_dis < min_dis1_track) {
+                min_dis1_track = temp_dis;
+            }
+        }
+        
+        // Apply selection criteria
+        if (min_dis_track < min_dis1_track || min_dis_track < 0.3 * units::cm) {
+            save_2dut.insert(*it);
+        }
+    }
+    
+    // Process V plane (plane 1)
+    std::set<Coord2D> save_2dvt;
+    for (auto it = temp_2dvt.associated_2d_points.begin(); it != temp_2dvt.associated_2d_points.end(); it++) {
+        const auto& coord = *it;
+        
+        int apa = coord.apa;
+        int face = coord.face;
+        
+        WirePlaneId wpid(kVlayer, face, apa);
+        auto offset_it = wpid_offsets.find(WirePlaneId(kAllLayers, face, apa));
+        auto slope_it = wpid_slopes.find(WirePlaneId(kAllLayers, face, apa));
+        
+        if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) continue;
+        
+        auto offset_t = std::get<0>(offset_it->second);
+        auto offset_v = std::get<2>(offset_it->second);
+        auto slope_x = std::get<0>(slope_it->second);
+        
+        double raw_x = (coord.time - offset_t) / slope_x;
+        WireCell::Point test_point(raw_x, 0, 0);
+        
+        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
+        double min_dis_track = std::get<1>(main_distances); // V plane distance
+        
+        double min_dis1_track = 1e9;
+        for (const auto& other_seg : all_segments) {
+            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
+            double temp_dis = std::get<1>(other_distances); // V plane distance
+            if (temp_dis < min_dis1_track) {
+                min_dis1_track = temp_dis;
+            }
+        }
+        
+        if (min_dis_track < min_dis1_track || min_dis_track < 0.3 * units::cm) {
+            save_2dvt.insert(*it);
+        }
+    }
+    
+    // Process W plane (plane 2)
+    std::set<Coord2D> save_2dwt;
+    for (auto it = temp_2dwt.associated_2d_points.begin(); it != temp_2dwt.associated_2d_points.end(); it++) {
+        const auto& coord = *it;
+        
+        int apa = coord.apa;
+        int face = coord.face;
+        
+        WirePlaneId wpid(kWlayer, face, apa);
+        auto offset_it = wpid_offsets.find(WirePlaneId(kAllLayers, face, apa));
+        auto slope_it = wpid_slopes.find(WirePlaneId(kAllLayers, face, apa));
+        
+        if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) continue;
+        
+        auto offset_t = std::get<0>(offset_it->second);
+        auto offset_w = std::get<3>(offset_it->second);
+        auto slope_x = std::get<0>(slope_it->second);
+        
+        double raw_x = (coord.time - offset_t) / slope_x;
+        WireCell::Point test_point(raw_x, 0, 0);
+        
+        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
+        double min_dis_track = std::get<2>(main_distances); // W plane distance
+        
+        double min_dis1_track = 1e9;
+        for (const auto& other_seg : all_segments) {
+            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
+            double temp_dis = std::get<2>(other_distances); // W plane distance
+            if (temp_dis < min_dis1_track) {
+                min_dis1_track = temp_dis;
+            }
+        }
+        
+        if (min_dis_track < min_dis1_track || min_dis_track < 0.3 * units::cm) {
+            save_2dwt.insert(*it);
+        }
+    }
+    
+    // Update the input plane data with filtered results
+    temp_2dut.associated_2d_points = save_2dut;
+    temp_2dvt.associated_2d_points = save_2dvt;
+    temp_2dwt.associated_2d_points = save_2dwt;
+}
+
 
  void TrackFitting::examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point, double charge_cut){
 
