@@ -5,6 +5,9 @@
 #include "WireCellClus/PRGraphType.h"
 #include "WireCellUtil/Flagged.h"
 #include "WireCellAux/ParticleInfo.h"
+#include "WireCellIface/IDetectorVolumes.h"
+#include <memory>
+
 
 namespace WireCell::Clus::PR {
 
@@ -57,6 +60,7 @@ namespace WireCell::Clus::PR {
     , public Graphed<edge_descriptor> // may live in a graph
     , public HasCluster<Segment>      // has an associated Cluster*.
     , public HasDPCs<Segment>      // has associated DynamicPointClouds.
+    , public std::enable_shared_from_this<Segment>  // allows shared_from_this()
     {
     public:
 
@@ -104,8 +108,16 @@ namespace WireCell::Clus::PR {
         }
         Segment& dir_weak(bool weak) { m_dir_weak = weak; return *this; }
 
+        // reset fit properties ...
+        void reset_fit_prop(); 
+        int get_fit_index(int i);
+        void set_fit_index(int i, int idx);
+        bool get_fit_flag_skip(int i);
+        void set_fit_flag_skip(int i, bool flag);
 
-
+        void set_fit_associate_vec(std::vector<WireCell::Point >& tmp_fit_pt_vec, std::vector<int>& tmp_fit_index, std::vector<bool>& tmp_fit_skip, const IDetectorVolumes::pointer& dv,const std::string& cloud_name="fit");
+        
+        
     private:
 
         std::vector<WCPoint> m_wcpts;
@@ -115,6 +127,8 @@ namespace WireCell::Clus::PR {
         bool m_dir_weak{false};
 
         std::shared_ptr<Aux::ParticleInfo> m_particle_info{nullptr};
+
+
 
         // Still must consider adding:
         // + pcloud_fit

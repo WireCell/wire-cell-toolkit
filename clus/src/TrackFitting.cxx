@@ -2688,7 +2688,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
  }
 
 void form_map_graph(bool flag_exclusion, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut){
-
+    
 }
 
 

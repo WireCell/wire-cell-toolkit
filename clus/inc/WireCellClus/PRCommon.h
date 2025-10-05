@@ -123,7 +123,7 @@ namespace WireCell::Clus::PR {
 
         int index{-1};
         double range{-1};
-        bool flag_fix{false};
+        bool flag_fix{false};        
 
         // Explicitly NOT defined:
 

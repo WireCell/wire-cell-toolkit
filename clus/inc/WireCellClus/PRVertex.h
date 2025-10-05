@@ -61,11 +61,24 @@ namespace WireCell::Clus::PR {
         const Fit& fit() const { return m_fit; }
         Fit& fit() { return m_fit; }
 
+        
 
         /// Chainable setters
-
         Vertex& wcpt(const WCPoint& wcpt) { m_wcpt = wcpt; return *this; }
         Vertex& fit(const Fit& fit) { m_fit = fit; return *this; }
+
+        // index and range ...
+        void set_fit_index(int idx) { m_fit.index = idx; }
+        int get_fit_index() const { return m_fit.index; }
+        void set_fit_range(double range) { m_fit.range = range; }
+        double get_fit_range() const { return m_fit.range; }
+
+        //
+        void reset_fit_prop(){
+            // Clear the kFitFix flag using keep_flags with inverted mask
+            this->keep_flags(static_cast<VertexFlags>(~static_cast<int>(VertexFlags::kFitFix)));
+            m_fit.reset();
+        }
 
         // Distance from "initial point" to fit point.
         double fit_distance() {
@@ -80,6 +93,7 @@ namespace WireCell::Clus::PR {
 
         WCPoint m_wcpt;         // "initial" point.
         Fit m_fit;
+
 
     };
 
