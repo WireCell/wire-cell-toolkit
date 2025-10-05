@@ -137,7 +137,7 @@ namespace WireCell::Clus {
          */
         double get_parameter(const std::string& name) const;
 
-
+        // single track fitting utilizes the segments ... 
         void add_segment(std::shared_ptr<PR::Segment> segment);
         /**
          * Get the set of segments currently stored in this TrackFitting instance.
@@ -146,6 +146,12 @@ namespace WireCell::Clus {
         std::set<std::shared_ptr<PR::Segment>> get_segments() const { return m_segments; }
         void clear_segments();
  
+        // multi-track fitting utilized the Graph ... 
+        void add_graph(std::shared_ptr<PR::Graph> graph);
+        std::shared_ptr<PR::Graph> get_graph() const { return m_graph; }
+        void clear_graph();
+
+
 
         // collect charge
         void prepare_data();
@@ -165,6 +171,8 @@ namespace WireCell::Clus {
         std::vector<WireCell::Point> examine_end_ps_vec(std::shared_ptr<PR::Segment> segment, const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end);
 
         void organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit);
+
+
     
 
                 /// Internal coordinate (can be more complex)
@@ -386,6 +394,9 @@ namespace WireCell::Clus {
 
         // input segment
         std::set<std::shared_ptr<PR::Segment> > m_segments;
+
+        // input graph 
+        std::shared_ptr<PR::Graph> m_graph{nullptr};
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION

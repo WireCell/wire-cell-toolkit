@@ -213,11 +213,55 @@ double TrackFitting::get_parameter(const std::string& name) const {
     }
 }
 
+
+
+void TrackFitting::clear_graph(){
+    m_graph = nullptr;
+    m_clusters.clear();
+    m_blobs.clear(); 
+}
+
+
 void TrackFitting::clear_segments(){
     m_segments.clear();
     m_clusters.clear();
     m_blobs.clear(); 
 }
+
+void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
+    m_graph = graph;
+
+    if (!m_graph){
+        return;
+    }
+
+    // Get edges from the graph and extract segments from them
+    auto edge_range = boost::edges(*m_graph);
+    std::set<std::shared_ptr<PR::Segment>> segments_set;
+    
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (edge_bundle.segment) {
+            segments_set.insert(edge_bundle.segment);
+            m_clusters.insert(edge_bundle.segment->cluster());
+        }
+    }
+
+    if (m_grouping == nullptr && !segments_set.empty()){
+        auto first_segment = *segments_set.begin();
+        m_grouping = first_segment->cluster()->grouping();
+        BuildGeometry();
+    }
+
+    for (auto& cluster: m_clusters){
+        for (auto& blob: cluster->children()){
+            m_blobs.insert(blob);
+        }
+    }
+
+    std::cout << "TrackFitting: Added graph with " << segments_set.size() << " segments." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
+}
+
 
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
