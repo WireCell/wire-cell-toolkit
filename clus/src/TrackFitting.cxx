@@ -4796,6 +4796,156 @@ void TrackFitting::recover_original_charge_data(){
     m_orig_charge_data.clear();
 }
 
+std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position){
+    // Initialize results vector - returns sharing ratios for each 3D position
+    std::vector<std::vector<double>> results(n_3d_positions);
+
+    // Initialize count vector for 2D measurements
+    std::vector<int> count_2d(n_2d_measurements, 1);
+    
+    // Maps for storing relationships between 2D and 3D indices
+    std::map<int, std::set<int>> map_2d_to_3d;
+    std::map<int, std::set<int>> map_3d_to_2d;
+    std::map<std::pair<int, int>, double> map_pair_values;
+    
+    // Build mapping structures by iterating through sparse matrix
+    for (int k = 0; k < response_matrix_transpose.outerSize(); ++k) {
+        int count = 0;
+        
+        for (Eigen::SparseMatrix<double>::InnerIterator it(response_matrix_transpose, k); it; ++it) {
+            int row = it.row();
+            int col = it.col();
+            double value = it.value();
+
+            // Build 2D to 3D mapping
+            if (map_2d_to_3d.find(col) != map_2d_to_3d.end()) {
+                map_2d_to_3d[col].insert(row);
+            } else {
+                std::set<int> temp_set;
+                temp_set.insert(row);
+                map_2d_to_3d[col] = temp_set;
+            }
+            
+            // Build 3D to 2D mapping  
+            if (map_3d_to_2d.find(row) != map_3d_to_2d.end()) {
+                map_3d_to_2d[row].insert(col);
+            } else {
+                std::set<int> temp_set;
+                temp_set.insert(col);
+                map_3d_to_2d[row] = temp_set;
+            }
+            
+            // Store pair values for later lookup
+            map_pair_values[std::make_pair(row, col)] = value;
+            count++;
+        }
+        
+        count_2d.at(k) = count;
+    }
+    
+    // Calculate average count for 3D positions
+    std::vector<std::pair<double, int>> average_count(n_3d_positions);
+    for (auto it = map_3d_to_2d.begin(); it != map_3d_to_2d.end(); ++it) {
+        int row = it->first;
+        double sum1 = 0.0;
+        double sum2 = 0.0;
+        int flag = 0;
+        
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
+            int col = *it1;
+            double val = map_pair_values[std::make_pair(row, col)];
+            sum1 += count_2d[col] * val;
+            sum2 += val;
+            if (count_2d[col] > 2) {
+                flag = 1;
+            }
+        }
+        average_count.at(row) = std::make_pair(sum1 / sum2, flag);
+    }
+    
+    // Update 2D measurement weights based on 3D position sharing
+    for (auto it = map_2d_to_3d.begin(); it != map_2d_to_3d.end(); ++it) {
+        int col = it->first;
+        double sum1 = 0.0;
+        double sum2 = 0.0;
+        int flag = 0;
+        
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
+            int row = *it1;
+            double val = map_pair_values[std::make_pair(row, col)];
+            if (average_count.at(row).second == 1) {
+                flag = 1;
+            }
+            sum1 += average_count.at(row).first * val;
+            sum2 += val;
+        }
+        
+        // Adjust weight matrix coefficients based on sharing criteria
+        if (flag == 1 && weight_matrix.coeffRef(col, col) == 1 && sum1 > cut_position * sum2) {
+            weight_matrix.coeffRef(col, col) = std::pow(1.0 / (sum1 / sum2 - cut_position + 1), 2);
+        }
+    }
+    
+    // Calculate sharing ratios between connected 3D positions (key difference from regular version)
+    for (auto it = map_3d_to_2d.begin(); it != map_3d_to_2d.end(); ++it) {
+        int row = it->first;
+        
+        // Skip if row is out of bounds for connected_vec
+        if (row >= static_cast<int>(connected_vec.size())) continue;
+        
+        // For each connected neighbor defined in connected_vec
+        for (size_t i = 0; i < connected_vec.at(row).size(); i++) {
+            double sum[2] = {0.0, 0.0};
+            
+            // Find the connected neighbor
+            auto it1 = map_3d_to_2d.find(connected_vec.at(row).at(i));
+            
+            // Count total connections for current 3D position
+            for (auto it3 = it->second.begin(); it3 != it->second.end(); ++it3) {
+                sum[0] += 1.0;  // Total count (using 1 instead of val as in WCP)
+            }
+            
+            // Count shared connections with this connected neighbor
+            if (it1 != map_3d_to_2d.end()) {
+                std::vector<int> common_results(it->second.size());
+                auto it3 = std::set_intersection(
+                    it->second.begin(), it->second.end(),
+                    it1->second.begin(), it1->second.end(),
+                    common_results.begin()
+                );
+                common_results.resize(it3 - common_results.begin());
+                
+                for (auto it4 = common_results.begin(); it4 != common_results.end(); ++it4) {
+                    sum[1] += 1.0;  // Shared count (using 1 instead of val as in WCP)
+                }
+            }
+            
+            // Calculate sharing ratio for this connected neighbor
+            results.at(row).push_back(sum[1] / (sum[0] + 1e-9));
+        }
+    }
+    
+    // Ensure all result vectors have the correct size
+    for (size_t i = 0; i < results.size(); i++) {
+        if (i < connected_vec.size() && results.at(i).size() != connected_vec.at(i).size()) {
+            results.at(i).resize(connected_vec.at(i).size(), 0.0);
+        }
+    }
+    
+    // Convert to the expected return type (pair format for compatibility)
+    // Note: The WCP version returns vector<vector<double>>, but our signature expects vector<pair<double,double>>
+    // We'll return the first two sharing ratios as a pair, or (0,0) if less than 2 connections
+    std::vector<std::pair<double, double>> pair_results(results.size());
+    for (size_t i = 0; i < results.size(); i++) {
+        double first = (results[i].size() > 0) ? results[i][0] : 0.0;
+        double second = (results[i].size() > 1) ? results[i][1] : 0.0;
+        pair_results[i] = std::make_pair(first, second);
+    }
+    
+    return pair_results;
+}
+
+
 std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
     Eigen::SparseMatrix<double>& weight_matrix,
     const Eigen::SparseMatrix<double>& response_matrix_transpose,

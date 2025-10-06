@@ -331,6 +331,7 @@ namespace WireCell::Clus {
          *         Each pair contains (previous_neighbor_ratio, next_neighbor_ratio)
          */
         std::vector<std::pair<double, double>> calculate_compact_matrix(Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
+        std::vector<std::pair<double, double>> calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
 
         void dQ_dx_fill(double dis_end_point_ext=0.45*units::cm);
 
