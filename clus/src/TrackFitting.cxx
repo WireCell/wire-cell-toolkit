@@ -3542,8 +3542,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         for (size_t i = 0; i < examined_ps.size(); i++) {
             PR::Fit fit;
             fit.point = examined_ps[i];
-            fit.index = (i < init_indices.size()) ? init_indices[i] : -1;
-            fit.flag_fix = (i < init_fit_skip.size()) ? init_fit_skip[i] : false;
+            fit.index = init_indices[i];
+            fit.flag_fix = init_fit_skip[i];
             
             // Calculate 2D projections
             auto test_wpid = m_dv->contained_by(examined_ps[i]);
