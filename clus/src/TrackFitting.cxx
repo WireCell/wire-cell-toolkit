@@ -3015,7 +3015,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 }
 
 
-WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw){
+WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::shared_ptr<PR::Segment> segment, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw){
     // Check if the point index exists in the 3D to 2D mapping
     auto point_it = m_3d_to_2d.find(i);
     if (point_it == m_3d_to_2d.end()) {
@@ -3040,10 +3040,17 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::map
     Eigen::SparseMatrix<double> RV(n_2D_v, 3);
     Eigen::SparseMatrix<double> RW(n_2D_w, 3);
     
+    auto test_wpid = m_dv->contained_by(init_p);
+    auto cluster = segment->cluster();
+    auto cluster_t0 = cluster->get_cluster_t0();
+    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+    // Initialization with its raw position
+    auto p_raw = transform->backward(init_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+
     // Initialize with input point
-    temp_pos_3D_init(0) = init_p.x();
-    temp_pos_3D_init(1) = init_p.y();
-    temp_pos_3D_init(2) = init_p.z();
+    temp_pos_3D_init(0) = p_raw.x();
+    temp_pos_3D_init(1) = p_raw.y();
+    temp_pos_3D_init(2) = p_raw.z();
     
     // Initialize data vectors to zero
     data_u_2D.setZero();
@@ -3215,20 +3222,366 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::map
     solver.compute(A);
     temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
     
-    WireCell::Point final_p;
+    WireCell::Point final_p_raw, final_p;
     
     // Check if solver succeeded
     if (std::isnan(solver.error())) {
         // Return initialization if solver failed
-        final_p = WireCell::Point(temp_pos_3D_init(0), temp_pos_3D_init(1), temp_pos_3D_init(2));
+        final_p_raw = WireCell::Point(temp_pos_3D_init(0), temp_pos_3D_init(1), temp_pos_3D_init(2));
     } else {
         // Return fitted result
-        final_p = WireCell::Point(temp_pos_3D(0), temp_pos_3D(1), temp_pos_3D(2));
+        final_p_raw = WireCell::Point(temp_pos_3D(0), temp_pos_3D(1), temp_pos_3D(2));
     }
-    
+
+    final_p = transform->forward(final_p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
+
     return final_p;
 }
 
+void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma){
+    if (!m_graph) return;
+    
+    // create pss_vec ... 
+    std::map<int, std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> map_index_pss;
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (!edge_bundle.segment) continue;
+        auto segment = edge_bundle.segment;
+        const auto& fits = segment->fits();
+        for (const auto& fit : fits) {
+            int idx = fit.index;
+            map_index_pss[idx] = std::make_pair(fit.point, segment);
+        }
+    }
+
+
+    // Create charge division factor maps for each APA/face combination
+    // Structure: [apa/face] -> [time/wire/3D_index] -> factor
+    std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>> map_Udiv_fac;
+    std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>> map_Vdiv_fac;
+    std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>> map_Wdiv_fac;
+
+    // Equal division - same as in trajectory_fit
+    for (auto it = m_2d_to_3d.begin(); it != m_2d_to_3d.end(); it++) {
+        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
+            WirePlaneLayer_t plane = it->first.plane;
+            int apa = it->first.apa;
+            int face = it->first.face;
+            int time = it->first.time;
+            int wire = it->first.wire;
+            
+            auto apa_face_key = std::make_pair(apa, face);
+            auto div_key = std::make_tuple(time, wire, *it1);
+            
+            if (plane == WirePlaneLayer_t::kUlayer) {
+                map_Udiv_fac[apa_face_key][div_key] = 1.0 / it->second.size();
+            } else if (plane == WirePlaneLayer_t::kVlayer) {
+                map_Vdiv_fac[apa_face_key][div_key] = 1.0 / it->second.size();
+            } else if (plane == WirePlaneLayer_t::kWlayer) {
+                map_Wdiv_fac[apa_face_key][div_key] = 1.0 / it->second.size();
+            }
+        }
+    }
+
+    if (charge_div_method == 2) {
+        // Use div_sigma for Gaussian weighting
+        // Process each plane separately
+        std::map<WirePlaneLayer_t, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>*> plane_maps = {
+            {WirePlaneLayer_t::kUlayer, &map_Udiv_fac},
+            {WirePlaneLayer_t::kVlayer, &map_Vdiv_fac},
+            {WirePlaneLayer_t::kWlayer, &map_Wdiv_fac}
+        };
+
+        for (auto& [plane, div_fac_map] : plane_maps) {
+            // Calculate Gaussian weights
+            for (auto& [apa_face, coord_idx_fac] : *div_fac_map) {
+                int apa = apa_face.first;
+                int face = apa_face.second; 
+
+                WirePlaneId wpid(kAllLayers, face, apa);
+                auto offset_it = wpid_offsets.find(wpid);
+                auto slope_it = wpid_slopes.find(wpid);
+                auto geom_it = wpid_geoms.find(wpid);
+
+                auto offset_t = std::get<0>(offset_it->second);
+                auto offset_u = std::get<1>(offset_it->second);
+                auto offset_v = std::get<2>(offset_it->second);
+                auto offset_w = std::get<3>(offset_it->second);
+                auto slope_x = std::get<0>(slope_it->second);
+                auto slope_yu = std::get<1>(slope_it->second).first;
+                auto slope_zu = std::get<1>(slope_it->second).second;
+                auto slope_yv = std::get<2>(slope_it->second).first;
+                auto slope_zv = std::get<2>(slope_it->second).second;
+                auto slope_yw = std::get<3>(slope_it->second).first;
+                auto slope_zw = std::get<3>(slope_it->second).second;
+
+                auto time_tick_width = std::get<0>(geom_it->second);
+                auto pitch_u = std::get<1>(geom_it->second);
+                auto pitch_v = std::get<2>(geom_it->second);
+                auto pitch_w = std::get<3>(geom_it->second);
+
+               
+                // double sum = 0;
+                std::map<std::pair<int, int>, double> map_tw_sum;
+
+                // Calculate weights
+                for (auto& [coord_idx, fac] : coord_idx_fac) {
+                    int time = std::get<0>(coord_idx);
+                    int wire = std::get<1>(coord_idx);
+                    int idx = std::get<2>(coord_idx);
+
+                    auto pss_vec_it = map_index_pss.find(idx);
+                    if (pss_vec_it == map_index_pss.end()) continue;
+
+                    auto segment = pss_vec_it->second.second;
+                    auto cluster = segment->cluster();
+                    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+                    double cluster_t0 = cluster->get_cluster_t0();
+
+                    auto test_wpid = m_dv->contained_by(pss_vec_it->second.first);
+                    // Initialization with its raw position
+                    auto p_raw = transform->backward(pss_vec_it->second.first, cluster_t0, test_wpid.face(), test_wpid.apa());
+
+                    double central_t = slope_x * p_raw.x() + offset_t;
+                    double central_ch = 0;
+                        
+                    if (plane == WirePlaneLayer_t::kUlayer) {
+                        central_ch = slope_yu * p_raw.y() + slope_zu * p_raw.z() + offset_u;
+                    } else if (plane == WirePlaneLayer_t::kVlayer) {
+                        central_ch = slope_yv * p_raw.y() + slope_zv * p_raw.z() + offset_v;
+                    } else if (plane == WirePlaneLayer_t::kWlayer) {
+                        central_ch = slope_yw * p_raw.y() + slope_zw * p_raw.z() + offset_w;
+                    }
+                        
+                    double pitch = (plane == WirePlaneLayer_t::kUlayer) ? pitch_u :
+                                    (plane == WirePlaneLayer_t::kVlayer) ? pitch_v : pitch_w;
+                        
+                    double factor = exp(-0.5 * (pow((central_t - time) * time_tick_width, 2) + pow((central_ch - wire) * pitch, 2)) / pow(div_sigma, 2));
+
+                    // std::cout << plane << " " << time << " " << wire << " " << idx << " " << central_t << " " << central_ch << " " << factor << std::endl;
+
+                    fac = factor;
+                    // sum += factor;
+
+                    auto [it, inserted] = map_tw_sum.try_emplace(std::make_pair(time, wire), factor);
+                    if (!inserted) {
+                        it->second += factor;
+                    }
+
+                }
+
+                // Normalize weights
+                for (auto& [coord_idx, fac] : coord_idx_fac) {
+                    double sum = map_tw_sum[std::make_pair(std::get<0>(coord_idx), std::get<1>(coord_idx))];
+                    fac /= sum;
+                    // std::cout << plane << " " << std::get<0>(coord_idx) << " " << std::get<1>(coord_idx) << " " << fac << " " << sum << std::endl;
+                }
+            }
+        }
+    }
+    
+    // Process vertices first
+    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        auto vd = *vp.first;
+        auto& v_bundle = (*m_graph)[vd];
+        if (!v_bundle.vertex) continue;
+        
+        auto vertex = v_bundle.vertex;
+        int i = vertex->fit_index();
+        auto segment = map_index_pss[i].second;
+        auto cluster = segment->cluster();
+        auto cluster_t0 = cluster->get_cluster_t0();
+        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+
+        bool flag_fit_fix = vertex->flag_fix();
+        WireCell::Point init_p = vertex->fit().point;
+        
+        if (!flag_fit_fix && i >= 0) {
+            // Get geometry parameters for this point
+            auto test_wpid = m_dv->contained_by(init_p);
+            if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+            
+            WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+            
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) continue;
+            
+            auto offset_t = std::get<0>(offset_it->second);
+            auto offset_u = std::get<1>(offset_it->second);
+            auto offset_v = std::get<2>(offset_it->second);
+            auto offset_w = std::get<3>(offset_it->second);
+            auto slope_x = std::get<0>(slope_it->second);
+            auto slope_yu = std::get<1>(slope_it->second).first;
+            auto slope_zu = std::get<1>(slope_it->second).second;
+            auto slope_yv = std::get<2>(slope_it->second).first;
+            auto slope_zv = std::get<2>(slope_it->second).second;
+            auto slope_yw = std::get<3>(slope_it->second).first;
+            auto slope_zw = std::get<3>(slope_it->second).second;
+            
+            // Fit the vertex point
+            WireCell::Point fitted_p = fit_point(init_p, i, segment, map_Udiv_fac, map_Vdiv_fac, map_Wdiv_fac,
+                                                offset_t, slope_x, offset_u, slope_yu, slope_zu,
+                                                offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
+            
+            // Update vertex with fitted position and projections
+            auto& vertex_fit = vertex->fit();
+            vertex_fit.point = fitted_p;
+            vertex_fit.index = i;
+
+            // Store 2D projections (following WCP pattern with offsets)
+            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0, test_wpid.apa(), test_wpid.face());
+            vertex_fit.pu = offset_u  + (slope_yu * fitted_p_raw.y() + slope_zu * fitted_p_raw.z());
+            vertex_fit.pv = offset_v  + (slope_yv * fitted_p_raw.y() + slope_zv * fitted_p_raw.z());
+            vertex_fit.pw = offset_w  + (slope_yw * fitted_p_raw.y() + slope_zw * fitted_p_raw.z());
+            vertex_fit.pt = offset_t  + slope_x * fitted_p_raw.x();
+
+            vertex_fit.paf = std::make_pair(test_wpid.apa(), test_wpid.face());
+        }
+    }
+    
+    // Process segments (tracks)
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (!edge_bundle.segment) continue;
+        
+        auto segment = edge_bundle.segment;
+        auto cluster = segment->cluster();
+        auto cluster_t0 = cluster->get_cluster_t0();
+        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+        auto& fits = segment->fits();
+        if (fits.empty()) continue;
+        
+        // Get start and end vertices
+        auto vd1 = boost::source(*e_it, *m_graph);
+        auto vd2 = boost::target(*e_it, *m_graph);
+        auto& v_bundle1 = (*m_graph)[vd1];
+        auto& v_bundle2 = (*m_graph)[vd2];
+        
+        std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
+        if (v_bundle1.vertex && v_bundle2.vertex) {
+            // Determine which vertex is start and which is end based on fit indices
+            if (v_bundle1.vertex->fit_index() == 0 || 
+                (v_bundle1.vertex->fit_index() < v_bundle2.vertex->fit_index() && v_bundle1.vertex->fit_index() >= 0)) {
+                start_v = v_bundle1.vertex;
+                end_v = v_bundle2.vertex;
+            } else {
+                start_v = v_bundle2.vertex;
+                end_v = v_bundle1.vertex;
+            }
+        }
+        
+        // Get initial points and fit info
+        std::vector<WireCell::Point> init_ps;
+        std::vector<int> init_indices;
+        std::vector<bool> init_fit_skip;
+        
+        for (const auto& fit : fits) {
+            init_ps.push_back(fit.point);
+            init_indices.push_back(fit.index);
+            init_fit_skip.push_back(fit.flag_fix);
+        }
+        
+        if (init_ps.empty()) continue;
+        
+        // Set endpoint positions from fitted vertices
+        if (start_v) init_ps.front() = start_v->fit().point;
+        if (end_v) init_ps.back() = end_v->fit().point;
+        
+        std::vector<WireCell::Point> final_ps;
+        
+        // Fit each point in the segment
+        for (size_t i = 0; i < init_ps.size(); i++) {
+            if (i == 0) {
+                // Use start vertex position
+                final_ps.push_back(start_v ? start_v->fit().point : init_ps[i]);
+            } else if (i + 1 == init_ps.size()) {
+                // Use end vertex position  
+                final_ps.push_back(end_v ? end_v->fit().point : init_ps[i]);
+            } else {
+                WireCell::Point temp_p = init_ps[i];
+                
+                if (!init_fit_skip[i] && init_indices[i] >= 0) {
+                    // Get geometry parameters
+                    auto test_wpid = m_dv->contained_by(init_ps[i]);
+                    if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
+                        WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
+                        auto offset_it = wpid_offsets.find(wpid);
+                        auto slope_it = wpid_slopes.find(wpid);
+                        
+                        if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
+                            auto offset_t = std::get<0>(offset_it->second);
+                            auto offset_u = std::get<1>(offset_it->second);
+                            auto offset_v = std::get<2>(offset_it->second);
+                            auto offset_w = std::get<3>(offset_it->second);
+                            auto slope_x = std::get<0>(slope_it->second);
+                            auto slope_yu = std::get<1>(slope_it->second).first;
+                            auto slope_zu = std::get<1>(slope_it->second).second;
+                            auto slope_yv = std::get<2>(slope_it->second).first;
+                            auto slope_zv = std::get<2>(slope_it->second).second;
+                            auto slope_yw = std::get<3>(slope_it->second).first;
+                            auto slope_zw = std::get<3>(slope_it->second).second;
+                            
+                            // Fit the point
+                            temp_p = fit_point(init_ps[i], init_indices[i], segment, map_Udiv_fac, map_Vdiv_fac, map_Wdiv_fac,
+                                             offset_t, slope_x, offset_u, slope_yu, slope_zu,
+                                             offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
+                        }
+                    }
+                }
+                final_ps.push_back(temp_p);
+            }
+        }
+        
+        // Apply trajectory examination/smoothing
+        std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps);
+        
+        // Update segment with fitted results
+        std::vector<PR::Fit> new_fits;
+        for (size_t i = 0; i < examined_ps.size(); i++) {
+            PR::Fit fit;
+            fit.point = examined_ps[i];
+            fit.index = (i < init_indices.size()) ? init_indices[i] : -1;
+            fit.flag_fix = (i < init_fit_skip.size()) ? init_fit_skip[i] : false;
+            
+            // Calculate 2D projections
+            auto test_wpid = m_dv->contained_by(examined_ps[i]);
+            if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
+                WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
+                auto offset_it = wpid_offsets.find(wpid);
+                auto slope_it = wpid_slopes.find(wpid);
+                
+                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0, test_wpid.apa(), test_wpid.face());
+                fit.paf = std::make_pair(test_wpid.apa(), test_wpid.face());
+
+                if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
+                    auto offset_t = std::get<0>(offset_it->second);
+                    auto offset_u = std::get<1>(offset_it->second);
+                    auto offset_v = std::get<2>(offset_it->second);
+                    auto offset_w = std::get<3>(offset_it->second);
+                    auto slope_x = std::get<0>(slope_it->second);
+                    auto slope_yu = std::get<1>(slope_it->second).first;
+                    auto slope_zu = std::get<1>(slope_it->second).second;
+                    auto slope_yv = std::get<2>(slope_it->second).first;
+                    auto slope_zv = std::get<2>(slope_it->second).second;
+                    auto slope_yw = std::get<3>(slope_it->second).first;
+                    auto slope_zw = std::get<3>(slope_it->second).second;
+
+                    fit.pu = offset_u + (slope_yu * examined_p_raw.y() + slope_zu * examined_p_raw.z());
+                    fit.pv = offset_v + (slope_yv * examined_p_raw.y() + slope_zv * examined_p_raw.z());
+                    fit.pw = offset_w + (slope_yw * examined_p_raw.y() + slope_zw * examined_p_raw.z());
+                    fit.pt = offset_t + slope_x * examined_p_raw.x();
+                }
+            }
+            
+            new_fits.push_back(fit);
+        }
+        
+        // Update segment fits
+        segment->fits() = new_fits;
+    }
+}
 
 
 // track trajectory fitting // should fit all APA ...
