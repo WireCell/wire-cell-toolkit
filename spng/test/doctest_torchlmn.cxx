@@ -13,6 +13,7 @@ using namespace WireCell::SPNG::LMN;
 
 namespace {
     // Helper function to create a 1D complex tensor from a std::vector
+    static
     torch::Tensor create_complex_tensor(const std::vector<std::complex<float>>& data) {
         // LibTorch requires complex tensors to be created from float/double data
         // of shape [N, 2] if initialized from vector, or directly from complex vector data
@@ -26,8 +27,10 @@ namespace {
     }
 
     // Helper function to check if two tensors are close, printing debug info if not.
-    bool check_tensor_close(const torch::Tensor& actual, const torch::Tensor& expected, double atol = 1e-6) {
-        if (!torch::allclose(actual, expected, atol)) {
+    static
+    bool check_tensor_close(const torch::Tensor& actual, const torch::Tensor& expected,
+                            double rtol = 1e-5, double atol = 1e-8) {
+        if (!torch::allclose(actual, expected, rtol, atol)) {
             std::cout << "--- TENSOR MISMATCH ---" << std::endl;
             std::cout << "Expected shape: " << expected.sizes() << std::endl;
             std::cout << "Actual shape: " << actual.sizes() << std::endl;
@@ -36,6 +39,7 @@ namespace {
             
             // Check element-wise differences
             auto diff = (actual - expected).abs();
+            std::cout << "Diff:\n" << diff << std::endl;
             std::cout << "Max absolute difference: " << diff.max().item<double>() << std::endl;
             //CHECK(false); // Fail the test explicitly
             return false;        // make doctest report fail site
@@ -72,8 +76,32 @@ TEST_SUITE("LMN Math Helpers") {
         // No rational solution within tolerance (should fail or return 0 if error is caught)
         // Since the implementation uses raise<ValueError>, we check the catch block.
         CHECK_THROWS_AS(rational(M_PI, 1.0, 1e-8), ValueError);
+
+        CHECK(rational(1.0, 2.0) == 2);
+        CHECK(rational(1.0, 0.5) == 1);
     }
     
+    TEST_CASE("nhalf") {
+        // Odd size N=5 (DC, P1, P2, N2, N1) -> (5-1)/2 = 2
+        CHECK(nhalf(5) == 2); 
+        
+        // Even size N=4 (DC, P1, NQ, N1) -> (4-2)/2 = 1
+        CHECK(nhalf(4) == 1); 
+
+        // Size N=2 (DC, N1) -> (2-2)/2 = 0
+        CHECK(nhalf(2) == 0);
+    }
+
+    TEST_CASE("nbigger") {
+        // N is already divisible by Nrat
+        CHECK(nbigger(10, 5) == 10);
+        
+        // N needs to be increased
+        CHECK(nbigger(11, 5) == 15);
+        CHECK(nbigger(1, 10) == 10);
+
+        CHECK(nbigger(20, 1) == 20);
+    }
 }
 
 TEST_SUITE("LMN Resize (Time Domain)") {
@@ -252,3 +280,139 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         CHECK(check_tensor_close(actual, expected));
     }
 }
+
+// Helper to create a simple real-valued signal
+static
+torch::Tensor create_sine_wave(int64_t N, float frequency_cycles, torch::Dtype dtype = torch::kFloat) {
+    auto t = torch::arange(N, dtype);
+    auto phase = (2 * M_PI * frequency_cycles / N) * t;
+    return torch::sin(phase).to(dtype);
+}
+
+TEST_SUITE("LMN Resample Interval (Composite)") {
+
+    // Helper to verify the output size and check if the complex components were handled correctly
+    bool check_resample_output(const torch::Tensor& input, const torch::Tensor& output, 
+                               int64_t expected_size, int64_t axis) {
+        // double bounce to return bool and get call site 
+        CHECK(output.dim() == input.dim());
+        if (output.dim() != input.dim()) return false;
+        CHECK(output.size(axis) == expected_size);
+        if (output.size(axis) != expected_size) return false;
+        CHECK(output.is_floating_point());
+        if (! output.is_floating_point()) return false;
+        return true;
+    }
+
+    TEST_CASE("Upsampling: Ts=1.0 to Tr=0.5 (2x Up)") {
+        double Ts = 1.0;
+        double Tr = 0.5; // 2x upsampling (Nr = 2 * Ns)
+
+        // 1. Create a signal: 10 samples, more than 1 full cycle.  Note, have
+        // to be careful with later checks due to aliasing in the initial
+        // sampling that fails to hit sample peak/valley
+        int64_t Ns = 10;
+        torch::Tensor input = create_sine_wave(Ns, 1.1f); // [10]
+        
+        // Expected intermediate rational factors:
+        // rational(1.0, 0.5) = 1.0. R_size_factor = 1.
+        // N_rat = nbigger(10, 1) = 10.
+        // Nr = 10 * (1.0 / 0.5) = 20.
+
+        int64_t Nr_expected = 20;
+        
+        torch::Tensor actual = resample_interval(input, Ts, Tr, 0);
+        CHECK(check_resample_output(input, actual, Nr_expected, 0));
+        
+        // Check numerical closeness by comparing sampled values
+        // A simple check: the upsampled signal should retain the same peak/trough values
+        CHECK(torch::max(actual).item<float>() == doctest::Approx(torch::max(input).item<float>()));
+        CHECK(torch::min(actual).item<float>() == doctest::Approx(torch::min(input).item<float>()));
+
+        // Also check edge point: the 0th sample should remain 0 (sine wave start)
+        CHECK(actual[0].item<float>() == doctest::Approx(0.0f).epsilon(1e-4));
+    }
+
+    TEST_CASE("Downsampling: Ts=1.0 to Tr=2.0 (2x Down)") {
+        double Ts = 1.0;
+        double Tr = 2.0; // 2x downsampling (Nr = 0.5 * Ns)
+
+        // 1. Create a signal: 20 samples, at least 2 full cycles
+        int64_t Ns = 20;
+        float num_cycles = 2.0f;
+        torch::Tensor input = create_sine_wave(Ns, num_cycles); // [20]
+
+        // Rational factors:
+        // rational(1.0, 2.0) = 1.0. R_size_factor = 1.
+        // N_rat = nbigger(20, 1) = 20.
+        // Nr = 20 * (1.0 / 2.0) = 10.
+        
+        int64_t Nr_expected = 10;
+        
+        torch::Tensor actual = resample_interval(input, Ts, Tr, 0);
+        CHECK(check_resample_output(input, actual, Nr_expected, 0));
+
+        // Downsampling might cause aliasing if not carefully chosen, 
+        // but since we used 2 cycles in 20 steps, the resulting 10 steps 
+        // should capture exactly 1 cycle (perfect downsampling).
+        
+        // Verify output frequency (1 cycle in 10 steps)
+        torch::Tensor expected_1cycle = create_sine_wave(10, num_cycles);
+        CHECK(check_tensor_close(actual, expected_1cycle, 1e-2, 1e-5));
+    }
+    
+    TEST_CASE("Non-Integer Ratio Upsampling: Ts=3.0 to Tr=2.0 (1.5x)") {
+        double Ts = 3.0;
+        double Tr = 2.0; // 1.5x upsampling (Nr = 1.5 * Ns)
+
+        // Ns = 10.
+        int64_t Ns = 10;
+        float num_cycles = 1.0f;
+        torch::Tensor input = create_sine_wave(Ns, num_cycles);
+
+        // Rational factors:
+        // rational(3.0, 2.0) = 2. R_size_factor = 2.
+        // N_rat = nbigger(10, 2) = 10.
+        // Nr = 10 * (3.0 / 2.0) = 15.
+        
+        int64_t Nr_expected = 15;
+        
+        torch::Tensor actual = resample_interval(input, Ts, Tr, 0);
+        CHECK(check_resample_output(input, actual, Nr_expected, 0));
+
+        // std::cout << "Input:\n" << input << "\n";
+        // std::cout << "Resampled:\n" << actual << "\n";
+
+        // Peak will not be sampled in both cases so the comparison has to be sloppy.
+        CHECK(torch::max(actual).item<float>() == doctest::Approx(torch::max(input).item<float>()).epsilon(1e-1));
+    }
+
+    TEST_CASE("Need for Rational Padding: Ns=9, Ts=3.0 to Tr=2.0") {
+        double Ts = 3.0;
+        double Tr = 2.0; 
+
+        // Ns = 9.
+        int64_t Ns = 9;
+        float num_cycles = 1.0f;
+        torch::Tensor input = create_sine_wave(Ns, num_cycles);
+
+        // Rational factors:
+        // R_size_factor = 2.
+        // N_rat = nbigger(9, 2) = 10. (Padding required)
+        // Nr = 10 * (3.0 / 2.0) = 15.
+        
+        //int64_t N_rat_expected = 10;
+        int64_t Nr_expected = 15;
+        
+        // We cannot easily test N_rat directly, but we can verify the final size.
+        torch::Tensor actual = resample_interval(input, Ts, Tr, 0);
+        CHECK(check_resample_output(input, actual, Nr_expected, 0));
+        
+        // std::cout << "Input:\n" << input << "\n";
+        // std::cout << "Resampled:\n" << actual << "\n";
+
+        // Peak will not be sampled in both cases so the comparison has to be sloppy.
+        CHECK(torch::max(actual).item<float>() == doctest::Approx(torch::max(input).item<float>()).epsilon(1e-1));
+    }
+}
+

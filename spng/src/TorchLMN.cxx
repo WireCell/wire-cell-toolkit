@@ -18,18 +18,6 @@ namespace WireCell::SPNG::LMN {
         return in.size(axis);
     }
 
-    /// Return the "half size" number of samples in a spectrum of full size N.
-    /// This excludes the "zero frequency" sample and the "Nyquist bin", if one
-    /// exists.
-    static
-    size_t nhalf(size_t N) {
-        if (N%2) {
-            return (N-1)/2;     // odd
-        }
-        return (N-2)/2;         // even
-    }
-
-
     double gcd(double a, double b, double eps)
     {
         // Ensure inputs are non-negative for standard GCD algorithm interpretation
@@ -83,10 +71,9 @@ namespace WireCell::SPNG::LMN {
     }
 
 
-// ----------------------------------------------------------------------
-// Tensor implementations (Time/Spatial Domain Resize)
-// ----------------------------------------------------------------------
-
+    // ----------------------------------------------------------------------
+    // Tensor implementations (Time/Spatial Domain Resize)
+    // ----------------------------------------------------------------------
     torch::Tensor resize(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
         TORCH_CHECK(in.dim() <= 2, "LMN::resize expected 1D or 2D tensor.");
@@ -216,5 +203,75 @@ namespace WireCell::SPNG::LMN {
         return rs;
     }
     
+    torch::Tensor resample_interval(const torch::Tensor& interval, 
+                                    double Ts, double Tr,
+                                    int64_t axis,
+                                    Normalization ni,
+                                    double eps)
+    {
+        TORCH_CHECK(interval.is_floating_point(), "Input tensor must be real-valued (floating point).");
+        TORCH_CHECK(interval.dim() <= 2, "Input tensor must be 1D or 2D.");
+        TORCH_CHECK(axis >= 0 && axis < interval.dim(), "Axis index out of bounds.");
+
+        const int64_t Ns = interval.size(axis);
+
+        if (std::abs(Ts - Tr) < eps) {
+            // No resampling needed if periods are identical within tolerance
+            return interval.clone();
+        }
+    
+        // 1. Calculate rational factor (Ns_rat)
+        // Ns_rat is the minimum size that allows rational resampling based on periods Ts and Tr.
+        // NOTE: The LMN rational function returns the target size Ns_rat * Rr / Rt where Rt/Rr = Ts/Tr.
+        // The rational function definition in the original code is slightly confusingly named 'Ns' (rNs).
+        // Let's call the result R_size_factor, which is the necessary size N needed 
+        // such that N * Tr / Ts is an integer ratio.
+        size_t R_size_factor = LMN::rational(Ts, Tr, eps);
+
+        if (R_size_factor == 0) {
+            raise<ValueError>("LMN::rational failed to find a rational factor for Ts=%f, Tr=%f", Ts, Tr);
+        }
+    
+        // 2. Determine target rational size (N_rat)
+        // Find the smallest size >= Ns that is divisible by R_size_factor
+
+        size_t N_rat = LMN::nbigger(Ns, R_size_factor);
+
+        // 3. Calculate final output size (Nr)
+        // New size Nr = N_rat * Ts / Tr. This must be an integer if R_size_factor was correct.
+        double Nr_float = (double)N_rat * Ts / Tr;
+        int64_t Nr = (int64_t)std::round(Nr_float);
+        if (std::abs(Nr_float - Nr) > eps) {
+            // Sanity check, should not happen if rational() and nbigger() are correct
+            raise<ValueError>("Rational size calculation failed: Nr=%f is not an integer", Nr_float);
+        }
+
+        // 4. Pad input tensor to rational size N_rat
+        torch::Tensor padded = LMN::resize(interval, N_rat, axis);
+
+        // 5. Apply FFT
+        torch::Tensor freq_domain = torch::fft::fft(padded, (int64_t)N_rat, axis);
+
+        // 6. Resample in Fourier space
+        // This performs the zero-padding/truncation and Nyquist handling.
+        torch::Tensor resampled_freq = LMN::resample(freq_domain, Nr, axis);
+
+        // 7. Apply inverse FFT and return real part
+        torch::Tensor time_domain_complex = torch::fft::ifft(resampled_freq, Nr, axis);
+    
+        // Return only the real part, ensuring the output type matches the input precision
+        // See LMN paper.
+        auto raw = torch::real(time_domain_complex).to(interval.dtype());
+        if (ni == Normalization::kInterpolation) {
+            return raw * ((double)Nr) / ((double)Ns);
+        }
+        if (ni == Normalization::kIntegral) {
+            return raw;
+        }
+        if (ni == Normalization::kEnergy) {
+            return raw * sqrt(((double)Nr) / ((double)Ns));
+        }
+        return raw;
+    }
 
 }

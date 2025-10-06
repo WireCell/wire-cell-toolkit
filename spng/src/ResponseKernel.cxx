@@ -2,6 +2,7 @@
 #include "WireCellSpng/Util.h"
 #include "WireCellSpng/DeconTools.h"
 #include "WireCellSpng/Convo.h"
+#include "WireCellSpng/TorchLMN.h"
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellIface/IFieldResponse.h"
