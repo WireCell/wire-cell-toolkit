@@ -9,6 +9,27 @@
 
 namespace WireCell::SPNG::LMN {
 
+    // Helper function to get size along axis
+    static
+    int64_t get_size_at_axis(const torch::Tensor& in, int64_t axis) {
+        if (axis < 0 || axis >= in.dim()) {
+            throw std::out_of_range("Axis index out of bounds");
+        }
+        return in.size(axis);
+    }
+
+    /// Return the "half size" number of samples in a spectrum of full size N.
+    /// This excludes the "zero frequency" sample and the "Nyquist bin", if one
+    /// exists.
+    static
+    size_t nhalf(size_t N) {
+        if (N%2) {
+            return (N-1)/2;     // odd
+        }
+        return (N-2)/2;         // even
+    }
+
+
     double gcd(double a, double b, double eps)
     {
         // Ensure inputs are non-negative for standard GCD algorithm interpretation
@@ -19,7 +40,7 @@ namespace WireCell::SPNG::LMN {
             return b;
         }
         // Recursive Euclidean algorithm
-        return LMN::gcd(fmod(b, a), a, eps);
+        return gcd(fmod(b, a), a, eps);
     }
 
     size_t rational(double Ts, double Tr, double eps)
@@ -61,13 +82,6 @@ namespace WireCell::SPNG::LMN {
         return rNs;    
     }
 
-// Helper function to get size along axis
-    int64_t get_size_at_axis(const torch::Tensor& in, int64_t axis) {
-        if (axis < 0 || axis >= in.dim()) {
-            throw std::out_of_range("Axis index out of bounds");
-        }
-        return in.size(axis);
-    }
 
 // ----------------------------------------------------------------------
 // Tensor implementations (Time/Spatial Domain Resize)
@@ -114,48 +128,6 @@ namespace WireCell::SPNG::LMN {
         return rs;
     }
 
-// ----------------------------------------------------------------------
-// Standard vector helpers
-// ----------------------------------------------------------------------
-
-    std::vector<float> resize(const std::vector<float>& in, size_t Nr)
-    {
-        size_t Ns = in.size();
-        if (Ns == Nr) return in;
-        size_t N_min = std::min(Nr,Ns);
-    
-        // Initialize with size Nr and default value 0.0
-        std::vector<float> rs(Nr, 0.0f); 
-        std::copy(in.begin(), in.begin()+N_min, rs.begin());
-
-        return rs;
-    }
-
-    void fill_constant(std::vector<float>::iterator begin,
-                       std::vector<float>::iterator end,
-                       float value)
-    {
-        std::fill(begin, end, value);
-    }
-
-    void fill_linear(std::vector<float>::iterator begin,
-                     std::vector<float>::iterator end,
-                     float first, float last)
-    {
-        size_t N = std::distance(begin, end);
-        if (N == 0) return;
-    
-        float step = (last - first) / (float)N; 
-    
-        for (size_t ind = 0; ind < N; ++ind) {
-            *(begin + ind) = first + ind * step;
-        }
-    }
-
-
-// ----------------------------------------------------------------------
-// Frequency Domain Resample (Tensor)
-// ----------------------------------------------------------------------
 
     torch::Tensor resample(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
@@ -168,80 +140,81 @@ namespace WireCell::SPNG::LMN {
             return in.clone();
         }
     
-        // N_half is calculated based on the dimension of the smaller frequency window
-        int64_t N_half_limit = (Nr > Ns) ? Ns : Nr;
-        size_t N_half = nhalf(N_half_limit);
+        // N_half is based on the size of the common spectrum (excluding Nyquist bins)
+        const int64_t N_half_limit = std::min(Ns, Nr);
+        const size_t H = LMN::nhalf(N_half_limit);
+        const int64_t P_size = H + 1; // DC + H positives
+        const int64_t L_size = H;     // H negatives
     
         // 1. Determine output shape and initialize zero tensor
         std::vector<int64_t> out_size = in.sizes().vec();
         out_size[axis] = Nr;
         torch::Tensor rs = torch::zeros(out_size, in.options()); 
 
-        // Define slice indices:
-        // Positive half size: N_half + 1 (DC component included)
-        int64_t pos_size = N_half + 1; 
-        int64_t pos_start = 0;
-
-        // Negative half size: N_half 
-        int64_t neg_size = N_half;
-        int64_t neg_start_in = Ns - N_half; // Start index in source (in)
-        int64_t neg_start_rs = Nr - N_half; // Start index in target (rs)
-    
-    
-        // Lambda to safely extract a slice along the specified axis
+        // Lambda to safely extract/assign a slice along the specified axis
         auto slice = [&](const torch::Tensor& t, int64_t start, int64_t length) -> torch::Tensor {
             if (t.dim() == 1) {
                 return t.narrow(0, start, length);
             } else if (axis == 0) {
-                // Slicing rows
-                return t.narrow(0, start, length);
+                return t.narrow(0, start, length); // Slicing rows
             } else {
-                // Slicing columns (axis == 1)
-                return t.narrow(1, start, length);
+                return t.narrow(1, start, length); // Slicing columns (axis == 1)
             }
         };
     
-        // 2. Copy Positive Half Frequencies (DC up to N_half)
-        slice(rs, pos_start, pos_size).copy_(slice(in, pos_start, pos_size));
+        // 2. Standard Copy (DC and primary halves)
+    
+        // Copy Positives: [0, P_size)
+        slice(rs, 0, P_size).copy_(slice(in, 0, P_size));
 
-        // 3. Copy Negative Half Frequencies (highest negative frequencies, wrapped)
-        // We only copy if N_half > 0
-        if (neg_size > 0) {
-            slice(rs, neg_start_rs, neg_size).copy_(slice(in, neg_start_in, neg_size));
+        // Copy Negatives: [N_s - L_size, N_s) -> [N_r - L_size, N_r)
+        if (L_size > 0) {
+            slice(rs, Nr - L_size, L_size).copy_(slice(in, Ns - L_size, L_size));
         }
     
-        // Note: Consistent with the original Eigen implementation structure,
-        // the Nyquist bin handling (if Ns is even) is omitted/skipped 
-        // based on the definition of nhalf, and requires external clarification if needed.
+        // 3. Nyquist Correction
+        if (Ns % 2 == 0 && Nr > Ns) {
+            // Case B1: Upsampling, Input Nyquist NQ_in exists (Ns even).
+            int64_t I_NQ_in = Ns / 2;
+            torch::Tensor NQ_val = slice(in, I_NQ_in, 1);
+        
+            // Split NQ_in into highest positive bin of new spectrum (index Ns/2) 
+            // and precursor of lowest negative bin (index Nr - Ns/2)
+        
+            // 1. Highest positive bin in rs: index Ns/2 
+            slice(rs, I_NQ_in, 1).add_(NQ_val / 2.0f);
+        
+            // 2. Lowest negative bin precursor in rs: index Nr - (Ns - Ns/2) = Nr - Ns/2
+            int64_t I_NQ_neg_rs = Nr - I_NQ_in;
+            slice(rs, I_NQ_neg_rs, 1).add_(NQ_val / 2.0f);
+        }
+    
+        else if (Nr % 2 == 0 && Ns > Nr) {
+            // Case B2: Downsampling, Output Nyquist NQ_out required (Nr even).
+            int64_t I_NQ_out = Nr / 2; // Index in rs
+        
+            // Combine contributions from the folded frequencies: 
+            // highest positive (in[Nr/2]) and lowest negative (in[Ns - Nr/2])
+            int64_t I_P_fold = Nr / 2; 
+            int64_t I_N_fold = Ns - Nr / 2;
 
+            if (I_P_fold < Ns && I_N_fold < Ns) { 
+                torch::Tensor P_fold = slice(in, I_P_fold, 1);
+                torch::Tensor N_fold = slice(in, I_N_fold, 1);
+            
+                // Use average to protect against small numeric deviations from symmetry.
+                torch::Tensor NQ_combined = 0.5*(P_fold + N_fold);
+            
+                // The Nyquist bin must be real-valued. Extract real part and zero imaginary part.
+                torch::Tensor NQ_real_part = torch::real(NQ_combined);
+                torch::Tensor NQ_imag_part = torch::zeros_like(NQ_real_part);
+                torch::Tensor NQ_final = torch::complex(NQ_real_part, NQ_imag_part);
+
+                slice(rs, I_NQ_out, 1).copy_(NQ_final);
+            }
+        }
         return rs;
     }
     
 
-// ----------------------------------------------------------------------
-// Frequency Domain Resample (Standard Vector)
-// ----------------------------------------------------------------------
-
-    std::vector<std::complex<float>>
-    resample(const std::vector<std::complex<float>>& in, size_t Nr)
-    {
-        size_t Ns = in.size();
-
-        size_t N_half_limit = (Nr > Ns) ? Ns : Nr;
-        size_t N_half = nhalf(N_half_limit);
-
-        std::vector<std::complex<float>> rs(Nr);
-
-        // Copy Positive Half (DC to N_half, total size N_half + 1)
-        std::copy(in.begin(), in.begin() + N_half + 1, rs.begin());
-    
-        // Copy Negative Half (last N_half elements)
-        // Source: using reverse iterators to pick up the tail
-        if (N_half > 0) {
-            std::copy(in.rbegin(), in.rbegin() + N_half, rs.rbegin());
-        }
-
-        // FIXME: deal with Nyquist bin. (Note maintained from original code.)
-        return rs;
-    }
 }
