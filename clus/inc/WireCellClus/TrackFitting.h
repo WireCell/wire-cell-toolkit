@@ -339,6 +339,8 @@ namespace WireCell::Clus {
         void dQ_dx_multi_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
 
         void do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_hack = false);
+        void do_multi_tracking(bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_exclusion =false, bool flag_hack = false);
+
 
         
 
