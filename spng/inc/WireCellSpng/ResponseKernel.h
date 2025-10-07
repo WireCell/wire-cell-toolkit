@@ -75,7 +75,7 @@ namespace WireCell::SPNG {
         virtual std::vector<int64_t> shape() const;
 
         /// Deprecated.
-        virtual std::vector<int64_t> shifts() const { return shape_t{0,0}; }
+        virtual std::vector<int64_t> shifts() const;
 
         // IConfigurable - see ResponseKernelConfig for configuration 
         virtual void configure(const WireCell::Configuration& config);
@@ -85,6 +85,8 @@ namespace WireCell::SPNG {
         // version of the natural spectrum at the given shape..
         torch::Tensor make_spectrum(const std::vector<int64_t> & shape) const;
 
+        // return hash of a shape
+        size_t make_cache_key(const shape_t& shape) const;
 
     private:
 
@@ -93,9 +95,6 @@ namespace WireCell::SPNG {
 
         using tensor_cache_t = ThreadSafeCache<size_t, torch::Tensor>;
         mutable tensor_cache_t m_cache;
-
-        // return hash of a shape
-        size_t make_cache_key(const shape_t& shape) const;
 
         // This is Fourier-space "natural" kernel, as calculated once in
         // configure() and for return by spectrum().

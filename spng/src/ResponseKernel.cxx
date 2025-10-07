@@ -10,15 +10,14 @@
 
 #include "boost/container_hash/hash.hpp"
 
-using namespace WireCell::HanaJsonCPP;                         
-using torch::nn::functional::pad;
-using torch::nn::functional::PadFuncOptions;
-
 WIRECELL_FACTORY(SPNGResponseKernel,
                  WireCell::SPNG::ResponseKernel,
                  WireCell::ITorchSpectrum,
                  WireCell::IConfigurable)
 
+using namespace WireCell::HanaJsonCPP;                         
+using torch::nn::functional::pad;
+using torch::nn::functional::PadFuncOptions;
 
 namespace WireCell::SPNG {
 
@@ -96,7 +95,6 @@ namespace WireCell::SPNG {
         m_response_waveform = torch::real(frer);
     }
 
-
     size_t ResponseKernel::make_cache_key(const shape_t& shape) const {
         size_t h = 0;
         for (const auto& s : shape) {
@@ -114,6 +112,10 @@ namespace WireCell::SPNG {
 
     torch::Tensor ResponseKernel::spectrum(const std::vector<int64_t> & shape) const
     {
+        if (m_cfg.capacity == 0) {
+            return make_spectrum(shape);
+        }
+
         const size_t key = make_cache_key(shape);
         torch::Tensor ten = m_cache.get_or_compute(key, [&]() {
             return this->make_spectrum(shape);
@@ -123,6 +125,11 @@ namespace WireCell::SPNG {
 
     std::vector<int64_t> ResponseKernel::shape() const {
         return m_natural_spectrum.sizes().vec();
+    }
+
+    std::vector<int64_t> ResponseKernel::shifts() const {
+        std::vector<int64_t> ret = {0,0};
+        return ret;
     }
 
 }
