@@ -70,11 +70,13 @@ namespace WireCell::SPNG::LMN {
 
     /// Return a new tensor of size Nr along the axis.  If Nr is smaller than
     /// the input dimension size, the returned tensor is truncated.  If Nr is
-    /// larger, the new tensor is zero-padded.
+    /// larger, the new tensor is zero-padded.  The tensor may have arbitrary
+    /// number of dimensions.
     torch::Tensor resize(const torch::Tensor& in, int64_t Nr, int64_t axis);
 
     /// Return a new tensor with size Nr on axis, performing padding/truncation
-    /// in the middle of the dimension (around the DC-equivalent sample at index 0).
+    /// in the middle of the dimension (around the DC-equivalent sample at index
+    /// 0).  Warning: function currently only supports 1D or 2D tensors.
     torch::Tensor resize_middle(const torch::Tensor& in, int64_t Nr, int64_t axis=1);
 
     /**

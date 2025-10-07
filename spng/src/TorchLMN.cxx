@@ -71,49 +71,35 @@ namespace WireCell::SPNG::LMN {
     }
 
 
-    // ----------------------------------------------------------------------
-    // Tensor implementations (Time/Spatial Domain Resize)
-    // ----------------------------------------------------------------------
     torch::Tensor resize(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
-        TORCH_CHECK(in.dim() <= 2, "LMN::resize expected 1D or 2D tensor.");
-    
         if (in.dim() == 0) return in.clone(); // Scalar case
 
-        const int64_t Ns = get_size_at_axis(in, axis);
+        // Validate axis constraint
+        TORCH_CHECK(axis >= 0 && axis < in.dim(), "Axis index out of bounds in LMN::resize");
+
+        const int64_t Ns = in.size(axis);
 
         if (Ns == Nr) {
             return in.clone();
         }
-    
+
         const int64_t N_min = std::min(Ns, Nr);
-    
-        // 1. Determine output shape and initialize zero tensor
+
+        // 1. Determine output shape
         std::vector<int64_t> out_size = in.sizes().vec();
-        if (in.dim() > 0) {
-            out_size[axis] = Nr;
-        }
-    
+        out_size[axis] = Nr;
+
+        // 2. Initialize zero tensor
         torch::Tensor rs = torch::zeros(out_size, in.options());
-    
-        // 2. Copy existing elements (narrowing the input and output)
-        if (in.dim() == 1) {
-            // 1D tensor
-            rs.narrow(0, 0, N_min).copy_(in.narrow(0, 0, N_min));
-        } else {
-            // 2D tensor (or higher, though constrained by TORCH_CHECK)
-            if (axis == 0) { // Rows
-                // Copy [0:N_min, all]
-                rs.narrow(0, 0, N_min).copy_(in.narrow(0, 0, N_min));
-            }
-            else { // Columns (axis == 1)
-                // Copy [all, 0:N_min]
-                rs.narrow(1, 0, N_min).copy_(in.narrow(1, 0, N_min));
-            }
-        }
-    
+
+        // 3. Copy existing elements using narrow along the specified axis
+        // rs.narrow(axis, start=0, length=N_min) copies from in.narrow(axis, start=0, length=N_min)
+        rs.narrow(axis, 0, N_min).copy_(in.narrow(axis, 0, N_min));
+
         return rs;
     }
+
 
     torch::Tensor slice_tensor(const torch::Tensor& t, int64_t start, int64_t length, int64_t axis) {
         if (t.dim() == 1) {
@@ -124,6 +110,7 @@ namespace WireCell::SPNG::LMN {
             return t.narrow(1, start, length); // Slicing columns
         }
     };
+
 
     torch::Tensor resize_middle(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {

@@ -55,7 +55,6 @@ public:
     virtual ~ITorchSpectrum();
 
     /// Return the spectrum interpolated into the given shape.
-    ///
     using shape_t = std::vector<int64_t>;
     virtual torch::Tensor spectrum(const shape_t& shape) const = 0;
 

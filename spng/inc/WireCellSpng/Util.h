@@ -64,6 +64,7 @@ namespace WireCell::SPNG {
                              torch::TensorOptions options = torch::TensorOptions());
 
     // Return a tensor sizes() as a vector.
+    // Actually, can just as easily to tensor.sizes().vec();
     inline
     std::vector<int64_t> vshape(const torch::IntArrayRef& sizes) {
         return std::vector<int64_t>(sizes.begin(), sizes.end());
