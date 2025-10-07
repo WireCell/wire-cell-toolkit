@@ -81,6 +81,11 @@ namespace WireCell::SPNG {
         virtual void configure(const WireCell::Configuration& config);
         virtual WireCell::Configuration default_configuration() const;
         
+        // Non interface methods.  Unconditionally and without cache, produce
+        // version of the natural spectrum at the given shape..
+        torch::Tensor make_spectrum(const std::vector<int64_t> & shape) const;
+
+
     private:
 
         ResponseKernelConfig m_cfg;

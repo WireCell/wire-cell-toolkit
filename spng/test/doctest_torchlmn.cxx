@@ -416,3 +416,74 @@ TEST_SUITE("LMN Resample Interval (Composite)") {
     }
 }
 
+TEST_SUITE("LMN Resize Middle (Interval Domain)") {
+    
+    // --- Helper Definitions ---
+    // Define unique values for easier visual tracking of truncation/padding
+    const torch::Tensor IN_ODD = torch::tensor({1.0f, 2.0f, 3.0f, 4.0f, 5.0f}, torch::kFloat); // Ns=5
+    // Halves based on Ns=5: [1.0, 2.0, 3.0] + [4.0, 5.0] -> P_size=3, L_size=2
+    
+    const torch::Tensor IN_EVEN = torch::tensor({10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f}, torch::kFloat); // Ns=6
+    // Halves based on Ns=6: [10, 11, 12] + [13, 14, 15] -> P_size=3, L_size=3
+    
+    const float ZERO = 0.0f;
+
+    // --- Upsampling Tests ---
+
+    TEST_CASE("Upsample Odd (Ns=5 to Nr=7, Odd)") {
+        // N_min = 5. P_size=3, L_size=2.
+        // Copy [1, 2, 3] | Insert 2 zeros | Copy [4, 5]
+        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 3.0f, ZERO, ZERO, 4.0f, 5.0f}, torch::kFloat);
+        torch::Tensor actual = resize_middle(IN_ODD, 7, 0);
+        check_tensor_close(actual, expected);
+    }
+    
+    TEST_CASE("Upsample Even (Ns=6 to Nr=8, Even)") {
+        // N_min = 6. P_size=3, L_size=3.
+        // Copy [10, 11, 12] | Insert 2 zeros | Copy [13, 14, 15]
+        torch::Tensor expected = torch::tensor({10.0f, 11.0f, 12.0f, ZERO, ZERO, 13.0f, 14.0f, 15.0f}, torch::kFloat);
+        torch::Tensor actual = resize_middle(IN_EVEN, 8, 0);
+        check_tensor_close(actual, expected);
+    }
+    
+    TEST_CASE("Upsample Odd to Even (Ns=5 to Nr=6)") {
+        // N_min = 5. P_size=3, L_size=2.
+        // Copy [1, 2, 3] | Insert 1 zero | Copy [4, 5]
+        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 3.0f, ZERO, 4.0f, 5.0f}, torch::kFloat);
+        torch::Tensor actual = resize_middle(IN_ODD, 6, 0);
+        check_tensor_close(actual, expected);
+    }
+
+    // --- Downsampling Tests ---
+    
+    TEST_CASE("Downsample Odd (Ns=5 to Nr=3, Odd)") {
+        // N_min = 3. 
+        // P_size = (3+1)/2 = 2. Copy [1, 2].
+        // L_size = (3-1)/2 = 1. Copy [5].
+        // Result: [1, 2, 5]. Samples 3, 4 truncated from the middle.
+        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 5.0f}, torch::kFloat);
+        torch::Tensor actual = resize_middle(IN_ODD, 3, 0);
+        check_tensor_close(actual, expected);
+    }
+
+    TEST_CASE("Downsample Even (Ns=6 to Nr=4, Even)") {
+        // N_min = 4. 
+        // P_size = 4/2 = 2. Copy [10, 11].
+        // L_size = 4/2 = 2. Copy [14, 15].
+        // Result: [10, 11, 14, 15]. Samples 12, 13 truncated from the middle.
+        torch::Tensor expected = torch::tensor({10.0f, 11.0f, 14.0f, 15.0f}, torch::kFloat);
+        torch::Tensor actual = resize_middle(IN_EVEN, 4, 0);
+        check_tensor_close(actual, expected);
+    }
+
+    TEST_CASE("Downsample Even to Odd (Ns=6 to Nr=5)") {
+        // N_min = 5.
+        // P_size = 3. Copy [10, 11, 12].
+        // L_size = 2. Copy [14, 15].
+        // Result: [10, 11, 12, 14, 15]. Sample 13 truncated from the middle.
+        torch::Tensor expected = torch::tensor({10.0f, 11.0f, 12.0f, 14.0f, 15.0f}, torch::kFloat);
+        torch::Tensor actual = resize_middle(IN_EVEN, 5, 0);
+        check_tensor_close(actual, expected);
+    }
+    
+}

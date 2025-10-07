@@ -62,47 +62,38 @@ namespace WireCell::SPNG {
         // Still at FR sampling, eg 100ns
         auto fr_fine = fr_average_tensor(ifr, m_cfg.plane_id);
 
-        // We now must do two transformations.
+        // We now must do two transformations prior to the FR*ER convolution.
         //
         // 1. Downsample FR from the fine FR sampling period to the coarse ER
-        // sampling period.  This is done by removing N=1-fine/coarse FREQUENCY
-        // bins near the Nyquist frequency.  That is, we wish to move the
-        // Nyquist frequency from 1/fine to 1/coarse.
+        // sampling period.  This is done using LMN resampling which applies a
+        // "perfect" low-pass filter.
         //
         // 2. Pad both FR and ER time dimension in INTERVAL space to assure
         // linear convolution.
         //
         // I'm sure there is a trick to minimize the FFT round trips, but for
-        // now we do the dumb straightforward thing.
+        // now we do the dumb, straightforward thing.  It is a one-shot anyways.
 
-
-        const int64_t er_nticks = er.size(0);
         const double er_period = ier->waveform_period();
-
-        const int64_t fr_nticks_fine = fr_fine.size(1);
         const double fr_period_fine = ifr->field_response().period;
 
-        // Find the half spectrum size of the downsampled FR.
-        const int64_t fr_nticks_half = 0.5 * fr_nticks_fine * (fr_period_fine / er_period);
+        // Resample under default interpolation interpretation.  We keep the
+        // default to return it to interval space as we must pad for the FR*ER
+        // convolution.
+        auto fr = LMN::resample_interval(fr_fine, fr_period_fine, er_period, 1);
 
-        // Chop it out 
-        auto fr_spec = torch::fft::fft(fr_fine, {}, 1);
-        fr_spec = fr_spec.narrow(1, fr_nticks_half, fr_nticks_fine - fr_nticks_half);
-        auto fr = torch::real(torch::fft::ifft(fr_spec, {}, 1)); // coarse
-        
-        // This is the convolution target size.
-        auto dft_nticks = linear_shape(fr.size(1), er.size(1));
+        // Find size to assure linear convolution.
+        const int64_t linear_size = linear_shape(fr.size(1), er.size(1));
 
-        auto fr_pad = pad(fr, PadFuncOptions({0, 0, 0, dft_nticks - fr.size(1)}));
-        auto er_pad = pad(er, PadFuncOptions({0, dft_nticks - fr.size(0)}));
+        auto fr_pad = pad(fr, PadFuncOptions({0, 0, 0, linear_size - fr.size(1)}));
+        auto er_pad = pad(er, PadFuncOptions({0, linear_size - er.size(0)}));
                           
         auto FR = torch::fft::fft(fr_pad, {}, 1);
         auto ER = torch::fft::fft(er_pad).unsqueeze(0);
         auto FRER = FR*ER;      // "natural spectrum"
 
-        // we got yet back to interval space again because we will need to pad
-        // there to do the Fourier-space interpolation.
-        m_response_waveform = torch::real(torch::fft::ifft(FRER, {}, 1));
+        auto frer = torch::fft::ifft(FRER, {}, 1);
+        m_response_waveform = torch::real(frer);
     }
 
 
@@ -114,16 +105,24 @@ namespace WireCell::SPNG {
         return h;
     }
 
+    torch::Tensor ResponseKernel::make_spectrum(const std::vector<int64_t> & shape) const
+    {
+        auto tmp = LMN::resize_middle(m_response_waveform, shape[0], 0);
+        return LMN::resize(tmp, shape[1], 1);
+    }
+
 
     torch::Tensor ResponseKernel::spectrum(const std::vector<int64_t> & shape) const
     {
-        torch::Tensor ten;
-        raise<AssertionError>("not implemented");
+        const size_t key = make_cache_key(shape);
+        torch::Tensor ten = m_cache.get_or_compute(key, [&]() {
+            return this->make_spectrum(shape);
+        });
         return ten;
     }
 
     std::vector<int64_t> ResponseKernel::shape() const {
-        return vshape(m_natural_spectrum.sizes());
+        return m_natural_spectrum.sizes().vec();
     }
 
 }

@@ -115,6 +115,87 @@ namespace WireCell::SPNG::LMN {
         return rs;
     }
 
+    torch::Tensor slice_tensor(const torch::Tensor& t, int64_t start, int64_t length, int64_t axis) {
+        if (t.dim() == 1) {
+            return t.narrow(0, start, length);
+        } else if (axis == 0) {
+            return t.narrow(0, start, length); // Slicing rows
+        } else {
+            return t.narrow(1, start, length); // Slicing columns
+        }
+    };
+
+    torch::Tensor resize_middle(const torch::Tensor& in, int64_t Nr, int64_t axis)
+    {
+        TORCH_CHECK(in.dim() <= 2, "LMN::resize_middle expected 1D or 2D tensor.");
+
+        if (in.dim() == 0) return in.clone(); 
+
+        const int64_t Ns = get_size_at_axis(in, axis);
+
+        if (Ns == Nr) {
+            return in.clone();
+        }
+
+        // Determine the size of the positive and negative halves to preserve.
+        const int64_t N_min = std::min(Ns, Nr);
+
+        // H_limit is the half size excluding index 0, but including a potential center bin for even N.
+        // Since the definition of "center" is asymmetric around N/2, we calculate the 
+        // split point based on standard convention where index 0 is the start of the "positive" half.
+
+        // We want to keep the samples closest to index 0.
+        // If N is the size we are limiting by (N_min), we keep roughly N/2 samples at the start
+        // and N/2 samples at the end.
+
+        int64_t P_size; // Size of the first chunk (from index 0)
+        int64_t L_size; // Size of the last chunk (the tail)
+
+        if (N_min % 2 == 1) {
+            // Odd N_min: (N_min - 1)/2 bins on either side of index 0.
+            // P_size = 1 (index 0) + (N_min - 1)/2 = (N_min + 1) / 2
+            // L_size = (N_min - 1) / 2
+            P_size = (N_min + 1) / 2;
+            L_size = (N_min - 1) / 2;
+        } else {
+            // Even N_min: (N_min - 2)/2 bins on either side of a central bin/gap.
+            // If we split symmetrically around index 0, we take N_min/2 at the front
+            // and N_min/2 at the back. 
+            // Example N=4: [0, 1, 2, 3]. Keep [0, 1] and [2, 3].
+            P_size = N_min / 2;
+            L_size = N_min / 2;
+        }
+
+        // 1. Determine output shape and initialize zero tensor
+        std::vector<int64_t> out_size = in.sizes().vec();
+        if (in.dim() > 0) {
+            out_size[axis] = Nr;
+        }
+
+        torch::Tensor rs = torch::zeros(out_size, in.options());
+
+        // 2. Copy the first chunk (P_size elements starting at 0)
+        // Source range: [0, P_size)
+        // Target range: [0, P_size)
+        slice_tensor(rs, 0, P_size, axis).copy_(slice_tensor(in, 0, P_size, axis));
+
+        // 3. Copy the last chunk (L_size elements)
+        if (L_size > 0) {
+            // Source range: [Ns - L_size, Ns)
+            int64_t Ns_start = Ns - L_size;
+
+            // Target range: [Nr - L_size, Nr)
+            int64_t Nr_start = Nr - L_size;
+
+            slice_tensor(rs, Nr_start, L_size, axis).copy_(slice_tensor(in, Ns_start, L_size, axis));
+        }
+
+        // The gap in the middle [P_size, Nr - L_size) is handled by zero initialization 
+        // (if Nr > Ns) or truncation (if Nr < Ns, where the gap is simply omitted).
+
+        return rs;
+    }
+
 
     torch::Tensor resample(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
@@ -139,16 +220,20 @@ namespace WireCell::SPNG::LMN {
         torch::Tensor rs = torch::zeros(out_size, in.options()); 
 
         // Lambda to safely extract/assign a slice along the specified axis
+        // auto slice = [&](const torch::Tensor& t, int64_t start, int64_t length) -> torch::Tensor {
+        //     if (t.dim() == 1) {
+        //         return t.narrow(0, start, length);
+        //     } else if (axis == 0) {
+        //         return t.narrow(0, start, length); // Slicing rows
+        //     } else {
+        //         return t.narrow(1, start, length); // Slicing columns (axis == 1)
+        //     }
+        // };
+        // Intern axis and call the external function
         auto slice = [&](const torch::Tensor& t, int64_t start, int64_t length) -> torch::Tensor {
-            if (t.dim() == 1) {
-                return t.narrow(0, start, length);
-            } else if (axis == 0) {
-                return t.narrow(0, start, length); // Slicing rows
-            } else {
-                return t.narrow(1, start, length); // Slicing columns (axis == 1)
-            }
+            return slice_tensor(t, start, length, axis);
         };
-    
+
         // 2. Standard Copy (DC and primary halves)
     
         // Copy Positives: [0, P_size)
@@ -207,6 +292,7 @@ namespace WireCell::SPNG::LMN {
                                     double Ts, double Tr,
                                     int64_t axis,
                                     Normalization ni,
+                                    bool fourier_space,
                                     double eps)
     {
         TORCH_CHECK(interval.is_floating_point(), "Input tensor must be real-valued (floating point).");
