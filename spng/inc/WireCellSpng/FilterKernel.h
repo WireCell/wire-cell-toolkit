@@ -13,7 +13,7 @@ namespace WireCell::SPNG {
 
     /// The configuration for FilterKernel which accepts a JSON object of the
     /// same schema.
-    struct FilterKernelConfig {
+    struct FilterKernelAxisConfig {
 
         /// Required string specifying the kind of filter.  Two are kinds of
         /// filters supported:
@@ -52,43 +52,45 @@ namespace WireCell::SPNG {
 
 
     };
+    struct FilterKernelConfig {
+
+        /// The full N-D filter kernel is the outer product of a 1D filter
+        /// kernels applied ALONG a dimension.  That is, for the 2D case,
+        /// axis[0] describes the filter applied along rows at each column.
+        ///
+        /// Note: currently this is supported only up to 3D but support for
+        /// higher dimensions can be added.
+        std::vector<FilterKernelAxisConfig> axis{};
+    };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelConfig,
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelAxisConfig,
                         kind,
                         period,
                         scale,
                         power,
                         ignore_baseline);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelConfig, axis);
 
 
 namespace WireCell::SPNG {
-    /** The FilterKernel provides a 1D convolutional kernel intended to filter
-     * other (de)convolutional parts.
+    /** The FilterKernel provides up to 3-D Fourier-space filter comprised of
+     * outer-product of up to 3 1D filters.
      *
-     * It returns 1D real-valued tensors.
+     * Higher dimensions can be supported with code changes. 
      *
-     * The filter spectra dimensions are (channel periodicity, temporal frequency).
+     * It is a real-valued, Fourier-space sampling of analytical filters.  As
+     * such, its shape should not incur any additional padding when used as part
+     * of a linear convolution.
      *
-     * The 2D filters are constructed from two 1D filters combined via outer
-     * product.  Each 1D filter is a sampled analytical function provided by
-     * ITorchFilterWaveform.
+     * This is typically used for decon in which case it should be configured
+     * with two dimensions to produce shape:
+     *
+     *   (channel periodicity, time frequency) 
      * 
-     * The spectrum is formed as a ratio of filter/response in Fourier-space.
-     *
-     * The filter is the outer product of two 1D filters, one for each
-     * dimension.  Filters are sampled analytic functions on the Fourier space
-     * domain.
-     *
-     * The response is the convolution of 2D field and 1D electronics responses.
-     *
-     * FIXME: adhere to the fixed FIXME's in ITorchSpectrum when they are fixed.
-     *
-     * This component is thread safe and caches its tensors.
-     *
      */
     struct FilterKernel : public ContextBase, 
-                         public ITorchSpectrum, virtual public IConfigurable {
+                          public ITorchSpectrum, virtual public IConfigurable {
 
         FilterKernel();
         FilterKernel(const FilterKernelConfig& cfg);
@@ -100,11 +102,11 @@ namespace WireCell::SPNG {
         virtual torch::Tensor spectrum(const shape_t & shape) const;
 
         /// Filters are sampled from analytic functions which have no native
-        /// size/shape.
-        virtual shape_t shape() const { return shape_t{0,}; }
+        /// size/shape.  This returns zeros.
+        virtual shape_t shape() const { return shape_t(m_funcs.size(), 0); }
 
-        // Deprecated.
-        virtual shape_t shifts() const { return shape_t{0,}; }
+        // Deprecated.  Returns zeros.
+        virtual shape_t shifts() const { return shape_t(m_funcs.size(), 0); }
 
         // IConfigurable - see FilterKernelConfig for configuration 
         virtual void configure(const WireCell::Configuration& config);
@@ -116,7 +118,8 @@ namespace WireCell::SPNG {
         void configme();        // trigger application of m_cfg;
 
         using filter_function = std::function<float(float)>;
-        filter_function m_func;
+        // Per-dimension filter functions
+        std::vector<filter_function> m_funcs;
 
 
     };
