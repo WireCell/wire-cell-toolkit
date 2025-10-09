@@ -3,33 +3,57 @@
 
 #include "WireCellSpng/ITorchSetUnpacker.h"
 #include "WireCellIface/IConfigurable.h"
-#include "WireCellUtil/Logging.h"
+#include "WireCellSpng/Logger.h"
+#include "WireCellUtil/HanaJsonCPP.h"
 
-namespace WireCell {
-    namespace SPNG {
+namespace WireCell::SPNG {
 
-        // Fan out 1 frame to N set at construction or configuration time.
-        class TorchSetUnpacker : public ITorchSetUnpacker, public IConfigurable {
-           public:
-            TorchSetUnpacker(size_t multiplicity = 0);
-            virtual ~TorchSetUnpacker();
 
-            // INode, override because we get multiplicity at run time.
-            virtual std::vector<std::string> output_types();
+    struct TorchSetUnpackerConfig {
 
-            // IFanout
-            virtual bool operator()(const input_pointer& in, output_vector& outv);
+        /// A tensor is selected either by an integer index into the tensor set or
+        /// by a string providing a regular expression to match against datapaths of
+        /// TDM compliant tensor sets.
+        using selector_t = std::variant<int, std::string>;
 
-            // IConfigurable
-            virtual void configure(const WireCell::Configuration& cfg);
-            virtual WireCell::Configuration default_configuration() const;
+        /// A list of tensor selections, one for each output port.
+        std::vector<selector_t> selections;
+    };
+}
 
-           private:
-            size_t m_multiplicity;
-            WireCell::Configuration m_cfg;
-            Log::logptr_t log;
-        };
-    }  // namespace Aux
-}  // namespace WireCell
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TorchSetUnpackerConfig, selections);
+
+namespace WireCell::SPNG {
+
+    /// Select tensors from a set and fan out the selection to per-tensor edges.
+    class TorchSetUnpacker : public Logger, public ITorchSetUnpacker, virtual public IConfigurable {
+    public:
+
+        TorchSetUnpacker();
+        TorchSetUnpacker(const TorchSetUnpackerConfig& cfg);
+        virtual ~TorchSetUnpacker();
+
+        // INode, override because we get multiplicity at run time.
+        virtual std::vector<std::string> output_types();
+
+        // IFanoutNode<ITorchTensorSet, ITorchTensor, 0>
+        virtual bool operator()(const input_pointer& in, output_vector& outv);
+
+        // IConfigurable
+        virtual void configure(const WireCell::Configuration& cfg);
+        virtual WireCell::Configuration default_configuration() const;
+
+
+        // Non API methods
+        void configme();
+        size_t multiplicity() const { return m_selectors.size(); }
+
+    private:
+        TorchSetUnpackerConfig m_cfg;
+        using selector_func = std::function<ITorchTensor::pointer(ITorchTensorSet::pointer)>;
+        std::vector<selector_func> m_selectors;
+    };
+
+}
 
 #endif

@@ -13,7 +13,7 @@ namespace WireCell {
      */
     class ITorchSetUnpacker : public IFanoutNode<ITorchTensorSet, ITorchTensor, 0> {
        public:
-        virtual ~ITorchSetUnpacker();
+        virtual ~ITorchSetUnpacker(){}
 
         virtual std::string signature() { return typeid(ITorchSetUnpacker).name(); }
 
