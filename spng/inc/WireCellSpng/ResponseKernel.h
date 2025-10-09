@@ -104,13 +104,6 @@ namespace WireCell::SPNG {
         // pad to match request in spectrum(shape).
         torch::Tensor m_response_waveform;
 
-        // The filter for each dimension.  We keep these original (not tensor)
-        // as we must sample them differently for the "natural" and custom
-        // spectra shapes.
-        IFilterWaveform::pointer m_time_filter;
-        IFilterWaveform::pointer m_channel_filter;        
-
-
     };
 
 }
