@@ -16,23 +16,94 @@ struct MyConfig {
     double weight = 75.5;
 
 };
-
 BOOST_HANA_ADAPT_STRUCT(MyConfig, number, title, isActive, weight);
 
-TEST_CASE("util hana jsoncpp") {
+struct SubConfig {
+    int sub_id = 1;
+    std::string sub_name = "default_sub";
+};
+BOOST_HANA_ADAPT_STRUCT(SubConfig, sub_id, sub_name);
 
-    MyConfig mc;
-    Json::Value j = to_json(mc);
-    // std::cerr << j << "\n";
-    CHECK(j["number"].asInt() == 42);
+struct MainConfig {
+    int root_id = 1000;
+    std::string root_title = "Master Config";
+    SubConfig primary_sub = SubConfig{900, "Primary Default"};
+    std::vector<SubConfig> sub_list;
+    std::vector<int> simple_list = {1, 2};
+};
+BOOST_HANA_ADAPT_STRUCT(MainConfig, root_id, root_title, primary_sub, sub_list, simple_list);
 
-    auto j2 = j;
-    j2["number"] = 69;
-    MyConfig mc2;
-    from_json(mc2, j2);
-    // std::cerr << to_json(mc2) << "\n";
-    CHECK(mc2.number == 69);
+TEST_SUITE("util hana jsoncpp") {
 
+    TEST_CASE("hana jsoncpp basics") {
+
+        MyConfig mc;
+        Json::Value j = to_json(mc);
+        // std::cerr << j << "\n";
+        CHECK(j["number"].asInt() == 42);
+
+        auto j2 = j;
+        j2["number"] = 69;
+        MyConfig mc2;
+        from_json(mc2, j2);
+        // std::cerr << to_json(mc2) << "\n";
+        CHECK(mc2.number == 69);
+
+    }
+
+
+    TEST_CASE("hana jsoncpp bigger test") {
+
+        MainConfig cfg;
+
+        cfg.sub_list.push_back(SubConfig{10, "Component A"});
+        cfg.sub_list.push_back(SubConfig{20, "Component B"});
+
+        std::cout << "--- Initial Configuration ---\n";
+        std::cout << "Primary Sub ID: " << cfg.primary_sub.sub_id << std::endl;
+        std::cout << "Sub List size: " << cfg.sub_list.size() << std::endl;
+
+        // --- Serialization ---
+        Json::Value json_val = to_json(cfg);
+        // ... (rest of main function remains the same)
+        Json::StreamWriterBuilder writerBuilder;
+        writerBuilder["commentStyle"] = "None";
+        writerBuilder["indentation"] = "  ";
+        std::string document = Json::writeString(writerBuilder, json_val);
+        std::cout << "\n--- Serialized JSON ---\n" << document << std::endl;
+
+        // --- Deserialization Test ---
+        Json::CharReaderBuilder readerBuilder;
+        Json::Value new_json_val;
+        std::string errs;
+
+        std::istringstream stream(R"({
+        "root_id": 999,
+        "primary_sub": {
+            "sub_id": 500,
+            "sub_name": "Override Sub"
+        },
+        "sub_list": [
+            {"sub_id": 101, "sub_name": "New Item 1"},
+            {"sub_id": 102, "sub_name": "New Item 2"}
+        ],
+        "simple_list": [10, 20, 30],
+        "root_title": "Fully Overridden"
+    })");
+
+        bool parse_okay = Json::parseFromStream(readerBuilder, stream, &new_json_val, &errs);
+        CHECK(parse_okay);
+
+        MainConfig new_cfg;
+        from_json(new_cfg, new_json_val);
+
+        std::cout << "\n--- Deserialized Configuration ---\n";
+        std::cout << "Root ID: " << new_cfg.root_id << std::endl;
+        std::cout << "Primary Sub ID: " << new_cfg.primary_sub.sub_id << std::endl;
+        std::cout << "Sub List size: " << new_cfg.sub_list.size() << std::endl;
+        std::cout << "Sub List[0] Name: " << new_cfg.sub_list[0].sub_name << std::endl;
+        std::cout << "Simple List[2]: " << new_cfg.simple_list[2] << std::endl;
+
+    }
 }
-
 
