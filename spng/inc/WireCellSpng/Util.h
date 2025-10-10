@@ -26,6 +26,12 @@ namespace WireCell::SPNG {
     /// Return a torch device as a string.
     std::string to_string(const torch::Device& device);
 
+    /// Return Tensor::sizes() as a string
+    std::string to_string(const torch::IntArrayRef& sizes);
+
+    /// Return torch::Tensor as string
+    std::string to_string(const torch::Tensor& tensor);
+
     // Map C++ types to torch::Dtype
     template <typename T, typename Enable=void>
     struct CppTypeToTorchDtype { }; // error about a .value missing?  You are using an usupported dtype.

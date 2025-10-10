@@ -41,16 +41,35 @@ namespace WireCell::SPNG {
 
         /// Optional, apply a "roll" to the interval-space convolution result
         /// (after a potential crop).  This will move the sample with the number
-        /// given by "roll" to become sample zero.
+        /// given by "roll" to become sample zero.  
         ///
         /// Note, a roll can be used for many reasons.  Some reasons:
         ///
-        /// The kernel may impart an "artificial" shift when it is wrongly
+        /// - The kernel may impart an "artificial" shift when it is wrongly
         /// constructed to place a point of symmetry in the center instead of at
-        /// sample zero (DeconKernel does not do this).  If a linear convolution
-        /// is done, the central sample is no longer central and a shift by half
-        /// the padded size is needed to restore its centrality.
+        /// sample zero (DeconKernel does not do this).
+        ///
+        /// - If a linear convolution is done, the central sample is no longer
+        /// central and a shift by half the padded size is needed to restore its
+        /// centrality.
+        ///
+        /// - If the kernel is a deconvolution, a natural shift in the response
+        /// (kernel denominator) will move early features in the input tensor to
+        /// "negative" sample locations they will appear to have "wrapped
+        /// around" to large positive sample locations (to the end of the
+        /// tensor).  Rolling by the size of the response will place these
+        /// otherwise "wrapped around" samples at the start of the tensor.  This
+        /// roll MUST coincide with reinterpreting the physical location/time of
+        /// the new zero sample.  
         int roll = 0;
+
+        /// In ADDITION to an explicit roll number, a set of canned roll modes
+        /// can be applied.
+        ///
+        /// - "decon" :: This will roll the dimension by size of the kernel.  It
+        /// can be be appropriate for the time dimension for SP decon.
+        std::string roll_mode="";
+
     };
 
     struct KernelConvolveConfig {
@@ -68,7 +87,7 @@ namespace WireCell::SPNG {
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig, cyclic, crop, roll);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig, cyclic, crop, roll, roll_mode);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig, kernel, axis, faster);
 
 namespace WireCell::SPNG {
@@ -109,6 +128,7 @@ namespace WireCell::SPNG {
         ITorchSpectrum::pointer m_kernel;
         FasterDftSize m_faster;
 
+        std::vector<int> m_roll;
     };
 }
 

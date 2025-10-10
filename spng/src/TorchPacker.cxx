@@ -7,7 +7,10 @@
 
 #include <algorithm>
 
-WIRECELL_FACTORY(TorchPacker, WireCell::SPNG::TorchPacker, WireCell::ITorchPacker, WireCell::IConfigurable)
+WIRECELL_FACTORY(SPNGTorchPacker,
+                 WireCell::SPNG::TorchPacker,
+                 WireCell::ITorchPacker,
+                 WireCell::IConfigurable)
 
 using namespace WireCell;
 

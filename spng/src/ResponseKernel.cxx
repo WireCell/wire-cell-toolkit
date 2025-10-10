@@ -22,10 +22,12 @@ using torch::nn::functional::PadFuncOptions;
 namespace WireCell::SPNG {
 
     ResponseKernel::ResponseKernel()
-        : m_cache(1)
+        : Logger("ResponseKernel", "spng")
+        , m_cache(1)
     {}
     ResponseKernel::ResponseKernel(const ResponseKernelConfig& cfg)
-        : m_cfg(cfg)
+        : Logger("ResponseKernel", "spng")
+        , m_cfg(cfg)
         , m_cache(m_cfg.capacity)
     {
         configme();
@@ -34,7 +36,9 @@ namespace WireCell::SPNG {
     WireCell::Configuration ResponseKernel::default_configuration() const
     {
         auto cfg = this->ContextBase::default_configuration();
-        auto cfg2 = to_json(m_cfg);
+        auto cfg2 = this->Logger::default_configuration();
+        update(cfg, cfg2);
+        cfg2 = to_json(m_cfg);
         update(cfg, cfg2);
         return cfg;
     }
@@ -42,24 +46,28 @@ namespace WireCell::SPNG {
     void ResponseKernel::configure(const WireCell::Configuration& config)
     {
         this->ContextBase::configure(config);
+        this->Logger::configure(config);
         from_json(m_cfg, config);
         configme();
     }
     
     void ResponseKernel::configme()
     {
-        if (m_cfg.plane_id < 0 || m_cfg.plane_id>3) {
-            raise<ValueError>("illegal plane ID: %d", m_cfg.plane_id);
+        if (m_cfg.plane_index < 0 || m_cfg.plane_index>3) {
+            raise<ValueError>("illegal plane ID: %d", m_cfg.plane_index);
         }
         m_cache.reset_capacity(m_cfg.capacity);
 
+        //
+        // FIXME: ER gets configured with like 6000 ticks.
+        //
         auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
         auto erv = ier->waveform_samples();
         auto er = torch::from_blob(erv.data(), {static_cast<int64_t>(erv.size())}, torch::kFloat32);
 
         auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
         // Still at FR sampling, eg 100ns
-        auto fr_fine = fr_average_tensor(ifr, m_cfg.plane_id);
+        auto fr_fine = fr_average_tensor(ifr, m_cfg.plane_index);
 
         // We now must do two transformations prior to the FR*ER convolution.
         //
@@ -74,7 +82,8 @@ namespace WireCell::SPNG {
         // now we do the dumb, straightforward thing.  It is a one-shot anyways.
 
         const double er_period = ier->waveform_period();
-        const double fr_period_fine = ifr->field_response().period;
+        // Some FRs have FP round off problems in the period.
+        const double fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
 
         // Resample under default interpolation interpretation.  We keep the
         // default to return it to interval space as we must pad for the FR*ER
@@ -82,13 +91,21 @@ namespace WireCell::SPNG {
         auto fr = LMN::resample_interval(fr_fine, fr_period_fine, er_period, 1);
 
         // Find size to assure linear convolution.
-        const int64_t linear_size = linear_shape(fr.size(1), er.size(1));
+        const int64_t linear_size = linear_shape(fr.size(1), er.size(0));
 
-        auto fr_pad = pad(fr, PadFuncOptions({0, 0, 0, linear_size - fr.size(1)}));
+        // pad is LAST FIRST
+        auto fr_pad = pad(fr, PadFuncOptions({0, linear_size - fr.size(1), 0, 0}));
         auto er_pad = pad(er, PadFuncOptions({0, linear_size - er.size(0)}));
                           
+        log->debug("linear_size={} er={} fr_fine={} fr={} fr_pad={} er_pad={}",
+                   linear_size,
+                   to_string(er), to_string(fr_fine), to_string(fr),
+                   to_string(fr_pad), to_string(er_pad));
+
         auto FR = torch::fft::fft(fr_pad, {}, 1);
         auto ER = torch::fft::fft(er_pad).unsqueeze(0);
+        log->debug("FR: {}", to_string(FR));
+        log->debug("ER: {}", to_string(ER));
         auto FRER = FR*ER;      // "natural spectrum"
 
         auto frer = torch::fft::ifft(FRER, {}, 1);

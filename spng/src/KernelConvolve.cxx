@@ -61,6 +61,20 @@ namespace WireCell::SPNG {
         }
         m_cfg.axis.resize(2);
 
+        auto kshape = m_kernel->shape();
+        m_roll.resize(2);
+        for (size_t dim=0; dim<2; ++dim) {
+            const auto& acfg = m_cfg.axis[dim];
+
+            if (acfg.crop < -2) {
+                raise<ValueError>("illegal crop configured: %d", acfg.crop);
+            }
+
+            m_roll[dim] = acfg.roll;
+            if (acfg.roll_mode == "decon") {
+                m_roll[dim] += kshape[dim];
+            }
+        }
     }
 
     bool KernelConvolve::operator()(const input_pointer& in, output_pointer& out)
@@ -110,6 +124,8 @@ namespace WireCell::SPNG {
                 // avoid a copy inside resize()
                 continue;
             }
+            log->debug("resize: {} dim={} size={}",
+                       to_string(tensor), dim, convolve_shape[dim]);
             tensor = LMN::resize(tensor, convolve_shape[dim], dim+1);
         }
 
@@ -143,9 +159,8 @@ namespace WireCell::SPNG {
             }
             // else, crop==0 and no crop
 
-            const int roll = m_cfg.axis[dim].roll;
-            if (roll) {
-                tensor = torch::roll(tensor, roll, dim+1);
+            if (m_roll[dim]) {
+                tensor = torch::roll(tensor, m_roll[dim], dim+1);
             }
         }
 

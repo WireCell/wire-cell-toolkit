@@ -1,9 +1,23 @@
 #include "WireCellSpng/TorchSetUnpacker.h"
+#include "WireCellUtil/NamedFactory.h"
 #include <regex>
 
 using namespace WireCell::HanaJsonCPP;                         
 
+WIRECELL_FACTORY(SPNGTorchSetUnpacker,
+                 WireCell::SPNG::TorchSetUnpacker,
+                 WireCell::INamed,
+                 WireCell::ITorchSetUnpacker,
+                 WireCell::IConfigurable)
+
+
 namespace WireCell::SPNG {
+
+    std::string TorchSetUnpackerSelection::str() const {
+        if (index >= 0) { return std::to_string(index); }
+        return datapath;
+    }
+        
 
     TorchSetUnpacker::TorchSetUnpacker()
         : Logger("TorchSetUnpacker", "spng") {
@@ -40,8 +54,8 @@ namespace WireCell::SPNG {
         
         // Build vector of callable selector functions that return nullptr on error.
         for (const auto& sel : m_cfg.selections) {
-            if (std::holds_alternative<int>(sel)) {
-                size_t index = std::get<int>(sel);
+            if (sel.index >= 0) {
+                size_t index = sel.index;
                 if (index < 0) {
                     raise<ValueError>("TorchSetUnpacker, illegal negative tensor index, check config?");
                 }
@@ -55,9 +69,8 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
-            if (std::holds_alternative<std::string>(sel)) {
-                std::string pattern = std::get<std::string>(sel);
-                std::regex match = std::regex(pattern);
+            if (sel.datapath.size()) {
+                std::regex match = std::regex(sel.datapath);
                 m_selectors.emplace_back([match](ITorchTensorSet::pointer ts) -> ITorchTensor::pointer {
                     auto tvec = ts->tensors();
                     for (auto iten : *(tvec)) {
@@ -71,7 +84,7 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
-            raise<ValueError>("TorchSetUnpacker, wrong type for 'selections' entry, check config?");
+            raise<ValueError>("TorchSetUnpacker, invalid 'selections' entry, check config?");
         }
     }
 
@@ -80,15 +93,6 @@ namespace WireCell::SPNG {
         const std::string tname = std::string(typeid(output_type).name());
         return std::vector<std::string>(multiplicity(), tname);
     }
-
-    struct SelectorString {
-        std::string operator()(int index) const {
-            return std::to_string(index);
-        }
-        std::string operator()(const std::string& s) const {
-            return s;
-        }
-    };
 
     bool TorchSetUnpacker::operator()(const input_pointer& in, output_vector& outv)
     {
@@ -107,7 +111,7 @@ namespace WireCell::SPNG {
             auto iten = sel(in);
             if (!iten) {
                 log->warn("null tensor selected for output port {} using selection: {}",
-                          ind, std::visit(SelectorString{}, m_cfg.selections[ind]));
+                          ind, m_cfg.selections[ind].str());
             }
             outv.push_back(iten);
         }

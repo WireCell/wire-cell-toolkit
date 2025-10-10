@@ -47,7 +47,8 @@ namespace WireCell::SPNG::LMN {
         const double err1 = std::abs(n - rn);
     
         if (err1 > eps) {
-            raise<ValueError>("gcd error one too big %f > %f, rn=%zu, n=%f", err1, eps, rn, n);
+            raise<ValueError>("gcd error one too big %f > %f, rn=%zu, n=%f, Ts=%f Tr=%f",
+                              err1, eps, rn, n, Ts, Tr);
             return 0;
         }
 

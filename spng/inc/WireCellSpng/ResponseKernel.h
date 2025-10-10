@@ -7,6 +7,7 @@
 #define WIRECELL_SPNG_RESPONSEKERNEL
 
 #include "WireCellSpng/ContextBase.h"
+#include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ITorchSpectrum.h"
 
 #include "WireCellIface/IConfigurable.h"
@@ -30,8 +31,8 @@ namespace WireCell::SPNG {
         /// Sample 0 must represent t=0.
         std::string elec_response{""};
 
-        /// Required plane ID on which use from the larger field response.
-        int plane_id{-1};
+        /// Required plane index on which use from the larger field response.
+        int plane_index{-1};
 
         /// Optional, the maximum number of spectra to hold in the LRU cache
         /// (not including the "natural" spectra).  By default it only caches 1
@@ -45,7 +46,7 @@ namespace WireCell::SPNG {
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResponseKernelConfig,
                         field_response,
                         elec_response,
-                        plane_id,
+                        plane_index,
                         capacity);
 
 namespace WireCell::SPNG {
@@ -56,7 +57,7 @@ namespace WireCell::SPNG {
      *
      * This component is thread safe and caches its tensors.
      */
-    struct ResponseKernel : public ContextBase, 
+    struct ResponseKernel : public ContextBase, public Logger,
                             public ITorchSpectrum, virtual public IConfigurable {
 
         ResponseKernel();
