@@ -3,6 +3,7 @@
 #include "WireCellUtil/Type.h"
 
 #include <string>
+#include <variant>
 #include <iostream>
 
 using WireCell::type;
@@ -33,7 +34,32 @@ struct MainConfig {
 };
 BOOST_HANA_ADAPT_STRUCT(MainConfig, root_id, root_title, primary_sub, sub_list, simple_list);
 
+// Poor-man's variant.
+struct IOS {
+    int number = 0;
+    std::string name = "";
+};
+struct ConfigWithVariants {
+    
+    std::vector<IOS> ios{0};
+};
+BOOST_HANA_ADAPT_STRUCT(IOS, number, name);
+BOOST_HANA_ADAPT_STRUCT(ConfigWithVariants, ios);
+
 TEST_SUITE("util hana jsoncpp") {
+
+    TEST_CASE("hana jsoncpp vector of fake variant") {
+
+        ConfigWithVariants vov;
+        auto jvov = to_json(vov);
+        CHECK(jvov["ios"].empty());
+        jvov["ios"][0]["number"] = 42;
+        jvov["ios"][1]["name"] = "the answer";
+        from_json(vov, jvov);
+        REQUIRE(vov.ios.size() == 2);
+        CHECK(vov.ios[0].number == 42);
+        CHECK(vov.ios[1].name == "the answer");
+    }
 
     TEST_CASE("hana jsoncpp basics") {
 
