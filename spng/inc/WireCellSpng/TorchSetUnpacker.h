@@ -12,9 +12,7 @@ namespace WireCell::SPNG {
         /// A tensor is selected either by an integer index into the tensor set or
         /// by a string providing a regular expression to match against datapaths of
         /// TDM compliant tensor sets.  At least one must be set to a valid value.
-
         int index=-1;           // invalid
-
         std::string datapath=""; // invalid
 
         std::string str() const;
@@ -30,7 +28,10 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TorchSetUnpackerConfig, selections);
 
 namespace WireCell::SPNG {
 
-    /// Select tensors from a set and fan out the selection to per-tensor edges.
+    /// Select ITorchTensor instances from an ITorchTensorSet set and fan out
+    /// the selection to per-tensor edges.
+    ///
+    /// This does not modify the ITorchTensor instances.
     class TorchSetUnpacker : public Logger, public ITorchSetUnpacker, virtual public IConfigurable {
     public:
 

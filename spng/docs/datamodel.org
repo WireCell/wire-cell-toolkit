@@ -1,17 +1,19 @@
 #+title: SPNG Data Model
 
-A driving strategy of SPNG is that an ~ITorchTensorSet~ is the only data type transferred between SPNG data flow graph nodes.  As the name implies, it holds a set of tensors.  It also holds "metadata" in the form of a dynamic structured object that follows the JSON data model.  Individual tensors are held in the set via an ~ITorchTensor~ which also have a "metadata" component.
+A driving strategy of SPNG is that an ~ITorchTensorSet~ is the only data type transferred between SPNG data flow graph nodes.  As the name implies, it holds a set of tensors.  It also holds "metadata" in the form of a dynamic, structured object that follows the JSON data model.  Individual tensors are held in the set via an ~ITorchTensor~ which also holds a (possibly empty) "metadata" component.
 
-This data type defines minimal structure with generic and simple primitives (tensors and metadata objects).  However, the information that SPNG must process has substantial structure (eg, that if ~IFrame~) and thus a /data model/ is needed to define the conventions used to express structure in the relatively "flat" data types.
+These tensor-oriented data types defines minimal structure with generic and simple primitives (tensors and metadata objects).  However, the information that SPNG must process has substantial structure (eg, that if ~IFrame~) and thus a /data model/ is needed to define the conventions used to express structure in the relatively "flat" tensor-oriented data types.
 
-This document defines the SPNG Data Model.  It is defined to be similar to the [[file:../../aux/docs/tensor-data-model.org][WCT Tensor Data Model]] but deviates in order to encourage the data forms to be immediately used in SPNG algorithms with minimal data transformation.  The model is intended to be sufficient for nearly perfect bidirectional conversion to and from the larger WCT data types (~IFrame~, etc).
+This document defines the *SPNG Data Model*.  It is defined to be similar to the [[file:../../aux/docs/tensor-data-model.org][WCT Tensor Data Model]] but deviates in order to encourage the data forms to be immediately used in SPNG algorithms with minimal data transformation.  The model is intended to be sufficient for nearly perfect bidirectional conversion to and from the WCT data types with more explicit structure (~IFrame~, etc).
+
+The SPNG Data Model, like WCT's, is factored into "low level" (or "base") and a "high level" models.  The low-level model defines a small set of metadata parameters that are expected to exist.  The high-level model defines a convention that depends on the value of the low-level parameters, particularly the ~datatype~ parameter.
 
 * Low level data model
 
 **  ~ITorchTensorSet~ 
 
 
-An ~ITorchTensorSet~ is considered a generic "bag" of ~ITorchTensor~ instances.  As such, the set does not itself have any interpretation or requirements.
+An ~ITorchTensorSet~ is considered a generic "bag" of ~ITorchTensor~ instances.  As such, the set does not itself have any interpretation or requirements.  Implementations should be cautious about placing metadata in the set.  The set is not expected to exist in all data flow nodes and subgraphs.  Downstream nodes that require metadata from upstream ~ITorchTensorSet~ instances must explicitly take the instance as input.  Individual ~ITorchTensor~ instances *must not* be tasked with forwarding set-level metadata. 
 
 **  ~ITorchTensor~ 
 
@@ -24,10 +26,14 @@ Every ~ITorchTensor~ metadata SHALL have these attributes:
 - ~datatype~ :: a string naming the SPNG Data Model element this ~ITorchTensor~ represents.
 - ~datapath~ :: a string *unique* to the ~ITorchTensorSet~.  This may be expressed as a ~/file/system/type/path~.
 
-An ~ITorchTensor~ metadata MAY have these attributes or depending on datatype MUST.
+An ~ITorchTensor~ metadata MAY have these attributes, depending on datatype.
 
 - ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent (but may be a parent).  A parent MUST precede all children in the ~ITorchTensor~.
-- ~batches~ :: an integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.  
+- ~batches~ :: An integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.  
+- ~derived_from~ :: An optional string or array of string holding the ~datapath~ strings of all ~ITorchTensor~ instances that directly provided information in the forming a novel output ~ITorchTensor~ instance.  See section [[Provenance]] below.
+
+
+
 
 * High level data model
 
@@ -109,14 +115,84 @@ The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label t
 The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).  The dtype is ~torch::kLong~.
 
 
-* Separation and combination
+* Conventions
+
+On top of the high-level data model, additional conventions must be understood.
+
+** Separation and combination
 
 TDM allows for tensors sets to be passed as well as individual tensors.  For
 example, a set with tensors representing a "frame" and its parts can be input to
-a node which outputs a single ~ITorchTensor~ with a "traces" datatype.  This
-single tensor can be consumed by a tensor filter, etc.  The downstream results
-of this per-tensor processing can be reunited with the "frame" and other tensor
-parts.  The reassembled "frame" tensor set may then be converted to an ~IFrame~.
+a node which outputs a single ~ITorchTensor~ with a "traces" datatype.  See
+~TorchSetUnpacker~ for one implementation.  This single "bare" ~ITorchTensor~ can be
+consumed by a tensor filter, etc.  The downstream results of this per-tensor
+processing can be reunited with the "frame" and other tensor parts.  The
+reassembled "frame" tensor set may then be converted to an ~IFrame~.
+
+** Datapaths
+
+The role of a ~datapath~ metadata parameter is to uniquely identify a tensor in
+some data flow programming context (ie, some DFP sub-graph).  It is analogous to
+a "variable name" in more traditional programming paradigms.
+
+Ultimately the end-user (DFP programmer) must decide what idioms to apply in
+setting ~datapath~ just as they do when naming variables in traditional
+programming.  It is the job of the DFP node implementations to support a common
+set of idioms.
+
+One major choice determines how to assign ~datapath~ to output ~ITorchTensor~
+instances that are derived from input ~ITorchTensor~ instances.  The choice can be
+one of two possibilities:
+
+- imperative :: the output ~datapath~ may be the same as the input ~datapath~.  In
+  traditional programming this is equivalent to re-setting a variable.
+
+- functional :: the output ~datapath~ is wholly unique among all others.  In
+  traditional programming this is equivalent to a strict functional programming
+  style.
+
+The imperative idiom is simplest to implement.  A node simply forwards the input
+~datapath~ to the output tensor instance.  However, if ever the input and output
+tensors are brought together in a context, their ~datapath~ values will conflict.
+Furthermore, if a tensor is derived from more than one input tensor, a decision
+is needed for which of the inputs ~datapath~ is taken by the output.
+
+The functional idiom avoids the problems with the imperative idiom but requires
+some additional construction.  However, this can be accommodated in a relatively
+simple manner with the following recipe:
+
+- Define a set of metadata parameters that provide parts of the ~datapath~ string.
+- Identify a subset that are expected to be give unique values by a DFP node.
+- Supply a *datapath format* string to which the parameters are applied to
+  generate a datapath.
+- Forward all other metadata and any new metadata produced by the DFP node.
+
+For example, the ~FrameToTdm~ node converts an ~IFrame~ to TDM tensor set and has
+(frame) "ident", "tag", "rule" and "group" parameters available.  We may
+commandeer "tag" to indicate the nature of the tensor content.  A follow-on
+"decon" node may provide a unique value for "tag" to indicate the nature of the
+deconvolution.  For example, the main distinguishing feature between different
+"kinds" of SP decon is the time filter used, "gauss" vs "wiener".
+
+The production of the unique ~datapath~, given the format string, is then
+straight-forward:
+
+#+begin_src cpp
+  auto datapath = Fmt::format(datapath_format, tensor->metadata());
+#+end_src
+
+In general, the datapath format string must be provided directly to the node
+that applies it.  It SHOULD NOT be itself provided as a tensor metadata
+parameter.  This is because the format string must reflect the complexity of the
+DFP graph itself.  
+
+** Provenance 
+
+The use of DFP and ~datapath~ to identify data in the graph enables a data
+provenance pattern.  An output tensor metadata may simply be given the ~datapath~
+of the input tensor(s) from which the output was derived.  When this idiom is
+followed, the ~derived_from~ metadata parameter should be identified to hold this
+provenance information.
 
 * SPNG support
 
@@ -124,6 +200,34 @@ SPNG provides modular and extensible support in the form of data flow graph node
 classes.  Instances of these classes may be to provide general purpose
 operations and the classes may be used as inheritance bases for developing
 extended behavior.
+
+** Datapath and provenance management
+
+Utility code is provided to produce imperative or functional management of ~datapath~.
+
+#+begin_src cpp
+  Configurable md;
+  md["tag"] = m_output_tag;
+  // derive from one
+  Configurable from = in_tensor->metadata();
+  // Or derive from many
+  std::vector<Configuration> from = {in_tensors[0]->metadata(),
+                                     in_tensors[1]->metadata()};
+
+  // Form new metadata, with scalar or vector "from".
+  md = TDM::derive_metadata(md, from, m_datapath_format);
+#+end_src
+
+This requires a node to define two configurable parameters
+
+- ~tag~ :: the kind of tensor content produced (eg "gauss" or "wiener" for decon).  
+- ~datapath_format~ :: a string how to format md attributes to a datapath string, or empty.
+
+
+Note, for long SPNG pipelines of fast GPU nodes, the overhead of datapath
+management may become the bottleneck.  If so, this bookkeeping should be made
+optional.
+
 
 ** FunctionNode
 

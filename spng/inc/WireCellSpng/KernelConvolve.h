@@ -84,11 +84,23 @@ namespace WireCell::SPNG {
         /// Optional, default is false.  If true, seek a "faster fft size" for
         /// dimensions that are not cyclically convolved.  
         bool faster=false;
+
+        /// Set the "tag" metadata attribute on the produced tensor.
+        std::string tag="";
+
+        /// Apply a format string to the metadata to produce a datapath for the
+        /// output tensor.  If not provided (default) the produced tensor will
+        /// retain the same datapath as the input tensor.  If provided, the
+        /// input datapath is stored as the "derived_from" attribute.
+        std::string datapath_format="";
+
+        // fixme: tag and datapath_format should be uplifted to a base class
+        // handling config and application.
     };
 }
 
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig, cyclic, crop, roll, roll_mode);
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig, kernel, axis, faster);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig, kernel, axis, faster, tag, datapath_format);
 
 namespace WireCell::SPNG {
     /** Apply a 2D convolution with a kernel to input tensor.

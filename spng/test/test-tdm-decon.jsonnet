@@ -148,7 +148,7 @@ local decon_kernel(filters, fr, er, which="gauss") = {
 
 /// Return config object for a KernelConvovle.  Use extra name to make otherwise
 /// identical instances (eg for one plane split into groups)
-local convo_node(kernel, plane_index, extra_name="") =
+local convo_node(kernel, plane_index, extra_name="", which="") =
     // For channel dimmension, wrapped wire planes are cyclic.
     local channel_options = [
         {cycle: true,  crop:  0}, // u
@@ -168,6 +168,8 @@ local convo_node(kernel, plane_index, extra_name="") =
                 channel_options,
                 time_options,
             ],
+            tag: which,
+            datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
         },
     }, nin=1, nout=1, uses=[kernel]);
 
@@ -246,9 +248,9 @@ function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid=
     /// Loop over "groups" making nodes that operate on a single traces tensor.
     local pipes = [
         local plane = group_plane[group];
-
+        local which  = "gauss";
         // to start, just decon, later turn this into a deeper pipeline
-        convo_node(decon_kernel(decon_filters(plane), fr, er, "gauss"), plane, '-group%d'%group)
+        convo_node(decon_kernel(decon_filters(plane), fr, er, which), plane, '-group%d'%group, which)
 
         for group in wc.iota(ngroups)
     ];
@@ -301,9 +303,13 @@ function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid=
     // 1->2->{1, 4->1}->1
     local body = pg.intern(
         innodes=[frontend], centernodes=[groupfan], outnodes=[fanin],
-        edges=[pg.edge(frontend, groupfan, 0, 0),
-               pg.edge(groupfan, fanin, 0, 0),
-               pg.edge(frontend, fanin, 1, 1)]);
+        edges=[
+            // slightly subtle ordering issue.  The set carrying the "frame"
+            // parent tensor must be first.
+            pg.edge(frontend, fanin, 0, 0),
+            pg.edge(frontend, groupfan, 1, 0),
+            pg.edge(groupfan, fanin, 0, 1)
+        ]);
 
     local sink = pg.pnode({ type: "DumpFrames", name: "" }, nin=1, nout=0);
 

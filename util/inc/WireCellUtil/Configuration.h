@@ -163,6 +163,7 @@ namespace WireCell {
 
     /// Merge dictionary b into a, return a
     Configuration update(Configuration& a, Configuration& b);
+    Configuration update(Configuration& a, const Configuration& b);
 
     /// Return an array which is composed of the array b appended to the array a.
     // fixme: this should be called "extend".

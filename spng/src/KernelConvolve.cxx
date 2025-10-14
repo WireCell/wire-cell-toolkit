@@ -1,6 +1,7 @@
 #include "WireCellSpng/KernelConvolve.h"
 #include "WireCellSpng/Convo.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/TdmTools.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
 
@@ -75,6 +76,9 @@ namespace WireCell::SPNG {
                 m_roll[dim] += kshape[dim];
             }
         }
+        log->debug("using tag: {} and datapath format: {}", m_cfg.tag, m_cfg.datapath_format);
+
+
     }
 
     bool KernelConvolve::operator()(const input_pointer& in, output_pointer& out)
@@ -86,20 +90,19 @@ namespace WireCell::SPNG {
             return true;
         }
 
-        bool batched = true;
+        logit(in, "input");
+
+        // Fixme: uplift tag/datapath_format config and application to a base
+        // class.
+        Configuration md;
+        if (m_cfg.tag.size()) {
+            md["tag"] = m_cfg.tag;
+        }
+        md = TDM::derive_metadata(md, in->metadata(), m_cfg.datapath_format);
+
+        bool batched = true;    // have ndim==3
 
         auto tensor = in->tensor();
-
-        // An upstream source may provide an empty tensor due to no activity
-        // (specifically sim which makes neither signal nor noise).  Better that
-        // a branch/merge protect us from this case but we try to act in good
-        // faith and just pass it along to the next sucker^W node.
-        if (tensor.size(-1) <= 0 || tensor.size(-2) <= 0) {
-            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?", m_count);
-            out = std::make_shared<SimpleTorchTensor>(tensor);
-            ++m_count;
-            return true;
-        }
 
         // Assure the tensor is batched.  Everything that touches "tensor" must
         // take care to consider indices {1,2} to be dimensions {0,1}!
@@ -108,6 +111,25 @@ namespace WireCell::SPNG {
             batched = false;    // squeeze on output 
         }
         auto tensor_shape = tensor.sizes().vec(); // size 3
+
+        if (tensor_shape.size() != 3) {
+            log->critical("illegal number of input tensor dimensions at call=%d: %d",
+                          m_count, tensor_shape.size());
+            raise<ValueError>("illegal number of input tensor dimensions");
+        }
+
+        // An upstream source may provide an empty tensor due to no activity
+        // (specifically sim which makes neither signal nor noise).  Better that
+        // a branch/merge protect us from this case but we try to act in good
+        // faith and just pass it along to the next sucker^W node.
+        if (tensor_shape[1] <= 0 || tensor_shape[2] <= 0) {
+            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?", m_count);
+            out = std::make_shared<SimpleTorchTensor>(tensor, md);
+            logit(out, "empty");
+            ++m_count;
+            // fixme: should still do output derivation
+            return true;
+        }
 
         // Consider non batch dimensions!
         std::vector<int64_t> basic_shape(2);
@@ -180,8 +202,9 @@ namespace WireCell::SPNG {
             tensor = tensor.squeeze(0);
         }
 
-        out = std::make_shared<SimpleTorchTensor>(tensor); // fixme: md?
+        out = std::make_shared<SimpleTorchTensor>(tensor, md);
 
+        logit(out, "output");
         ++m_count;
         return true;
     }

@@ -36,6 +36,11 @@ WireCell::Configuration WireCell::update(WireCell::Configuration& a, WireCell::C
     }
     return a;
 }
+WireCell::Configuration WireCell::update(WireCell::Configuration& a, const WireCell::Configuration& b)
+{
+    auto c = b;
+    return update(a, c);
+}
 
 /// Append array b onto end of a and return a.
 WireCell::Configuration WireCell::append(Configuration& a, Configuration& b)
