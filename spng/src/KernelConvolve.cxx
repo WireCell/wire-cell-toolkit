@@ -88,9 +88,21 @@ namespace WireCell::SPNG {
 
         bool batched = true;
 
+        auto tensor = in->tensor();
+
+        // An upstream source may provide an empty tensor due to no activity
+        // (specifically sim which makes neither signal nor noise).  Better that
+        // a branch/merge protect us from this case but we try to act in good
+        // faith and just pass it along to the next sucker^W node.
+        if (tensor.size(-1) <= 0 || tensor.size(-2) <= 0) {
+            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?", m_count);
+            out = std::make_shared<SimpleTorchTensor>(tensor);
+            ++m_count;
+            return true;
+        }
+
         // Assure the tensor is batched.  Everything that touches "tensor" must
         // take care to consider indices {1,2} to be dimensions {0,1}!
-        auto tensor = in->tensor();
         if (tensor.dim() == 2) {
             tensor = tensor.unsqueeze(0);
             batched = false;    // squeeze on output 

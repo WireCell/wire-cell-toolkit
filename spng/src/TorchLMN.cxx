@@ -76,10 +76,14 @@ namespace WireCell::SPNG::LMN {
     {
         if (in.dim() == 0) return in.clone(); // Scalar case
 
+        TORCH_CHECK(Nr >= 0, "Resample size too small in LMN::resize");
+
         // Validate axis constraint
         TORCH_CHECK(axis >= 0 && axis < in.dim(), "Axis index out of bounds in LMN::resize");
 
         const int64_t Ns = in.size(axis);
+
+        TORCH_CHECK(Ns >= 0, "Original size too small in LMN::resize");
 
         if (Ns == Nr) {
             return in.clone();
