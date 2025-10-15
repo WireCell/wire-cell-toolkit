@@ -70,6 +70,9 @@ namespace WireCell::SPNG {
             if (acfg.crop < -2) {
                 raise<ValueError>("illegal crop configured: %d", acfg.crop);
             }
+            if (kshape[dim] == 0) {
+                log->warn("kernel dimension {} has zero size, is this really what you want?", dim);
+            }
 
             m_roll[dim] = acfg.roll;
             if (acfg.roll_mode == "decon") {
@@ -137,29 +140,39 @@ namespace WireCell::SPNG {
         auto kernel_shape = m_kernel->shape();
         for (size_t dim=0; dim<2; ++dim) {
             const auto& acfg = m_cfg.axis[dim];
-            const auto tshape = tensor_shape[dim+1]; // skip batch dim;
+            const auto dim_size = tensor_shape[dim+1]; // skip batch dim;
+
+            if (kernel_shape[dim] == 0) {
+                log->warn("shape: natural kernel size of dimension {} is zero, using input size {}", dim, dim_size);
+                convolve_shape[dim] = basic_shape[dim] = dim_size;
+                continue;
+            }
 
             if (acfg.cyclic) {
-                convolve_shape[dim] = basic_shape[dim] = tshape;
+                convolve_shape[dim] = basic_shape[dim] = dim_size;
+                log->debug("shape: dim={} cyclic size: {}", dim, dim_size);
                 continue;
             }
             // linear
-            convolve_shape[dim] = basic_shape[dim] = linear_shape(tshape, kernel_shape[dim]);
+            convolve_shape[dim] = basic_shape[dim] = linear_shape(dim_size, kernel_shape[dim]);
             if (!m_cfg.faster) {
+                log->debug("shape: dim={} linear size: {}->{}", dim, dim_size, convolve_shape[dim]);
                 continue;
             }
             convolve_shape[dim] = m_faster(convolve_shape[dim]);
+            log->debug("shape: dim={} faster size: {}->{}->{}",
+                       dim, dim_size, basic_shape[dim], convolve_shape[dim]);
         }
 
         /// Do padding of input tensor
         for (size_t dim=0; dim<2; ++dim) {
-            const auto tshape = tensor_shape[dim+1]; // skip batch dim;
-            if (tshape == convolve_shape[dim]) {
+            const auto dim_size = tensor_shape[dim+1]; // skip batch dim;
+            if (dim_size == convolve_shape[dim]) {
                 // avoid a copy inside resize()
                 continue;
             }
-            log->debug("resize: {} dim={} size={}",
-                       to_string(tensor), dim, convolve_shape[dim]);
+            log->debug("resize: dim={} {} -> {}",
+                       dim, dim_size, convolve_shape[dim]);
             tensor = LMN::resize(tensor, convolve_shape[dim], dim+1);
         }
 
@@ -182,16 +195,22 @@ namespace WireCell::SPNG {
         /// Do crop and/or roll
         for (size_t dim=0; dim<2; ++dim) {        
             const int crop = m_cfg.axis[dim].crop;
+            log->debug("before: crop={} dim={} tensor={}", crop, dim, to_string(tensor));
+
             if (crop > 0) {  // absolute crop
                 tensor = LMN::resize(tensor, crop, dim+1);
             }
             else if (crop == -1) {
+                // crop away the "faster" padding keep the basic convoulutional size
                 tensor == LMN::resize(tensor, basic_shape[dim], dim+1);
             }
             else if (crop == -2) {
-                tensor = LMN::resize(tensor, tensor_shape[dim], dim+1);
+                // crop faster and convolutional padding
+                const auto dim_size = tensor_shape[dim+1];
+                tensor = LMN::resize(tensor, dim_size, dim+1);
             }
             // else, crop==0 and no crop
+            log->debug("after: crop={} dim={} tensor={}", crop, dim, to_string(tensor));
 
             if (m_roll[dim]) {
                 tensor = torch::roll(tensor, m_roll[dim], dim+1);

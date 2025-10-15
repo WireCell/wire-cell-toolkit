@@ -52,27 +52,48 @@ namespace WireCell::SPNG::TDM {
             auto jtarget = object[key];
 
             if (jtarget.isNull()) { // must have all attributes in match
+                // std::cerr << "No match attribute: " << key << "\n";
                 return false;
             }
 
             auto jmatch = match[key];
             if (jtarget == jmatch) { // test for simple equality
+                // std::cerr << "Found: " << key << " " << jtarget << "\n";
                 continue;
             }
 
             // one last chance, regex
 
             if (! jmatch.isString()) { // can't be a regex
+                // std::cerr << "No match: " << key << " not a string " << jmatch << "\n";
                 return false;
             }
+
+            // coerce target to string
+            std::string text;
+            if (jtarget.isString()) {
+                text = jtarget.asString();
+            }
+            else if (jtarget.isInt()) {
+                text = std::to_string(jtarget.asInt());
+            }
+            else if (jtarget.isDouble()) {
+                text = std::to_string(jtarget.asDouble());
+            }
+            else {
+                // object or array
+                text = Json::writeString(builder, jtarget);
+            }
             std::regex re(jmatch.asString());
-            // coerce to string
-            std::string text = Json::writeString(builder, jtarget);
+
             if (std::regex_match(text, re)) {
+                // std::cerr << "Found: " << key << " regex " << jmatch.asString() << " against '" << text << "'\n";
                 continue;
             }
+            // std::cerr << "No match: " << key << " regex " << jmatch.asString() << " against '" << text << "'\n";
             return false;  // fail one, fail all
         }
+        // std::cerr << "Matched: " << object << "\n";
         return true;
     }
 
@@ -94,7 +115,7 @@ namespace WireCell::SPNG::TDM {
 
         for (const auto& jmatch : jmatches) {
             for (const auto& ten : tensors) {
-                if (match_object(ten->metadata(), jmatch)) {
+                if (match_object(jmatch, ten->metadata())) {
                     selected.push_back(ten);
                 }
             }

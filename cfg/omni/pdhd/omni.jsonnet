@@ -62,8 +62,8 @@ local omni = omniapi + {
             data: {
                 start: binning.start,
                 tick: binning.spacing,
-                // FIXME: it's dumb to set eg 6000 here
-                nticks: binning.number,
+                // DO NOT PUT READOUT SIZE HERE
+                nticks: params.elec.nticks,
                 shaping : params.elec.shaping,
                 gain: params.elec.gain,
                 postgain: params.elec.postgain,

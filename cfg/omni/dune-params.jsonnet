@@ -86,6 +86,11 @@ local wc = import "wirecell.jsonnet";
         // The shaping (aka peaking) time of the amplifier shaper.
         shaping : 2.0*wc.us,
 
+        // The number of ticks needed to cover the ER.  ColdElec with 3us timing
+        // is close to zero after 10us / 20 ticks.  So, we double that to be
+        // generous.   THIS IS NOT THE ADC WAVEFORM READOUT SIZE.
+        nticks: 40,
+
         // An realtive gain applied after shaping and before ADC.
         // Don't use this to fix wrong sign depos.  If you neeed to
         // fix sign of larsoft depos, use:

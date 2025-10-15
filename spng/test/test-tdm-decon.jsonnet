@@ -151,12 +151,12 @@ local decon_kernel(filters, fr, er, which="gauss") = {
 local convo_node(kernel, plane_index, extra_name="", which="") =
     // For channel dimmension, wrapped wire planes are cyclic.
     local channel_options = [
-        {cycle: true,  crop:  0}, // u
-        {cycle: true,  crop:  0}, // v
-        {cycle: false, crop: -2}  // w
+        {cyclic: true,  crop:  0}, // u, cycle, wrapped
+        {cyclic: true,  crop:  0}, // v, cyclic, wrapped
+        {cyclic: false, crop: -2}  // w, linear
     ][plane_index];
     /// Would NOT crop in chunked-streaming mode.
-    local time_options = {cycle: false, crop: -2, roll_mode: "decon"};
+    local time_options = {cyclic: false, crop: -2, roll_mode: "decon"};
 
     // one decon per filter type
     pg.pnode({
@@ -170,23 +170,72 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
             ],
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
+            faster: true,       // use "faster DFT size"
         },
     }, nin=1, nout=1, uses=[kernel]);
 
 
 
 /// Note, different input may require selecting a different anodeid to get any activity.
-function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid="3", device="cpu")
+function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
+
+    local adc_tick = 500*wc.ns;
+    local adc_nticks = 6000;
+
     local source = io.depo_file_source(input);
-    local detector="pdhd"; // eventually make this an input parameter via omni 
+
+    # FIXME: remove omni and make this file stand-alone.
+    local detector="pdhd";
     local omni = omnimap[detector];
     local aid = std.parseInt(anodeid);
+
     local anode = omni.anodes[aid];
     local drift = omni.drift(anode);
     local signal = omni.signal(anode);
     local noise = omni.noise(anode);
     local digitize = omni.digitize(anode);
+
+    // This is what sets the ADC waveform readout window.
+    local reframer = pg.pnode({
+        type: 'Reframer',
+        name: anodeid,
+        data: {
+            anode: wc.tn(anode),
+            nticks: adc_nticks,
+        },
+    }, nin=1, nout=1, uses=[anode]);
+
     local verbose = 2;
+
+    local fr = {
+        type: 'FieldResponse',
+        name: detector,
+        data: {
+            filename: "dune-garfield-1d565.json.bz2",
+        },
+    };
+    local er = {
+        type: 'ColdElecResponse',
+        name: detector,
+        data: {
+            tick: adc_tick,
+            // enough to cover the ER, DO NOT PUT FULL READOUT SIZE HERE
+            nticks: 40,
+            shaping: 2.2*wc.us,
+            gain : 14.0*wc.mV/wc.fC,
+            postgain: 1.0,
+        },
+    };
+    local rcr = {
+        type: 'RCResponse',
+        name: detector,
+        data: {
+            width: 1.1*wc.ms,
+        }
+    };
+    local rc = [rcr, rcr];
+
+    local plane_filters = [decon_filters(plane) for plane in wc.iota(3)];
 
     local groups = [
         [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
@@ -239,11 +288,6 @@ function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid=
         },
     }, nin=1, nout=ngroups);
 
-    local res = omni.responses(anode, "sp");
-    local fr = res.fr[0];
-    local er = res.er[0];
-
-    local plane_filters = [decon_filters(plane) for plane in wc.iota(3)];
 
     /// Loop over "groups" making nodes that operate on a single traces tensor.
     local pipes = [
@@ -279,9 +323,13 @@ function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid=
             data: {
                 verbose: verbose,
                 frame: {datapath: "/frames/\\d+/frame"},
+                #frame: {datapath: "/frames/0/frame"},
                 // chmasks: ...
                 tagged_traces: [ {
-                    traces: { tag: "gauss" }
+                    // eg datapath of /frames/0/tags/gauss/groups/0/traces
+                    traces: { tag: "gauss" },
+                    // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
+                    chids: { tag: "null" },
                 }]
             },
         }, nin=1, nout=1, uses=[]),
@@ -312,8 +360,11 @@ function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid=
             pg.edge(groupfan, fanin, 0, 1)
         ]);
 
-    local sink = pg.pnode({ type: "DumpFrames", name: "" }, nin=1, nout=0);
+    local sink = if output == ""
+                 then pg.pnode({ type: "DumpFrames", name: "" }, nin=1, nout=0)
+                 else io.frame_file_sink(output, digitize=false);
+    // else io.frame_tensor_file_sink(output, digitize=false, mode="dense");
 
-    local graph = pg.pipeline([source, drift, signal, noise, digitize, body, sink]);
+    local graph = pg.pipeline([source, drift, signal, reframer, noise, digitize, body, sink]);
     pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])
 

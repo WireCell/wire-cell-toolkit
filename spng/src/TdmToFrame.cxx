@@ -143,6 +143,7 @@ namespace WireCell::SPNG {
             auto chv = to_vector<int>(chids_itensor->tensor());
             all_chids.insert(all_chids.end(), chv.begin(), chv.end());
         }
+        log->debug("have {} channels from {} groups", all_chids.size(), chids_itensors.size());
         return all_chids;
     }
 
@@ -170,11 +171,15 @@ namespace WireCell::SPNG {
             const int tbin = traces_metadata["tbin"].asInt();
                 
             for (size_t row=0; row < ntraces; ++row) {
-                auto charge = to_vector<float>(traces_tensor);
+                auto charge = to_vector<float>(traces_tensor[row]);
                 const int chid = chids[chid_index++];
                 auto itrace = std::make_shared<Aux::SimpleTrace>(chid, tbin, charge);
                 all_traces.push_back(itrace);
             }
+        }
+        if (all_traces.size() != chids.size()) {
+            log->critical("trace / channel count mismatch: {} != {}", all_traces.size(), chids.size());
+            raise<ValueError>("trace / channel count mismatch: %d != %d", all_traces.size(), chids.size());
         }
         return all_traces;
     }
@@ -194,7 +199,10 @@ namespace WireCell::SPNG {
         auto tensors_by_datatype = TDM::by_datatype(*in->tensors());
 
         // Get THE frame tensor, complain if we do not have exactly 1. 
-        auto frame_itensors = TDM::select_tensors(tensors_by_datatype["frame"], m_cfg.frame);
+        auto frame_itensors = tensors_by_datatype["frame"];
+        log->debug("input {} frame tensors", frame_itensors.size());
+        frame_itensors = TDM::select_tensors(frame_itensors, m_cfg.frame);
+        // log->debug("selected {} frame tensors with {}", frame_itensors.size(), m_cfg.frame);
         if (frame_itensors.empty()) {
             log->warn("no frame tensor, returning empty frame for set ident {} at call={}",
                       in->ident(), m_count);

@@ -97,10 +97,6 @@ namespace WireCell::SPNG {
         using tensor_cache_t = ThreadSafeCache<size_t, torch::Tensor>;
         mutable tensor_cache_t m_cache;
 
-        // This is Fourier-space "natural" kernel, as calculated once in
-        // configure() and for return by spectrum().
-        torch::Tensor m_natural_spectrum;
-
         // This is natural FR*ER in interval space.  We keep this in order to
         // pad to match request in spectrum(shape).
         torch::Tensor m_response_waveform;

@@ -57,8 +57,15 @@ namespace WireCell::SPNG {
 
 
     /// Convert a 1D tensor to a C++ vector of a given type.
+    ///
+    /// If you REALLY want to flatten an N-dimensional tensor to vector, pass
+    /// nd_okay=true.
     template<typename T>
-    std::vector<T> to_vector(const torch::Tensor& tensor) {
+    std::vector<T> to_vector(const torch::Tensor& tensor, bool nd_okay=false) {
+        if (!nd_okay && tensor.dim() != 1) {
+            raise<ValueError>("to_vector given %d-dimensional tensor", tensor.dim());
+        }
+
         torch::Tensor row_tensor = to_dtype<T>(tensor).to(torch::kCPU).contiguous();
         return std::vector<T>(row_tensor.data_ptr<T>(),
                               row_tensor.data_ptr<T>() + row_tensor.numel());

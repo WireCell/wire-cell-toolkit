@@ -141,7 +141,7 @@ namespace WireCell::SPNG {
     }
 
     std::vector<int64_t> ResponseKernel::shape() const {
-        return m_natural_spectrum.sizes().vec();
+        return m_response_waveform.sizes().vec();
     }
 
     std::vector<int64_t> ResponseKernel::shifts() const {
