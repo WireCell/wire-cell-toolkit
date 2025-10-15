@@ -76,13 +76,16 @@ TEST_SUITE("util hana jsoncpp") {
         Json::Value j = to_json(mc);
         // std::cerr << j << "\n";
         CHECK(j["number"].asInt() == 42);
+        CHECK(j["isActive"].asBool() == true);
 
         auto j2 = j;
         j2["number"] = 69;
+        j2["isActive"] = false;
         MyConfig mc2;
         from_json(mc2, j2);
         // std::cerr << to_json(mc2) << "\n";
         CHECK(mc2.number == 69);
+        CHECK(mc2.isActive == false);
 
     }
 
