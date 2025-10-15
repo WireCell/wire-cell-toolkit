@@ -6,7 +6,7 @@ local spng_filters = import 'spng_filters.jsonnet';
 
 function(
     tools, debug_force_cpu=false,
-    ts_model_file="/nfs/data/1/abashyal/spng/spng_dev_050525/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+    ts_model_file="/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
     output_path="testout_mp_finding_%s.tar",
 ) {
     // make_spng :: function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do_collate_apa=false) {
