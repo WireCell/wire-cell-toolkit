@@ -240,3 +240,17 @@ void Gen::GaussianDiffusion::clear_sampling()
 const Gen::GaussianDiffusion::patch_t& Gen::GaussianDiffusion::patch() const { return m_patch; }
 
 const std::vector<double> Gen::GaussianDiffusion::weights() const { return m_qweights; }
+
+
+bool Gen::GausDiffTimeCompare::operator()(
+    const std::shared_ptr<Gen::GaussianDiffusion>& lhs, 
+    const std::shared_ptr<Gen::GaussianDiffusion>& rhs) const
+{
+ if (lhs->depo_time() != rhs->depo_time()) {
+     return lhs->depo_time() < rhs->depo_time();
+ }
+ if (lhs->depo_x() != rhs->depo_x()) {
+     return lhs->depo_x() < rhs->depo_x();
+ }
+ return lhs.get() < rhs.get(); // pointer comparison as last resort
+}
