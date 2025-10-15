@@ -2606,9 +2606,17 @@ void ROI_refinement::MP3ROI(const int plane, const IAnodePlane::pointer anode, c
     LogDebug("mp_th1: " << mp_th1 << ", mp_th2: " << mp_th2);
     std::set<int> print_chids = {1441, 875};
 
-    if (plane == 2) return;
+    //Default target plane == 1
     int ref_planes[2] = {0, 2};
-    if (plane == 0) ref_planes[0] = 1;
+    if (plane == 2) {
+        //{0, 1}
+        ref_planes[1] = 1;
+    }
+    else if (plane == 0) {
+        //{1, 2}
+        ref_planes[0] = 1;
+    }
+
 
     std::map<int, std::vector<WireCell::RayGrid::coordinate_t>> map_tick_coord[3];
     std::map<int, std::map<int, SignalROI *>> map_tick_pitch_roi[3];
@@ -2786,9 +2794,16 @@ void ROI_refinement::MP2ROI(const int target_plane, const IAnodePlane::pointer a
         }
     }
 
-    if (target_plane == 2) return;
+    //Default target plane == 1
     int ref_planes[2] = {0, 2};
-    if (target_plane == 0) ref_planes[0] = 1;
+    if (target_plane == 2) {
+        //{0, 1}
+        ref_planes[1] = 1;
+    }
+    else if (target_plane == 0) {
+        //{1, 2}
+        ref_planes[0] = 1;
+    }
 
     std::map<int, std::vector<WireCell::RayGrid::coordinate_t>> map_tick_coord[3];
     std::map<int, std::map<int, SignalROI *>> map_tick_pitch_roi[3];
