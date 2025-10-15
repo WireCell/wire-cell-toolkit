@@ -100,13 +100,26 @@ namespace WireCell::SPNG {
         }
         md = TDM::derive_metadata(md, in->metadata(), m_cfg.datapath_format);
 
-        bool batched = true;    // have ndim==3
-
         auto tensor = in->tensor();
+
+        // An upstream source may provide an empty tensor due to no activity
+        // (specifically sim which makes neither signal nor noise).  Better that
+        // a branch/merge protect us from this case but we try to act in good
+        // faith and just pass it along to the next sucker^W node.
+        if (tensor.size(-1) <= 0 || tensor.size(-2) <= 0) {
+            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?", m_count);
+            out = std::make_shared<SimpleTorchTensor>(tensor, md);
+            logit(out, "empty");
+            ++m_count;
+            // fixme: should still do output derivation
+            return true;
+        }
+
 
         // Assure the tensor is batched.  Everything that touches "tensor" must
         // take care to consider indices {1,2} to be dimensions {0,1}!
-        if (tensor.dim() == 2) {
+        bool batched = true;     // start with assuming ndim==3
+        if (tensor.dim() == 2) { // unless shown otherwise
             tensor = tensor.unsqueeze(0);
             batched = false;    // squeeze on output 
         }
@@ -116,19 +129,6 @@ namespace WireCell::SPNG {
             log->critical("illegal number of input tensor dimensions at call=%d: %d",
                           m_count, tensor_shape.size());
             raise<ValueError>("illegal number of input tensor dimensions");
-        }
-
-        // An upstream source may provide an empty tensor due to no activity
-        // (specifically sim which makes neither signal nor noise).  Better that
-        // a branch/merge protect us from this case but we try to act in good
-        // faith and just pass it along to the next sucker^W node.
-        if (tensor_shape[1] <= 0 || tensor_shape[2] <= 0) {
-            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?", m_count);
-            out = std::make_shared<SimpleTorchTensor>(tensor, md);
-            logit(out, "empty");
-            ++m_count;
-            // fixme: should still do output derivation
-            return true;
         }
 
         // Consider non batch dimensions!

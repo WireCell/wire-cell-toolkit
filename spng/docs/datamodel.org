@@ -119,15 +119,15 @@ The tensor part is always 2D and has 4 columns giving tick ranges for a batch in
 
 On top of the high-level data model, additional conventions must be understood.
 
-** Separation and combination
+** Separation of tensor sets
 
-TDM allows for tensors sets to be passed as well as individual tensors.  For
-example, a set with tensors representing a "frame" and its parts can be input to
-a node which outputs a single ~ITorchTensor~ with a "traces" datatype.  See
-~TorchSetUnpacker~ for one implementation.  This single "bare" ~ITorchTensor~ can be
-consumed by a tensor filter, etc.  The downstream results of this per-tensor
-processing can be reunited with the "frame" and other tensor parts.  The
-reassembled "frame" tensor set may then be converted to an ~IFrame~.
+TDM allows for tensors sets or individual ("bare") tensor instances to be passed
+between DFP processing nodes.  For example, a set with tensors representing a
+"frame" and its parts can be input to a node which outputs a single ~ITorchTensor~
+with a "traces" datatype.  See ~TorchSetUnpacker~ for one implementation.  This
+single "bare" ~ITorchTensor~ can be consumed by a tensor filter, etc.  See section
+[[Combining of tensors into sets]] for the inverse operation.
+
 
 ** Datapaths
 
@@ -186,6 +186,18 @@ that applies it.  It SHOULD NOT be itself provided as a tensor metadata
 parameter.  This is because the format string must reflect the complexity of the
 DFP graph itself.  
 
+** Tags
+
+The ~IFrame~ data model defines a ~tag~ metadata attribute.  Initially it identifies
+a set of "tagged traces" in the frame for consideration.  This set is then
+partitioned according to two axes: rules that define groups.  The ~tag~ may be
+kept as the data flows through processing nodes or it may be changed.  If
+changed, the user should think of ~tag~ as labeling the kind of content of the
+tensor.  For example, data produced by a deconvolution with the "gauss" filter
+might be given the tag "gauss".  Equivalently, this change of tag may be used to
+label a "data tier".  A change in "tag" value can lead to a change in ~datapath~
+for nodes that apply a ~datapath_format~ string.
+
 ** Provenance 
 
 The use of DFP and ~datapath~ to identify data in the graph enables a data
@@ -193,6 +205,31 @@ provenance pattern.  An output tensor metadata may simply be given the ~datapath
 of the input tensor(s) from which the output was derived.  When this idiom is
 followed, the ~derived_from~ metadata parameter should be identified to hold this
 provenance information.
+
+** Combining of tensors into sets
+
+The results of parallel pipelines each processing an individual "bare" tensor
+may be reunited back into a tensor set.  For example, a ~TorchPacker~ acts as a
+fan in of individual tensors to construct a tensor set.  The order in the set
+reflects the input port ordering.
+
+The repacked set and the original set holding the frame can likewise be combined
+with a ~SPNGFaninNode~, again with the final order reflecting the input ports.
+This particular fanin enacts a union which can lead to tensors with redundant
+~datapath~ values, be they otherwise identical or not.
+
+The ~TdmToFrame~ component can take such a tensor set and attempt to reconstruct
+from it an ~IFrame~.  To do that, it requires a mechanism to correlate tensors of
+different ~datatype~.  For example, typically an SPNG DFP graph will process only
+the "traces" tensors.  These can be given wholly different ~datapath~ as they go
+through the graph.  For ~TdmToFrame~ to reconstruct the frame, it must associate a
+"chids" tensor to each "traces" tensor.  The mechanism of forwarding the
+original frame tensor set provides the data but another association mechanism is
+required.
+
+This mechanism uses the metadata that is forwarded through the DFP nodes.
+
+
 
 * SPNG support
 
@@ -334,3 +371,21 @@ pre and/or post fanned tensor sets.
 * More information
 
 - [[https://www.phy.bnl.gov/~bviren/talks/wire-cell/topics/spng/tdm.pdf][Presentation by bv to SPNG group on the TDM]]
+
+* 
+
+#+begin_example
+<frame>  /frames/0/frame (0) <float> @cpu  
+<traces> /frames/0/tags/null/rules/0/groups/0/traces (400, 6000) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/0/chids (400) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/null/rules/0/groups/1/traces (448, 6000) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/1/chids (448) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/null/rules/0/groups/2/traces (0, 0) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/2/chids (0) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/null/rules/0/groups/3/traces (478, 6000) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/3/chids (478) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/0/traces (399, 400) <float> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/1/traces (447, 448) <float> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/2/traces (1, 0, 0) <float> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/3/traces (1, 478) <float> @cpu <-- /frames/0/frame 
+#+end_example

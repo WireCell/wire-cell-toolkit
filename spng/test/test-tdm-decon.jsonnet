@@ -273,15 +273,16 @@ function(input="test/data/muon-depos.npz", output="test-tdm-decon.npz", anodeid=
             },
         }, nin=2, nout=1),
 
-        // big fat FIXME: need something to combine traces/chids that
-        // were separated into "groups" (planes).  Make a new component
-        // and do not this to TdmToFrame.
-
         pg.pnode({
             type: 'SPNGTdmToFrame',
             name: "fromtdm",
             data: {
                 verbose: verbose,
+                frame: {datapath: "/frames/\\d+/frame"},
+                // chmasks: ...
+                tagged_traces: [ {
+                    traces: { tag: "gauss" }
+                }]
             },
         }, nin=1, nout=1, uses=[]),
     ]);

@@ -81,6 +81,9 @@ namespace WireCell::HanaJsonCPP {
                         }
                     }
                 }
+            } else if constexpr (std::is_same_v<ValueType, Json::Value>) {
+                // Json::Value attribute -> copy the entire JSON tree
+                root[name_cstr] = value;
             } else if constexpr (std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string>) {
                 // Handle primitives
                 root[name_cstr] = value;
@@ -136,6 +139,9 @@ namespace WireCell::HanaJsonCPP {
                         }
                     }
                 }
+            } else if constexpr (std::is_same_v<ValueType, Json::Value>) {
+                // Json::Value attribute -> copy the parsed JSON data
+                value = json_field;
             } else if constexpr (std::is_same_v<ValueType, int>) {
                 value = json_field.asInt();
             } else if constexpr (std::is_same_v<ValueType, std::string>) {

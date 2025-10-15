@@ -105,6 +105,7 @@ namespace WireCell::SPNG {
             ++m_count;
             return true;
         }
+        logit(in, "input");
 
         for (size_t ind=0; ind<nout; ++ind) {
             const auto& sel = m_selectors[ind];
@@ -115,6 +116,9 @@ namespace WireCell::SPNG {
             }
             outv.push_back(iten);
         }
+
+        logit(outv, "output");
+        ++m_count;
         return true;
     }
 }

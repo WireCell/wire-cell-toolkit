@@ -1,5 +1,5 @@
 #include "WireCellSpng/TdmToFrame.h"
-#include "WireCellSpng/TdmFrame.h"
+#include "WireCellSpng/TdmTools.h"
 #include "WireCellSpng/TensorIndex.h"
 #include "WireCellSpng/Util.h"
 
@@ -20,11 +20,21 @@ WIRECELL_FACTORY(SPNGTdmToFrame,
                  WireCell::SPNG::ITorchSetToFrame)
 
 
+
 namespace WireCell::SPNG {
+
+    using HanaJsonCPP::to_json;
+    using HanaJsonCPP::from_json;
 
     TdmToFrame::TdmToFrame()
         : Logger("TdmToFrame", "spng")
     {
+    }
+    TdmToFrame::TdmToFrame(const TdmToFrameConfig& cfg)
+        : Logger("TdmToFrame", "spng")
+        , m_cfg(cfg)
+    {
+        configme();
     }
 
     TdmToFrame::~TdmToFrame()
@@ -33,54 +43,81 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration TdmToFrame::default_configuration() const
     {
-        Configuration cfg;
-        cfg["frame"] = 0;
+        auto cfg = this->ContextBase::default_configuration();
+        auto cfg2 = this->Logger::default_configuration();
+        update(cfg, cfg2);
+        cfg2 = to_json(m_cfg);
+        update(cfg, cfg2);
         return cfg;
     }
 
         
     void TdmToFrame::configure(const WireCell::Configuration& cfg)
     {
-        auto jff = cfg["frame"];
-        if (jff.isInt()) {
-            m_find_frame = jff.asInt(); // index
+        this->ContextBase::configure(cfg);
+        this->Logger::configure(cfg);
+        from_json(m_cfg, cfg);
+        configme();
+    }
+
+    static
+    void assure_attribute(Configuration& cfg, const std::string& key, const std::string& value)
+    {
+        if (cfg.empty()) {
+            return;
         }
-        else if (jff.isString()) {
-            m_find_frame = jff.asString(); // regex
+
+        if (cfg.isArray()) {
+            for (Configuration& one : cfg) {
+                assure_attribute(one, key, value);
+            }
+            return;
+        }
+        if (!cfg.isObject()) {
+            raise<ValueError>("assure_attribute requires object or array of object");
+        }
+        if (! cfg.isMember(key.c_str())) {
+            cfg[key] = value;
         }
     }
-    
 
-    bool TdmToFrame::operator()(const input_pointer& in, output_pointer& out)
+    void TdmToFrame::configme()
     {
-        out = nullptr;
-        if (!in) {
-            log->debug("EOS at call={}", m_count);
-            ++m_count;
-            return true;
+        // Give some user friendliness to not have to explicitly match on
+        // datatype since user will already give this info as the attribute key.
+
+        if (! m_cfg.frame.isObject()) {
+            raise<ValueError>("single match object required for frame");
+        }
+        assure_attribute(m_cfg.frame, "datatype", "frame");
+
+        for (auto& tt : m_cfg.tagged_traces) {
+            if (tt.traces.empty()) {
+                raise<ValueError>("no traces match object");
+            }
+            if (tt.chids.empty()) {
+                raise<ValueError>("no chids match object");
+            }
+            assure_attribute(tt.traces, "datatype", "traces");
+            assure_attribute(tt.chids, "datatype", "chids");
+            assure_attribute(tt.summaries, "datatype", "summaries");
         }
 
-        TensorIndex ti(in);
-        TdmFrame frame = std::holds_alternative<int>(m_find_frame)
-            ? frame_at_index(ti, get<int>(m_find_frame))
-            : frame_at_match(ti, get<std::string>(m_find_frame));
-            
-        if (!frame.frame) {
-            log->critical("failed to get frame from tensor set id {} at call={}",
-                          in->ident(), m_count);
-            raise<ValueError>("failed to retrieve frame tensor from set.  Fix you configuration?");
-        }
+        assure_attribute(m_cfg.chmasks, "datatype", "chmasks");
+    }
 
-        logit(ti, "input");
-
+    Waveform::ChannelMaskMap TdmToFrame::get_cmm(const ITorchTensor::vector& chmasks_itensors) const
+    {
         Waveform::ChannelMaskMap cmm;
-        for (const auto& [label, chmasks_itensor] : frame.chmasks) {
-            if (!chmasks_itensor) {
-                log->warn("no channel mask for label \"{}\"", label);
+        for (const auto& chmasks_itensor : chmasks_itensors) {
+            auto md = chmasks_itensor->metadata();
+            if (md["label"].empty()) {
+                log->warn("no label for channel mask, corrupt TDM, skipping");
                 continue;
             }
+            std::string label = md["label"].asString();
 
-            auto cmten = chmasks_itensor->tensor().to(torch::kCPU);
+            auto cmten = chmasks_itensor->tensor().to(torch::kCPU); // do I need the semaphore here?
             size_t nrows = cmten.size(0);
             Waveform::ChannelMasks cms;
             for (size_t irow=0; irow<nrows; ++irow) {
@@ -96,8 +133,92 @@ namespace WireCell::SPNG {
             }
             cmm[label] = cms;
         }
+        return cmm;
+    }
 
-        auto frame_md = frame.frame->metadata();
+    std::vector<int> TdmToFrame::get_chids(const ITorchTensor::vector& chids_itensors) const
+    {
+        std::vector<int> all_chids;
+        for (const auto& chids_itensor : chids_itensors) {
+            auto chv = to_vector<int>(chids_itensor->tensor());
+            all_chids.insert(all_chids.end(), chv.begin(), chv.end());
+        }
+        return all_chids;
+    }
+
+    std::vector<double> TdmToFrame::get_summaries(const ITorchTensor::vector& summaries_itensors) const
+    {
+        std::vector<double> all_summaries;
+        for (const auto& summaries_itensor : summaries_itensors) {
+            auto summaries = to_vector<double>(summaries_itensor->tensor());
+            all_summaries.insert(all_summaries.end(), summaries.begin(), summaries.end());
+        }
+        return all_summaries;
+    }
+
+    ITrace::vector TdmToFrame::get_traces(const ITorchTensor::vector& traces_itensors,
+                                          const std::vector<int>& chids) const
+    {
+        ITrace::vector all_traces;
+
+        size_t chid_index = 0;
+        for (const auto& traces_itensor : traces_itensors) {
+            auto traces_tensor = traces_itensor->tensor().to(torch::kCPU);
+            const size_t ntraces = traces_tensor.size(0);
+
+            auto traces_metadata = traces_itensor->metadata();
+            const int tbin = traces_metadata["tbin"].asInt();
+                
+            for (size_t row=0; row < ntraces; ++row) {
+                auto charge = to_vector<float>(traces_tensor);
+                const int chid = chids[chid_index++];
+                auto itrace = std::make_shared<Aux::SimpleTrace>(chid, tbin, charge);
+                all_traces.push_back(itrace);
+            }
+        }
+        return all_traces;
+    }
+
+    bool TdmToFrame::operator()(const input_pointer& in, output_pointer& out)
+    {
+        out = nullptr;
+        if (!in) {
+            logit("EOS");
+            ++m_count;
+            return true;
+        }
+
+        logit(in, "input");
+
+        // partition to help speed up matching a bit.
+        auto tensors_by_datatype = TDM::by_datatype(*in->tensors());
+
+        // Get THE frame tensor, complain if we do not have exactly 1. 
+        auto frame_itensors = TDM::select_tensors(tensors_by_datatype["frame"], m_cfg.frame);
+        if (frame_itensors.empty()) {
+            log->warn("no frame tensor, returning empty frame for set ident {} at call={}",
+                      in->ident(), m_count);
+            out =  std::make_shared<Aux::SimpleFrame>(in->ident());
+            ++m_count;
+            return true;
+        }
+        if (frame_itensors.size() > 1) {        
+            log->warn("multiple frame tensors, using first in ident {} at call={}",
+                      in->ident(), m_count);
+            // fixme: if multi-frame becomes a thing, TdmToFrame can be changed
+            // to a queued out node.  Or, we make a plural TdmToFrames and an
+            // IFrameSet.
+        };
+        auto frame_itensor = frame_itensors[0];
+
+
+        // okay, down to business.
+
+
+        Waveform::ChannelMaskMap cmm = get_cmm(
+            TDM::select_tensors(tensors_by_datatype["chmasks"], m_cfg.frame));
+
+        auto frame_md = frame_itensor->metadata();
         // We'll load traces as we go
         auto all_traces = std::make_shared<ITrace::vector>();
         auto sf =  std::make_shared<Aux::SimpleFrame>(
@@ -107,59 +228,28 @@ namespace WireCell::SPNG {
             frame_md["period"].asFloat(),
             cmm);
 
-        /// Now actually fill in the traces and tagged traces.
-        for (const auto& [tag, traces_itensor] : frame.traces) {
-            if (!traces_itensor) {
-                log->warn("no traces for tag \"{}\"", tag);
-                continue;
-            }
-                
-            auto traces_tensor = traces_itensor->tensor().to(torch::kCPU);
-            const size_t ntraces = traces_tensor.size(0);
-            if (!ntraces) {
-                log->warn("empty traces tensor for tag \"{}\"", tag);
-                continue;
-            }
+        /// Loop over each requested tagged traces set.
+        for (const auto& tt_cfg : m_cfg.tagged_traces) {
 
-            auto chids_itensor = frame.chids[tag];
-            if (!chids_itensor) {
-                log->critical("frame corrupt: no chids tensor for tag \"{}\"", tag);
-                raise<ValueError>("frame corrupt: no chids tensor");
-            }
-            auto chids_tensor = chids_itensor->tensor().to(torch::kCPU);
-            const size_t nchannels = chids_tensor.size(0);
-            if (nchannels != ntraces) {
-                log->critical("frame corrupt: {} channels and {} traces", nchannels, ntraces);
-                raise<ValueError>("frame corrupt: channel/trace count mismatch");
-            }
-            auto chids_vector = to_vector<int>(chids_tensor);
-                
-            auto traces_metadata = traces_itensor->metadata();
-            const int tbin = traces_metadata["tbin"].asInt();
+            auto chids_vector = get_chids(
+                TDM::select_tensors(tensors_by_datatype["chids"], tt_cfg.chids));
             
-            const size_t beg = all_traces->size();
-            for (size_t row=0; row < ntraces; ++row) {
-                
-                auto charge = to_vector<float>(traces_tensor);
+            auto traces_vector = get_traces(
+                TDM::select_tensors(tensors_by_datatype["traces"], tt_cfg.traces),
+                chids_vector);
 
-                const int chid = chids_vector[row];
-                auto itrace = std::make_shared<Aux::SimpleTrace>(chid, tbin, charge);
-                all_traces->push_back(itrace);
-            }
-            const size_t end = all_traces->size();            
-            
-            IFrame::trace_list_t indices(end-beg);
-            std::iota(indices.begin(), indices.end(), beg);
+            // Form trace indices for this block of tagged traces.
+            const size_t traces_beg = all_traces->size();
+            all_traces->insert(all_traces->end(), traces_vector.begin(), traces_vector.end());
+            IFrame::trace_list_t indices(traces_vector.size());
+            std::iota(indices.begin(), indices.end(), traces_beg);
 
-            auto summaries_itensor = frame.summaries[tag];
-            if (summaries_itensor) {
-                auto summaries_tensor = summaries_itensor->tensor().to(torch::kCPU);
-                auto summaries = to_vector<double>(summaries_tensor);
-                sf->tag_traces(tag, indices, summaries);
-            }
-            else {
-                sf->tag_traces(tag, indices);
-            }
+            auto summaries_vector = get_summaries(
+                TDM::select_tensors(tensors_by_datatype["summaries"], tt_cfg.summaries));
+
+            // summaries can be empty.
+            sf->tag_traces(tt_cfg.tag, indices, summaries_vector);
+
         }
 
         out = sf;

@@ -27,6 +27,7 @@ namespace WireCell::SPNG {
         virtual void logit(const std::string& context) const;
         virtual void logit(const ITorchTensorSet::pointer& ts, const std::string& context="") const;
         virtual void logit(const ITorchTensor::pointer& ten, const std::string& context="") const;
+        virtual void logit(const ITorchTensor::vector& tens, const std::string& context="") const;
         virtual void logit(const TensorIndex& ti, const std::string& context="") const;
 
         /// Configuration:

@@ -1,5 +1,6 @@
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/HanaJsonCPP.h"
+#include "WireCellUtil/Configuration.h"
 #include "WireCellUtil/Type.h"
 
 #include <string>
@@ -7,6 +8,7 @@
 #include <iostream>
 
 using WireCell::type;
+using WireCell::Configuration;
 using namespace WireCell::HanaJsonCPP;
 
 struct MyConfig {
@@ -45,6 +47,13 @@ struct ConfigWithVariants {
 };
 BOOST_HANA_ADAPT_STRUCT(IOS, number, name);
 BOOST_HANA_ADAPT_STRUCT(ConfigWithVariants, ios);
+
+struct ConfigWithConfig {
+    int number=0;
+    Configuration json={};
+};
+BOOST_HANA_ADAPT_STRUCT(ConfigWithConfig, number, json);
+
 
 TEST_SUITE("util hana jsoncpp") {
 
@@ -131,5 +140,29 @@ TEST_SUITE("util hana jsoncpp") {
         std::cout << "Simple List[2]: " << new_cfg.simple_list[2] << std::endl;
 
     }
+
+    TEST_CASE("hana config with config") {
+        ConfigWithConfig cwc{9};
+        cwc.json["key"] = "value";
+
+        Configuration cfg = to_json(cwc);
+        REQUIRE(cfg["number"].isInt());
+        CHECK(cfg["number"].asInt() == 9);
+        REQUIRE(cfg["json"].isObject());
+        CHECK(cfg["json"]["key"].isString());
+        CHECK(cfg["json"]["key"].asString() == "value");
+
+        ConfigWithConfig cwc2;
+        from_json(cwc2, cfg);
+        CHECK(cwc2.number == 9);
+        REQUIRE(cwc2.json.isObject());
+        REQUIRE(cwc2.json["key"].isString());
+        CHECK(cwc2.json["key"].asString() == "value");
+
+
+    }
+
 }
+
+
 

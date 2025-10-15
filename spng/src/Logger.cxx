@@ -30,6 +30,24 @@ namespace WireCell::SPNG {
         log->debug("{}: call={}", context, m_count);
     }
 
+    void Logger::logit(const ITorchTensor::vector& tens, const std::string& context) const
+    {
+        if (m_verbose == 0) return;
+
+        const size_t ntens = tens.size();
+        log->debug("{} call={}, {} tensors in set", context, m_count, ntens);
+
+        if (m_verbose == 1) {
+            return;
+        }
+
+        --m_verbose;
+        for (const auto& iten : tens) {
+            logit(iten, context);
+        }
+        ++m_verbose;
+    }
+
     void Logger::logit(const ITorchTensorSet::pointer& ts, const std::string& context) const
     {
         if (m_verbose == 0) return;
@@ -39,18 +57,7 @@ namespace WireCell::SPNG {
             return;
         }
 
-        const size_t ntens = ts->tensors()->size();
-        log->debug("{} call={}, {} tensors in set", context, m_count, ntens);
-
-        if (m_verbose == 1) {
-            return;
-        }
-
-        --m_verbose;
-        for (const auto& iten : *ts->tensors()) {
-            logit(iten, context);
-        }
-        ++m_verbose;
+        logit(*ts->tensors(), context);
     }
     
     void Logger::logit(const ITorchTensor::pointer& ten, const std::string& context) const

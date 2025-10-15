@@ -4,7 +4,10 @@
 #include "WireCellSpng/TensorIndex.h"
 #include "WireCellSpng/ITorchTensor.h"
 
+
 namespace WireCell::SPNG {
+
+
 
     /// Give some structure to an SPNG TDM "frame" set of tensors.
     struct TdmFrame {
