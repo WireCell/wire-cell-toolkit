@@ -1,6 +1,3 @@
-#/bin/env bash
-
-#env CC=clang CXX=clang++ FC=gfortran \
 env CC=gcc CXX=g++ FC=gfortran \
 ./wcb configure \
 --build-debug="-O3 -g -fno-omit-frame-pointer" \
@@ -28,4 +25,4 @@ env CC=gcc CXX=g++ FC=gfortran \
 --with-triton-include="$TRITON_INC" \
 --with-triton-lib="$TRITON_LIB" \
 --with-libtorch="$LIBTORCH_FQ_DIR/" --with-libtorch-libs torch,torch_cpu,c10 \
---prefix=/exp/dune/app/users/yuhw/opt/
+--prefix=/exp/dune/app/users/$USER/opt
