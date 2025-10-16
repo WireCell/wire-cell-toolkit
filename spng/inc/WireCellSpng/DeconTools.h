@@ -11,18 +11,25 @@
 
 namespace WireCell::SPNG {
 
-    /// Return the average interval space FR for the plane and return it as a
-    /// flat valued 2D tensor on CPU.
-    ///
-    /// If zero_centered is true (default) the channel dimension of the tensor
-    /// is rolled to bring the center row to the zero row position.  This
-    /// removes the artificial shift that exists when the peak of the response
-    /// is left in the center row.  Note, padding to match some desired shape
-    /// for convolution should be inserted in the middle of the tensor.
-    //
-    // FIXME: this function is not well placed in this header.  Maybe a
-    // "ResponseTools.h"?
-    torch::Tensor fr_average_tensor(IFieldResponse::pointer ifr, int plane,
+    /**
+       @brief Turn FR data into a tensor
+
+       @param fr_data An FR schema object.
+       @param plane_id The plane ID for which the tensor is formed.
+       @param zero_centered True if the wire-of-interest is in row 0.
+       @return A 2D tensor giving FR as (npath, nsteps).
+     */
+    torch::Tensor fr_tensor(const Response::Schema::FieldResponse& fr_data,
+                            int plane_id,
+                            bool zero_centered=true);
+
+    /**
+       Calculate the "wire-region averaged" FR and return it in tensor form.
+
+       See fr_tensor() for details.
+     */
+    torch::Tensor fr_average_tensor(const Response::Schema::FieldResponse& fr_data,
+                                    int plane,
                                     bool zero_centered=true);
 
 

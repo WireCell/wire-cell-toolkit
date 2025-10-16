@@ -66,7 +66,7 @@ namespace WireCell::SPNG {
         /// analytical function.  Ultimately it is requested to be the padded
         /// size required for M*F/R.  Here we will kludge that size without
         /// going overboard..
-        std::vector<int64_t> shape = {100,1000};
+        std::vector<int64_t> shape = {100,2000};
         
         using tensor_map = torch::Dict<std::string, torch::Tensor>;
         tensor_map to_save;
@@ -77,7 +77,7 @@ namespace WireCell::SPNG {
         // Some quick and dirty impulse functions.
         auto meas = torch::zeros(shape);
         meas.index({0, 0}) = 1.0;
-        meas.index({25, 999}) = 1.0;
+        meas.index({25, 1999}) = 1.0;
         meas.index({50, 100}) = 1.0;
         meas.index({75, 500}) = 1.0;
         meas = torch::fft::fft2(meas);

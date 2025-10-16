@@ -51,23 +51,81 @@ namespace WireCell::SPNG {
         configme();
     }
     
-    void ResponseKernel::configme()
+    // convolve then downsample
+    void ResponseKernel::configme_ctd()
     {
-        if (m_cfg.plane_index < 0 || m_cfg.plane_index>3) {
-            raise<ValueError>("illegal plane ID: %d", m_cfg.plane_index);
-        }
-        m_cache.reset_capacity(m_cfg.capacity);
-
-        //
-        // FIXME: ER gets configured with like 6000 ticks.
-        //
+        log->debug("configuring FR*ER for convolve-then-downsample");
         auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
-        auto erv = ier->waveform_samples();
-        auto er = torch::from_blob(erv.data(), {static_cast<int64_t>(erv.size())}, torch::kFloat32);
+        auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
+
+        const double er_period = ier->waveform_period();
+        // Some FRs have FP round off problems in the period.
+        const double fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
+
+        // The natural number of samples for ER.  WARNING: old config sets this
+        // to nticks in ADC readout which is absurdly long.  FIXME: instead of
+        // fighting history, add a dedicated "nerticks" config to this component.
+        const size_t nerticks = ier->waveform_samples().size();
+        const double nerticks_duration = nerticks * er_period;
+        const int64_t nerticks_fine = nerticks * er_period/fr_period_fine;
+        Binning er_bins(nerticks_fine, 0, nerticks_duration);
+        log->debug("ER: {} ticks, {} us duration", nerticks_fine, nerticks_duration/units::us);
+
+        std::vector<float> erv = ier->waveform_samples(er_bins);
+        /// we hold on to er_fine so better not from_blob it!
+        // auto er_fine = torch::from_blob(erv.data(), nerticks_fine, torch::kFloat32);
+        auto er_fine = torch::tensor(erv, torch::kFloat32);
+        m_raw_er = er_fine;
+
+        // Still at FR sampling, eg 100ns
+        m_raw_fr_full_fine = fr_tensor(ifr->field_response(), m_cfg.plane_index);
+        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
+        m_raw_fr_avg_fine = fr_fine;
+
+        // Find size to assure linear convolution.
+        const int64_t linear_size = linear_shape(fr_fine.size(1), er_fine.size(0));
+
+        // pad is LAST FIRST
+        auto fr_pad = pad(fr_fine, PadFuncOptions({0, linear_size - fr_fine.size(1), 0, 0}));
+        auto er_pad = pad(er_fine, PadFuncOptions({0, linear_size - er_fine.size(0)}));
+                          
+        auto FR = torch::fft::fft(fr_pad, {}, 1);
+        auto ER = torch::fft::fft(er_pad).unsqueeze(0);
+        log->debug("FR: {}", to_string(FR));
+        log->debug("ER: {}", to_string(ER));
+        auto FRER = FR*ER;      // "natural spectrum"
+
+        auto frer_fine = torch::real(torch::fft::ifft(FRER, {}, 1));
+        m_raw_fr = frer_fine; // repurposed to hold pre-resampled.
+
+        auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, er_period, 1);
+
+        log->debug("nerticks={}, er_period={}, er_fine={}, fr_period={}, fr_fine={}, linear_size={}, fr_pad={}, er_pad={}, frer_fine={}, frer_coarse={}",
+                   nerticks, er_period, to_string(er_fine),
+                   fr_period_fine, to_string(fr_fine),
+                   linear_size,
+                   to_string(fr_pad), to_string(er_pad),
+                   to_string(frer_fine), to_string(frer_coarse));
+
+        m_response_waveform = frer_coarse;
+    }
+
+    // downsample then convolve
+    void ResponseKernel::configme_dtc()
+    {
+        log->debug("configuring FR*ER for downsample-then-convolve");
+        auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
+        std::vector<float> erv = ier->waveform_samples();
+        // We hold on to this so better not from_blob it!
+        // auto er = torch::from_blob(erv.data(), {static_cast<int64_t>(erv.size())}, torch::kFloat32);
+        auto er = torch::tensor(erv, torch::kFloat32);
+        m_raw_er = er;
 
         auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
         // Still at FR sampling, eg 100ns
-        auto fr_fine = fr_average_tensor(ifr, m_cfg.plane_index);
+        m_raw_fr_full_fine = fr_tensor(ifr->field_response(), m_cfg.plane_index);
+        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
+        m_raw_fr_avg_fine = fr_fine;
 
         // We now must do two transformations prior to the FR*ER convolution.
         //
@@ -81,6 +139,7 @@ namespace WireCell::SPNG {
         // I'm sure there is a trick to minimize the FFT round trips, but for
         // now we do the dumb, straightforward thing.  It is a one-shot anyways.
 
+
         const double er_period = ier->waveform_period();
         // Some FRs have FP round off problems in the period.
         const double fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
@@ -89,6 +148,7 @@ namespace WireCell::SPNG {
         // default to return it to interval space as we must pad for the FR*ER
         // convolution.
         auto fr = LMN::resample_interval(fr_fine, fr_period_fine, er_period, 1);
+        m_raw_fr = fr;
 
         // Find size to assure linear convolution.
         const int64_t linear_size = linear_shape(fr.size(1), er.size(0));
@@ -111,6 +171,22 @@ namespace WireCell::SPNG {
         auto frer = torch::fft::ifft(FRER, {}, 1);
         m_response_waveform = torch::real(frer);
 
+    }
+    
+    void ResponseKernel::configme()
+    {
+        if (m_cfg.plane_index < 0 || m_cfg.plane_index>3) {
+            raise<ValueError>("illegal plane ID: %d", m_cfg.plane_index);
+        }
+        m_cache.reset_capacity(m_cfg.capacity);
+
+        if (false) {
+            configme_dtc();
+        }
+        else {
+            configme_ctd();
+        }
+
         if (m_cfg.debug_filename.size()) {
             log->debug("writing debug file: {}", m_cfg.debug_filename);
             write_debug(m_cfg.debug_filename);
@@ -122,8 +198,13 @@ namespace WireCell::SPNG {
     {
         using tensor_map = torch::Dict<std::string, torch::Tensor>;
         tensor_map to_save;
+        to_save.insert("field_response_full_fine", m_raw_fr_full_fine);
+        to_save.insert("field_response_avg_fine", m_raw_fr_avg_fine);
+        to_save.insert("field_response", m_raw_fr);
+        to_save.insert("elec_response", m_raw_er);
+
         to_save.insert("response_waveform", m_response_waveform);
-        std::vector<int64_t> s = {100,1000};
+        std::vector<int64_t> s = {100,2000};
         to_save.insert("padded_waveform", pad_waveform(s));
         to_save.insert("padded_spectrum", make_spectrum(s));
         auto data = torch::pickle_save(to_save);

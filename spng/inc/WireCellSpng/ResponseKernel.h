@@ -101,6 +101,8 @@ namespace WireCell::SPNG {
 
         ResponseKernelConfig m_cfg;
         void configme();
+        void configme_dtc();
+        void configme_ctd();
 
         using tensor_cache_t = ThreadSafeCache<size_t, torch::Tensor>;
         mutable tensor_cache_t m_cache;
@@ -109,6 +111,9 @@ namespace WireCell::SPNG {
         // pad to match request in spectrum(shape).
         torch::Tensor m_response_waveform;
 
+        // For now, we will hang on to these past config time in order to
+        // write_debug them.
+        torch::Tensor m_raw_er, m_raw_fr_full_fine, m_raw_fr_avg_fine, m_raw_fr;
     };
 
 }

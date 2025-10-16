@@ -73,7 +73,7 @@ namespace WireCell::SPNG {
         /// analytical function.  Ultimately it is requested to be the padded
         /// size required for M*F/R.  Here we will kludge that size without
         /// going overboard..
-        std::vector<int64_t> shape = {100,1000};
+        std::vector<int64_t> shape = {100,2000};
         
         using tensor_map = torch::Dict<std::string, torch::Tensor>;
         tensor_map to_save;
