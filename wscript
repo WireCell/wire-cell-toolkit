@@ -59,7 +59,8 @@ def options(opt):
 
     opt.add_option('--cxxstd', default='c++17',
                    help="Set the value for the compiler's --std= option, default 'c++17'")
-
+    opt.add_option("--with-nvtx", action="store_true", default=False,
+                   help="Use NVTX if available (default: False)")
 
 def is_development():
     '''
@@ -128,10 +129,14 @@ int main(int argc,const char *argv[])
 
     if cfg.options.with_spdlog_static.lower() in ("yes","on","true"):
         cfg.env.CXXFLAGS += ['-DSPDLOG_COMPILED_LIB=1']
+    
+    if cfg.options.with_nvtx:
+        cfg.env.CXXFLAGS += ['-DHAVE_NVTX=1']
 
     # in principle, this should be the only line here.  Any cruft
     # above that has accrued should be seen as a fixme: move to
     # wcb/waf-tools.
+
     cfg.load("wcb")
 
     cfg.env.CXXFLAGS += ['-I.']

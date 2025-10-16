@@ -58,6 +58,7 @@ def options(opt):
     opt.load('rootsys')
     opt.load('libtorch')
     opt.load('cuda')
+    #opt.load("nvtx")
     opt.load('kokkos')
     #opt.load('protobuf')
 
@@ -98,6 +99,8 @@ def configure(cfg):
     if with_p('root'):
         cfg.load('rootsys')
 
+    #if with_p('nvtx'):
+    #    cfg.load('nvtx')
 
     # Check for stuff not found in the wcb-generic way
     #
@@ -154,6 +157,7 @@ def configure(cfg):
             ("hio", "INCLUDES_HDF5"),
             ("pytorch", "LIB_LIBTORCH"),
             ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ")
+            #("nvtx", "HAVE_NVTX")
     ]:
         exts = to_list(ext)
         for have in exts:
