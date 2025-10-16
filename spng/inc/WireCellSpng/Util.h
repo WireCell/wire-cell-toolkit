@@ -87,6 +87,13 @@ namespace WireCell::SPNG {
         return vshape(ten.sizes());
     }
 
+
+    /// Return true if any element is a NaN.
+    inline
+    bool has_nan(const torch::Tensor& tensor) {
+        return tensor.isnan().any().item<bool>();
+    }
+
     
     // Note, removed pad() as it was too limiting and was never used.  Use
     // torch::nn::pad().  See spng/test/doctest_simple_convo.cxx for one

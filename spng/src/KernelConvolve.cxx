@@ -63,6 +63,12 @@ namespace WireCell::SPNG {
         m_cfg.axis.resize(2);
 
         auto kshape = m_kernel->shape();
+        auto kernel_tensor = m_kernel->spectrum(kshape);
+        if (has_nan(kernel_tensor)) {
+            raise<ValueError>("kernel has NaN");
+        }
+
+
         m_roll.resize(2);
         for (size_t dim=0; dim<2; ++dim) {
             const auto& acfg = m_cfg.axis[dim];
@@ -104,6 +110,10 @@ namespace WireCell::SPNG {
         md = TDM::derive_metadata(md, in->metadata(), m_cfg.datapath_format);
 
         auto tensor = in->tensor();
+        if (has_nan(tensor)) {
+            log->critical("input tensor has NaNs {}", to_string(tensor));
+            raise<ValueError>("input tensor has NaNs");
+        }
 
         // An upstream source may provide an empty tensor due to no activity
         // (specifically sim which makes neither signal nor noise).  Better that
@@ -180,6 +190,10 @@ namespace WireCell::SPNG {
         tensor = torch::fft::fft2(tensor);
 
         auto kernel = m_kernel->spectrum(convolve_shape);
+        if (has_nan(kernel)) {
+            log->critical("kernel has NaNs {}", to_string(kernel));
+            raise<ValueError>("kernel has NaNs");
+        }
 
         // This is supposed to not change data shared by other shallow copies.
         kernel = kernel.unsqueeze(0);
