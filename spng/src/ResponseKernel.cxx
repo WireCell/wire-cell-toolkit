@@ -110,9 +110,29 @@ namespace WireCell::SPNG {
 
         auto frer = torch::fft::ifft(FRER, {}, 1);
         m_response_waveform = torch::real(frer);
+
+        if (m_cfg.debug_filename.size()) {
+            log->debug("writing debug file: {}", m_cfg.debug_filename);
+            write_debug(m_cfg.debug_filename);
+        }
+
     }
 
-    size_t ResponseKernel::make_cache_key(const shape_t& shape) const {
+    void ResponseKernel::write_debug(const std::string& filename) const
+    {
+        using tensor_map = torch::Dict<std::string, torch::Tensor>;
+        tensor_map to_save;
+        to_save.insert("response_waveform", m_response_waveform);
+        std::vector<int64_t> s = {100,1000};
+        to_save.insert("padded_waveform", pad_waveform(s));
+        to_save.insert("padded_spectrum", make_spectrum(s));
+        auto data = torch::pickle_save(to_save);
+        std::ofstream output_file(filename, std::ios::binary);
+        output_file.write(data.data(), data.size());
+    }
+
+    size_t ResponseKernel::make_cache_key(const shape_t& shape) const
+    {
         size_t h = 0;
         for (const auto& s : shape) {
             boost::hash_combine(h, s);
@@ -121,6 +141,11 @@ namespace WireCell::SPNG {
     }
 
     torch::Tensor ResponseKernel::make_spectrum(const std::vector<int64_t> & shape) const
+    {
+        return torch::fft::fft2(pad_waveform(shape));
+    }
+
+    torch::Tensor ResponseKernel::pad_waveform(const std::vector<int64_t> & shape) const
     {
         auto tmp = LMN::resize_middle(m_response_waveform, shape[0], 0);
         return LMN::resize(tmp, shape[1], 1);

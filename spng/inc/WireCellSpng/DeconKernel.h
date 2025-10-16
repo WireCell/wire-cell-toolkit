@@ -6,6 +6,7 @@
 #define WIRECELL_SPNG_DECONKERNEL
 
 #include "WireCellSpng/ContextBase.h"
+#include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ITorchSpectrum.h"
 
 #include "WireCellIface/IConfigurable.h"
@@ -39,12 +40,17 @@ namespace WireCell::SPNG {
         /// reduce memory usage if you enable caching here you likely want to
         /// disable caching there or vice versa.  
         int capacity{1};
+
+        /// If set, save some debug output to the named file.  File is produced
+        /// by torch::pickle_save().
+        std::string debug_filename = "";
     };
 }
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::DeconKernelConfig,
                         filter,
                         response,
-                        capacity);
+                        capacity,
+                        debug_filename);
 
 namespace WireCell::SPNG {
 
@@ -58,6 +64,7 @@ namespace WireCell::SPNG {
      * and not convolutional and thus no additional padding is considered.
      */
     struct DeconKernel : public ContextBase, 
+                         public Logger,
                          public ITorchSpectrum, virtual public IConfigurable {
 
         DeconKernel();
@@ -87,6 +94,8 @@ namespace WireCell::SPNG {
 
         // return hash of a shape
         size_t make_cache_key(const shape_t& shape) const;
+
+        void write_debug(const std::string& filename) const;
 
     private:
 

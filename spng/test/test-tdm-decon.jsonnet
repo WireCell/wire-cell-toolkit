@@ -1,6 +1,14 @@
 /// A test job using the TDM retrofitted nodes.
 ///
 /// This supports whatever detectors that omni supports.
+///
+/// TLAs:
+///
+/// input :: a depos file, optional, default to the muon-depos.npz file
+/// output :: optional, if given must have a "%s" to name the tier.
+/// anodeid :: optional, default is 3
+/// device :: optional, default to cpu
+
 
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
@@ -68,14 +76,15 @@ local decon_filters(plane_index, anode=null) = {
     // Channel filter applied as part of decon.
     //
     // Channel dimension from cfg/pgrapher/experiment/pdsp/sp-filters.jsonnet.
-    //There it is called "wire filter" and a "wf()" function defines defaults
-    //and separate filters for induction and collection are defined.  The
-    //"sigma" there is the "scale" here.  Note, the filter baseline (DC zero
-    //frequency) is preserved.
+    // There it is called "wire filter" and a "wf()" function defines defaults
+    // and separate filters for induction and collection are defined.  The
+    // "sigma" there is the "scale" here.  Note, the filter baseline (DC zero
+    // frequency) is preserved.  Also, note the "period" is a unitless 1.0 which
+    // means one channel per sample.
     channel:
         if plane_ids.is(plane_index, "ind")
-        then filter(scale=1.0 / wc.sqrtpi * 0.75, ignore_baseline=false)  // ind
-        else filter(scale=1.0 / wc.sqrtpi * 10.0, ignore_baseline=false), // col
+        then filter(scale=1.0 / wc.sqrtpi * 0.75, ignore_baseline=false, period=1.0)  // ind
+        else filter(scale=1.0 / wc.sqrtpi * 10.0, ignore_baseline=false, period=1.0), // col
 
     // Weiner (inspired) filter.
     //
@@ -121,7 +130,8 @@ local decon_kernel(filters, fr, er, which="gauss") = {
         type: "SPNGFilterKernel",
         name: name + which,
         data: {
-            axis: [ filters.channel, filters[which] ]
+            axis: [ filters.channel, filters[which] ],
+            debug_filename: "filter-kernel-%s.pkl" % (name+which)
         },
         // no uses
     },
@@ -133,6 +143,7 @@ local decon_kernel(filters, fr, er, which="gauss") = {
             field_response: wc.tn(fr),
             elec_response: wc.tn(er),
             plane_index: filters.plane_index,
+            debug_filename: "response-kernel-%s.pkl" % (name+which)
         },
         uses: [fr, er],         // NOT anode.
     },
@@ -142,6 +153,7 @@ local decon_kernel(filters, fr, er, which="gauss") = {
     data: {
         filter: wc.tn(filter),
         response: wc.tn(response),
+        debug_filename: "decon-kernel-%s.pkl" % (name+which)
     },
     uses: [response, filter]
 };
@@ -182,7 +194,7 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
     local adc_tick = 500*wc.ns;
     local adc_nticks = 6000;
 
-    local source = io.depo_file_source(input);
+    local depo_source = io.depo_file_source(input);
 
     # FIXME: remove omni and make this file stand-alone.
     local detector="pdhd";
@@ -360,11 +372,29 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
             pg.edge(groupfan, fanin, 0, 1)
         ]);
 
+    local sim_source = pg.pipeline([depo_source, drift, signal, reframer, noise, digitize]);
+    local frame_fout = pg.pnode({
+        type: 'FrameFanout',
+        name: '',
+        data: {
+            multiplicity: 2
+        }
+    }, nin=1, nout=2);
+    local adc_sink = io.frame_file_sink(output % "adc", digitize=true);
+    local adc_tap = pg.intern(innodes=[frame_fout],
+                              centernodes=[adc_sink],
+                              outnodes=[frame_fout],
+                              edges=[pg.edge(frame_fout, adc_sink, 1, 0)]);
+
+    local source = if output == ""
+                   then sim_source
+                   else pg.pipeline([sim_source, adc_tap]);
+    
     local sink = if output == ""
                  then pg.pnode({ type: "DumpFrames", name: "" }, nin=1, nout=0)
-                 else io.frame_file_sink(output, digitize=false);
+                 else io.frame_file_sink(output % "sig", digitize=false);
     // else io.frame_tensor_file_sink(output, digitize=false, mode="dense");
 
-    local graph = pg.pipeline([source, drift, signal, reframer, noise, digitize, body, sink]);
+    local graph = pg.pipeline([source, body, sink]);
     pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])
 

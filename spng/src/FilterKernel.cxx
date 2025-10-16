@@ -1,4 +1,5 @@
 #include "WireCellSpng/FilterKernel.h"
+#include "WireCellSpng/TorchLMN.h"
 
 #include "WireCellUtil/Response.h"
 
@@ -9,12 +10,17 @@ WIRECELL_FACTORY(SPNGFilterKernel,
                  WireCell::ITorchSpectrum,
                  WireCell::IConfigurable)
 
+using WireCell::SPNG::LMN::nhalf;
+
 namespace WireCell::SPNG {
 
-    FilterKernel::FilterKernel() {
+    FilterKernel::FilterKernel()
+        : Logger("FilterKernel", "spng")
+    {
     }
     FilterKernel::FilterKernel(const FilterKernelConfig& cfg)
-        : m_cfg(cfg)
+        : Logger("FilterKernel", "spng")
+        , m_cfg(cfg)
     {
         configme();
     }
@@ -26,7 +32,9 @@ namespace WireCell::SPNG {
         }
 
         m_funcs.clear();
-        for (const auto& axis : m_cfg.axis) { 
+        size_t ndim = m_cfg.axis.size();
+        for (size_t ind=0; ind<ndim; ++ind) {
+            const auto& axis = m_cfg.axis[ind];
             
             if (axis.kind != "lowpass" && axis.kind != "highpass") {
                 raise<ValueError>("unsupported kind of filter: %s", axis.kind);
@@ -43,13 +51,44 @@ namespace WireCell::SPNG {
                     return exp(-0.5 * pow(freq / axis.scale, axis.power));
                 });
             }
-            else {
+            else {              // "highpass", aka "lf"
                 m_funcs.emplace_back([axis](double freq) -> float {
                     return 1 - exp(-pow(freq / axis.scale, axis.power));
                 });
             }
+            log->debug("filter axis {} with {} period={} scale={} power={}",
+                       ind, axis.kind, axis.period, axis.scale, axis.power);
         }
+
+        if (m_cfg.debug_filename.size()) {
+            log->debug("writing debug file: {}", m_cfg.debug_filename);
+            write_debug(m_cfg.debug_filename);
+        }
+
     }
+
+    void FilterKernel::write_debug(const std::string& filename) const
+    {
+        /// There is no "native" size for the filter since it is a sampled
+        /// analytical function.  Ultimately it is requested to be the padded
+        /// size required for M*F/R.  Here we will kludge that size without
+        /// going overboard..
+        std::vector<int64_t> shape = {100,1000};
+        
+        using tensor_map = torch::Dict<std::string, torch::Tensor>;
+        tensor_map to_save;
+
+        size_t ndims = m_funcs.size();
+        for (size_t idim=0; idim<ndims; ++idim) {
+            auto s = spectrum_axis(shape, idim);
+            to_save.insert(fmt::format("filter1d{}", idim), s);
+        }
+        to_save.insert("filter2d", spectrum(shape));
+        auto data = torch::pickle_save(to_save);
+        std::ofstream output_file(filename, std::ios::binary);
+        output_file.write(data.data(), data.size());
+    }
+
 
     void FilterKernel::configure(const WireCell::Configuration& cfg)
     {
@@ -64,6 +103,38 @@ namespace WireCell::SPNG {
         auto cfg2 = this->ContextBase::default_configuration();
         update(cfg, cfg2);
         return cfg;
+    }
+
+
+    torch::Tensor FilterKernel::spectrum_axis(const shape_t & shape, int64_t axis) const
+    {
+        const auto& cfg = m_cfg.axis[axis];
+        const auto& sample = m_funcs[axis];
+
+        int64_t size = shape[axis];
+
+        // Build on CPU.  We will send to device just before return.
+        auto s = torch::zeros(size, torch::kFloat);
+
+        if (! cfg.ignore_baseline) {
+            s[0] = sample(0.0);
+        }
+
+        // From 0 to sample frequency
+        Binning bins(size, 0, 1.0/cfg.period);
+
+        // Number of non-zero/non-nyquist "positive frequencies".
+        const size_t half = nhalf(size);
+        for (size_t ind=1; ind <= half; ++ind) {
+            float freq = bins.edge(ind);
+            s[ind] = s[size-ind] = sample(freq);
+        }
+        if (size%2 == 0) {      // a nyquist bin exists.
+            int64_t nyquist_sample = size/2;
+            float nyquist_frequency = bins.edge(nyquist_sample);
+            s[half+1] = sample(nyquist_frequency);
+        }
+        return s;
     }
 
     torch::Tensor FilterKernel::spectrum(const shape_t & shape) const
@@ -83,31 +154,7 @@ namespace WireCell::SPNG {
         std::vector<torch::Tensor> axis;
 
         for (size_t idim=0; idim<ndims; ++idim) {
-            const auto& cfg = m_cfg.axis[idim];
-            const auto& sample = m_funcs[idim];
-
-            int64_t size = shape[idim];
-
-            // Build on CPU.  We will send to device just before return.
-            auto s = torch::zeros(size, torch::kFloat);
-
-            if (! cfg.ignore_baseline) {
-                s[0] = sample(0.0);
-            }
-
-            // From 0 to sample frequency
-            Binning bins(size, 0, 1.0/cfg.period);
-
-            const size_t half = (size+1)/2;
-            for (size_t ind=1; ind<half; ++ind) {
-                float freq = bins.edge(ind);
-                s[ind] = s[size-ind] = sample(freq);
-            }
-            if (size%2 == 0) {
-                float nyquist = bins.edge(half);
-                s[half] = bins.edge(nyquist);
-            }
-
+            auto s = spectrum_axis(shape, idim);
             axis.push_back(s);
         }
 

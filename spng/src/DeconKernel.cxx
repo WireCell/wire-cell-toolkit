@@ -19,11 +19,13 @@ using namespace WireCell::HanaJsonCPP;
 namespace WireCell::SPNG {
 
     DeconKernel::DeconKernel()
-        : m_cache(1)
+        : Logger("DeconKernel", "spng")
+        , m_cache(1)
     {}
 
     DeconKernel::DeconKernel(const DeconKernelConfig& cfg)
-        : m_cfg(cfg)
+        : Logger("DeconKernel", "spng")
+        , m_cfg(cfg)
         , m_cache(m_cfg.capacity)
     {
         configme();
@@ -52,6 +54,39 @@ namespace WireCell::SPNG {
         m_filter = Factory::find_tn<ITorchSpectrum>(m_cfg.filter);
         m_response = Factory::find_tn<ITorchSpectrum>(m_cfg.response);
 
+        if (m_cfg.debug_filename.size()) {
+            log->debug("writing debug file: {}", m_cfg.debug_filename);
+            write_debug(m_cfg.debug_filename);
+        }
+    }
+
+    void DeconKernel::write_debug(const std::string& filename) const
+    {
+        /// There is no "native" size for the filter since it is a sampled
+        /// analytical function.  Ultimately it is requested to be the padded
+        /// size required for M*F/R.  Here we will kludge that size without
+        /// going overboard..
+        std::vector<int64_t> shape = {100,1000};
+        
+        using tensor_map = torch::Dict<std::string, torch::Tensor>;
+        tensor_map to_save;
+
+        auto kern = spectrum(shape);
+        to_save.insert("decon_kernel", kern);
+
+        // Some quick and dirty impulse functions.
+        auto meas = torch::zeros(shape);
+        meas.index({0, 0}) = 1.0;
+        meas.index({25, 999}) = 1.0;
+        meas.index({50, 100}) = 1.0;
+        meas.index({75, 500}) = 1.0;
+        meas = torch::fft::fft2(meas);
+        auto sig = torch::real(torch::fft::ifft2(meas*kern));
+        to_save.insert("decon_signal", sig);
+
+        auto data = torch::pickle_save(to_save);
+        std::ofstream output_file(filename, std::ios::binary);
+        output_file.write(data.data(), data.size());
     }
 
     size_t DeconKernel::make_cache_key(const shape_t& shape) const {

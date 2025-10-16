@@ -2,6 +2,7 @@
 #define WIRECELL_SPNG_FILTERKERNEL
 
 #include "WireCellSpng/ContextBase.h"
+#include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ITorchSpectrum.h"
 
 #include "WireCellIface/IConfigurable.h"
@@ -61,6 +62,10 @@ namespace WireCell::SPNG {
         /// Note: currently this is supported only up to 3D but support for
         /// higher dimensions can be added.
         std::vector<FilterKernelAxisConfig> axis{};
+
+        /// If set, save some debug output to the named file.  File is produced
+        /// by torch::pickle_save().
+        std::string debug_filename = "";
     };
 }
 
@@ -70,7 +75,7 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelAxisConfig,
                         scale,
                         power,
                         ignore_baseline);
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelConfig, axis);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelConfig, axis, debug_filename);
 
 
 namespace WireCell::SPNG {
@@ -90,6 +95,7 @@ namespace WireCell::SPNG {
      * 
      */
     struct FilterKernel : public ContextBase, 
+                          public Logger,
                           public ITorchSpectrum, virtual public IConfigurable {
 
         FilterKernel();
@@ -111,7 +117,16 @@ namespace WireCell::SPNG {
         // IConfigurable - see FilterKernelConfig for configuration 
         virtual void configure(const WireCell::Configuration& config);
         virtual WireCell::Configuration default_configuration() const;
-        
+
+        // Non-API methods
+
+        /// Get the 1D filter spectrum for the given axis.
+        torch::Tensor spectrum_axis(const shape_t & shape, int64_t axis) const;
+
+        // Write a debug output file.
+        void write_debug(const std::string& filename) const;
+
+
     private:
 
         FilterKernelConfig m_cfg;

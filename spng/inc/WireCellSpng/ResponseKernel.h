@@ -40,6 +40,9 @@ namespace WireCell::SPNG {
         /// variety of argument values passed to spectrum(shape).
         int capacity{1};
 
+        /// If set, save some debug output to the named file.  File is produced
+        /// by torch::pickle_save().
+        std::string debug_filename = "";
     };
 }
 
@@ -47,7 +50,8 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResponseKernelConfig,
                         field_response,
                         elec_response,
                         plane_index,
-                        capacity);
+                        capacity,
+                        debug_filename);
 
 namespace WireCell::SPNG {
     /** The ResponseKernel provides FR*ER spectrum
@@ -83,11 +87,15 @@ namespace WireCell::SPNG {
         virtual WireCell::Configuration default_configuration() const;
         
         // Non interface methods.  Unconditionally and without cache, produce
-        // version of the natural spectrum at the given shape..
+        // version of the response waveform at the given shape..
+        torch::Tensor pad_waveform(const std::vector<int64_t> & shape) const;
+        // Pad and apply fft2
         torch::Tensor make_spectrum(const std::vector<int64_t> & shape) const;
 
         // return hash of a shape
         size_t make_cache_key(const shape_t& shape) const;
+
+        void write_debug(const std::string& filename) const;
 
     private:
 
