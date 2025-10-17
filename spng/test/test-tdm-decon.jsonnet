@@ -83,8 +83,8 @@ local decon_filters(plane_index, anode=null) = {
     // means one channel per sample.
     channel:
         if plane_ids.is(plane_index, "ind")
-        then filter(scale=1.0 / wc.sqrtpi * 0.75, ignore_baseline=false, period=1.0)  // ind
-        else filter(scale=1.0 / wc.sqrtpi * 10.0, ignore_baseline=false, period=1.0), // col
+        then filter(scale=1.0 / wc.sqrtpi * 0.75, period=1.0)  // ind
+        else filter(scale=1.0 / wc.sqrtpi * 10.0, period=1.0), // col
 
     // Weiner (inspired) filter.
     //
@@ -131,6 +131,8 @@ local decon_kernel(filters, fr, er, which="gauss") = {
         name: name + which,
         data: {
             axis: [ filters.channel, filters[which] ],
+            // axis: [ {kind: "identity"}, {kind: "identity"} ],
+            // axis: [ {kind: "identity"}, filters[which] ],
             debug_filename: "filter-kernel-%s.pkl" % (name+which)
         },
         // no uses
@@ -168,7 +170,9 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
         {cyclic: false, crop: -2}  // w, linear
     ][plane_index];
     /// Would NOT crop in chunked-streaming mode.
-    local time_options = {cyclic: false, crop: -2, roll_mode: "decon"};
+    // local time_options = {cyclic: false, crop: -2, roll: 1000, roll_mode: "decon"};
+    local time_options = {cyclic: false, crop: 0};
+    /// Note, may need to change KC to roll then crop.
 
     // one decon per filter type
     pg.pnode({
@@ -182,7 +186,7 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
             ],
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
-            faster: true,       // use "faster DFT size"
+            //faster: true,       // use "faster DFT size"
         },
     }, nin=1, nout=1, uses=[kernel]);
 

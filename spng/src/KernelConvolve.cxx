@@ -211,6 +211,10 @@ namespace WireCell::SPNG {
             const int crop = m_cfg.axis[dim].crop;
             log->debug("before: crop={} dim={} tensor={}", crop, dim, to_string(tensor));
 
+            if (m_roll[dim]) {
+                tensor = torch::roll(tensor, m_roll[dim], dim+1);
+            }
+
             if (crop > 0) {  // absolute crop
                 tensor = LMN::resize(tensor, crop, dim+1);
             }
@@ -226,9 +230,6 @@ namespace WireCell::SPNG {
             // else, crop==0 and no crop
             log->debug("after: crop={} dim={} tensor={}", crop, dim, to_string(tensor));
 
-            if (m_roll[dim]) {
-                tensor = torch::roll(tensor, m_roll[dim], dim+1);
-            }
         }
 
         if (! batched) {

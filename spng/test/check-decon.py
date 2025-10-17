@@ -33,6 +33,7 @@ def cli():
 def needs_log(tensor, title):
     if "_waveform" in title: return True
     if "field_response" in title: return True
+    if "decon_kernel" in title and "amplitude" in title: return True
     return False
 
 def do_plot(tensor, title, pdf):
@@ -56,7 +57,7 @@ def do_plot(tensor, title, pdf):
             pos = torch.abs(tensor)
             avmin = torch.min(pos).item()
             avmax = torch.max(pos).item()
-            linthresh = avmax*1e-6
+            linthresh = avmax*1e-8
             vlim = avmax*1e-3
             norm = pcolors.SymLogNorm(linthresh=linthresh, 
                                       vmin=-vlim, vmax=vlim)

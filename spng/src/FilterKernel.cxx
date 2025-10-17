@@ -36,9 +36,15 @@ namespace WireCell::SPNG {
         for (size_t ind=0; ind<ndim; ++ind) {
             const auto& axis = m_cfg.axis[ind];
             
-            if (axis.kind != "lowpass" && axis.kind != "highpass") {
-                raise<ValueError>("unsupported kind of filter: %s", axis.kind);
+            if (axis.kind == "identity") {
+                m_funcs.emplace_back([axis](double freq) -> float {
+                    return 1.0;
+                });
+                continue;
             }
+
+            // the "pass" filters require legal parameters.
+
             if (axis.period <= 0) {
                 raise<ValueError>("period must be positive");
             }
@@ -51,10 +57,13 @@ namespace WireCell::SPNG {
                     return exp(-0.5 * pow(freq / axis.scale, axis.power));
                 });
             }
-            else {              // "highpass", aka "lf"
+            else if (axis.kind == "highpass") { // aka "lf"
                 m_funcs.emplace_back([axis](double freq) -> float {
                     return 1 - exp(-pow(freq / axis.scale, axis.power));
                 });
+            }
+            else {
+                raise<ValueError>("unsupported axis kind: %s", axis.kind);
             }
             log->debug("filter axis {} with {} period={} scale={} power={}",
                        ind, axis.kind, axis.period, axis.scale, axis.power);

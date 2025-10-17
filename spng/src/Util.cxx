@@ -29,7 +29,9 @@ namespace WireCell::SPNG {
     std::string to_string(const torch::Tensor& tensor)
     {
         std::stringstream ss;
-        ss << to_string(tensor.sizes()) << " <" << tensor.dtype() << ">";
+        auto tabs = torch::abs(tensor);
+        ss << to_string(tensor.sizes()) << " dtype:" << tensor.dtype() << " vmm:["
+           << torch::min(tabs).item() << ", " << torch::max(tabs).item() << "]";
         return ss.str();
     }
 

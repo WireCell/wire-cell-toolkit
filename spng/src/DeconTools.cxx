@@ -39,7 +39,7 @@ namespace WireCell::SPNG {
 
             /// Move "wire of interest" row from center row to row zero in order
             /// to remove the artificial shift.
-            return torch::roll(response, {npaths/2}, {0});
+            return torch::roll(response, {(npaths+1)/2}, {0});
         }
         raise<ValueError>("no plane %d in field response", plane_id);
         return torch::zeros({0}); // avoid compiler warning.

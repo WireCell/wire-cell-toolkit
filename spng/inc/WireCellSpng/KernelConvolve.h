@@ -40,7 +40,7 @@ namespace WireCell::SPNG {
         int crop = 0;
 
         /// Optional, apply a "roll" to the interval-space convolution result
-        /// (after a potential crop).  This will move the sample with the number
+        /// (before a crop).  This will move the sample with the number
         /// given by "roll" to become sample zero.  
         ///
         /// Note, a roll can be used for many reasons.  Some reasons:

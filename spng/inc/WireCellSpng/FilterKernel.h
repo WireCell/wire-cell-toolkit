@@ -28,6 +28,7 @@ namespace WireCell::SPNG {
         ///                (WCT mainline calls this "hf")
         /// The "lowpass" filter is: exp(-0.5 (freq/scale)^power).
         ///
+        /// - "identity" :: all filter values are 1.0.
         std::string kind{""};
 
         /// Required, give the interval-domain sampling period in
