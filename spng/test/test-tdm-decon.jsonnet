@@ -14,7 +14,7 @@ local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local omnimap = import "omni/all.jsonnet";
 local io = import "fileio.jsonnet";
-
+local detectors = import "detectors.jsonnet"; // in wire-cell-data
 
 // Define a "matrix" lookup table between a plane label and all labels.  Note,
 // below we have 2 "groups" for W plane, but "plane" continues to mean just the
@@ -191,21 +191,12 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
     }, nin=1, nout=1, uses=[kernel]);
 
 
-
-/// Note, different input may require selecting a different anodeid to get any activity.
-function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
-
-    local adc_tick = 500*wc.ns;
-    local adc_nticks = 6000;
-
-    local depo_source = io.depo_file_source(input);
+/// Return a compound node representing a source that simulates using input depos
+local sim_source_node(depos_filename, anode, omni, nticks=6000) = 
+              
+    local depo_source = io.depo_file_source(depos_filename);
 
     # FIXME: remove omni and make this file stand-alone.
-    local detector="pdhd";
-    local omni = omnimap[detector];
-    local aid = std.parseInt(anodeid);
-
-    local anode = omni.anodes[aid];
     local drift = omni.drift(anode);
     local signal = omni.signal(anode);
     local noise = omni.noise(anode);
@@ -214,23 +205,58 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
     // This is what sets the ADC waveform readout window.
     local reframer = pg.pnode({
         type: 'Reframer',
-        name: anodeid,
+        name: anode.data.ident,
         data: {
             anode: wc.tn(anode),
-            nticks: adc_nticks,
+            nticks: nticks,
         },
     }, nin=1, nout=1, uses=[anode]);
 
-    local verbose = 2;
+    pg.pipeline([depo_source, drift, signal, reframer, noise, digitize]);
 
-    local fr = {
+
+
+/// Return a "plane group" object.  The "layer" MUST be only one.
+local plane_group(layer, faces, anode, nchan) = {
+    wpids: [wc.WirePlaneId(layer, face, anode.data.ident) for face in faces],
+    plane: wc.wpid_layer_to_index(layer),
+    nchan: nchan,
+};
+
+
+/// Return an array of "plane group" objects that determines how a frame is
+/// split into parallel-processed tensors.
+local plane_groups(detector, anode) =
+    // fixme: some day, this should become dependent on "detector".  For now, we assume APA.
+    local objs = [
+        plane_group(wc.Ulayer, [0,1], anode, 800),
+        plane_group(wc.Vlayer, [0,1], anode, 800),
+        plane_group(wc.Wlayer, [0], anode, 480),
+        plane_group(wc.Wlayer, [1], anode, 480),
+    ];
+    {
+        objects: objs,
+        wpids: [o.wpids for o in objs],
+        planes: [o.plane for o in objs],
+        nchans: [o.nchan for o in objs],
+        count: std.length(objs),
+    };
+
+
+// Return fr, er, rc responess for the detector.
+local responses(detector, anode, adc_tick=500*wc.ns) = {
+    local det = detectors[detector],
+
+    fr : {
         type: 'FieldResponse',
         name: detector,
         data: {
-            filename: "dune-garfield-1d565.json.bz2",
+            filename: det.fields[0], // "dune-garfield-1d565.json.bz2",
         },
-    };
-    local er = {
+    },
+
+    // Fixme: un-hard-wire,  this is for APA
+    er : {
         type: 'ColdElecResponse',
         name: detector,
         data: {
@@ -241,34 +267,166 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
             gain : 14.0*wc.mV/wc.fC,
             postgain: 1.0,
         },
-    };
-    local rcr = {
+    },
+
+    // Fixme: un-hard-wire,  this is for APA
+    local rc = {
         type: 'RCResponse',
         name: detector,
         data: {
             width: 1.1*wc.ms,
         }
-    };
-    local rc = [rcr, rcr];
+    },
+
+    rc: [rc,rc],
+};
+
+
+/// A frame->(decon)->frame compound node that runs the original SPNG decon.
+local orig_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns, adc_nticks=6000) =
+    local res = responses(detector, anode, adc_tick);
+
+    local groups = plane_groups(detector, anode);
+
+    local fanout = pg.pnode({
+        type: 'FrameToTorchSetFanout',
+        name: "fanout",
+        data: {
+            anode: wc.tn(anode),
+            expected_nticks: adc_nticks,
+            output_groups: groups.wpids,
+            unsqueeze_output: true,
+        },
+    }, nin=1, nout=groups.count, uses=[anode]);
+
+    // helper to make a per group (iplane) pieline
+    local decon_pipeline(iplane) = 
+
+        local torch_frer = {
+            type: "TorchFRERSpectrum",
+            name: "torch_frer%d_plane%d" % [anode.data.ident, iplane],
+            uses: [res.fr, res.er],
+            data: {
+                field_response: wc.tn(res.fr),
+                elec_response: wc.tn(res.er),
+                fr_plane_id: if iplane > 2 then 2 else iplane,
+                ADC_mV: 11702142857.142859,
+                gain: 1.0,
+                default_nchans : groups.nchans[iplane],
+                default_nticks: 6000,
+                readout_period: 500.0, #512.0,
+                extra_scale: 1.0,
+                debug_force_cpu: device == "cpu",
+                
+            }
+        };
+        local wire_filter_ind = if iplane < 2 then 0 else 1;
+        local the_wire_filter = 
+            local wf = {
+                type: 'HfFilter',
+                name: ['Wire_ind', 'Wire_col'][wire_filter_ind],
+                data: {
+                    max_freq: 1,  // warning: units
+                    power: 2,
+                    flag: false,
+                    sigma: [ 1.0 / wc.sqrtpi * 0.75,  1.0 / wc.sqrtpi * 10.0][wire_filter_ind]
+                }
+            };
+            {
+                type: "Torch1DSpectrum",
+                name: "orig-wire-filter%d" % wire_filter_ind,
+                uses: [wf],
+                data: {
+                    spectra: [ wc.tn(wf) ],
+                    device: device,
+                },
+            };
+
+        local decon = pg.pnode({
+            type: 'SPNGDecon',
+            name: 'spng_decon_apa%d_plane%d' % [anode.data.ident, iplane],
+            data: {
+                frer_spectrum: wc.tn(torch_frer),
+                wire_filter: wc.tn(the_wire_filter), #put in if statement
+                coarse_time_offset: 1000,
+                debug_no_frer: false,
+                debug_no_wire_filter: false,
+                debug_no_roll: false,
+                debug_force_cpu: device == "cpu",
+                pad_wire_domain: (iplane > 1), #Non-periodic planes get padded
+                use_fft_best_length: true,
+                unsqueeze_input: false,
+            },
+        }, nin=1, nout=1, uses=[torch_frer, the_wire_filter]);
+        local gaus_filter = {
+            type: 'HfFilter',
+            name: 'Gaus_wide',
+            data: {
+                max_freq: 0.001,  // warning: units
+                power: 2,
+                flag: true,
+                sigma: 0.00012,  // caller should provide
+                use_negative_freqs: false,
+                device: device,
+            }
+        };
+        local torch_gaus_filter = {
+            type: "Torch1DSpectrum",
+            name: "torch_1dspec_gaus",
+            uses: [gaus_filter],
+            data: {
+                spectra: [
+                    wc.tn(gaus_filter),
+                ],
+                device: device,
+            },
+        };
+        local gaus = pg.pnode({
+            type: 'SPNGApply1DSpectrum',
+            name: 'spng_gaus_apa%d_plane%d' % [anode.data.ident, iplane],
+            data: {
+                base_spectrum_name: wc.tn(torch_gaus_filter),
+                dimension: 2,
+                output_set_tag: "HfGausWide",
+            },
+        }, nin=1, nout=1, uses=[torch_gaus_filter]);
+
+        pg.pipeline([decon, gaus]);
+
+    local fanin =  pg.pnode({
+        type: 'TorchTensorSetToFrameFanin',
+        name: "",
+        data: {
+            anode: wc.tn(anode),
+            input_groups: groups.wpids,
+        },
+    }, nin=groups.count, nout=1, uses=[anode]);
+
+
+    local giota = wc.iota(groups.count);
+    local pipes = [decon_pipeline(n) for n in giota];
+
+    local body = pg.intern(innodes=[fanout], centernodes=pipes, outnodes=[fanin],
+                           edges=[
+                               pg.edge(fanout, pipes[n], n, 0) for n in giota
+                           ] + [
+                               pg.edge(pipes[n], fanin, 0, n) for n in giota
+                           ]);
+    body;
+
+    
+
+/// Return a frame->[decon]->frame compound node that does TDM decon.
+local tdm_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns) = 
+    local verbose = 2;          // loud debug logging
+    local res = responses(detector, anode, adc_tick);
 
     local plane_filters = [decon_filters(plane) for plane in wc.iota(3)];
 
-    local groups = [
-        [wc.WirePlaneId(wc.Ulayer, 0, anode.data.ident),
-         wc.WirePlaneId(wc.Ulayer, 1, anode.data.ident)],
-        
-        [wc.WirePlaneId(wc.Vlayer, 0, anode.data.ident),
-         wc.WirePlaneId(wc.Vlayer, 1, anode.data.ident)],
-        
-        [wc.WirePlaneId(wc.Wlayer, 0, anode.data.ident)],
-        
-        [wc.WirePlaneId(wc.Wlayer, 1, anode.data.ident)],
-    ];
-    local group_plane = [0, 1, 2, 2];
+    local groups = plane_groups(detector, anode);
 
-    local ngroups = std.length(groups);
     // fan size.  one extra sends the input frame to the output
-    local multiplicity = ngroups + 1;
+    local multiplicity = groups.count + 1;
 
     local frametotdm = pg.pnode({
         type: 'SPNGFrameToTdm',
@@ -279,8 +437,8 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
             rules: [{
                 tag: "",
                 groups: [{
-                    wpids: groups[g],
-                }, for g in wc.iota(ngroups)]}],
+                    wpids: groups.wpids[g],
+                }, for g in wc.iota(groups.count)]}],
         },
     }, nin=1, nout=1, uses=[anode]);
     
@@ -300,28 +458,28 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
         name: "unpack",
         data: {
             selections: [ {datapath:"/frames/\\d+/tags/null/rules/0/groups/%d/traces" % group}
-                          for group in wc.iota(ngroups) ],
+                          for group in wc.iota(groups.count) ],
         },
-    }, nin=1, nout=ngroups);
+    }, nin=1, nout=groups.count);
 
 
     /// Loop over "groups" making nodes that operate on a single traces tensor.
     local pipes = [
-        local plane = group_plane[group];
+        local plane = groups.planes[group];
         local which  = "gauss";
         // to start, just decon, later turn this into a deeper pipeline
-        convo_node(decon_kernel(decon_filters(plane), fr, er, which), plane, '-group%d'%group, which)
+        convo_node(decon_kernel(decon_filters(plane), res.fr, res.er, which), plane, '-group%d'%group, which)
 
-        for group in wc.iota(ngroups)
+        for group in wc.iota(groups.count)
     ];
     
     local repack = pg.pnode({
         type: 'SPNGTorchPacker',
         name: "repack",
         data: {
-            multiplicity: ngroups,
+            multiplicity: groups.count,
         },
-    }, nin=ngroups, nout=1);
+    }, nin=groups.count, nout=1);
 
     local fanin = pg.pipeline([
         pg.pnode({
@@ -359,10 +517,10 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
         innodes=[unpack], centernodes=pipes, outnodes=[repack],
         edges=[
             pg.edge(unpack, pipes[n], n, 0)
-            for n in wc.iota(ngroups)
+            for n in wc.iota(groups.count)
         ] + [
             pg.edge(pipes[n], repack, 0, n)
-            for n in wc.iota(ngroups)
+            for n in wc.iota(groups.count)
         ]);
 
     // 1->2->{1, 4->1}->1
@@ -376,29 +534,75 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu")
             pg.edge(groupfan, fanin, 0, 1)
         ]);
 
-    local sim_source = pg.pipeline([depo_source, drift, signal, reframer, noise, digitize]);
+    body;
+
+
+/// Make a sink of frames through a body.  If output is given, tap a frame file sink
+local frame_sink(body, output="", name="", tier="sig", digitize=false) = 
+    local sink = if output == ""
+                 then pg.pnode({ type: "DumpFrames", name: name }, nin=1, nout=0)
+                 else io.frame_file_sink(output%tier, digitize=digitize);
+    pg.pipeline([body, sink]);
+
+
+
+local frame_tap(filename) =
+    /// Make a tap if we save ADC
     local frame_fout = pg.pnode({
         type: 'FrameFanout',
-        name: '',
+        name: filename,
         data: {
             multiplicity: 2
         }
     }, nin=1, nout=2);
-    local adc_sink = io.frame_file_sink(output % "adc", digitize=true);
+    local adc_sink = io.frame_file_sink(filename, digitize=true);
     local adc_tap = pg.intern(innodes=[frame_fout],
                               centernodes=[adc_sink],
                               outnodes=[frame_fout],
                               edges=[pg.edge(frame_fout, adc_sink, 1, 0)]);
+    adc_tap;
+
+
+/// Return a single sink that is actually a fanout to two sink
+local frame_sink_two(one, two, name="") =
+    local fout = pg.pnode({
+        type: 'FrameFanout',
+        name: name,
+        data: {
+            multiplicity: 2,
+        },
+    }, nin=1, nout=2);
+    pg.intern(innodes=[fout], outnodes=[one, two], edges=[
+        pg.edge(fout, one, 0, 0),
+        pg.edge(fout, two, 1, 0)]);
+
+
+/// Note, different input may require selecting a different anodeid to get any activity.
+function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu", which="tdm")
+
+    local adc = {tick: 500*wc.ns, nticks: 6000};
+
+    # FIXME: remove omni and make this file stand-alone.
+    local detector="pdhd";
+    local omni = omnimap[detector];
+    local aid = std.parseInt(anodeid);
+    local anode = omni.anodes[aid];
+
+    local sim_source = sim_source_node(input, anode, omni, adc.nticks);
 
     local source = if output == ""
                    then sim_source
-                   else pg.pipeline([sim_source, adc_tap]);
+                   else pg.pipeline([sim_source, frame_tap(output%"adc")]);
     
-    local sink = if output == ""
-                 then pg.pnode({ type: "DumpFrames", name: "" }, nin=1, nout=0)
-                 else io.frame_file_sink(output % "sig", digitize=false);
-    // else io.frame_tensor_file_sink(output, digitize=false, mode="dense");
+    local tdm_decon = tdm_decon_node(detector, anode, device, adc.tick);
+    local tdm_sink = frame_sink(tdm_decon, output, "tdm", "tdm-sig");
 
-    local graph = pg.pipeline([source, body, sink]);
+    local orig_decon = orig_decon_node(detector, anode, device, adc.tick, adc.nticks);
+    local orig_sink = frame_sink(orig_decon, output, "orig", "orig-sig");
+
+    local both_sink = frame_sink_two(tdm_sink, orig_sink, "both");
+
+    local sinks = { tdm: tdm_sink, orig: orig_sink, both: both_sink };
+    local graph = pg.pipeline([source, sinks[which]]);
     pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])
 
