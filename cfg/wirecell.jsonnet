@@ -289,14 +289,37 @@
     Ray :: {tail:self.Point,head:self.Point},
     Track :: { time:0.0, charge:-1, ray:self.Ray },
 
-    // WirePlaneID is a packed integer.  WARNING, layer is NOT what
-    // most people call "plane number".  It is a bit field.  For
-    // 3-plane detectors the outer most wire plane layer is 1, then 2
-    // and collection is 4 (not 3).  layer=0 is undefined.
+    // A wire-plane ID is a packed integer.  WARNING, layer is NOT what most
+    // people call "plane number".  It is a bit field.  For 3-plane detectors
+    // the outer most wire plane layer is 1, middle is layer 2 and the
+    // collection plane is 4 (not 3).  layer=0 is undefined.  What you normally
+    // think of as a zero-counted "plane number" is the "index" and that
+    // information is held in which layer bit holds value 1.  A WPID may have
+    // multiple layers set to 1, depending on how it is used.
     Ulayer:1<<0,
     Vlayer:1<<1,
     Wlayer:1<<2,
     WirePlaneId(layer, face=0, apa=0) :: (layer&7) | (face << 3) | (apa << 4),
+
+    // Return INDEX of all layers that are identified in the layer bitmap.
+    wpid_layer_to_indices(layer) ::
+        [bit for bit in [0,1,2] if (layer & (1<<bit)) != 0],
+
+    // Return FIRST INDEX of layers that are identified in the layer bitmap.
+    wpid_layer_to_index(layer) ::
+        self.wpid_layer_to_indices(layer)[0],
+
+    // Unpack a WirePlaneId into its constituents
+    unpack_wpid(wpid) :: {
+        local layer_mask = 7,
+        local face_shift = 3,
+        local apa_shift = 4,
+        apa: wpid >> apa_shift,
+        face: (wpid&(1 << face_shift))>>face_shift,
+        layer: wpid&layer_mask,
+        index: $.wpid_layer_to_index(self.layer),
+    },
+
 
     // Base class for a configurable.
     Component :: {
