@@ -16,6 +16,11 @@ namespace WireCell::SPNG {
 
     struct KernelConvolveAxisConfig {
 
+        /// Subtract a baseline.  If true, the median value is found along this
+        /// axis and subtracted.  Eg, if this axis is "time", each "channel" is
+        /// median-subtracted.
+        bool baseline = false;
+
         ///  Optional, (default false), if the convolution over this axis is
         ///  cyclic (true) or linear (false, default).  Note, if cyclic is true,
         ///  the dimension will not be padded at all, including for "faster FFT
@@ -96,10 +101,14 @@ namespace WireCell::SPNG {
 
         // fixme: tag and datapath_format should be uplifted to a base class
         // handling config and application.
+
+        /// If set, save some debug output to the named file.  File is produced
+        /// by torch::pickle_save().
+        std::string debug_filename = "";
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig, cyclic, crop, roll, roll_mode);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig, baseline, cyclic, crop, roll, roll_mode);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig, kernel, axis, faster, tag, datapath_format);
 
 namespace WireCell::SPNG {

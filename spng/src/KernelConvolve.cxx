@@ -80,9 +80,12 @@ namespace WireCell::SPNG {
                 log->warn("kernel dimension {} has zero size, is this really what you want?", dim);
             }
 
+            // Fixme: what about additional padding due to "faster DFT"?
             m_roll[dim] = acfg.roll;
             if (acfg.roll_mode == "decon") {
                 m_roll[dim] += kshape[dim];
+                log->debug("will roll dim {} by {} of which {} is from response",
+                           dim, m_roll[dim], kshape[dim]);
             }
         }
         log->debug("using tag: {} and datapath format: {}", m_cfg.tag, m_cfg.datapath_format);
@@ -151,6 +154,12 @@ namespace WireCell::SPNG {
         for (size_t dim=0; dim<2; ++dim) {
             const auto& acfg = m_cfg.axis[dim];
             const auto dim_size = tensor_shape[dim+1]; // skip batch dim;
+
+            if (acfg.baseline) {
+                auto medians = std::get<0>(torch::median(tensor, dim+1, false));
+                medians = medians.unsqueeze(dim+1);
+                tensor = tensor - medians;
+            }
 
             if (kernel_shape[dim] == 0) {
                 log->warn("shape: natural kernel size of dimension {} is zero, using input size {}", dim, dim_size);

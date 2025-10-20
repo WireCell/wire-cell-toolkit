@@ -171,7 +171,9 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
     ][plane_index];
     /// Would NOT crop in chunked-streaming mode.
     // local time_options = {cyclic: false, crop: -2, roll: 1000, roll_mode: "decon"};
-    local time_options = {cyclic: false, crop: 0};
+    // local time_options = {cyclic: false, crop: 0, roll_mode: "decon"};
+    // local time_options = {cyclic: false, crop: 0, roll: 120};
+    local time_options = {cyclic: false, crop: 0, baseline:true};
     /// Note, may need to change KC to roll then crop.
 
     // one decon per filter type
