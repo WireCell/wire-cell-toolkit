@@ -70,8 +70,8 @@ TEST_SUITE("util hana jsoncpp") {
         CHECK(vov.ios[1].name == "the answer");
     }
 
-    TEST_CASE("hana jsoncpp basics") {
-
+    TEST_CASE("hana jsoncpp basics")
+    {
         MyConfig mc;
         Json::Value j = to_json(mc);
         // std::cerr << j << "\n";
@@ -86,9 +86,21 @@ TEST_SUITE("util hana jsoncpp") {
         // std::cerr << to_json(mc2) << "\n";
         CHECK(mc2.number == 69);
         CHECK(mc2.isActive == false);
-
     }
 
+    TEST_CASE("hana jsoncpp with residual")
+    {
+        MyConfig mc;
+        auto jmc = to_json(mc);
+        jmc["extra"] = "this is not in the struct";
+        auto jres = from_json(mc, jmc);
+        CHECK(jres.isMember("extra"));
+        CHECK(jres["extra"].asString() == "this is not in the struct");
+        CHECK(! jres.isMember("number"));
+        CHECK(! jres.isMember("title"));
+        CHECK(! jres.isMember("isActive"));
+        CHECK(! jres.isMember("weight"));
+    }
 
     TEST_CASE("hana jsoncpp bigger test") {
 
@@ -144,7 +156,7 @@ TEST_SUITE("util hana jsoncpp") {
 
     }
 
-    TEST_CASE("hana config with config") {
+    TEST_CASE("hana jsoncpp config with config") {
         ConfigWithConfig cwc{9};
         cwc.json["key"] = "value";
 
