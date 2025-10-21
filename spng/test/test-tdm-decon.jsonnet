@@ -122,7 +122,7 @@ local decon_filters(plane_index, anode=null) = {
 /// Bind an instance of the above generic filter configuration to
 /// a specific implementation of the components.
 ///
-local decon_kernel(filters, fr, er, which="gauss") = {
+local decon_kernel(filters, fr, er, adc, which="gauss") = {
     /// A name that uniquely identifies the context.
     local name = plane_context_name(filters.plane_index, filters.anode),
 
@@ -146,6 +146,9 @@ local decon_kernel(filters, fr, er, which="gauss") = {
             field_response: wc.tn(fr),
             elec_response: wc.tn(er),
             plane_index: filters.plane_index,
+            // vmin: adc.fullscale[0],
+            // vmax: adc.fullscale[1],
+            // range: adc.gain * (1 << adc.resolution),
             debug_filename: "response-kernel-%s.pkl" % (name+which)
         },
         uses: [fr, er],         // NOT anode.
@@ -186,6 +189,7 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
             axis: [
                 channel_options,
                 time_options,
+
             ],
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
@@ -247,6 +251,34 @@ local plane_groups(detector, anode) =
     };
 
 
+local adc_params(detector, anode=null) =
+    // FIXME: make dependent on detector name and potentially anode.  For now,
+    // it's hard-wired to return APA info.  And we use same object as in OG
+    // params.adc
+    {
+
+        // The sample period of the ADC.  This assumes we live in a resampled
+        // universe and not the 512ns reality of PDHD and part of PDVD.
+        tick: 500*wc.ns,
+
+        // The number of samples in an ADC readout.  Note, in general, this
+        // number should NOT be used anywhere else.  It is NOT a size of any
+        // convolution.  Specifically, it is NOT the size of the ER.
+        nticks: 6000,
+
+        // A relative, unitless gain.  Not ER gain.
+        gain: 1.0,
+
+        // The resolution (bits) of the ADC.  Use "modern" number (PDHD, FDHD).
+        // FIXME: we probably still have 12bits in the sim part.
+        resolution: 14,
+
+        // The voltage range as [min,max] of the ADC, eg min voltage
+        // counts 0 ADC, max counts 2^resolution-1.
+        fullscale: [0.2*wc.volt, 1.6*wc.volt],
+    };
+
+
 // Return fr, er, rc responess for the detector.
 local responses(detector, anode, adc_tick=500*wc.ns) = {
     local det = detectors[detector],
@@ -287,8 +319,8 @@ local responses(detector, anode, adc_tick=500*wc.ns) = {
 
 
 /// A frame->(decon)->frame compound node that runs the original SPNG decon.
-local orig_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns, adc_nticks=6000) =
-    local res = responses(detector, anode, adc_tick);
+local orig_decon_node(detector, anode, adc, device="cpu") =
+    local res = responses(detector, anode, adc.tick);
 
     local groups = plane_groups(detector, anode);
 
@@ -297,7 +329,7 @@ local orig_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns, adc_nti
         name: "fanout",
         data: {
             anode: wc.tn(anode),
-            expected_nticks: adc_nticks,
+            expected_nticks: adc.nticks,
             output_groups: groups.wpids,
             unsqueeze_output: true,
         },
@@ -421,9 +453,9 @@ local orig_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns, adc_nti
     
 
 /// Return a frame->[decon]->frame compound node that does TDM decon.
-local tdm_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns) = 
+local tdm_decon_node(detector, anode, adc, device="cpu") = 
     local verbose = 2;          // loud debug logging
-    local res = responses(detector, anode, adc_tick);
+    local res = responses(detector, anode, adc.tick);
 
     local plane_filters = [decon_filters(plane) for plane in wc.iota(3)];
 
@@ -472,7 +504,7 @@ local tdm_decon_node(detector, anode, device="cpu", adc_tick=500*wc.ns) =
         local plane = groups.planes[group];
         local which  = "gauss";
         // to start, just decon, later turn this into a deeper pipeline
-        convo_node(decon_kernel(decon_filters(plane), res.fr, res.er, which), plane, '-group%d'%group, which)
+        convo_node(decon_kernel(decon_filters(plane), res.fr, res.er, adc, which), plane, '-group%d'%group, which)
 
         for group in wc.iota(groups.count)
     ];
@@ -583,14 +615,18 @@ local frame_sink_two(one, two, name="") =
 
 /// Note, different input may require selecting a different anodeid to get any activity.
 function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu", which="tdm")
+    
+    // One fine day, make this a CLI argument.  Until then, we try to make it
+    // parameterize this config but it's mostly a show.
+    local detector="pdhd";
 
-    local adc = {tick: 500*wc.ns, nticks: 6000};
 
     # FIXME: remove omni and make this file stand-alone.
-    local detector="pdhd";
     local omni = omnimap[detector];
     local aid = std.parseInt(anodeid);
     local anode = omni.anodes[aid];
+
+    local adc = adc_params(detector, anode);
 
     local sim_source = sim_source_node(input, anode, omni, adc.nticks);
 
@@ -598,10 +634,10 @@ function(input="test/data/muon-depos.npz", output="", anodeid="3", device="cpu",
                    then sim_source
                    else pg.pipeline([sim_source, frame_tap(output%"adc")]);
     
-    local tdm_decon = tdm_decon_node(detector, anode, device, adc.tick);
+    local tdm_decon = tdm_decon_node(detector, anode, adc, device);
     local tdm_sink = frame_sink(tdm_decon, output, "tdm", "tdm-sig");
 
-    local orig_decon = orig_decon_node(detector, anode, device, adc.tick, adc.nticks);
+    local orig_decon = orig_decon_node(detector, anode, adc, device);
     local orig_sink = frame_sink(orig_decon, output, "orig", "orig-sig");
 
     local both_sink = frame_sink_two(tdm_sink, orig_sink, "both");

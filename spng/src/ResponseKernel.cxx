@@ -74,12 +74,12 @@ namespace WireCell::SPNG {
         std::vector<float> erv = ier->waveform_samples(er_bins);
         /// we hold on to er_fine so better not from_blob it!
         // auto er_fine = torch::from_blob(erv.data(), nerticks_fine, torch::kFloat32);
-        auto er_fine = torch::tensor(erv, torch::kFloat32);
+        auto er_fine = torch::tensor(erv, torch::kFloat32).to(torch::kFloat64);
         m_raw_er = er_fine;
 
         // Still at FR sampling, eg 100ns
         m_raw_fr_full_fine = fr_tensor(ifr->field_response(), m_cfg.plane_index);
-        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
+        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index).to(torch::kFloat64);
         m_raw_fr_avg_fine = fr_fine;
 
         // Find size to assure linear convolution.
@@ -107,72 +107,20 @@ namespace WireCell::SPNG {
                    to_string(fr_pad), to_string(er_pad),
                    to_string(frer_fine), to_string(frer_coarse));
 
-        m_response_waveform = frer_coarse;
+        /// FR is naturally in units of current, ER in voltage/charge.
+        /// Approximately integrate FR over one sample period to get FR*ER*T in
+        /// units of voltage.
+        frer_coarse = frer_coarse * er_period;
+
+        // Apply the user scaling.
+        const double scale = ( m_cfg.range / (m_cfg.vmax - m_cfg.vmin) );
+        frer_coarse = (frer_coarse - m_cfg.vmin) * scale;
+        log->debug("scale={} vmin={} vmax={} range={}",
+                   scale, m_cfg.vmin, m_cfg.vmax, m_cfg.range);
+
+        m_response_waveform = frer_coarse.to(torch::kFloat32);
     }
 
-    // downsample then convolve
-    void ResponseKernel::configme_dtc()
-    {
-        log->debug("configuring FR*ER for downsample-then-convolve");
-        auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
-        std::vector<float> erv = ier->waveform_samples();
-        // We hold on to this so better not from_blob it!
-        // auto er = torch::from_blob(erv.data(), {static_cast<int64_t>(erv.size())}, torch::kFloat32);
-        auto er = torch::tensor(erv, torch::kFloat32);
-        m_raw_er = er;
-
-        auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
-        // Still at FR sampling, eg 100ns
-        m_raw_fr_full_fine = fr_tensor(ifr->field_response(), m_cfg.plane_index);
-        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
-        m_raw_fr_avg_fine = fr_fine;
-
-        // We now must do two transformations prior to the FR*ER convolution.
-        //
-        // 1. Downsample FR from the fine FR sampling period to the coarse ER
-        // sampling period.  This is done using LMN resampling which applies a
-        // "perfect" low-pass filter.
-        //
-        // 2. Pad both FR and ER time dimension in INTERVAL space to assure
-        // linear convolution.
-        //
-        // I'm sure there is a trick to minimize the FFT round trips, but for
-        // now we do the dumb, straightforward thing.  It is a one-shot anyways.
-
-
-        const double er_period = ier->waveform_period();
-        // Some FRs have FP round off problems in the period.
-        const double fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
-
-        // Resample under default interpolation interpretation.  We keep the
-        // default to return it to interval space as we must pad for the FR*ER
-        // convolution.
-        auto fr = LMN::resample_interval(fr_fine, fr_period_fine, er_period, 1);
-        m_raw_fr = fr;
-
-        // Find size to assure linear convolution.
-        const int64_t linear_size = linear_shape(fr.size(1), er.size(0));
-
-        // pad is LAST FIRST
-        auto fr_pad = pad(fr, PadFuncOptions({0, linear_size - fr.size(1), 0, 0}));
-        auto er_pad = pad(er, PadFuncOptions({0, linear_size - er.size(0)}));
-                          
-        log->debug("linear_size={} er={} fr_fine={} fr={} fr_pad={} er_pad={}",
-                   linear_size,
-                   to_string(er), to_string(fr_fine), to_string(fr),
-                   to_string(fr_pad), to_string(er_pad));
-
-        auto FR = torch::fft::fft(fr_pad, {}, 1);
-        auto ER = torch::fft::fft(er_pad).unsqueeze(0);
-        log->debug("FR: {}", to_string(FR));
-        log->debug("ER: {}", to_string(ER));
-        auto FRER = FR*ER;      // "natural spectrum"
-
-        auto frer = torch::fft::ifft(FRER, {}, 1);
-        m_response_waveform = torch::real(frer);
-
-    }
-    
     void ResponseKernel::configme()
     {
         if (m_cfg.plane_index < 0 || m_cfg.plane_index>3) {
@@ -180,12 +128,11 @@ namespace WireCell::SPNG {
         }
         m_cache.reset_capacity(m_cfg.capacity);
 
-        if (false) {
-            configme_dtc();
+        if (m_cfg.vmin >= m_cfg.vmax) {
+            raise<ValueError>("bogus voltage range, check config");
         }
-        else {
-            configme_ctd();
-        }
+
+        configme_ctd();
 
         if (m_cfg.debug_filename.size()) {
             log->debug("writing debug file: {}", m_cfg.debug_filename);

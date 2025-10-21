@@ -34,6 +34,18 @@ namespace WireCell::SPNG {
         /// Required plane index on which use from the larger field response.
         int plane_index{-1};
 
+        /// The response is nominally T*FR*ER where T is the ER's sample period.
+        /// This gives units of voltage.  When the response kernel is used to
+        /// deconvolve an ADC measure, it can be prepared to be in units of ADC
+        /// count by scaling according to:
+        ///
+        /// ADC = (V - Vmin) / (Vmax - Vmin) * Range
+        ///
+        /// Where Range may include a factor 2^b where "b" is the number of bits
+        /// of the ADC and it may include some additional relative, unitless
+        /// gain.  By default, no scaling is done.
+        double vmin=0, vmax=1, range=1;
+
         /// Optional, the maximum number of spectra to hold in the LRU cache
         /// (not including the "natural" spectra).  By default it only caches 1
         /// providing last-cache.  Set larger for jobs that expect to see a
@@ -50,6 +62,7 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResponseKernelConfig,
                         field_response,
                         elec_response,
                         plane_index,
+                        vmin, vmax, range,
                         capacity,
                         debug_filename);
 
@@ -101,7 +114,6 @@ namespace WireCell::SPNG {
 
         ResponseKernelConfig m_cfg;
         void configme();
-        void configme_dtc();
         void configme_ctd();
 
         using tensor_cache_t = ThreadSafeCache<size_t, torch::Tensor>;
