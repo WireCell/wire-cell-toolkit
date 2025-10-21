@@ -1,5 +1,7 @@
 #+title: SPNG Deconvolution
 
+Caveat: some detailed structure described here does not exactly match implementation structure.
+
 * Overview
 
 The original signal processing (OSP) in WCT convolves the measured ADC waveforms
@@ -29,7 +31,7 @@ now, the padded dimension sizes would be:
 
 The following graph represents most of the processing that must be done.
 
-[[file:decon-flow.png]] 
+[[file:decon-flow.png]]
 
 It omits two important issues.
 
@@ -47,6 +49,19 @@ A comment on the long RC, the one relevant to MicroBooNE extends longer than the
 nominal 3ms DUNE readout.  In streaming (SNB) mode, this will require the "tail"
 of the signal processing to be snipped and added to more than one subsequent
 chunk.
+
+* Additional details to get right
+
+** Padding artifiacts
+
+See [[file:padding.org]] 
+
+** Scaling
+
+The ADC measurements must be converted to units of voltage and the FRs must be
+converted from units of current to units of charge.  The (de)convolution must
+then be scaled by the ER gain which is in units of voltage per charge.
+
 
 * Design considerations 
 

@@ -108,8 +108,10 @@ namespace WireCell::SPNG {
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig, baseline, cyclic, crop, roll, roll_mode);
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig, kernel, axis, faster, tag, datapath_format);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig,
+                        baseline, cyclic, crop, roll, roll_mode);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig,
+                        kernel, axis, faster, tag, datapath_format, debug_filename);
 
 namespace WireCell::SPNG {
     /** Apply a 2D convolution with a kernel to input tensor.

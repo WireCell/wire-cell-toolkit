@@ -83,8 +83,9 @@ local decon_filters(plane_index, anode=null) = {
     // means one channel per sample.
     channel:
         if plane_ids.is(plane_index, "ind")
-        then filter(scale=1.0 / wc.sqrtpi * 0.75, period=1.0)  // ind
-        else filter(scale=1.0 / wc.sqrtpi * 10.0, period=1.0), // col
+        then filter(scale=1.0 / wc.sqrtpi * 0.75, period=1.0, ignore_baseline=false)  // ind
+        else filter(scale=1.0 / wc.sqrtpi * 10.0, period=1.0, ignore_baseline=false), // col
+    // original pdsp has 0.75 and 10.0
 
     // Weiner (inspired) filter.
     //
@@ -101,7 +102,7 @@ local decon_filters(plane_index, anode=null) = {
             filter(scale=0.1487880 * wc.megahertz, power=3.76194)
         else if plane_ids.is(plane_index, "v") then
             filter(scale=0.1596568 * wc.megahertz, power=4.36125)
-        else                        // u
+        else                        // w
             filter(scale=0.1362300 * wc.megahertz, power=3.35324),
 
     // Gauss filter.
@@ -173,7 +174,7 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
     // local time_options = {cyclic: false, crop: -2, roll: 1000, roll_mode: "decon"};
     // local time_options = {cyclic: false, crop: 0, roll_mode: "decon"};
     // local time_options = {cyclic: false, crop: 0, roll: 120};
-    local time_options = {cyclic: false, crop: 0, baseline:true};
+    local time_options = {cyclic: false, crop: 0, baseline: true};
     /// Note, may need to change KC to roll then crop.
 
     // one decon per filter type
@@ -189,6 +190,7 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
             //faster: true,       // use "faster DFT size"
+            debug_filename: "kernel-convolve%s-{ident}.pkl"%extra_name,
         },
     }, nin=1, nout=1, uses=[kernel]);
 

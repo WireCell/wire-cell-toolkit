@@ -147,6 +147,18 @@ namespace WireCell::SPNG {
             raise<ValueError>("illegal number of input tensor dimensions");
         }
 
+        using tensor_map = torch::Dict<std::string, torch::Tensor>;
+        tensor_map to_save;
+        auto maybe_save = [&](torch::Tensor ten, std::string name) {
+            if (m_cfg.debug_filename.size()) {
+                if (!batched) {
+                    ten = ten.squeeze(0);
+                }
+                to_save.insert(name, ten);
+            }
+        };
+
+
         // Consider non batch dimensions!
         std::vector<int64_t> basic_shape(2);
         std::vector<int64_t> convolve_shape(2);
@@ -159,6 +171,9 @@ namespace WireCell::SPNG {
                 auto medians = std::get<0>(torch::median(tensor, dim+1, false));
                 medians = medians.unsqueeze(dim+1);
                 tensor = tensor - medians;
+                log->debug("median baseline subtraction for dimension {} of size {}", dim, dim_size);
+
+                maybe_save(tensor, fmt::format("medium_subtracted_dim{}", dim));
             }
 
             if (kernel_shape[dim] == 0) {
@@ -179,7 +194,7 @@ namespace WireCell::SPNG {
                 continue;
             }
             convolve_shape[dim] = m_faster(convolve_shape[dim]);
-            log->debug("shape: dim={} faster size: {}->{}->{}",
+            log->debug("shape: dim={} faster size: {}->{}->{}, {}",
                        dim, dim_size, basic_shape[dim], convolve_shape[dim]);
         }
 
@@ -193,6 +208,8 @@ namespace WireCell::SPNG {
             log->debug("resize: dim={} {} -> {}",
                        dim, dim_size, convolve_shape[dim]);
             tensor = LMN::resize(tensor, convolve_shape[dim], dim+1);
+
+            maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }
 
         // applies to last 2 dimensions by default
@@ -214,6 +231,8 @@ namespace WireCell::SPNG {
 
         // applies to last 2 dimensions by default
         tensor = torch::real(torch::fft::ifft2(tensor));
+
+        maybe_save(tensor, "raw_convo");
 
         /// Do crop and/or roll
         for (size_t dim=0; dim<2; ++dim) {        
@@ -243,6 +262,13 @@ namespace WireCell::SPNG {
 
         if (! batched) {
             tensor = tensor.squeeze(0);
+        }
+
+        if (m_cfg.debug_filename.size()) {
+            std::string filename = fmt::format(m_cfg.debug_filename, fmt::arg("ident", m_count));
+            auto data = torch::pickle_save(to_save);
+            std::ofstream output_file(filename, std::ios::binary);
+            output_file.write(data.data(), data.size());
         }
 
         out = std::make_shared<SimpleTorchTensor>(tensor, md);
