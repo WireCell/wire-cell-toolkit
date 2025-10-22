@@ -146,9 +146,8 @@ local decon_kernel(filters, fr, er, adc, which="gauss") = {
             field_response: wc.tn(fr),
             elec_response: wc.tn(er),
             plane_index: filters.plane_index,
-            // vmin: adc.fullscale[0],
-            // vmax: adc.fullscale[1],
-            // range: adc.gain * (1 << adc.resolution),
+            // Negate to give positive signals.
+            scale: -1 * adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0]),
             debug_filename: "response-kernel-%s.pkl" % (name+which)
         },
         uses: [fr, er],         // NOT anode.

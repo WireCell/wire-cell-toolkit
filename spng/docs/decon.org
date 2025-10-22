@@ -58,9 +58,23 @@ See [[file:padding.org]]
 
 ** Scaling
 
-The ADC measurements must be converted to units of voltage and the FRs must be
-converted from units of current to units of charge.  The (de)convolution must
-then be scaled by the ER gain which is in units of voltage per charge.
+- FR :: field response in units [current/ie] (ie = ionization electron)
+- ER :: electronics response in units [voltage/charge]
+- T :: coarse sample period in units of [time] 
+- R :: full response kernel, R = sT(FR*ER) units of [s*voltage/ie]
+- s :: user provided scale, eg s = gain*resolution/range in units [count/voltage]
+- gain :: a unitless relative gain
+
+- resolution :: ADC resolution = 2^nbits
+
+- range :: fullscale range of ADC input in voltage
+
+- ADC :: unitless [count]
+
+- decon :: number of ionization electrons in units [ie]  
+
+The response kernel R, with the given user "s", has a nominal baseline of 0 ADC
+counts.  The ADC waveform tensor must be baseline subtracted prior to decon.
 
 
 * Design considerations 

@@ -58,15 +58,15 @@ namespace WireCell::SPNG {
         auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
         auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
 
-        const double er_period = ier->waveform_period();
+        const float er_period = ier->waveform_period();
         // Some FRs have FP round off problems in the period.
-        const double fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
+        const float fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
 
         // The natural number of samples for ER.  WARNING: old config sets this
         // to nticks in ADC readout which is absurdly long.  FIXME: instead of
         // fighting history, add a dedicated "nerticks" config to this component.
         const size_t nerticks = ier->waveform_samples().size();
-        const double nerticks_duration = nerticks * er_period;
+        const float nerticks_duration = nerticks * er_period;
         const int64_t nerticks_fine = nerticks * er_period/fr_period_fine;
         Binning er_bins(nerticks_fine, 0, nerticks_duration);
         log->debug("ER: {} ticks, {} us duration", nerticks_fine, nerticks_duration/units::us);
@@ -74,12 +74,12 @@ namespace WireCell::SPNG {
         std::vector<float> erv = ier->waveform_samples(er_bins);
         /// we hold on to er_fine so better not from_blob it!
         // auto er_fine = torch::from_blob(erv.data(), nerticks_fine, torch::kFloat32);
-        auto er_fine = torch::tensor(erv, torch::kFloat32).to(torch::kFloat64);
+        auto er_fine = torch::tensor(erv, torch::kFloat32);
         m_raw_er = er_fine;
 
         // Still at FR sampling, eg 100ns
         m_raw_fr_full_fine = fr_tensor(ifr->field_response(), m_cfg.plane_index);
-        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index).to(torch::kFloat64);
+        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
         m_raw_fr_avg_fine = fr_fine;
 
         // Find size to assure linear convolution.
@@ -100,25 +100,17 @@ namespace WireCell::SPNG {
 
         auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, er_period, 1);
 
-        log->debug("nerticks={}, er_period={}, er_fine={}, fr_period={}, fr_fine={}, linear_size={}, fr_pad={}, er_pad={}, frer_fine={}, frer_coarse={}",
-                   nerticks, er_period, to_string(er_fine),
+        /// Convert to units of charge, and further scale by user scale.
+        frer_coarse = frer_coarse * er_period * (float)m_cfg.scale;
+
+        log->debug("nerticks={}, scale={}, er_period={}, er_fine={}, fr_period={}, fr_fine={}, linear_size={}, fr_pad={}, er_pad={}, frer_fine={}, frer_coarse={}",
+                   nerticks, m_cfg.scale, er_period, to_string(er_fine),
                    fr_period_fine, to_string(fr_fine),
                    linear_size,
                    to_string(fr_pad), to_string(er_pad),
                    to_string(frer_fine), to_string(frer_coarse));
 
-        /// FR is naturally in units of current, ER in voltage/charge.
-        /// Approximately integrate FR over one sample period to get FR*ER*T in
-        /// units of voltage.
-        frer_coarse = frer_coarse * er_period;
-
-        // Apply the user scaling.
-        const double scale = ( m_cfg.range / (m_cfg.vmax - m_cfg.vmin) );
-        frer_coarse = (frer_coarse - m_cfg.vmin) * scale;
-        log->debug("scale={} vmin={} vmax={} range={}",
-                   scale, m_cfg.vmin, m_cfg.vmax, m_cfg.range);
-
-        m_response_waveform = frer_coarse.to(torch::kFloat32);
+        m_response_waveform = frer_coarse;
     }
 
     void ResponseKernel::configme()
@@ -128,8 +120,8 @@ namespace WireCell::SPNG {
         }
         m_cache.reset_capacity(m_cfg.capacity);
 
-        if (m_cfg.vmin >= m_cfg.vmax) {
-            raise<ValueError>("bogus voltage range, check config");
+        if (m_cfg.scale == 0.0) {
+            raise<ValueError>("bogus zero scale, check config");
         }
 
         configme_ctd();

@@ -34,17 +34,25 @@ namespace WireCell::SPNG {
         /// Required plane index on which use from the larger field response.
         int plane_index{-1};
 
-        /// The response is nominally T*FR*ER where T is the ER's sample period.
-        /// This gives units of voltage.  When the response kernel is used to
-        /// deconvolve an ADC measure, it can be prepared to be in units of ADC
-        /// count by scaling according to:
+        /// A multiplicative scale applied to the natural response tensor.
         ///
-        /// ADC = (V - Vmin) / (Vmax - Vmin) * Range
+        /// The FR is originally in units of [current].  The ER is in units
+        /// [voltage/charge] and its coarse sample period T is multiplied to the
+        /// convolution of the two to give T(FR*ER) in units [voltage].  When
+        /// the response is used to deconvolve an ADC waveform tensor, it is
+        /// convenient to convert the response kernel from units of [voltage] to
+        /// a unitless ADC [count].  This is done by giving a scale that is in
+        /// units of [count/voltage].  In Jsonnet, and assuming the conventional
+        /// "adc" object, this would be
         ///
-        /// Where Range may include a factor 2^b where "b" is the number of bits
-        /// of the ADC and it may include some additional relative, unitless
-        /// gain.  By default, no scaling is done.
-        double vmin=0, vmax=1, range=1;
+        /// @code(jsonnet)
+        /// adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0])
+        /// @endcode
+        ///
+        /// Note, this leaves the kernel with a nominal baseline of 0 ADC count
+        /// and thus expects the ADC waveform tensor to be baseline-subtracted.
+        ///
+        double scale{1.0};
 
         /// Optional, the maximum number of spectra to hold in the LRU cache
         /// (not including the "natural" spectra).  By default it only caches 1
@@ -62,7 +70,7 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResponseKernelConfig,
                         field_response,
                         elec_response,
                         plane_index,
-                        vmin, vmax, range,
+                        scale,
                         capacity,
                         debug_filename);
 
