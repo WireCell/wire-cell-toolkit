@@ -46,6 +46,97 @@ namespace WireCell::SPNG {
     }
 
 
+    torch::Tensor resize_tensor(const torch::Tensor& in,
+                                int64_t axis, int64_t index, int64_t size)
+    {
+
+        if (in.dim() == 0) return in.clone(); // touches temple
+
+        axis = modulo(axis, in.dim());
+            
+        std::vector<int64_t> out_size = in.sizes().vec();
+        const int64_t Ns = out_size[axis];
+        const int64_t Nr = size; // just for symmetry in variable names
+        if (in.dim() > 0) {
+            out_size[axis] = Nr;
+        }
+
+        // Support for Numpy array style negative indices.
+        if (index < 0) {
+            index = modulo(index, Ns);
+        }
+        TORCH_CHECK(index <= Ns, "resize_tensor expects axis in [0,Ns] inclusive.");
+
+        torch::Tensor rs = torch::zeros(out_size, in.options());
+
+        if (Ns > Nr) {          // truncation
+
+            const int64_t nloss = Ns - Nr;
+
+            /// Indices of range of original dimension subject to truncation
+            const int beg = modulo(index, Ns);
+            const int end = modulo(index+nloss, Ns);
+
+            if (beg < end) {    // slice internal, clip middle, keep ends.
+                if (beg) { // low-side end, if not empty
+                    rs.narrow(axis, 0, beg).copy_(in.narrow(axis, 0, beg));
+                }
+                if (end < Ns) { // high-side end, if nto empty
+                    rs.narrow(axis, beg, Ns-end).copy_(in.narrow(axis, end, Ns-end));
+                }
+            }
+            else if (end < beg) { // slice wraps around, clip the ends, keep middle
+                // end here is start, beg is, er, the ending.
+                rs.copy_(in.narrow(axis, end, Nr));
+            }
+        }
+        else if (Ns < Nr) {     // padding
+
+            if (index) {        // we are NOT pre-padding, copy first part of input
+                // Note, this also captures the post-padding case when index == Ns
+                rs.narrow(axis, 0, index).copy_(in.narrow(axis, 0, index));
+            }
+            if (index < Ns) {   // we are NOT post-padding, copy last part of input
+                const int64_t nkeep = Ns - index;
+                const int64_t npad = Nr - Ns;
+                const int64_t rindex = index + npad;
+                const int64_t sindex = index;
+                rs.narrow(axis, rindex, nkeep).copy_(in.narrow(axis, sindex, nkeep));
+            }
+        }
+        else {
+            return in.clone();
+        }
+
+        return rs;
+    }
+
+    torch::Tensor resize_tensor_tail(const torch::Tensor& in,
+                                     int64_t axis, int64_t size)
+    {
+        const int64_t Ns = in.size(axis);
+        if (size < Ns) { // truncate end
+            return resize_tensor(in, axis, size-Ns, size);
+        }
+        // pad end
+        return resize_tensor(in, axis, Ns, size);
+    }
+
+    torch::Tensor resize_tensor_head(const torch::Tensor& in,
+                                     int64_t axis, int64_t size)
+    {
+        return resize_tensor(in, axis, 0, size);
+
+    }
+
+
+    torch::Tensor resize_tensor_middle(const torch::Tensor& in,
+                                     int64_t axis, int64_t size)
+    {
+        return resize_tensor(in, axis, middle_index(in.size(axis)), size);
+    }
+
+
 
 }
 

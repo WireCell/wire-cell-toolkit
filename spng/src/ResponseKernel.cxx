@@ -149,8 +149,14 @@ namespace WireCell::SPNG {
 
     torch::Tensor ResponseKernel::pad_waveform(const std::vector<int64_t> & shape) const
     {
-        auto tmp = LMN::resize_middle(m_response_waveform, shape[0], 0);
-        return LMN::resize(tmp, shape[1], 1);
+        const int64_t caxis = 0;
+        const int64_t cindex = middle_index(m_response_waveform.size(caxis));
+        const int64_t csize = shape[caxis];
+        auto tmp = resize_tensor(m_response_waveform, caxis, cindex, csize);
+
+        const int64_t taxis = 1;
+        const int64_t tsize = shape[taxis];
+        return resize_tensor_tail(tmp, taxis, tsize);
     }
 
 

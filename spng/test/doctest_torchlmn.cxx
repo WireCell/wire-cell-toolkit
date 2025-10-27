@@ -1,33 +1,20 @@
 #include "WireCellSpng/Testing.h"
 
 #include "WireCellSpng/TorchLMN.h"
+#include "WireCellSpng/Util.h"
+
 #include "WireCellUtil/Exceptions.h"
+
 
 #include <cmath>
 #include <complex>
 #include <vector>
 #include <iostream>
 
-using namespace WireCell;
-using namespace WireCell::SPNG::LMN;
-
-namespace {
-    // Helper function to create a 1D complex tensor from a std::vector
-    static
-    torch::Tensor create_complex_tensor(const std::vector<std::complex<float>>& data) {
-        // LibTorch requires complex tensors to be created from float/double data
-        // of shape [N, 2] if initialized from vector, or directly from complex vector data
-        // For simplicity, we initialize from a vector of complex numbers.
-        torch::Tensor in = torch::from_blob(
-            (void*)data.data(), 
-            {(long)data.size()}, 
-            torch::kComplexFloat
-        ).clone();
-        return in;
-    }
+namespace  {
 
     // Helper function to check if two tensors are close, printing debug info if not.
-    static
+    inline
     bool check_tensor_close(const torch::Tensor& actual, const torch::Tensor& expected,
                             double rtol = 1e-5, double atol = 1e-8) {
         if (!torch::allclose(actual, expected, rtol, atol)) {
@@ -48,6 +35,10 @@ namespace {
         return true;
     }
 }
+
+using namespace WireCell;
+using namespace WireCell::SPNG::LMN;
+using WireCell::SPNG::to_tensor;
 
 
 TEST_SUITE("LMN Math Helpers") {
@@ -81,17 +72,6 @@ TEST_SUITE("LMN Math Helpers") {
         CHECK(rational(1.0, 0.5) == 1);
     }
     
-    TEST_CASE("nhalf") {
-        // Odd size N=5 (DC, P1, P2, N2, N1) -> (5-1)/2 = 2
-        CHECK(nhalf(5) == 2); 
-        
-        // Even size N=4 (DC, P1, NQ, N1) -> (4-2)/2 = 1
-        CHECK(nhalf(4) == 1); 
-
-        // Size N=2 (DC, N1) -> (2-2)/2 = 0
-        CHECK(nhalf(2) == 0);
-    }
-
     TEST_CASE("nbigger") {
         // N is already divisible by Nrat
         CHECK(nbigger(10, 5) == 10);
@@ -101,32 +81,6 @@ TEST_SUITE("LMN Math Helpers") {
         CHECK(nbigger(1, 10) == 10);
 
         CHECK(nbigger(20, 1) == 20);
-    }
-}
-
-TEST_SUITE("LMN Resize (Time Domain)") {
-
-    // --- Torch Tensor Implementation Tests (Real Float) ---
-
-    TEST_CASE("1D Tensor resize upsample") {
-        torch::Tensor in = torch::tensor({1.0f, 2.0f, 3.0f}, torch::kFloat);
-        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 3.0f, 0.0f, 0.0f}, torch::kFloat);
-        torch::Tensor actual = resize(in, 5, 0);
-        CHECK(check_tensor_close(actual, expected));
-    }
-
-    TEST_CASE("2D Tensor resize upsample rows (axis 0)") {
-        torch::Tensor in = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}}, torch::kFloat);
-        torch::Tensor expected = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}, {0.0f, 0.0f}}, torch::kFloat);
-        torch::Tensor actual = resize(in, 3, 0);
-        CHECK(check_tensor_close(actual, expected));
-    }
-
-    TEST_CASE("2D Tensor resize downsample columns (axis 1)") {
-        torch::Tensor in = torch::tensor({{1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f}}, torch::kFloat);
-        torch::Tensor expected = torch::tensor({{1.0f, 2.0f}, {4.0f, 5.0f}}, torch::kFloat);
-        torch::Tensor actual = resize(in, 2, 1);
-        CHECK(check_tensor_close(actual, expected));
     }
 }
 
@@ -142,14 +96,14 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
     TEST_CASE("1D Resampling Ns=4 to Nr=2 (edge case)") {
         // Ns=4: [DC, P1, NQ, N1].
         std::vector<std::complex<float>> in_data = {DC, P1, NQ, N1};
-        torch::Tensor in = create_complex_tensor(in_data);
+        torch::Tensor in = to_tensor(in_data);
         
         // Nr=2: N_half(2)=0. Pos size = 1 (DC). Neg size = 0.
         // Result: [DC, 1]
         std::vector<std::complex<float>> expected_data = {
             DC, {1.0, 0.0f}
         };
-        torch::Tensor expected = create_complex_tensor(expected_data);
+        torch::Tensor expected = to_tensor(expected_data);
         
         torch::Tensor actual = resample(in, 2, 0);
         CHECK(check_tensor_close(actual, expected));
@@ -163,8 +117,8 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         std::vector<std::complex<float>> in_row2 = {DC, N1, NQ, P1}; // Different pattern for row 2
         
         torch::Tensor in = torch::empty({2, 4}, torch::kComplexFloat);
-        in.narrow(0, 0, 1).copy_(create_complex_tensor(in_row1));
-        in.narrow(0, 1, 1).copy_(create_complex_tensor(in_row2));
+        in.narrow(0, 0, 1).copy_(to_tensor(in_row1));
+        in.narrow(0, 1, 1).copy_(to_tensor(in_row2));
 
         // Nr=8.
         // Result [DC, P1, NQ/2, 0, 0, 0, NQ/2, N1] (Row 1 pattern)
@@ -177,8 +131,8 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         };
         
         torch::Tensor expected = torch::empty({2, 8}, torch::kComplexFloat);
-        expected.narrow(0, 0, 1).copy_(create_complex_tensor(exp_row1));
-        expected.narrow(0, 1, 1).copy_(create_complex_tensor(exp_row2));
+        expected.narrow(0, 0, 1).copy_(to_tensor(exp_row1));
+        expected.narrow(0, 1, 1).copy_(to_tensor(exp_row2));
         
         torch::Tensor actual = resample(in, 8, 1);
         CHECK(check_tensor_close(actual, expected));
@@ -196,13 +150,13 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         };
         
         // Convert to (8, 1) tensor
-        torch::Tensor in = create_complex_tensor(in_data).reshape({8, 1});
+        torch::Tensor in = to_tensor(in_data).reshape({8, 1});
 
         // Nr=4. N_half=1. Copy DC, P1, N1.
         std::vector<std::complex<float>> expected_data = {
             DC, P1, {2.0f, 0.0f}, N1
         };
-        torch::Tensor expected = create_complex_tensor(expected_data).reshape({4, 1});
+        torch::Tensor expected = to_tensor(expected_data).reshape({4, 1});
         
         torch::Tensor actual = resample(in, 4, 0);
         CHECK(check_tensor_close(actual, expected));
@@ -213,7 +167,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         // NQ is defined as {5.0f, 0.0f}. NQ/2 = {2.5f, 0.0f}
         
         std::vector<std::complex<float>> in_data = {DC, P1, NQ, N1};
-        torch::Tensor in = create_complex_tensor(in_data);
+        torch::Tensor in = to_tensor(in_data);
         
         // Nr=8. I_NQ_in=2. I_NQ_neg_rs = 8 - 2 = 6.
         // P1 is at index 1.
@@ -228,7 +182,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         std::vector<std::complex<float>> expected_data = {
             DC, P1, {2.5f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f}, {2.5f, 0.0f}, N1
         };
-        torch::Tensor expected = create_complex_tensor(expected_data);
+        torch::Tensor expected = to_tensor(expected_data);
         
         torch::Tensor actual = resample(in, 8, 0);
         CHECK(check_tensor_close(actual, expected));
@@ -245,7 +199,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         std::vector<std::complex<float>> in_data = {
             DC, P1, P2, {3.0f, 3.0f}, NQ, {3.0f, -3.0f}, N2, N1
         };
-        torch::Tensor in = create_complex_tensor(in_data);
+        torch::Tensor in = to_tensor(in_data);
 
         // NQ_combined = P2 + N2 = {4.0f, 0.0f}.
         // Nyquist result must be real: {4.0f, 0.0f}.
@@ -254,7 +208,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         std::vector<std::complex<float>> expected_data = {
             DC, P1, {2.0f, 0.0f}, N1
         };
-        torch::Tensor expected = create_complex_tensor(expected_data);
+        torch::Tensor expected = to_tensor(expected_data);
         
         torch::Tensor actual = resample(in, 4, 0);
         CHECK(check_tensor_close(actual, expected));
@@ -270,11 +224,11 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         // Row 1: DC, P1, P2, P3, N2, N1 (Ns=6)
         std::vector<std::complex<float>> in_row1 = {DC, P1, P2, {3.0f, 3.0f}, N2, N1};
         
-        torch::Tensor in = create_complex_tensor(in_row1).reshape({1, 6});
+        torch::Tensor in = to_tensor(in_row1).reshape({1, 6});
 
         // Nr=4. Expected: [DC, P1, {2.0f, 0.0f}, N1]
         std::vector<std::complex<float>> expected_data = {DC, P1, {2.0f, 0.0f}, N1};
-        torch::Tensor expected = create_complex_tensor(expected_data).reshape({1, 4});
+        torch::Tensor expected = to_tensor(expected_data).reshape({1, 4});
         
         torch::Tensor actual = resample(in, 4, 1);
         CHECK(check_tensor_close(actual, expected));
@@ -414,76 +368,4 @@ TEST_SUITE("LMN Resample Interval (Composite)") {
         // Peak will not be sampled in both cases so the comparison has to be sloppy.
         CHECK(torch::max(actual).item<float>() == doctest::Approx(torch::max(input).item<float>()).epsilon(1e-1));
     }
-}
-
-TEST_SUITE("LMN Resize Middle (Interval Domain)") {
-    
-    // --- Helper Definitions ---
-    // Define unique values for easier visual tracking of truncation/padding
-    const torch::Tensor IN_ODD = torch::tensor({1.0f, 2.0f, 3.0f, 4.0f, 5.0f}, torch::kFloat); // Ns=5
-    // Halves based on Ns=5: [1.0, 2.0, 3.0] + [4.0, 5.0] -> P_size=3, L_size=2
-    
-    const torch::Tensor IN_EVEN = torch::tensor({10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f}, torch::kFloat); // Ns=6
-    // Halves based on Ns=6: [10, 11, 12] + [13, 14, 15] -> P_size=3, L_size=3
-    
-    const float ZERO = 0.0f;
-
-    // --- Upsampling Tests ---
-
-    TEST_CASE("Upsample Odd (Ns=5 to Nr=7, Odd)") {
-        // N_min = 5. P_size=3, L_size=2.
-        // Copy [1, 2, 3] | Insert 2 zeros | Copy [4, 5]
-        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 3.0f, ZERO, ZERO, 4.0f, 5.0f}, torch::kFloat);
-        torch::Tensor actual = resize_middle(IN_ODD, 7, 0);
-        check_tensor_close(actual, expected);
-    }
-    
-    TEST_CASE("Upsample Even (Ns=6 to Nr=8, Even)") {
-        // N_min = 6. P_size=3, L_size=3.
-        // Copy [10, 11, 12] | Insert 2 zeros | Copy [13, 14, 15]
-        torch::Tensor expected = torch::tensor({10.0f, 11.0f, 12.0f, ZERO, ZERO, 13.0f, 14.0f, 15.0f}, torch::kFloat);
-        torch::Tensor actual = resize_middle(IN_EVEN, 8, 0);
-        check_tensor_close(actual, expected);
-    }
-    
-    TEST_CASE("Upsample Odd to Even (Ns=5 to Nr=6)") {
-        // N_min = 5. P_size=3, L_size=2.
-        // Copy [1, 2, 3] | Insert 1 zero | Copy [4, 5]
-        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 3.0f, ZERO, 4.0f, 5.0f}, torch::kFloat);
-        torch::Tensor actual = resize_middle(IN_ODD, 6, 0);
-        check_tensor_close(actual, expected);
-    }
-
-    // --- Downsampling Tests ---
-    
-    TEST_CASE("Downsample Odd (Ns=5 to Nr=3, Odd)") {
-        // N_min = 3. 
-        // P_size = (3+1)/2 = 2. Copy [1, 2].
-        // L_size = (3-1)/2 = 1. Copy [5].
-        // Result: [1, 2, 5]. Samples 3, 4 truncated from the middle.
-        torch::Tensor expected = torch::tensor({1.0f, 2.0f, 5.0f}, torch::kFloat);
-        torch::Tensor actual = resize_middle(IN_ODD, 3, 0);
-        check_tensor_close(actual, expected);
-    }
-
-    TEST_CASE("Downsample Even (Ns=6 to Nr=4, Even)") {
-        // N_min = 4. 
-        // P_size = 4/2 = 2. Copy [10, 11].
-        // L_size = 4/2 = 2. Copy [14, 15].
-        // Result: [10, 11, 14, 15]. Samples 12, 13 truncated from the middle.
-        torch::Tensor expected = torch::tensor({10.0f, 11.0f, 14.0f, 15.0f}, torch::kFloat);
-        torch::Tensor actual = resize_middle(IN_EVEN, 4, 0);
-        check_tensor_close(actual, expected);
-    }
-
-    TEST_CASE("Downsample Even to Odd (Ns=6 to Nr=5)") {
-        // N_min = 5.
-        // P_size = 3. Copy [10, 11, 12].
-        // L_size = 2. Copy [14, 15].
-        // Result: [10, 11, 12, 14, 15]. Sample 13 truncated from the middle.
-        torch::Tensor expected = torch::tensor({10.0f, 11.0f, 12.0f, 14.0f, 15.0f}, torch::kFloat);
-        torch::Tensor actual = resize_middle(IN_EVEN, 5, 0);
-        check_tensor_close(actual, expected);
-    }
-    
 }

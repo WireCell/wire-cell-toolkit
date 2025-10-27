@@ -207,7 +207,8 @@ namespace WireCell::SPNG {
             }
             log->debug("resize: dim={} {} -> {}",
                        dim, dim_size, convolve_shape[dim]);
-            tensor = LMN::resize(tensor, convolve_shape[dim], dim+1);
+            // axis, index, size
+            tensor = resize_tensor_tail(tensor, dim+1, convolve_shape[dim]);
 
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }
@@ -244,16 +245,17 @@ namespace WireCell::SPNG {
             }
 
             if (crop > 0) {  // absolute crop
-                tensor = LMN::resize(tensor, crop, dim+1);
+                tensor = resize_tensor_tail(tensor, dim+1, crop);
+
             }
             else if (crop == -1) {
                 // crop away the "faster" padding keep the basic convoulutional size
-                tensor == LMN::resize(tensor, basic_shape[dim], dim+1);
+                tensor == resize_tensor_tail(tensor, dim+1, basic_shape[dim]);
             }
             else if (crop == -2) {
                 // crop faster and convolutional padding
                 const auto dim_size = tensor_shape[dim+1];
-                tensor = LMN::resize(tensor, dim_size, dim+1);
+                tensor = resize_tensor_tail(tensor, dim=1, dim_size);
             }
             // else, crop==0 and no crop
             log->debug("after: crop={} dim={} tensor={}", crop, dim, to_string(tensor));

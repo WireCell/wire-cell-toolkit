@@ -1,5 +1,6 @@
 #include "WireCellSpng/FilterKernel.h"
 #include "WireCellSpng/TorchLMN.h"
+#include "WireCellSpng/Util.h"
 
 #include "WireCellUtil/Response.h"
 
@@ -10,9 +11,9 @@ WIRECELL_FACTORY(SPNGFilterKernel,
                  WireCell::ITorchSpectrum,
                  WireCell::IConfigurable)
 
-using WireCell::SPNG::LMN::nhalf;
-
 namespace WireCell::SPNG {
+
+    using WireCell::SPNG::nhalf;
 
     FilterKernel::FilterKernel()
         : Logger("FilterKernel", "spng")

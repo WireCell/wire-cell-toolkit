@@ -38,25 +38,6 @@ namespace WireCell::SPNG::LMN {
     double gcd(double a, double b, double eps=1e-6);
 
 
-    /**
-    * @brief Calculates the number of unique, non-redundant positive frequency bins in a discrete spectrum of size N.
-    *
-    * @details Determines the "half size" count of spectral components, excluding both the
-    *          Direct Current (DC) component (zero frequency) and the Nyquist frequency bin,
-    *          if one exists (i.e., when N is even).
-    *          This calculation yields the number of independent positive-frequency bins
-    *          and is typically equivalent to floor(N / 2) - 1.
-    *
-    * @param N The full size or length of the discrete spectrum (e.g., the FFT size).
-    * @return size_t The number of unique positive frequency samples (excluding DC and Nyquist).
-    */
-    inline size_t nhalf(size_t N)
-    {
-        if (N%2) {
-            return (N-1)/2;     // odd
-        }
-        return (N-2)/2;         // even
-    }
 
     // Return number divisible by Nrat that is equal or minimally larger than N.
     inline size_t nbigger(size_t N, size_t Nrat)
@@ -64,18 +45,6 @@ namespace WireCell::SPNG::LMN {
         if (N%Nrat == 0) return N;
         return Nrat * ( N/Nrat + 1);
     }
-
-
-    /// Return a new tensor of size Nr along the axis.  If Nr is smaller than
-    /// the input dimension size, the returned tensor is truncated.  If Nr is
-    /// larger, the new tensor is zero-padded.  The tensor may have arbitrary
-    /// number of dimensions.
-    torch::Tensor resize(const torch::Tensor& in, int64_t Nr, int64_t axis);
-
-    /// Return a new tensor with size Nr on axis, performing padding/truncation
-    /// in the middle of the dimension (around the DC-equivalent sample at index
-    /// 0).  Warning: function currently only supports 1D or 2D tensors.
-    torch::Tensor resize_middle(const torch::Tensor& in, int64_t Nr, int64_t axis=1);
 
     /**
     * @brief Calculates the minimum sampling size required for rational resampling between two periods.

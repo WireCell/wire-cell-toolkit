@@ -1,5 +1,6 @@
 // TorchLMN.cxx
 #include "WireCellSpng/TorchLMN.h"
+#include "WireCellSpng/Util.h"
 #include "WireCellUtil/Exceptions.h"
 #include <cmath>
 #include <algorithm>
@@ -9,14 +10,7 @@
 
 namespace WireCell::SPNG::LMN {
 
-    // Helper function to get size along axis
-    static
-    int64_t get_size_at_axis(const torch::Tensor& in, int64_t axis) {
-        if (axis < 0 || axis >= in.dim()) {
-            throw std::out_of_range("Axis index out of bounds");
-        }
-        return in.size(axis);
-    }
+    using WireCell::SPNG::nhalf;
 
     double gcd(double a, double b, double eps)
     {
@@ -72,118 +66,13 @@ namespace WireCell::SPNG::LMN {
     }
 
 
-    torch::Tensor resize(const torch::Tensor& in, int64_t Nr, int64_t axis)
-    {
-        if (in.dim() == 0) return in.clone(); // Scalar case
-
-        TORCH_CHECK(Nr >= 0, "Resample size too small in LMN::resize");
-
-        // Validate axis constraint
-        TORCH_CHECK(axis >= 0 && axis < in.dim(), "Axis index out of bounds in LMN::resize");
-
-        const int64_t Ns = in.size(axis);
-
-        TORCH_CHECK(Ns >= 0, "Original size too small in LMN::resize");
-
-        if (Ns == Nr) {
-            return in.clone();
-        }
-
-        const int64_t N_min = std::min(Ns, Nr);
-
-        // 1. Determine output shape
-        std::vector<int64_t> out_size = in.sizes().vec();
-        out_size[axis] = Nr;
-
-        // 2. Initialize zero tensor
-        torch::Tensor rs = torch::zeros(out_size, in.options());
-
-        // 3. Copy existing elements using narrow along the specified axis
-        // rs.narrow(axis, start=0, length=N_min) copies from in.narrow(axis, start=0, length=N_min)
-        rs.narrow(axis, 0, N_min).copy_(in.narrow(axis, 0, N_min));
-
-        return rs;
-    }
-
-
-    torch::Tensor resize_middle(const torch::Tensor& in, int64_t Nr, int64_t axis)
-    {
-        TORCH_CHECK(in.dim() <= 2, "LMN::resize_middle expected 1D or 2D tensor.");
-
-        if (in.dim() == 0) return in.clone(); 
-
-        const int64_t Ns = get_size_at_axis(in, axis);
-
-        if (Ns == Nr) {
-            return in.clone();
-        }
-
-        // Determine the size of the positive and negative halves to preserve.
-        const int64_t N_min = std::min(Ns, Nr);
-
-        // H_limit is the half size excluding index 0, but including a potential center bin for even N.
-        // Since the definition of "center" is asymmetric around N/2, we calculate the 
-        // split point based on standard convention where index 0 is the start of the "positive" half.
-
-        // We want to keep the samples closest to index 0.
-        // If N is the size we are limiting by (N_min), we keep roughly N/2 samples at the start
-        // and N/2 samples at the end.
-
-        int64_t P_size; // Size of the first chunk (from index 0)
-        int64_t L_size; // Size of the last chunk (the tail)
-
-        if (N_min % 2 == 1) {
-            // Odd N_min: (N_min - 1)/2 bins on either side of index 0.
-            // P_size = 1 (index 0) + (N_min - 1)/2 = (N_min + 1) / 2
-            // L_size = (N_min - 1) / 2
-            P_size = (N_min + 1) / 2;
-            L_size = (N_min - 1) / 2;
-        } else {
-            // Even N_min: (N_min - 2)/2 bins on either side of a central bin/gap.
-            // If we split symmetrically around index 0, we take N_min/2 at the front
-            // and N_min/2 at the back. 
-            // Example N=4: [0, 1, 2, 3]. Keep [0, 1] and [2, 3].
-            P_size = N_min / 2;
-            L_size = N_min / 2;
-        }
-
-        // 1. Determine output shape and initialize zero tensor
-        std::vector<int64_t> out_size = in.sizes().vec();
-        if (in.dim() > 0) {
-            out_size[axis] = Nr;
-        }
-
-        torch::Tensor rs = torch::zeros(out_size, in.options());
-
-        // 2. Copy the first chunk (P_size elements starting at 0)
-        // Source range: [0, P_size)
-        // Target range: [0, P_size)
-        rs.narrow(axis, 0, P_size).copy_(in.narrow(axis, 0, P_size));
-
-        // 3. Copy the last chunk (L_size elements)
-        if (L_size > 0) {
-            // Source range: [Ns - L_size, Ns)
-            int64_t Ns_start = Ns - L_size;
-
-            // Target range: [Nr - L_size, Nr)
-            int64_t Nr_start = Nr - L_size;
-
-            rs.narrow(axis, Nr_start, L_size).copy_(in.narrow(axis, Ns_start, L_size));
-        }
-
-        // The gap in the middle [P_size, Nr - L_size) is handled by zero initialization 
-        // (if Nr > Ns) or truncation (if Nr < Ns, where the gap is simply omitted).
-
-        return rs;
-    }
-
 
     torch::Tensor resample(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
         TORCH_CHECK(in.is_complex(), "Input tensor must be complex for frequency domain resampling.");
         TORCH_CHECK(in.dim() <= 2, "LMN::resample expected 1D or 2D tensor.");
     
-        const int64_t Ns = get_size_at_axis(in, axis);
+        const int64_t Ns = in.size(axis);
 
         if (Ns == Nr) {
             return in.clone();
@@ -191,7 +80,7 @@ namespace WireCell::SPNG::LMN {
     
         // N_half is based on the size of the common spectrum (excluding Nyquist bins)
         const int64_t N_half_limit = std::min(Ns, Nr);
-        const size_t H = LMN::nhalf(N_half_limit);
+        const size_t H = nhalf(N_half_limit);
         const int64_t P_size = H + 1; // DC + H positives
         const int64_t L_size = H;     // H negatives
     
@@ -314,7 +203,7 @@ namespace WireCell::SPNG::LMN {
         }
 
         // 4. Pad input tensor to rational size N_rat
-        torch::Tensor padded = LMN::resize(interval, N_rat, axis);
+        torch::Tensor padded = resize_tensor_tail(interval, axis, N_rat);
 
         // 5. Apply FFT
         torch::Tensor freq_domain = torch::fft::fft(padded, (int64_t)N_rat, axis);
