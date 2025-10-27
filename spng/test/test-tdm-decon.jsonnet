@@ -116,58 +116,56 @@ local decon_filters(plane_index, anode=null) = {
     // single Gauss filter.
     gauss: filter(scale=0.12 * wc.megahertz),
 
+    /// The identity filter config.
+    ident: { kind: "identity" },
+
     /// fixme: add more to cover ROI needs
 };
+
+local filter_kernel(name, axis) = {
+
+    type: "SPNGFilterKernel",
+    name: name,
+    data: {
+        axis: axis, 
+        debug_filename: "filter-kernel-%s.pkl" % name
+    },
+    // no uses
+};
+
+local response_kernel(plane_index, fr, er, adc, name="") = {
+    type: "SPNGResponseKernel",
+    name: fr.name+er.name + name,
+    data: {
+        field_response: wc.tn(fr),
+        elec_response: wc.tn(er),
+        elec_duration: 20*wc.us, // just enough to cover non-zero value.
+        period: adc.tick,        // sample period of kernel time dimension.
+        plane_index: plane_index,
+        // Negate to give positive signals.
+        scale: -1 * adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0]),
+        debug_filename: "response-kernel-%s.pkl" % name,
+    },
+    uses: [fr, er],         // NOT anode.
+};
+
 
 /// Bind an instance of the above generic filter configuration to
 /// a specific implementation of the components.
 ///
-local decon_kernel(filters, fr, er, adc, which="gauss") = {
-    /// A name that uniquely identifies the context.
-    local name = plane_context_name(filters.plane_index, filters.anode),
-
-    // two types of filter
-    local filter = {
-        type: "SPNGFilterKernel",
-        name: name + which,
-        data: {
-            axis: [ filters.channel, filters[which] ],
-            // axis: [ {kind: "identity"}, {kind: "identity"} ],
-            // axis: [ {kind: "identity"}, filters[which] ],
-            debug_filename: "filter-kernel-%s.pkl" % (name+which)
-        },
-        // no uses
-    },
-
-    local response = {
-        type: "SPNGResponseKernel",
-        name: fr.name+er.name + name,
-        data: {
-            field_response: wc.tn(fr),
-            elec_response: wc.tn(er),
-            elec_duration: 20*wc.us, // just enough to cover non-zero value.
-            period: adc.tick,        // sample period of kernel time dimension.
-            plane_index: filters.plane_index,
-            // Negate to give positive signals.
-            scale: -1 * adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0]),
-            debug_filename: "response-kernel-%s.pkl" % (name+which),
-        },
-        uses: [fr, er],         // NOT anode.
-    },
-
+local decon_kernel(filt, resp, name) = {
     type: "SPNGDeconKernel",
-    name: which+"-decon-"+name,
+    name: name,
     data: {
-        filter: wc.tn(filter),
-        response: wc.tn(response),
-        debug_filename: "decon-kernel-%s.pkl" % (name+which)
+        filter: wc.tn(filt),
+        response: wc.tn(resp),
+        debug_filename: "decon-kernel-%s.pkl" % name
     },
-    uses: [response, filter]
+    uses: [filt, resp]
 };
 
-/// Return config object for a KernelConvovle.  Use extra name to make otherwise
-/// identical instances (eg for one plane split into groups)
-local convo_node(kernel, plane_index, extra_name="", which="") =
+/// Return config object for a KernelConvovle.  
+local convo_node(kernel, plane_index, tag, name="") =
     // For channel dimmension, wrapped wire planes are cyclic.
     local channel_options = [
         {cyclic: true,  crop:  0}, // u, cycle, wrapped
@@ -179,17 +177,17 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
     // one decon per filter type
     pg.pnode({
         type: "SPNGKernelConvolve",
-        name: kernel.name + extra_name,
+        name: name,
         data: {
             kernel: wc.tn(kernel),
             axis: [
                 channel_options,
                 time_options,
             ],
-            tag: which,
+            tag: tag,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
             faster: true,       // use "faster DFT size"
-            debug_filename: "kernel-convolve%s-{ident}.pkl"%extra_name,
+            debug_filename: "kernel-convolve%s-{ident}.pkl"%name,
         },
     }, nin=1, nout=1, uses=[kernel]);
 
@@ -494,15 +492,23 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
 
 
     /// Loop over "groups" making nodes that operate on a single traces tensor.
+
+    /// This applies the gauss filter as part of the decon filter.
     local pipes = [
-        local plane = groups.planes[group];
-        local which  = "gauss";
-        // to start, just decon, later turn this into a deeper pipeline
-        convo_node(decon_kernel(decon_filters(plane), res.fr, res.er, adc, which), plane, '-group%d'%group, which)
+        local plane_index = groups.planes[group];
+        local tag  = "gauss";
+        local gname = 'g%d' % group;
+        local name = plane_context_name(plane_index, anode) + gname;
+        local df = plane_filters[plane_index];
+        local filt = filter_kernel(name, [df.channel, df.gauss]);
+        local resp = response_kernel(plane_index, res.fr, res.er, adc, name);
+        local kern = decon_kernel(filt, resp, name);
+
+        convo_node(kern, plane_index, tag, name)
 
         for group in wc.iota(groups.count)
     ];
-    
+
     local repack = pg.pnode({
         type: 'SPNGTorchPacker',
         name: "repack",
@@ -510,6 +516,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
             multiplicity: groups.count,
         },
     }, nin=groups.count, nout=1);
+
 
     local fanin = pg.pipeline([
         pg.pnode({

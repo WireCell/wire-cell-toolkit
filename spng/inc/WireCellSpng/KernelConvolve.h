@@ -35,6 +35,10 @@ namespace WireCell::SPNG {
         ///
         /// - "head" prepend padding to the front of the time dimension.
         /// - "tail" append padding to the back of the time dimension (default).
+        /// - "none" do NO padding.
+        ///
+        /// No padding can be reasonable if the kernel is a pure Fourier-space
+        /// filter.
         ///
         /// Note, see roll_mode "decon" which is equivalent to "head' padding in
         /// time.

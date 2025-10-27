@@ -87,3 +87,6 @@ version.txt
 .clangd
 junk*
 data
+*.pkl
+*.csv
+.fuse*

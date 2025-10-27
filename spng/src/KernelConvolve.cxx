@@ -4,6 +4,7 @@
 #include "WireCellSpng/TdmTools.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
+#include "WireCellUtil/String.h"
 
 #include "WireCellUtil/NamedFactory.h"
 
@@ -70,6 +71,10 @@ namespace WireCell::SPNG {
         m_roll.resize(2);
         for (size_t dim=0; dim<2; ++dim) {
             const auto& acfg = m_cfg.axis[dim];
+
+            if (!String::has({"head","tail","none"}, acfg.padding)) {
+                raise<ValueError>("unsupported padding mode: \"%s\"", acfg.padding);
+            }
 
             if (acfg.crop < -2) {
                 raise<ValueError>("illegal crop configured: %d", acfg.crop);
@@ -212,13 +217,14 @@ namespace WireCell::SPNG {
             if (m_cfg.axis[dim].padding == "tail") {
                 tensor = resize_tensor_tail(tensor, dim+1, convolve_shape[dim]);
             }
-            else {
+            else if (m_cfg.axis[dim].padding == "head") {
                 // "head" padding 
                 tensor = resize_tensor_head(tensor, dim+1, convolve_shape[dim]);
                 if (dim == 1) {
                     time -= convolve_shape[dim] * sample_period;
                 }
             }
+            /// else padding is "none"
 
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }

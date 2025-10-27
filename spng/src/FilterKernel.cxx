@@ -36,13 +36,6 @@ namespace WireCell::SPNG {
         size_t ndim = m_cfg.axis.size();
         for (size_t ind=0; ind<ndim; ++ind) {
             const auto& axis = m_cfg.axis[ind];
-            
-            if (axis.kind == "identity") {
-                m_funcs.emplace_back([axis](double freq) -> float {
-                    return 1.0;
-                });
-                continue;
-            }
 
             // the "pass" filters require legal parameters.
 
@@ -119,9 +112,14 @@ namespace WireCell::SPNG {
     torch::Tensor FilterKernel::spectrum_axis(const shape_t & shape, int64_t axis) const
     {
         const auto& cfg = m_cfg.axis[axis];
-        const auto& sample = m_funcs[axis];
 
-        int64_t size = shape[axis];
+        const int64_t size = shape[axis];            
+
+        if (cfg.kind == "identity") {
+            return torch::ones(size, torch::kFloat);
+        }
+
+        const auto& sample = m_funcs[axis];
 
         // Build on CPU.  We will send to device just before return.
         auto s = torch::zeros(size, torch::kFloat);

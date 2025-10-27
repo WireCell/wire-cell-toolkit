@@ -25,6 +25,15 @@ namespace WireCell {
 
     namespace String {
 
+        /// Return true if tgt is in lst.
+        inline
+        bool has(const std::vector<std::string>& lst, const std::string& tgt) {
+            for (const auto& one : lst) {
+                if (one == tgt) { return true; }
+            }
+            return false;
+        }
+
         std::vector<std::string> split(const std::string& in, const std::string& delim = ":");
 
         std::pair<std::string, std::string> parse_pair(const std::string& in, const std::string& delim = ":");
