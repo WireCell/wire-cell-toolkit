@@ -17,8 +17,6 @@ WIRECELL_FACTORY(SPNGResponseKernel,
                  WireCell::IConfigurable)
 
 using namespace WireCell::HanaJsonCPP;                         
-using torch::nn::functional::pad;
-using torch::nn::functional::PadFuncOptions;
 
 namespace WireCell::SPNG {
 
@@ -97,9 +95,8 @@ namespace WireCell::SPNG {
         // Find size to assure linear convolution.
         const int64_t linear_size = linear_shape(fr_fine.size(1), er_fine.size(0));
 
-        // pad is LAST FIRST
-        auto fr_pad = pad(fr_fine, PadFuncOptions({0, linear_size - fr_fine.size(1), 0, 0}));
-        auto er_pad = pad(er_fine, PadFuncOptions({0, linear_size - er_fine.size(0)}));
+        auto fr_pad = resize_tensor_tail(fr_fine, 1, linear_size);
+        auto er_pad = resize_tensor_tail(er_fine, 0, linear_size);
                           
         auto FR = torch::fft::fft(fr_pad, {}, 1); // [current/electron]
         auto ER = torch::fft::fft(er_pad).unsqueeze(0); // [voltage/charge]
@@ -156,7 +153,10 @@ namespace WireCell::SPNG {
 
         const int64_t taxis = 1;
         const int64_t tsize = shape[taxis];
-        return resize_tensor_tail(tmp, taxis, tsize);
+        if (m_cfg.padding == "tail") { // decon
+            return resize_tensor_tail(tmp, taxis, tsize);
+        }
+        return resize_tensor_head(tmp, taxis, tsize); // convo
     }
 
 

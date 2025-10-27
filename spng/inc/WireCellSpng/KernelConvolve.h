@@ -29,6 +29,20 @@ namespace WireCell::SPNG {
         ///  larger to hit a nearby "faster FFT size".
         bool cyclic = false;
 
+
+        /// Specify how to pad this axis.
+        ///
+        /// Current modes are:
+        ///
+        /// - "head" prepend padding to the front of the time dimension.  Relevant for decon.
+        /// - "tail" append padding to the back of the time dimension.  Relevant for convo.
+        ///
+        /// This padding policy should match the kernel's configuration in order
+        /// to avoid artificial shifts.
+        ///
+        /// Per-dimension defaults: ["tail", "head"] matching the case of response decon.
+        std::string padding{""};
+
         /// Optional, (default 0), crop the interval-space dimension.  The
         /// integer is interpreted in the following way:
         ///

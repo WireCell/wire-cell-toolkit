@@ -62,6 +62,11 @@ namespace WireCell::SPNG {
         }
         m_cfg.axis.resize(2);
 
+        // By default we assume we act as a response de-convolution and that the
+        // response kernel is also tail-padded on channels, head-padded on time.
+        if (m_cfg.axis[0].padding.empty()) m_cfg.axis[0].padding = "tail";
+        if (m_cfg.axis[1].padding.empty()) m_cfg.axis[1].padding = "head";
+
         auto kshape = m_kernel->shape();
         auto kernel_tensor = m_kernel->spectrum(kshape);
         if (has_nan(kernel_tensor)) {
@@ -208,7 +213,12 @@ namespace WireCell::SPNG {
             log->debug("resize: dim={} {} -> {}",
                        dim, dim_size, convolve_shape[dim]);
             // axis, index, size
-            tensor = resize_tensor_tail(tensor, dim+1, convolve_shape[dim]);
+            if (m_cfg.axis[dim].padding == "tail") {
+                tensor = resize_tensor_tail(tensor, dim+1, convolve_shape[dim]);
+            }
+            else {
+                tensor = resize_tensor_head(tensor, dim+1, convolve_shape[dim]);
+            }
 
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }

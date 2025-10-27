@@ -150,7 +150,8 @@ local decon_kernel(filters, fr, er, adc, which="gauss") = {
             plane_index: filters.plane_index,
             // Negate to give positive signals.
             scale: -1 * adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0]),
-            debug_filename: "response-kernel-%s.pkl" % (name+which)
+            debug_filename: "response-kernel-%s.pkl" % (name+which),
+            padding: "head",    // head is default
         },
         uses: [fr, er],         // NOT anode.
     },
@@ -188,8 +189,8 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
         data: {
             kernel: wc.tn(kernel),
             axis: [
-                channel_options,
-                time_options,
+                channel_options { padding: "tail" }, // tail is default
+                time_options { padding: "head" },    // head is default
             ],
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",

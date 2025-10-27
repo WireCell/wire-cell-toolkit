@@ -66,6 +66,20 @@ namespace WireCell::SPNG {
         ///
         double scale{1.0};
 
+        /// Specify how to pad to achieve requested spectrum shape.
+        ///
+        /// Current modes are:
+        ///
+        /// - "head" prepend padding to the front of the time dimension.  Relevant for decon.
+        /// - "tail" append padding to the back of the time dimension.  Relevant for convo.
+        ///
+        /// This padding policy should be matched by whatever is (de)convolving
+        /// with this kernel.  
+        ///
+        /// Currently, these options only control the time dimension.  Channel
+        /// dimension is always tail-padded.
+        std::string padding{"head"};
+
         /// Optional, the maximum number of spectra to hold in the LRU cache
         /// (not including the "natural" spectra).  By default it only caches 1
         /// providing last-cache.  Set larger for jobs that expect to see a
@@ -85,6 +99,7 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResponseKernelConfig,
                         period,
                         plane_index,
                         scale,
+                        padding,
                         capacity,
                         debug_filename);
 
