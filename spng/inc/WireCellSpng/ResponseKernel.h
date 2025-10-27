@@ -15,6 +15,7 @@
 
 #include "WireCellUtil/HanaJsonCPP.h"
 #include "WireCellUtil/ThreadSafeCache.h"
+#include "WireCellUtil/Units.h"
 
 namespace WireCell::SPNG {
 
@@ -31,7 +32,18 @@ namespace WireCell::SPNG {
         /// Sample 0 must represent t=0.
         std::string elec_response{""};
 
-        /// Required plane index on which use from the larger field response.
+        /// The duration of the electronics response sampling.  This should be
+        /// chosen NOT LONGER than needed in order to sample where the ER is
+        /// non-zero.  DO NOT set this to some ADC readout duration.  The ER
+        /// will be sampled at the sampling period of the FR.  Note, IWaveform
+        /// provides a default sampling and we ignore it.
+        double elec_duration{20*units::us};
+
+        /// The sample period for the kernel.  This must match the period of the
+        /// target tensor to which this response will be applied.
+        double period{500*units::ns};
+
+        /// Required index of the plane to select from the full field response.
         int plane_index{-1};
 
         /// A multiplicative scale applied to the natural response tensor.
@@ -69,6 +81,8 @@ namespace WireCell::SPNG {
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResponseKernelConfig,
                         field_response,
                         elec_response,
+                        elec_duration,
+                        period,
                         plane_index,
                         scale,
                         capacity,
@@ -116,13 +130,10 @@ namespace WireCell::SPNG {
         // return hash of a shape
         size_t make_cache_key(const shape_t& shape) const;
 
-        void write_debug(const std::string& filename) const;
-
     private:
 
         ResponseKernelConfig m_cfg;
         void configme();
-        void configme_ctd();
 
         using tensor_cache_t = ThreadSafeCache<size_t, torch::Tensor>;
         mutable tensor_cache_t m_cache;
@@ -131,9 +142,6 @@ namespace WireCell::SPNG {
         // pad to match request in spectrum(shape).
         torch::Tensor m_response_waveform;
 
-        // For now, we will hang on to these past config time in order to
-        // write_debug them.
-        torch::Tensor m_raw_er, m_raw_fr_full_fine, m_raw_fr_avg_fine, m_raw_fr;
     };
 
 }

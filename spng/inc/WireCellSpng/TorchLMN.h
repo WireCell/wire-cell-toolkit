@@ -65,8 +65,6 @@ namespace WireCell::SPNG::LMN {
         return Nrat * ( N/Nrat + 1);
     }
 
-    // fixme: move to Util.h
-    torch::Tensor slice_tensor(const torch::Tensor& t, int64_t start, int64_t length, int64_t axis);
 
     /// Return a new tensor of size Nr along the axis.  If Nr is smaller than
     /// the input dimension size, the returned tensor is truncated.  If Nr is

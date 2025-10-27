@@ -34,6 +34,7 @@ def needs_log(tensor, title):
     if "_waveform" in title: return True
     if "field_response" in title: return True
     if "decon_kernel" in title and "amplitude" in title: return True
+    if "_fr" in title and "phase" not in title: return True
     return False
 
 def do_plot(tensor, title, pdf):

@@ -80,10 +80,9 @@ namespace WireCell::SPNG {
                 log->warn("kernel dimension {} has zero size, is this really what you want?", dim);
             }
 
-            // Fixme: what about additional padding due to "faster DFT"?
             m_roll[dim] = acfg.roll;
             if (acfg.roll_mode == "decon") {
-                m_roll[dim] += kshape[dim];
+                m_roll[dim] = kshape[dim];
                 log->debug("will roll dim {} by {} of which {} is from response",
                            dim, m_roll[dim], kshape[dim]);
             }
@@ -177,7 +176,8 @@ namespace WireCell::SPNG {
             }
 
             if (kernel_shape[dim] == 0) {
-                log->warn("shape: natural kernel size of dimension {} is zero, using input size {}", dim, dim_size);
+                log->warn("shape: natural kernel size of dimension {} is zero, using input size {}",
+                          dim, dim_size);
                 convolve_shape[dim] = basic_shape[dim] = dim_size;
                 continue;
             }
@@ -194,7 +194,7 @@ namespace WireCell::SPNG {
                 continue;
             }
             convolve_shape[dim] = m_faster(convolve_shape[dim]);
-            log->debug("shape: dim={} faster size: {}->{}->{}, {}",
+            log->debug("shape: dim={} faster size: {}->{}->{}",
                        dim, dim_size, basic_shape[dim], convolve_shape[dim]);
         }
 

@@ -145,6 +145,8 @@ local decon_kernel(filters, fr, er, adc, which="gauss") = {
         data: {
             field_response: wc.tn(fr),
             elec_response: wc.tn(er),
+            elec_duration: 20*wc.us, // just enough to cover non-zero value.
+            period: adc.tick,        // sample period of kernel time dimension.
             plane_index: filters.plane_index,
             // Negate to give positive signals.
             scale: -1 * adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0]),
@@ -177,7 +179,7 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
     // local time_options = {cyclic: false, crop: 0, roll_mode: "decon"};
     // local time_options = {cyclic: false, crop: 0, roll: 120};
     local time_options = {cyclic: false, crop: 0, baseline: true};
-    /// Note, may need to change KC to roll then crop.
+
 
     // one decon per filter type
     pg.pnode({
@@ -188,11 +190,10 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
             axis: [
                 channel_options,
                 time_options,
-
             ],
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
-            //faster: true,       // use "faster DFT size"
+            faster: true,       // use "faster DFT size"
             debug_filename: "kernel-convolve%s-{ident}.pkl"%extra_name,
         },
     }, nin=1, nout=1, uses=[kernel]);
@@ -295,9 +296,8 @@ local responses(detector, anode, adc_tick=500*wc.ns) = {
         type: 'ColdElecResponse',
         name: detector,
         data: {
-            tick: adc_tick,
-            // enough to cover the ER, DO NOT PUT FULL READOUT SIZE HERE
-            nticks: 40,
+            // note, the default sampling (tick/nticks) is ignored so we don't
+            // bother configuring it.
             shaping: 2.2*wc.us,
             gain : 14.0*wc.mV/wc.fC,
             postgain: 1.0,

@@ -94,7 +94,8 @@ namespace WireCell::SPNG {
         return tensor.isnan().any().item<bool>();
     }
 
-    
+
+
     // Note, removed pad() as it was too limiting and was never used.  Use
     // torch::nn::pad().  See spng/test/doctest_simple_convo.cxx for one
     // example.

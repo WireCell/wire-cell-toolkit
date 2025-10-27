@@ -106,17 +106,6 @@ namespace WireCell::SPNG::LMN {
     }
 
 
-    torch::Tensor slice_tensor(const torch::Tensor& t, int64_t start, int64_t length, int64_t axis) {
-        if (t.dim() == 1) {
-            return t.narrow(0, start, length);
-        } else if (axis == 0) {
-            return t.narrow(0, start, length); // Slicing rows
-        } else {
-            return t.narrow(1, start, length); // Slicing columns
-        }
-    };
-
-
     torch::Tensor resize_middle(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
         TORCH_CHECK(in.dim() <= 2, "LMN::resize_middle expected 1D or 2D tensor.");
@@ -169,7 +158,7 @@ namespace WireCell::SPNG::LMN {
         // 2. Copy the first chunk (P_size elements starting at 0)
         // Source range: [0, P_size)
         // Target range: [0, P_size)
-        slice_tensor(rs, 0, P_size, axis).copy_(slice_tensor(in, 0, P_size, axis));
+        rs.narrow(axis, 0, P_size).copy_(in.narrow(axis, 0, P_size));
 
         // 3. Copy the last chunk (L_size elements)
         if (L_size > 0) {
@@ -179,7 +168,7 @@ namespace WireCell::SPNG::LMN {
             // Target range: [Nr - L_size, Nr)
             int64_t Nr_start = Nr - L_size;
 
-            slice_tensor(rs, Nr_start, L_size, axis).copy_(slice_tensor(in, Ns_start, L_size, axis));
+            rs.narrow(axis, Nr_start, L_size).copy_(in.narrow(axis, Ns_start, L_size));
         }
 
         // The gap in the middle [P_size, Nr - L_size) is handled by zero initialization 
@@ -223,7 +212,7 @@ namespace WireCell::SPNG::LMN {
         // };
         // Intern axis and call the external function
         auto slice = [&](const torch::Tensor& t, int64_t start, int64_t length) -> torch::Tensor {
-            return slice_tensor(t, start, length, axis);
+            return t.narrow(axis, start, length);
         };
 
         // 2. Standard Copy (DC and primary halves)

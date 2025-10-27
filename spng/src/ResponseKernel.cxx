@@ -4,9 +4,10 @@
 #include "WireCellSpng/Convo.h"
 #include "WireCellSpng/TorchLMN.h"
 
-#include "WireCellUtil/NamedFactory.h"
 #include "WireCellIface/IFieldResponse.h"
 #include "WireCellIface/IWaveform.h"
+
+#include "WireCellUtil/NamedFactory.h"
 
 #include "boost/container_hash/hash.hpp"
 
@@ -52,67 +53,6 @@ namespace WireCell::SPNG {
     }
     
     // convolve then downsample
-    void ResponseKernel::configme_ctd()
-    {
-        log->debug("configuring FR*ER for convolve-then-downsample");
-        auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
-        auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
-
-        const float er_period = ier->waveform_period();
-        // Some FRs have FP round off problems in the period.
-        const float fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
-
-        // The natural number of samples for ER.  WARNING: old config sets this
-        // to nticks in ADC readout which is absurdly long.  FIXME: instead of
-        // fighting history, add a dedicated "nerticks" config to this component.
-        const size_t nerticks = ier->waveform_samples().size();
-        const float nerticks_duration = nerticks * er_period;
-        const int64_t nerticks_fine = nerticks * er_period/fr_period_fine;
-        Binning er_bins(nerticks_fine, 0, nerticks_duration);
-        log->debug("ER: {} ticks, {} us duration", nerticks_fine, nerticks_duration/units::us);
-
-        std::vector<float> erv = ier->waveform_samples(er_bins);
-        /// we hold on to er_fine so better not from_blob it!
-        // auto er_fine = torch::from_blob(erv.data(), nerticks_fine, torch::kFloat32);
-        auto er_fine = torch::tensor(erv, torch::kFloat32);
-        m_raw_er = er_fine;
-
-        // Still at FR sampling, eg 100ns
-        m_raw_fr_full_fine = fr_tensor(ifr->field_response(), m_cfg.plane_index);
-        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
-        m_raw_fr_avg_fine = fr_fine;
-
-        // Find size to assure linear convolution.
-        const int64_t linear_size = linear_shape(fr_fine.size(1), er_fine.size(0));
-
-        // pad is LAST FIRST
-        auto fr_pad = pad(fr_fine, PadFuncOptions({0, linear_size - fr_fine.size(1), 0, 0}));
-        auto er_pad = pad(er_fine, PadFuncOptions({0, linear_size - er_fine.size(0)}));
-                          
-        auto FR = torch::fft::fft(fr_pad, {}, 1);
-        auto ER = torch::fft::fft(er_pad).unsqueeze(0);
-        log->debug("FR: {}", to_string(FR));
-        log->debug("ER: {}", to_string(ER));
-        auto FRER = FR*ER;      // "natural spectrum"
-
-        auto frer_fine = torch::real(torch::fft::ifft(FRER, {}, 1));
-        m_raw_fr = frer_fine; // repurposed to hold pre-resampled.
-
-        auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, er_period, 1);
-
-        /// Convert to units of charge, and further scale by user scale.
-        frer_coarse = frer_coarse * er_period * (float)m_cfg.scale;
-
-        log->debug("nerticks={}, scale={}, er_period={}, er_fine={}, fr_period={}, fr_fine={}, linear_size={}, fr_pad={}, er_pad={}, frer_fine={}, frer_coarse={}",
-                   nerticks, m_cfg.scale, er_period, to_string(er_fine),
-                   fr_period_fine, to_string(fr_fine),
-                   linear_size,
-                   to_string(fr_pad), to_string(er_pad),
-                   to_string(frer_fine), to_string(frer_coarse));
-
-        m_response_waveform = frer_coarse;
-    }
-
     void ResponseKernel::configme()
     {
         if (m_cfg.plane_index < 0 || m_cfg.plane_index>3) {
@@ -124,31 +64,73 @@ namespace WireCell::SPNG {
             raise<ValueError>("bogus zero scale, check config");
         }
 
-        configme_ctd();
-
-        if (m_cfg.debug_filename.size()) {
-            log->debug("writing debug file: {}", m_cfg.debug_filename);
-            write_debug(m_cfg.debug_filename);
-        }
-
-    }
-
-    void ResponseKernel::write_debug(const std::string& filename) const
-    {
+        /// for debugging we may save some tensors to file for checkout
         using tensor_map = torch::Dict<std::string, torch::Tensor>;
         tensor_map to_save;
-        to_save.insert("field_response_full_fine", m_raw_fr_full_fine);
-        to_save.insert("field_response_avg_fine", m_raw_fr_avg_fine);
-        to_save.insert("field_response", m_raw_fr);
-        to_save.insert("elec_response", m_raw_er);
+        auto maybe_save = [&](torch::Tensor ten, std::string name) {
+            if (m_cfg.debug_filename.size()) {
+                to_save.insert(name, ten);
+            }
+        };
 
-        to_save.insert("response_waveform", m_response_waveform);
-        std::vector<int64_t> s = {100,2000};
-        to_save.insert("padded_waveform", pad_waveform(s));
-        to_save.insert("padded_spectrum", make_spectrum(s));
-        auto data = torch::pickle_save(to_save);
-        std::ofstream output_file(filename, std::ios::binary);
-        output_file.write(data.data(), data.size());
+
+        log->debug("configuring FR*ER for convolve-then-downsample");
+        auto ier = Factory::find_tn<IWaveform>(m_cfg.elec_response);
+        auto ifr = Factory::find_tn<IFieldResponse>(m_cfg.field_response);
+
+        // Some FRs have FP round off problems in their sample period.
+        const double fr_period_fine = round(ifr->field_response().period/units::ns)*units::ns;
+
+        // Sample ER at fr sampling period.
+        Binning er_sampling(m_cfg.elec_duration/fr_period_fine, 0, m_cfg.elec_duration);
+        std::vector<float> erv = ier->waveform_samples(er_sampling);
+        auto er_fine = torch::tensor(erv, torch::kFloat32);
+        maybe_save(er_fine, "fine_sampled_er");
+
+        // Note, this full FR does not have symmetries expanded.
+        maybe_save(fr_tensor(ifr->field_response(), m_cfg.plane_index), "fine_full_fr");
+
+        // Average FR is symmetric
+        auto fr_fine = fr_average_tensor(ifr->field_response(), m_cfg.plane_index);
+        maybe_save(fr_fine, "fine_avg_fr");
+
+        // Find size to assure linear convolution.
+        const int64_t linear_size = linear_shape(fr_fine.size(1), er_fine.size(0));
+
+        // pad is LAST FIRST
+        auto fr_pad = pad(fr_fine, PadFuncOptions({0, linear_size - fr_fine.size(1), 0, 0}));
+        auto er_pad = pad(er_fine, PadFuncOptions({0, linear_size - er_fine.size(0)}));
+                          
+        auto FR = torch::fft::fft(fr_pad, {}, 1); // [current/electron]
+        auto ER = torch::fft::fft(er_pad).unsqueeze(0); // [voltage/charge]
+        auto FRER = FR*ER;      // The "natural spectrum".
+        auto frer_fine = torch::real(torch::fft::ifft(FRER, {}, 1));
+        maybe_save(frer_fine, "fine_frer");
+
+        auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, m_cfg.period, 1);
+
+        /// Convert to units of voltage/electron and apply user scale.
+        frer_coarse = frer_coarse * (float)m_cfg.period * (float)m_cfg.scale;
+
+        log->debug("er_period={}, scale={}, er_fine={}, fr_period={}, fr_fine={}, linear_size={}, fr_pad={}, er_pad={}, frer_fine={}, frer_coarse={}",
+                   er_sampling.binsize(), m_cfg.scale, to_string(er_fine),
+                   fr_period_fine, to_string(fr_fine),
+                   linear_size,
+                   to_string(fr_pad), to_string(er_pad),
+                   to_string(frer_fine), to_string(frer_coarse));
+
+        m_response_waveform = frer_coarse;
+
+        if (m_cfg.debug_filename.size()) {
+            to_save.insert("response_waveform", m_response_waveform);
+            std::vector<int64_t> s = {100,2000};
+            to_save.insert("padded_waveform", pad_waveform(s));
+            to_save.insert("padded_spectrum", make_spectrum(s));
+            auto data = torch::pickle_save(to_save);
+            std::ofstream output_file(m_cfg.debug_filename, std::ios::binary);
+            output_file.write(data.data(), data.size());
+        }
+
     }
 
     size_t ResponseKernel::make_cache_key(const shape_t& shape) const
