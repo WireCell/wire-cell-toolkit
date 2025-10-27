@@ -153,10 +153,7 @@ namespace WireCell::SPNG {
 
         const int64_t taxis = 1;
         const int64_t tsize = shape[taxis];
-        if (m_cfg.padding == "tail") { // decon
-            return resize_tensor_tail(tmp, taxis, tsize);
-        }
-        return resize_tensor_head(tmp, taxis, tsize); // convo
+        return resize_tensor_tail(tmp, taxis, tsize);
     }
 
 

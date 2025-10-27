@@ -151,7 +151,6 @@ local decon_kernel(filters, fr, er, adc, which="gauss") = {
             // Negate to give positive signals.
             scale: -1 * adc.gain * (1 << adc.resolution) / (adc.fullscale[1] - adc.fullscale[0]),
             debug_filename: "response-kernel-%s.pkl" % (name+which),
-            padding: "head",    // head is default
         },
         uses: [fr, er],         // NOT anode.
     },
@@ -175,12 +174,7 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
         {cyclic: true,  crop:  0}, // v, cyclic, wrapped
         {cyclic: false, crop: -2}  // w, linear
     ][plane_index];
-    /// Would NOT crop in chunked-streaming mode.
-    // local time_options = {cyclic: false, crop: -2, roll: 1000, roll_mode: "decon"};
-    // local time_options = {cyclic: false, crop: 0, roll_mode: "decon"};
-    // local time_options = {cyclic: false, crop: 0, roll: 120};
-    local time_options = {cyclic: false, crop: 0, baseline: true};
-
+    local time_options = {cyclic: false, crop: 0, baseline: true, roll_mode: "decon"};
 
     // one decon per filter type
     pg.pnode({
@@ -189,8 +183,8 @@ local convo_node(kernel, plane_index, extra_name="", which="") =
         data: {
             kernel: wc.tn(kernel),
             axis: [
-                channel_options { padding: "tail" }, // tail is default
-                time_options { padding: "head" },    // head is default
+                channel_options,
+                time_options,
             ],
             tag: which,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",

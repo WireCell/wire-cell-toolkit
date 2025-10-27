@@ -1,6 +1,8 @@
 #include "WireCellSpng/Logger.h"
 #include "WireCellSpng/Util.h"
 
+#include "WireCellUtil/Units.h"
+
 #include <sstream>
 
 namespace WireCell::SPNG {
@@ -72,6 +74,7 @@ namespace WireCell::SPNG {
             comma = ", ";
         }
 
+        auto datatype = get<std::string>(md, "datatype", "");
 
         std::string parent = get<std::string>(md, "parent", "");;
         if (parent.size()) {
@@ -79,12 +82,19 @@ namespace WireCell::SPNG {
         }            
         log->debug("{} <{}> {} ({}) <{}> @{} {}",
                    context,
-                   get<std::string>(md, "datatype", ""),
+                   datatype,
                    get<std::string>(md, "datapath", ""),
                    ss.str(),
                    ten->dtype(),
                    to_string(ten->device()),
                    parent);
+        if (datatype == "traces") {
+            log->debug("\ttbin={}, time={}ms period={}ns tag:\"{}\"",
+                       get(md, "tbin", 0),
+                       get(md, "time", 0.0)/units::ms,
+                       get(md, "period", 0.0)/units::ns,
+                       get<std::string>(md, "tag", ""));
+        }
 
         if (m_verbose == 1) return;
 

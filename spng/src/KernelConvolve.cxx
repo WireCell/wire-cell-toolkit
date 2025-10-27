@@ -6,8 +6,6 @@
 #include "WireCellUtil/HanaJsonCPP.h"
 
 #include "WireCellUtil/NamedFactory.h"
-#include "WireCellIface/IFieldResponse.h"
-#include "WireCellIface/IWaveform.h"
 
 #include "boost/container_hash/hash.hpp"
 
@@ -62,11 +60,6 @@ namespace WireCell::SPNG {
         }
         m_cfg.axis.resize(2);
 
-        // By default we assume we act as a response de-convolution and that the
-        // response kernel is also tail-padded on channels, head-padded on time.
-        if (m_cfg.axis[0].padding.empty()) m_cfg.axis[0].padding = "tail";
-        if (m_cfg.axis[1].padding.empty()) m_cfg.axis[1].padding = "head";
-
         auto kshape = m_kernel->shape();
         auto kernel_tensor = m_kernel->spectrum(kshape);
         if (has_nan(kernel_tensor)) {
@@ -115,6 +108,11 @@ namespace WireCell::SPNG {
             md["tag"] = m_cfg.tag;
         }
         md = TDM::derive_metadata(md, in->metadata(), m_cfg.datapath_format);
+        
+        // We will update time as we head-pad or do a roll.
+        double time = get<double>(md, "time", 0.0);
+        const double sample_period = get<double>(md, "period", 1.0); // 1.0 is certainly wrong
+        // fixme: I'm ignoring tbin.
 
         auto tensor = in->tensor();
         if (has_nan(tensor)) {
@@ -134,7 +132,6 @@ namespace WireCell::SPNG {
             // fixme: should still do output derivation
             return true;
         }
-
 
         // Assure the tensor is batched.  Everything that touches "tensor" must
         // take care to consider indices {1,2} to be dimensions {0,1}!
@@ -161,7 +158,6 @@ namespace WireCell::SPNG {
                 to_save.insert(name, ten);
             }
         };
-
 
         // Consider non batch dimensions!
         std::vector<int64_t> basic_shape(2);
@@ -217,7 +213,11 @@ namespace WireCell::SPNG {
                 tensor = resize_tensor_tail(tensor, dim+1, convolve_shape[dim]);
             }
             else {
+                // "head" padding 
                 tensor = resize_tensor_head(tensor, dim+1, convolve_shape[dim]);
+                if (dim == 1) {
+                    time -= convolve_shape[dim] * sample_period;
+                }
             }
 
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
@@ -252,9 +252,12 @@ namespace WireCell::SPNG {
 
             if (m_roll[dim]) {
                 tensor = torch::roll(tensor, m_roll[dim], dim+1);
+                if (dim == 1) {
+                    time -= m_roll[dim] * sample_period;
+                }
             }
 
-            if (crop > 0) {  // absolute crop
+            if (crop > 0) {  // absolute crop to user provided size
                 tensor = resize_tensor_tail(tensor, dim+1, crop);
 
             }
@@ -283,6 +286,7 @@ namespace WireCell::SPNG {
             output_file.write(data.data(), data.size());
         }
 
+        md["time"] = time;
         out = std::make_shared<SimpleTorchTensor>(tensor, md);
 
         logit(out, "output");

@@ -70,6 +70,7 @@ A "traces" tensor represents a tagged ~ITrace~ collection.  Unlike ~ITrace~, the
 The metadata attributes are:
 
 - ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~time~ :: required, float giving an absolute reference time for the time domain samples.
 - ~period~ :: required, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.  This replicates the ~period~ value in the parent.
 - ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor represents.
 - ~tbin~ :: integer (unbatched) or array of integer (batched) of the number of sample periods from the frame reference time to the first (element 0) column / tick.  If omitted, a default value of zero may be assumed.

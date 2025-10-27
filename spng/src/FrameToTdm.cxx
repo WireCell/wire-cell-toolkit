@@ -416,6 +416,7 @@ namespace WireCell::SPNG {
                     Configuration md = common_md;
                     md["tbin"] = (int)tbeg;
                     md["period"] = iframe->tick();
+                    md["time"] = iframe->time();
                     tensors.push_back(make_datatype("traces", group.relpath, ten, md));
                 }
 
