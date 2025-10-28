@@ -380,7 +380,7 @@ namespace WireCell::Clus::PR {
 
 
 
-    bool break_segment(Graph& graph, SegmentPtr seg, Point point, double max_dist/*=1e9*/)
+    bool break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/)
     {
         /// sanity checks
         if (! seg->descriptor_valid()) {
@@ -429,20 +429,125 @@ namespace WireCell::Clus::PR {
 
 
         // fill in the new objects.  All three get the middle thing
-
+        // Split wcpts - break point included in both
         seg1->wcpts(std::vector<WCPoint>(wcpts.begin(), itwcpts+1));
         seg2->wcpts(std::vector<WCPoint>(itwcpts, wcpts.end()));
         vtx->wcpt(*itwcpts);
 
+        // Split fits - break point included in both
         seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
         seg2->fits(std::vector<Fit>(itfits, fits.end()));
         vtx->fit(*itfits);
 
-        //.... more for segment
-        // dir_weak
-        // flags (dir, shower traj, shower topo)
-        // particle type and mass and score
-        // points clouds
+        // Copy segment properties from original to both new segments (matching WCPPID)
+        seg1->dir_weak(seg->dir_weak());
+        seg2->dir_weak(seg->dir_weak());
+        
+        seg1->dirsign(seg->dirsign());
+        seg2->dirsign(seg->dirsign());
+        
+        // Copy all flags
+        seg1->flags_set(seg->flags());
+        seg2->flags_set(seg->flags());
+
+        if (seg->has_particle_info()) {
+            // Copy particle info if it exists
+            segment_cal_4mom(seg1, seg->particle_info()->pdg(), particle_data, recomb_model);
+            segment_cal_4mom(seg2, seg->particle_info()->pdg(), particle_data, recomb_model);
+        }
+
+        // Copy dynamic point clouds if they exist
+        // The dpcloud() method returns the DynamicPointCloud associated with a given name
+        if (seg->dpcloud("fit")) {
+            create_segment_fit_point_cloud(seg1, dv, "fit");
+            create_segment_fit_point_cloud(seg2, dv, "fit");
+        }
+        
+        if (seg->dpcloud("main")) {
+            // Convert WCPoint to Point for create_segment_point_cloud
+            const auto& wcpts1 = seg1->wcpts();
+            const auto& wcpts2 = seg2->wcpts();
+            std::vector<geo_point_t> points1, points2;
+            points1.reserve(wcpts1.size());
+            points2.reserve(wcpts2.size());
+            for (const auto& wcp : wcpts1) {
+                points1.push_back(wcp.point);
+            }
+            for (const auto& wcp : wcpts2) {
+                points2.push_back(wcp.point);
+            }
+            create_segment_point_cloud(seg1, points1, dv, "main");
+            create_segment_point_cloud(seg2, points2, dv, "main");
+        }
+        
+        if (seg->dpcloud("associate_points")) {
+            // Redistribute associated points based on closest distance to seg1 vs seg2
+            // This matches WCPPID lines 123-140
+            
+            auto orig_dpc = seg->dpcloud("associate_points");
+            const auto& orig_points = orig_dpc->get_points();
+            
+            // Separate points based on which segment they're closer to
+            std::vector<Facade::DynamicPointCloud::DPCPoint> points1, points2;
+            points1.reserve(orig_points.size() / 2);  // estimate
+            points2.reserve(orig_points.size() / 2);
+            
+            // Determine which cloud to use for distance calculations
+            // Prefer "fit" points, but fall back to "main" if "fit" is not available
+            std::string ref_cloud_name = "fit";
+            if (!seg1->dpcloud("fit") || !seg2->dpcloud("fit")) {
+                ref_cloud_name = "main";
+                // Ensure main clouds exist for both segments
+                if (!seg1->dpcloud("main") || !seg2->dpcloud("main")) {
+                    raise<RuntimeError>("break_segment: cannot redistribute associate_points - neither 'fit' nor 'main' clouds available");
+                }
+            }
+            
+            // Iterate through all associated points
+            for (const auto& dpc_point : orig_points) {
+                WireCell::Point point(dpc_point.x, dpc_point.y, dpc_point.z);
+                
+                // Compute closest distance to seg1 and seg2 using reference cloud
+                auto [dist1, _1] = segment_get_closest_point(seg1, point, ref_cloud_name);
+                auto [dist2, _2] = segment_get_closest_point(seg2, point, ref_cloud_name);
+                
+                // Add point to closer segment
+                if (dist1 < dist2) {
+                    points1.push_back(dpc_point);
+                } else {
+                    points2.push_back(dpc_point);
+                }
+            }
+            
+            // Get wpid_params from the original cloud
+            auto& cluster = *seg->cluster();
+            const auto& wpids = cluster.grouping()->wpids();
+            std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_params;
+            std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir;
+            std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_V_dir;
+            std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
+            std::set<int> apas;
+            Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+
+            // Create new DynamicPointClouds for associated points if we have any
+            if (!points1.empty()) {
+                // Create and populate seg1's associate_points cloud
+                auto dpc1 = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+                dpc1->add_points(points1);
+                seg1->dpcloud("associate_points", dpc1);
+            }
+            
+            if (!points2.empty()) {
+                // Create and populate seg2's associate_points cloud
+                auto dpc2 = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+                dpc2->add_points(points2);
+                seg2->dpcloud("associate_points", dpc2);
+            }
+            
+            // Note: KD-tree indices are automatically rebuilt when add_points() is called
+        }
+        
+       
             
         return true;
     }
@@ -1952,7 +2057,7 @@ namespace WireCell::Clus::PR {
         if (!dpcloud_fit) return false;
         
         // Get the associated point cloud 
-        auto dpcloud_assoc = segment->dpcloud("associated");
+        auto dpcloud_assoc = segment->dpcloud("associate_points");
         if (!dpcloud_assoc) return false;
         
         const auto& assoc_points = dpcloud_assoc->get_points();
