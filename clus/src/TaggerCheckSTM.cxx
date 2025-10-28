@@ -209,6 +209,11 @@ public:
                 std::cout << "Fit point cloud not found on segment!" << std::endl;
             }
 
+            std::cout << "Direct Length: " << segment_track_direct_length(segment) / units::cm << " cm; " <<  segment_track_direct_length(segment, 0, 10) / units::cm << " cm" << " " << segment_track_direct_length(segment, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
+
+            std::cout << "Segment Length: " << segment_track_length(segment) / units::cm << " cm; " << segment_track_length(segment,0, 0, 10) / units::cm << " cm" << " " << segment_track_length(segment,0, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
+            std::cout << "Max deviation: " << segment_track_max_deviation(segment) / units::cm << " cm; " <<  segment_track_max_deviation(segment, 0, 10) / units::cm << " cm"  << std::endl;
+
 
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
