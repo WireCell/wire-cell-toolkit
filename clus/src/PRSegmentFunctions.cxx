@@ -996,6 +996,10 @@ namespace WireCell::Clus::PR {
             
             // Calculate dE/dx using Box model inverse formula from original code
             double dE = recomb_model->dE(dQ, dx);
+
+            double dQp = (*recomb_model)(dE, dx);
+
+            std::cout << dQ << " " << dx << " " << dE << " " << units::MeV << " " << dQp << std::endl;
             
             // Apply bounds (same as original)
             if (dE < 0) dE = 0;

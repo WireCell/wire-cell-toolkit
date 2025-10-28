@@ -167,7 +167,7 @@ public:
             m_track_fitter.do_single_tracking(segment, true, true, false, true);
             // Extract fit results from the segment
             const auto& fits = segment->fits();
-            
+            std::vector<double> vec_dQ, vec_dx;
             // Print position, dQ, and dx for each fit point
             std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
             for (size_t i = 0; i < fits.size(); ++i) {
@@ -175,6 +175,8 @@ public:
                 std::cout << "  Point " << i << ": position=(" 
                          << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
                          << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+                vec_dQ.push_back(fit.dQ);
+                vec_dx.push_back(fit.dx);
             }
             std::cout << std::endl;
 
@@ -219,6 +221,40 @@ public:
             std::cout <<"Kink search: " << std::get<0>(kink_results) << " " << std::get<1>(kink_results) << " " << std::get<2>(kink_results) << " " << std::get<3>(kink_results) <<std::endl;
             std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
             std::cout <<"3D Vector: " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
+
+            vec_dQ.clear();
+            vec_dx.clear();
+
+            vec_dQ.push_back(35750.7); vec_dx.push_back(0.591606 * units::cm);
+            vec_dQ.push_back(32381.5); vec_dx.push_back(0.532785 * units::cm);
+            vec_dQ.push_back(30075.9); vec_dx.push_back(0.482393 * units::cm);
+            vec_dQ.push_back(32805.1); vec_dx.push_back(0.49908  * units::cm);
+            vec_dQ.push_back(46702.9); vec_dx.push_back(0.664835 * units::cm);
+            vec_dQ.push_back(58132.3); vec_dx.push_back(0.779598 * units::cm);
+            vec_dQ.push_back(58407.1); vec_dx.push_back(0.759001 * units::cm);
+            vec_dQ.push_back(55774.6); vec_dx.push_back(0.767953 * units::cm);
+            vec_dQ.push_back(51256.7); vec_dx.push_back(0.746227 * units::cm);
+            vec_dQ.push_back(42653.3); vec_dx.push_back(0.607304 * units::cm);
+            vec_dQ.push_back(47765.7); vec_dx.push_back(0.644757 * units::cm);
+            vec_dQ.push_back(55210.0); vec_dx.push_back(0.726355 * units::cm);
+            vec_dQ.push_back(44971.7); vec_dx.push_back(0.624519 * units::cm);
+            vec_dQ.push_back(35688.0); vec_dx.push_back(0.541333 * units::cm);
+            vec_dQ.push_back(37316.4); vec_dx.push_back(0.613396 * units::cm);
+            vec_dQ.push_back(37136.7); vec_dx.push_back(0.643779 * units::cm);
+            vec_dQ.push_back(33273.7); vec_dx.push_back(0.544746 * units::cm);
+            vec_dQ.push_back(32636.5); vec_dx.push_back(0.546531 * units::cm);
+            vec_dQ.push_back(35736.8); vec_dx.push_back(0.634489 * units::cm);
+            vec_dQ.push_back(35515.5); vec_dx.push_back(0.620087 * units::cm);
+            vec_dQ.push_back(36371.2); vec_dx.push_back(0.657168 * units::cm);
+            vec_dQ.push_back(37250.7); vec_dx.push_back(0.78021  * units::cm);
+            vec_dQ.push_back(29661.0); vec_dx.push_back(0.648785 * units::cm);
+            vec_dQ.push_back(27046.6); vec_dx.push_back(0.578585 * units::cm);
+            vec_dQ.push_back(28468.3); vec_dx.push_back(0.611002 * units::cm);
+            vec_dQ.push_back(33398.8); vec_dx.push_back(0.685772 * units::cm);
+            vec_dQ.push_back(42891.4); vec_dx.push_back(0.714633 * units::cm);
+            vec_dQ.push_back(44924.0); vec_dx.push_back(0.628143 * units::cm);
+
+            std::cout <<"Kine dQ_dx: " << segment_cal_kine_dQdx(segment, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_dQdx(vec_dQ, vec_dx, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_range(segment_track_length(segment), 13, particle_data()) << std::endl;
 
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
