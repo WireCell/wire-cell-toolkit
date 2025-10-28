@@ -271,6 +271,9 @@ public:
             std::cout << std::get<0>(results) << " " << std::get<1>(results) << " " << std::get<2>(results) << " " << std::get<3>(results) << std::endl;
             std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
 
+            segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true);
+
+
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
             // fitted_segments.push_back(segment);

@@ -1375,33 +1375,39 @@ namespace WireCell::Clus::PR {
         }
         
         // Set particle mass and calculate 4-momentum
-        if (pdg_code != 0) {
+        // Only calculate if direction points toward a free end (matching WCPPID logic)
+        if (pdg_code != 0 && ((segment->dirsign() == 1 && end_n == 1) || (segment->dirsign() == -1 && start_n == 1))) {
             // Calculate 4-momentum using the identified particle type
-            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
+            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
 
             // Create ParticleInfo with the identified particle
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                pdg_code,                    // PDG code
+                pdg_code,                                    // PDG code
                 particle_data->get_particle_mass(pdg_code), // mass
                 particle_data->pdg_to_name(pdg_code),       // name
-                four_momentum                     // 4-momentum
+                four_momentum                                // 4-momentum (E, px, py, pz)
             );
             
-            // Set additional properties if available
-            pinfo->set_particle_score(particle_score); // This method would need to be added
-            
-            // Store particle info in segment (this would require adding particle_info to Segment class)
+            // Store particle info in segment
             segment->particle_info(pinfo);
         }
                 
-        if (flag_print && pdg_code != 0) {
-            std::cout << "Segment PID: PDG=" << pdg_code 
-                      << ", Score=" << particle_score 
-                      << ", Length=" << length / units::cm << " cm"
-                      << ", Direction=" << segment->dirsign() 
-                      << (segment->dir_weak() ? " (weak)" : "") 
-                      << ", Medium dQ/dx=" << segment_median_dQ_dx(segment) / (MIP_dQdx) 
-                      << " MIP"
+        if (flag_print) {
+            // Match WCPPID output format: id, length, "Track", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
+            double particle_mass = pdg_code != 0 ? particle_data->get_particle_mass(pdg_code) : 0.0;
+            double kinetic_energy = 0.0;
+            
+            if (segment->has_particle_info()) {
+                kinetic_energy = segment->particle_info()->kinetic_energy();
+            }
+            
+            std::cout << "Seg " << length/units::cm << " cm Track " 
+                      << segment->dirsign() << " " 
+                      << (segment->dir_weak() ? 1 : 0) << " "
+                      << pdg_code << " " 
+                      << particle_mass/units::MeV << " MeV " 
+                      << kinetic_energy/units::MeV << " MeV "
+                      << particle_score 
                       << std::endl;
         }
     }
