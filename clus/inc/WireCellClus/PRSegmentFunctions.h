@@ -88,7 +88,7 @@ namespace WireCell::Clus::PR {
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
     std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
     // success, flag_dir, pdg_code, particle_score
-    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range=35*units::cm, double offset_length = 0*units::cm, bool flag_force = false,  double MIP_dQdx = 50000/units::cm);
 
     // direction calculation ...
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg);

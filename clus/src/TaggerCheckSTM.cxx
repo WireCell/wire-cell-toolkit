@@ -220,7 +220,7 @@ public:
             auto kink_results = segment_search_kink(segment, first_wcp, "fit");
             std::cout <<"Kink search: " << std::get<0>(kink_results) << " " << std::get<1>(kink_results) << " " << std::get<2>(kink_results) << " " << std::get<3>(kink_results) <<std::endl;
             std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
-            std::cout <<"3D Vector: " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
+            std::cout <<"3D Vector: " << segment->dirsign() << " " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
 
             vec_dQ.clear();
             vec_dx.clear();
@@ -267,7 +267,9 @@ public:
             }
             auto pid_results = WireCell::Clus::PR::do_track_comp(L, dQ_dx, 35*units::cm, 0*units::cm, particle_data());
             std::cout << "Particle ID results: " << pid_results.at(0) << " " << pid_results.at(1) << " " << pid_results.at(2) << " " << pid_results.at(3) << std::endl;
-   
+            auto results = segment_do_track_pid(segment, L, dQ_dx, particle_data());
+            std::cout << std::get<0>(results) << " " << std::get<1>(results) << " " << std::get<2>(results) << " " << std::get<3>(results) << std::endl;
+            std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
 
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;

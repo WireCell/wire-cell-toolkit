@@ -828,6 +828,7 @@ namespace WireCell::Clus::PR {
 
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg){
         const auto& fits = seg->fits();
+
         if (fits.size() < 2) {
             return WireCell::Vector(0, 0, 0);
         }
@@ -1098,7 +1099,7 @@ namespace WireCell::Clus::PR {
     }
 
     // success, flag_dir, particle_type, particle_score
-    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx){
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range , double offset_length, bool flag_force, double MIP_dQdx){
         
         if (L.size() != dQ_dx.size() || L.empty() || !segment) {
             return std::make_tuple(false, 0, 0, 0.0);
@@ -1197,6 +1198,8 @@ namespace WireCell::Clus::PR {
             return std::make_tuple(true, flag_dir, particle_type, particle_score);
         }
         
+        segment->dirsign(flag_dir);
+
         // Reset before return - failure case
         return std::make_tuple(false, 0, 0, 0.0);
     }
@@ -1220,8 +1223,9 @@ namespace WireCell::Clus::PR {
         double particle_mass = particle_data->get_particle_mass(pdg_code);
 
         results[0]= kine_energy + particle_mass;
-        double mom = sqrt(pow(results[3],2) - pow(particle_mass,2));
+        double mom = sqrt(pow(results[0],2) - pow(particle_mass,2));
         auto v1 = segment_cal_dir_3vector(segment);
+
         results[1] = mom * v1.x();
         results[2] = mom * v1.y();
         results[3] = mom * v1.z();
@@ -1275,7 +1279,7 @@ namespace WireCell::Clus::PR {
             
             if (start_n == 1 && end_n == 1 && npoints >= 15) {
                 // Can use the dQ/dx to do PID and direction
-                auto result = segment_do_track_pid(segment, L, dQ_dx, 35*units::cm, 1*units::cm, true, particle_data);
+                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 1*units::cm, true);
                 tmp_flag_pid = std::get<0>(result);
                 if (tmp_flag_pid) {
                     segment->dirsign(std::get<1>(result));
@@ -1284,7 +1288,7 @@ namespace WireCell::Clus::PR {
                 }
                 
                 if (!tmp_flag_pid) {
-                    result = segment_do_track_pid(segment, L, dQ_dx, 15*units::cm, 1*units::cm, true, particle_data);
+                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 1*units::cm, true);
                     tmp_flag_pid = std::get<0>(result);
                     if (tmp_flag_pid) {
                         segment->dirsign(std::get<1>(result));
@@ -1294,7 +1298,7 @@ namespace WireCell::Clus::PR {
                 }
             } else {
                 // Can use the dQ/dx to do PID and direction
-                auto result = segment_do_track_pid(segment, L, dQ_dx, 35*units::cm, 0*units::cm, false, particle_data);
+                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 0*units::cm, false);
                 tmp_flag_pid = std::get<0>(result);
                 if (tmp_flag_pid) {
                     segment->dirsign(std::get<1>(result));
@@ -1303,7 +1307,7 @@ namespace WireCell::Clus::PR {
                 }
                 
                 if (!tmp_flag_pid) {
-                    result = segment_do_track_pid(segment, L, dQ_dx, 15*units::cm, 0*units::cm, false, particle_data);
+                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 0*units::cm, false);
                     tmp_flag_pid = std::get<0>(result);
                     if (tmp_flag_pid) {
                         segment->dirsign(std::get<1>(result));
