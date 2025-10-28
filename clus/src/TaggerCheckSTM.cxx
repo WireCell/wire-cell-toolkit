@@ -272,6 +272,7 @@ public:
             std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
 
             segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true);
+            segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true);
 
 
             // std::cout << "After search other tracks" << std::endl;

@@ -1417,43 +1417,60 @@ namespace WireCell::Clus::PR {
         double length = segment_track_length(segment, 0);
         
         // hack for now ...
-        int pdg_code = 11;
+        int pdg_code = 11; // electron
+        double particle_score = 0.0;
         
-        if (start_n==1 && end_n >1){
+        if (start_n == 1 && end_n > 1){
             segment->dirsign(-1);
-        }else if (start_n > 1 && end_n == 1){
+        } else if (start_n > 1 && end_n == 1){
             segment->dirsign(1);
-        }else{
+        } else {
+            // Try track PID first
             segment_determine_dir_track(segment, start_n, end_n, particle_data, recomb_model, MIP_dQdx, false);
-            if (segment->particle_info()->pdg() != 11){
+            
+            // Check if particle info was set and if it's not an electron
+            if (segment->has_particle_info() && segment->particle_info()->pdg() != 11) {
+                // Reset to electron and no direction
+                pdg_code = 11;
+                segment->dirsign(0);
+            } else if (segment->has_particle_info()) {
+                // Keep the electron identification from track PID
+                pdg_code = segment->particle_info()->pdg();
+            } else {
+                // No particle info set, default to electron with no direction
+                pdg_code = 11;
                 segment->dirsign(0);
             }
         }
-                
-        auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
+        
+        // Always calculate 4-momentum for shower trajectories (matching WCPPID)
+        auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
 
         // Create ParticleInfo with the identified particle
         auto pinfo = std::make_shared<Aux::ParticleInfo>(
-            pdg_code,                    // PDG code
+            pdg_code,                                    // PDG code (electron)
             particle_data->get_particle_mass(pdg_code), // mass
             particle_data->pdg_to_name(pdg_code),       // name
-            four_momentum                     // 4-momentum
+            four_momentum                                // 4-momentum (E, px, py, pz)
         );
                 
-        // Store particle info in segment (this would require adding particle_info to Segment class)
+        // Store particle info in segment
         segment->particle_info(pinfo);
 
-         if (flag_print ) {
-            std::cout << "Segment PID: PDG=" << pdg_code 
-                      << ", Length=" << length / units::cm << " cm"
-                      << ", Direction=" << segment->dirsign() 
-                      << (segment->dir_weak() ? " (weak)" : "") 
-                      << ", Medium dQ/dx=" << segment_median_dQ_dx(segment) / (MIP_dQdx) 
-                      << " MIP"
+        if (flag_print) {
+            // Match WCPPID output format: id, length, "S_traj", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
+            double particle_mass = particle_data->get_particle_mass(pdg_code);
+            double kinetic_energy = pinfo->kinetic_energy();
+            
+            std::cout << "Seg " << length/units::cm << " cm S_traj " 
+                      << segment->dirsign() << " " 
+                      << (segment->dir_weak() ? 1 : 0) << " "
+                      << pdg_code << " " 
+                      << particle_mass/units::MeV << " MeV " 
+                      << kinetic_energy/units::MeV << " MeV "
+                      << particle_score 
                       << std::endl;
         }
-
-
      }
 
     void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
