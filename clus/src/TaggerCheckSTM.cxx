@@ -256,6 +256,19 @@ public:
 
             std::cout <<"Kine dQ_dx: " << segment_cal_kine_dQdx(segment, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_dQdx(vec_dQ, vec_dx, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_range(segment_track_length(segment), 13, particle_data()) << std::endl;
 
+            std::vector<double> L, dQ_dx;
+            for (size_t i = 0; i < vec_dQ.size(); ++i) {
+                if (i==0){
+                  L.push_back(0.);
+                }else{
+                  L.push_back(L.back() + vec_dx.at(i));
+                }
+                dQ_dx.push_back(vec_dQ.at(i)/vec_dx.at(i)); // convert to per cm
+            }
+            auto pid_results = WireCell::Clus::PR::do_track_comp(L, dQ_dx, 35*units::cm, 0*units::cm, particle_data());
+            std::cout << "Particle ID results: " << pid_results.at(0) << " " << pid_results.at(1) << " " << pid_results.at(2) << " " << pid_results.at(3) << std::endl;
+   
+
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
             // fitted_segments.push_back(segment);

@@ -997,9 +997,9 @@ namespace WireCell::Clus::PR {
             // Calculate dE/dx using Box model inverse formula from original code
             double dE = recomb_model->dE(dQ, dx);
 
-            double dQp = (*recomb_model)(dE, dx);
+            // double dQp = (*recomb_model)(dE, dx);
 
-            std::cout << dQ << " " << dx << " " << dE << " " << units::MeV << " " << dQp << std::endl;
+            // std::cout << dQ << " " << dx << " " << dE << " " << units::MeV << " " << dQp << std::endl;
             
             // Apply bounds (same as original)
             if (dE < 0) dE = 0;
@@ -1036,8 +1036,8 @@ namespace WireCell::Clus::PR {
         
         for (size_t i = 0; i != ncount; i++) {
             muon_ref[i] = particle_data->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm) /units::cm;
-            proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm)/ units::cm;
-            electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm)/ units::cm;
+            proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm) / units::cm;
+            electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm) / units::cm;
         }
         
         // Perform KS-like tests using kslike_compare
@@ -1057,6 +1057,8 @@ namespace WireCell::Clus::PR {
         double ratio4 = std::accumulate(electron_ref.begin(), electron_ref.end(), 0.0) / 
                         (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
         
+        // std::cout << ks1 << " " << ratio1 << " " << ks2 << " " << ratio2 << " " << ks3 << " " << ratio3 << " " << ks4 << " " << ratio4 << std::endl;
+
         std::vector<double> results;
         // Convert bool result to double (1.0 for true, 0.0 for false)
         results.push_back(eval_ks_ratio(ks1, ks2, ratio1, ratio2) ? 1.0 : 0.0); // direction metric
@@ -1089,9 +1091,8 @@ namespace WireCell::Clus::PR {
         
         if (!range_function) {
             // Default to muon if particle type not recognized
-            range_function = particle_data->get_range_function("muon");
+            range_function = particle_data->get_range_function("muon"); 
         }
-        
         double kine_energy = range_function->scalar_function(L/units::cm) * units::MeV;
         return kine_energy;
     }
