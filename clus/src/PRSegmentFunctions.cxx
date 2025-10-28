@@ -906,9 +906,17 @@ namespace WireCell::Clus::PR {
             }
         } else if (direction == -1) {
             // Backward direction
-            for (int i = start; i < start + num_points - 1 && (fits.size() - i - 1) < fits.size(); i++) {
-                if (fits.size() - start < fits.size()) {
-                    p = p + (fits[fits.size() - i - 1].point - fits[fits.size() - start].point);
+             for (int i = start; i < start + num_points - 1; i++) {
+                // WCPPID's bounds check
+                if (i + 1 > static_cast<int>(fits.size())) break;
+                
+                // Ensure backward indices are valid
+                int back_idx = fits.size() - i - 1;
+                int ref_idx = fits.size() - start;
+                
+                if (back_idx >= 0 && back_idx < static_cast<int>(fits.size()) && 
+                    ref_idx >= 0 && ref_idx < static_cast<int>(fits.size())) {
+                    p = p + (fits[back_idx].point - fits[ref_idx].point);
                 }
             }
         }

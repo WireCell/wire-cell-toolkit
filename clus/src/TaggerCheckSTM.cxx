@@ -215,6 +215,11 @@ public:
             std::cout << "Max deviation: " << segment_track_max_deviation(segment) / units::cm << " cm; " <<  segment_track_max_deviation(segment, 0, 10) / units::cm << " cm"  << std::endl;
             std::cout << "dQ_dx: " << segment_rms_dQ_dx(segment) << " " << segment_median_dQ_dx(segment) << " " << segment_median_dQ_dx(segment,0,10) << std::endl;
 
+            auto kink_results = segment_search_kink(segment, first_wcp, "fit");
+            std::cout <<"Kink search: " << std::get<0>(kink_results) << " " << std::get<1>(kink_results) << " " << std::get<2>(kink_results) << " " << std::get<3>(kink_results) <<std::endl;
+            std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
+            std::cout <<"3D Vector: " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
+
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
             // fitted_segments.push_back(segment);
