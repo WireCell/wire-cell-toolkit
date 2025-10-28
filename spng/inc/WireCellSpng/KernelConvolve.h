@@ -14,7 +14,28 @@
 
 namespace WireCell::SPNG {
 
+    /** Configure one axis of the convolution.
+     *
+     * Either 1 or 2 axes may be configured corresponding to 1D or 2D convolution.
+     *
+     * In both cases, the kernel must have 2 dimensions.  To support 1D
+     * convolution with a common 1D kernel, the kernel may be unsqueeze()'d).
+     */
     struct KernelConvolveAxisConfig {
+        
+
+        /// The dimension that this axis corresponds.
+        ///
+        /// Default value is undefined.  If no dimension is defined it will be
+        /// set to the index at which this axis config resides in the vector of
+        /// axes.  It must be explicitly set in order to apply the
+        /// KernelConvolve sparsely across the dimensions.
+        ///
+        /// When only one KernelConvolveAxisConfig is given, the convolution is
+        /// 1D across the dimension and repeated for each element of the other
+        /// dimension (and wholly repeated if batch).  When a single axis is
+        /// given, the kernel MUST also be 1D.
+        int dim = -1;
 
         /// Subtract a baseline.  If true, the median value is found along this
         /// axis and subtracted.  Eg, if this axis is "time", each "channel" is
@@ -117,15 +138,20 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig,
                         kernel, axis, faster, tag, datapath_format, debug_filename);
 
 namespace WireCell::SPNG {
-    /** Apply a 2D convolution with a kernel to input tensor.
+    /** Apply a convolution of a kernel and 2D input tensors.
      *
-     * The kernel is configurable and fully determines the nature of the
-     * convolution.  For the "WC signal processing deconvolution" configure this
-     * node to use a DeconKernel.  See KernelConvolveConfig for this and other
-     * configuration parameters.
+     * Despite the generic name, this component assumes input tensors have
+     * datatype of "traces" giving 2D tensors (possibly batched) that represent
+     * (channel, time) samples.
      *
-     * The shape of the input tensor may be either: (nbatches, nrows, ncols) or
-     * (nrows, ncols) matching (nrows, ncols) of the strictly 2D kernel.
+     * The convolution may be may be 1D across either channel or time tensor
+     * dimensions or 2D across both.  For the "WC signal processing
+     * deconvolution" configure this node to use a DeconKernel.  This node may
+     * also be used to only apply a FilterKernel along one or both dimensions.
+     * See the per-axis "dim" attribute of KernelConvolveAxisConfig.
+     *
+     * If batched, the first dimension must be the batch dimension.  The last
+     * two dimensions are of shape (nchannels, nticks).
      */
     class KernelConvolve : public ContextBase,
                            public Logger,
@@ -150,11 +176,16 @@ namespace WireCell::SPNG {
 
         void configme();        // called from configured constructor and configure()
 
+        // Wrap the two behaviors depending on the number of configured axes.
+        torch::Tensor convolve_2d(torch::Tensor tensor, torch::Tensor kernel);
+        torch::Tensor convolve_1d(torch::Tensor tensor, torch::Tensor kernel);
+
         KernelConvolveConfig m_cfg;
         ITorchSpectrum::pointer m_kernel;
         FasterDftSize m_faster;
 
         std::vector<int> m_roll;
+        std::vector<int> m_crop;
     };
 }
 

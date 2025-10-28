@@ -29,7 +29,7 @@ Every ~ITorchTensor~ metadata SHALL have these attributes:
 An ~ITorchTensor~ metadata MAY have these attributes, depending on datatype.
 
 - ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent (but may be a parent).  A parent MUST precede all children in the ~ITorchTensor~.
-- ~batches~ :: An integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched.  If a tensor is batched, first / most major dimension spans the batch.  
+- ~batches~ :: An integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched unless the consumer may infer batching based on the =datatype=.  If a tensor is batched, first / most major dimension spans the batch.  
 - ~derived_from~ :: An optional string or array of string holding the ~datapath~ strings of all ~ITorchTensor~ instances that directly provided information in the forming a novel output ~ITorchTensor~ instance.  See section [[Provenance]] below.
 
 

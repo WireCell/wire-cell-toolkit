@@ -49,50 +49,80 @@ namespace WireCell::SPNG {
         configme();
     }
 
+    torch::Tensor KernelConvolve::convolve_2d(torch::Tensor tensor, torch::Tensor kernel)
+    {
+        // full 2D convolution, operates on last 2 dimensions by defalut
+        return torch::real(torch::fft::ifft2(torch::fft::fft2(tensor) * kernel));
+    }
+
+    torch::Tensor KernelConvolve::convolve_1d(torch::Tensor tensor, torch::Tensor kernel)
+    {
+        int64_t dim = m_cfg.axis[0].dim + 1; // +1 because we assume batched.
+        // 1D convolution of full 2D kernel
+        auto spec = torch::fft::fft(tensor, std::nullopt, dim);
+        auto conv = spec * kernel;
+        return torch::real(torch::fft::ifft(conv, std::nullopt, dim));
+    }
+
+
     void KernelConvolve::configme()
     {
         if (m_cfg.kernel.empty()) {
             raise<ValueError>("the 'kernel' parameter is required");
         }
         m_kernel = Factory::find_tn<ITorchSpectrum>(m_cfg.kernel);
-        if (m_cfg.axis.size() != 2) {
-            log->warn("number of configured axis: {} is not 2, using defaults for missing or ignoring extra",
-                m_cfg.axis.size());
-        }
-        m_cfg.axis.resize(2);
 
+        // sanity check the kernel
         auto kshape = m_kernel->shape();
         auto kernel_tensor = m_kernel->spectrum(kshape);
         if (has_nan(kernel_tensor)) {
             raise<ValueError>("kernel has NaN");
         }
+        const size_t ndims = m_kernel->shape().size();
+        if (ndims != 2) {
+            raise<ValueError>("convolution requires 2D kernel, got (%d)", ndims);
+        }
 
+        // Collect and check per input dimension values.
+        m_roll.clear();
+        m_crop.clear();
+        m_roll.resize(2, 0);
+        m_crop.resize(2, 0);
+        const size_t naxes = m_cfg.axis.size();
+        for (size_t ind=0; ind<naxes; ++ind) {
+            auto& acfg = m_cfg.axis[ind];
 
-        m_roll.resize(2);
-        for (size_t dim=0; dim<2; ++dim) {
-            const auto& acfg = m_cfg.axis[dim];
+            /// We support 1D or 2D convolution.  A "dim" always refers to the
+            /// index into the 2D shape vector which may differ from the "ind"
+            /// in the list of axes.  User can specify "dim" for an axis config
+            /// explicitly or or we assume they equate dim and ind.  Note, this
+            /// will do the wrong thing if user wants 1D on second axis.  User
+            /// must specify "dim" for that case to work.
+            if (acfg.dim < 0) acfg.dim = ind;
+            const size_t dim = acfg.dim;
 
             if (!String::has({"head","tail","none"}, acfg.padding)) {
-                raise<ValueError>("unsupported padding mode: \"%s\"", acfg.padding);
+                raise<ValueError>("unsupported padding mode: \"%s\" for axis %d", acfg.padding, dim);
             }
 
             if (acfg.crop < -2) {
-                raise<ValueError>("illegal crop configured: %d", acfg.crop);
+                raise<ValueError>("illegal crop configured: %d for axis %d", acfg.crop, dim);
             }
-            if (kshape[dim] == 0) {
-                log->warn("kernel dimension {} has zero size, is this really what you want?", dim);
+            m_crop[dim] = acfg.crop;
+
+            if (kshape[dim] <= 1) {
+                log->warn("convolution of kernel dim {} with size {} is probably wrong, did you set an unsqueezed axis for 1D convo by mistake?", dim, kshape[dim]);
             }
 
             m_roll[dim] = acfg.roll;
             if (acfg.roll_mode == "decon") {
-                m_roll[dim] = kshape[dim];
-                log->debug("will roll dim {} by {} of which {} is from response",
-                           dim, m_roll[dim], kshape[dim]);
+                m_roll[dim] += kshape[dim];
             }
+            log->debug("convolution axis #{} dim={} roll={} crop={} kernel size={}",
+                       ind, dim, m_roll[dim], m_crop[dim], kshape[dim]);
+
         }
         log->debug("using tag: {} and datapath format: {}", m_cfg.tag, m_cfg.datapath_format);
-
-
     }
 
     bool KernelConvolve::operator()(const input_pointer& in, output_pointer& out)
@@ -178,7 +208,7 @@ namespace WireCell::SPNG {
                 tensor = tensor - medians;
                 log->debug("median baseline subtraction for dimension {} of size {}", dim, dim_size);
 
-                maybe_save(tensor, fmt::format("medium_subtracted_dim{}", dim));
+                maybe_save(tensor, fmt::format("median_subtracted_dim{}", dim));
             }
 
             if (kernel_shape[dim] == 0) {
@@ -229,9 +259,6 @@ namespace WireCell::SPNG {
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }
 
-        // applies to last 2 dimensions by default
-        tensor = torch::fft::fft2(tensor);
-
         auto kernel = m_kernel->spectrum(convolve_shape);
         if (has_nan(kernel)) {
             log->critical("kernel has NaNs {}", to_string(kernel));
@@ -242,43 +269,46 @@ namespace WireCell::SPNG {
         kernel = kernel.unsqueeze(0);
 
 
-        // The reason of our existence, I give you, the CONVOLUTION:
-        tensor = tensor * kernel;
-
-
-        // applies to last 2 dimensions by default
-        tensor = torch::real(torch::fft::ifft2(tensor));
+        if (m_cfg.axis.size() == 1) {
+            tensor = convolve_1d(tensor, kernel);
+        }
+        else {
+            tensor = convolve_2d(tensor, kernel);
+        }
 
         maybe_save(tensor, "raw_convo");
 
         /// Do crop and/or roll
-        for (size_t dim=0; dim<2; ++dim) {        
-            const int crop = m_cfg.axis[dim].crop;
-            log->debug("before: crop={} dim={} tensor={}", crop, dim, to_string(tensor));
+        const size_t naxes = m_cfg.axis.size();
+        for (size_t ind=0; ind<naxes; ++ind) {        
+            const size_t dim = m_cfg.axis[ind].dim;
+            const size_t batched_dim = dim + 1; // the dimension in the batched tensor
+
+            const int crop = m_crop[dim];
+            log->debug("axis #{} before: crop={} dim={} tensor={}", ind, crop, dim, to_string(tensor));
 
             if (m_roll[dim]) {
-                tensor = torch::roll(tensor, m_roll[dim], dim+1);
+                tensor = torch::roll(tensor, m_roll[dim], batched_dim);
                 if (dim == 1) {
                     time -= m_roll[dim] * sample_period;
                 }
             }
 
             if (crop > 0) {  // absolute crop to user provided size
-                tensor = resize_tensor_tail(tensor, dim+1, crop);
+                tensor = resize_tensor_tail(tensor, batched_dim, crop);
 
             }
             else if (crop == -1) {
                 // crop away the "faster" padding keep the basic convoulutional size
-                tensor == resize_tensor_tail(tensor, dim+1, basic_shape[dim]);
+                tensor == resize_tensor_tail(tensor, batched_dim, basic_shape[dim]);
             }
             else if (crop == -2) {
-                // crop faster and convolutional padding
-                const auto dim_size = tensor_shape[dim+1];
-                tensor = resize_tensor_tail(tensor, dim=1, dim_size);
+                // crop both the "faster" and the convolutional padding
+                const auto dim_size = tensor_shape[batched_dim];
+                tensor = resize_tensor_tail(tensor, batched_dim, dim_size);
             }
             // else, crop==0 and no crop
-            log->debug("after: crop={} dim={} tensor={}", crop, dim, to_string(tensor));
-
+            log->debug("axis #{} after: crop={} dim={} tensor={}", ind, crop, dim, to_string(tensor));
         }
 
         if (! batched) {
