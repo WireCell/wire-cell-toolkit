@@ -125,114 +125,183 @@ public:
         // Process each main cluster
         size_t stm_count = 0;
 
-        // // validation check ... temporary ...
-        // {
-        //     auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
+        // validation check ... temporary ...
+        {
+            auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
 
-        //     const auto& steiner_pc = main_cluster->get_pc("steiner_pc");
-        //     const auto& coords = main_cluster->get_default_scope().coords;
-        //     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-        //     const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-        //     const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+            const auto& steiner_pc = main_cluster->get_pc("steiner_pc");
+            const auto& coords = main_cluster->get_default_scope().coords;
+            const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+            const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+            const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
 
-        //  // Add the two boundary points as additional extreme point groups
-        //     geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
-        //                                 y_coords[boundary_indices.first], 
-        //                                 z_coords[boundary_indices.first]);
-        //     geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
-        //                                 y_coords[boundary_indices.second], 
-        //                                 z_coords[boundary_indices.second]);
-        //     geo_point_t first_wcp = boundary_point_first;
-        //     geo_point_t last_wcp = boundary_point_second;
+         // Add the two boundary points as additional extreme point groups
+            geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
+                                        y_coords[boundary_indices.first], 
+                                        z_coords[boundary_indices.first]);
+            geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
+                                        y_coords[boundary_indices.second], 
+                                        z_coords[boundary_indices.second]);
+            geo_point_t first_wcp = boundary_point_first;
+            geo_point_t last_wcp = boundary_point_second;
 
-        //     std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
-        //     last_wcp = geo_point_t(215.532, -95.1674, 211.193);
+            std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
+            // last_wcp = geo_point_t(215.532, -95.1674, 211.193);
 
-        //     auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
+            auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
 
-        //     // Create segment for tracking
-        //     auto segment = create_segment_for_cluster(*main_cluster, path_points);
+            // Create segment for tracking
+            auto segment = create_segment_for_cluster(*main_cluster, path_points);
 
-        //     // geo_point_t test_p(10,10,10);
-        //     // const auto& fit_seg_dpc = segment->dpcloud("main");
-        //     // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
-        //     // double closest_3d_distance = sqrt(closest_result[0].second);
-        //     // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
-        //     // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
-        //     // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
-        //     // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
-        //     // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
+            // geo_point_t test_p(10,10,10);
+            // const auto& fit_seg_dpc = segment->dpcloud("main");
+            // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
+            // double closest_3d_distance = sqrt(closest_result[0].second);
+            // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
+            // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
+            // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
+            // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
+            // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
 
-        //     m_track_fitter.add_segment(segment);
-        //     m_track_fitter.do_single_tracking(segment, true, true, false, true);
-        //     // Extract fit results from the segment
-        //     const auto& fits = segment->fits();
+            m_track_fitter.add_segment(segment);
+            m_track_fitter.do_single_tracking(segment, true, true, false, true);
+            // Extract fit results from the segment
+            const auto& fits = segment->fits();
             
-        //     // Print position, dQ, and dx for each fit point
-        //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
-        //     for (size_t i = 0; i < fits.size(); ++i) {
-        //         const auto& fit = fits[i];
-        //         std::cout << "  Point " << i << ": position=(" 
-        //                  << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
-        //                  << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
-        //     }
-        //     std::cout << std::endl;
+            // Print position, dQ, and dx for each fit point
+            std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            for (size_t i = 0; i < fits.size(); ++i) {
+                const auto& fit = fits[i];
+                std::cout << "  Point " << i << ": position=(" 
+                         << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+                         << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            }
+            std::cout << std::endl;
 
-        //     std::cout << "After search other tracks" << std::endl;
-        //     std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
-        //     fitted_segments.push_back(segment);
-        //     search_other_tracks(*main_cluster, fitted_segments);
 
-        //     std::cout << fitted_segments.size() << std::endl;
-        //     // {
-        //     //     // Extract fit results from the segment
-        //     //     const auto& fits = fitted_segments.back()->fits();
+            // test point cloud fit
+            create_segment_fit_point_cloud(segment, m_dv, "fit");
+            
+            // Now access it directly from the segment
+            auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
+
+            if (fit_dpcloud) {
+                const auto& points = fit_dpcloud->get_points();
                 
-        //     //     // Print position, dQ, and dx for each fit point
-        //     //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
-        //     //     for (size_t i = 0; i < fits.size(); ++i) {
-        //     //         const auto& fit = fits[i];
-        //     //         std::cout << "  Point " << i << ": position=(" 
-        //     //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
-        //     //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
-        //     //     }
-        //     //     std::cout << std::endl;   
-        //     // }
-        //     bool flag_other_tracks = check_other_tracks(*main_cluster, fitted_segments);
-        //     std::cout << "Check other Tracks: " << flag_other_tracks << std::endl;
+                std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
+                // for (size_t i = 0; i < points.size(); ++i) {
+                //     std::cout << "  Point " << i << ": (" 
+                //             << points[i].x/units::cm << ", "
+                //             << points[i].y/units::cm << ", "
+                //             << points[i].z/units::cm << ") cm" << std::endl;
+                // }
+                
+                // // You can also verify against the segment's fit data
+                // const auto& fits = segment->fits();
+                // std::cout << "\nVerification:" << std::endl;
+                // std::cout << "  Point cloud size: " << points.size() << std::endl;
+                // std::cout << "  Segment fits size: " << fits.size() << std::endl;
+                
+                // if (points.size() == fits.size()) {
+                //     std::cout << "  ✓ Sizes match!" << std::endl;
+                // }
+            } else {
+                std::cout << "Fit point cloud not found on segment!" << std::endl;
+            }
 
-        //     bool flag_other_clusters = check_other_clusters(*main_cluster, main_to_associated[main_cluster]);
-        //     std::cout << "Check other Clusters: " << flag_other_clusters << std::endl;
 
-        //     geo_point_t mid_point(0,0,0);
-        //     auto adjusted_path_points = adjust_rough_path(*main_cluster, mid_point);
-        //     std::cout << "Adjust path " << mid_point << std::endl;
+            // std::cout << "After search other tracks" << std::endl;
+            // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+            // fitted_segments.push_back(segment);
+            // search_other_tracks(*main_cluster, fitted_segments);
 
-        //     int kink_num = find_first_kink(segment);
-        //     std::cout << "Kink " << kink_num << std::endl;
+            // std::cout << fitted_segments.size() << std::endl;
+            // // {
+            // //     // Extract fit results from the segment
+            // //     const auto& fits = fitted_segments.back()->fits();
+                
+            // //     // Print position, dQ, and dx for each fit point
+            // //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            // //     for (size_t i = 0; i < fits.size(); ++i) {
+            // //         const auto& fit = fits[i];
+            // //         std::cout << "  Point " << i << ": position=(" 
+            // //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+            // //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            // //     }
+            // //     std::cout << std::endl;   
+            // // }
+            // bool flag_other_tracks = check_other_tracks(*main_cluster, fitted_segments);
+            // std::cout << "Check other Tracks: " << flag_other_tracks << std::endl;
 
-        //     bool flag_proton = detect_proton(segment, kink_num, fitted_segments);
-        //     std::cout << "Proton " << flag_proton << std::endl;
+            // bool flag_other_clusters = check_other_clusters(*main_cluster, main_to_associated[main_cluster]);
+            // std::cout << "Check other Clusters: " << flag_other_clusters << std::endl;
 
-        //     bool flag_eval_stm = eval_stm(segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
-        //     std::cout << "eval_stm " << flag_eval_stm << std::endl; 
+            // geo_point_t mid_point(0,0,0);
+            // auto adjusted_path_points = adjust_rough_path(*main_cluster, mid_point);
+            // std::cout << "Adjust path " << mid_point << std::endl;
+
+            // int kink_num = find_first_kink(segment);
+            // std::cout << "Kink " << kink_num << std::endl;
+
+            // bool flag_proton = detect_proton(segment, kink_num, fitted_segments);
+            // std::cout << "Proton " << flag_proton << std::endl;
+
+            // bool flag_eval_stm = eval_stm(segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
+            // std::cout << "eval_stm " << flag_eval_stm << std::endl; 
+
+        }
+
+        // bool flag_stm = check_stm_conditions(*main_cluster, main_to_associated[main_cluster] );
+        // std::cout << "STM tagger: " << " " << flag_stm << std::endl;
+        // if (flag_stm) {
+        //     main_cluster->set_flag(Flags::STM);
+        //     stm_count++;
+        // }
+        
+        // (void)stm_count;
+
+        // // hack ... 
+        // {
+        //     auto segs = m_track_fitter.get_segments();
+        //     // std::cout << "Xin: " << segs.size() << std::endl;
+        //     clustering_points_segments(segs,m_dv);
+
+        //     // Get the last segment from the set
+        //     if (!segs.empty()) {
+        //         auto segment = *segs.rbegin();  // Get last element from set
+                
+        //         // test point cloud fit
+        //         create_segment_fit_point_cloud(segment, m_dv, "fit");
+                
+        //         // Now access it directly from the segment
+        //         auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
+
+        //         // if (fit_dpcloud) {
+        //         //     const auto& points = fit_dpcloud->get_points();
+                    
+        //         //     std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
+        //         //     for (size_t i = 0; i < points.size(); ++i) {
+        //         //         std::cout << "  Point " << i << ": (" 
+        //         //                 << points[i].x/units::cm << ", "
+        //         //                 << points[i].y/units::cm << ", "
+        //         //                 << points[i].z/units::cm << ") cm" << std::endl;
+        //         //     }
+                    
+        //         //     // You can also verify against the segment's fit data
+        //         //     const auto& fits = segment->fits();
+        //         //     std::cout << "\nVerification:" << std::endl;
+        //         //     std::cout << "  Point cloud size: " << points.size() << std::endl;
+        //         //     std::cout << "  Segment fits size: " << fits.size() << std::endl;
+                    
+        //         //     if (points.size() == fits.size()) {
+        //         //         std::cout << "  ✓ Sizes match!" << std::endl;
+        //         //     }
+        //         // } else {
+        //         //     std::cout << "Fit point cloud not found on segment!" << std::endl;
+        //         // }
+        //     }
 
         // }
-
-        bool flag_stm = check_stm_conditions(*main_cluster, main_to_associated[main_cluster] );
-        std::cout << "STM tagger: " << " " << flag_stm << std::endl;
-        if (flag_stm) {
-            main_cluster->set_flag(Flags::STM);
-            stm_count++;
-        }
-        
-        (void)stm_count;
-
-        // hack ... 
-        {
-            auto segs = m_track_fitter.get_segments();
-            clustering_points_segments(segs,m_dv);
-        }
 
     }
 
