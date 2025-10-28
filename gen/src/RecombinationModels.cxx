@@ -51,13 +51,13 @@ Gen::BirksRecombination::BirksRecombination(double Efield, double A3t, double k3
 Gen::BirksRecombination::~BirksRecombination() {}
 double Gen::BirksRecombination::operator()(double dE, double dX)
 {
-    const double R = m_a3t / (1 + (dE / dX) * m_k3t / (m_efield * m_rho));
+    const double R = m_a3t / (1 + (dE * units::cm / dX) * m_k3t / (m_efield * m_rho));
     return R * dE / m_wi;
 }
 double Gen::BirksRecombination::dE(double dQ, double dX)
 {
     const double numerator = dQ;
-    const double denominator = m_a3t/m_wi - dQ/dX * m_k3t/(m_efield*m_rho);
+    const double denominator = m_a3t/m_wi - dQ/dX*units::cm * m_k3t/(m_efield*m_rho);
 
     return numerator / denominator;
 }
