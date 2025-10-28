@@ -611,19 +611,33 @@ namespace WireCell::Clus::PR {
         
 
 
-    double segment_median_dQ_dx(SegmentPtr seg)
+    double segment_median_dQ_dx(SegmentPtr seg, int n1, int n2)
     {
         auto& fits = seg->fits();
         if (fits.empty()) {
             return 0.0;
         }
         
-        std::vector<double> vec_dQ_dx;
-        vec_dQ_dx.reserve(fits.size());
+        // Handle default parameters (equivalent to get_medium_dQ_dx())
+        if (n1 < 0 && n2 < 0) {
+            n1 = 0;
+            n2 = static_cast<int>(fits.size());
+        }
         
-        for (auto& fit : fits) {
+        // Clamp indices to valid range (equivalent to WCPPID bounds checking)
+        if (n1 < 0) n1 = 0;
+        if (n1 + 1 > static_cast<int>(fits.size())) n1 = static_cast<int>(fits.size()) - 1;
+        if (n2 < 0) n2 = 0;
+        if (n2 + 1 > static_cast<int>(fits.size())) n2 = static_cast<int>(fits.size()) - 1;
+        
+        std::vector<double> vec_dQ_dx;
+        vec_dQ_dx.reserve(n2 - n1 + 1);
+        
+        // Loop over specified range [n1, n2] (inclusive, matching WCPPID)
+        for (int i = n1; i <= n2 && i < static_cast<int>(fits.size()); i++) {
+            auto& fit = fits[i];
             if (fit.valid() && fit.dx > 0 && fit.dQ >= 0) {
-                // Add small epsilon to avoid division by zero (same as original)
+                // Add small epsilon to avoid division by zero (same as WCPPID: 1e-9)
                 vec_dQ_dx.push_back(fit.dQ / (fit.dx + 1e-9));
             }
         }
@@ -632,7 +646,7 @@ namespace WireCell::Clus::PR {
             return 0.0;
         }
         
-        // Use nth_element to find median (same algorithm as original)
+        // Use nth_element to find median (exact WCPPID algorithm)
         size_t median_index = vec_dQ_dx.size() / 2;
         std::nth_element(vec_dQ_dx.begin(), 
                         vec_dQ_dx.begin() + median_index, 

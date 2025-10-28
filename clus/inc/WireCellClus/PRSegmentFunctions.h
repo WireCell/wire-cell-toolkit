@@ -61,7 +61,7 @@ namespace WireCell::Clus::PR {
     ///
     /// @param seg The segment containing fit data
     /// @return Median dQ/dx value (0 if no valid fits)
-    double segment_median_dQ_dx(SegmentPtr seg);
+    double segment_median_dQ_dx(SegmentPtr seg, int n1 = -1, int n2 = -1);
     double segment_rms_dQ_dx(SegmentPtr seg);
     
     

@@ -213,7 +213,7 @@ public:
 
             std::cout << "Segment Length: " << segment_track_length(segment) / units::cm << " cm; " << segment_track_length(segment,0, 0, 10) / units::cm << " cm" << " " << segment_track_length(segment,0, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
             std::cout << "Max deviation: " << segment_track_max_deviation(segment) / units::cm << " cm; " <<  segment_track_max_deviation(segment, 0, 10) / units::cm << " cm"  << std::endl;
-            std::cout << "dQ_dx: " << segment_rms_dQ_dx(segment) << " " << segment_mean_dQ_dx(segment) << " " << std::endl;
+            std::cout << "dQ_dx: " << segment_rms_dQ_dx(segment) << " " << segment_median_dQ_dx(segment) << " " << segment_median_dQ_dx(segment,0,10) << std::endl;
 
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
