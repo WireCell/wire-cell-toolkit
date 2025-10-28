@@ -28,7 +28,9 @@ namespace WireCell::SPNG {
         ///                (WCT mainline calls this "hf")
         /// The "lowpass" filter is: exp(-0.5 (freq/scale)^power).
         ///
-        /// - "identity" :: all filter values are 1.0.
+        /// - "flat" :: all filter values are given by "scale" and ignore_baseline is applied.
+        ///
+        /// - "none" :: no filter, tensor dimension may be provided by an unsqueeze().
         std::string kind{""};
 
         /// Required, give the interval-domain sampling period in
@@ -52,7 +54,10 @@ namespace WireCell::SPNG {
         /// O.w. retain whatever value the underlying filter function provides.
         bool ignore_baseline = true;
 
-
+        /// Optional int, default 128.  Gives a "natural size" for the filter
+        /// dimension.  This is arbitrary for these filters but a number is
+        /// needed to satisfy the API.
+        int size = 128;
     };
     struct FilterKernelConfig {
 
@@ -75,7 +80,7 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelAxisConfig,
                         period,
                         scale,
                         power,
-                        ignore_baseline);
+                        ignore_baseline, size);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelConfig, axis, debug_filename);
 
 
@@ -110,7 +115,7 @@ namespace WireCell::SPNG {
 
         /// Filters are sampled from analytic functions which have no native
         /// size/shape.  This returns zeros.
-        virtual shape_t shape() const { return shape_t(m_funcs.size(), 0); }
+        virtual shape_t shape() const;
 
         // Deprecated.  Returns zeros.
         virtual shape_t shifts() const { return shape_t(m_funcs.size(), 0); }
@@ -136,7 +141,6 @@ namespace WireCell::SPNG {
         using filter_function = std::function<float(float)>;
         // Per-dimension filter functions
         std::vector<filter_function> m_funcs;
-
 
     };
 

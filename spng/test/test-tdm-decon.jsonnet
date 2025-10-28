@@ -16,6 +16,43 @@ local omnimap = import "omni/all.jsonnet";
 local io = import "fileio.jsonnet";
 local detectors = import "detectors.jsonnet"; // in wire-cell-data
 
+/// Make a sink of frames through a body.  If output is given, tap a frame file sink
+local frame_sink(body, output="", name="", tier="sig", digitize=false) = 
+    local sink = if output == ""
+                 then pg.pnode({ type: "DumpFrames", name: name }, nin=1, nout=0)
+                 else io.frame_file_sink(output%tier, digitize=digitize);
+    pg.pipeline([body, sink]);
+
+
+local frame_tap(filename, digitize=true) =
+    local frame_fout = pg.pnode({
+        type: 'FrameFanout',
+        name: filename,
+        data: {
+            multiplicity: 2
+        }
+    }, nin=1, nout=2);
+    local sink = io.frame_file_sink(filename, digitize=digitize);
+    pg.intern(innodes=[frame_fout],
+              centernodes=[sink],
+              outnodes=[frame_fout],
+              edges=[pg.edge(frame_fout, sink, 1, 0)]);
+
+
+/// Return a single sink that is actually a fanout to two sink
+local frame_sink_two(one, two, name="") =
+    local fout = pg.pnode({
+        type: 'FrameFanout',
+        name: name,
+        data: {
+            multiplicity: 2,
+        },
+    }, nin=1, nout=2);
+    pg.intern(innodes=[fout], outnodes=[one, two], edges=[
+        pg.edge(fout, one, 0, 0),
+        pg.edge(fout, two, 1, 0)]);
+
+
 // Define a "matrix" lookup table between a plane label and all labels.  Note,
 // below we have 2 "groups" for W plane, but "plane" continues to mean just the
 // three.
@@ -117,7 +154,11 @@ local decon_filters(plane_index, anode=null) = {
     gauss: filter(scale=0.12 * wc.megahertz),
 
     /// The identity filter config.
-    ident: { kind: "identity" },
+    flat_ac: { kind: "flat", ignore_baseline: true }, // AC coupled, DC is zero
+    flat_dc: { kind: "flat", ignore_baseline: false }, // DC is 1.0
+
+    /// Like identity but rely on unsqueeze to populate. 
+    none: { kind: "none", },
 
     /// fixme: add more to cover ROI needs
 };
@@ -164,15 +205,29 @@ local decon_kernel(filt, resp, name) = {
     uses: [filt, resp]
 };
 
-/// Return config object for a KernelConvovle.  
-local convo_node(kernel, plane_index, tag, name="") =
-    // For channel dimmension, wrapped wire planes are cyclic.
-    local channel_options = [
+local convo_options(plane_index) = {
+    decon_channel: [
         {cyclic: true,  crop:  0}, // u, cycle, wrapped
         {cyclic: true,  crop:  0}, // v, cyclic, wrapped
         {cyclic: false, crop: -2}  // w, linear
-    ][plane_index];
-    local time_options = {cyclic: false, crop: 0, baseline: true, roll_mode: "decon"};
+    ][plane_index],
+    decon_time: {cyclic: false, crop: 0, baseline: true, roll_mode: "decon"},
+
+    nothing: {padding: "none", dft: false},
+    just_filter: {padding: "none", dft: true},
+
+    axis: {
+        // For FR*ER deconvolution, regardless of filters.
+        decon_resp: [$.decon_channel, $.decon_time],
+        // For follow-on of a time filter, eg "gauss".
+        filter_time: [$.nothing, $.just_filter],
+        // For future RC decon
+        decon_time: [$.nothing, $.decon_time],
+    },
+};
+
+/// Return config object for a KernelConvovle.  
+local convo_node(kernel, axis, tag, name="") =
 
     // one decon per filter type
     pg.pnode({
@@ -180,10 +235,7 @@ local convo_node(kernel, plane_index, tag, name="") =
         name: name,
         data: {
             kernel: wc.tn(kernel),
-            axis: [
-                channel_options,
-                time_options,
-            ],
+            axis: axis,
             tag: tag,
             datapath_format: "/frames/{ident}/tags/{tag}/groups/{group}/traces",
             faster: true,       // use "faster DFT size"
@@ -494,7 +546,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
     /// Loop over "groups" making nodes that operate on a single traces tensor.
 
     /// This applies the gauss filter as part of the decon filter.
-    local pipes = [
+    local decon_monolith = [
         local plane_index = groups.planes[group];
         local tag  = "gauss";
         local gname = 'g%d' % group;
@@ -504,10 +556,47 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
         local resp = response_kernel(plane_index, res.fr, res.er, adc, name);
         local kern = decon_kernel(filt, resp, name);
 
-        convo_node(kern, plane_index, tag, name)
+        // local axis = convo_options(plane_index).axis.decon_resp;
+        local co = convo_options(plane_index);
+
+        // convo_node(kern, axis, tag, name)
+        convo_node(kern, [co.decon_channel, co.decon_time], tag, name)
 
         for group in wc.iota(groups.count)
     ];
+    // local pipes = decon_monolith;
+
+    /// This applies gauss filtering as a follow-on.
+    local decon_staged = [
+        local plane_index = groups.planes[group];
+        local gname = 'g%d' % group;
+        local name = plane_context_name(plane_index, anode) + gname;
+
+        local df = plane_filters[plane_index];
+        // local coa = convo_options(plane_index).axis;
+        local co = convo_options(plane_index);
+
+        // The response decon
+        local decon_tag = 'decon';
+        local decon_name = decon_tag+'-'+name;
+        local decon_filt = filter_kernel(decon_name, [df.channel, df.none]);
+        local decon_resp = response_kernel(plane_index, res.fr, res.er, adc, decon_name);
+        local decon_kern = decon_kernel(decon_filt, decon_resp, decon_name);
+        local decon_node = convo_node(decon_kern, [co.decon_channel, co.decon_time], decon_tag, decon_name);
+
+        // In this case we put gauss on its own to make room for future addition
+        // of other filters.  Note, we could (should?) keep gauss in the decon
+        // and then apply other filters "normalized" by gauss.
+        local gauss_tag = 'gauss';
+        local gauss_name = gauss_tag+'-'+name;
+        local gauss_filt = filter_kernel(gauss_name, [df.none, df.gauss]);
+        local gauss_node = convo_node(gauss_filt, [co.nothing, co.just_filter], gauss_tag, gauss_name);
+
+        pg.pipeline([decon_node, gauss_node])
+
+        for group in wc.iota(groups.count)
+    ];
+    local pipes = decon_staged;
 
     local repack = pg.pnode({
         type: 'SPNGTorchPacker',
@@ -573,45 +662,6 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
 
     body;
 
-
-/// Make a sink of frames through a body.  If output is given, tap a frame file sink
-local frame_sink(body, output="", name="", tier="sig", digitize=false) = 
-    local sink = if output == ""
-                 then pg.pnode({ type: "DumpFrames", name: name }, nin=1, nout=0)
-                 else io.frame_file_sink(output%tier, digitize=digitize);
-    pg.pipeline([body, sink]);
-
-
-
-local frame_tap(filename) =
-    /// Make a tap if we save ADC
-    local frame_fout = pg.pnode({
-        type: 'FrameFanout',
-        name: filename,
-        data: {
-            multiplicity: 2
-        }
-    }, nin=1, nout=2);
-    local adc_sink = io.frame_file_sink(filename, digitize=true);
-    local adc_tap = pg.intern(innodes=[frame_fout],
-                              centernodes=[adc_sink],
-                              outnodes=[frame_fout],
-                              edges=[pg.edge(frame_fout, adc_sink, 1, 0)]);
-    adc_tap;
-
-
-/// Return a single sink that is actually a fanout to two sink
-local frame_sink_two(one, two, name="") =
-    local fout = pg.pnode({
-        type: 'FrameFanout',
-        name: name,
-        data: {
-            multiplicity: 2,
-        },
-    }, nin=1, nout=2);
-    pg.intern(innodes=[fout], outnodes=[one, two], edges=[
-        pg.edge(fout, one, 0, 0),
-        pg.edge(fout, two, 1, 0)]);
 
 
 /// Note, different input may require selecting a different anodeid to get any activity.

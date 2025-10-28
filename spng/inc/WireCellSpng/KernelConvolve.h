@@ -15,27 +15,13 @@
 namespace WireCell::SPNG {
 
     /** Configure one axis of the convolution.
-     *
-     * Either 1 or 2 axes may be configured corresponding to 1D or 2D convolution.
-     *
-     * In both cases, the kernel must have 2 dimensions.  To support 1D
-     * convolution with a common 1D kernel, the kernel may be unsqueeze()'d).
      */
     struct KernelConvolveAxisConfig {
-        
 
-        /// The dimension that this axis corresponds.
-        ///
-        /// Default value is undefined.  If no dimension is defined it will be
-        /// set to the index at which this axis config resides in the vector of
-        /// axes.  It must be explicitly set in order to apply the
-        /// KernelConvolve sparsely across the dimensions.
-        ///
-        /// When only one KernelConvolveAxisConfig is given, the convolution is
-        /// 1D across the dimension and repeated for each element of the other
-        /// dimension (and wholly repeated if batch).  When a single axis is
-        /// given, the kernel MUST also be 1D.
-        int dim = -1;
+        /// Optional, (default true), boolean stating if the DFT is applied to
+        /// this axis.  One axis may have DFT false in order to perform a 1D
+        /// FFT.
+        bool dft = true;
 
         /// Subtract a baseline.  If true, the median value is found along this
         /// axis and subtracted.  Eg, if this axis is "time", each "channel" is
@@ -58,11 +44,11 @@ namespace WireCell::SPNG {
         /// - "tail" append padding to the back of the time dimension (default).
         /// - "none" do NO padding.
         ///
-        /// No padding can be reasonable if the kernel is a pure Fourier-space
-        /// filter.
+        /// The padding mode "none" can be reasonable if the kernel is a pure
+        /// Fourier-space filter or when the dimension does not have the DFT
+        /// applied.
         ///
-        /// Note, see roll_mode "decon" which is equivalent to "head' padding in
-        /// time.
+        /// Note, see roll_mode "decon" which is equivalent to "head" padding.
         std::string padding{"tail"};
 
         /// Optional, (default 0), crop the interval-space dimension.  The
@@ -100,7 +86,11 @@ namespace WireCell::SPNG {
         std::string roll_mode="";
 
     };
+}
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig,
+                        dft, baseline, cyclic, padding, crop, roll, roll_mode);
 
+namespace WireCell::SPNG {
     struct KernelConvolveConfig {
 
         /// Required, the type/name of an ITorchSpectrum providing the kernel.
@@ -132,8 +122,6 @@ namespace WireCell::SPNG {
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveAxisConfig,
-                        baseline, cyclic, padding, crop, roll, roll_mode);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig,
                         kernel, axis, faster, tag, datapath_format, debug_filename);
 
@@ -176,9 +164,7 @@ namespace WireCell::SPNG {
 
         void configme();        // called from configured constructor and configure()
 
-        // Wrap the two behaviors depending on the number of configured axes.
-        torch::Tensor convolve_2d(torch::Tensor tensor, torch::Tensor kernel);
-        torch::Tensor convolve_1d(torch::Tensor tensor, torch::Tensor kernel);
+        torch::Tensor convolve(torch::Tensor tensor, torch::Tensor kernel);
 
         KernelConvolveConfig m_cfg;
         ITorchSpectrum::pointer m_kernel;

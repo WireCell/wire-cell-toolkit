@@ -26,6 +26,17 @@ namespace WireCell::SPNG {
         configme();
     }
 
+    FilterKernel::shape_t FilterKernel::shape() const
+    {
+        shape_t shape;
+        const size_t ndims = m_cfg.axis.size();
+        for (size_t ind=0; ind<ndims; ++ind) {
+            shape.push_back(m_cfg.axis[ind].size);
+        }
+        return shape;
+    }
+
+
     void FilterKernel::configme()
     {
         if (m_cfg.axis.empty()) {
@@ -33,12 +44,37 @@ namespace WireCell::SPNG {
         }
 
         m_funcs.clear();
-        size_t ndim = m_cfg.axis.size();
+        const size_t ndim = m_cfg.axis.size();
+
+        if (ndim > 3) {
+            raise <ValueError>("a filter kernel only supports up to 3D (currently)");
+        }
+
         for (size_t ind=0; ind<ndim; ++ind) {
             const auto& axis = m_cfg.axis[ind];
 
-            // the "pass" filters require legal parameters.
+            log->debug("filter axis {} kind=\"{}\" size={} period={} scale={} power={} ignore_baseline={}",
+                       ind, axis.kind, axis.size, axis.period, axis.scale, axis.power, axis.ignore_baseline);
 
+            // No other configurations matter when axis is the identity filter
+            if (axis.kind == "none") {
+                // We will unsqueeze() to form this axis.
+                m_funcs.emplace_back([](double freq) -> float {
+                    // We are never called because "sampling" is done with torch::ones().
+                    raise<LogicError>("identity spectrum is never explicitly sampled");
+                    return 1.0;
+                });
+                continue;
+            }
+
+            if (axis.kind == "flat") {
+                m_funcs.emplace_back([axis](double freq) -> float {
+                    return axis.scale;
+                });
+                continue;
+            }
+            
+            // the "pass" filters have parameter constraints.
             if (axis.period <= 0) {
                 raise<ValueError>("period must be positive");
             }
@@ -59,8 +95,6 @@ namespace WireCell::SPNG {
             else {
                 raise<ValueError>("unsupported axis kind: %s", axis.kind);
             }
-            log->debug("filter axis {} with {} period={} scale={} power={}",
-                       ind, axis.kind, axis.period, axis.scale, axis.power);
         }
 
         if (m_cfg.debug_filename.size()) {
@@ -81,7 +115,7 @@ namespace WireCell::SPNG {
         using tensor_map = torch::Dict<std::string, torch::Tensor>;
         tensor_map to_save;
 
-        size_t ndims = m_funcs.size();
+        const size_t ndims = m_funcs.size();
         for (size_t idim=0; idim<ndims; ++idim) {
             auto s = spectrum_axis(shape, idim);
             to_save.insert(fmt::format("filter1d{}", idim), s);
@@ -115,7 +149,9 @@ namespace WireCell::SPNG {
 
         const int64_t size = shape[axis];            
 
-        if (cfg.kind == "identity") {
+        //log->debug("spectrum_axis {} size {} kind \"{}\"", axis, size, m_cfg.axis[axis].kind);
+        if (m_cfg.axis[axis].kind == "none") {
+            // Note, this "sampling" does not get into a final kernel.
             return torch::ones(size, torch::kFloat);
         }
 
@@ -147,7 +183,7 @@ namespace WireCell::SPNG {
 
     torch::Tensor FilterKernel::spectrum(const shape_t & shape) const
     {
-        size_t ndims = m_funcs.size();
+        const size_t ndims = m_funcs.size();
 
         if (shape.size() != ndims) {
             raise<ValueError>("dimension mismatch, want: %d got: %d.  Check config or code?",
@@ -159,30 +195,69 @@ namespace WireCell::SPNG {
         }
 
         
-        std::vector<torch::Tensor> axis;
+        std::vector<torch::Tensor> full_axis, none_axis;
+        std::vector<int64_t> none_dims;
 
         for (size_t idim=0; idim<ndims; ++idim) {
             auto s = spectrum_axis(shape, idim);
-            axis.push_back(s);
+
+            log->debug("filter spectrum dim={} size={} kind=\"{}\"", idim, shape[idim], m_cfg.axis[idim].kind);
+
+            if (m_cfg.axis[idim].kind == "none") {
+
+                none_axis.push_back(s);
+                none_dims.push_back(idim);
+            }
+            else {
+                full_axis.push_back(s);
+            }
         }
 
-        // 1D
+        // To handle unsqueezed axes, we must have at least one sampled axis.
+        // If all are "none" we use the last one to provide a "real" sampled
+        // tensor and will unsqueeze to get the rest.
+        if (full_axis.empty()) {
+            full_axis.push_back(none_axis.back());
+            none_axis.pop_back();
+            none_dims.pop_back();
+        }
+
+        // 1D special case must end up with full_axis as the sole holder.
         if (ndims == 1) {
-            return to(axis[0]);
-        }
-        
-        // 2D
-        if (ndims == 2) {
-            return to(torch::outer(axis[0], axis[1]));
+            return to(full_axis[0]);
         }
 
-        // 3D
-        return to(torch::einsum("i,j,k->ijk", axis));
+        torch::Tensor result;
 
-        // Future extension for 4D etc can be added easily by giving the
-        // appropriate, larger einsum string.  Actually, all dimensions can be
-        // symmetric with a call to einsum("...", oneds) with a per-dimension
-        // string....
+        if (full_axis.size() == 1) {
+            // No outer product needed.
+            result = full_axis[0];
+        }
+        else {
+            // Craft the einsum "i,j,k->ijk" directive to do outer product;
+
+            // Technically, this supports up to 6D of "real" axes.  We could
+            // relax the 3D clamp in configme().
+            const std::string index_letters = "ijklmn";
+            std::string from, to, comma="";
+            for (size_t ind=0; ind<full_axis.size(); ++ind) {
+                from += comma;
+                comma = ",";
+                from.push_back(index_letters[ind]);
+                to.push_back(index_letters[ind]);
+            }                
+            std::string ein = from + "->" + to;
+            log->debug("filter outer product \"{}\"", ein);
+            result = torch::einsum(ein, full_axis);
+        }
+
+        // This relies dimensions sorted in increasing order.
+        for (auto dim : none_dims) {
+            log->debug("unsqueeze dim={}", dim);
+            result = result.unsqueeze(dim);
+        }
+
+        return to(result);
     }
     
 

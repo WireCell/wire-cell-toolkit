@@ -49,21 +49,24 @@ namespace WireCell::SPNG {
         configme();
     }
 
-    torch::Tensor KernelConvolve::convolve_2d(torch::Tensor tensor, torch::Tensor kernel)
+    torch::Tensor KernelConvolve::convolve(torch::Tensor tensor, torch::Tensor kernel)
     {
-        // full 2D convolution, operates on last 2 dimensions by defalut
-        return torch::real(torch::fft::ifft2(torch::fft::fft2(tensor) * kernel));
-    }
+        // 2D
+        if (m_cfg.axis[0].dft && m_cfg.axis[1].dft) {
+            return torch::real(torch::fft::ifft2(torch::fft::fft2(tensor) * kernel));
+        }
 
-    torch::Tensor KernelConvolve::convolve_1d(torch::Tensor tensor, torch::Tensor kernel)
-    {
-        int64_t dim = m_cfg.axis[0].dim + 1; // +1 because we assume batched.
-        // 1D convolution of full 2D kernel
-        auto spec = torch::fft::fft(tensor, std::nullopt, dim);
+        int64_t dim = 0;
+        if (m_cfg.axis[1].dft) {
+            dim = 1;
+        };
+        log->debug("convolve 1d along axis dim {}", dim);
+
+        // 1D
+        auto spec = torch::fft::fft(tensor, std::nullopt, dim+1);
         auto conv = spec * kernel;
-        return torch::real(torch::fft::ifft(conv, std::nullopt, dim));
+        return torch::real(torch::fft::ifft(conv, std::nullopt, dim+1));
     }
-
 
     void KernelConvolve::configme()
     {
@@ -83,23 +86,20 @@ namespace WireCell::SPNG {
             raise<ValueError>("convolution requires 2D kernel, got (%d)", ndims);
         }
 
+        const size_t naxes = m_cfg.axis.size();
+        if (naxes != 2) {
+            raise<ValueError>("convolution requires 2D axes, got (%d)", naxes);
+        }
+
+
         // Collect and check per input dimension values.
         m_roll.clear();
         m_crop.clear();
         m_roll.resize(2, 0);
         m_crop.resize(2, 0);
-        const size_t naxes = m_cfg.axis.size();
-        for (size_t ind=0; ind<naxes; ++ind) {
-            auto& acfg = m_cfg.axis[ind];
 
-            /// We support 1D or 2D convolution.  A "dim" always refers to the
-            /// index into the 2D shape vector which may differ from the "ind"
-            /// in the list of axes.  User can specify "dim" for an axis config
-            /// explicitly or or we assume they equate dim and ind.  Note, this
-            /// will do the wrong thing if user wants 1D on second axis.  User
-            /// must specify "dim" for that case to work.
-            if (acfg.dim < 0) acfg.dim = ind;
-            const size_t dim = acfg.dim;
+        for (size_t dim=0; dim<naxes; ++dim) {
+            auto& acfg = m_cfg.axis[dim];
 
             if (!String::has({"head","tail","none"}, acfg.padding)) {
                 raise<ValueError>("unsupported padding mode: \"%s\" for axis %d", acfg.padding, dim);
@@ -110,16 +110,12 @@ namespace WireCell::SPNG {
             }
             m_crop[dim] = acfg.crop;
 
-            if (kshape[dim] <= 1) {
-                log->warn("convolution of kernel dim {} with size {} is probably wrong, did you set an unsqueezed axis for 1D convo by mistake?", dim, kshape[dim]);
-            }
-
             m_roll[dim] = acfg.roll;
             if (acfg.roll_mode == "decon") {
                 m_roll[dim] += kshape[dim];
             }
-            log->debug("convolution axis #{} dim={} roll={} crop={} kernel size={}",
-                       ind, dim, m_roll[dim], m_crop[dim], kshape[dim]);
+            log->debug("convolution axis dim={} roll={} crop={} natural size={} dft={}",
+                       dim, m_roll[dim], m_crop[dim], kshape[dim], acfg.dft);
 
         }
         log->debug("using tag: {} and datapath format: {}", m_cfg.tag, m_cfg.datapath_format);
@@ -183,6 +179,7 @@ namespace WireCell::SPNG {
             raise<ValueError>("illegal number of input tensor dimensions");
         }
 
+        // For saving out debug tensors
         using tensor_map = torch::Dict<std::string, torch::Tensor>;
         tensor_map to_save;
         auto maybe_save = [&](torch::Tensor ten, std::string name) {
@@ -200,56 +197,67 @@ namespace WireCell::SPNG {
         auto kernel_shape = m_kernel->shape();
         for (size_t dim=0; dim<2; ++dim) {
             const auto& acfg = m_cfg.axis[dim];
-            const auto dim_size = tensor_shape[dim+1]; // skip batch dim;
+            const size_t batched_dim = dim+1;
+            const auto dim_size = tensor_shape[batched_dim];
 
             if (acfg.baseline) {
-                auto medians = std::get<0>(torch::median(tensor, dim+1, false));
-                medians = medians.unsqueeze(dim+1);
+                auto medians = std::get<0>(torch::median(tensor, batched_dim, false));
+                medians = medians.unsqueeze(batched_dim);
                 tensor = tensor - medians;
                 log->debug("median baseline subtraction for dimension {} of size {}", dim, dim_size);
 
                 maybe_save(tensor, fmt::format("median_subtracted_dim{}", dim));
             }
 
+            // Find the padding sizes.
+            convolve_shape[dim] = basic_shape[dim] = dim_size;
+
+            // Ways we may not actually pad:
+            if (acfg.padding == "none") {
+                log->debug("shape: dim={} \"{}\" padding, size: {}, dft={}",
+                           dim, acfg.padding, dim_size, acfg.dft);
+                continue;
+            }
             if (kernel_shape[dim] == 0) {
                 log->warn("shape: natural kernel size of dimension {} is zero, using input size {}",
                           dim, dim_size);
-                convolve_shape[dim] = basic_shape[dim] = dim_size;
                 continue;
             }
-
             if (acfg.cyclic) {
-                convolve_shape[dim] = basic_shape[dim] = dim_size;
                 log->debug("shape: dim={} cyclic size: {}", dim, dim_size);
                 continue;
             }
-            // linear
+
+            // Achieve linear convolution.
             convolve_shape[dim] = basic_shape[dim] = linear_shape(dim_size, kernel_shape[dim]);
             if (!m_cfg.faster) {
                 log->debug("shape: dim={} linear size: {}->{}", dim, dim_size, convolve_shape[dim]);
                 continue;
             }
+
+            // Use a somewhat larger, faster DFT size.
             convolve_shape[dim] = m_faster(convolve_shape[dim]);
             log->debug("shape: dim={} faster size: {}->{}->{}",
                        dim, dim_size, basic_shape[dim], convolve_shape[dim]);
         }
 
-        /// Do padding of input tensor
+        /// Do the actual padding of input tensor
         for (size_t dim=0; dim<2; ++dim) {
-            const auto dim_size = tensor_shape[dim+1]; // skip batch dim;
+            const auto& acfg = m_cfg.axis[dim];
+            const size_t batched_dim = dim+1;
+            const auto dim_size = tensor_shape[batched_dim];
             if (dim_size == convolve_shape[dim]) {
-                // avoid a copy inside resize()
                 continue;
             }
             log->debug("resize: dim={} {} -> {}",
                        dim, dim_size, convolve_shape[dim]);
             // axis, index, size
-            if (m_cfg.axis[dim].padding == "tail") {
-                tensor = resize_tensor_tail(tensor, dim+1, convolve_shape[dim]);
+            if (acfg.padding == "tail") {
+                tensor = resize_tensor_tail(tensor, batched_dim, convolve_shape[dim]);
             }
-            else if (m_cfg.axis[dim].padding == "head") {
+            else if (acfg.padding == "head") {
                 // "head" padding 
-                tensor = resize_tensor_head(tensor, dim+1, convolve_shape[dim]);
+                tensor = resize_tensor_head(tensor, batched_dim, convolve_shape[dim]);
                 if (dim == 1) {
                     time -= convolve_shape[dim] * sample_period;
                 }
@@ -268,24 +276,17 @@ namespace WireCell::SPNG {
         // This is supposed to not change data shared by other shallow copies.
         kernel = kernel.unsqueeze(0);
 
-
-        if (m_cfg.axis.size() == 1) {
-            tensor = convolve_1d(tensor, kernel);
-        }
-        else {
-            tensor = convolve_2d(tensor, kernel);
-        }
+        // Our main event of the evening.
+        tensor = convolve(tensor, kernel);
 
         maybe_save(tensor, "raw_convo");
 
         /// Do crop and/or roll
-        const size_t naxes = m_cfg.axis.size();
-        for (size_t ind=0; ind<naxes; ++ind) {        
-            const size_t dim = m_cfg.axis[ind].dim;
+        for (size_t dim=0; dim<2; ++dim) {        
             const size_t batched_dim = dim + 1; // the dimension in the batched tensor
 
             const int crop = m_crop[dim];
-            log->debug("axis #{} before: crop={} dim={} tensor={}", ind, crop, dim, to_string(tensor));
+            log->debug("axis before: dim={} crop={} tensor={} dft={}", dim, crop, to_string(tensor), m_cfg.axis[dim].dft);
 
             if (m_roll[dim]) {
                 tensor = torch::roll(tensor, m_roll[dim], batched_dim);
@@ -308,7 +309,7 @@ namespace WireCell::SPNG {
                 tensor = resize_tensor_tail(tensor, batched_dim, dim_size);
             }
             // else, crop==0 and no crop
-            log->debug("axis #{} after: crop={} dim={} tensor={}", ind, crop, dim, to_string(tensor));
+            log->debug("axis after: dim={} crop={} tensor={} dft={}", dim, crop, to_string(tensor), m_cfg.axis[dim].dft);
         }
 
         if (! batched) {
