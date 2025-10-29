@@ -274,6 +274,19 @@ public:
             segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true);
             segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true);
 
+            std::set<std::shared_ptr<PR::Segment>> segs;
+            segs.insert(segment);
+            clustering_points_segments(segs, m_dv, "associate_points");
+
+            auto associate_dpcloud = segment->dpcloud("associate_points");  // Get the DynamicPointCloud
+
+            if (associate_dpcloud) {
+                const auto& points = associate_dpcloud->get_points();
+                std::cout << "Fit point cloud has " << points.size() << " points: " << segment->cluster()->npoints() << std::endl;
+            }
+            std::cout << segment_is_shower_topology(segment) << " " << segment_determine_shower_direction(segment, particle_data(), m_recomb_model) << std::endl;
+
+
 
             // std::cout << "After search other tracks" << std::endl;
             // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;

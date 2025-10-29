@@ -1880,6 +1880,9 @@ namespace WireCell::Clus::PR {
         // Determine direction based on spread analysis
         int flag_dir = 0;
         
+
+        // std::cout << "Shower Topology Direction: " << max_spread/units::cm << " " << large_spread_length/units::cm << " " << total_effective_length/units::cm << std::endl;
+
         // Check if this looks like a shower based on spread
         bool is_shower_like = (
             (max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
@@ -2192,6 +2195,8 @@ namespace WireCell::Clus::PR {
             }
         }
         (void)max_cont_weighted_length; // Currently unused
+
+        // std::cout << "Shower Topology Check: " << max_spread/units::cm << " " << large_spread_length/units::cm << " " << total_effective_length/units::cm << std::endl;
         
         // Determine if this is shower topology based on spread patterns
         if ((max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
