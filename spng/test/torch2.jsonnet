@@ -9,7 +9,7 @@ function(tools, debug_force_cpu=false, apply_gaus=true, do_roi_filters=false, do
 
     local device = if debug_force_cpu then "cpu" else "gpu",
 
-        local filters = spng_filters(device)
+        local filters = spng_filters(device),
 
         local make_fanout(anode, name=null) = {
             ret : g.pnode({

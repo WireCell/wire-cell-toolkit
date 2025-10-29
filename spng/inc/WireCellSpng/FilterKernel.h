@@ -114,7 +114,7 @@ namespace WireCell::SPNG {
         virtual torch::Tensor spectrum(const shape_t & shape) const;
 
         /// Filters are sampled from analytic functions which have no native
-        /// size/shape.  This returns zeros.
+        /// size/shape.  This returns a fixed size.
         virtual shape_t shape() const;
 
         // Deprecated.  Returns zeros.
