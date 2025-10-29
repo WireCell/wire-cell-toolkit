@@ -380,7 +380,7 @@ namespace WireCell::Clus::PR {
 
 
 
-    bool break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/)
+    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/)
     {
         /// sanity checks
         if (! seg->descriptor_valid()) {
@@ -396,10 +396,23 @@ namespace WireCell::Clus::PR {
 
         const auto& fits = seg->fits();
         auto itfits = closest_point(fits, point, owp_to_point<Fit>);
+        
+        // std::cout << "Break point in system units: " << point << std::endl;
+        // std::cout << "Break point in cm: (" << point.x()/units::cm << ", " << point.y()/units::cm << ", " << point.z()/units::cm << ")" << std::endl;
+        
+        // for (size_t i = 0; i < fits.size(); ++i) {
+        //     const auto& fit = fits[i];
+        //     double dist = (fit.point - point).magnitude();
+        //     std::cout << "  Point " << i << ": position=(" 
+        //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+        //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm 
+        //                 << " | dist=" << dist/units::cm << " cm" << std::endl;
+        // }
+
 
         // reject if test point is at begin or end of fits.
         if (itfits == fits.begin() || itfits+1 == fits.end()) {
-            return false;
+            return std::make_tuple(false, std::pair<SegmentPtr, SegmentPtr>(), VertexPtr());
         }
 
         const auto& wcpts = seg->wcpts();        
@@ -412,6 +425,8 @@ namespace WireCell::Clus::PR {
         else if (itwcpts+1 == wcpts.end()) {
             --itwcpts;
         }
+
+        std::cout << "Closest point found: " << itfits - fits.begin() << " / " << fits.size() << " " << itwcpts - wcpts.begin() << " / " << wcpts.size() << " points in fits\n";
 
         
         // update graph
@@ -434,6 +449,9 @@ namespace WireCell::Clus::PR {
         seg2->wcpts(std::vector<WCPoint>(itwcpts, wcpts.end()));
         vtx->wcpt(*itwcpts);
 
+        seg1->cluster(seg->cluster()); 
+        seg2->cluster(seg->cluster());
+
         // Split fits - break point included in both
         seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
         seg2->fits(std::vector<Fit>(itfits, fits.end()));
@@ -450,6 +468,7 @@ namespace WireCell::Clus::PR {
         seg1->flags_set(seg->flags());
         seg2->flags_set(seg->flags());
 
+            
         if (seg->has_particle_info()) {
             // Copy particle info if it exists
             segment_cal_4mom(seg1, seg->particle_info()->pdg(), particle_data, recomb_model);
@@ -549,7 +568,7 @@ namespace WireCell::Clus::PR {
         
        
             
-        return true;
+        return std::make_tuple(true,std::make_pair(seg1, seg2), vtx);
     }
 
 

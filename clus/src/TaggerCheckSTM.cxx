@@ -153,6 +153,13 @@ public:
             // Create segment for tracking
             auto segment = create_segment_for_cluster(*main_cluster, path_points);
 
+            // Create a PR::Graph with two vertices connected by this segment
+            // This is needed for break_segment to work properly
+            WireCell::Clus::PR::Graph pr_graph;
+            auto vtx1 = WireCell::Clus::PR::make_vertex(pr_graph);
+            auto vtx2 = WireCell::Clus::PR::make_vertex(pr_graph);
+            WireCell::Clus::PR::add_segment(pr_graph, segment, vtx1, vtx2);
+
             // geo_point_t test_p(10,10,10);
             // const auto& fit_seg_dpc = segment->dpcloud("main");
             // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
@@ -222,37 +229,37 @@ public:
             std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
             std::cout <<"3D Vector: " << segment->dirsign() << " " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
 
-            vec_dQ.clear();
-            vec_dx.clear();
+            // vec_dQ.clear();
+            // vec_dx.clear();
 
-            vec_dQ.push_back(35750.7); vec_dx.push_back(0.591606 * units::cm);
-            vec_dQ.push_back(32381.5); vec_dx.push_back(0.532785 * units::cm);
-            vec_dQ.push_back(30075.9); vec_dx.push_back(0.482393 * units::cm);
-            vec_dQ.push_back(32805.1); vec_dx.push_back(0.49908  * units::cm);
-            vec_dQ.push_back(46702.9); vec_dx.push_back(0.664835 * units::cm);
-            vec_dQ.push_back(58132.3); vec_dx.push_back(0.779598 * units::cm);
-            vec_dQ.push_back(58407.1); vec_dx.push_back(0.759001 * units::cm);
-            vec_dQ.push_back(55774.6); vec_dx.push_back(0.767953 * units::cm);
-            vec_dQ.push_back(51256.7); vec_dx.push_back(0.746227 * units::cm);
-            vec_dQ.push_back(42653.3); vec_dx.push_back(0.607304 * units::cm);
-            vec_dQ.push_back(47765.7); vec_dx.push_back(0.644757 * units::cm);
-            vec_dQ.push_back(55210.0); vec_dx.push_back(0.726355 * units::cm);
-            vec_dQ.push_back(44971.7); vec_dx.push_back(0.624519 * units::cm);
-            vec_dQ.push_back(35688.0); vec_dx.push_back(0.541333 * units::cm);
-            vec_dQ.push_back(37316.4); vec_dx.push_back(0.613396 * units::cm);
-            vec_dQ.push_back(37136.7); vec_dx.push_back(0.643779 * units::cm);
-            vec_dQ.push_back(33273.7); vec_dx.push_back(0.544746 * units::cm);
-            vec_dQ.push_back(32636.5); vec_dx.push_back(0.546531 * units::cm);
-            vec_dQ.push_back(35736.8); vec_dx.push_back(0.634489 * units::cm);
-            vec_dQ.push_back(35515.5); vec_dx.push_back(0.620087 * units::cm);
-            vec_dQ.push_back(36371.2); vec_dx.push_back(0.657168 * units::cm);
-            vec_dQ.push_back(37250.7); vec_dx.push_back(0.78021  * units::cm);
-            vec_dQ.push_back(29661.0); vec_dx.push_back(0.648785 * units::cm);
-            vec_dQ.push_back(27046.6); vec_dx.push_back(0.578585 * units::cm);
-            vec_dQ.push_back(28468.3); vec_dx.push_back(0.611002 * units::cm);
-            vec_dQ.push_back(33398.8); vec_dx.push_back(0.685772 * units::cm);
-            vec_dQ.push_back(42891.4); vec_dx.push_back(0.714633 * units::cm);
-            vec_dQ.push_back(44924.0); vec_dx.push_back(0.628143 * units::cm);
+            // vec_dQ.push_back(35750.7); vec_dx.push_back(0.591606 * units::cm);
+            // vec_dQ.push_back(32381.5); vec_dx.push_back(0.532785 * units::cm);
+            // vec_dQ.push_back(30075.9); vec_dx.push_back(0.482393 * units::cm);
+            // vec_dQ.push_back(32805.1); vec_dx.push_back(0.49908  * units::cm);
+            // vec_dQ.push_back(46702.9); vec_dx.push_back(0.664835 * units::cm);
+            // vec_dQ.push_back(58132.3); vec_dx.push_back(0.779598 * units::cm);
+            // vec_dQ.push_back(58407.1); vec_dx.push_back(0.759001 * units::cm);
+            // vec_dQ.push_back(55774.6); vec_dx.push_back(0.767953 * units::cm);
+            // vec_dQ.push_back(51256.7); vec_dx.push_back(0.746227 * units::cm);
+            // vec_dQ.push_back(42653.3); vec_dx.push_back(0.607304 * units::cm);
+            // vec_dQ.push_back(47765.7); vec_dx.push_back(0.644757 * units::cm);
+            // vec_dQ.push_back(55210.0); vec_dx.push_back(0.726355 * units::cm);
+            // vec_dQ.push_back(44971.7); vec_dx.push_back(0.624519 * units::cm);
+            // vec_dQ.push_back(35688.0); vec_dx.push_back(0.541333 * units::cm);
+            // vec_dQ.push_back(37316.4); vec_dx.push_back(0.613396 * units::cm);
+            // vec_dQ.push_back(37136.7); vec_dx.push_back(0.643779 * units::cm);
+            // vec_dQ.push_back(33273.7); vec_dx.push_back(0.544746 * units::cm);
+            // vec_dQ.push_back(32636.5); vec_dx.push_back(0.546531 * units::cm);
+            // vec_dQ.push_back(35736.8); vec_dx.push_back(0.634489 * units::cm);
+            // vec_dQ.push_back(35515.5); vec_dx.push_back(0.620087 * units::cm);
+            // vec_dQ.push_back(36371.2); vec_dx.push_back(0.657168 * units::cm);
+            // vec_dQ.push_back(37250.7); vec_dx.push_back(0.78021  * units::cm);
+            // vec_dQ.push_back(29661.0); vec_dx.push_back(0.648785 * units::cm);
+            // vec_dQ.push_back(27046.6); vec_dx.push_back(0.578585 * units::cm);
+            // vec_dQ.push_back(28468.3); vec_dx.push_back(0.611002 * units::cm);
+            // vec_dQ.push_back(33398.8); vec_dx.push_back(0.685772 * units::cm);
+            // vec_dQ.push_back(42891.4); vec_dx.push_back(0.714633 * units::cm);
+            // vec_dQ.push_back(44924.0); vec_dx.push_back(0.628143 * units::cm);
 
             std::cout <<"Kine dQ_dx: " << segment_cal_kine_dQdx(segment, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_dQdx(vec_dQ, vec_dx, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_range(segment_track_length(segment), 13, particle_data()) << std::endl;
 
@@ -271,20 +278,48 @@ public:
             std::cout << std::get<0>(results) << " " << std::get<1>(results) << " " << std::get<2>(results) << " " << std::get<3>(results) << std::endl;
             std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
 
-            segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true);
-            segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true);
+            segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true) ;
+            segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true); 
 
-            std::set<std::shared_ptr<PR::Segment>> segs;
-            segs.insert(segment);
-            clustering_points_segments(segs, m_dv, "associate_points");
+            // // hack ...
+            // std::set<std::shared_ptr<PR::Segment>> segs;
+            // segs.insert(segment);
+            // clustering_points_segments(segs, m_dv, "associate_points");
+            // std::cout << segment_is_shower_topology(segment) << " " << segment_determine_shower_direction(segment, particle_data(), m_recomb_model) << std::endl;
 
-            auto associate_dpcloud = segment->dpcloud("associate_points");  // Get the DynamicPointCloud
 
-            if (associate_dpcloud) {
-                const auto& points = associate_dpcloud->get_points();
-                std::cout << "Fit point cloud has " << points.size() << " points: " << segment->cluster()->npoints() << std::endl;
+            Point break_p(215.7*units::cm, -94.9437*units::cm, 211.109*units::cm);
+
+            auto break_results = break_segment(pr_graph, segment, break_p, particle_data(), m_recomb_model, m_dv);
+            bool break_success = std::get<0>(break_results);
+            if (break_success){
+                std::cout << "Break segment successful." << std::endl;
+                auto seg1 = std::get<1>(break_results).first;
+                auto seg2 = std::get<1>(break_results).second;
+                auto vtx_break = std::get<2>(break_results);
+                std::cout << " Segment 1 fits size: " << seg1->fits().size() << std::endl;
+                std::cout << " Segment 2 fits size: " << seg2->fits().size() << std::endl;
+                std::cout << " Break vertex position: " << vtx_break->fit().point << std::endl;
+
+                std::set<std::shared_ptr<PR::Segment>> segs;
+                segs.insert(seg1);
+                segs.insert(seg2);
+                clustering_points_segments(segs, m_dv, "associate_points");
+
+                auto associate_dpcloud_seg1 = seg1->dpcloud("associate_points");  // Get the DynamicPointCloud
+                auto associate_dpcloud_seg2 = seg2->dpcloud("associate_points");  // Get the DynamicPointCloud
+
+                std::cout << "Fit point cloud has " << associate_dpcloud_seg1->get_points().size() << " " << associate_dpcloud_seg2->get_points().size() <<  " points: " << seg1->cluster()->npoints() << std::endl;
+            // if (associate_dpcloud) {
+            //     const auto& points = associate_dpcloud->get_points();
+            //     std::cout << "Fit point cloud has " << points.size() << " points: " << segment->cluster()->npoints() << std::endl;
+            // }
+                std::cout << segment_is_shower_topology(seg1) << " " << segment_determine_shower_direction(seg1, particle_data(), m_recomb_model) << std::endl;
+                std::cout << segment_is_shower_topology(seg2) << " " << segment_determine_shower_direction(seg2, particle_data(), m_recomb_model) << std::endl;
+
+
             }
-            std::cout << segment_is_shower_topology(segment) << " " << segment_determine_shower_direction(segment, particle_data(), m_recomb_model) << std::endl;
+            
 
 
 
