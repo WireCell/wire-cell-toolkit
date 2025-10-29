@@ -146,9 +146,9 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     torch::Tensor b = tensors->at(1)->tensor().clone(); //MP2
     torch::Tensor c = tensors->at(0)->tensor().clone(); //MP3
     //print the shapes of the tensors
-    log->debug("DNNROI: Input tensor a shape: {}", tensor_shape_string(a));
-    log->debug("DNNROI: Input tensor b shape: {}", tensor_shape_string(b));
-    log->debug("DNNROI: Input tensor c shape: {}", tensor_shape_string(c));
+    log->debug("DNNROI: Input tensor a shape: {} device {}", tensor_shape_string(a), a.device().str());
+    log->debug("DNNROI: Input tensor b shape: {} device {}", tensor_shape_string(b), b.device().str());
+    log->debug("DNNROI: Input tensor c shape: {} device {}", tensor_shape_string(c), c.device().str());
 
     a = a*m_cfg.input_scale + m_cfg.input_offset;
     b = b*m_cfg.input_scale + m_cfg.input_offset;
@@ -187,6 +187,10 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     
     //Do the stacking along a new dimension [3, 800, 1500]
     //now a_ds, b and c have the same shape [1, 800, 1500]
+    //device for a_ds, b and c
+    log->debug("DNNROI: a_ds device: {}", a_ds.device().str());
+    log->debug("DNNROI: b device: {}", b.device().str());
+    log->debug("DNNROI: c device: {}", c.device().str());
     torch::Tensor stacked = torch::stack({a_ds, b, c}, 1);
     //torch::Tensor stacked = torch::stack({a_ds, b, c}, 0);
     log->debug("DNNROI: Stacked shape: {}", tensor_shape_string(stacked));

@@ -122,7 +122,7 @@ local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        model: ts_model_file,//"ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
+        model: ts_model_file,
         device: (if device == 'gpu' then 'gpucpu' else 'cpu'), // "gpucpu",
         concurrency: 1,
     },
