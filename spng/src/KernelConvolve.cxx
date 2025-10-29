@@ -13,7 +13,7 @@
 
 WIRECELL_FACTORY(SPNGKernelConvolve,
                  WireCell::SPNG::KernelConvolve,
-                 WireCell::ITorchSpectrum,
+                 WireCell::ITorchTensorFilter,
                  WireCell::IConfigurable)
 
 using namespace WireCell::HanaJsonCPP;                         
