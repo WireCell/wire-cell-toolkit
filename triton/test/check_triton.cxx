@@ -1,3 +1,5 @@
+#ifdef HAVE_LIBTORCH
+
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -70,3 +72,4 @@ int main() {
   }
   return 0;
 }
+#endif // HAVE_LIBTORCH
