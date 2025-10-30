@@ -97,7 +97,7 @@ int main(int argc, const char* argv[])
     //auto otens = module.forward(itens).toTensor();
     std::vector<torch::IValue> inputs = {iten};
     ITorchTensorSet::pointer iitens = to_itensor(inputs);
-    auto oitens = torch_service->forward(iitens);
+    auto oitens = torch_service->forward(iten);
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "timing: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
 

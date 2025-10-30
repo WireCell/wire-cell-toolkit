@@ -233,6 +233,7 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     m_plane_channels_to_wires[m_target_plane_index] = m_plane_channels_to_wires[m_target_plane_index].to(m_device);
 
     //Clone the inputs  
+    
     auto target_tensor_n = (*in->tensors())[m_target_plane_index]->tensor().clone().to(m_device);
     // target_tensor_n.index_put_({0, Slice(), Slice()}, 0.);
     // target_tensor_n.index_put_({0, 317, 4887}, 1.);

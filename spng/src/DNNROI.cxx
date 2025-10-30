@@ -215,12 +215,12 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
         auto iitens = to_itensor(inputs); // convert inputs to ITorchTensorSet        
         log->debug("DNNROI: ITorchTensorSet shape: {}", tensor_shape_string(iitens->tensors()->at(0)->tensor()));
         log->debug("DNNROI: Forwarding chunk with shape: {} from inputs of shape {}", tensor_shape_string(iitens->tensors()->at(0)->tensor()),tensor_shape_string(chunk));
-        auto oitens = m_forward->forward(iitens);
+        auto out_chunks = m_forward->forward(chunk);
         //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(oitens->tensors()->at(0)->tensor()));
         //torch::Tensor out_chunk = oitens.toTensor().to(torch::kCUDA); // keep the data in gpu if needed for other stuff.
-        torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor(); // convert ITorchTensorSet to torch::Tensor
+        //torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor(); // convert ITorchTensorSet to torch::Tensor
         //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(out_chunk));
-        outputs.push_back(out_chunk.clone());
+        outputs.push_back(out_chunks.clone());
     }
 
     //now concatenate along the time dimensions (3)
