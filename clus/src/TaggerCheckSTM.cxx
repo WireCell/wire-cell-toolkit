@@ -155,10 +155,10 @@ public:
 
             // Create a PR::Graph with two vertices connected by this segment
             // This is needed for break_segment to work properly
-            WireCell::Clus::PR::Graph pr_graph;
-            auto vtx1 = WireCell::Clus::PR::make_vertex(pr_graph);
-            auto vtx2 = WireCell::Clus::PR::make_vertex(pr_graph);
-            WireCell::Clus::PR::add_segment(pr_graph, segment, vtx1, vtx2);
+            auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
+            auto vtx1 = WireCell::Clus::PR::make_vertex(*pr_graph);
+            auto vtx2 = WireCell::Clus::PR::make_vertex(*pr_graph);
+            WireCell::Clus::PR::add_segment(*pr_graph, segment, vtx1, vtx2);
 
             // geo_point_t test_p(10,10,10);
             // const auto& fit_seg_dpc = segment->dpcloud("main");
@@ -179,13 +179,22 @@ public:
             std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
             for (size_t i = 0; i < fits.size(); ++i) {
                 const auto& fit = fits[i];
-                std::cout << "  Point " << i << ": position=(" 
-                         << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
-                         << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+                // std::cout << "  Point " << i << ": position=(" 
+                //          << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+                //          << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
                 vec_dQ.push_back(fit.dQ);
                 vec_dx.push_back(fit.dx);
             }
-            std::cout << std::endl;
+            // std::cout << std::endl;
+            const auto& wcpts = segment->wcpts();
+            std::cout << "Segment WCPoints (" << wcpts.size() << "):" << std::endl;
+            for (size_t i = 0; i < wcpts.size(); ++i) {
+                const auto& wcp = wcpts[i];
+                std::cout << "  [" << i << "]: (" 
+                          << wcp.point.x()/units::cm << ", "
+                          << wcp.point.y()/units::cm << ", "
+                          << wcp.point.z()/units::cm << ") cm" << std::endl;
+            }
 
 
             // test point cloud fit
@@ -281,6 +290,60 @@ public:
             segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true) ;
             segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true); 
 
+            // Hack: Override segment wcpts with specific data
+            {
+                std::vector<WireCell::Clus::PR::WCPoint> new_wcpts;
+                new_wcpts.push_back({WireCell::Point(219.539*units::cm, -86.9317*units::cm, 209.05*units::cm), 182});
+                new_wcpts.push_back({WireCell::Point(219.319*units::cm, -87.3647*units::cm, 209.2*units::cm), 180});
+                new_wcpts.push_back({WireCell::Point(219.099*units::cm, -87.8843*units::cm, 209.5*units::cm), 176});
+                new_wcpts.push_back({WireCell::Point(218.879*units::cm, -88.2307*units::cm, 209.5*units::cm), 172});
+                new_wcpts.push_back({WireCell::Point(218.659*units::cm, -88.5771*units::cm, 209.5*units::cm), 166});
+                new_wcpts.push_back({WireCell::Point(218.438*units::cm, -88.9235*units::cm, 209.5*units::cm), 161});
+                new_wcpts.push_back({WireCell::Point(218.218*units::cm, -89.4431*units::cm, 209.8*units::cm), 157});
+                new_wcpts.push_back({WireCell::Point(218.218*units::cm, -89.7896*units::cm, 209.8*units::cm), 159});
+                new_wcpts.push_back({WireCell::Point(217.998*units::cm, -90.136*units::cm, 209.8*units::cm), 155});
+                new_wcpts.push_back({WireCell::Point(217.778*units::cm, -90.6556*units::cm, 210.1*units::cm), 149});
+                new_wcpts.push_back({WireCell::Point(217.778*units::cm, -91.002*units::cm, 210.1*units::cm), 150});
+                new_wcpts.push_back({WireCell::Point(217.337*units::cm, -91.3484*units::cm, 210.1*units::cm), 139});
+                new_wcpts.push_back({WireCell::Point(217.117*units::cm, -91.868*units::cm, 210.4*units::cm), 135});
+                new_wcpts.push_back({WireCell::Point(216.897*units::cm, -92.2144*units::cm, 210.4*units::cm), 130});
+                new_wcpts.push_back({WireCell::Point(216.897*units::cm, -92.5608*units::cm, 210.4*units::cm), 131});
+                new_wcpts.push_back({WireCell::Point(216.677*units::cm, -92.9073*units::cm, 210.4*units::cm), 125});
+                new_wcpts.push_back({WireCell::Point(216.457*units::cm, -92.8206*units::cm, 210.55*units::cm), 116});
+                new_wcpts.push_back({WireCell::Point(216.457*units::cm, -93.3402*units::cm, 210.85*units::cm), 118});
+                new_wcpts.push_back({WireCell::Point(216.236*units::cm, -93.6867*units::cm, 210.85*units::cm), 112});
+                new_wcpts.push_back({WireCell::Point(216.016*units::cm, -94.0331*units::cm, 210.85*units::cm), 105});
+                new_wcpts.push_back({WireCell::Point(216.016*units::cm, -94.3795*units::cm, 210.85*units::cm), 106});
+                new_wcpts.push_back({WireCell::Point(215.796*units::cm, -94.8991*units::cm, 211.15*units::cm), 96});
+                new_wcpts.push_back({WireCell::Point(215.576*units::cm, -95.2455*units::cm, 211.15*units::cm), 88});
+                new_wcpts.push_back({WireCell::Point(215.356*units::cm, -95.1589*units::cm, 211.3*units::cm), 87});
+                new_wcpts.push_back({WireCell::Point(215.356*units::cm, -95.5053*units::cm, 211.3*units::cm), 86});
+                new_wcpts.push_back({WireCell::Point(215.356*units::cm, -95.8517*units::cm, 211.3*units::cm), 85});
+                new_wcpts.push_back({WireCell::Point(215.135*units::cm, -96.1982*units::cm, 211.3*units::cm), 80});
+                new_wcpts.push_back({WireCell::Point(214.915*units::cm, -96.1982*units::cm, 211.3*units::cm), 76});
+                new_wcpts.push_back({WireCell::Point(214.695*units::cm, -96.7178*units::cm, 211.6*units::cm), 73});
+                new_wcpts.push_back({WireCell::Point(214.695*units::cm, -97.0642*units::cm, 211.6*units::cm), 74});
+                new_wcpts.push_back({WireCell::Point(214.475*units::cm, -97.4106*units::cm, 211.6*units::cm), 68});
+                new_wcpts.push_back({WireCell::Point(214.255*units::cm, -97.757*units::cm, 211.6*units::cm), 64});
+                new_wcpts.push_back({WireCell::Point(214.034*units::cm, -98.2766*units::cm, 211.9*units::cm), 59});
+                new_wcpts.push_back({WireCell::Point(213.814*units::cm, -98.623*units::cm, 211.9*units::cm), 52});
+                new_wcpts.push_back({WireCell::Point(213.594*units::cm, -98.7096*units::cm, 211.75*units::cm), 47});
+                new_wcpts.push_back({WireCell::Point(213.594*units::cm, -99.2292*units::cm, 212.05*units::cm), 48});
+                new_wcpts.push_back({WireCell::Point(213.374*units::cm, -99.4025*units::cm, 212.05*units::cm), 40});
+                new_wcpts.push_back({WireCell::Point(213.374*units::cm, -99.7489*units::cm, 212.05*units::cm), 39});
+                new_wcpts.push_back({WireCell::Point(213.154*units::cm, -99.8355*units::cm, 212.2*units::cm), 35});
+                new_wcpts.push_back({WireCell::Point(213.154*units::cm, -100.182*units::cm, 212.2*units::cm), 37});
+                new_wcpts.push_back({WireCell::Point(212.933*units::cm, -100.442*units::cm, 212.35*units::cm), 33});
+                new_wcpts.push_back({WireCell::Point(212.713*units::cm, -100.528*units::cm, 212.2*units::cm), 28});
+                new_wcpts.push_back({WireCell::Point(212.493*units::cm, -101.048*units::cm, 212.5*units::cm), 23});
+                new_wcpts.push_back({WireCell::Point(212.493*units::cm, -101.221*units::cm, 212.8*units::cm), 24});
+                new_wcpts.push_back({WireCell::Point(212.053*units::cm, -101.481*units::cm, 212.95*units::cm), 9});
+                new_wcpts.push_back({WireCell::Point(212.053*units::cm, -101.827*units::cm, 212.95*units::cm), 10});
+                new_wcpts.push_back({WireCell::Point(212.053*units::cm, -103.213*units::cm, 212.95*units::cm), 15});
+                segment->wcpts(new_wcpts);
+                std::cout << "Hacked segment wcpts with " << new_wcpts.size() << " points" << std::endl;
+            }
+            
             // // hack ...
             // std::set<std::shared_ptr<PR::Segment>> segs;
             // segs.insert(segment);
@@ -290,7 +353,7 @@ public:
 
             Point break_p(215.7*units::cm, -94.9437*units::cm, 211.109*units::cm);
 
-            auto break_results = break_segment(pr_graph, segment, break_p, particle_data(), m_recomb_model, m_dv);
+            auto break_results = break_segment(*pr_graph, segment, break_p, particle_data(), m_recomb_model, m_dv);
             bool break_success = std::get<0>(break_results);
             if (break_success){
                 std::cout << "Break segment successful." << std::endl;
@@ -319,7 +382,11 @@ public:
 
 
             }
-            
+
+
+            m_track_fitter.add_graph(pr_graph);
+            m_track_fitter.do_multi_tracking(true, true, false);
+
 
 
 

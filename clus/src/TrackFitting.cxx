@@ -6472,57 +6472,73 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         fill_global_rb_map();
     }
 
+
+    auto edge_range = boost::edges(*m_graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (edge_bundle.segment) {
+            std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        }
+    }
+
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
     organize_segments_path(low_dis_limit, end_point_limit);
 
+    std::cout << "After first organization " << std::endl;
 
-  
-    if (flag_1st_tracking){
-        form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
-        multi_trajectory_fit(1, m_params.div_sigma);
-    }
-
-  
-    if (flag_2nd_tracking){
-        // second round trajectory fit ...
-        low_dis_limit = m_params.low_dis_limit/2.;
-        end_point_limit = m_params.end_point_limit/2.;
-        
-        // organize path
-        organize_segments_path_2nd(low_dis_limit, end_point_limit);    
-        
-        form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
-        
-        multi_trajectory_fit(1, m_params.div_sigma);
-
-        // organize path
-        low_dis_limit = 0.6*units::cm;
-        organize_segments_path_3rd(low_dis_limit);
-    }
-  
-  
-    if (flag_dQ_dx){
-        for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-            auto vd = *vp.first;
-            auto& v_bundle = (*m_graph)[vd];
-            if (v_bundle.vertex) {
-                bool flag_fix = v_bundle.vertex->flag_fix();
-                v_bundle.vertex->reset_fit_prop();
-                v_bundle.vertex->flag_fix(flag_fix);
-            }
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (edge_bundle.segment) {
+            std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
         }
-
-        auto edge_range = boost::edges(*m_graph);    
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            auto& edge_bundle = (*m_graph)[*e_it];
-            if (edge_bundle.segment) {
-                edge_bundle.segment->reset_fit_prop();
-            }
-        }
-        dQ_dx_multi_fit(end_point_limit, flag_dQ_dx_fit_reg);
     }
+  
+    // if (flag_1st_tracking){
+    //     form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+    //     multi_trajectory_fit(1, m_params.div_sigma);
+    // }
+
+  
+    // if (flag_2nd_tracking){
+    //     // second round trajectory fit ...
+    //     low_dis_limit = m_params.low_dis_limit/2.;
+    //     end_point_limit = m_params.end_point_limit/2.;
+        
+    //     // organize path
+    //     organize_segments_path_2nd(low_dis_limit, end_point_limit);    
+        
+    //     form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        
+    //     multi_trajectory_fit(1, m_params.div_sigma);
+
+    //     // organize path
+    //     low_dis_limit = 0.6*units::cm;
+    //     organize_segments_path_3rd(low_dis_limit);
+    // }
+  
+  
+    // if (flag_dQ_dx){
+    //     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+    //         auto vd = *vp.first;
+    //         auto& v_bundle = (*m_graph)[vd];
+    //         if (v_bundle.vertex) {
+    //             bool flag_fix = v_bundle.vertex->flag_fix();
+    //             v_bundle.vertex->reset_fit_prop();
+    //             v_bundle.vertex->flag_fix(flag_fix);
+    //         }
+    //     }
+
+    //     auto edge_range = boost::edges(*m_graph);    
+    //     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+    //         auto& edge_bundle = (*m_graph)[*e_it];
+    //         if (edge_bundle.segment) {
+    //             edge_bundle.segment->reset_fit_prop();
+    //         }
+    //     }
+    //     dQ_dx_multi_fit(end_point_limit, flag_dQ_dx_fit_reg);
+    // }
 }
 
 
