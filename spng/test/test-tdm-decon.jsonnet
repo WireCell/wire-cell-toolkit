@@ -525,7 +525,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
     // One goes into SP, the other joins the result at the end of the graph to
     // pass through any metadata and non-trace tensors.
     local fanpass = pg.pnode({
-        type: 'SPNGFanoutNode',
+        type: 'SPNGFanoutTensorSets',
         name: "fanpass",
         data: {
             multiplicity: 2,
@@ -607,9 +607,9 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
     }, nin=groups.count, nout=1);
 
 
-    local fanin = pg.pipeline([
+   local fanin = pg.pipeline([
         pg.pnode({
-            type: 'SPNGFaninNode',
+            type: 'SPNGFaninTensorSets',
             name: "fanin",
             data: {
                 multiplicity: 2,

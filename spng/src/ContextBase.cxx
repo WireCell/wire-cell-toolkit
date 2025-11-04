@@ -1,4 +1,5 @@
 #include "WireCellSpng/ContextBase.h"
+#include "WireCellUtil/Logging.h"
 
 #include <iostream> // debug
 
@@ -16,6 +17,7 @@ namespace WireCell::SPNG {
     {
         auto devname = get<std::string>(cfg, "device", "cpu");
         auto semname = get<std::string>(cfg, "semaphore", "");
+        spdlog::debug("ContextBase: device:{} semaphore:{}", devname, semname);
         m_ctx.connect(devname, semname);
     }
     
