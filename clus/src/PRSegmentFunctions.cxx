@@ -439,7 +439,7 @@ namespace WireCell::Clus::PR {
         // WARNING there is no "direction" in the graph.  You can not assume the
         // "source()" of a segment is closest to the segments first point.  As
         // of now, at least...
-        auto seg1 = make_segment(graph, vtx, vtx1);
+        auto seg1 = make_segment(graph, vtx1, vtx);
         auto seg2 = make_segment(graph, vtx, vtx2);
 
 

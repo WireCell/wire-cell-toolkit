@@ -2843,6 +2843,9 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
             }
         }
 
+        // std::cout << "Form Map: "  << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
+
+
         // Set fit associate vector for the segment
         segment->set_fit_associate_vec(saved_pts, saved_index, saved_skip, m_dv, "fit");
     }
@@ -2890,6 +2893,8 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
             }
         }
     }
+
+    //  std::cout << "Form Map: "  << " I " <<  " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
 }
 
 
@@ -3425,6 +3430,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                                                 offset_t, slope_x, offset_u, slope_yu, slope_zu,
                                                 offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
             
+            // std::cout << "Vertex Fit " << i << " " << init_p << " --> " << fitted_p << std::endl;
+
             // Update vertex with fitted position and projections
             auto& vertex_fit = vertex->fit();
             vertex_fit.point = fitted_p;
@@ -3530,6 +3537,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                         }
                     }
                 }
+                // std::cout << "Fit point Track " << i << ": (" << init_ps[i].x() << ", " << init_ps[i].y() << ", " << init_ps[i].z() << ")" <<  " : (" << temp_p.x() << ", " << temp_p.y() << ", " << temp_p.z() << ")" << std::endl;
                 final_ps.push_back(temp_p);
             }
         }
@@ -3537,6 +3545,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         // Apply trajectory examination/smoothing
         std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps);
         
+        std::cout  << " fitted with " << examined_ps.size() << " " << init_ps.size() << " " << final_ps.size() << " points." << std::endl;
+
         // Update segment with fitted results
         std::vector<PR::Fit> new_fits;
         for (size_t i = 0; i < examined_ps.size(); i++) {
@@ -4176,6 +4186,8 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
     }
     
     for (size_t i = 0; i < final_ps_vec.size(); i++) {
+        // std::cout << i << " " << final_ps_vec[i].x() << " " << final_ps_vec[i].y() << " " << final_ps_vec[i].z() << " : " << init_ps_vec[i].x() << " " << init_ps_vec[i].y() << " " << init_ps_vec[i].z() << std::endl;
+
         pss_vec.push_back(std::make_pair(final_ps_vec[i], segment));
     }
     
@@ -6446,6 +6458,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
 }
 
 void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_exclusion, bool flag_hack){
+
     // Reset fit properties for all vertices first
     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
         auto vd = *vp.first;
@@ -6457,6 +6470,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
                 auto& vertex_fit = v_bundle.vertex->fit();
                 vertex_fit.point = p;
             }
+
+            // std::cout << "Vertex fit point before reset: " << flag_fix << " " << v_bundle.vertex->fit().point << " " << v_bundle.vertex->wcpt().point << std::endl;
             // v_bundle.vertex->reset_fit_prop();
             // v_bundle.vertex->flag_fix(flag_fix);
         }
@@ -6495,20 +6510,36 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         }
     }
   
-    // if (flag_1st_tracking){
-    //     form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
-    //     multi_trajectory_fit(1, m_params.div_sigma);
-    // }
+    if (flag_1st_tracking){
+        form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        multi_trajectory_fit(1, m_params.div_sigma);
+    }
 
   
-    // if (flag_2nd_tracking){
-    //     // second round trajectory fit ...
-    //     low_dis_limit = m_params.low_dis_limit/2.;
-    //     end_point_limit = m_params.end_point_limit/2.;
+    if (flag_2nd_tracking){
+        // second round trajectory fit ...
+        low_dis_limit = m_params.low_dis_limit/2.;
+        end_point_limit = m_params.end_point_limit/2.;
         
-    //     // organize path
-    //     organize_segments_path_2nd(low_dis_limit, end_point_limit);    
+        auto edge_range = boost::edges(*m_graph);
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            auto& edge_bundle = (*m_graph)[*e_it];
+            if (edge_bundle.segment) {
+                std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+            }
+        }
+
+        // organize path
+        organize_segments_path_2nd(low_dis_limit, end_point_limit);    
         
+        std::cout << "After second organization " << std::endl;
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            auto& edge_bundle = (*m_graph)[*e_it];
+            if (edge_bundle.segment) {
+                std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+            }
+        }
+
     //     form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         
     //     multi_trajectory_fit(1, m_params.div_sigma);
@@ -6516,7 +6547,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     //     // organize path
     //     low_dis_limit = 0.6*units::cm;
     //     organize_segments_path_3rd(low_dis_limit);
-    // }
+    }
   
   
     // if (flag_dQ_dx){

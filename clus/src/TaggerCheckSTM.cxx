@@ -158,6 +158,8 @@ public:
             auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
             auto vtx1 = WireCell::Clus::PR::make_vertex(*pr_graph);
             auto vtx2 = WireCell::Clus::PR::make_vertex(*pr_graph);
+            vtx1->wcpt().point = first_wcp;
+            vtx2->wcpt().point = last_wcp;
             WireCell::Clus::PR::add_segment(*pr_graph, segment, vtx1, vtx2);
 
             // geo_point_t test_p(10,10,10);
@@ -362,7 +364,7 @@ public:
                 auto vtx_break = std::get<2>(break_results);
                 std::cout << " Segment 1 fits size: " << seg1->fits().size() << std::endl;
                 std::cout << " Segment 2 fits size: " << seg2->fits().size() << std::endl;
-                std::cout << " Break vertex position: " << vtx_break->fit().point << std::endl;
+                std::cout << " Break vertex position: " << vtx_break->fit().point << " " << vtx_break->wcpt().point << std::endl;
 
                 std::set<std::shared_ptr<PR::Segment>> segs;
                 segs.insert(seg1);
@@ -379,7 +381,6 @@ public:
             // }
                 std::cout << segment_is_shower_topology(seg1) << " " << segment_determine_shower_direction(seg1, particle_data(), m_recomb_model) << std::endl;
                 std::cout << segment_is_shower_topology(seg2) << " " << segment_determine_shower_direction(seg2, particle_data(), m_recomb_model) << std::endl;
-
 
             }
 
