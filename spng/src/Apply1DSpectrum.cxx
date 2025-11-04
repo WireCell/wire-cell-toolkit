@@ -106,7 +106,12 @@ bool WireCell::SPNG::Apply1DSpectrum::operator()(const input_pointer& in, output
 
     log->debug("Spectrum size: {}", spectrum_tensor.sizes()[0]);
     log->debug("RFFt'd size: {}", tensor_clone.sizes()[m_dimension]);
-
+    //make sure tensor_clone and spectrum_tensor are on the same device gpu
+    if(tensor_clone.device().type() != spectrum_tensor.device().type()) {
+        spectrum_tensor = spectrum_tensor.to(tensor_clone.device());
+        log->debug("Moved spectrum_tensor to device {}",
+                   spectrum_tensor.device().str());
+    }
     //Reshape input tensor for multiplication, do the filter multiplication
     tensor_clone = (tensor_clone.swapaxes(-1, m_dimension) * spectrum_tensor);
     log->debug("Swapped & mult'd");

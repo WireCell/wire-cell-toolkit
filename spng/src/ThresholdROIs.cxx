@@ -73,22 +73,23 @@ bool WireCell::SPNG::ThresholdROIs::operator()(const input_pointer& in, output_p
         log->debug("shape {}", s);
     }
 
-
-    //Get baseline + subtract for each channel
-    auto median = std::get<0>(torch::median(tensor_clone, 2, true));
-    auto nantensor = torch::zeros({1});
-    nantensor[0] = NAN;
     torch::Device device((
         (torch::cuda::is_available() && !m_debug_force_cpu) ? torch::kCUDA : torch::kCPU
     ));
-    nantensor = nantensor.to(device);
-    // log->debug("nan device: {} input device: {}", nantensor.device(), tensor_clone.device());
+    tensor_clone = tensor_clone.to(device);
+    //Get baseline + subtract for each channel
+    auto median = std::get<0>(torch::median(tensor_clone, 2, true));
+    auto nantensor = torch::full({1}, NAN, tensor_clone.options());
+
+    log->debug("nan device: {} input device: {}", nantensor.device().str(), tensor_clone.device().str());
     auto no_outliers = torch::where(torch::abs(tensor_clone - median) < 500., tensor_clone, nantensor);
+    log->debug("no_outliers device: {}", no_outliers.device().str());
     auto baseline = std::get<0>(torch::nanmedian(
         no_outliers, 2, true
     ));
     // std::cout << baseline << std::endl;
-
+    //baseline device location
+    log->debug("baseline device: {}", baseline.device().str());
     tensor_clone = tensor_clone - baseline;
     for (const auto & s : tensor_clone.sizes()) {
         log->debug("shape {}", s);

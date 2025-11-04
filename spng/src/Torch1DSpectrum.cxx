@@ -82,22 +82,39 @@ namespace WireCell::SPNG {
 
             //Get the waveform for this size
             auto vals = spectrum->filter_waveform(shape[0]);
-        
+            log->debug("Size of vals for spectrum {} is {} and resides on device {}", 
+                       m_spectra_tns[i], vals.size(), this->device().str());
             //Fill a tensor from it
-            auto this_tensor = torch::ones(shape, tensor_options());
+            //first write the values into a cpu tensor
+            auto cpu_tensor = torch::ones(shape);
+            {
+                auto acc = cpu_tensor.accessor<float,1>();
+                for (size_t j = 0; j < vals.size(); j++) {
+                    acc[j] = vals.at(j);
+                }
+            }
+            auto this_tensor = torch::empty(shape, tensor_options());
+            this_tensor.copy_(cpu_tensor, /*non_blocking=*/true);
+            //see if this tensor resides on CPU or GPU
+            log->debug("Creating spectrum tensor for {} of size {} on device {}", 
+                       m_spectra_tns[i], shape[0], this_tensor.device().str());
+            /*
             auto accessor = this_tensor.accessor<float,1>();
             for (size_t i = 0; i < vals.size(); i++) {
                 accessor[i] = vals.at(i);
             }
+            */
 
             //Multiply the cached tensor by the FFT of this tensor
             if (i == 0) {
-                m_cache.insert(shape, /*torch::fft::fft*/this_tensor);
+                m_cache.insert(shape, /*torch::fft::fft*/to(this_tensor));
             }
             else {
-                m_cache.get(shape).value() *= /*torch::fft::fft*/this_tensor;
+                m_cache.get(shape).value() *= /*torch::fft::fft*/to(this_tensor);
             }
         }
+        log->debug("Caching spectrum tensor of size {} on device {}", 
+                   shape[0], m_cache.get(shape).value().device().str());
         return m_cache.get(shape).value();
     }
 }

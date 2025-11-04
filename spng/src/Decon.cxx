@@ -146,6 +146,7 @@ namespace WireCell::SPNG {
         // }
 
         // Get input tensor.
+        log->debug("Getting input tensor at index {}", m_tensor_index);
         auto input_itensor = get_input(in, m_tensor_index);
         const double period = get<double>(in->metadata(), "period", 0.0);
 
@@ -158,15 +159,15 @@ namespace WireCell::SPNG {
 
         // Why do we clone?  Is there an early operation that is in-place?  Just to be safe?
         auto tensor_clone = to(orig_tensor.clone());
-    
         if (m_unsqueeze_input) {
             tensor_clone = torch::unsqueeze(tensor_clone, 0);
         }
-
+        //print if tensor_clone is in cpu or gpu
+        log->debug("Input tensor device: {}", tensor_clone.device().str());
         tensor_clone = decon(tensor_clone, period);
 
         if (m_unsqueeze_input) {
-            torch::squeeze(tensor_clone, 0);
+            tensor_clone = torch::squeeze(tensor_clone, 0);
         }
 
         out = make_output(in, input_itensor, tensor_clone);
@@ -223,7 +224,7 @@ namespace WireCell::SPNG {
 
                 );
 
-            log->debug("Padded to {} ", waveforms.sizes()[1]);
+            log->debug("Padded from {} to {} ", original_nchans, waveforms.sizes()[1]);
             response_shape[0] = waveforms.sizes()[1];
         }
 
@@ -246,14 +247,25 @@ namespace WireCell::SPNG {
         //Get the Wire filter -- already FFT'd
         //TODO -- fix the log here because of HfFilter weirdness
         auto wire_filter_tensor = m_base_wire_filter->spectrum({response_shape[0]});
-
+        log->debug("Wire filter tensor shape size {} on device {}",
+                   wire_filter_tensor.sizes()[0],
+                   wire_filter_tensor.device().str());
         //Multiply along the wire dimension
+        //check the device of waveforms and wire_filter_tensor
+        if(waveforms.device().type() != wire_filter_tensor.device().type()) {
+            waveforms = waveforms.to(wire_filter_tensor.device());
+            log->debug("Moved waveform tensor to device {}",
+                       wire_filter_tensor.device().str());
+        }
+        log->debug("Waveforms device {} wire filter device {}",
+                   waveforms.device().str(),
+                   wire_filter_tensor.device().str());
         if (!m_debug_no_wire_filter)
             waveforms = waveforms * wire_filter_tensor.view({-1,1});
-
+        log->debug("Before irff2, shape is {} {} {}", waveforms.sizes()[0], waveforms.sizes()[1], waveforms.sizes()[2]);
         //Inverse FFT in both dimensions
         waveforms = torch::fft::irfft2(waveforms);
-    
+        log->debug("After irfft2, shape is {} {} {}", waveforms.sizes()[0], waveforms.sizes()[1], waveforms.sizes()[2]);
         //Get the wire shift
         int wire_shift = m_base_frer_spectrum->shifts()[0];
         log->debug("Preparing to shift by {} wires in", wire_shift);
