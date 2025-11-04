@@ -252,3 +252,15 @@ TEST_CASE("spng hana configurable with member")
     HCwithHC c;
     cycle(c);
 }
+
+TEST_CASE("spng hana helper functions")
+{
+    SC sc;
+    SC2 sc2;
+    AC1 ac;
+    HConly hc;
+    auto cfg = default_configuration_types(sc, sc2, ac, hc);
+    std::cout << "cfg from many types: " << cfg << "\n";
+    configure_types(cfg, sc, sc2, ac, hc);
+        
+}

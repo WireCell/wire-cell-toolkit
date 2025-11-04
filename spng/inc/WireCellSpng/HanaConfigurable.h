@@ -94,6 +94,55 @@
 // This could move into Aux so I put it in a more generic namespace
 namespace WireCell {
 
+    /// Helper to configure a parameter pack of different types.
+    template<typename Type>
+    void configure_types(const WireCell::Configuration& config, Type& obj) {
+        obj.configure(config);
+    }
+    template<typename Type, typename... Types>
+    void configure_types(const WireCell::Configuration& config, Type& obj, Types&... rest) {
+        obj.configure(config);
+        configure_types(config, rest...);
+    }
+
+    /// Helper to aggregate default config over many.
+    template<typename Type>
+    WireCell::Configuration default_configuration_types(const Type& obj) {
+        return obj.default_configuration();
+    }
+    template<typename Type, typename... Types>
+    WireCell::Configuration default_configuration_types(const Type& obj, const Types&... rest)  {
+        WireCell::Configuration cfg = obj.default_configuration();
+        WireCell::Configuration cfg2 = default_configuration_types(rest...);
+        return update(cfg, cfg2);
+    }
+    
+
+    // Helper to aggregate default configuration across many.
+    inline
+    WireCell::Configuration default_configuration_each(std::initializer_list<const IConfigurable*> objs)
+    {
+        WireCell::Configuration combined_config;
+
+        // We iterate over the list. T will be deduced based on what is passed (e.g., A&, B&, C&).
+        for (const auto& obj : objs) {
+            auto current_config = obj->default_configuration();
+            update(combined_config, current_config);
+        }
+        return combined_config;
+    }
+
+    // Helper to dispatch configuration to many.
+    inline
+    void configure_each(std::initializer_list<IConfigurable*> objs, const WireCell::Configuration& config)
+    {
+        for (auto& obj : objs) {
+            obj->configure(config);
+        }
+    }
+
+
+
 
     // Helper to detect a method.
     template <typename T, typename = void>
@@ -247,31 +296,6 @@ namespace WireCell {
 
         Config m_hana_config;
     };
-
-
-    // Helper to aggregate default configuration across many.
-    inline
-    WireCell::Configuration default_configuration_each(std::initializer_list<const IConfigurable*> objs)
-    {
-        WireCell::Configuration combined_config;
-
-        // We iterate over the list. T will be deduced based on what is passed (e.g., A&, B&, C&).
-        for (const auto& obj : objs) {
-            auto current_config = obj->default_configuration();
-            update(combined_config, current_config);
-        }
-        return combined_config;
-    }
-
-    // Helper to dispatch configuration to many.
-    inline
-    void configure_each(std::initializer_list<IConfigurable*> objs, const WireCell::Configuration& config)
-    {
-        for (auto& obj : objs) {
-            obj->configure(config);
-        }
-    }
-
 
 
 }
