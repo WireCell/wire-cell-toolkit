@@ -498,7 +498,7 @@ local orig_decon_node(detector, anode, adc, device="cpu") =
 
 /// Return a frame->[decon]->frame compound node that does TDM decon.
 local tdm_decon_node(detector, anode, adc, device="cpu") = 
-    local verbose = 2;          // loud debug logging
+    local verbosity = 2;          // loud debug logging
     local res = responses(detector, anode, adc.tick);
 
     local plane_filters = [decon_filters(plane) for plane in wc.iota(3)];
@@ -513,7 +513,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
         name: "totdm",
         data: {
             anode: wc.tn(anode),
-            verbose: verbose,
+            verbosity: verbosity,
             rules: [{
                 tag: "",
                 groups: [{
@@ -529,7 +529,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
         name: "fanpass",
         data: {
             multiplicity: 2,
-            verbose: verbose,
+            verbosity: verbosity,
         },
     }, nin=1, nout=multiplicity);
 
@@ -613,7 +613,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
             name: "fanin",
             data: {
                 multiplicity: 2,
-                verbose: verbose,
+                verbosity: verbosity,
             },
         }, nin=2, nout=1),
 
@@ -621,7 +621,7 @@ local tdm_decon_node(detector, anode, adc, device="cpu") =
             type: 'SPNGTdmToFrame',
             name: "fromtdm",
             data: {
-                verbose: verbose,
+                verbosity: verbosity,
                 frame: {datapath: "/frames/\\d+/frame"},
                 #frame: {datapath: "/frames/0/frame"},
                 // chmasks: ...

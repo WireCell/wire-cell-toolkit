@@ -176,6 +176,8 @@ namespace WireCell::SPNG {
     {
         // we need this mutable.
         m_verbosity = m_hana_config.verbosity;
+        debug("logger with verbosity: {}", m_verbosity);
+
     }
 
 }

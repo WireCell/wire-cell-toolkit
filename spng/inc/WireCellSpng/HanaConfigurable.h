@@ -95,10 +95,23 @@
 namespace WireCell {
 
 
+    // Helper to detect a method.
+    template <typename T, typename = void>
+    struct has_member_configured : std::false_type {};
+    template <typename T>
+    struct has_member_configured<T, std::void_t<decltype(&T::configured)>> : std::true_type {};
+
     /// Inherit like
     /// struct AC : AutoConfigurable<AC, Base1, Base2>
     template <typename Derived, typename... Bases>
     struct AutoConfigurable : public Bases..., virtual public IConfigurable {
+
+        template <typename Parent>
+            void call_configured() {
+            if constexpr (has_member_configured<Parent>::value) {
+                static_cast<Parent*>(this)->Parent::configured();
+            }
+        }
 
         // Derived may override to get the configuration in m_json_config.
         virtual void configured() { }
@@ -111,6 +124,10 @@ namespace WireCell {
         // Dispatch configuration to base classes.
         void configure_bases() {
             (void)(((static_cast<Bases*>(static_cast<Derived*>(this)))->Bases::configure(m_json_config)), ...);
+        }
+
+        void configured_bases() {
+            (call_configured<Bases>(), ...);
         }
 
         // Collect default configuration across base classes.
@@ -131,7 +148,7 @@ namespace WireCell {
         virtual void configure(const WireCell::Configuration& jconfig) {
             m_json_config = jconfig;
             configure_bases();
-            configured();
+            configured_bases();
         }
 
         // Aggregate across mixins and self.
@@ -149,23 +166,17 @@ namespace WireCell {
     // use, eg
     // struct Threshold : public AutoConfigurable<Threshold, ContextBase, Logger> { /*...*/ };
 
-    // Helper to detect a method.
-    template <typename T, typename = void>
-    struct has_member_configured : std::false_type {};
-    template <typename T>
-    struct has_member_configured<T, std::void_t<decltype(&T::configured)>> : std::true_type {};
 
     template<typename Derived, typename Config, typename... Bases>
     struct HanaConfigurable : public Bases..., virtual public IConfigurable
     {
 
         template <typename Parent>
-        void call_configured() {
+            void call_configured() {
             if constexpr (has_member_configured<Parent>::value) {
                 static_cast<Parent*>(this)->Parent::configured();
             }
         }
-
 
         void configure_bases(const WireCell::Configuration& config) {
             // C++17 fold expression over the comma operator
