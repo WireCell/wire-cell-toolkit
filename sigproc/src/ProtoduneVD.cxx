@@ -2,9 +2,9 @@
 /*             Noise filter (NF) module for ProtoDUNE VD                   */
 /***************************************************************************/
 // Features:                       
-//   baseline correction         
-//   adaptive baseline correction 
-//   ShieldCoupling removal for TDE u plane, idea from Lardon https://github.com/dune-lardon/lardon/blob/main/noise_filter.py#L181
+//  baseline correction      
+//  CNR removal   
+//   Add ShieldCoupling removal for TDE u plane, idea from Lardon https://github.com/dune-lardon/lardon/blob/main/noise_filter.py#L181
 //
 // 10/19/2025, created by X.Ning (xning@bnl.gov) 
 
@@ -810,7 +810,7 @@ WireCell::Waveform::ChannelMaskMap PDVD::OneChannelNoise::apply(int ch, signal_t
 
     // correct rc undershoot
     auto spectrum = fwd_r2c(m_dft, signal);
-    bool is_partial = false;  // Xin's "IS_RC()"
+    bool is_partial = false;  // remove is_partial correction for pdvd
     // bool is_partial = m_check_partial(spectrum);  // Xin's "IS_RC()"
     // if(ch>3072*2) is_partial=false;
 
@@ -838,7 +838,7 @@ WireCell::Waveform::ChannelMaskMap PDVD::OneChannelNoise::apply(int ch, signal_t
 
     // Now do the adaptive baseline
     if (is_partial) {
-       std::cout << "[PDVD] is_partical channel: " << ch << std::endl;
+    //    std::cout << "[PDVD] is_partical channel: " << ch << std::endl;
 
         auto wpid = m_anode->resolve(ch);
         const int iplane = wpid.index();
@@ -973,7 +973,6 @@ WireCell::Waveform::ChannelMaskMap PDVD::CoherentNoiseSub::apply(channel_signals
 
     // }
 
-    // exit(0);
     // calculate the scaling coefficient and subtract
     PDVD::Subtract_WScaling(chansig, medians, respec, res_offset, rois, 
                                   m_dft,
@@ -1246,7 +1245,7 @@ WireCell::Waveform::ChannelMaskMap PDVD::ShieldCouplingSub::apply(
     if (chansig.empty()) {
         return ret;
     }
-    std::cout << "grouped channel size: " << " " << chansig.size() << std::endl;
+    // std::cout << "grouped channel size: " << " " << chansig.size() << std::endl;
     
     const int nbins = (chansig.begin()->second).size();
 
@@ -1260,7 +1259,7 @@ WireCell::Waveform::ChannelMaskMap PDVD::ShieldCouplingSub::apply(
         if (it != m_strip_lengths.end() && it->second > 0) {
             strip_length = it->second;
         }else{
-            std::cout<<"error!! strip length for ch "<<ch<<" not found"<<std::endl;
+            std::cerr<<"error!! strip length for ch "<<ch<<" not found"<< std::endl;
         }
         
         scale_factors[ch] = strip_length;
@@ -1277,70 +1276,36 @@ WireCell::Waveform::ChannelMaskMap PDVD::ShieldCouplingSub::apply(
     WireCell::Waveform::realseq_t medians = PDVD::CalcMedian_shieldCoupling_u(chansig);
 
     const int achannel = chansig.begin()->first;
-    // const Waveform::compseq_t& respec = m_noisedb->response(achannel);
-    // const int res_offset = m_noisedb->response_offset(achannel);
-    // const int pad_f = m_noisedb->pad_window_front(achannel);
-    // const int pad_b = m_noisedb->pad_window_back(achannel);
-    
-    // const float decon_limit = m_noisedb->coherent_nf_decon_limit(achannel);
-    // const float decon_lf_cutoff = m_noisedb->coherent_nf_decon_lf_cutoff(achannel);
-    // const float adc_limit = m_noisedb->coherent_nf_adc_limit(achannel);
-    // const float decon_limit1 = m_noisedb->coherent_nf_decon_limit1(achannel);
-    // const float roi_min_max_ratio = m_noisedb->coherent_nf_roi_min_max_ratio(achannel);
-    // // const float protection_factor = m_noisedb->coherent_nf_protection_factor(achannel);
-    // const float protection_factor = m_noisedb->coherent_nf_protection_factor(achannel);
-    // const float min_adc_limit = m_noisedb->coherent_nf_min_adc_limit(achannel);
-
-    // std::cout<<"res_offset = "<<res_offset<<std::endl;
-    // std::cout<<"protection factor = "<<protection_factor<<std::endl;
-    // std::cout<<"upper ADC limit = "<<adc_limit<<std::endl;
    
     
-    if(false){
-        std::cout<<"print out median: "<<achannel<<std::endl;
-    std::string filename = "medians_output_tu"+ std::to_string(achannel)+".txt";
-    std::ofstream outfile(filename);
+    // if(false){
+    //     std::cout<<"print out median: "<<achannel<<std::endl;
+    // std::string filename = "medians_output_tu"+ std::to_string(achannel)+".txt";
+    // std::ofstream outfile(filename);
     
-    for (size_t i = 0; i < medians.size(); ++i) {
-        outfile << i << " " << medians[i]<<std::endl;
-    }
+    // for (size_t i = 0; i < medians.size(); ++i) {
+    //     outfile << i << " " << medians[i]<<std::endl;
+    // }
     
-    outfile.close();
-    int k=0;
-    for (auto it : chansig) {
-    if(it.first % 40==0){
-        std::string filename2 = "medians_output_tu"+ std::to_string(achannel)+"_"+std::to_string(k)+".txt";
-        std::ofstream outfile2(filename2);
+    // outfile.close();
+    // int k=0;
+    // for (auto it : chansig) {
+    // if(it.first % 40==0){
+    //     std::string filename2 = "medians_output_tu"+ std::to_string(achannel)+"_"+std::to_string(k)+".txt";
+    //     std::ofstream outfile2(filename2);
     
-        for (size_t i = 0; i < medians.size(); ++i) {
-            outfile2 << i << " " << it.second.at(i)<<std::endl;
-        }
+    //     for (size_t i = 0; i < medians.size(); ++i) {
+    //         outfile2 << i << " " << it.second.at(i)<<std::endl;
+    //     }
     
-        outfile2.close();
-        k++;
-    }
+    //     outfile2.close();
+    //     k++;
+    // }
 
-    }
+    // }
 
-    }
+    // }
 
-    // Step 4: Apply signal protection
-
-    // std::vector<std::vector<int>> rois = PDVD::SignalProtection(
-    //     medians, respec, m_dft,
-    //     res_offset, pad_f, pad_b,
-    //     decon_limit, decon_lf_cutoff, adc_limit,
-    //     protection_factor, min_adc_limit
-    // );
-    // std::vector<std::vector<int>> rois; 
-    
-    // Step 5: Subtract median with scaling
-    // PDVD::Subtract_WScaling(
-    //     chansig, medians, respec, 0, rois,
-    //     m_dft,
-    //     decon_limit1, roi_min_max_ratio,
-    //     m_rms_threshold
-    // );
 
     for (auto it : chansig) {
         int ch = it.first;
