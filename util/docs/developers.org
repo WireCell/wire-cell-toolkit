@@ -62,6 +62,8 @@ This section describes the high-level developer "philosophy" of WCT.
 
 1. Use C++-17, do not use C or very old C++ idioms.
 
+2. Prefer =#pragma once= over =#ifndef XXX/#define XXX/#endif=.
+
 * Style
 
 1. Follow a uniform formatting for the code you write.

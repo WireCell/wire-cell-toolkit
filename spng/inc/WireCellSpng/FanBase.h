@@ -1,15 +1,12 @@
+#pragma once
+
 /**
    These fans keep the type unchanged between input and output.
  */
 
-#ifndef WIRECELL_SPNG_FANBASE
-#define WIRECELL_SPNG_FANBASE
-
-#include "WireCellSpng/ITorchTensorSet.h"
 #include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/HanaConfigurable.h"
-#include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IFaninNode.h"
 #include "WireCellIface/IFanoutNode.h"
 
@@ -41,7 +38,7 @@ namespace WireCell::SPNG {
         using output_pointer = typename fan_type::output_pointer;
 
 
-        FaninBase(const std::string& type_name="SPNGFaninTensorSets",
+        FaninBase(const std::string& type_name,
                   const std::string& group_name="spng") {
             auto& cfg = this->Logger::hana_config();
             cfg.type_name = type_name;
@@ -58,9 +55,7 @@ namespace WireCell::SPNG {
         virtual void fanin_combine(const input_vector& inv, output_pointer& out) = 0;
 
         /// Let subclass do EOS processing or logging.
-        virtual void fanin_eos() {
-            this->logit("EOS");
-        };
+        virtual void fanin_eos() { };
 
         virtual bool operator()(const input_vector& inv, output_pointer& out) {
             TorchSemaphore sem(this->context());
@@ -79,9 +74,11 @@ namespace WireCell::SPNG {
             size_t neos = std::count(inv.begin(), inv.end(), nullptr);
             if (neos) {
                 fanin_eos();
+                this->logit("EOS");
             }
             else {
                 fanin_combine(inv, out);
+                this->logit(out, "fanin");
             }
             this->next_count();
             return true;
@@ -94,7 +91,7 @@ namespace WireCell::SPNG {
             std::vector<std::string> ret(multiplicity, tname);
             return ret;
         }
-        virtual std::string signature() { return typeid(FaninBase<IDataType>).name(); }
+        virtual std::string signature() { return typeid(fan_type).name(); }
 
     };
 
@@ -110,7 +107,7 @@ namespace WireCell::SPNG {
         using input_pointer = typename fan_type::input_pointer;
         using output_vector = typename fan_type::output_vector;
 
-        FanoutBase(const std::string& type_name="SPNGFaninTensorSets",
+        FanoutBase(const std::string& type_name,
                    const std::string& group_name="spng") {
             auto& cfg = this->Logger::hana_config();
             cfg.type_name = type_name;
@@ -126,9 +123,7 @@ namespace WireCell::SPNG {
         virtual void fanout_separate(const input_pointer& in, output_vector& outv) = 0;
 
         /// Let subclass do EOS processing or logging.
-        virtual void fanout_eos() {
-            this->logit("EOS");
-        };
+        virtual void fanout_eos() { }
 
         virtual bool operator()(const input_pointer& in, output_vector& outv) {
             TorchSemaphore sem(this->context());
@@ -143,9 +138,11 @@ namespace WireCell::SPNG {
             outv.resize(multiplicity, nullptr);
             if (! in) {
                 fanout_eos();
+                this->logit("EOS");
             }
             else {
                 fanout_separate(in, outv);
+                this->logit(in, "fanout");
             }
             this->next_count();
             return true;
@@ -158,7 +155,7 @@ namespace WireCell::SPNG {
             std::vector<std::string> ret(multiplicity, tname);
             return ret;
         }
-        virtual std::string signature() { return typeid(FanoutBase<IDataType>).name(); }
+        virtual std::string signature() { return typeid(fan_type).name(); }
     };
 
 
@@ -183,4 +180,4 @@ namespace WireCell::SPNG {
         size_t m_multiplicity{2};
     };
 }
-#endif
+

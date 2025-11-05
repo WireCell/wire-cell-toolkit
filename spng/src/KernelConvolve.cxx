@@ -2,6 +2,7 @@
 #include "WireCellSpng/Convo.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/TdmTools.h"
+#include "WireCellSpng/HanaConfigurable.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
 #include "WireCellUtil/String.h"
@@ -33,18 +34,15 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration KernelConvolve::default_configuration() const
     {
-        auto cfg = this->ContextBase::default_configuration();
-        auto cfg2 = this->Logger::default_configuration();
-        update(cfg, cfg2);
-        cfg2 = to_json(m_cfg);
+        auto cfg = WireCell::default_configuration_bases<KernelConvolve, ContextBase, Logger>(this);
+        auto cfg2 = to_json(m_cfg);
         update(cfg, cfg2);
         return cfg;
     }
 
     void KernelConvolve::configure(const WireCell::Configuration& config)
     {
-        this->ContextBase::configure(config);
-        this->Logger::configure(config);
+        WireCell::configure_bases<KernelConvolve, ContextBase, Logger>(this, config);
         from_json(m_cfg, config);
         configme();
     }
@@ -126,11 +124,13 @@ namespace WireCell::SPNG {
         out = nullptr;
         if (!in) {
             logit("EOS");
-            ++m_count;
+            next_count();
             return true;
         }
 
         logit(in, "input");
+
+        TorchSemaphore sem(context());
 
         // Fixme: uplift tag/datapath_format config and application to a base
         // class.
@@ -156,10 +156,11 @@ namespace WireCell::SPNG {
         // a branch/merge protect us from this case but we try to act in good
         // faith and just pass it along to the next sucker^W node.
         if (tensor.size(-1) <= 0 || tensor.size(-2) <= 0) {
-            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?", m_count);
+            log->warn("empty tensor dimensions at call={}, passing it along.  Are we sparse processing?",
+                      get_count());
             out = std::make_shared<SimpleTorchTensor>(tensor, md);
             logit(out, "empty");
-            ++m_count;
+            next_count();
             // fixme: should still do output derivation
             return true;
         }
@@ -175,7 +176,7 @@ namespace WireCell::SPNG {
 
         if (tensor_shape.size() != 3) {
             log->critical("illegal number of input tensor dimensions at call=%d: %d",
-                          m_count, tensor_shape.size());
+                          get_count(), tensor_shape.size());
             raise<ValueError>("illegal number of input tensor dimensions");
         }
 
@@ -317,7 +318,7 @@ namespace WireCell::SPNG {
         }
 
         if (m_cfg.debug_filename.size()) {
-            std::string filename = fmt::format(m_cfg.debug_filename, fmt::arg("ident", m_count));
+            std::string filename = fmt::format(m_cfg.debug_filename, fmt::arg("ident", get_count()));
             auto data = torch::pickle_save(to_save);
             std::ofstream output_file(filename, std::ios::binary);
             output_file.write(data.data(), data.size());
@@ -327,7 +328,7 @@ namespace WireCell::SPNG {
         out = std::make_shared<SimpleTorchTensor>(tensor, md);
 
         logit(out, "output");
-        ++m_count;
+        next_count();
         return true;
     }
 

@@ -125,7 +125,7 @@ namespace WireCell::SPNG {
         outtens = nullptr;
         if (!inframe) {
             logit("EOS");
-            ++m_count;
+            next_count();
             return true;
         }
 
@@ -150,7 +150,7 @@ namespace WireCell::SPNG {
 
         logit(outtens, "output");
 
-        ++m_count;
+        next_count();
         return true;
     }
 

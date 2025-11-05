@@ -4,6 +4,7 @@
 #include "WireCellSpng/Convo.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/TdmTools.h"
+#include "WireCellSpng/HanaConfigurable.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
 #include "WireCellUtil/String.h"
@@ -34,18 +35,15 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration Threshold::default_configuration() const
     {
-        auto cfg = this->ContextBase::default_configuration();
-        auto cfg2 = this->Logger::default_configuration();
-        update(cfg, cfg2);
-        cfg2 = to_json(m_cfg);
+        auto cfg = WireCell::default_configuration_bases<Threshold, ContextBase, Logger>(this);
+        auto cfg2 = to_json(m_cfg);
         update(cfg, cfg2);
         return cfg;
     }
 
     void Threshold::configure(const WireCell::Configuration& config)
     {
-        this->ContextBase::configure(config);
-        this->Logger::configure(config);
+        WireCell::configure_bases<Threshold, ContextBase, Logger>(this, config);
         from_json(m_cfg, config);
     }
 
@@ -80,10 +78,12 @@ namespace WireCell::SPNG {
         out = nullptr;
         if (!in) {
             logit("EOS");
-            ++m_count;
+            next_count();
             return true;
         }
         logit(in, "input");
+
+        TorchSemaphore sem(context());
 
         auto tensor = in->tensor();
         if (m_cfg.rms_nsigma == 0.0) {
@@ -95,7 +95,7 @@ namespace WireCell::SPNG {
         out = std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
 
         logit(out, "output");
-        ++m_count;
+        next_count();
         return true;
     }
 

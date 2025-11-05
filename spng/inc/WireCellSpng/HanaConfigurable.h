@@ -116,6 +116,26 @@ namespace WireCell {
         WireCell::Configuration cfg2 = default_configuration_types(rest...);
         return update(cfg, cfg2);
     }
+
+    template<typename ThisType, typename... Bases>
+    void configure_bases(ThisType* this_obj, const Configuration& cfg)  {
+        (void)(((static_cast<Bases*>(static_cast<ThisType*>(this_obj)))->Bases::configure(cfg)), ...);
+    }
+
+    template<typename ThisType, typename... Bases>
+    WireCell::Configuration default_configuration_bases(const ThisType* this_obj)  {
+        WireCell::Configuration aggregated_cfg;
+
+        (void)(((
+                    aggregated_cfg = update(
+                        aggregated_cfg,
+                        (static_cast<const Bases*>(static_cast<const ThisType*>(this_obj)))->Bases::default_configuration()
+                        )
+                    )), ...);
+
+        return aggregated_cfg;
+
+    }
     
 
     // Helper to aggregate default configuration across many.

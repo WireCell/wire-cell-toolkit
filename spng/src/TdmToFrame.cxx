@@ -189,7 +189,7 @@ namespace WireCell::SPNG {
         out = nullptr;
         if (!in) {
             logit("EOS");
-            ++m_count;
+            next_count();
             return true;
         }
 
@@ -205,14 +205,14 @@ namespace WireCell::SPNG {
         // log->debug("selected {} frame tensors with {}", frame_itensors.size(), m_cfg.frame);
         if (frame_itensors.empty()) {
             log->warn("no frame tensor, returning empty frame for set ident {} at call={}",
-                      in->ident(), m_count);
+                      in->ident(), get_count());
             out =  std::make_shared<Aux::SimpleFrame>(in->ident());
-            ++m_count;
+            next_count();
             return true;
         }
         if (frame_itensors.size() > 1) {        
             log->warn("multiple frame tensors, using first in ident {} at call={}",
-                      in->ident(), m_count);
+                      in->ident(), get_count());
             // fixme: if multi-frame becomes a thing, TdmToFrame can be changed
             // to a queued out node.  Or, we make a plural TdmToFrames and an
             // IFrameSet.
@@ -261,9 +261,9 @@ namespace WireCell::SPNG {
         }
 
         out = sf;
-        log->debug("call={} output frame: {}", m_count, Aux::taginfo(out));
+        log->debug("call={} output frame: {}", get_count(), Aux::taginfo(out));
 
-        ++m_count;
+        next_count();
         return true;
     }
 

@@ -26,7 +26,6 @@ namespace WireCell::SPNG {
     TensorIndex TorchFunctionNode::sys_transform_tensors(TensorIndex ti) const
     {
         TorchSemaphore sem(context());
-        torch::AutoGradMode enable_grad(false);
 
         // Assure tensors are on the configured desired.  
         auto dev = device();

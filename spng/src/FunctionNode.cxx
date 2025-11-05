@@ -189,7 +189,7 @@ namespace WireCell::SPNG {
         out = nullptr;
         if (! in) {
             logit("EOS");
-            ++m_count;
+            next_count();
             return true;
         }
 
@@ -197,7 +197,7 @@ namespace WireCell::SPNG {
         // Weeeeee!
         out = sys_pack_tensors(sys_rename_tensors(sys_transform_tensors(sys_select_tensors(sys_index_tensors(in)))));
         logit(out, "output");
-        ++m_count;
+        next_count();
         return true;
     }
 
