@@ -64,7 +64,7 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     Eigen::VectorXd ydX(nbeta);
     Eigen::SparseMatrix<double> XdX(nbeta, nbeta);
     // std::cout << "Lasso begin inner product nbeta "  << nbeta << " X.rows " << X.rows() << " X.cols " << X.cols() << std::endl;
-    double sum_non_zeros = 0;
+    // double sum_non_zeros = 0;
 
     // orig
     // std::cout << " orig method " << std::endl;
@@ -95,7 +95,7 @@ std::vector<size_t> WireCell::LassoModel::Fit()
                 double value = X.col(i).dot(X.col(j));
                 if (value != 0)
                     tripletList.push_back(T(i,j,value));
-                sum_non_zeros += value;
+                // sum_non_zeros += value;
             }
             // if ( nbeta == 5582) {
             //     std::cout << " inner_product nbeta == 5582 " << i << std::endl;

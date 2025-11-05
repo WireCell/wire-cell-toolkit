@@ -1,3 +1,5 @@
+#ifdef HAVE_LIBTORCH
+
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -70,3 +72,13 @@ int main() {
   }
   return 0;
 }
+
+#else
+
+#include <iostream>
+int main() {
+    std::cerr << "This test requires libtorch support. Skipping.\n";
+    return 0;
+}
+
+#endif // HAVE_LIBTORCH
