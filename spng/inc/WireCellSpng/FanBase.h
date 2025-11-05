@@ -1,9 +1,5 @@
 #pragma once
 
-/**
-   These fans keep the type unchanged between input and output.
- */
-
 #include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/HanaConfigurable.h"
@@ -28,12 +24,15 @@ namespace WireCell::SPNG {
     /** @brief Base class providing a fanin DFP node.
 
         The sub class should implement at least fanin_combine().
+
+        The type in the fan is IFansType and output is IScalarType which defaults to IFansType.
+
     */
-    template<typename IDataType>  
-    struct FaninBase : public HanaConfigurable<FaninBase<IDataType>, FanConfig, Logger, ContextBase>,
-                       public virtual IFaninNode<IDataType, IDataType, 0>
+    template<typename IFansType, typename IScalarType = IFansType>  
+    struct FaninBase : public HanaConfigurable<FaninBase<IFansType, IScalarType>, FanConfig, Logger, ContextBase>,
+                       public virtual IFaninNode<IFansType, IScalarType, 0>
     {
-        using fan_type = IFaninNode<IDataType, IDataType, 0>;
+        using fan_type = IFaninNode<IFansType, IScalarType, 0>;
         using input_vector = typename fan_type::input_vector;
         using output_pointer = typename fan_type::output_pointer;
 
@@ -85,7 +84,7 @@ namespace WireCell::SPNG {
         /// Supply the IFaninNode 
         virtual std::vector<std::string> input_types() {
             int multiplicity = this->hana_config().multiplicity;
-            const std::string tname = std::string(typeid(IDataType).name());
+            const std::string tname = std::string(typeid(IFansType).name());
             std::vector<std::string> ret(multiplicity, tname);
             return ret;
         }
@@ -96,12 +95,14 @@ namespace WireCell::SPNG {
     /** @brief Base class providing a fanout DFP node.
 
         The sub class should implement at least fanout_separate();
+
+        The type in the fan is IFansType and output is IScalarType which defaults to IFansType.
     */
-    template<typename IDataType>  
-    struct FanoutBase : public HanaConfigurable<FanoutBase<IDataType>, FanConfig, Logger, ContextBase>,
-                        public virtual IFanoutNode<IDataType, IDataType, 0>
+    template<typename IFansType, typename IScalarType = IFansType>  
+    struct FanoutBase : public HanaConfigurable<FanoutBase<IFansType, IScalarType>, FanConfig, Logger, ContextBase>,
+                        public virtual IFanoutNode<IScalarType, IFansType, 0>
     {
-        using fan_type = IFanoutNode<IDataType, IDataType, 0>;
+        using fan_type = IFanoutNode<IScalarType, IFansType, 0>;
         using input_pointer = typename fan_type::input_pointer;
         using output_vector = typename fan_type::output_vector;
 
@@ -147,7 +148,7 @@ namespace WireCell::SPNG {
         /// Supply IFanoutNode interface.
         virtual std::vector<std::string> output_types() {
             int multiplicity = this->hana_config().multiplicity;
-            const std::string tname = std::string(typeid(IDataType).name());
+            const std::string tname = std::string(typeid(IFansType).name());
             std::vector<std::string> ret(multiplicity, tname);
             return ret;
         }

@@ -1,8 +1,7 @@
 #pragma once
 
 #include "WireCellSpng/FanBase.h"
-#include "WireCellSpng/ContextBase.h"
-#include "WireCellIface/IConfigurable.h"
+
 
 
 namespace WireCell::SPNG {
