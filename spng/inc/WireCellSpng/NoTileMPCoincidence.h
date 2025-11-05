@@ -28,17 +28,22 @@ namespace SPNG {
     private:
 
         void convert_wires_to_channels(torch::Tensor & input, torch::Tensor & indices);
-        int m_rebin_val{-1};
+        // int m_rebin_val{-1};
+
+        /// Pick out the 3 plane tensors to consider from the input set:
         int m_target_plane_index{0};
         int m_aux_plane_l_index{1};
         int m_aux_plane_m_index{2};
-        bool m_debug_force_cpu{false};
-        double m_readout_plane_width{100.},
-               m_readout_plane_height{100.},
-               m_pitch{5.},
-               m_angle_in_radians{0.6230825}; //35.7deg
+
+        // unused....
+        // double m_readout_plane_width{100.};
+        // double m_readout_plane_height{100.};
+        // double m_pitch{5.};
+        // double m_angle_in_radians{0.6230825}; //35.7deg
+        // torch::Tensor m_trivial_blobs;
+
         torch::Device m_device{torch::kCPU};
-        torch::Tensor m_trivial_blobs;
+
         torch::Tensor m_raygrid_views;
         std::string m_anode_tn{"AnodePlane"};
         IAnodePlane::pointer m_anode;
@@ -47,9 +52,12 @@ namespace SPNG {
         std::map<int, int> m_plane_nwires;
         std::map<int, torch::Tensor> m_plane_wires_to_channels;
         std::map<int, torch::Tensor> m_plane_channels_to_wires;
+
+        /// debugging
         std::string m_output_torch_name;
         bool m_debug_output{false};
-        bool m_test_style{0};
+        bool m_debug_force_cpu{false};
+        // bool m_test_style{0};
 
         
     };

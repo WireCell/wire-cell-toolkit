@@ -25,7 +25,7 @@ WireCell::SPNG::NoTileMPCoincidence::~NoTileMPCoincidence() {};
 
 
 void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuration& config) {
-    m_rebin_val = get(config, "rebin_val", m_rebin_val);
+    // m_rebin_val = get(config, "rebin_val", m_rebin_val);
 
     m_debug_force_cpu = get(config, "debug_force_cpu", m_debug_force_cpu);
 
@@ -38,7 +38,7 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
     m_aux_plane_m_index = get(config, "aux_plane_m_index", m_aux_plane_m_index);
     m_output_torch_name = get(config, "output_torch_name", m_output_torch_name);
     m_debug_output = get(config, "debug_output", m_debug_output);
-    m_test_style = get(config, "test_style", m_test_style);
+    // m_test_style = get(config, "test_style", m_test_style);
     //Check that we aren't requesting any of the same 2 planes
     if ((m_target_plane_index == m_aux_plane_l_index) ||
         (m_target_plane_index == m_aux_plane_m_index) ||
@@ -51,13 +51,13 @@ void WireCell::SPNG::NoTileMPCoincidence::configure(const WireCell::Configuratio
         );
     }
 
-    m_readout_plane_width = get(config, "readout_plane_width", m_readout_plane_width); //Unused
-    m_readout_plane_height = get(config, "readout_plane_height", m_readout_plane_height); //Unused
-    m_pitch = get(config, "pitch", m_pitch); //Unused
-    m_angle_in_radians = get(config, "angle_in_radians", m_angle_in_radians); //Unused 
+    // m_readout_plane_width = get(config, "readout_plane_width", m_readout_plane_width); //Unused
+    // m_readout_plane_height = get(config, "readout_plane_height", m_readout_plane_height); //Unused
+    // m_pitch = get(config, "pitch", m_pitch); //Unused
+    // m_angle_in_radians = get(config, "angle_in_radians", m_angle_in_radians); //Unused 
 
     //Get trivial blobs
-    m_trivial_blobs = WireCell::SPNG::RayGrid::trivial_blobs(); //unused
+    // m_trivial_blobs = WireCell::SPNG::RayGrid::trivial_blobs(); //unused
     //Create the views & coordinates used in RayGrid
 
 
