@@ -41,6 +41,11 @@ namespace WireCell {
             {
                 return (bounds.first <= pitch_index) and (pitch_index <= bounds.second);
             }
+
+            // Return the width measured in number of rays "in" (not "on") the strip.
+            size_t width() const {
+                return bounds.second - bounds.first;
+            }
         };
         typedef std::vector<Strip> strips_t;
 
@@ -143,6 +148,11 @@ namespace WireCell {
             }
 
             std::string as_string() const;
+
+            /// Return strip indices for strips in ascending order, first by
+            /// size, then by location in their layer and finally by their layer
+            /// index.  Any strip in the ignore_layers will be ignored.
+            std::vector<size_t> ordered(const std::set<size_t>& ignore_layers = {0,1}) const;
 
            private:
             strips_t m_strips;

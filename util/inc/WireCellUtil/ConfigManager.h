@@ -51,6 +51,7 @@ namespace WireCell {
         /// Return a list of all known configurables
         typedef std::pair<std::string, std::string> ClassInstance;
         std::vector<ClassInstance> configurables() const;
+
     };
 
 }  // namespace WireCell

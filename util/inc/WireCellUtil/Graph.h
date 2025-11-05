@@ -1,3 +1,6 @@
+// Include this header and not directly any bare boost/* in order to avoid some
+// compiler warnings.
+
 #ifndef WIRECELL_GRAPH
 #define WIRECELL_GRAPH
 
@@ -17,6 +20,9 @@
 #include <boost/graph/filtered_graph.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
+#include <boost/graph/kruskal_min_spanning_tree.hpp>
+#include <boost/graph/connected_components.hpp>
+#include <boost/graph/properties.hpp>
 
 #ifdef __clang__
 #  if defined(__has_warning)

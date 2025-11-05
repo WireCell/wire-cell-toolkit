@@ -1,6 +1,5 @@
 #include "WireCellClus/PointTreeBuilding.h"
 #include "WireCellClus/Facade.h"
-#include "WireCellClus/Facade_Util.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/RayTiling.h"
 #include "WireCellUtil/GraphTools.h"
@@ -67,6 +66,8 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("failed to get anode plane");
     }
 
+    m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
+
     m_face = get<int>(cfg, "face", 0);
     log->debug("using face: {}", m_face);
     if (m_anode->face(m_face) == nullptr) {
@@ -74,7 +75,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
     }
 
     // Fixme: this is an utterly broken thing and should be replaced.
-    m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
+    // m_geomhelper = Factory::find_tn<IClusGeomHelper>(cfg["geom_helper"].asString());
 
     auto samplers = cfg["samplers"];
     if (samplers.isNull()) {
@@ -94,6 +95,25 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("m_samplers must have \"3d\" sampler");
     }
 
+}
+
+double PointTreeBuilding::get_time_offset(const WirePlaneId& wpid) const{
+    if (cache_map_time_offset.find(wpid) == cache_map_time_offset.end()) {
+        cache_map_time_offset[wpid] = m_dv->metadata(wpid)["time_offset"].asDouble();
+    }
+    return cache_map_time_offset[wpid];
+}
+double PointTreeBuilding::get_drift_speed(const WirePlaneId& wpid) const{
+    if (cache_map_drift_speed.find(wpid) == cache_map_drift_speed.end()) {
+        cache_map_drift_speed[wpid] = m_dv->metadata(wpid)["drift_speed"].asDouble();
+    }
+    return cache_map_drift_speed[wpid];
+}
+double PointTreeBuilding::get_tick(const WirePlaneId& wpid) const{
+    if (cache_map_tick.find(wpid) == cache_map_tick.end()) {
+        cache_map_tick[wpid] = m_dv->metadata(wpid)["tick"].asDouble();
+    }
+    return cache_map_tick[wpid];
 }
 
 
@@ -155,37 +175,18 @@ namespace {
     // - make_corner_dataset
 }
 
-// static Dataset make2dds (const Dataset& ds3d, const double angle) {
-//     Dataset ds;
-//     const auto& x = ds3d.get("x")->elements<Facade::float_t>();
-//     const auto& y = ds3d.get("y")->elements<Facade::float_t>();
-//     const auto& z = ds3d.get("z")->elements<Facade::float_t>();
-//     std::vector<Facade::float_t> x2d(x.size());
-//     std::vector<Facade::float_t> y2d(y.size());
-//     for (size_t ind=0; ind<x.size(); ++ind) {
-//         const auto& xx = x[ind];
-//         const auto& yy = y[ind];
-//         const auto& zz = z[ind];
-//         x2d[ind] = xx;
-//         y2d[ind] = cos(angle) * zz - sin(angle) * yy;
-//     }
-//     ds.add("x", Array(x2d));
-//     ds.add("y", Array(y2d));
-//     return ds;
-// }
 
-// Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const double angle_u, const double angle_v, const double angle_w) const {
-void PointTreeBuilding::sample_live(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
-    auto grouping = root->value.facade<Facade::Grouping>();
-    const auto& tp = grouping->get_params();
-    using int_t = Facade::int_t;
+Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointer icluster, const double tick, const std::vector<double>& angles) const
+{
+
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
     auto clusters = blob_clusters(gr);
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
-    // Points::node_ptr root = std::make_unique<Points::node_t>();
+    size_t nskipped = 0;
+    Points::node_ptr root = std::make_unique<Points::node_t>();
     auto& sampler = m_samplers.at("3d");
     for (auto& [cluster_id, vdescs] : clusters) {
         auto cnode = root->insert();
@@ -194,43 +195,28 @@ void PointTreeBuilding::sample_live(Points::node_ptr& root, const WireCell::IClu
             if (code != 'b') {
                 continue;
             }
+
             const IBlob::pointer iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
-            named_pointclouds_t pcs;
-            /// TODO: use nblobs or iblob->ident()?  A: Index.  The sampler takes blob->ident() as well.
-            auto [pc3d, aux] = sampler->sample_blob(iblob, nblobs);
-            if (pc3d.get("x")->size_major() == 0) {
-                log->debug("blob {} has no points", iblob->ident());
+
+            auto pcs = Aux::sample_live(sampler, iblob, angles, tick, nblobs);
+            /// DO NOT EXTEND FURTHER! see #426, #430
+
+            if (pcs.empty()) {
                 continue;
             }
-            pcs.emplace("3d", pc3d);
-            pcs.emplace("2dp0", make2dds(pc3d, tp.angle_u));
-            pcs.emplace("2dp1", make2dds(pc3d, tp.angle_v));
-            pcs.emplace("2dp2", make2dds(pc3d, tp.angle_w));
-            pcs.emplace("corner", make_corner_dataset(iblob, true, tp.time_offset, tp.drift_speed));
-            const Point center = calc_blob_center(pcs["3d"]);
-            // std::cout << "[delete] center: " << center.x() << " " << center.y() << " " << center.z() << std::endl;
-            auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tp.tick);
-            int_t max_wire_interval = aux.get("max_wire_interval")->elements<int_t>()[0];
-            int_t min_wire_interval = aux.get("min_wire_interval")->elements<int_t>()[0];
-            int_t max_wire_type = aux.get("max_wire_type")->elements<int_t>()[0];
-            int_t min_wire_type = aux.get("min_wire_type")->elements<int_t>()[0];
-            scalar_ds.add("max_wire_interval", Array({(int_t)max_wire_interval}));
-            scalar_ds.add("min_wire_interval", Array({(int_t)min_wire_interval}));
-            scalar_ds.add("max_wire_type", Array({(int_t)max_wire_type}));
-            scalar_ds.add("min_wire_type", Array({(int_t)min_wire_type}));
-            pcs.emplace("scalar", std::move(scalar_ds));
             cnode->insert(Points(std::move(pcs)));
-
             ++nblobs;
         }
     }
     
-    log->debug("sampled {} live blobs to tree with {} children", nblobs, root->nchildren());
-    // return root;
+    if (nskipped) {
+        log->debug("skipped {} live blobs.  You may want to follow up with a ClusteringPointed in an MABC.  See Issue #425", nskipped);
+    }
+    log->debug("sampled {} live blobs in {} clusters", nblobs, root->nchildren());
+    return root;
 }
 
 Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointer icluster, const double tick) const {
-    using int_t = Facade::int_t;
     const auto& gr = icluster->graph();
     log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
@@ -238,10 +224,6 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
     log->debug("got {} clusters", clusters.size());
     size_t nblobs = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
-    // if (m_samplers.find("dead") == m_samplers.end()) {
-    //     raise<ValueError>("m_samplers must have \"dead\" sampler");
-    // }
-    // auto& sampler = m_samplers.at("dead");
     for (auto& [cluster_id, vdescs] : clusters) {
         auto cnode = root->insert(std::make_unique<Points::node_t>());
         for (const auto& vdesc : vdescs) {
@@ -249,26 +231,24 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
             if (code != 'b') {
                 continue;
             }
+            
             auto iblob = std::get<IBlob::pointer>(gr[vdesc].ptr);
-            named_pointclouds_t pcs;
-            auto scalar_ds = make_scalar_dataset(iblob, {0,0,0}, 0, tick);
-            scalar_ds.add("max_wire_interval", Array({(int_t)-1}));
-            scalar_ds.add("min_wire_interval", Array({(int_t)-1}));
-            scalar_ds.add("max_wire_type", Array({(int_t)-1}));
-            scalar_ds.add("min_wire_type", Array({(int_t)-1}));
-            pcs.emplace("scalar", scalar_ds);
-            pcs.emplace("corner", make_corner_dataset(iblob));
-            // for (const auto& [name, pc] : pcs) {
-            //     log->debug("{} -> keys {} size_major {}", name, pc.keys().size(), pc.size_major());
-            // }
+
+
+            auto pcs = Aux::sample_dead(iblob, tick); 
+            // std::cout << "Xin: " << "bad sampling points in dead " << " " << pcs.size() << std::endl;
+
+            if (pcs.empty()) {
+                continue;
+            }
             cnode->insert(Points(std::move(pcs)));
+            // DO NOT EXTEND THIS.  see #430.
+            
             ++nblobs;
         }
-        /// DEBUGONLY
-        // if (nblobs > 1) {
-        //     break;
-        // }
     }
+
+    // std::cout << "Xin: " << "sampled " << nblobs << " dead blobs in " << root->nchildren() << " clusters" << std::endl;
     
     log->debug("sampled {} dead blobs to tree with {} children", nblobs, root->nchildren());
     return root;
@@ -283,29 +263,18 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     // log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
 
     auto grouping = root->value.facade<Facade::Grouping>();
-    const auto& tp = grouping->get_params();
     const auto& proj_centers = grouping->proj_centers();
     const auto& pitch_mags = grouping->pitch_mags();
-    /// DEBUGONLY: remove these prints after debugging
-    // for(const auto& [face, mags] : pitch_mags) {
-    //     for(const auto& [pind, mag] : mags) {
-    //         log->debug("face {} pind {} pitch_mag {}", face, pind, mag);
-    //     }
-    // }
-    // for (const auto& [face, centers] : proj_centers) {
-    //     for(const auto& [pind, center] : centers) {
-    //         log->debug("face {} pind {} center {}", face, pind, center);
-    //     }
-    // }
 
     Facade::mapfp_t<std::vector<float_t>> ds_x, ds_y, ds_charge, ds_charge_err;
     Facade::mapfp_t<std::vector<int_t>> ds_cident, ds_wind, ds_slice_index;
 
+    size_t nslices = 0;
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
         const auto& cgnode = cg[vdesc];
         if (cgnode.code() == 's') {
             auto& slice = std::get<slice_t>(cgnode.ptr);
-            const auto& slice_index = slice->start()/tp.tick;
+            ++nslices;
             const auto& activity = slice->activity();
             for (const auto& [ichan, charge] : activity) {
                 if(charge.uncertainty() > m_dead_threshold) {
@@ -313,24 +282,25 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan << " " << slice_index << std::endl;
                     continue;
                 } 
+                // std::cout << "Test: live " << " m_dead_threshold " << m_dead_threshold
+                //           << " charge.uncertainty() " << charge.uncertainty()
+                //           << " " << charge.value() << " " << ichan->ident()
+                //           << " " << slice->start() << std::endl;
                 const auto& cident = ichan->ident();
                 const auto& wires = ichan->wires();
                 for (const auto& wire : wires) {
                     const auto& wind = wire->index();
-                    const auto& plane = wire->planeid().index();
-                    // log->debug("slice {} chan {} charge {} wind {} plane {} face {}", slice_index, cident, charge, wind, plane, wire->planeid().face());
-                    // const auto& face = wire->planeid().face();
-                    const auto& face = m_face;
-                    /// FIXME: is this the way to get face?
-
-//                    std::cout << "Test: " << slice->start() <<  " " << slice_index << " " << tp.time_offset << " " << tp.drift_speed << std::endl;
-
-                    const auto& x = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
-                    const double y = pitch_mags.at(face).at(plane)* (wind +0.5) + proj_centers.at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
-
-                    // if (abs(wind-815) < 2 or abs(wind-1235) < 2 or abs(wind-1378) < 2) {
-                    //     log->debug("slice {} chan {} charge {} wind {} plane {} face {} x {} y {}", slice_index, cident, charge,
-                    //                wind, plane, face, x, y);
+                    const auto& wpid_wire = wire->planeid();
+                    const auto& plane = wpid_wire.index();
+                    const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
+                    const auto& face = wpid_wire.face();
+                    const auto& x = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start());
+                    const double y = pitch_mags.at(m_anode->ident()).at(face).at(plane)* (wind +0.5) + proj_centers.at(m_anode->ident()).at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
+                    // if (nslices < 2) {
+                    //     log->debug("dv: time_offset {} drift_speed {} tick {}",
+                    //     get_time_offset(wpid_all),
+                    //     get_drift_speed(wpid_all),
+                    //     get_tick(wpid_all));
                     // }
                     ds_x[face][plane].push_back(x);
                     ds_y[face][plane].push_back(y);
@@ -338,13 +308,17 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     ds_charge_err[face][plane].push_back(charge.uncertainty());
                     ds_cident[face][plane].push_back(cident);
                     ds_wind[face][plane].push_back(wind);
+                    const auto& slice_index = slice->start()/get_tick(wpid_all);
                     ds_slice_index[face][plane].push_back(slice_index);
                 }
             }
             // log->debug("ds_x.size() {}", ds_x.size());
         }
     }
+    // log->debug("got {} slices", nslices);
 
+    int anode_ident = m_anode->ident();
+    std::vector<std::string> plane_names = {"U", "V", "W"};
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {
             // log->debug("ds_x {} ds_y {} ds_charge {} ds_charge_err {} ds_cident {} ds_wind {} ds_slice_index {}",
@@ -358,7 +332,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             ds.add("cident", Array(ds_cident[face][plane]));
             ds.add("wind", Array(ds_wind[face][plane]));
             ds.add("slice_index", Array(ds_slice_index[face][plane]));
-            const std::string ds_name = String::format("ctpc_f%dp%d", face, plane);
+            const std::string ds_name = String::format("ctpc_a%df%dp%d",anode_ident, face, plane_names[plane]);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root->value.local_pcs().emplace(ds_name, ds);
             // log->debug("added point cloud {} with {} points", ds_name, x.size());
@@ -367,6 +341,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     // for (const auto& [name, pc] : root->value.local_pcs()) {
     //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
     // }
+    (void)nslices; // unused, but useful for debugging
 }
 
 void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::ICluster::pointer icluster) const {
@@ -375,7 +350,6 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     using int_t = Facade::int_t;
     const auto& cg = icluster->graph();
     auto grouping = root->value.facade<Facade::Grouping>();
-    const auto& tp = grouping->get_params();
     std::set<int> faces;
     std::set<int> planes;
     for (const auto& vdesc : GraphTools::mir(boost::vertices(cg))) {
@@ -385,19 +359,19 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
         // const auto& slice_index = slice->start()/m_tick;
         const auto& activity = slice->activity();
         for (const auto& [ichan, charge] : activity) {
+            // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan->ident() << " " << slice->start() << std::endl;
             if(charge.uncertainty() < m_dead_threshold) continue;
             // log->debug("m_dead_threshold {} charge.uncertainty() {}", m_dead_threshold, charge.uncertainty());
             // const auto& cident = ichan->ident();
             const auto& wires = ichan->wires();
             for (const auto& wire : wires) {
                 const auto& wind = wire->index();
-                const auto& plane = wire->planeid().index();
-                // const auto& face = wire->planeid().face();
-                // log->debug("dead chan {} charge {} wind {} plane {} face {}", ichan->ident(), charge, wind, plane, wire->planeid().face());
-                const auto& face = m_face;
-                /// FIXME: is this the way to get face?
-                const auto& xbeg = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start());
-                const auto& xend = Facade::time2drift(m_anode->face(face), tp.time_offset, tp.drift_speed, slice->start() + slice->span());
+                const auto& wpid_wire = wire->planeid();
+                const auto& plane = wpid_wire.index();
+                const auto& wpid_all = WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
+                const auto& face = wpid_wire.face();
+                const auto& xbeg = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start());
+                const auto& xend = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start() + slice->span());
                 // if (true) {
                 //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                 //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
@@ -405,14 +379,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 faces.insert(face);
                 planes.insert(plane);
 
-                auto & dead_winds = grouping->get_dead_winds(face, plane);
-                // fix a bug how do we know the smaller or bigger value of xbeg and xend?
-                // if (dead_winds.find(wind) == dead_winds.end()) {
-                //     dead_winds[wind] = {xbeg, xend};
-                // } else {
-                //     const auto& [xbeg_now, xend_now] = dead_winds[wind];
-                //     dead_winds[wind] = {std::min(xbeg, xbeg_now), std::max(xend, xend_now)};
-                // }
+                auto & dead_winds = grouping->get_dead_winds(m_anode->ident(), face, plane);
                 if (dead_winds.find(wind) == dead_winds.end()) {
                     dead_winds[wind] = {std::min(xbeg,xend)-0.1*units::cm, std::max(xbeg,xend) + 0.1*units::cm};
                 } else {
@@ -435,27 +402,30 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     //         log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
     //     }
     // }
-    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(0, 0).size(), grouping->get_dead_winds(0, 1).size(),
-               grouping->get_dead_winds(0, 2).size());
+    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(m_anode->ident(), 0, 0).size(), grouping->get_dead_winds(m_anode->ident(), 0, 1).size(),
+               grouping->get_dead_winds(m_anode->ident(), 0, 2).size());
 
     Facade::mapfp_t<std::vector<float_t>> xbegs, xends;
     Facade::mapfp_t<std::vector<int_t>> winds;
     for (const auto& face : faces) {
         for (const auto& plane : planes) {
-            for (const auto& [wind, xbeg_xend] : grouping->get_dead_winds(face, plane)) {
+            for (const auto& [wind, xbeg_xend] : grouping->get_dead_winds(m_anode->ident(), face, plane)) {
                 xbegs[face][plane].push_back(xbeg_xend.first);
                 xends[face][plane].push_back(xbeg_xend.second);
                 winds[face][plane].push_back(wind);
             }
         }
     }
+    int anode_ident = m_anode->ident();
+    std::vector<std::string> plane_names = {"U", "V", "W"};
     for (const auto& face : faces) {
         for (const auto& plane : planes) {
             Dataset ds;
             ds.add("xbeg", Array(xbegs[face][plane]));
             ds.add("xend", Array(xends[face][plane]));
             ds.add("wind", Array(winds[face][plane]));
-            const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
+            const std::string ds_name = String::format("dead_winds_a%df%dp%d",anode_ident, face, plane_names[plane]);
+            // const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root->value.local_pcs().emplace(ds_name, ds);
             // log->debug("added point cloud {} with {} points", ds_name, xbeg.size());
@@ -502,20 +472,38 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         datapath = String::format(datapath, ident);
     }
 
-    const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
-    Points::node_ptr root_live = std::make_unique<Points::node_t>();
+    // const auto& tp_json = m_geomhelper->get_params(m_anode->ident(), m_face);
+
+    // fixme: this replicates functionality in pimpos.
+    std::vector<double> angles(3);
+    for (size_t ind=0; ind<3; ++ind) {
+        const auto layer = iplane2layer[ind]; // in WirePlaneId.h
+        WirePlaneId wpid(layer, m_face, m_anode->ident());
+        Vector wire_dir = m_dv->wire_direction(wpid);
+        angles[ind] = std::atan2(wire_dir.z(), wire_dir.y());
+    }
+
+    WirePlaneId wpid_all(kAllLayers, m_face, m_anode->ident());
+    double tick = get_tick(wpid_all);
+
+    Points::node_ptr root_live = sample_live(iclus_live, tick, angles);
     auto grouping = root_live->value.facade<Facade::Grouping>();
-    grouping->set_anode(m_anode);
-    grouping->set_params(tp_json);
-    // {
-    //     const auto& tp = grouping->get_params();
-    //     std::cout << "[delete] sample_live: tp.time_offset: " << tp.time_offset << " tp.drift_speed: " << tp.drift_speed << std::endl;
-    // }
-    sample_live(root_live, iclus_live);
-    // Points::node_ptr root_live = sample_live(iclus_live, tp_json["tick"].asDouble(), tp_json["angle_u"].asDouble(),
-    //                                          tp_json["angle_v"].asDouble(), tp_json["angle_w"].asDouble());
+    grouping->set_anodes({m_anode});
+    // grouping->set_params(tp_json);
     add_ctpc(root_live, iclus_live);
     add_dead_winds(root_live, iclus_live);
+    
+    /// DEBUGONLY
+    {
+        std::vector<WirePlaneLayer_t> layers = {kUlayer, kVlayer, kWlayer};
+        for (const auto& layer : layers) {
+            WirePlaneId wpid(layer, m_face, m_anode->ident());
+            int face_dirx = m_dv->face_dirx(wpid);
+            Vector wire_direction = m_dv->wire_direction(wpid);
+            Vector pitch_vector = m_dv->pitch_vector(wpid);
+            log->debug("wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
+        }
+    }
     /// TODO: remove after debugging
     // {
     //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
@@ -590,7 +578,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         if(ident != iclus_dead->ident()) {
             raise<ValueError>("ident mismatch between live and dead clusters");
         }
-        Points::node_ptr root_dead = sample_dead(iclus_dead, tp_json["tick"].asDouble());
+        Points::node_ptr root_dead = sample_dead(iclus_dead, tick);
         /// DEBUGONLY:
         // {
         //     Facade::Grouping& dead_grouping = *root_dead->value.facade<Facade::Grouping>();

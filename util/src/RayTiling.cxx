@@ -238,6 +238,34 @@ void Blob::add(const Coordinates& coords, const Strip& strip, double nudge)
 
 const crossings_t& Blob::corners() const { return m_corners; }
 
+std::vector<size_t> Blob::ordered(const std::set<size_t>& ignore_layers) const
+{
+    std::vector<size_t> strip_indices;
+    for (size_t ind = 0; ind<m_strips.size(); ++ind) {
+        if (ignore_layers.find(ind) == ignore_layers.end()) {
+            strip_indices.push_back(ind);
+        }
+    }
+    std::sort(strip_indices.begin(), strip_indices.end(), [&](size_t ia, size_t ib) {
+        const auto& a = m_strips[ia];
+        const auto& b = m_strips[ib];
+
+        const size_t sa = a.bounds.second - a.bounds.first;
+        const size_t sb = b.bounds.second - b.bounds.first;
+
+        if (sa < sb) return true;
+        if (sa > sb) return false;
+        
+        // same size, break tie on which one is lower in the array
+        if (a.bounds.first < b.bounds.first) return true;
+        if (a.bounds.first > b.bounds.first) return false;
+
+        // still a tie, break on layer.  If this ties, then the two are equal.
+        return a.layer < b.layer;
+    });
+    return strip_indices;
+}
+
 Tiling::Tiling(const Coordinates& coords, double nudge)
   : m_coords(coords)
   , m_nudge(nudge)

@@ -12,7 +12,7 @@
 
 #include <string>
 
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
   // create a new function to take in the original_grouping and the newly created shadow_grouping
     // the return of this new function should be a std::map<Cluster*, std::pair<Cluster*, Cluster*> >. 
     // The first Cluster should be the original cluster, the first of the pair Clusters should be the corresponding shadow_cluster, the second of the pair Cluster should be the main cluster due to separation. 

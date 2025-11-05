@@ -1,8 +1,10 @@
 #include "WireCellUtil/ConfigManager.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Logging.h"
 
 using namespace std;
 using namespace WireCell;
+
 
 ConfigManager::ConfigManager()
   : m_top(Json::arrayValue)
@@ -10,7 +12,14 @@ ConfigManager::ConfigManager()
 }
 ConfigManager::~ConfigManager() {}
 
-void ConfigManager::extend(Configuration more) { m_top = append(m_top, more); }
+void ConfigManager::extend(Configuration more)
+{
+    // m_top = append(m_top, more);
+
+    for (auto one : more) {
+        add(one);
+    }
+}
 
 int ConfigManager::index(const std::string& type, const std::string& name) const
 {
@@ -30,9 +39,15 @@ int ConfigManager::index(const std::string& type, const std::string& name) const
 
 int ConfigManager::add(Configuration& cfg)
 {
-    int ind = this->index(get<string>(cfg, "type"), get<string>(cfg, "name"));
+    const std::string type = get<string>(cfg, "type");
+    const std::string name = get<string>(cfg, "name");
+
+    int ind = this->index(type, name);
     if (ind < 0) {
         ind = m_top.size();
+    }
+    else {
+        spdlog::warn("ConfigManager:add() overwriting existing type=\"{}\" name=\"{}\"", type, name);
     }
     m_top[ind] = cfg;
     return ind;

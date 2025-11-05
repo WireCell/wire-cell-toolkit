@@ -23,6 +23,7 @@ Gen::MipRecombination::MipRecombination(double Rmip, double Wi)
 }
 Gen::MipRecombination::~MipRecombination() {}
 double Gen::MipRecombination::operator()(double dE, double dX) { return m_rmip * dE / m_wi; }
+double Gen::MipRecombination::dE(double dQ, double dX) { return dQ * m_wi / m_rmip; }
 void Gen::MipRecombination::configure(const WireCell::Configuration& config)
 {
     m_rmip = get(config, "Rmip", m_rmip);
@@ -52,6 +53,12 @@ double Gen::BirksRecombination::operator()(double dE, double dX)
 {
     const double R = m_a3t / (1 + (dE / dX) * m_k3t / (m_efield * m_rho));
     return R * dE / m_wi;
+}
+double Gen::BirksRecombination::dE(double dQ, double dX)
+{
+    const double numerator = dQ;
+    const double denominator = m_a3t/m_wi - dQ/dX * m_k3t/(m_efield*m_rho);
+    return numerator / denominator;
 }
 void Gen::BirksRecombination::configure(const WireCell::Configuration& config)
 {
@@ -89,6 +96,14 @@ double Gen::BoxRecombination::operator()(double dE, double dX)
     const double tmp = (dE / dX) * m_b / (m_efield * m_rho);
     const double R = std::log(m_a + tmp) / tmp;
     return R * dE / m_wi;
+}
+double Gen::BoxRecombination::dE(double dQ, double dX)
+{
+    const double coeff = m_b / (m_efield * m_rho);
+    const double a_exp = std::exp(dQ/dX * coeff * m_wi);
+    const double numerator = (a_exp - m_a)*dX;
+    const double denominator = coeff;
+    return numerator / denominator;
 }
 void Gen::BoxRecombination::configure(const WireCell::Configuration& config)
 {

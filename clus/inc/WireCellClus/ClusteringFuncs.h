@@ -1,21 +1,81 @@
+/**
+   This header provides various free functions used in clustering.
+
+   Some implementations may be found in clustering_*.cxx.  The rest are in
+   ClusteringFuncs.cxx.
+
+ */
+
+#ifndef WIRECELLCLUS_CLUSTERINGFUNCS
+#define WIRECELLCLUS_CLUSTERINGFUNCS
+
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade.h"
-#include "WireCellClus/ClusteringRetile.h"
-#include "WireCellUtil/NamedFactory.h"
-#include "WireCellUtil/Units.h"
-#include "WireCellUtil/Persist.h"
+#include "WireCellClus/IPCTransform.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/Graphs.h"
+
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensorSet.h"
 
-#include "WireCellUtil/Graph.h"
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Units.h"
+#include "WireCellUtil/Persist.h"
 
 
+
+#include <string>
 #include <fstream>
 
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
     using namespace WireCell::PointCloud::Tree;
+
+    /// Some clustering functions define and react to flags defined on cluster
+    /// facades.  We name these flags with strings in this namespace to assure
+    /// consistency, add documentation/comments and avoid typos.  Note,
+    /// merge_clusters() will call fresh.from(other) to forward flags.
+    namespace Flags {
+
+        /// Indicates the cluster is a "live" cluster and connected to a "dead"
+        /// cluster.
+        inline const std::string live_dead = "live_dead";
+
+        /// Indicates the cluster has a flash coincident with beam timing
+        inline const std::string beam_flash = "beam_flash";
+        
+        /// Indicates the cluster is tagged as through-going muon (TGM)
+        inline const std::string tgm = "tgm";
+        
+        /// Indicates the cluster is tagged as low energy
+        inline const std::string low_energy = "low_energy";
+        
+        /// Indicates the cluster is tagged as light mismatch (LM)
+        inline const std::string light_mismatch = "light_mismatch";
+        
+        /// Indicates the cluster is tagged as fully contained
+        inline const std::string fully_contained = "fully_contained";
+        
+        /// Indicates the cluster is tagged as short track muon (STM)
+        inline const std::string short_track_muon = "short_track_muon";
+        
+        /// Indicates the cluster has full detector dead region
+        inline const std::string full_detector_dead = "full_detector_dead";
+
+        // main cluster
+        inline const std::string main_cluster = "main_cluster";
+
+        // associated cluster
+        inline const std::string associated_cluster = "associated_cluster"; 
+
+        /// This flag is set by ClusteringTaggerCheckSTM algorithm when specific STM conditions are met
+        inline const std::string STM = "STM";
+
+        inline const std::string TGM = "TGM";
+
+    }
 
     struct ClusterLess {
         bool operator()(const Cluster* a, const Cluster* b) const {
@@ -32,54 +92,42 @@ namespace WireCell::PointCloud::Facade {
     using cluster_vector_t = std::vector<Cluster*>;
 
 
-    // clustering_util.cxx
+    // This function will produce a new cluster in the grouping corresponding to
+    // each connected component in the cluster_connectivity_graph_t that as two
+    // or more clusters.  Any cluster in a single-cluster component is simply
+    // left in place in the grouping.
     //
-    // This function will produce new clusters in live_clusters.  The children
-    // of each "fresh" cluster will be those of the "donor" clusters that are
-    // connected according to the cluster_connectivity_graph_t.  The "fresh"
-    // cluster will be added to and the "donor" clusters will be removed from
-    // "known_clusters".  The "donor" clusters will also be removed from
-    // live_clusters.
+    // Each new cluster will be given the children (blob nodes) of the clusters
+    // in the associated connected component.  These now empty clusters will be
+    // removed from the grouping and discarded.
     //
-    // If both aname and pcname are given then store a cc array in any newly
-    // created clusters holding the merged set of blobs.  The cc array will
-    // arbitrarily label each blob with a number corresponding to the original
-    // cluster which was parent to the blob (and which is destroyed after this
-    // function).
+    // If both aname and pcname are given then a representation of the previous
+    // clustering of blob nodes will be stored in the new cluster.  This
+    // connected component (cc) array is in child-node-order and its integer
+    // value counts which original cluster donated the blob to the new cluster.
     //
-    // See above for cluster_connectivity_graph_t.
-    void merge_clusters(cluster_connectivity_graph_t& g, // 
-			Grouping& grouping,
-			cluster_set_t& known_clusters, // in/out
-                        const std::string& aname="", const std::string& pcname="perblob");
+    // The fresh.from(other) is called to transfer flags, scope and possibly
+    // other bits of information.
+    //
+    // Pointers to the newly created cluster node facades are returned.  These
+    // are loaned.  As usual, the cluster node owns the facade and these nodes
+    // are in turn owned by the grouping node.
+    std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, // 
+                                         Grouping& grouping,
+                                         const std::string& aname="",
+                                         const std::string& pcname="perblob");
+
     
-    // clustering_live_dead.cxx
-    // first function ...
-    void clustering_live_dead(Grouping& live_clusters,
-                              const Grouping& dead_clusters,
-                              cluster_set_t& cluster_connected_dead,  // in/out
-                              const int dead_live_overlap_offset      // specific params
-    );
-    class ClusteringLiveDead {
-       public:
-        ClusteringLiveDead(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
-        }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_live_dead(live_clusters, dead_clusters, cluster_connected_dead, dead_live_overlap_offset_);
-        }
-
-       private:
-        int dead_live_overlap_offset_{2};
-    };
-
-
-
-    // clustering_extend.cxx
+    /**
+     * Extract geometry information from a grouping
+     * @param grouping The input Grouping object
+     * @param dv Detector geometry provider
+     * @return Tuple of (drift_direction, angle_u, angle_v, angle_w)
+     */
+    std::tuple<geo_point_t, double, double, double> extract_geometry_params(
+        const Grouping& grouping,
+        IDetectorVolumes::pointer dv);
 
     std::vector<std::pair<geo_point_t, const Blob*>> get_strategic_points(const Cluster& cluster);
 
@@ -95,426 +143,55 @@ namespace WireCell::PointCloud::Facade {
 			       );
 			       
     
-    // clustering_extend.cxx
-    // second function ...
-    void clustering_extend(Grouping& live_clusters,
-                           cluster_set_t& cluster_connected_dead,            // in/out
-                           const int flag,                                                //
-                           const double length_cut = 150*units::cm,                       //
-                           const int num_try = 0,                                         //
-                           const double length_2_cut = 3*units::cm,                       //
-                           const int num_dead_try =3                                      //
-			   );
-    class ClusteringExtend {
-       public:
-        ClusteringExtend(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            flag_ = get(config, "flag", 0);
-            length_cut_ = get(config, "length_cut", 150*units::cm);
-            num_try_ = get(config, "num_try", 0);
-            length_2_cut_ = get(config, "length_2_cut", 3*units::cm);
-            num_dead_try_ = get(config, "num_dead_try", 3);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_extend(live_clusters, cluster_connected_dead, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
-        }
-
-       private:
-        int flag_{0};
-        double length_cut_{150*units::cm};
-        int num_try_{0};
-        double length_2_cut_{3*units::cm};
-        int num_dead_try_{3};
-    };
-    class ClusteringExtendLoop {
-       public:
-        ClusteringExtendLoop(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            num_try_ = get(config, "num_try", 0);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            // for very busy events do less ...
-            int num_try = num_try_;
-            if (live_clusters.nchildren() > 1100) num_try = 1;
-            for (int i = 0; i != num_try; i++) {
-                // deal with prolong case
-                clustering_extend(live_clusters, cluster_connected_dead, 1, 150*units::cm, 0);
-                // deal with parallel case
-                clustering_extend(live_clusters, cluster_connected_dead, 2, 30*units::cm, 0);
-                // extension regular case
-                clustering_extend(live_clusters, cluster_connected_dead, 3, 15*units::cm, 0);
-                // extension ones connected to dead region ...
-                if (i == 0) {
-                    clustering_extend(live_clusters, cluster_connected_dead, 4, 60 * units::cm, i);
-                }
-                else {
-                    clustering_extend(live_clusters, cluster_connected_dead, 4, 35 * units::cm, i);
-                }
-            }
-        }
-
-       private:
-        int num_try_{0};
-    };
-
-    bool Clustering_4th_prol(const Cluster& cluster1,
-			     const Cluster& cluster2,
-			     double length_2,
-			     geo_point_t& earliest_p,
-			     geo_point_t& dir_earlp,
-			     double length_cut);
-    
-    bool Clustering_4th_para(const Cluster& cluster1,
-			     const Cluster& cluster2,
-			     double length_1, double length_2,
-			     geo_point_t& earliest_p,
-			     geo_point_t& dir_earlp,
-			     double length_cut);
-
-    bool Clustering_4th_reg(const Cluster& cluster1,
-			    const Cluster& cluster2,
-			    double length_1, double length_2,
-			    geo_point_t p1, double length_cut);
-
-    bool Clustering_4th_dead(const Cluster& cluster1,
-			     const Cluster& cluster2,
-			     double length_1, double length_2, double length_cut, int num_dead_try=3);
-      
-
-    // clustering_regular.cxx
-    // third function 
-    void clustering_regular(Grouping& live_clusters,
-                            cluster_set_t& cluster_connected_dead,            // in/out
-                            const double length_cut = 45*units::cm,                                       //
-                            bool flag_enable_extend = true                                       //
-    );
-    class ClusteringRegular {
-       public:
-        ClusteringRegular(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            length_cut_ = get(config, "length_cut", 45*units::cm);
-            flag_enable_extend_ = get(config, "flag_enable_extend", true);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_regular(live_clusters, cluster_connected_dead, length_cut_, flag_enable_extend_);
-        }
-
-       private:
-        double length_cut_{45*units::cm};
-        bool flag_enable_extend_{true};
-    };
-
-    bool Clustering_1st_round(const Cluster& cluster1,
-			      const Cluster& cluster2,
-			      double length_1,
-			      double length_2,
-			      double length_cut = 45*units::cm,
-			      bool flag_enable_extend = true);
-
-    // clustering_parallel_prolong.cxx:
-    void clustering_parallel_prolong(Grouping& live_clusters,
-                                     cluster_set_t& cluster_connected_dead, // in/out
-                                     const double length_cut = 35*units::cm
-    );
-    class ClusteringParallelProlong {
-       public:
-        ClusteringParallelProlong(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            length_cut_ = get(config, "length_cut", 35*units::cm);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_parallel_prolong(live_clusters, cluster_connected_dead, length_cut_);
-        }
-
-       private:
-        double length_cut_{35*units::cm};
-    };
-
-    bool Clustering_2nd_round(const Cluster& cluster1,
-			      const Cluster& cluster2,
-			      double length_1,
-			      double length_2,
-			      double length_cut = 35*units::cm);
-    
-    // clustering_close.cxx
-    void clustering_close(Grouping& live_clusters,           // 
-                          cluster_set_t& cluster_connected_dead, // in/out
-                          const double length_cut = 1*units::cm //
-    );
-    class ClusteringClose {
-       public:
-        ClusteringClose(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            length_cut_ = get(config, "length_cut", 1*units::cm);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_close(live_clusters, cluster_connected_dead, length_cut_);
-        }
-
-       private:
-        double length_cut_{1*units::cm};
-    };
-
-    bool Clustering_3rd_round( const Cluster& cluster1,
-			       const Cluster& cluster2,
-			       double length_1,
-			       double length_2,
-			       double length_cut = 1*units::cm);
-
-    // void clustering_separate(Grouping& live_grouping,
-    //                          std::map<int, std::pair<double, double>>& dead_u_index,
-    //                          std::map<int, std::pair<double, double>>& dead_v_index,
-    //                          std::map<int, std::pair<double, double>>& dead_w_index);
-
-    void clustering_separate(Grouping& live_grouping,
-                             const bool use_ctpc);
-    class ClusteringSeparate {
-       public:
-        ClusteringSeparate(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            use_ctpc_ = get(config, "use_ctpc", true);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_separate(live_clusters, use_ctpc_);
-        }
-
-       private:
-        double use_ctpc_{true};
-    };
-
-    void clustering_connect1(Grouping& live_grouping);
-    class ClusteringConnect1 {
-       public:
-        ClusteringConnect1(const WireCell::Configuration& config)
-        {
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_connect1(live_clusters);
-        }
-
-       private:
-    };
-
-    void clustering_deghost(Grouping& live_grouping,
-                            const bool use_ctpc,
-                            double length_cut = 0);
-    class ClusteringDeGhost {
-       public:
-        ClusteringDeGhost(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            use_ctpc_ = get(config, "use_ctpc", true);
-            length_cut_ = get(config, "length_cut", 0);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_deghost(live_clusters, use_ctpc_, length_cut_);
-        }
-
-       private:
-        double use_ctpc_{true};
-        double length_cut_{0};
-    };
-
-    // this is a function to test the implementation of CT point cloud ...
-    void clustering_ctpointcloud(Grouping& live_grouping);
-    class ClusteringCTPointCloud {
-       public:
-        ClusteringCTPointCloud(const WireCell::Configuration& config)
-        {
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_ctpointcloud(live_clusters);
-        }
-
-       private:
-    };
 
 
-    // this is a function to test the implementation of examine bundles ...
-    void clustering_examine_bundles(Grouping& live_grouping, const bool use_ctpc);
-    class ClusteringExamineBundles {
-       public:
-        ClusteringExamineBundles(const WireCell::Configuration& config)
-        {
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_examine_bundles(live_clusters, use_ctpc_);
-        }
-
-       private:
-        double use_ctpc_{true};
-    };
 
 
-    void clustering_examine_x_boundary(Grouping& live_grouping);
-    class ClusteringExamineXBoundary {
-       public:
-        ClusteringExamineXBoundary(const WireCell::Configuration& config)
-        {
-        }
 
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_examine_x_boundary(live_clusters);
-        }
-
-       private:
-    };
-
-    void clustering_protect_overclustering(Grouping& live_grouping);
-    class ClusteringProtectOverClustering {
-       public:
-        ClusteringProtectOverClustering(const WireCell::Configuration& config)
-        {
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            clustering_protect_overclustering(live_clusters);
-        }
-
-       private:
-    };
-
-    void clustering_neutrino(Grouping &live_grouping, int num_try);
-    class ClusteringNeutrino {
-       public:
-        ClusteringNeutrino(const WireCell::Configuration& config)
-        {
-            // FIXME: throw if not found?
-            num_try_ = get(config, "num_try", 1);
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            for (int i = 0; i != num_try_; i++) {
-                clustering_neutrino(live_clusters, i);
-            }
-        }
-
-       private:
-        int num_try_{1};
-    };
-
-    void clustering_isolated(Grouping& live_grouping);
-    class ClusteringIsolated {
-       public:
-        ClusteringIsolated(const WireCell::Configuration& config)
-        {
-        }
-
-        void operator()(Grouping& live_clusters, Grouping& dead_clusters, cluster_set_t& cluster_connected_dead) const
-        {
-            return clustering_isolated(live_clusters);
-        }
-
-       private:
-    };
-
+    // These Judge*() functions are used by multiple clustering methods.  They
+    // are defined in clustering_separate.cxx.
 
     // time_slice_length is length span for a slice
-    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length, const double time_slice_length);
+    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length);
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
-    bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
+    bool JudgeSeparateDec_2(const Cluster* cluster, IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length);
     
 
 
 
-
+    // this is used only by ClusteringSeparate but keep it public for symmetry with Separate_2.
     std::vector<Cluster *> Separate_1(const bool use_ctpc, Cluster *cluster,
-                                                         std::vector<geo_point_t> &boundary_points,
-                                                         std::vector<geo_point_t> &independent_points,
-                                                         std::map<int, std::pair<double, double>> &dead_u_index,
-                                                         std::map<int, std::pair<double, double>> &dead_v_index,
-                                                         std::map<int, std::pair<double, double>> &dead_w_index,
-                                                         double length);
+                                      std::vector<geo_point_t> &boundary_points,
+                                      std::vector<geo_point_t> &independent_points,
+                                      double length, geo_point_t dir_cosmic, geo_point_t dir_beam, 
+                                      IDetectorVolumes::pointer dv, 
+                                      IPCTransformSet::pointer pcts,
+                                      const Tree::Scope& scope);
 
-    std::vector<int> Separate_2(Cluster *cluster, const double dis_cut =  5*units::cm, const size_t ticks_per_slice = 4);
+    // This is used by multiple clustering methods.
+    std::vector<int> Separate_2(Cluster *cluster, 
+                                const Tree::Scope& scope,
+                                const double dis_cut =  5*units::cm);
+
+    // Function to compute wire plane parameters for clustering algorithms
+    void compute_wireplane_params(
+        const std::set<WirePlaneId>& wpids,
+        const IDetectorVolumes::pointer dv,
+        std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
+        std::map<WirePlaneId, std::pair<geo_point_t, double>>& wpid_U_dir,
+        std::map<WirePlaneId, std::pair<geo_point_t, double>>& wpid_V_dir,
+        std::map<WirePlaneId, std::pair<geo_point_t, double>>& wpid_W_dir,
+        std::set<int>& apas);
+
+    // Calculate PCA direction for a set of points around a center point
+    geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points);
 
 
-    inline std::function<void(Grouping&, Grouping&, cluster_set_t&)> getClusteringFunction(const WireCell::Configuration& config) {
-        std::string function_name = config["name"].asString();
+}  // namespace WireCell::Clus::Facade
 
-        if (function_name == "clustering_retile") {
-            return ClusteringRetile(config);
-        }
-        if (function_name == "clustering_live_dead") {
-            return ClusteringLiveDead(config);
-        }
-        else if (function_name == "clustering_extend") {
-            return ClusteringExtend(config);
-        }
-        else if (function_name == "clustering_regular") {
-            return ClusteringRegular(config);
-        }
-        else if (function_name == "clustering_parallel_prolong") {
-            return ClusteringParallelProlong(config);
-        }
-        else if (function_name == "clustering_close") {
-            return ClusteringClose(config);
-        }
-        else if (function_name == "clustering_extend_loop") {
-            return ClusteringExtendLoop(config);
-        }
-        else if (function_name == "clustering_separate") {
-            return ClusteringSeparate(config);
-        }
-        else if (function_name == "clustering_connect1") {
-            return ClusteringConnect1(config);
-        }
-        else if (function_name == "clustering_deghost") {
-            return ClusteringDeGhost(config);
-        }
-        else if (function_name == "clustering_examine_x_boundary") {
-            return ClusteringExamineXBoundary(config);
-        }
-        else if (function_name == "clustering_protect_overclustering") {
-            return ClusteringProtectOverClustering(config);
-        }
-        else if (function_name == "clustering_neutrino") {
-            return ClusteringNeutrino(config);
-        }
-        else if (function_name == "clustering_isolated") {
-            return ClusteringIsolated(config);
-        }
-        else if (function_name == "clustering_ctpointcloud") {
-            return ClusteringCTPointCloud(config);
-        }
-        else if (function_name == "clustering_examine_bundles") {
-            return ClusteringExamineBundles(config);
-        }
-        else {
-            throw std::invalid_argument("Unknown function name in configuration");
-        }
-    }
-}  // namespace WireCell::PointCloud::Facade
+#endif
+

@@ -31,7 +31,7 @@ namespace WireCell {
 
     private:
       std::vector<WireCell::BoundingBox> m_boxes;
-      // std::size_t m_count{0};
+     //std::size_t m_count{0};
 
       double bin_width;
       double tpc_width;

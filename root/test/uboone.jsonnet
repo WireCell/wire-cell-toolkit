@@ -55,12 +55,13 @@ local anode = mid.anodes()[0];
         name: sampler.name,
         data: {
             input: fname,       // file name or list
+            anode: wc.tn(anode),
             datapath: datapath,
             sampler: wc.tn(sampler),
         } + if optical then {
             light: "light", flash: "flash", flashlight: "flashlight"
         } else {}
-    }, nin=1, nout=1, uses=[sampler]),
+    }, nin=1, nout=1, uses=[sampler, anode]),
         
     ClusterFlashDump(datapath="pointtrees/%d/uboone") :: pg.pnode({
         type: 'ClusterFlashDump',

@@ -92,5 +92,7 @@ bool Sio::NumpyDepoTools::load(const std::string& fname, int count,
         }
     }
 
+    // (void)npositive; // silence unused warning
+
     return true;
 }

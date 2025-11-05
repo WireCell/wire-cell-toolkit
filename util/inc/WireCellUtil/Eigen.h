@@ -22,6 +22,8 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wignored-attributes"
 #pragma GCC diagnostic ignored "-Wignored-attributes"
+#pragma GCC diagnostic warning "-Wunused-but-set-variable"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #endif
 #if HAS_WARNING("-Wunused-but-set-variable")
 #pragma GCC diagnostic push

@@ -1,6 +1,8 @@
 #include "WireCellRoot/UbooneClusterSource.h"
 #include "WireCellAux/SamplingHelpers.h"
 #include "WireCellAux/TensorDMpointtree.h"
+#include "WireCellAux/SimpleBlob.h"
+#include "WireCellAux/SimpleSlice.h"
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
@@ -40,6 +42,9 @@ Root::UbooneClusterSource::~UbooneClusterSource()
 
 void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
 {
+    auto anode_tn = get<std::string>(cfg, "anode", "AnodePlane");
+    m_anode = Factory::find_tn<IAnodePlane>(anode_tn);
+
     auto check_file = [](const auto& jstr) -> std::string {
         auto got = Persist::resolve(jstr.asString());
         if (got.empty()) {
@@ -89,9 +94,12 @@ void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
     m_time_offset = get(cfg, "time_offset", m_time_offset);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
 
-    m_angle_u = get(cfg, "angle_u", m_angle_u);
-    m_angle_v = get(cfg, "angle_v", m_angle_v);
-    m_angle_w = get(cfg, "angle_w", m_angle_w);
+    
+    m_angles = {
+        get(cfg, "angle_u", m_angles[0]),
+        get(cfg, "angle_v", m_angles[1]),
+        get(cfg, "angle_w", m_angles[2])
+    };
 }
 
 WireCell::Configuration Root::UbooneClusterSource::default_configuration() const
@@ -144,10 +152,356 @@ bool Root::UbooneClusterSource::operator()(const IBlobSet::pointer& in, output_q
     return true;
 }
 
+IChannel::pointer Root::UbooneClusterSource::get_channel(int chanid) const
+{
+    auto ich = m_anode->channel(chanid);
+    if (!ich) {
+        log->error("No channel for ID {}, segfault to follow", chanid);
+    }
+    return ich;
+}
+
+
+// Fill slices and blobs from "dead" blob sets.  This simply extracts the blob
+// and slice pointers from each blob set.  Output vectors are not cleared prior
+// to filling.
+void Root::UbooneClusterSource::extract_dead(
+    const IBlobSet::vector& blobsets,
+    ISlice::vector& out_slices,
+    IBlob::vector& out_blobs) const
+{
+    for (const auto& ibs : blobsets) {
+        const auto& fresh = ibs->blobs();
+        out_blobs.insert(out_blobs.end(), fresh.begin(), fresh.end());
+        out_slices.push_back(ibs->slice());
+    }
+}
+
+
+// Map from time slice ID.  This MUST be used same as in UbooneBlobSource.
+using SimpleSlicePtr = std::shared_ptr<Aux::SimpleSlice>;
+using SliceMap = std::map<int, SimpleSlicePtr>;
+
+// // Fill slices and blobs from "live" blob sets.  This will produce new slices
+// // according to the ROOT data and new blobs same as old blobs that refer to
+// // corresponding new slices.  Output vectors are not cleared prior to filling.
+// void Root::UbooneClusterSource::extract_live(
+//     const IBlobSet::vector& blobsets,
+//     ISlice::vector& out_slices,
+//     IBlob::vector& out_blobs) const
+// {
+//     // Temporarily hold slices by their time slice id so we can look up later as
+//     // we patch in new slices to old blobs.
+//     SliceMap by_tid;
+
+//     // Get representative frame.  Note, this is likely a trace-free frame
+//     // manufactured by one of several upstream UbooneBlobSource's.  In
+//     // principle, right here we could replace it with a fully fleshed one built
+//     // from ROOT data.  But, it's a fully fleshed activity we currently seek to
+//     // keep we keep it as-is.
+//     auto iframe = blobsets[0]->slice()->frame(); 
+
+//     // WARNING: the code to fill the activity is ALMOST an exact copy-paste from
+//     // UbooneBlobSource.
+
+//     // Make all new slices, initially with no activity.
+//     const int n_slices_span = m_files->trees->nslices_span();
+//     const int nrebin = m_files->trees->header.nrebin;
+//     const double span = nrebin * m_tick;
+
+//     // Intermediate mutable version.
+//     std::vector<SimpleSlicePtr> slices(n_slices_span);
+//     for (int tsid = 0; tsid<n_slices_span; ++tsid) {
+//         auto sslice = std::make_shared<SimpleSlice>(iframe, tsid, tsid*span, span);
+//         slices[tsid] = sslice;
+//         // log->debug("simple slice: ident:{}, time:{}, span:{}, frame:{}",
+//         //            tsid, tsid*span, span, iframe->ident());
+//     }
+
+//     // Now fill in activity
+//     const auto& act = m_files->trees->activity; // abbrev
+//     const auto& tids = act.timesliceId;
+//     const int n_slices_data = m_files->trees->nslices_data();
+//     for (int sind=0; sind<n_slices_data; ++sind) {
+
+//         int tsid = tids->at(sind); // time slice ID
+
+//         const auto& q = act.raw_charge->at(sind);
+//         const auto& dq = act.raw_charge_err->at(sind);
+//         const auto& chans = act.timesliceChannel->at(sind);
+//         const size_t nchans = chans.size();
+        
+//         auto& sslice = slices[tsid];
+//         if (!sslice) {
+//             raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+//         }
+//         auto& activity = sslice->activity();
+
+//         // Fill in known channel measures in this time slice.
+//         for (size_t cind=0; cind<nchans; ++cind) {
+//             const int chid = chans[cind];
+//             auto ichan = get_channel(chid);
+//             activity[ichan] = ISlice::value_t(q[cind], dq[cind]);
+//         }
+
+//         // Fill in known dead channels in this time slice
+//         for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
+//             auto ichan = get_channel(ch);
+//             // If slice overlaps with any of the bin ranges.
+//             for (const auto& tt : brl) {
+//                 if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
+//                 activity[ichan] = m_bodge;
+//             }
+//         }
+
+//     }
+//     out_slices.insert(out_slices.end(), slices.begin(), slices.end());
+
+
+
+
+
+//     // Now freshen the blobs with new slice and everything else copied from old.
+//     for (auto blobset : blobsets) {
+//         int tsid = blobset->ident(); // UbooneBlobSource must continue to follow this convention.
+//         for (auto old_blob : blobset->blobs()) {
+
+//             auto sslice = out_slices[tsid];
+//             if (!sslice) {
+//                 raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+//             }
+
+//             out_blobs.push_back(
+//                 std::make_shared<SimpleBlob>(
+//                     old_blob->ident(),
+//                     old_blob->value(),
+//                     old_blob->uncertainty(),
+//                     old_blob->shape(),
+//                     sslice,
+//                     old_blob->face()));
+//         }
+//     }
+// }
+
+
+// Fill slices and blobs from "live" blob sets.  This will produce new slices
+// according to the ROOT data and new blobs same as old blobs that refer to
+// corresponding new slices.  Output vectors are not cleared prior to filling.
+void Root::UbooneClusterSource::extract_live(
+    const IBlobSet::vector& blobsets,
+    ISlice::vector& out_slices,
+    IBlob::vector& out_blobs) const
+{
+    // Temporarily hold slices by their time slice id so we can look up later as
+    // we patch in new slices to old blobs.
+    SliceMap by_tid;
+
+    // Get representative frame.  Note, this is likely a trace-free frame
+    // manufactured by one of several upstream UbooneBlobSource's.  In
+    // principle, right here we could replace it with a fully fleshed one built
+    // from ROOT data.  But, it's a fully fleshed activity we currently seek to
+    // keep we keep it as-is.
+    auto iframe = blobsets[0]->slice()->frame(); 
+
+    // WARNING: the code to fill the activity is ALMOST an exact copy-paste from
+    // UbooneBlobSource.
+
+    // Get dimensions for slice creation
+    const int n_slices_span = m_files->trees->nslices_span();
+    const int nrebin = m_files->trees->header.nrebin;
+    const double span = nrebin * m_tick;
+
+    // =================================================================
+    // STEP 1: Load the activity map
+    // =================================================================
+    
+    // Create activity maps for each time slice
+    std::vector<ISlice::map_t> slice_activities(n_slices_span);
+    
+    // Fill initial activity from ROOT data
+    const auto& act = m_files->trees->activity; // abbrev
+    const auto& tids = act.timesliceId;
+    const int n_slices_data = m_files->trees->nslices_data();
+    
+    for (int sind = 0; sind < n_slices_data; ++sind) {
+        int tsid = tids->at(sind); // time slice ID
+        if (tsid >= n_slices_span) continue;
+
+        const auto& q = act.raw_charge->at(sind);
+        const auto& dq = act.raw_charge_err->at(sind);
+        const auto& chans = act.timesliceChannel->at(sind);
+        const size_t nchans = chans.size();
+        
+        auto& activity = slice_activities[tsid];
+
+        // Fill in known channel measures in this time slice.
+        for (size_t cind = 0; cind < nchans; ++cind) {
+            const int chid = chans[cind];
+            auto ichan = get_channel(chid);
+            if (ichan) {
+                activity[ichan] = ISlice::value_t(q[cind], dq[cind]);
+            }
+        }
+    }
+
+    // =================================================================
+    // STEP 2: Modify activity map based on bad channels (bad_ch)
+    // =================================================================
+    
+    // Fill in known dead channels in all time slices
+    for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
+        auto ichan = get_channel(ch);
+        if (!ichan) continue;
+        
+
+        // Check each time slice to see if it overlaps with any of the bin ranges
+        for (int tsid = 0; tsid < n_slices_span; ++tsid) {
+            auto& activity = slice_activities[tsid];
+            
+            // If slice overlaps with any of the bin ranges.
+            for (const auto& tt : brl) {
+                if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
+
+                // if (ch == 955)         std::cout << "Test: " << tsid << " " << ch << " " << n_slices_span << " " << brl.front().first << " " << brl.front().second << std::endl;
+
+                activity[ichan] = m_bodge;
+                break; // No need to check other ranges for this slice
+            }
+        }
+    }
+
+    // =================================================================
+    // STEP 3: Modify activity map based on TC and TDC flag information
+    // =================================================================
+    
+    // Process TC (live) data flag information
+    const auto& live_data = m_files->trees->live;
+    const size_t n_live_blobs = live_data.cluster_id_vec->size();
+    
+    int num_wires[3]={0,2400,4800};
+
+    for (size_t bind = 0; bind < n_live_blobs; ++bind) {
+        const int tsid = live_data.time_slice_vec->at(bind);
+        
+        // Skip if time slice is out of range
+        if (tsid >= n_slices_span) continue;
+        
+        auto& activity = slice_activities[tsid];
+        
+        // Check each plane flag - 0 means the plane is dead for this blob
+        const std::vector<int> flags = {
+            live_data.flag_u_vec->at(bind),
+            live_data.flag_v_vec->at(bind), 
+            live_data.flag_w_vec->at(bind)
+        };
+        const std::vector<std::vector<int>> wire_indices = {
+            live_data.wire_index_u_vec->at(bind),
+            live_data.wire_index_v_vec->at(bind),
+            live_data.wire_index_w_vec->at(bind)
+        };
+        
+        for (int plane = 0; plane < 3; ++plane) {
+            if (flags[plane] == 0) { // This plane is dead for this blob
+                // Mark all wires in this plane for this blob as bad
+                for (int wire_idx : wire_indices[plane]) {
+                    auto ichan = get_channel(wire_idx + num_wires[plane]);
+                    if (ichan) {
+                        // if (activity[ichan].uncertainty() < 1e10)
+                            // std::cout << "TC: " << tsid << " " << wire_idx << " " << plane << " " << activity[ichan] << std::endl;
+                        activity[ichan] = m_bodge; // Set to (0, 1e12)
+                    }
+                }
+            }
+        }
+    }
+
+    // Process TDC (dead) data flag information if available
+    if (m_files->trees->dead.cluster_id_vec != nullptr) {
+        const auto& dead_data = m_files->trees->dead;
+        const size_t n_dead_blobs = dead_data.cluster_id_vec->size();
+        
+        for (size_t bind = 0; bind < n_dead_blobs; ++bind) {
+            const auto& time_slices = dead_data.time_slices_vec->at(bind);
+            
+            // TDC has multiple time slices per blob
+            for (int tsid : time_slices) {
+                if (tsid >= n_slices_span) continue;
+                
+                auto& activity = slice_activities[tsid];
+                
+                // Same flag processing as live data
+                const std::vector<int> flags = {
+                    dead_data.flag_u_vec->at(bind),
+                    dead_data.flag_v_vec->at(bind),
+                    dead_data.flag_w_vec->at(bind)
+                };
+                const std::vector<std::vector<int>> wire_indices = {
+                    dead_data.wire_index_u_vec->at(bind),
+                    dead_data.wire_index_v_vec->at(bind),
+                    dead_data.wire_index_w_vec->at(bind)
+                };
+                
+                for (int plane = 0; plane < 3; ++plane) {
+                    if (flags[plane] == 0) { // This plane is dead for this blob
+                        for (int wire_idx : wire_indices[plane]) {
+                            auto ichan = get_channel(wire_idx + num_wires[plane]);
+                            if (ichan) {
+                                // if (activity[ichan].uncertainty() < 1e10)
+                                //    std::cout << "TDC: " << activity[ichan] << std::endl;
+                                activity[ichan] = m_bodge; // Set to (0, 1e12)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =================================================================
+    // STEP 4: Form slices with finalized activity maps
+    // =================================================================
+    
+    // Intermediate mutable version.
+    std::vector<SimpleSlicePtr> slices(n_slices_span);
+    for (int tsid = 0; tsid < n_slices_span; ++tsid) {
+        auto sslice = std::make_shared<SimpleSlice>(iframe, tsid, tsid*span, span);
+        
+        // Copy the prepared activity map into the slice
+        auto& slice_activity = sslice->activity();
+        slice_activity = slice_activities[tsid];  // Copy the prepared activity map
+        
+        slices[tsid] = sslice;
+        // log->debug("simple slice: ident:{}, time:{}, span:{}, frame:{}",
+        //            tsid, tsid*span, span, iframe->ident());
+    }
+    
+    out_slices.insert(out_slices.end(), slices.begin(), slices.end());
+
+    // Now freshen the blobs with new slice and everything else copied from old.
+    for (auto blobset : blobsets) {
+        int tsid = blobset->ident(); // UbooneBlobSource must continue to follow this convention.
+        for (auto old_blob : blobset->blobs()) {
+
+            auto sslice = out_slices[tsid];
+            if (!sslice) {
+                raise<RuntimeError>("UbooneClusterSource given ROOT files inconsistent with input blobs");
+            }
+
+            out_blobs.push_back(
+                std::make_shared<SimpleBlob>(
+                    old_blob->ident(),
+                    old_blob->value(),
+                    old_blob->uncertainty(),
+                    old_blob->shape(),
+                    sslice,
+                    old_blob->face()));
+        }
+    }
+}
 
 bool Root::UbooneClusterSource::flush(output_queue& outq)
 {
-    bool load_ok = m_files->next();
+    const bool load_ok = m_files->next();
     if (!load_ok) {
         log->error("failed to load uboone cluster event at call {}", m_calls);
         return false;
@@ -171,29 +525,31 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         auto& spc = cnode->value.local_pcs()["cluster_scalar"];
         spc.add("flash", Array({(int)-1}));
         spc.add("ident", Array({cid}));
+
+        apply_tagger_flags(cnode, cid);
     }
 
-    int ident = -1;
-
-
-    // Collect all the IBlobs from all cached IBlobSets
-    std::vector<IBlob::pointer> iblobs;
-    IAnodeFace::pointer iface = nullptr;
-    for (const auto& ibs : m_cache) {
-        if (ident < 0) {
-            ident = ibs->slice()->frame()->ident();
-            log->debug("using ident {} from first blob set frame", ident);
-        }
-        // use the first iface we find
-        if (!iface && ibs->blobs().size()) {
-            iface = ibs->blobs().front()->face();
-        }
-        const auto& fresh = ibs->blobs();
-        iblobs.insert(iblobs.end(), fresh.begin(), fresh.end());
+    // First, collect all the IBlobs and ISlices from all cached IBlobSets
+    IBlob::vector iblobs;
+    ISlice::vector islices;
+    if (trees.is_live()) {
+        extract_live(m_cache, islices, iblobs);
+    }
+    else {
+        extract_dead(m_cache, islices, iblobs);
     }
 
-    size_t nublobs = blob_cluster_ids.size();
-    size_t niblobs = iblobs.size();
+    const int ident = islices[0]->frame()->ident();
+    IAnodeFace::pointer iface = iblobs[0]->face();
+    log->debug("is_live:{}, extracted {} slices, {} blobs from {} blob sets from frame ident {} face ident {} at call {}",
+               trees.is_live(),
+               
+               islices.size(), iblobs.size(), m_cache.size(), ident, iface->ident(), m_calls);
+
+    m_cache.clear();
+
+    const size_t nublobs = blob_cluster_ids.size();
+    const size_t niblobs = iblobs.size();
 
     log->debug("blobs: ub={} ib={} in {} clusters", nublobs, niblobs, cnodes.size());
     if (nublobs != niblobs) {
@@ -201,10 +557,10 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
                           niblobs, nublobs);
     }
 
-    //std::cout << "Test: " << niblobs << " " << nublobs << std::endl;
+    // Next dispatch the collected IBlobs and ISlices
 
+    // First, dispatch the IBlobs
     const double tick = 500*units::ns;
-    size_t n3dpoints_total = 0;
     for (size_t bind=0; bind<niblobs; ++bind) {
         const IBlob::pointer iblob = iblobs[bind];
 
@@ -225,42 +581,63 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
             continue;
         }
 
-        named_pointclouds_t pcs;
         if (trees.is_live()) {
-            auto [pc3d, aux] = m_sampler->sample_blob(iblob, bind);
-            n3dpoints_total += pc3d.size_major();
-            pcs.emplace("3d", pc3d);
-            /// These seem unused and bring in horrible code
-            pcs.emplace("2dp0", make2dds(pc3d, m_angle_u));
-            pcs.emplace("2dp1", make2dds(pc3d, m_angle_v));
-            pcs.emplace("2dp2", make2dds(pc3d, m_angle_w));
-            const Point center = calc_blob_center(pcs["3d"]);
-            auto scalar_ds = make_scalar_dataset(iblob, center, pcs["3d"].get("x")->size_major(), tick);
-            int max_wire_interval = aux.get("max_wire_interval")->elements<int>()[0];
-            int min_wire_interval = aux.get("min_wire_interval")->elements<int>()[0];
-            int max_wire_type = aux.get("max_wire_type")->elements<int>()[0];
-            int min_wire_type = aux.get("min_wire_type")->elements<int>()[0];
-            scalar_ds.add("max_wire_interval", Array({(int)max_wire_interval}));
-            scalar_ds.add("min_wire_interval", Array({(int)min_wire_interval}));
-            scalar_ds.add("max_wire_type", Array({(int)max_wire_type}));
-            scalar_ds.add("min_wire_type", Array({(int)min_wire_type}));
-            pcs.emplace("scalar", std::move(scalar_ds));
+
+            auto pcs = Aux::sample_live(m_sampler, iblob, m_angles, tick, bind);
+
+            
+            /// DO NOT EXTEND FURTHER! see #426, #430
+
+            if (pcs.empty()) {
+                SPDLOG_DEBUG("retile: skipping blob {} with no points", iblob->ident());
+                continue;
+            }
+
+            cnode->insert(Points(std::move(pcs)));
         }
         else { // dead
-            auto scalar_ds = make_scalar_dataset(iblob, {0,0,0}, 0, tick);
-            scalar_ds.add("max_wire_interval", Array({(int)-1}));
-            scalar_ds.add("min_wire_interval", Array({(int)-1}));
-            scalar_ds.add("max_wire_type", Array({(int)-1}));
-            scalar_ds.add("min_wire_type", Array({(int)-1}));
-            pcs.emplace("scalar", scalar_ds);
-            pcs.emplace("corner", make_corner_dataset(iblob));
 
+            cnode->insert(Points(Aux::sample_dead(iblob, tick)));
+            /// DO NOT EXTEND FURTHER! see #426, #430
         }
-        cnode->insert(Points(std::move(pcs)));
     }
-    log->debug("sampled {} points over {} blobs", n3dpoints_total, niblobs);
     
+    // Process individual cluster IDs for live data
+    if (trees.is_live()) {
+        const auto& individual_cluster_ids = trees.live.individual_cluster_ids();
+        
+        // Create isolated arrays for each cluster
+        for (const auto& [cid, cnode] : cnodes) {
+            auto& lpc = cnode->value.local_pcs();
+            auto& pc = lpc["perblob"];
+            
+            std::vector<int> cluster_cc2;
+            
+            // Find blobs belonging to this cluster and assign group IDs
+            for (size_t bind = 0; bind < niblobs; ++bind) {
+                const int index = iblobs[bind]->ident();
+                const int blob_cluster_id = blob_cluster_ids[index];
+                
+                if (blob_cluster_id == cid) {
+                    const int individual_cluster_id = individual_cluster_ids[index];
+                    
+                    if (individual_cluster_id == cid) {
+                        cluster_cc2.push_back(-1);  // Main cluster
+                    } else {
+                        cluster_cc2.push_back(individual_cluster_id);  // Sub-cluster
+                    }
+                }
+            }
+            
+            // Add the isolated array to the cluster's PCTree
+            if (!cluster_cc2.empty()) {
+                PointCloud::Array::shape_t shape = {cluster_cc2.size()};
+                pc.add("isolated", PointCloud::Array(cluster_cc2, shape, false));
+            }
+        }
+    }
 
+    // Add "flash"
     size_t nmatch=0;
     if (trees.is_live()) { 
         if (!m_light_name.empty()) {
@@ -282,25 +659,115 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         }
     }
 
-    std::string datapath = m_datapath;
-    if (datapath.find("%") != std::string::npos) {
-        datapath = String::format(datapath, ident);
+    // Dispatch the ISlices
+    if (trees.is_live()){
+        Aux::add_ctpc(root, islices, iface, 0, m_time_offset, m_drift_speed);
+        Aux::add_dead_winds(root, islices, iface, 0, m_time_offset, m_drift_speed);
     }
 
-    Aux::add_ctpc(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
-    Aux::add_dead_winds(root, m_cache, iface, 0, m_time_offset, m_drift_speed);
-    m_cache.clear();
 
     for (const auto& [name, pc] : root.value.local_pcs()) {
         log->debug("contains point cloud {} size_major {}", name, pc.size_major());
     }
-    auto tens = as_tensors(root, datapath);
 
+    // Serialize to tensors
+    std::string datapath = m_datapath;
+    if (datapath.find("%") != std::string::npos) {
+        datapath = String::format(datapath, ident);
+    }
+    auto tens = as_tensors(root, datapath);
     log->debug("made pc-tree ncluster={} nblob={} nmatch={} in {} tensors at {} with ident {} in call {}",
                cnodes.size(), niblobs, nmatch, tens.size(), datapath, ident, m_calls);
+    // for (auto& ten : tens) {
+    //     log->debug("{}", ten->metadata()["datapath"]);
+    // }
 
     auto out = as_tensorset(tens, ident);
     outq.push_back(out);
     return true;
 }
 
+void Root::UbooneClusterSource::apply_tagger_flags(WireCell::PointCloud::Tree::Points::node_t* cnode, int cluster_id) const
+{
+    if (!m_files || !m_files->trees) {
+        return;
+    }
+
+    const auto& trees = *m_files->trees;
+    
+    if (!trees.is_live()) {
+        return;
+    }
+
+    // Store tagger flag information in point cloud for later transfer to flags
+    auto& tagger_pc = cnode->value.local_pcs()["tagger_info"];
+    
+    // Check beam flash coincidence
+    bool beam_flash_coincident = trees.is_beam_flash_coincident(cluster_id);
+    
+    if (beam_flash_coincident) {
+        // Store that this cluster should have beam_flash flag
+        tagger_pc.add("has_beam_flash", PointCloud::Array({1}));
+        
+        // Get event type and extract individual flags
+        int event_type = trees.get_event_type(cluster_id);
+        // double cluster_length = trees.get_cluster_length(cluster_id);
+        
+        // Extract flags from event_type using bit operations
+        int flag_tgm = (event_type >> 3) & 1U;
+        int flag_low_energy = (event_type >> 4) & 1U;
+        int flag_lm = (event_type >> 1) & 1U;
+        int flag_fully_contained = (event_type >> 2) & 1U;
+        int flag_stm = (event_type >> 5) & 1U;
+        int flag_full_detector_dead = (event_type >> 6) & 1U;
+        
+        // // Store all flags in a single array to avoid potential point cloud issues
+        // std::cout << "Xin: Adding flags array for cluster " << cluster_id << std::endl;
+        // std::vector<int> flag_values = {flag_tgm, flag_low_energy, flag_lm, flag_fully_contained, flag_stm, flag_full_detector_dead};
+        // tagger_pc.add("tagger_flags", PointCloud::Array(flag_values));
+        
+        // Also store individual flags for backward compatibility
+        tagger_pc.add("has_tgm", PointCloud::Array({flag_tgm}));
+        tagger_pc.add("has_low_energy", PointCloud::Array({flag_low_energy}));
+        tagger_pc.add("has_light_mismatch", PointCloud::Array({flag_lm}));
+        tagger_pc.add("has_fully_contained", PointCloud::Array({flag_fully_contained}));
+        tagger_pc.add("has_short_track_muon", PointCloud::Array({flag_stm}));
+        tagger_pc.add("has_full_detector_dead", PointCloud::Array({flag_full_detector_dead}));
+        // std::cout << "Xin: Added all flags for cluster " << cluster_id << std::endl;
+        
+        // Store metadata
+        // tagger_pc.add("event_type", PointCloud::Array({event_type}));
+        // tagger_pc.add("cluster_length", PointCloud::Array({cluster_length}));
+        
+        // Debug: List all keys we just added
+        // std::cout << "Xin: Final tagger_pc keys for cluster " << cluster_id << ": ";
+        // for (const auto& key : tagger_pc.keys()) {
+        //     std::cout << key << " ";
+        // }
+        // std::cout << std::endl;
+        
+        log->debug("Stored tagger flag data for cluster {}: beam_flash=1, event_type={}", 
+                   cluster_id, event_type);
+
+        // std::cout << "Xin: Cluster " << cluster_id 
+        //           << " has beam flash coincident with event type: " << event_type 
+        //           << ", cluster length: " << cluster_length << " " << flag_tgm << " " << flag_low_energy << " " << flag_lm << " " << flag_fully_contained << " " << flag_stm << " " << flag_full_detector_dead << std::endl;
+    } else {
+        // Store that this cluster should NOT have beam_flash flag
+        tagger_pc.add("has_beam_flash", PointCloud::Array({0}));
+
+        // Also store individual flags for backward compatibility
+        tagger_pc.add("has_tgm", PointCloud::Array({0}));
+        tagger_pc.add("has_low_energy", PointCloud::Array({0}));
+        tagger_pc.add("has_light_mismatch", PointCloud::Array({0}));
+        tagger_pc.add("has_fully_contained", PointCloud::Array({0}));
+        tagger_pc.add("has_short_track_muon", PointCloud::Array({0}));
+        tagger_pc.add("has_full_detector_dead", PointCloud::Array({0}));
+        
+        // Store metadata
+        // tagger_pc.add("event_type", PointCloud::Array({0}));
+        // tagger_pc.add("cluster_length", PointCloud::Array({0}));
+
+        log->debug("Cluster {} not beam coincident", cluster_id);
+    }
+}

@@ -7,7 +7,7 @@
 //   -A infiles=nuselEval_5384_137_6852.root \
 //      clus/test/uboone-mabc.jsonnet
 //
-// The "kind" can be "live" or "both" (live and dead - the default).
+// The "kind" can be "live" or "both" (live and dead).
 
 
 local wc = import "wirecell.jsonnet";
@@ -23,6 +23,9 @@ local params = import "pgrapher/experiment/uboone/simparams.jsonnet";
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anode = tools.anodes[0];
+local anodes = tools.anodes;
+local clus = import "pgrapher/common/clus.jsonnet";
+
 
 
 
@@ -44,10 +47,26 @@ local ub = {
         data: {
             time_offset: -1600 * wc.us + 6 * wc.mm/self.drift_speed,
             drift_speed: 1.101 * wc.mm / wc.us,
-            strategy: [
-                "stepped",
-            ],
-            extra: [".*wire_index"] //
+            strategy: {
+                "name": "charge_stepped",
+                "disable_mix_dead_cell": true,
+            },
+            extra: [".*wire_index", ".*charge.*", "wpid"] //
+        }
+    },
+
+    // Special for improvedCluster retiling
+    bs_live_no_dead_mix : {
+        type: "BlobSampler",
+        name: "live_no_dead_mix",
+        data: {
+            time_offset: -1600 * wc.us + 6 * wc.mm/self.drift_speed,
+            drift_speed: 1.101 * wc.mm / wc.us,
+            strategy: {
+                "name": "charge_stepped",
+                "disable_mix_dead_cell": false,  // This is the key change
+            },
+            extra: [".*wire_index", ".*charge.*", "wpid"]
         }
     },
 
@@ -60,6 +79,52 @@ local ub = {
             ],
             extra: [".*"] // want all the extra
         }
+    },
+
+    local pctransforms = {
+        type: "PCTransformSet",
+        name: "",
+        data: { detector_volumes: wc.tn(detector_volumes) },
+        uses: [detector_volumes]
+    },
+
+    local detector_volumes = 
+    {
+        type: "DetectorVolumes",
+        name: "",
+        data: {
+            anodes: [wc.tn(a) for a in tools.anodes],
+            metadata:
+                {overall: {
+                    FV_xmin: 1 * wc.cm,
+                    FV_xmax: 255 * wc.cm,
+                    FV_ymin: -99.5 * wc.cm,
+                    FV_ymax: 101.5 * wc.cm,
+                    FV_zmin: 15 * wc.cm,
+                    FV_zmax: 1022 * wc.cm,
+                    FV_xmin_margin: 2 * wc.cm,
+                    FV_xmax_margin: 2 * wc.cm,
+                    FV_ymin_margin: 2.5 * wc.cm,
+                    FV_ymax_margin: 2.5 * wc.cm,
+                    FV_zmin_margin: 3 * wc.cm,
+                    FV_zmax_margin: 3 * wc.cm,
+                    vertical_dir: [0,1,0],
+                    beam_dir: [0,0,1]
+                }} +
+                {
+                    [ "a" + std.toString(a.data.ident) + "f0pA" ]: {
+                        drift_speed: 1.101 * wc.mm / wc.us,
+                        tick: 0.5 * wc.us,  // 0.5 mm per tick
+                        tick_drift: self.drift_speed * self.tick,
+                        time_offset: -1600 * wc.us + 6 * wc.mm/self.drift_speed,
+                        nticks_live_slice: 4,
+                        FV_xmin: 1 * wc.cm,
+                        FV_xmax: 255 * wc.cm,
+                        FV_xmin_margin: 2 * wc.cm,
+                        FV_xmax_margin: 2 * wc.cm,
+                    } for a in tools.anodes
+                }
+        },
     },
     
     UbooneBlobSource(fname, kind /*live or dead*/, views /* uvw, uv, vw, wu */) :: pg.pnode({
@@ -78,13 +143,14 @@ local ub = {
         name: sampler.name,
         data: {
             input: fname,       // file name or list
+            anode: wc.tn(anode),
             datapath: datapath + '/' + kind, // see issue #375
             sampler: wc.tn(sampler),
             kind: kind,
         } + if optical then {
             light: "light", flash: "flash", flashlight: "flashlight"
         } else {}
-    }, nin=1, nout=1, uses=[sampler]),
+    }, nin=1, nout=1, uses=[sampler, anode]),
         
     TensorSetFanin(multiplicity=2, tensor_order=[0,1]) :: pg.pnode({
         type: 'TensorSetFanin',
@@ -187,63 +253,30 @@ local ub = {
         },
     }, nin=1, nout=1),
 
+    // PointTreeBuilding() :: pg.pnode({
+    //     type: "PointTreeBuilding",
+    //     name: "",
+    //     data:  {
+    //         samplers: {
+    //             "3d": wc.tn($.bs_live),
+    //             "dead": wc.tn($.bs_dead),
+    //         },
+    //         multiplicity: 2,
+    //         tags: ["live", "dead"],
+    //         anode: wc.tn(anode),
+    //         face: 0,
+    //         detector_volumes: "DetectorVolumes",
+    //     }
+    // }, nin=2, nout=1, uses=[$.bs_live, $.bs_dead, detector_volumes]),
 
-    SimpleClusGeomHelper() :: {
-        type: "SimpleClusGeomHelper",
-        name: "uboone",
-        data: {
-            a0f0: {
-                pitch_u: 3 * wc.mm,
-                pitch_v: 3 * wc.mm,
-                pitch_w: 3 * wc.mm,
-                angle_u: 1.0472,    // 60 degrees
-                angle_v: -1.0472,   // -60 degrees
-                angle_w: 0,         // 0 degrees
-                drift_speed: 1.101 * wc.mm / wc.us,
-                tick: 0.5 * wc.us,  // 0.5 mm per tick
-                tick_drift: self.drift_speed * self.tick,
-                time_offset: -1600 * wc.us + 6 * wc.mm/self.drift_speed,
-                nticks_live_slice: 4,
-                FV_xmin: 1 * wc.cm,
-                FV_xmax: 255 * wc.cm,
-                FV_ymin: -99.5 * wc.cm,
-                FV_ymax: 101.5 * wc.cm,
-                FV_zmin: 15 * wc.cm,
-                FV_zmax: 1022 * wc.cm,
-                FV_xmin_margin: 2 * wc.cm,
-                FV_xmax_margin: 2 * wc.cm,
-                FV_ymin_margin: 2.5 * wc.cm,
-                FV_ymax_margin: 2.5 * wc.cm,
-                FV_zmin_margin: 3 * wc.cm,
-                FV_zmax_margin: 3 * wc.cm
-            },
-        }
-    },
-
-    PointTreeBuilding(geom_helper = $.SimpleClusGeomHelper()) :: pg.pnode({
-        type: "PointTreeBuilding",
-        name: "",
-        data:  {
-            samplers: {
-                "3d": wc.tn($.bs_live),
-                "dead": wc.tn($.bs_dead),
-            },
-            multiplicity: 2,
-            tags: ["live", "dead"],
-            anode: wc.tn(anode),
-            face: 0,
-            geom_helper: wc.tn(geom_helper),
-        }
-    }, nin=2, nout=1, uses=[$.bs_live, $.bs_dead, geom_helper]),
-
-    point_tree_source(livefn, deadfn) ::
-        local livesrc = $.ClusterFileSource(livefn);
-        local deadsrc = $.ClusterFileSource(deadfn);
-        local ptb = $.PointTreeBuilding();
-        pg.intern(innodes=[livesrc, deadsrc], outnodes=[ptb],
-                  edges=[ pg.edge(livesrc, ptb, 0, 0),
-                          pg.edge(deadsrc, ptb, 0, 1) ]
-                 ),
+    // point_tree_source(livefn, deadfn) ::
+    //     local livesrc = $.ClusterFileSource(livefn);
+    //     local deadsrc = $.ClusterFileSource(deadfn);
+    //     local ptb = $.PointTreeBuilding();
+    //     pg.intern(innodes=[livesrc, deadsrc], outnodes=[ptb],
+    //               edges=[ pg.edge(livesrc, ptb, 0, 0),
+    //                       pg.edge(deadsrc, ptb, 0, 1) ]
+    //              ),
 
     BeeBlobSink(fname, sampler) :: pg.pnode({
         type: "BeeBlobSink",
@@ -266,8 +299,30 @@ local ub = {
         pg.intern(innodes=[fan], centernodes=[sink],
                   edges=[ pg.edge(fan, sink, 1, 0) ]),
 
-    MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, live_sampler=$.bs_live,
-                           geom_helper = $.SimpleClusGeomHelper()) :: pg.pnode({
+    MultiAlgBlobClustering(beezip, datapath=pointtree_datapath, live_sampler=$.bs_live, 
+                           index=0, runNo=1, subRunNo=1, eventNo=1) :: 
+        local cm = clus.clustering_methods(detector_volumes=detector_volumes,
+                                           pc_transforms=pctransforms);
+        local retiler = cm.retiler(anodes=anodes, 
+                                   samplers=[clus.sampler(live_sampler, apa=0, face=0)],
+                                   cut_time_low=3*wc.us, cut_time_high=5*wc.us);
+
+        local improve_cluster_2 = cm.improve_cluster_2(anodes=anodes, 
+                                   samplers=[clus.sampler($.bs_live_no_dead_mix, apa=0, face=0)],
+                                   verbose=true);
+
+
+        local cm_pipeline = [
+            cm.tagger_flag_transfer("tagger"),
+            cm.clustering_recovering_bundle("recover_bundle"),
+            cm.switch_scope(),
+            // cm.examine_bundles(),
+            // cm.retile(retiler=retiler),
+            cm.steiner(retiler=improve_cluster_2),
+            cm.tagger_check_stm(),
+            cm.do_tracking("","multiple"),
+        ];
+        pg.pnode({
         type: "MultiAlgBlobClustering",
         name: "",
         data:  {
@@ -275,37 +330,75 @@ local ub = {
             outpath: pointtree_datapath,
             perf: true,
             bee_zip: beezip,
-            dump_json: false,   // true to produce summary of groupings in JSON for debugging.
-            initial_index: 0,
+            initial_index: index,
             use_config_rse: true,  // Enable use of configured RSE
-            runNo: 1,
-            subRunNo: 1,
-            eventNo: 1,
+            runNo: runNo,
+            subRunNo: subRunNo,
+            eventNo: eventNo,
             save_deadarea: true, 
-            anode: wc.tn(anode),
-            face: 0,            // FIXME: take an IAnodeFace!
-            geom_helper: wc.tn(geom_helper),
-            func_cfgs: [
-                // {name: "clustering_ctpointcloud"},
-                // {name: "clustering_live_dead", dead_live_overlap_offset: 2},
-                // {name: "clustering_extend", flag: 4, length_cut: 60 * wc.cm, num_try: 0, length_2_cut: 15 * wc.cm, num_dead_try: 1},
-                // {name: "clustering_regular", length_cut: 60*wc.cm, flag_enable_extend: false},
-                // {name: "clustering_regular", length_cut: 30*wc.cm, flag_enable_extend: true},
-                // {name: "clustering_parallel_prolong", length_cut: 35*wc.cm},
-                // {name: "clustering_close", length_cut: 1.2*wc.cm},
-                // {name: "clustering_extend_loop", num_try: 3},
-                // {name: "clustering_separate", use_ctpc: true},
-                // {name: "clustering_connect1"},
-                // {name: "clustering_deghost"},
-                // {name: "clustering_examine_x_boundary"},
-                // {name: "clustering_protect_overclustering"},
-                // {name: "clustering_neutrino"},
-                // {name: "clustering_isolated"},
-                {name: "clustering_examine_bundles"},
-                {name: "clustering_retile", sampler: wc.tn(live_sampler), anode: wc.tn(anode), cut_time_low: 3*wc.us, cut_time_high: 5*wc.us},
+            anodes: [wc.tn(a) for a in anodes],
+            detector_volumes: wc.tn(detector_volumes),
+            bee_points_sets: [  // New configuration for multiple bee points sets
+                //{
+                //    name: "img",                // Name of the bee points set
+                //    detector: "uboone",         // Detector name
+                //    algorithm: "img",           // Algorithm identifier
+                //    pcname: "3d",           // Which scope to use
+                //    coords: ["x", "y", "z"],    // Coordinates to use
+                //    individual: false           // Whether to output as a whole or individual APA/Face
+                //},
+                //{
+                //    name: "clustering",         // Name of the bee points set
+                //    detector: "uboone",         // Detector name
+                //    algorithm: "clustering",    // Algorithm identifier
+                //    pcname: "3d",           // Which scope to use
+                //    coords: ["x", "y", "z"],    // Coordinates to use
+                //    individual: true            // Output individual APA/Face
+                //},
+                //{
+                //    name: "retiled",         // Name of the bee points set
+                //    grouping: "shadow",
+                //    detector: "uboone",         // Detector name
+                //    algorithm: "retiled",    // Algorithm identifier
+                //    pcname: "3d",           // Which scope to use
+                //    coords: ["x", "y", "z"],    // Coordinates to use
+                //    individual: true            // Output individual APA/Face
+                //},
+                //{
+                //    name: "examine",         // Name of the bee points set
+                //    visitor: "ClusteringExamineBundles",
+                //    detector: "uboone",         // Detector name
+                //    algorithm: "examine",    // Algorithm identifier
+                //    pcname: "3d",           // Which scope to use
+                //    coords: ["x", "y", "z"],    // Coordinates to use
+                //    individual: true            // Output individual APA/Face
+                //},
+                {
+                    name: "regular",         // Name of the bee points set
+                    visitor: "CreateSteinerGraph",
+                    detector: "uboone",         // Detector name
+                    algorithm: "regular",    // Algorithm identifier
+                    pcname: "3d",           // Which scope to use
+                    coords: ["x_t0cor", "y", "z"],    // Coordinates to use
+                    individual: false,            // Output individual APA/Face
+                    filter: 1                    // 1 apply scope filter, 0 ignore scope filter, -1 apply inverse scope filter
+                },
+                {
+                    name: "steiner",         // Name of the bee points set
+                    visitor: "CreateSteinerGraph",
+                    detector: "uboone",         // Detector name
+                    algorithm: "steiner",    // Algorithm identifier
+                    pcname: "steiner_pc",           // Which scope to use
+                    coords: ["x_t0cor", "y", "z"],    // Coordinates to use
+                    individual: false,            // Output individual APA/Face
+                },
+
             ],
+            pipeline: wc.tns(cm_pipeline),
+            // cluster_id_order: "size", // or "tree" for insertion order or nothing for no rewriting
         }
-    }, nin=1, nout=1, uses=[geom_helper, live_sampler, anode]),
+        }, nin=1, nout=1, uses=anodes + [detector_volumes] + cm_pipeline),
+
 
     TensorFileSink(fname) :: pg.pnode({
         type: "TensorFileSink",
@@ -355,23 +448,29 @@ local ingraph_dead(infiles, datapath=pointtree_datapath) = pg.pipeline([
     ub.multiplex_blob_views(infiles, 'dead', ["uv","vw","wu"]),
     ub.UbooneClusterSource(infiles, datapath=datapath, sampler=ub.bs_dead, kind='dead', optical=false)
 ]);
-local outgraph(beezip,  datapath=pointtree_datapath) = pg.pipeline([
-    ub.MultiAlgBlobClustering(beezip, datapath=datapath),
+local outgraph(beezip, datapath=pointtree_datapath, index=0, runNo=1, subRunNo=1, eventNo=1) = pg.pipeline([
+    ub.MultiAlgBlobClustering(beezip, datapath=datapath, index=index, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     ub.ClusterFlashDump(datapath=datapath)
 ]);
+//local outgraph(beezip,  datapath=pointtree_datapath) = pg.pipeline([
+//    ub.MultiAlgBlobClustering(beezip, datapath=datapath),
+//    ub.ClusterFlashDump(datapath=datapath)
+//]);
 
 
 local graphs = {
-    live :: function(infiles, beezip, datapath) 
-        pg.pipeline([ingraph_live(infiles, datapath), outgraph(beezip, datapath)]),
+    live :: function(infiles, beezip, datapath, index=0, runNo=1, subRunNo=1, eventNo=1) 
+        pg.pipeline([ingraph_live(infiles, datapath), 
+                    outgraph(beezip, datapath, index, runNo, subRunNo, eventNo)]),
 
-    dead :: function(infiles, beezip, datapath)
-        pg.pipeline([ingraph_dead(infiles, datapath), outgraph(beezip, datapath)]),
+    dead :: function(infiles, beezip, datapath, index=0, runNo=1, subRunNo=1, eventNo=1)
+        pg.pipeline([ingraph_dead(infiles, datapath), 
+                    outgraph(beezip, datapath, index, runNo, subRunNo, eventNo)]),
 
-    both :: function(infiles, beezip, datapath)
+    both :: function(infiles, beezip, datapath, index=0, runNo=1, subRunNo=1, eventNo=1)
         local live = ingraph_live(infiles, datapath);
         local dead = ingraph_dead(infiles, datapath);
-        local out = outgraph(beezip, datapath);
+        local out = outgraph(beezip, datapath, index, runNo, subRunNo, eventNo);
         local fanin = ub.TensorSetFanin();
         pg.intern(innodes=[live,dead], outnodes=[out], centernodes=[fanin],
                   edges=[
@@ -380,8 +479,40 @@ local graphs = {
                       pg.edge(fanin,out,0,0)])
 };
 
+//local graphs = {
+//    live :: function(infiles, beezip, datapath) 
+//        pg.pipeline([ingraph_live(infiles, datapath), outgraph(beezip, datapath)]),
+//
+//    dead :: function(infiles, beezip, datapath)
+//        pg.pipeline([ingraph_dead(infiles, datapath), outgraph(beezip, datapath)]),
+//
+//    both :: function(infiles, beezip, datapath)
+//        local live = ingraph_live(infiles, datapath);
+//        local dead = ingraph_dead(infiles, datapath);
+//        local out = outgraph(beezip, datapath);
+//        local fanin = ub.TensorSetFanin();
+//        pg.intern(innodes=[live,dead], outnodes=[out], centernodes=[fanin],
+//                  edges=[
+//                      pg.edge(live,fanin,0,0),
+//                      pg.edge(dead,fanin,0,1),
+//                      pg.edge(fanin,out,0,0)])
+//};
+
 local extra_plugins = ["WireCellAux", "WireCellRoot", "WireCellClus"];
 
 // kind can be "live", "dead" or "both".
-function(infiles="uboone.root", beezip="bee.zip", kind="both", datapath=pointtree_datapath)
-    ub.main(graphs[kind](infiles, beezip, datapath), "Pgrapher", extra_plugins)
+function(infiles="uboone.root", beezip="bee.zip", kind="live", datapath=pointtree_datapath, 
+         initial_index="0", initial_runNo="1", initial_subRunNo="1", initial_eventNo="1")
+    
+    // Parse the integer values from strings
+    local index = std.parseInt(initial_index);
+    local runNo = std.parseInt(initial_runNo);
+    local subRunNo = std.parseInt(initial_subRunNo);
+    local eventNo = std.parseInt(initial_eventNo);
+    
+    // Use these parameters in the main graph
+    ub.main(graphs[kind](infiles, beezip, datapath, index, runNo, subRunNo, eventNo), 
+            "Pgrapher", extra_plugins)
+
+//function(infiles="uboone.root", beezip="bee.zip", kind="live", datapath=pointtree_datapath)
+//    ub.main(graphs[kind](infiles, beezip, datapath), "Pgrapher", extra_plugins)

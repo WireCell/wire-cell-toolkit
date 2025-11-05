@@ -89,3 +89,11 @@ version.txt
 .cache
 .clangd
 junk*
+downloads
+tmp*
+
+doxy
+*.bak
+doxy_quick
+html
+latex

@@ -1,75 +1,66 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringRegular;
+WIRECELL_FACTORY(ClusteringRegular, ClusteringRegular,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+
+static void clustering_regular(Grouping& live_clusters,
+
+                               IDetectorVolumes::pointer dv,
+                               const Tree::Scope& scope,
+                               const double length_cut = 45*units::cm,
+                               bool flag_enable_extend = true);
+
+class ClusteringRegular :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
+    double m_length_cut{45*units::cm};
+    bool m_flag_enable_extend{true};
+public:
+    ClusteringRegular() {}
+    virtual ~ClusteringRegular() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+
+        m_length_cut = get(config, "length_cut", 45*units::cm);
+        m_flag_enable_extend = get(config, "flag_enable_extend", true);
+    }
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        return cfg;
+    }
+
+    void visit(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_regular(live, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
+    }
+};
+
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
-using namespace WireCell::PointCloud::Tree;
-void WireCell::PointCloud::Facade::clustering_regular(
-    Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,            // in/out
-    const double length_cut,                                       //
-    bool flag_enable_extend                                        //
-)
-{
-  double internal_length_cut = 10 *units::cm;
-  if (flag_enable_extend) {
-    internal_length_cut = 15 *units::cm;
-  }
-
-  // prepare graph ...
-  typedef cluster_connectivity_graph_t Graph;
-  Graph g;
-  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
-  
-
-  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    const auto& live = live_clusters.at(ilive);
-    map_cluster_index[live] = ilive;
-    ilive2desc[ilive] = boost::add_vertex(ilive, g);
-  }
-
-  // original algorithm ... (establish edges ... )
-
-
-  for (size_t i=0;i!=live_clusters.size();i++){
-    auto cluster_1 = live_clusters.at(i);
-    if (cluster_1->get_length() < internal_length_cut) continue;
-    for (size_t j=i+1;j<live_clusters.size();j++){
-      auto cluster_2 = live_clusters.at(j);
-      if (cluster_2->get_length() < internal_length_cut) continue;
-
-      if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), length_cut, flag_enable_extend)){
-
-        // debug ...
-        //std::cout << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << std::endl;
-
-	      //	to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			  ilive2desc[map_cluster_index[cluster_2]], g);
-      }
-    }
-  }
-
-  // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
-}
-
-bool WireCell::PointCloud::Facade::Clustering_1st_round(
+static bool Clustering_1st_round(
     const Cluster& cluster1,
     const Cluster& cluster2,
     double length_1,
     double length_2,
+    const std::map<WirePlaneId, geo_point_t>& wpid_U_dir, const std::map<WirePlaneId, geo_point_t>& wpid_V_dir, const std::map<WirePlaneId, geo_point_t>& wpid_W_dir,
+    const IDetectorVolumes::pointer dv,
     double length_cut,
     bool flag_enable_extend)
 {
-  const auto [angle_u,angle_v,angle_w] = cluster1.grouping()->wire_angles();
 
   geo_point_t p1;
   geo_point_t p2;
@@ -79,19 +70,13 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     // if (fabs(length_1 + length_2 - 12.9601*units::cm - 83.8829*units::cm) < 0.3*units::cm 
     // && fabs(fabs(length_1-length_2) - fabs(12.9601*units::cm - 83.8829*units::cm)) < 0.3*units::cm) flag_print =true;
 
-  double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
+  double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
 
-  // if (flag_print) {
-  //   std::cout << length_1/units::cm << " " << length_2/units::cm << " " << cluster1.npoints() << 
-  //   " " << cluster2.npoints() << " " << p1 << " " << p2 << " " << dis/units::cm << std::endl;
-  //   std::cout << (*cluster1.get_first_blob()) << " " << cluster1.get_first_blob()->center_pos() << " " << (*cluster1.get_last_blob()) << " " << cluster1.get_last_blob()->center_pos() << std::endl;
-  //   auto points = cluster1.get_first_blob()->points();
-  //   for (auto it1 = points.begin();it1!=points.end();it1++){
-  //     std::cout << (*it1).x() << " " << (*it1).y() << " " << (*it1).z() << std::endl;
-  //   }
-  // }
+  auto wpid_p1 = cluster1.wpid(p1);
+  auto wpid_p2 = cluster2.wpid(p2);
+  auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
 
 
   if (dis < length_cut){
@@ -106,18 +91,15 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     bool flag_force_extend = false;
 
 
-    geo_point_t drift_dir(1, 0, 0);  // assuming the drift direction is along X ...
+    geo_point_t drift_dir_abs(1, 0, 0);  // assuming the drift direction is along X ...
     
-    // pronlonged case for U 3 and V 4 ...
-    geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
-
     // calculate average distance ... 
     geo_point_t cluster1_ave_pos = cluster1.calc_ave_pos(p1,5*units::cm);
+    auto wpid_ave_p1 = cluster1.wpid(cluster1_ave_pos);
     geo_point_t cluster2_ave_pos = cluster2.calc_ave_pos(p2,5*units::cm);
+    auto wpid_ave_p2 = cluster2.wpid(cluster2_ave_pos);
+    auto wpid_ave_ps = get_wireplaneid(cluster1_ave_pos, wpid_ave_p1, cluster2_ave_pos, wpid_ave_p2, dv);
 
-    
     geo_point_t dir2_1(p2.x() - p1.x()+1e-9, p2.y() - p1.y()+1e-9, p2.z() - p1.z()+1e-9); // 2-1
     geo_point_t dir2(cluster2_ave_pos.x() - cluster1_ave_pos.x()+1e-9,
                      cluster2_ave_pos.y() - cluster1_ave_pos.y()+1e-9,
@@ -125,36 +107,35 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
     dir2_1 = dir2_1/dir2_1.magnitude();
     dir2 = dir2/dir2.magnitude();
 
-
      // parallle case
-    double angle1 = dir2_1.angle(drift_dir);
-    double angle2 = dir2.angle(drift_dir);
+    double angle1 = dir2_1.angle(drift_dir_abs);
+    double angle2 = dir2.angle(drift_dir_abs);
     
     double angle3{0}, angle4{0};
     double angle3_1{0}, angle4_1{0};
     
     if ((fabs(angle1-3.1415926/2.)<7.5/180.*3.1415926 ||
-	 fabs(angle2-3.1415926/2.)<7.5/180.*3.1415926) && dis < 45*units::cm &&
-	length_1 > 12*units::cm && length_2 > 12*units::cm){
+	      fabs(angle2-3.1415926/2.)<7.5/180.*3.1415926) && dis < 45*units::cm &&
+	      length_1 > 12*units::cm && length_2 > 12*units::cm){
       flag_para = true;
 
       if (dis >=3*length_1 && dis >= 3*length_2 && flag_para) return false;
       
-      angle3 = dir2_1.angle(U_dir);
-      angle4 = dir2_1.angle(V_dir);
+      angle3 = dir2_1.angle(wpid_U_dir.at(wpid_ps));  // betwen points p ...
+      angle4 = dir2_1.angle(wpid_V_dir.at(wpid_ps));
             
-      angle3_1 = dir2.angle(U_dir);
-      angle4_1 = dir2.angle(V_dir);
+      angle3_1 = dir2.angle(wpid_U_dir.at(wpid_ave_ps)); // between ave points ...
+      angle4_1 = dir2.angle(wpid_V_dir.at(wpid_ave_ps));
             
       if (fabs(angle3-3.1415926/2.)<7.5/180.*3.1415926 || fabs(angle3_1-3.1415926/2.)<7.5/180.*3.1415926 ||
-	  ((fabs(angle3-3.1415926/2.)<15/180.*3.1415926 || fabs(angle3_1-3.1415926/2.)<15/180.*3.1415926)
-	   &&dis < 6*units::cm))
-	flag_para_U = true;
+	      ((fabs(angle3-3.1415926/2.)<15/180.*3.1415926 || fabs(angle3_1-3.1415926/2.)<15/180.*3.1415926)
+	      &&dis < 6*units::cm))
+	      flag_para_U = true;
       
       if (fabs(angle4-3.1415926/2.)<7.5/180.*3.1415926 || fabs(angle4_1-3.1415926/2.)<7.5/180.*3.1415926 ||
-	  ((fabs(angle4-3.1415926/2.)<15/180.*3.1415926 || fabs(angle4_1-3.1415926/2.)<15/180.*3.1415926)&&
-	   dis < 6*units::cm))
-	flag_para_V = true;
+	      ((fabs(angle4-3.1415926/2.)<15/180.*3.1415926 || fabs(angle4_1-3.1415926/2.)<15/180.*3.1415926)&&
+	      dis < 6*units::cm))
+	      flag_para_V = true;
     } 
 
     if (!flag_para){
@@ -164,29 +145,29 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
                          cluster2_ave_pos.z() - cluster1_ave_pos.z());
       geo_point_t tempV5;
       
-      double angle6 = tempV3.angle(U_dir);
+      double angle6 = tempV3.angle(wpid_U_dir.at(wpid_ps));
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle6),0);
-      angle6 = tempV5.angle(drift_dir);
+      angle6 = tempV5.angle(drift_dir_abs);
       
-      double angle7 = tempV3.angle(V_dir);
+      double angle7 = tempV3.angle(wpid_V_dir.at(wpid_ps));
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle7),0);
-      angle7 = tempV5.angle(drift_dir);
+      angle7 = tempV5.angle(drift_dir_abs);
       
-      double angle8 = tempV3.angle(W_dir);
+      double angle8 = tempV3.angle(wpid_W_dir.at(wpid_ps));
       tempV5.set(fabs(p2.x()-p1.x()),sqrt(pow(p2.y() - p1.y(),2)+pow(p2.z() - p1.z(),2))*sin(angle8),0);
-      angle8 = tempV5.angle(drift_dir);
+      angle8 = tempV5.angle(drift_dir_abs);
       
-      double angle6_1 = tempV4.angle(U_dir);
+      double angle6_1 = tempV4.angle(wpid_U_dir.at(wpid_ave_ps));
       tempV5.set(fabs(cluster2_ave_pos.x()-cluster1_ave_pos.x()),sqrt(pow(cluster2_ave_pos.y()-cluster1_ave_pos.y(),2)+pow(cluster2_ave_pos.z()-cluster1_ave_pos.z(),2))*sin(angle6_1),0);
-      angle6_1 = tempV5.angle(drift_dir);
+      angle6_1 = tempV5.angle(drift_dir_abs);
       
-      double angle7_1 = tempV4.angle(V_dir);
+      double angle7_1 = tempV4.angle(wpid_V_dir.at(wpid_ave_ps));
       tempV5.set(fabs(cluster2_ave_pos.x()-cluster1_ave_pos.x()),sqrt(pow(cluster2_ave_pos.y()-cluster1_ave_pos.y(),2)+pow(cluster2_ave_pos.z()-cluster1_ave_pos.z(),2))*sin(angle7_1),0);
-      angle7_1 = tempV5.angle(drift_dir);
+      angle7_1 = tempV5.angle(drift_dir_abs);
       
-      double angle8_1 = tempV4.angle(W_dir);
+      double angle8_1 = tempV4.angle(wpid_W_dir.at(wpid_ave_ps));
       tempV5.set(fabs(cluster2_ave_pos.x()-cluster1_ave_pos.x()),sqrt(pow(cluster2_ave_pos.y()-cluster1_ave_pos.y(),2)+pow(cluster2_ave_pos.z()-cluster1_ave_pos.z(),2))*sin(angle8_1),0);
-      angle8_1 = tempV5.angle(drift_dir);
+      angle8_1 = tempV5.angle(drift_dir_abs);
       
       if (angle6<15/180.*3.1415926  ||
 	  angle6_1<15/180.*3.1415926 )
@@ -206,7 +187,7 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
       flag_regular = true;
     }else if ( length_1 > 30*units::cm && length_2 > 30*units::cm) {
       if (dis <= 25*units::cm)
-	flag_regular = true;
+	      flag_regular = true;
     }
     
     if ((flag_para_U || flag_para_V )  ||
@@ -298,15 +279,21 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
 
 
       if (flag_para && (flag_para_U || flag_para_V  || flag_regular)){
-	
-	double dangle1 = (dir1.angle(drift_dir)-3.1415926/2.)/3.1415926*180.;
-	double dangle1_1 = (dir1_1.angle(drift_dir)-3.1415926/2.)/3.1415926*180.;
-	
-	double dangle2 = (dir2.angle(drift_dir)-3.1415926/2.)/3.1415926*180.;
-	double dangle2_1 = (dir2_1.angle(drift_dir)-3.1415926/2.)/3.1415926*180.;
 
-	double dangle3 = (dir3.angle(drift_dir)-3.1415926/2.)/3.1415926*180.;
-	double dangle3_1 = (dir3_1.angle(drift_dir)-3.1415926/2.)/3.1415926*180.;
+        // add a special fix for very long tracks  PDHD
+        if (flag_para && (wpid_p1.apa() != wpid_p2.apa() || wpid_p1.face() != wpid_p2.face())){
+          if (length_1 > 100*units::cm && length_2 > 100*units::cm && dis < 5*units::cm ) return true;
+        }
+        // if (length_1 > 250*units::cm && length_2 > 250*units::cm) std::cout << "Test: " << length_1/units::cm << " " << length_2/units::cm << " " << flag_para << " " << dis/units::cm <<  " " << length_cut/units::cm << std::endl;
+	
+	double dangle1 = (dir1.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
+	double dangle1_1 = (dir1_1.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
+	
+	double dangle2 = (dir2.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
+	double dangle2_1 = (dir2_1.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
+
+	double dangle3 = (dir3.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
+	double dangle3_1 = (dir3_1.angle(drift_dir_abs)-3.1415926/2.)/3.1415926*180.;
 	
 	double dangle4 = dangle1 + dangle2;
 	double dangle4_1 = dangle1_1 + dangle2_1;
@@ -427,4 +414,117 @@ bool WireCell::PointCloud::Facade::Clustering_1st_round(
   return false;
   
 }
+
+// Expand this function to handle multiple APA/Faces ...
+static void clustering_regular(
+    Grouping& live_grouping,
+
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope,
+    const double length_cut,
+    bool flag_enable_extend)
+{
+  // Get all the wire plane IDs from the grouping
+  const auto& wpids = live_grouping.wpids();
+
+  // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+  std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+  std::map<WirePlaneId, geo_point_t> wpid_U_dir;
+  std::map<WirePlaneId, geo_point_t> wpid_V_dir;
+  std::map<WirePlaneId, geo_point_t> wpid_W_dir;
+  std::set<int> apas;
+  for (const auto& wpid : wpids) {
+      int apa = wpid.apa();
+      int face = wpid.face();
+      apas.insert(apa);
+
+      // Create wpids for all three planes with this APA and face
+      WirePlaneId wpid_u(kUlayer, face, apa);
+      WirePlaneId wpid_v(kVlayer, face, apa);
+      WirePlaneId wpid_w(kWlayer, face, apa);
+   
+      // Get drift direction based on face orientation
+      int face_dirx = dv->face_dirx(wpid_u);
+      geo_point_t drift_dir(face_dirx, 0, 0);
+      
+      // Get wire directions for all planes
+      Vector wire_dir_u = dv->wire_direction(wpid_u);
+      Vector wire_dir_v = dv->wire_direction(wpid_v);
+      Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+      // Calculate angles
+      double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+      double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+      double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+      wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+      wpid_U_dir[wpid] = geo_point_t(0, cos(angle_u), sin(angle_u));
+      wpid_V_dir[wpid] = geo_point_t(0, cos(angle_v), sin(angle_v));
+      wpid_W_dir[wpid] = geo_point_t(0, cos(angle_w), sin(angle_w));
+  }
+
+
+
+
+  double internal_length_cut = 10 *units::cm;
+  if (flag_enable_extend) {
+    internal_length_cut = 15 *units::cm;
+  }
+
+  // prepare graph ...
+  typedef cluster_connectivity_graph_t Graph;
+  Graph g;
+  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+  std::map<const Cluster*, int> map_cluster_index;
+  const auto& live_clusters = live_grouping.children();
+  
+  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+    auto& live = live_clusters.at(ilive);
+    map_cluster_index[live] = ilive;
+    ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    if (live->get_default_scope().hash() != scope.hash()) {
+      live->set_default_scope(scope);
+      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+   }
+  }
+
+  // original algorithm ... (establish edges ... )
+
+  for (size_t i=0;i!=live_clusters.size();i++){
+    auto cluster_1 = live_clusters.at(i);
+    if (!cluster_1->get_scope_filter(scope)) continue;
+    if (cluster_1->get_length() < internal_length_cut) continue;
+    for (size_t j=i+1;j<live_clusters.size();j++){
+      auto cluster_2 = live_clusters.at(j);
+      if (!cluster_2->get_scope_filter(scope)) continue;
+      if (cluster_2->get_length() < internal_length_cut) continue;
+      if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut, flag_enable_extend)){
+	      //	to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+			  ilive2desc[map_cluster_index[cluster_2]], g);
+      }
+    }
+  }
+
+  // new function to  merge clusters ...
+  merge_clusters(g, live_grouping);
+
+
+  // {
+  //  auto live_clusters = live_grouping.children(); // copy
+  //   // Process each cluster
+  //   for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+  //       Cluster* cluster = live_clusters.at(iclus);
+  //       auto& scope = cluster->get_default_scope();
+  //       std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center) << std::endl;
+  //   }
+  // }
+
+
+
+
+
+
+}
+
 #pragma GCC diagnostic pop

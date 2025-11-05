@@ -1,78 +1,56 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/ExecMon.h"
+
+class ClusteringClose;
+WIRECELL_FACTORY(ClusteringClose, ClusteringClose,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+
+static void clustering_close(Grouping& live_clusters,           // 
+
+                             const Tree::Scope& scope,
+                             const double length_cut = 1*units::cm //
+  );
+
+class ClusteringClose : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
+public:
+  ClusteringClose() {}
+  virtual ~ClusteringClose() {}
+
+  void configure(const WireCell::Configuration& config) {
+    NeedScope::configure(config);
+    
+    length_cut_ = get(config, "length_cut", 1*units::cm);
+  }
+  virtual Configuration default_configuration() const {
+    Configuration cfg;
+    return cfg;
+  }
+
+  void visit(Ensemble& ensemble) const {
+    auto& live = *ensemble.with_name("live").at(0);
+    clustering_close(live, m_scope, length_cut_);
+  }
+  
+private:
+  double length_cut_{1*units::cm};
+};
+
+
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
-using namespace WireCell::PointCloud::Tree;
-void WireCell::PointCloud::Facade::clustering_close(
-    Grouping& live_grouping,
-    cluster_set_t& cluster_connected_dead,     // in/out
-    const double length_cut)
-{
-  // bool flag_print = false;
-  // ExecMon em("starting");
-
-  cluster_set_t used_clusters;
-  
-
-  // prepare graph ...
-  typedef cluster_connectivity_graph_t Graph;
-  Graph g;
-  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
-  
-  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
-    const auto& live = live_clusters.at(ilive);
-    map_cluster_index[live] = ilive;
-    ilive2desc[ilive] = boost::add_vertex(ilive, g);
-  }
-
-  for (size_t i=0;i!=live_clusters.size();i++){
-    auto cluster_1 = live_clusters.at(i);
-    if (cluster_1->get_length() < 1.5*units::cm) continue;
-    if (used_clusters.find(cluster_1)!=used_clusters.end()) continue;
-    for (size_t j=i+1;j<live_clusters.size();j++){
-      auto cluster_2 = live_clusters.at(j);
-      if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
-      if (cluster_2->get_length() < 1.5*units::cm) continue;
-      if (Clustering_3rd_round(*cluster_1,*cluster_2,
-                               cluster_1->get_length(), cluster_2->get_length(), length_cut)){
-	//to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
-	boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-			ilive2desc[map_cluster_index[cluster_2]], g);
-
-
-	
-	if (cluster_1->get_length() < 5*units::cm){
-	  used_clusters.insert(cluster_1);
-	  break;
-	}
-	if (cluster_2->get_length() < 5*units::cm){
-	  used_clusters.insert(cluster_2);
-	}
-      }
-    }
-  }
-
-  //  if (flag_print) std::cout << em("core alg") << std::endl;
-
-  // new function to  merge clusters ...
-  merge_clusters(g, live_grouping, cluster_connected_dead);
-
-  //  if (flag_print) std::cout << em("merge clusters") << std::endl;
-}
-
-
-
-
-bool WireCell::PointCloud::Facade::Clustering_3rd_round(
+static bool Clustering_3rd_round(
   const Cluster& cluster1,
   const Cluster& cluster2,
   double length_1,
@@ -85,7 +63,7 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round(
   bool flag_print = false;
   ExecMon em("starting");
   
-  double dis = WireCell::PointCloud::Facade::Find_Closest_Points(cluster1, cluster2,
+  double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
 
@@ -144,10 +122,6 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round(
     geo_point_t tempV1(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
     geo_point_t tempV2(cluster2_ave_pos.x() - cluster1_ave_pos.x(), cluster2_ave_pos.y() - cluster1_ave_pos.y(), cluster2_ave_pos.z() - cluster1_ave_pos.z());
     
-    /* if (length_1 > 150*units::cm || length_2 > 150*units::cm) */
-    /*   std::cout << cluster1.get_cluster_id() << " " << cluster2.get_cluster_id() << " " << length_1/units::cm << " " << length_2/units::cm << " " << num_p1 << " " << num_p2 << " " << num_tp1 << " " << num_tp2 << std::endl; */
-    /* return false; */
-    
     // one small the other one is big 
     if (length_1 < 12 *units::cm && num_p1 > 0.5*num_tp1 && (num_p2> 50 || num_p2 > 0.25*num_tp2) ||
 	length_2 < 12*units::cm && num_p2 > 0.5*num_tp2 && (num_p1>50 || num_p1 > 0.25*num_tp1) )
@@ -160,42 +134,116 @@ bool WireCell::PointCloud::Facade::Clustering_3rd_round(
       double angle5 = tempV1.angle(tempV2);
               
       if (length_1 < 60*units::cm || length_2 < 60*units::cm){
-	if (angle5 < 30/180.*3.1415926)
-	  return true;
-	if (angle5 < 90/180.*3.1415926 && (num_p1 > 50 && num_p2 > 50) && (num_p1>75 || num_p2>75))
-	  return true;
+        if (angle5 < 30/180.*3.1415926)
+          return true;
+        if (angle5 < 90/180.*3.1415926 && (num_p1 > 50 && num_p2 > 50) && (num_p1>75 || num_p2>75))
+          return true;
       }
       
       if ((length_1 < 60*units::cm || num_p1 >40) && (length_2 < 60*units::cm || num_p2 > 40)){
 	
-	if ((3.1415926 - dir1.angle(dir2))/3.1415926*180 < 30 &&
-	    (3.1415926 - dir1.angle(tempV1))/3.1415926*180. < 60 &&
-	     dir2.angle(tempV1)/3.1415926*180.<60 ||
-	    (3.1415926 - dir1.angle(dir2))/3.1415926*180 < 15)
-	  return true;
+        if ((3.1415926 - dir1.angle(dir2))/3.1415926*180 < 30 &&
+            (3.1415926 - dir1.angle(tempV1))/3.1415926*180. < 60 &&
+            dir2.angle(tempV1)/3.1415926*180.<60 ||
+            (3.1415926 - dir1.angle(dir2))/3.1415926*180 < 15)
+          return true;
 
-	geo_point_t dir3 = cluster1.vhough_transform(cluster1_ave_pos,50*units::cm); // cluster 1 direction based on hough
-	geo_point_t dir4 = cluster2.vhough_transform(cluster2_ave_pos,50*units::cm); // cluster 1 direction based on hough
+        geo_point_t dir3 = cluster1.vhough_transform(cluster1_ave_pos,50*units::cm); // cluster 1 direction based on hough
+        geo_point_t dir4 = cluster2.vhough_transform(cluster2_ave_pos,50*units::cm); // cluster 1 direction based on hough
 
-	if ((3.1415926 - dir3.angle(dir4))/3.1415926*180 < 25 &&
-	    (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 15 &&
-	     dir4.angle(tempV2)/3.1415926*180.<15 ||
-	    (3.1415926 - dir3.angle(dir4))/3.1415926*180 < 15)
-	  return true;
+        if ((3.1415926 - dir3.angle(dir4))/3.1415926*180 < 25 &&
+            (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 15 &&
+            dir4.angle(tempV2)/3.1415926*180.<15 ||
+            (3.1415926 - dir3.angle(dir4))/3.1415926*180 < 15)
+          return true;
 
-	if (dis<0.6*units::cm && ((3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 45 && dir4.angle(tempV2)/3.1415926*180. < 90 || (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 90 && dir4.angle(tempV2)/3.1415926*180. < 45))
-	  return true;
+        if (dis<0.6*units::cm && ((3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 45 && dir4.angle(tempV2)/3.1415926*180. < 90 || (3.1415926 - dir3.angle(tempV2))/3.1415926*180. < 90 && dir4.angle(tempV2)/3.1415926*180. < 45))
+          return true;
 	
       }
     }
     //    if (flag_print) std::cout << em("additional running") << std::endl;
   }
 
- 
-
   return false;
+}
+
+
+// This function can handle multiple APA/Faces
+static void clustering_close(
+    Grouping& live_grouping,
+
+    const Tree::Scope& scope,
+    const double length_cut)
+{
+
+  cluster_set_t used_clusters;
   
- }
+  // prepare graph ...
+  typedef cluster_connectivity_graph_t Graph;
+  Graph g;
+  std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+  std::map<const Cluster*, int> map_cluster_index;
+  const auto& live_clusters = live_grouping.children();
+
+  for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+    const auto& live = live_clusters.at(ilive);
+    if (live->get_default_scope().hash() != scope.hash()) {
+      live->set_default_scope(scope);
+    }
+    map_cluster_index[live] = ilive;
+    ilive2desc[ilive] = boost::add_vertex(ilive, g);
+  }
+
+  for (size_t i=0;i!=live_clusters.size();i++){
+    auto cluster_1 = live_clusters.at(i);
+    // nor process this cluster if it is not in the filter ...
+    if (!cluster_1->get_scope_filter(scope)) continue;
+    if (cluster_1->get_length() < 1.5*units::cm) continue;
+    if (used_clusters.find(cluster_1)!=used_clusters.end()) continue;
+    for (size_t j=i+1;j<live_clusters.size();j++){
+      auto cluster_2 = live_clusters.at(j);
+      // nor process this cluster if it is not in the filter ...
+      if (!cluster_2->get_scope_filter(scope)) continue;
+      if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+      if (cluster_2->get_length() < 1.5*units::cm) continue;
+      if (Clustering_3rd_round(*cluster_1,*cluster_2,
+                               cluster_1->get_length(), cluster_2->get_length(), length_cut)){
+        //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
+        boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+            ilive2desc[map_cluster_index[cluster_2]], g);
+
+
+        
+        if (cluster_1->get_length() < 5*units::cm){
+          used_clusters.insert(cluster_1);
+          break;
+        }
+        if (cluster_2->get_length() < 5*units::cm){
+          used_clusters.insert(cluster_2);
+        }
+      }
+    }
+  }
+
+  //  if (flag_print) std::cout << em("core alg") << std::endl;
+  
+  // new function to  merge clusters ...
+  merge_clusters(g, live_grouping);
+
+  //  if (flag_print) std::cout << em("merge clusters") << std::endl;
+
+
+}
+
+
+
+
+
+
+
+
+
 #pragma GCC diagnostic pop
 
 // Local Variables:

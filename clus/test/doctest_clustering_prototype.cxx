@@ -1,9 +1,15 @@
+#include "WireCellClus/Facade.h"
+#include "WireCellClus/IPCTransform.h"
+
+#include "WireCellIface/IConfigurable.h"
+
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/PointTesting.h"
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/PluginManager.h"
+#include "WireCellUtil/NamedFactory.h"
 
-#include "WireCellClus/Facade.h"
 
 #include <unordered_map>
 
@@ -11,32 +17,35 @@ using namespace WireCell;
 using namespace WireCell::PointTesting;
 using namespace WireCell::PointCloud;
 using namespace WireCell::PointCloud::Tree;
-using namespace WireCell::PointCloud::Facade;
-using fa_float_t = WireCell::PointCloud::Facade::float_t;
-using fa_int_t = WireCell::PointCloud::Facade::int_t;
+using namespace WireCell::Clus::Facade;
+using fa_float_t = WireCell::Clus::Facade::float_t;
+using fa_int_t = WireCell::Clus::Facade::int_t;
 // WireCell::PointCloud::Tree::scoped_pointcloud_t
 using spdlog::debug;
 using spdlog::warn;
 
 using node_ptr = std::unique_ptr<Points::node_t>;
 
+void print_ds(const Dataset& ds) {
+    std::stringstream ss;
+    ss << " size_major " << ds.size_major() << std::endl;
+    for (const auto& key : ds.keys()) {
+        ss << key << ": ";
+        // auto arr = ds.get(key)->elements<double>();
+        // for(auto elem : arr) {
+        //     ss << elem << " ";
+        // }
+        ss << std::endl;
+    }
+    debug(ss.str());
+}
+
 // No more explicit DisjointDataset.  It is a PointCloud::Tree::scoped_pointcloud_t.
 template <typename DisjointDataset>
 void print_dds(const DisjointDataset& dds) {
     for (size_t idx=0; idx<dds.size(); ++idx) {
         const Dataset& ds = dds[idx];
-        std::stringstream ss;
-        ss << "ds: " << idx << std::endl;
-        // const size_t len = ds.size_major();
-        for (const auto& key : ds.keys()) {
-            auto arr = ds.get(key)->elements<fa_float_t>();
-            ss << key << ": ";
-            for(auto elem : arr) {
-                ss << elem << " ";
-            }
-            ss << std::endl;
-        }
-        debug(ss.str());
+        print_ds(ds);
     }
 }
 
@@ -64,6 +73,7 @@ Points::node_ptr make_simple_pctree()
             {"center_x", Array({(fa_float_t)0.5})},
             {"center_y", Array({(fa_float_t)0.})},
             {"center_z", Array({(fa_float_t)0.})},
+            {"wpid", Array({(fa_int_t)WirePlaneId(WirePlaneLayer_t::kAllLayers).ident()})},
             {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
@@ -93,6 +103,7 @@ Points::node_ptr make_simple_pctree()
             {"center_x", Array({(fa_float_t)1.5})},
             {"center_y", Array({(fa_float_t)0.})},
             {"center_z", Array({(fa_float_t)0.})},
+            {"wpid", Array({(fa_int_t)WirePlaneId(WirePlaneLayer_t::kAllLayers).ident()})},
             {"npoints", Array({(fa_int_t)10})},
             {"slice_index_min", Array({(fa_int_t)0})},
             {"slice_index_max", Array({(fa_int_t)1})},
@@ -151,7 +162,7 @@ TEST_CASE("clustering prototype point tree")
     }
 
     // name, coords, [depth]
-    Scope scope{ "3d", {"x","y","z"}};
+    Scope scope_3d_raw{ "3d", {"x","y","z"}};
     auto const& s3d = rval.scoped_view({ "3d", {"x","y","z"}});
 
     auto const& pc3d = s3d.pcs();
@@ -186,7 +197,7 @@ TEST_CASE("clustering prototype point tree")
         debug("knn point {} at distance {} from query is in local point cloud {} at local point {}",
               index, metric, node_index, pin_index);
         const Dataset& pc = pc3d[node_index];
-        for (const auto& name : scope.coords) {
+        for (const auto& name : scope_3d_raw.coords) {
             debug("\t{} = {}", name, pc.get(name)->element<fa_float_t>(pin_index));
         }
     }
@@ -218,12 +229,18 @@ TEST_CASE("clustering prototype facade")
     // (0.5 * 1 + 1.5 * 2) / 3 = 1.1666666666666665
     debug("blob 0: q={}, r={}", blobs[0]->charge(), blobs[0]->center_x());
     debug("blob 1: q={}, r={}", blobs[1]->charge(), blobs[1]->center_x());
+    REQUIRE(blobs[0]->center_x() == 0.5);
+    REQUIRE(blobs[1]->center_x() == 1.5);
+    REQUIRE(blobs[0]->charge() == 1);
+    REQUIRE(blobs[1]->charge() == 2);
+
     double expect = 0;
     expect += blobs[0]->charge() * blobs[0]->center_x();
     expect += blobs[1]->charge() * blobs[1]->center_x();
     expect /= blobs[0]->charge() + blobs[1]->charge();
     debug("expect average pos {}", expect);
-    auto ave_pos = pcc.calc_ave_pos({1,0,0}, 1);
+    // there is now another calc_ave_pos(const geo_point_t& origin, int N) const;
+    auto ave_pos = pcc.calc_ave_pos({1,0,0}, 1.0);
     debug("ave_pos: {} | expecting (1.1666666666666665 0 0)", ave_pos);
     auto l1 = fabs(ave_pos[0] - 1.1666666666666665) + fabs(ave_pos[1]) + fabs(ave_pos[2]);
     CHECK(l1 < 1e-3);
@@ -263,26 +280,26 @@ TEST_CASE("clustering prototype facade")
 }
 
 
-static void print_MCUGraph(const MCUGraph& g) {
-    std::stringstream ss;
-    ss << "MCUGraph:" << std::endl;
-    ss << "Vertices: " << num_vertices(g) << std::endl;
-    ss << "Edges: " << num_edges(g) << std::endl;
-    ss << "Vertex Properties:" << std::endl;
-    auto vrange = boost::vertices(g);
-    for (auto vit = vrange.first; vit != vrange.second; ++vit) {
-        auto v = *vit;
-        ss << "Vertex " << v << ": Index = " << g[v].index << std::endl;
-    }
-    ss << "Edge Properties:" << std::endl;
-    auto erange = boost::edges(g);
-    auto weightMap = get(boost::edge_weight, g);
-    for (auto eit = erange.first; eit != erange.second; ++eit) {
-        auto e = *eit;
-        ss << "Edge " << e << ": Distance = " << get(weightMap, e) << std::endl;
-    }
-    debug(ss.str());
-}
+// static void print_MCUGraph(const MCUGraph& g) {
+//     std::stringstream ss;
+//     ss << "MCUGraph:" << std::endl;
+//     ss << "Vertices: " << num_vertices(g) << std::endl;
+//     ss << "Edges: " << num_edges(g) << std::endl;
+//     ss << "Vertex Properties:" << std::endl;
+//     auto vrange = boost::vertices(g);
+//     for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+//         auto v = *vit;
+//         ss << "Vertex " << v << ": Index = " << g[v].index << std::endl;
+//     }
+//     ss << "Edge Properties:" << std::endl;
+//     auto erange = boost::edges(g);
+//     auto weightMap = get(boost::edge_weight, g);
+//     for (auto eit = erange.first; eit != erange.second; ++eit) {
+//         auto e = *eit;
+//         ss << "Edge " << e << ": Distance = " << get(weightMap, e) << std::endl;
+//     }
+//     debug(ss.str());
+// }
 
 TEST_CASE("clustering prototype pca")
 {
@@ -295,11 +312,11 @@ TEST_CASE("clustering prototype pca")
     REQUIRE(pccptr->grouping() == grouping);
     Cluster& pcc = *pccptr;
 
-    geo_point_t center = pcc.get_center();
+    geo_point_t center = pcc.get_pca().center;
     debug("center: {} {} {}", center.x(), center.y(), center.z());
     for (size_t ind=0; ind<3; ++ind) {
-        auto axis = pcc.get_pca_axis(ind);
-        auto val = pcc.get_pca_value(ind);
+        auto axis = pcc.get_pca().axis.at(ind);
+        auto val = pcc.get_pca().values.at(ind);
         debug("pca{}: {} {} {} {}", ind, axis.x(), axis.y(), axis.z(), val);
     }
 }
@@ -384,20 +401,46 @@ TEST_CASE("clustering prototype Simple3DPointCloud")
 }
 
 
-TEST_CASE("clustering prototype dijkstra_shortest_paths")
-{
-    Points::node_t root_node;
-    Grouping* grouping = root_node.value.facade<Grouping>();
-    REQUIRE(grouping != nullptr);
-    root_node.insert(make_simple_pctree());
-    Cluster* pccptr = grouping->children()[0];
-    REQUIRE(pccptr != nullptr);
-    REQUIRE(pccptr->grouping() == grouping);
-    Cluster& pcc = *pccptr;
-    pcc.Create_graph(false);
-    print_MCUGraph(*pcc.get_graph());
-    pcc.dijkstra_shortest_paths(5, false);
-}
+// static IPCTransformSet::pointer get_pcts()
+// {
+//     PluginManager& pm = PluginManager::instance();
+//     pm.add("WireCellClus");
+    
+//     {
+//         auto icfg = Factory::lookup<IConfigurable>("DetectorVolumes");
+//         auto cfg = icfg->default_configuration();
+//         icfg->configure(cfg);
+//     }
+//     {
+//         auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
+//         auto cfg = icfg->default_configuration();
+//         icfg->configure(cfg);
+//     }
+//     {
+//         auto icfg = Factory::lookup<IConfigurable>("PCTransformSet");
+//         auto cfg = icfg->default_configuration();
+//         icfg->configure(cfg);
+//     }
+
+//     return Factory::find_tn<IPCTransformSet>("PCTransformSet");
+// }
+
+// TEST_CASE("clustering prototype dijkstra_shortest_paths")
+// {
+//     auto pcts = get_pcts();
+
+//     Points::node_t root_node;
+//     Grouping* grouping = root_node.value.facade<Grouping>();
+//     REQUIRE(grouping != nullptr);
+//     root_node.insert(make_simple_pctree());
+//     Cluster* pccptr = grouping->children()[0];
+//     REQUIRE(pccptr != nullptr);
+//     REQUIRE(pccptr->grouping() == grouping);
+//     Cluster& pcc = *pccptr;
+//     pcc.Create_graph(pcts, false);
+//     print_MCUGraph(*pcc.get_graph());
+//     pcc.dijkstra_shortest_paths(pcts, 5, false);
+// }
 
 
 TEST_CASE("clustering prototype Facade separate")
@@ -434,4 +477,205 @@ TEST_CASE("clustering prototype Facade separate")
     REQUIRE(child_node.get() != nullptr);
     debug("after removal, grouping has {} children", grouping->nchildren());
     REQUIRE(grouping->nchildren() == 1);
+}
+
+
+
+/**
+   This gives an example of how to do the following:
+   - add xc,yc,zc arrays representing "corrected coordinates" to blob-local "3d" PC.
+   - create a "filtered scoped view" on xc,yc,zc.
+
+   - create an equivalent scoped view on x,y,z
+
+   See also the test "point tree filtered scoped view" in util/test/doctest_pointtree.cxx
+
+ */
+TEST_CASE("clustering prototype corrected coordinates")
+{
+    Points::node_t root_node;
+    root_node.insert(make_simple_pctree()); // cluster 1
+    root_node.insert(make_simple_pctree()); // cluster 2
+
+    // We first get all blobs in a scoped view.
+    //
+    // There is more than one way to do this.  Here, we rely on the coincidence
+    // that only blob nodes have a local PC named "3d".
+    Scope all_blobs_scope{"3d",{"x","y","z"}};
+    auto& all_sv = root_node.value.scoped_view(all_blobs_scope);
+
+    // Now add xc,yc,zc by making a "correction".  The actual "correction" here
+    // bogus and just serves as an example.
+    for (auto* node : all_sv.nodes()) {
+        Dataset& pc3d = node->value.local_pc("3d");
+        auto npoints = pc3d.size_major();
+        REQUIRE(npoints);
+
+        // Make copy as we will mutate.
+        auto xc = Array(*pc3d.get("x"));
+        auto yc = Array(*pc3d.get("y"));
+        auto zc = Array(*pc3d.get("z"));
+        auto xcv = xc.elements<double>();
+        auto ycv = yc.elements<double>();
+        auto zcv = zc.elements<double>();
+
+        // Here we do a totally bogus "correction" just to make some different
+        // arrays.
+        for (size_t ind=0; ind<npoints; ++ind) {
+            xcv[ind] *= -1;
+            ycv[ind] *= -1;
+            zcv[ind] *= -1;
+        }
+
+        // Now we add these new arrays to the "3d" PC
+        pc3d.add("xc", xc);
+        pc3d.add("yc", yc);
+        pc3d.add("zc", zc);
+    }
+
+    // Next we get a scoped view on the "corrected" charge and simulate some
+    // blob-level fiducial or other selection.
+    struct EveryOther {
+        int count{0};
+        bool operator()(const Points::node_t& node) {
+            // We visit EVERY node in the DFS but can only decide based on nodes
+            // that are otherwise "in scope".
+            
+            //Again, rely on the arrangement that blob nodes are the only with
+            //"3d" PCs.  Skip those.
+            if (! node.value.has_pc("3d")) return false;
+
+            // At this point a "real" selector might use local_pc("3d") to get
+            // the "3d" PC and check its points and make some sophisticated
+            // decision.  But, here we just keep half of the blob nodes.
+            return (count++)%2; // every other
+        }
+    };
+
+    Scope everyother_corr_scope{"3d",{"xc","yc","zc"},0, "everyother_corr"};
+    auto& eoc_sv = root_node.value.scoped_view(everyother_corr_scope, EveryOther{});
+
+    debug("after keeping every other we have {} nodes in scope", eoc_sv.nodes().size()); // 74 for 2 janky tracks??
+    
+
+    // We next make a scoped view to get the same nodes but with the x,y,z
+    // coordinates.
+    std::set<const Points::node_t*> eo_nodes(eoc_sv.nodes().begin(), eoc_sv.nodes().end());
+    Scope everyother_orig_scope{"3d",{"x","y","z"},0, "everyother_orig"};
+    auto& eoo_sv = root_node.value.scoped_view(everyother_orig_scope, 
+                                              [&](const Points::node_t& node) {
+                                                  return eo_nodes.find(&node) != eo_nodes.end();
+                                              });
+    REQUIRE(eoo_sv.nodes().size() == eoc_sv.nodes().size());
+    
+    // We can now do a "k-d tree query" on the "corrected" coordinate PC and
+    // then use the returned point indices to refer to points in the "original"
+    // PC. 
+
+    // Get k-d trees for each SV.  We will query kdc "corr" and index into kdo
+    // "orig" points.
+
+    const auto& kdo = eoo_sv.kd();     // orig
+    const auto& kdc = eoc_sv.kd();     // corr
+    const auto& kdo_pts = kdo.points();
+    const auto& kdc_pts = kdc.points();
+    CHECK(kdo_pts.size() == kdc_pts.size());
+
+    // Do some random k-d tree query.
+    const std::vector<double> origin = {0,0,0};
+    auto kdc_nn = kdc.knn(1, origin);
+    CHECK(kdc_nn.size() == 1);
+
+    for (const auto& [index, metric] : kdc_nn) {
+        debug("query=({},{},{}) orig=({},{},{}) corr=({},{},{}) metric={}",
+              origin[0], origin[1], origin[2],
+              kdo_pts[0][index], kdo_pts[1][index], kdo_pts[2][index],
+              kdc_pts[0][index], kdc_pts[1][index], kdc_pts[2][index],
+              metric);
+
+        // We next show some ways that this data is all interrelated.  
+
+        // We can get the node that provided the point at the index:
+        auto* node = eoo_sv.node_with_point(index); 
+
+        // That is literally indexing the nodes by the "major index" of the
+        // point.  Remember, there is the pair of (major,minor) indices
+        // corresponding to the "point" index.  The "major" is simply the index
+        // of the node in the SV and the "minor" is the point in the local PC of
+        // that node.
+        REQUIRE(node == eoo_sv.nodes().at(kdo.major_index(index)));
+
+        // Again, the minor index is the index of the point in the node's local
+        // PC.  We can use it in the local PC of the node.
+        auto minor_index = kdo.minor_index(index);
+        const auto& pc3d = node->value.local_pc("3d");
+        double xc = pc3d.get("xc")->element<double>(minor_index);
+        REQUIRE(xc == kdc_pts[0][index]); // same!
+
+    }
+    
+}
+
+
+TEST_CASE("haiwang")
+{
+    Points::node_t root_node;
+    root_node.insert(make_simple_pctree()); // cluster 1
+    // root_node.insert(make_simple_pctree()); // cluster 2
+
+    Scope all_scope{"3d",{"x","y","z"}};
+    auto& all_sv = root_node.value.scoped_view(all_scope);
+    debug("all_sv has {} nodes", all_sv.nodes().size());
+    print_dds(all_sv.pcs());
+
+    Scope smallx_scope{"3d",{"x","y","z"}, 0, "smallx"};
+    auto& smallx_sv = root_node.value.scoped_view(smallx_scope,
+        [&](const Points::node_t& node) {
+            debug("filtering node");
+            const auto& lpcs = node.value.local_pcs();
+            debug("filtering node with {} local pcs", lpcs.size());
+            const auto& it = lpcs.find("3d");
+            if (it == lpcs.end()) {
+                return false;
+            }
+            const auto& pc = it->second;
+            // const auto& x = pc.get("x");
+            // const auto xv = x->elements<double>();
+            const auto& wpid = pc.get("wpid");
+            const auto wpidv = wpid->elements<int>();
+            // for (auto val : xv) {
+            //     debug("filtering x={}", val);
+            //     if (val < 1.) {
+            //         return true;
+            //     }
+            // }
+            for (auto val : wpidv) {
+                debug("filtering wpid={}", val);
+                if (val < 11) {
+                    debug("passing wpid={}", val);
+                    return true;
+                }
+            }
+            return false;
+        }
+    );
+    debug("smallx_sv has {} nodes", smallx_sv.nodes().size());
+    debug("print_dds(smallx_sv.pcs());");
+    print_dds(smallx_sv.pcs());
+    auto smallx_fp = smallx_sv.flat_pc("3d");
+    debug("print_ds(smallx_fp);");
+    print_ds(smallx_fp);
+    auto smallx_fc = smallx_sv.flat_coords();
+    debug("print_ds(smallx_fc);");
+    print_ds(smallx_fc);
+
+    {
+        WireCell::WirePlaneId wpid{-1};
+        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid.valid()? true : false, wpid.valid());
+    }
+
+    {
+        WireCell::WirePlaneId wpid{0};
+        debug("wpid: wpid.ident() {} wpid.name() {} ok? {} valid? {}", wpid.ident(), wpid.name(), wpid.valid()? true : false, wpid.valid());
+    }
 }

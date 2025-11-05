@@ -1,32 +1,158 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringNeutrino;
+WIRECELL_FACTORY(ClusteringNeutrino, ClusteringNeutrino,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::Aux;
+using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_neutrino(
+    Grouping &live_grouping, 
+    int num_try, 
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope
+    );
+
+class ClusteringNeutrino :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
+public:
+    ClusteringNeutrino() {}
+    virtual ~ClusteringNeutrino() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+        
+        num_try_ = get(config, "num_try", 1);
+    }
+    
+    void visit(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        for (int i = 0; i != num_try_; i++) {
+            clustering_neutrino(live, i, m_dv, m_scope);
+        }
+    }
+    
+private:
+    int num_try_{1};
+};
 
 // The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
 
-using namespace WireCell;
-using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
-using namespace WireCell::PointCloud::Tree;
-
-
-void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, int num_try)
+// handle all APA/Face
+static void clustering_neutrino(
+    Grouping &live_grouping,
+    int num_try, 
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope)
 {
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = live_grouping.wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    }
+
+
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function  from long cluster to short cluster
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
 
-    const auto &mp = live_grouping.get_params();
-    // this is for 4 time slices
-    double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
 
-    geo_point_t drift_dir(1, 0, 0);
+    // const auto &mp = live_grouping.get_params();
+    // this is for 4 time slices
+    // double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
+
+    // get wpids ...
+    std::map<WirePlaneId, double> map_wpid_time_slice_width;
+    std::map<WirePlaneId, double> map_FV_xmin;
+    std::map<WirePlaneId, double> map_FV_xmax;
+    std::map<WirePlaneId, double> map_FV_xmin_margin;
+    std::map<WirePlaneId, double> map_FV_xmax_margin;
+    for (const auto& wpid : wpids) {
+        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
+        map_FV_xmin[wpid] = dv->metadata(wpid)["FV_xmin"].asDouble() ;
+        map_FV_xmax[wpid] = dv->metadata(wpid)["FV_xmax"].asDouble() ;
+        map_FV_xmin_margin[wpid] = dv->metadata(wpid)["FV_xmin_margin"].asDouble() ;
+        map_FV_xmax_margin[wpid] = dv->metadata(wpid)["FV_xmax_margin"].asDouble() ;
+    }
+    WirePlaneId wpid_all(0);
+    double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
+    double det_FV_xmax = dv->metadata(wpid_all)["FV_xmax"].asDouble();
+    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
+    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
+    double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
+    double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
+    // double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
+    // double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
+
+
+
+
+
+    // Get drift direction from the first element of wpid_params, 
+    // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
+    geo_point_t drift_dir_abs(1,0,0);
+
     geo_point_t vertical_dir(0, 1, 0);
     geo_point_t beam_dir(0, 0, 1);
+    // Get vertical_dir from metadata
+    Json::Value vertical_dir_json = dv->metadata(wpid_all)["vertical_dir"];
+    Json::Value beam_dir_json = dv->metadata(wpid_all)["beam_dir"];
+    if (!vertical_dir_json.isNull() && vertical_dir_json.isArray() && vertical_dir_json.size() >= 3) {
+        vertical_dir = geo_point_t(
+            vertical_dir_json[0].asDouble(),
+            vertical_dir_json[1].asDouble(),
+            vertical_dir_json[2].asDouble()
+        );
+    } 
+    if (!beam_dir_json.isNull() && beam_dir_json.isArray() && beam_dir_json.size() >= 3) {
+        beam_dir = geo_point_t(
+            beam_dir_json[0].asDouble(),
+            beam_dir_json[1].asDouble(),
+            beam_dir_json[2].asDouble()
+        );
+    } 
 
     // find all the clusters that are inside the box ...
     std::vector<Cluster *> contained_clusters;
@@ -34,6 +160,12 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
+        if (!cluster->get_scope_filter(scope)) continue;
+        if (cluster->get_default_scope().hash() != scope.hash()) {
+            cluster->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+
         // cluster->Create_point_cloud();
         std::pair<geo_point_t, geo_point_t> hl_wcps = cluster->get_highest_lowest_points();
         std::pair<geo_point_t, geo_point_t> fb_wcps = cluster->get_front_back_points();
@@ -43,7 +175,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         // el_wcps.first.x()/units::cm << " " << el_wcps.second.x()/units::cm << std::endl;
 
         // if (el_wcps.first.x() < -1 * units::cm || el_wcps.second.x() > 257 * units::cm ||
-        if (el_wcps.first.x() < mp.FV_xmin - mp.FV_xmin_margin || el_wcps.second.x() > mp.FV_xmax + mp.FV_xmax_margin || cluster->get_length() < 6.0 * units::cm)
+        if (el_wcps.first.x() < map_FV_xmin.begin()->second - map_FV_xmin_margin.begin()->second || el_wcps.second.x() > map_FV_xmax.begin()->second + map_FV_xmax_margin.begin()->second || cluster->get_length() < 6.0 * units::cm)
             continue;
 
         bool flag_fy = false;
@@ -54,17 +186,17 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         bool flag_bz = false;
 
         std::vector<geo_point_t> saved_wcps;
-        if (hl_wcps.first.y() > mp.FV_ymax) {
+        if (hl_wcps.first.y() > det_FV_ymax) {
             saved_wcps.push_back(hl_wcps.first);
             flag_fy = true;
         }
 
-        if (hl_wcps.second.y() < mp.FV_ymin) {
+        if (hl_wcps.second.y() < det_FV_ymin) {
             saved_wcps.push_back(hl_wcps.second);
             flag_by = true;
         }
 
-        if (fb_wcps.first.z() > mp.FV_zmax) {
+        if (fb_wcps.first.z() > det_FV_zmax) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - fb_wcps.first.x(), 2) +
@@ -81,7 +213,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (fb_wcps.second.z() < mp.FV_zmin) {
+        if (fb_wcps.second.z() < det_FV_zmin) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - fb_wcps.second.x(), 2) +
@@ -98,7 +230,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (el_wcps.first.x() < mp.FV_xmin) {
+        if (el_wcps.first.x() < det_FV_xmin) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - el_wcps.first.x(), 2) +
@@ -115,7 +247,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             }
         }
 
-        if (el_wcps.second.x() > mp.FV_xmax) {
+        if (el_wcps.second.x() > det_FV_xmax) {
             bool flag_save = true;
             for (size_t j = 0; j != saved_wcps.size(); j++) {
                 double dis = sqrt(pow(saved_wcps.at(j).x() - el_wcps.second.x(), 2) +
@@ -148,9 +280,11 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
     // calculate the closest distance??? ...
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster1 = live_clusters.at(i);
+        if (!cluster1->get_scope_filter(scope)) continue;
         // ToyPointCloud *cloud1 = cluster1->get_point_cloud();
         for (size_t j = i + 1; j != live_clusters.size(); j++) {
             Cluster *cluster2 = live_clusters.at(j);
+            if (!cluster2->get_scope_filter(scope)) continue;
             // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
 
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
@@ -203,8 +337,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
             // can not be the same
             if (cluster2 == cluster1) continue;
             if (cluster2->get_length() > 150 * units::cm) {
-                geo_point_t dir1(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                 cluster2->get_pca_axis(0).z());
+                geo_point_t dir1(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                 cluster2->get_pca().axis.at(0).z());
                 if (fabs(dir1.angle(vertical_dir) - 3.1415926 / 2.) / 3.1415926 * 180. > 80) continue;
             }
             // cluster2->Create_point_cloud();
@@ -217,9 +351,9 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
             if (cluster_cloud_map.find(cluster1) == cluster_cloud_map.end()) {
                 // cluster1->Calc_PCA();
-                geo_point_t center = cluster1->get_center();
-                geo_point_t main_dir(cluster1->get_pca_axis(0).x(), cluster1->get_pca_axis(0).y(),
-                                     cluster1->get_pca_axis(0).z());
+                geo_point_t center = cluster1->get_pca().center;
+                geo_point_t main_dir(cluster1->get_pca().axis.at(0).x(), cluster1->get_pca().axis.at(0).y(),
+                                     cluster1->get_pca().axis.at(0).z());
                 main_dir = main_dir.norm();
 
                 // ToyPointCloud *cloud1_ext = new ToyPointCloud(angle_u, angle_v, angle_w);
@@ -248,14 +382,17 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
                 if (cluster1->nnearby(extreme_pts.first, 15 * units::cm) <= 75 && cluster1->npoints() > 75 ||
                     cluster1->nnearby(extreme_pts.second, 15 * units::cm) <= 75 && cluster1->npoints() > 75 ||
-                    cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0) &&
+                    cluster1->get_pca().values.at(1) > 0.022 * cluster1->get_pca().values.at(0) &&
                         cluster1->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster1, 2.5 * units::cm);
                     const double orig_cluster_length = cluster1->get_length();
                     // std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
-                    const auto b2id = Separate_2(cluster1, 2.5 * units::cm);
+                    const auto b2id = Separate_2(cluster1, scope, 2.5 * units::cm);
                     // false: do not remove the cluster1
+                    auto scope_transform = cluster1->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster1, b2id, false);
+
+
                     assert(cluster1 != nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
@@ -267,9 +404,9 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     }
 
                     temp_extreme_pts = largest_cluster->get_two_extreme_points();
-                    center = largest_cluster->get_center();
-                    main_dir.set(largest_cluster->get_pca_axis(0).x(), largest_cluster->get_pca_axis(0).y(),
-                                 largest_cluster->get_pca_axis(0).z());
+                    center = largest_cluster->get_pca().center;
+                    main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
+                                 largest_cluster->get_pca().axis.at(0).z());
                     num_clusters = sep_clusters.size();
                     // largest_cluster->Create_point_cloud();
 
@@ -310,14 +447,14 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                 if (cluster1->nnearby(extreme_pts.first, 15 * units::cm) <= 75 &&
                         cluster1->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0))
+                        cluster1->get_pca().values.at(1) > 0.022 * cluster1->get_pca().values.at(0))
                     flag_add1 = false;
 
                 bool flag_add2 = true;
                 if (cluster1->nnearby(extreme_pts.second, 15 * units::cm) <= 75 &&
                         cluster1->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster1->get_pca_value(1) > 0.022 * cluster1->get_pca_value(0))
+                        cluster1->get_pca().values.at(1) > 0.022 * cluster1->get_pca().values.at(0))
                     flag_add2 = false;
 
                 for (size_t j = 0; j != 150; j++) {
@@ -393,9 +530,9 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
             if (cluster_cloud_map.find(cluster2) == cluster_cloud_map.end()) {
                 // cluster2->Calc_PCA();
-                geo_point_t center = cluster2->get_center();
-                geo_point_t main_dir(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                     cluster2->get_pca_axis(0).z());
+                geo_point_t center = cluster2->get_pca().center;
+                geo_point_t main_dir(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                     cluster2->get_pca().axis.at(0).z());
                 main_dir = main_dir.norm();
 
                 // ToyPointCloud *cloud2_ext = new ToyPointCloud(angle_u, angle_v, angle_w);
@@ -424,13 +561,15 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
                 if (cluster2->nnearby(extreme_pts.first, 15 * units::cm) <= 75 && cluster2->npoints() > 75 ||
                     cluster2->nnearby(extreme_pts.second, 15 * units::cm) <= 75 && cluster2->npoints() > 75 ||
-                    cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0) &&
+                    cluster2->get_pca().values.at(1) > 0.022 * cluster2->get_pca().values.at(0) &&
                         cluster2->get_length() > 45 * units::cm) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(cluster2, 2.5 * units::cm);
                     // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                     const double orig_cluster_length = cluster2->get_length();
-                    const auto b2id = Separate_2(cluster2, 2.5 * units::cm);
+                    const auto b2id = Separate_2(cluster2, scope, 2.5 * units::cm);
+                    auto scope_transform = cluster2->get_scope_transform(scope);
                     auto sep_clusters = live_grouping.separate(cluster2, b2id, false);
+
                     assert(cluster2 != nullptr);
                     Cluster *largest_cluster = 0;
                     int max_num_points = 0;
@@ -441,9 +580,9 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         }
                     }
                     temp_extreme_pts = largest_cluster->get_two_extreme_points();
-                    center = largest_cluster->get_center();
-                    main_dir.set(largest_cluster->get_pca_axis(0).x(), largest_cluster->get_pca_axis(0).y(),
-                                 largest_cluster->get_pca_axis(0).z());
+                    center = largest_cluster->get_pca().center;
+                    main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
+                                 largest_cluster->get_pca().axis.at(0).z());
                     num_clusters = sep_clusters.size();
 
                     // largest_cluster->Create_point_cloud();
@@ -485,13 +624,13 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                 if (cluster2->nnearby(extreme_pts.first, 15 * units::cm) <= 75 &&
                         cluster2->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0))
+                        cluster2->get_pca().values.at(1) > 0.022 * cluster2->get_pca().values.at(0))
                     flag_add1 = false;
                 bool flag_add2 = true;
                 if (cluster2->nnearby(extreme_pts.second, 15 * units::cm) <= 75 &&
                         cluster2->get_length() > 60 * units::cm ||
                     flag_enable_temp && num_clusters >= 4 &&
-                        cluster2->get_pca_value(1) > 0.022 * cluster2->get_pca_value(0))
+                        cluster2->get_pca().values.at(1) > 0.022 * cluster2->get_pca().values.at(0))
                     flag_add2 = false;
 
                 // std::cout << flag_add1 << " " << flag_add2 << " " << dir1.x() << " " << dir1.y() << " " <<
@@ -585,6 +724,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                 double dis1 = std::get<2>(results_1);
                 double dis2 = cluster1->get_closest_dis(test_pt);
 
+                // drift_dir +x, -x the same ...
                 if (dis1 < std::min(std::max(4.5 * units::cm, dis2 * sin(15 / 180. * 3.1415926)), 12 * units::cm) &&
                         (cluster2->get_length() > 25 * units::cm || cluster1->get_length() <= cluster2->get_length()) ||
                     dis1 < std::min(std::max(2.5 * units::cm, dis2 * sin(10 / 180. * 3.1415926)), 10 * units::cm) ||
@@ -593,8 +733,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         cluster2->get_length() > 15 * units::cm ||
                     cluster1->get_length() > 45 * units::cm && dis1 < 16 * units::cm &&
                         fabs(test_pt.x() - test_pt1.x()) < 3.2 * units::cm &&
-                        (fabs(drift_dir.angle(cluster_dir1_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5 ||
-                         fabs(drift_dir.angle(cluster_dir2_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5)) {
+                        (fabs(drift_dir_abs.angle(cluster_dir1_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5 ||
+                         fabs(drift_dir_abs.angle(cluster_dir2_map[cluster1]) - 3.1415926 / 2.) / 3.1415926 * 180. < 5)) {
                     // std::cout << test_pt1.x()/units::cm << " " << test_pt1.y()/units::cm << " " <<
                     // test_pt1.z()/units::cm
                     // << std::endl;
@@ -618,24 +758,24 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                         if ((angle_diff1 > 65 || angle_diff2 > 65) &&
                             (dis * sin((90 - angle_diff1) / 180. * 3.1415926) < 4.5 * units::cm ||
                              dis * sin((90 - angle_diff2) / 180. * 3.1415926) < 4.5 * units::cm)) {
-                            if (!cluster2->judge_vertex(test_pt1)) {
+                            if (!cluster2->judge_vertex(test_pt1, dv)) {
                                 test_pt1 = test_pt2;
                             }
                         }
                     }
 
                     if (cluster1->get_length() > 25 * units::cm &&
-                        cluster1->get_pca_value(1) < 0.0015 * cluster1->get_pca_value(0)) {
+                        cluster1->get_pca().values.at(1) < 0.0015 * cluster1->get_pca().values.at(0)) {
                         flag_merge = false;
 
                         if (dis < 0.5 * units::cm && dis1 < 1.5 * units::cm && dis2 < 1.5 * units::cm)
-                            flag_merge = cluster2->judge_vertex(test_pt1, 0.5, 0.6);
+                            flag_merge = cluster2->judge_vertex(test_pt1, dv, 0.5, 0.6);
                     }
                     else {
                         if (cluster2->get_length() < 30 * units::cm) {
                             flag_merge = true;
                             if (cluster1->get_length() > 15 * units::cm &&
-                                cluster1->get_pca_value(1) < 0.012 * cluster1->get_pca_value(0)) {
+                                cluster1->get_pca().values.at(1) < 0.012 * cluster1->get_pca().values.at(0)) {
                                 if (dis1 > std::max(2.5 * units::cm, dis2 * sin(7.5 / 180. * 3.1415926)))
                                     flag_merge = false;
                             }
@@ -644,44 +784,44 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                                 flag_merge = false;
                             }
                         }
-                        else if (JudgeSeparateDec_1(cluster2, drift_dir, cluster2->get_length(), time_slice_width)) {
+                        else if (JudgeSeparateDec_1(cluster2, drift_dir_abs, cluster2->get_length())) {
                             if (dis2 < 5 * units::cm) {
-                                flag_merge = cluster2->judge_vertex(test_pt1, 2. / 3.);
+                                flag_merge = cluster2->judge_vertex(test_pt1,dv, 2. / 3.);
                             }
                             else if (dis < 0.5 * units::cm) {
-                                flag_merge = cluster2->judge_vertex(test_pt1, 0.5, 0.6);
+                                flag_merge = cluster2->judge_vertex(test_pt1, dv, 0.5, 0.6);
                             }
                             else {
-                                flag_merge = cluster2->judge_vertex(test_pt1);
+                                flag_merge = cluster2->judge_vertex(test_pt1, dv);
                             }
 
                             if (cluster1->get_length() > 15 * units::cm &&
-                                cluster1->get_pca_value(1) < 0.012 * cluster1->get_pca_value(0)) {
+                                cluster1->get_pca().values.at(1) < 0.012 * cluster1->get_pca().values.at(0)) {
                                 if (dis1 > std::max(2.5 * units::cm, dis2 * sin(7.5 / 180. * 3.1415926)))
                                     flag_merge = false;
                             }
                         }
                         else {
                             if (dis2 < 5 * units::cm) {
-                                flag_merge = cluster2->judge_vertex(test_pt1, 2. / 3.);
+                                flag_merge = cluster2->judge_vertex(test_pt1, dv, 2. / 3.);
                             }
                             else if (dis < 0.5 * units::cm) {
-                                flag_merge = cluster2->judge_vertex(test_pt1, 0.5, 0.6);
+                                flag_merge = cluster2->judge_vertex(test_pt1, dv, 0.5, 0.6);
                             }
                             else {
-                                flag_merge = cluster2->judge_vertex(test_pt1);
+                                flag_merge = cluster2->judge_vertex(test_pt1,dv );
                             }
 
                             if (cluster1->get_length() > 15 * units::cm &&
-                                cluster1->get_pca_value(1) < 0.012 * cluster1->get_pca_value(0)) {
+                                cluster1->get_pca().values.at(1) < 0.012 * cluster1->get_pca().values.at(0)) {
                                 if (dis1 > std::max(3.5 * units::cm, dis2 * sin(7.5 / 180. * 3.1415926)))
                                     flag_merge = false;
                             }
 
                             if (flag_merge && cluster2->get_length() > 200 * units::cm && dis2 < 12 * units::cm &&
-                                cluster2->get_pca_value(1) < 0.0015 * cluster2->get_pca_value(0)) {
-                                geo_point_t cluster2_dir(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                                         cluster2->get_pca_axis(0).z());
+                                cluster2->get_pca().values.at(1) < 0.0015 * cluster2->get_pca().values.at(0)) {
+                                geo_point_t cluster2_dir(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                                         cluster2->get_pca().axis.at(0).z());
                                 if (fabs(cluster2_dir.angle(vertical_dir) / 3.1415926 * 180. - 3.1415926 / 2.) /
                                             3.1415926 * 180. >
                                         45 &&
@@ -696,7 +836,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                     if (cluster_close_cluster_map[cluster1].second < 1.2 * units::cm &&
                         cluster_close_cluster_map[cluster1].first != cluster2 &&
                         cluster_close_cluster_map[cluster1].first->get_length() > 60 * units::cm &&
-                        cluster1->get_pca_value(1) > 0.012 * cluster1->get_pca_value(0) && dis1 > 0.6 * units::cm) {
+                        cluster1->get_pca().values.at(1) > 0.012 * cluster1->get_pca().values.at(0) && dis1 > 0.6 * units::cm) {
                         flag_merge = false;
                     }
 
@@ -706,15 +846,15 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
 
                     if (flag_merge && cluster1->get_length() > 150 * units::cm &&
                         cluster2->get_length() > 150 * units::cm &&
-                        (cluster1->get_pca_value(1) < 0.03 * cluster1->get_pca_value(0) ||
-                         cluster2->get_pca_value(1) < 0.03 * cluster2->get_pca_value(0))) {
+                        (cluster1->get_pca().values.at(1) < 0.03 * cluster1->get_pca().values.at(0) ||
+                         cluster2->get_pca().values.at(1) < 0.03 * cluster2->get_pca().values.at(0))) {
                         // protect against two long tracks ...
                         // cluster1->Calc_PCA();
                         // cluster2->Calc_PCA();
-                        geo_point_t temp_dir1(cluster1->get_pca_axis(0).x(), cluster1->get_pca_axis(0).y(),
-                                              cluster1->get_pca_axis(0).z());
-                        geo_point_t temp_dir2(cluster2->get_pca_axis(0).x(), cluster2->get_pca_axis(0).y(),
-                                              cluster2->get_pca_axis(0).z());
+                        geo_point_t temp_dir1(cluster1->get_pca().axis.at(0).x(), cluster1->get_pca().axis.at(0).y(),
+                                              cluster1->get_pca().axis.at(0).z());
+                        geo_point_t temp_dir2(cluster2->get_pca().axis.at(0).x(), cluster2->get_pca().axis.at(0).y(),
+                                              cluster2->get_pca().axis.at(0).z());
                         if (fabs(temp_dir1.angle(temp_dir2) - 3.1415926 / 2.) < 60 / 180. * 3.1415926)
                             flag_merge = false;
                     }
@@ -724,7 +864,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                 // if(flag_merge) 
                 //     std::cout << dis1 / units::cm << " " << dis2 / units::cm << " " << dis / units::cm << " "
                 //               << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
-                //               << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                //               << flag_merge << " " << merge_type << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
 
                 if (dis < 1.8 * units::cm && cluster1->get_length() < 75 * units::cm &&
                     cluster2->get_length() < 75 * units::cm &&
@@ -762,8 +902,8 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
                          cluster2->get_length() > 30 * units::cm && cluster1->get_length() > 30 * units::cm) {
                     // cluster1->Calc_PCA();
                     // cluster2->Calc_PCA();
-                    if (cluster1->get_pca_value(1) > 0.0015 * cluster1->get_pca_value(0) &&
-                        cluster2->get_pca_value(1) > 0.0015 * cluster2->get_pca_value(0)) {
+                    if (cluster1->get_pca().values.at(1) > 0.0015 * cluster1->get_pca().values.at(0) &&
+                        cluster2->get_pca().values.at(1) > 0.0015 * cluster2->get_pca().values.at(0)) {
                         flag_merge = true;
                         merge_type = 3;
                     }
@@ -807,7 +947,7 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         //  if(flag_merge ) 
         //             std::cout 
         //                       << cluster1->get_length() / units::cm << " " << cluster2->get_length() / units::cm << " "
-        //                       << flag_merge << " " << merge_type << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+        //                       << flag_merge << " " << merge_type << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
 
         }
     }
@@ -827,12 +967,27 @@ void WireCell::PointCloud::Facade::clustering_neutrino(Grouping &live_grouping, 
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
     }
     for (auto [cluster1, cluster2] : to_be_merged_pairs) {
-        // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+        // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
         boost::add_edge(ilive2desc[map_cluster_index[cluster1]],
                         ilive2desc[map_cluster_index[cluster2]], g);
     }
-    cluster_set_t new_clusters;
-    merge_clusters(g, live_grouping, new_clusters);
+
+    auto new_clusters = merge_clusters(g, live_grouping);
 
  
+    //       {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //      // Process each cluster
+    //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //          Cluster* cluster = live_clusters.at(iclus);
+    //          auto& scope = cluster->get_default_scope();
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center << std::endl;
+    //      }
+    //    }
+
+
+
+
+
+
 }

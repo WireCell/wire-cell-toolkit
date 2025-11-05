@@ -1,0 +1,145 @@
+#+title: Tools to test code
+
+This document collects pointers and usage notes for various tools that can be
+useful to test or otherwise evaluate source code.
+
+* Duplo
+
+https://github.com/dlidstrom/Duplo
+
+This tool locates duplicate blocks of code.
+
+Such blocks are a [[https://en.wikipedia.org/wiki/Code_smell][code smell]] that indicate a non-professional copy-pasting
+coding style.  The redundancy leads to overly long source that is difficult to
+understand and maintain.  These blocks can be breeding grounds for a class of
+bugs where the redundancy is not manually maintained.
+
+Duplo itself is written in C++.  It is easy to build but you will need a
+compiler and libstd++ new enough so that the C++20 header ~<format>~ is provided.
+A static executable can be made on a system with C++20 and it can then be used
+on non-C++20 systems:
+
+#+begin_example
+$ git clone https://github.com/dlidstrom/Duplo.git
+$ mkdir Duplo/build
+$ cd Duplo/build
+$ cmake .. -DCMAKE_EXE_LINKER_FLAGS=-static
+$ make
+$ ldd duplo
+	not a dynamic executable
+$ ./duplo --help
+NAME
+       Duplo v1.0.1 - duplicate source code block finder
+
+
+SYNOPSIS
+       duplo [OPTIONS] [INPUT_FILELIST] [OUTPUT_FILE]
+
+DESCRIPTION
+       Duplo is a tool to find duplicated code blocks in large
+       C/C++/Java/C#/VB.Net/Ada software systems.
+
+       -ml              minimal block size in lines (default is 4)
+       -pt              percentage of lines of duplication threshold to override -ml
+                        (default is 100%)
+                        useful for identifying whole file duplication
+       -mc              minimal characters in line (default is 3)
+                        lines with less characters are ignored
+       -n               only report for first N files
+       -j               number of threads to use (default is 1)
+       -ip              ignore preprocessor directives
+       -d               ignore file pairs with same name
+       -xml             output file in XML
+       -json            output file in JSON format
+       INPUT_FILELIST   input filelist (specify '-' to read from stdin)
+       OUTPUT_FILE      output file (specify '-' to output to stdout)
+...
+#+end_example
+
+To run Duplo on the WCT code base:
+
+#+begin_example
+$ find . -type f \( -iname '*.h' -o -iname '*.cxx' \) > files.lst
+$ duplo -ip -j8 files.lst wct-duplo.out > wct-duplo.log 1>&2
+#+end_example
+
+The log file will hold a summary of each source file and it may be useful to
+summarize the results as:
+
+#+begin_example
+$ grep -c 'nothing found' wct-duplo.log
+794
+$ grep -c '\bblock\b' wct-duplo.log
+389
+$ grep  '\bblock\b' duplo.log|grep -v '/test/' | awk '{print $3" "$1}' | sort -n -r | head -30
+168 ./clus/src/Facade_Cluster.cxx
+98 ./sigproc/src/ROI_refinement.cxx
+75 ./util/inc/WireCellUtil/boost_units_measurement.h
+61 ./util/src/miniz.cxx
+57 ./clus/src/clustering_neutrino.cxx
+54 ./clus/src/clustering_extend.cxx
+44 ./sigproc/src/OmnibusSigProc.cxx
+42 ./sigproc/src/Microboone.cxx
+41 ./clus/src/clustering_separate.cxx
+40 ./clus/src/clustering_parallel_prolong.cxx
+39 ./sigproc/src/DuneCrp.cxx
+38 ./clus/src/clustering_connect.cxx
+33 ./sigproc/src/Protodune.cxx
+31 ./clus/src/clustering_isolated.cxx
+30 ./img/src/InSliceDeghosting.cxx
+27 ./clus/src/clustering_deghost.cxx
+23 ./sigproc/src/ROI_formation.cxx
+22 ./clus/src/close_connected_graph.cxx
+19 ./clus/src/clustering_examine_bundles.cxx
+19 ./clus/src/clustering_ctpointcloud.cxx
+17 ./clus/src/clustering_close.cxx
+16 ./clus/src/clustering_protect_overclustering.cxx
+15 ./sigproc/inc/WireCellSigProc/ProtoduneHD.h
+15 ./clus/src/clustering_retile.cxx
+14 ./img/inc/WireCellImg/InSliceDeghosting.h
+14 ./clus/src/clustering_live_dead.cxx
+13 ./util/inc/WireCellUtil/NFKD.h
+13 ./img/inc/WireCellImg/ClusterScopeFilter.h
+13 ./clus/src/clustering_examine_x_boundary.cxx
+13 ./aux/src/FftwDFT.cxx
+#+end_example
+
+Note, this count is the number of pairs of duplicate blocks where at least one
+pair is in the named file.  The duplication can be internal or shared with
+another file.  The same block replicated more than twice leads to more pairs.
+
+The details are in the ~wct-duplo.out~ file.  For example, this trio of pairs:
+
+#+begin_example
+./clus/src/clustering_neutrino.cxx(239)
+./clus/src/clustering_neutrino.cxx(205)
+                if (dis < 15 * units::cm) {
+                    flag_save = false;
+                    break;
+            if (flag_save) {
+
+./clus/src/clustering_neutrino.cxx(256)
+./clus/src/clustering_neutrino.cxx(222)
+                if (dis < 15 * units::cm) {
+                    flag_save = false;
+                    break;
+            if (flag_save) {
+
+./clus/src/clustering_neutrino.cxx(256)
+./clus/src/clustering_neutrino.cxx(205)
+                if (dis < 15 * units::cm) {
+                    flag_save = false;
+                    break;
+            if (flag_save) {
+#+end_example
+
+Note, this "out" snippet has apparently elided some code (the ending braces).  The code is actually:
+
+#+begin_src c++
+                if (dis < 15 * units::cm) {
+                    flag_save = false;
+                    break;
+                }
+            }
+#+end_src
+

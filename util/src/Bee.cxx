@@ -32,6 +32,8 @@ Bee::Points::Points()
     m_data["z"] = Json::arrayValue;
     m_data["q"] = Json::arrayValue;
     m_data["cluster_id"] = Json::arrayValue;
+    m_data["real_cluster_id"] = Json::arrayValue;
+
 }
 
 
@@ -47,6 +49,8 @@ Bee::Points::Points(const std::string& geom,
     m_data["z"] = Json::arrayValue;
     m_data["q"] = Json::arrayValue;
     m_data["cluster_id"] = Json::arrayValue;
+    m_data["real_cluster_id"] = Json::arrayValue;
+
 }
 
 void Bee::Points::detector(const std::string& geom)
@@ -83,6 +87,8 @@ void Bee::Points::reset(int evt, int sub, int run)
     m_data["z"] = Json::arrayValue;
     m_data["q"] = Json::arrayValue;
     m_data["cluster_id"] = Json::arrayValue;
+    m_data["real_cluster_id"] = Json::arrayValue;
+
 }
 
 std::vector<int> Bee::Points::rse() const
@@ -94,7 +100,7 @@ std::vector<int> Bee::Points::rse() const
     };
 }
 
-void Bee::Points::append(const Point& p, double q, int clid)
+void Bee::Points::append(const Point& p, double q, int clid, int real_clid)
 {
     // Here we take the unusual pattern to store a value in explicit units.
     // Normally, WCT code should NOT do this.  But, we consider m_data to belong
@@ -104,12 +110,13 @@ void Bee::Points::append(const Point& p, double q, int clid)
     m_data["z"].append(p.z()/units::cm);
     m_data["q"].append(q);
     m_data["cluster_id"].append(clid);
+    m_data["real_cluster_id"].append(real_clid);
 }
 
 void Bee::Points::append(const Bee::Points& obj)
 {
     const int num = obj.size();
-    const std::vector<std::string> xyzq = {"x","y","z","q","cluser_id"};
+    const std::vector<std::string> xyzq = {"x","y","z","q","cluster_id","real_cluster_id"};
     for (const auto& key : xyzq) {
         const auto& arr = obj.m_data[key];
         for (int ind=0; ind<num; ++ind) {
@@ -131,7 +138,7 @@ int Bee::Points::back_cluster_id() const
 {
     int siz = size();
     if (!siz) { return -1; }
-    return m_data["cluser_id"][siz-1].asInt();
+    return m_data["cluster_id"][siz-1].asInt();
 }
 
 

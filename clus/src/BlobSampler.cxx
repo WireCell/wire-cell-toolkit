@@ -110,6 +110,7 @@ struct BlobSampler::Sampler : public Aux::Logger
             std::string lsuffix = letter + suffix;
             if (samp.is_extra(lsuffix)) {
                 ds.add(samp.cc.prefix+lsuffix, Array(vals));
+                // std::cout << "test: " << samp.cc.prefix << " " << lsuffix << " " << vals.size() << std::endl;
             }
         }
     };
@@ -172,11 +173,11 @@ struct BlobSampler::Sampler : public Aux::Logger
     // coordinates.
     double time2drift(double time) const
     {
-        const Pimpos* colpimpos = pimpos(2);
+        // const Pimpos* colpimpos = pimpos(2);
         const double drift = (time + cc.time_offset)*cc.drift_speed;
         double xorig = plane_x(2); // colpimpos->origin()[0];
         /// TODO: how to determine xsign?
-        double xsign = colpimpos->axis(0)[0];
+        double xsign = anodeface->dirx();
         return xorig + xsign*drift;
     }
 
@@ -269,7 +270,7 @@ struct BlobSampler::Sampler : public Aux::Logger
         }
 
         // Per point arrays
-
+        WirePlaneId wpid_blob{0}; // 0 is invalid, assign when we get it. duplicate over all pts later.
         const auto& activity = islice->activity();
         auto iface = iblob->face();
         for (const auto& iplane : iface->planes()) {
@@ -310,8 +311,12 @@ struct BlobSampler::Sampler : public Aux::Logger
                 wire_coord[ipt] = xwp[1];
                 const double pitch = xwp[2];
                 pitch_coord[ipt] = pitch;
-                int wind = pimpos->closest(pitch).first;
-                if (wind < 0 || wind >= (int)iwires.size()) {
+
+                // auto temp = pimpos->closest(pitch);
+                int wind =  pimpos->closest(pitch + 0.1*units::mm).first; // shift to the higher wires in case of a tie ... 
+                // std::cout << temp.second << " " << wind << " " << temp1.second << " " << temp1.first << std::endl;
+                
+                if (wind < 0) {
                     log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
                     log->warn("wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
                     wind = (int)iwires.size() - 1;
@@ -320,9 +325,13 @@ struct BlobSampler::Sampler : public Aux::Logger
                 wire_index[ipt] = wind;
         
                 IWire::pointer iwire = iwires[wire_index[ipt]];
+                const auto& wpid_wire = iwire->planeid();
+                wpid_blob = WireCell::WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                 channel_ident[ipt] = iwire->channel();
                 channel_attach[ipt] = p_chi2i[channel_ident[ipt]];
                 auto ich = channels[channel_attach[ipt]];
+
+                
 
                 auto ait = activity.find(ich);
                 if (ait != activity.end()) {
@@ -330,6 +339,15 @@ struct BlobSampler::Sampler : public Aux::Logger
                     charge_val[ipt] = act.value();
                     charge_unc[ipt] = act.uncertainty();
                 }
+
+                // std::cout << "Test: wire_index " << wire_index[ipt]
+                //           << " pitch_coord " << pitch_coord[ipt]
+                //           << " wire_coord " << wire_coord[ipt]
+                //           << " channel_ident " << channel_ident[ipt]
+                //           << " channel_attach " << channel_attach[ipt]
+                //           << " charge_val " << charge_val[ipt]
+                //           << " charge_unc " << charge_unc[ipt] 
+                //           << std::endl;
             }
 
             nv("wire_index", wire_index);
@@ -341,6 +359,11 @@ struct BlobSampler::Sampler : public Aux::Logger
             nv("charge_unc", charge_unc);
 
         } // over planes
+
+        {
+            npts_dup nd{*this, ds, npts};
+            nd("wpid", wpid_blob.ident());
+        }        
 
         return ds;
     }
@@ -382,10 +405,6 @@ struct BlobSampler::Sampler : public Aux::Logger
 std::tuple<PointCloud::Dataset, PointCloud::Dataset> BlobSampler::sample_blob(const IBlob::pointer& iblob,
                                              int blob_index)
 {
-    if (!iblob) {
-        THROW(ValueError() << errmsg{"can not sample null blob"});
-    }
-
     PointCloud::Dataset ret_main;
     PointCloud::Dataset ret_aux;
     // size_t points_added = 0;
@@ -706,60 +725,92 @@ struct Stepped : public BlobSampler::Sampler
     void sample(Dataset& ds, Dataset& aux) {
         const auto& coords = anodeface->raygrid();
         auto strips = iblob->shape().strips();
+        const int ndummy_index = strips.size() == 5 ? 2 : 0; // use this to skip dummy planes
+        const int li[3] = {ndummy_index+0, ndummy_index+1, ndummy_index+2}; // layer index
+        // std::cout << "DEBUG strips.size() " << strips.size() << std::endl;
+        // for (const auto& strip : strips) {
+        //     std::cout << "DEBUG strip " << strip.layer << " " << strip.bounds.first << " " << strip.bounds.second << std::endl;
+        // }
 
+        // This returns the number of wire regions covered by the strip s.
         auto swidth = [](const Strip& s) -> int {
             return s.bounds.second - s.bounds.first;
         };
-        // std::sort(strips.begin()+2, strips.end(),
-        //           [&](const Strip& a, const Strip& b) -> bool {
-        //               return swidth(a) < swidth(b);
-        //           });
-        // const Strip& smin = strips[2];
-        // const Strip& smid = strips[3];
-        // const Strip& smax = strips[4];
 
-        // XQ update this part of code to match WCP
-        Strip smax = strips[2]; int max_id = 2;
-        Strip smin = strips[3]; int min_id = 3;
-        Strip smid = strips[4]; /*int mid_id = 4;*/
-
-        if (swidth(strips[3]) > swidth(smax)){
-            smax = strips[3]; max_id = 3;
+        // Find the strip with largest coverage.
+        Strip smax = strips[li[0]]; int max_id = li[0];
+        if (swidth(strips[li[1]]) > swidth(smax)){
+            smax = strips[li[1]]; max_id = li[1];
         }
-        if(swidth(strips[4]) > swidth(smax)){
-            smax = strips[4]; max_id = 4;
-        }
-        if (swidth(strips[2]) < swidth(smin)){
-            smin = strips[2]; min_id = 2;
-        }
-        if(swidth(strips[4]) < swidth(smin)){
-            smin = strips[4]; min_id = 4;
+        if(swidth(strips[li[2]]) > swidth(smax)){
+            smax = strips[li[2]]; max_id = li[2];
         }
 
-        for (int i = 2;i!=5;i++){
+        // Find the strip with least coverage.
+        Strip smin = strips[li[1]]; int min_id = li[1];
+        if (swidth(strips[li[0]]) < swidth(smin)){
+            smin = strips[li[0]]; min_id = li[0];
+        }
+        if(swidth(strips[li[2]]) < swidth(smin)){
+            smin = strips[li[2]]; min_id = li[2];
+        }
+
+        // Find the other strip.
+        Strip smid = strips[li[2]]; /*int mid_id = li[2];*/
+        for (int i = li[0];i!=li[2]+1;i++){
             if (i != max_id && i != min_id){
                 smid = strips[i];        
                 // mid_id = i;
             }
         }
         
+        // Step sizes for the min/max directions.
         int nmin = std::max(min_step_size, max_step_fraction*swidth(smin));
         int nmax = std::max(min_step_size, max_step_fraction*swidth(smax));
 
         std::vector<Point> points;
 
         //XQ: is the order of 0 vs. 1 correct for the wire center???
+        //
+        // BV: this gives a diagonal vector from the crossing point of the
+        // 0-rays to the crossing point of the 0-wires (0-wire = half-way from
+        // 0-ray to 1-ray, half-way assuming offset is default 0.5).
+        //
+        //        /(0-ray) 
+        //       / /(0-wire)  
+        //      +-+-+ b
+        //     /   /
+        //    / c +-------(0-wire)
+        //   /   /
+        //  +---+----(0-ray)
+        //  a
+        // 
+        // if "a" is the crossing of two 0-rays and "b" is the crossing of two
+        // 1-rays, "adjust is the vector "ac" which is coincident with the
+        // crossing of the 0-wires.
         const Vector adjust = offset * (
             coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}) -
             coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}));
 
-        const double pitch_adjust = offset * (coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) - coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer) ); 
+        // This gives a relative pitch distance measured in the "mid" view that
+        // is half the distance between crossing point of the 0-rays and the
+        // 1-rays in the other two views.  In general, this is NOT the same as
+        // the magnitude of "adjust" / "ac" vector above as that diagonal of the
+        // min/max parallelogram is not necessarily parallel to the pitch
+        // direction in the third, "mid" view.  The two directions are
+        // accidentally coincident for symmetric wire patterns like in
+        // MicroBooNE.
+        const double pitch_adjust = offset * (
+            coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) -
+            coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer) ); 
+
         // log->debug("offset={} adjust={},{},{}", offset, adjust.x(), adjust.y(), adjust.z());
 
         std::set<decltype(smin.bounds.first)> min_wires_set;
         std::set<decltype(smin.bounds.first)> max_wires_set;
 
-        //XQ: is this the right way of adding the last wire?        
+        // Load up wires for the min/max dimensions including first, along each
+        // step size and last wire.
         for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) { 
             min_wires_set.insert(gmin);
         }
@@ -769,41 +820,649 @@ struct Stepped : public BlobSampler::Sampler
         }
         max_wires_set.insert(smax.bounds.second-1);
 
-        // std::cout << min_wires_set.size() << " " << max_wires_set.size() << " " << smin.bounds.first << " " << smin.bounds.second << " " << smax.bounds.first << " " << smax.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second << " " << smin.layer << " " << smax.layer <<  " " << smid.layer << std::endl;
-
+        // size_t npre_missed=0;
+        // size_t nrel_missed=0;
         for (auto it_gmin = min_wires_set.begin(); it_gmin != min_wires_set.end(); it_gmin++){
-//        for (auto gmin=smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) {
             coordinate_t cmin{smin.layer, *it_gmin};
-           for (auto it_gmax = max_wires_set.begin(); it_gmax != max_wires_set.end(); it_gmax++){
-           // for (auto gmax=smax.bounds.first; gmax < smax.bounds.second; gmax += nmax) {
+            for (auto it_gmax = max_wires_set.begin(); it_gmax != max_wires_set.end(); it_gmax++){
                 coordinate_t cmax{smax.layer, *it_gmax};
 
-                // adjust wire center ...                 
+                // Added by hyu, dunno why
+                const double ploc0 = coords.pitch_location(cmin, cmax, 0);
+                const double prel0 = coords.pitch_relative(ploc0, 0);
+                const double ploc1 = coords.pitch_location(cmin, cmax, 1);
+                const double prel1 = coords.pitch_relative(ploc1, 1);
+                if (prel0 > 1 or prel0 < 0 or prel1 > 1 or prel1 < 0) {
+                    // ++npre_missed;
+                    continue;
+                }
+
+                // This is the mid-view pitch of the crossings of the two *wires* associated with cmin/cmax *rays*.
                 const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust;
-                // XQ: how was the closest wire is found, if the pitch is exactly at the middle between two wires?
+
+                // This is the location from the mid view 0-ray to the point of
+                // the wire-crossing measured in units of mid view pitches.
                 const double pitch_relative = coords.pitch_relative(pitch, smid.layer); 
-//                auto gmid = coords.pitch_index(pitch, smid.layer);
- //               if (smid.in(gmid)) {
-                // if (smax.bounds.first==1006 && smax.bounds.second==1011)
-                //     std::cout << smax.bounds.first << " " << smax.bounds.second << " " << smin.bounds.first << " " << smin.bounds.second << " " << smid.bounds.first << " " << smid.bounds.second 
-                //         << " " << *it_gmax << " " << *it_gmin << " " << pitch << " " << pitch_relative << " " << pitch_adjust << " " << max_id << " " << min_id << " " << mid_id << std::endl;
-                // if (smid.bounds.first == 707) std::cout << pitch_relative << std::endl;
+
                 if (pitch_relative > smid.bounds.first - tolerance && pitch_relative < smid.bounds.second + tolerance){
                     const auto pt = coords.ray_crossing(cmin, cmax);
                     points.push_back(pt + adjust);
+                //     log->warn("Blob {} adding point {} prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
+                //               iblob->ident(), pt, pitch_relative, smid.bounds.first, smid.bounds.second, tolerance, offset, pitch_adjust, adjust);
+                // }
+                // else {
+                //     log->warn("Blob {} not adding point prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
+                //               iblob->ident(), pitch_relative, smid.bounds.first, smid.bounds.second, tolerance, offset, pitch_adjust, adjust);
+                //     ++nrel_missed;
                 }
             }
         }
+
+        // if (points.empty()) {
+        //     int ident = iblob->ident();
+        //     log->warn("Blob {} unsampled: minsiz={} maxsiz={} nwiresmin={} nwiresmax={} nrel={} npre={}.", 
+        //               ident, nmin, nmax, min_wires_set.size(), max_wires_set.size(), nrel_missed, npre_missed);
+        //     for (const auto& strip : strips) {
+        //         log->warn("Blob {} strip: {}", ident, strip);
+        //     }
+        // }
+
         intern(ds, points);
 
         // make aux dataset
         /// TODO: hard coded for 5 planes, i.e., wire_type is id - "2"
         aux.add("max_wire_interval", Array({(int)nmax}));
         aux.add("min_wire_interval", Array({(int)nmin}));
-        aux.add("max_wire_type", Array({(int)(max_id-2)}));
-        aux.add("min_wire_type", Array({(int)(min_id-2)}));
+        aux.add("max_wire_type", Array({(int)(max_id-ndummy_index)}));
+        aux.add("min_wire_type", Array({(int)(min_id-ndummy_index)}));
     }
 };
+
+// ===========================================================================
+// ChargeStepped Strategy Implementation for BlobSampler
+// ===========================================================================
+
+// Implement the "charge_stepped" sampling.
+//
+// This is an enhanced version of "stepped" sampling that includes:
+// 1. Charge-based filtering of sampling points
+// 2. Bad plane handling with configurable thresholds
+// 3. Conditional use of all wires vs stepped sets based on wire product
+// 4. Enhanced validation logic for charge requirements
+// 5. Runtime configuration override capability
+//
+// Based on WCPPID::calc_sampling_points() from wire-cell-pid
+struct ChargeStepped : public BlobSampler::Sampler
+{
+    using BlobSampler::Sampler::Sampler;
+    ChargeStepped(const ChargeStepped&) = default;
+    ChargeStepped& operator=(const ChargeStepped&) = default;
+    virtual ~ChargeStepped() {}
+
+    // Configuration parameters
+    double min_step_size{3};
+    double max_step_fraction{1.0/12.0};
+    double offset{0.5};
+    double tolerance{0.03};
+    
+    // Charge threshold parameters
+    double charge_threshold_max{4000};
+    double charge_threshold_min{4000};
+    double charge_threshold_other{4000};
+    
+    // Control parameters
+    int max_wire_product_threshold{2500};
+    bool disable_mix_dead_cell{true};
+    
+    // Dead plane detection threshold (same as PointTreeBuilding default)
+    double dead_threshold{1e10};
+
+    virtual void configure(const Configuration& cfg)
+    {
+        min_step_size = get(cfg, "min_step_size", min_step_size);
+        max_step_fraction = get(cfg, "max_step_fraction", max_step_fraction);
+        offset = get(cfg, "offset", offset);
+        tolerance = get(cfg, "tolerance", tolerance);
+        
+        charge_threshold_max = get(cfg, "charge_threshold_max", charge_threshold_max);
+        charge_threshold_min = get(cfg, "charge_threshold_min", charge_threshold_min);
+        charge_threshold_other = get(cfg, "charge_threshold_other", charge_threshold_other);
+        
+        max_wire_product_threshold = get(cfg, "max_wire_product_threshold", max_wire_product_threshold);
+        disable_mix_dead_cell = get(cfg, "disable_mix_dead_cell", disable_mix_dead_cell);
+        
+        dead_threshold = get(cfg, "dead_threshold", dead_threshold);
+    }
+
+    // Runtime configuration override
+    void apply_runtime_config(const Configuration& runtime_cfg)
+    {
+        if (runtime_cfg.isMember("charge_threshold_max")) {
+            charge_threshold_max = runtime_cfg["charge_threshold_max"].asDouble();
+        }
+        if (runtime_cfg.isMember("charge_threshold_min")) {
+            charge_threshold_min = runtime_cfg["charge_threshold_min"].asDouble();
+        }
+        if (runtime_cfg.isMember("charge_threshold_other")) {
+            charge_threshold_other = runtime_cfg["charge_threshold_other"].asDouble();
+        }
+        if (runtime_cfg.isMember("disable_mix_dead_cell")) {
+            disable_mix_dead_cell = runtime_cfg["disable_mix_dead_cell"].asBool();
+        }
+        if (runtime_cfg.isMember("dead_threshold")) {
+            dead_threshold = runtime_cfg["dead_threshold"].asDouble();
+        }
+    }
+
+    void sample(Dataset& ds, Dataset& aux) {
+        sample_with_config(ds, aux, Configuration());
+    }
+
+    void sample_with_config(Dataset& ds, Dataset& aux, const Configuration& runtime_cfg) {
+        // Apply runtime configuration if provided
+        if (!runtime_cfg.isNull()) {
+            apply_runtime_config(runtime_cfg);
+        }
+
+        const auto& coords = anodeface->raygrid();
+        auto strips = iblob->shape().strips();
+        const int ndummy_index = strips.size() == 5 ? 2 : 0;
+        const int li[3] = {ndummy_index+0, ndummy_index+1, ndummy_index+2};
+
+        auto swidth = [](const Strip& s) -> int {
+            return s.bounds.second - s.bounds.first;
+        };
+
+        // Find strips with max, min, and middle coverage
+        Strip smax = strips[li[0]]; int max_id = li[0];
+        if (swidth(strips[li[1]]) > swidth(smax)){
+            smax = strips[li[1]]; max_id = li[1];
+        }
+        if(swidth(strips[li[2]]) > swidth(smax)){
+            smax = strips[li[2]]; max_id = li[2];
+        }
+
+        Strip smin = strips[li[1]]; int min_id = li[1];
+        if (swidth(strips[li[0]]) < swidth(smin)){
+            smin = strips[li[0]]; min_id = li[0];
+        }
+        if(swidth(strips[li[2]]) < swidth(smin)){
+            smin = strips[li[2]]; min_id = li[2];
+        }
+
+        Strip smid = strips[li[2]]; int mid_id = li[2];
+        for (int i = li[0]; i <= li[2]; i++){
+            if (i != max_id && i != min_id){
+                smid = strips[i];
+                mid_id = i;
+            }
+        }
+
+        // Step sizes for the min/max directions
+        int nmin = std::max(min_step_size, max_step_fraction*swidth(smin));
+        int nmax = std::max(min_step_size, max_step_fraction*swidth(smax));
+
+        // Pre-cache activity data for charge lookup
+        auto islice = iblob->slice();
+        const auto& activity = islice->activity();
+        auto iface = anodeface;
+
+        // Detect bad planes dynamically based on charge uncertainty
+        std::vector<bool> plane_is_bad(3, false);
+        if (disable_mix_dead_cell){
+            plane_is_bad[max_id - ndummy_index] = is_plane_bad(max_id, activity, iface);
+            plane_is_bad[min_id - ndummy_index] = is_plane_bad(min_id, activity, iface);
+            plane_is_bad[mid_id - ndummy_index] = is_plane_bad(mid_id, activity, iface);
+        }
+
+        
+
+        // Adjust charge thresholds based on detected bad planes
+        double thresh_max = plane_is_bad[max_id - ndummy_index] ? 0.0 : charge_threshold_max;
+        double thresh_min = plane_is_bad[min_id - ndummy_index] ? 0.0 : charge_threshold_min;
+        double thresh_other = plane_is_bad[mid_id - ndummy_index] ? 0.0 : charge_threshold_other;
+
+        // if (!disable_mix_dead_cell)
+        //     std::cout << islice->start()/islice->span()*4<< " " << (islice->start() + islice->span())/islice->span()*4 << " "
+        //               << strips[2].bounds.first << " " << strips[2].bounds.second << " "
+        //               << strips[3].bounds.first << " " << strips[3].bounds.second << " "
+        //               << strips[4].bounds.first << " " << strips[4].bounds.second << " " 
+        //               << thresh_max << " " << thresh_min << " " << thresh_other << " ";// << std::endl;
+
+        // Create stepped wire sets (mandatory wires)
+        std::set<decltype(smin.bounds.first)> min_wires_set;
+        std::set<decltype(smax.bounds.first)> max_wires_set;
+
+        for (auto gmin = smin.bounds.first; gmin < smin.bounds.second; gmin += nmin) {
+            min_wires_set.insert(gmin);
+        }
+        min_wires_set.insert(smin.bounds.second-1);
+        
+        for (auto gmax = smax.bounds.first; gmax < smax.bounds.second; gmax += nmax) {
+            max_wires_set.insert(gmax);
+        }
+        max_wires_set.insert(smax.bounds.second-1);
+
+        // Determine which wire sets to use
+        bool use_all_wires = (swidth(smax) * swidth(smin) <= max_wire_product_threshold);
+        
+        std::set<decltype(smin.bounds.first)> actual_min_wires;
+        std::set<decltype(smax.bounds.first)> actual_max_wires;
+        
+        if (use_all_wires) {
+            // Use all wires
+            for (auto i = smin.bounds.first; i < smin.bounds.second; i++) {
+                actual_min_wires.insert(i);
+            }
+            for (auto i = smax.bounds.first; i < smax.bounds.second; i++) {
+                actual_max_wires.insert(i);
+            }
+        } else {
+            // Use stepped sets
+            actual_min_wires = min_wires_set;
+            actual_max_wires = max_wires_set;
+        }
+
+        // Offset adjustment for wire crossing points
+        const Vector adjust = offset * (
+            coords.ray_crossing({smin.layer, 1}, {smax.layer, 1}) -
+            coords.ray_crossing({smin.layer, 0}, {smax.layer, 0}));
+
+        const double pitch_adjust = offset * (
+            coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) -
+            coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer));
+
+        std::vector<Point> points;
+
+
+        //  // Collect wire indices for each plane //debug ...
+        // std::vector<int> wires_u, wires_v, wires_w;
+        // for (auto idx : actual_min_wires) {
+        //     if (smin.layer - ndummy_index == 0) wires_u.push_back(idx);
+        //     if (smin.layer - ndummy_index == 1) wires_v.push_back(idx);
+        //     if (smin.layer - ndummy_index == 2) wires_w.push_back(idx);
+        // }
+        // for (auto idx : actual_max_wires) {
+        //     if (smax.layer - ndummy_index == 0) wires_u.push_back(idx);
+        //     if (smax.layer - ndummy_index == 1) wires_v.push_back(idx);
+        //     if (smax.layer - ndummy_index == 2) wires_w.push_back(idx);
+        // }
+        // // Add actual_mid_wires collection
+        // std::set<decltype(smid.bounds.first)> actual_mid_wires;
+        // if (use_all_wires) {
+        //     for (auto i = smid.bounds.first; i < smid.bounds.second; i++) {
+        //         actual_mid_wires.insert(i);
+        //     }
+        // } else {
+        //     // Only use the bounds (start and end-1)
+        //     actual_mid_wires.insert(smid.bounds.first);
+        //     actual_mid_wires.insert(smid.bounds.second-1);
+        // }
+        // for (auto idx : actual_mid_wires) {
+        //     if (smid.layer - ndummy_index == 0) wires_u.push_back(idx);
+        //     if (smid.layer - ndummy_index == 1) {wires_v.push_back(idx); }
+        //     if (smid.layer - ndummy_index == 2) {wires_w.push_back(idx); }
+        // }
+        // // Remove duplicates
+        // std::sort(wires_u.begin(), wires_u.end());
+        // wires_u.erase(std::unique(wires_u.begin(), wires_u.end()), wires_u.end());
+        // std::sort(wires_v.begin(), wires_v.end());
+        // wires_v.erase(std::unique(wires_v.begin(), wires_v.end()), wires_v.end());
+        // std::sort(wires_w.begin(), wires_w.end());
+        // wires_w.erase(std::unique(wires_w.begin(), wires_w.end()), wires_w.end());
+        bool flag_print = false;
+        // Print debug info if specific sizes are matched
+        // if (wires_u.size() == 10 && wires_v.size() == 10 && wires_w.size() == 3) {
+        //     std::cout << "Xin1: " << points.size() << " " << wires_u.size() << " " << wires_v.size() << " " << wires_w.size()
+        //           << " " << actual_max_wires.size() << " " << actual_min_wires.size() << " " << disable_mix_dead_cell << " " << use_all_wires
+        //           << " bad_plane_max=" << plane_is_bad[max_id - ndummy_index] << " " << max_id 
+        //           << " bad_plane_min=" << plane_is_bad[min_id - ndummy_index] << " " << min_id
+        //           << " bad_plane_other=" << plane_is_bad[mid_id - ndummy_index] << " " << mid_id
+        //           << std::endl;
+        //     flag_print = true;
+        // }
+        // plane_is_bad[mid_id - ndummy_index] = is_plane_bad(mid_id, activity, iface, flag_print);
+        // debug code 
+
+
+        for (auto it_gmax = actual_max_wires.begin(); it_gmax != actual_max_wires.end(); it_gmax++) {
+            coordinate_t cmax{smax.layer, *it_gmax};
+            
+            bool flag_must2 = max_wires_set.find(*it_gmax) != max_wires_set.end();
+            double charge2 = get_wire_charge(cmax, activity, iface, ndummy_index, flag_print);
+
+            // if (!disable_mix_dead_cell){
+            //    std::cout << "max: " << charge2 << " " << *it_gmax << std::endl;
+            // }
+            
+            if ((!flag_must2) && (charge2 < thresh_max) && (charge2 != 0 || disable_mix_dead_cell)) {
+                continue;
+            }
+            // if (flag_print) {
+            //     std::cout << "wire: " << *it_gmax << " " << charge2 << " " << flag_must2 << " " << (charge2 < thresh_max) << " " << (charge2 != 0 || disable_mix_dead_cell) << " " << thresh_max << std::endl;
+            // }
+           
+
+            for (auto it_gmin = actual_min_wires.begin(); it_gmin != actual_min_wires.end(); it_gmin++) {
+                coordinate_t cmin{smin.layer, *it_gmin};
+                
+                // Check if this is a "must" wire (from stepped set)
+                bool flag_must1 = min_wires_set.find(*it_gmin) != min_wires_set.end();
+                
+                // Get charge for this wire
+                double charge1 = get_wire_charge(cmin, activity, iface, ndummy_index);
+                
+                // if(!disable_mix_dead_cell){
+                //     std::cout << "min: " << charge1 << " " << *it_gmin << std::endl;
+                // }
+
+                // Apply charge filtering for non-must wires
+                if ((!flag_must1) && (charge1 < thresh_min) && (charge1 != 0 || disable_mix_dead_cell)) {
+                    continue;
+                }
+                // if (flag_print) {
+                //     std::cout << "min wire: " << *it_gmin << " " << charge1 << " " << flag_must1 << " " << (charge1 < thresh_min) << " " << (charge1 != 0 || disable_mix_dead_cell) << " " << thresh_min << std::endl;
+                // }
+           
+
+                // Check basic bounds
+                const double ploc0 = coords.pitch_location(cmin, cmax, 0);
+                const double prel0 = coords.pitch_relative(ploc0, 0);
+                const double ploc1 = coords.pitch_location(cmin, cmax, 1);
+                const double prel1 = coords.pitch_relative(ploc1, 1);
+                if (prel0 > 1 || prel0 < 0 || prel1 > 1 || prel1 < 0) {
+                    continue;
+                }
+
+                // Check third plane bounds
+                const double pitch = coords.pitch_location(cmin, cmax, smid.layer)+ pitch_adjust;
+                const double pitch_relative = coords.pitch_relative(pitch, smid.layer);
+                
+                if (pitch_relative > smid.bounds.first - tolerance && 
+                    pitch_relative < smid.bounds.second + tolerance) {
+                    
+                    // Get charge for third plane
+                    coordinate_t cother{smid.layer, static_cast<int>(std::round(pitch_relative))};  
+                    double charge3 = get_wire_charge(cother, activity, iface, ndummy_index);
+                    
+                    // Apply charge validation logic
+                    if (flag_must1 && flag_must2) {
+                        // Both wires are mandatory, no additional charge filtering
+                    } else {
+                        // At least one wire is not mandatory, apply charge filtering
+                        if ((charge2 < thresh_max && (charge2 != 0 || disable_mix_dead_cell)) || // 2 is max ...
+                            (charge1 < thresh_min && (charge1 != 0 || disable_mix_dead_cell)) || // 1 is min ...
+                            (charge3 < thresh_other && (charge3 != 0 || disable_mix_dead_cell))) {
+                       
+                        
+                            continue;
+                        }
+                        
+                        // Skip if all charges are zero
+                        if (charge1 == 0 && charge2 == 0 && charge3 == 0) {
+                            continue;
+                        }
+                    }
+                    
+                    // if (flag_print) {
+                    //     std::cout <<  cmax << " " << cmin 
+                    //               << " " << cother 
+                    //               << " (" << charge2 << ", " << charge1 << ", " << charge3 << ")" << " " << pitch << " " << pitch_relative << " " 
+                    //               << " " << thresh_max << " " << thresh_min << " " << thresh_other << " " << std::endl;
+                    // }
+
+                    const auto pt = coords.ray_crossing(cmin, cmax);
+                    points.push_back(pt + adjust);
+                }
+            }
+        }
+
+        // if (!disable_mix_dead_cell) std::cout << points.size() << std::endl;
+
+        //de bug ...
+        // if (wires_u.size() == 10 && wires_v.size() == 10 && wires_w.size() == 3) {
+        //      std::cout << "Xin2: " << points.size() << " " << wires_u.front()  << " " << wires_v.front() << " " << wires_w.front() << " " << wires_u.size() << " " << wires_v.size() << " " << wires_w.size()
+        //           << " " << actual_max_wires.size() << " " << actual_min_wires.size() << " " << disable_mix_dead_cell << " " << use_all_wires << std::endl;
+        // }
+        // debug ...
+
+        intern(ds, points);
+
+        // Add auxiliary data
+        aux.add("max_wire_interval", Array({(int)nmax}));
+        aux.add("min_wire_interval", Array({(int)nmin}));
+        aux.add("max_wire_type", Array({(int)(max_id-ndummy_index)}));
+        aux.add("min_wire_type", Array({(int)(min_id-ndummy_index)}));
+        // aux.add("charge_threshold_max", Array({thresh_max}));
+        // aux.add("charge_threshold_min", Array({thresh_min}));
+        // aux.add("charge_threshold_other", Array({thresh_other}));
+        // aux.add("use_all_wires", Array({use_all_wires}));
+        // aux.add("bad_plane_max", Array({plane_is_bad[max_id - ndummy_index]}));
+        // aux.add("bad_plane_min", Array({plane_is_bad[min_id - ndummy_index]}));
+        // aux.add("bad_plane_other", Array({plane_is_bad[mid_id - ndummy_index]}));
+    }
+
+private:
+    // Helper function to detect if a plane is bad based on charge uncertainty
+    // Check the first wire of the blob for each plane
+    bool is_plane_bad(int plane_layer, 
+                      const ISlice::map_t& activity, 
+                      IAnodeFace::pointer iface, bool flag_print = false) {
+        
+        // Get the blob strips to find the first wire index for this plane
+        auto strips = iblob->shape().strips();
+        const int ndummy_index = strips.size() == 5 ? 2 : 0;
+        
+
+        if (plane_layer -ndummy_index < 0 || plane_layer - ndummy_index >= (int)iface->planes().size()) {
+            return false;
+        }
+        
+        // Find the strip for this plane layer
+        const Strip* target_strip = nullptr;
+        for (const auto& strip : strips) {
+            if (strip.layer == plane_layer) {
+                target_strip = &strip;
+                break;
+            }
+        }
+        
+        if (!target_strip) {
+            return false;
+        }
+
+        // if (flag_print) std::cout << plane_layer << " " <<  (int)iface->planes().size() << target_strip << std::endl;
+
+        
+        // Get the first and last wire indices from the strip bounds
+        int first_wire_index = target_strip->bounds.first;
+        int last_wire_index = target_strip->bounds.second - 1;
+
+        // Lambda to check if a wire is bad based on uncertainty
+        auto is_wire_bad = [&](int wire_index) -> bool {
+            // Create coordinate for the wire
+            // coordinate_t coord{plane_layer, wire_index};
+
+           
+
+            // Get the appropriate plane
+            int plane_index = plane_layer - ndummy_index;
+
+            // if (flag_print) {
+            //     std::cout << "Plane check: " << plane_index << " " <<  (int)iface->planes().size() << std::endl;
+            // }
+
+            if (plane_index < 0 || plane_index >= (int)iface->planes().size()) {
+            return false;
+            }
+
+            auto iplane = iface->planes()[plane_index];
+            const IWire::vector& iwires = iplane->wires();
+            const IChannel::vector& channels = iplane->channels();
+
+            // if (flag_print) {
+            //     std::cout << "Wire check: " << wire_index << " " << (int)iwires.size() << std::endl;
+            // }
+
+            // Bounds check for wire index
+            if (wire_index < 0 || wire_index >= (int)iwires.size()) {
+            return false;
+            }
+
+            // Get the wire and its channel
+            IWire::pointer iwire = iwires[wire_index];
+            int channel_ident = iwire->channel();
+
+            // Build/use cache for channel ident to index mapping (same as get_wire_charge)
+            auto& p_chi2i = plane_ident2index[iplane];
+            if (p_chi2i.empty()) {
+            const size_t nchannels = channels.size();
+            for (size_t chind=0; chind<nchannels; ++chind) {
+                auto ich = channels[chind];
+                p_chi2i[ich->ident()] = chind;
+            }
+            }
+
+            // if (flag_print){
+            //     std::cout << "Channel ident: " << channel_ident << " " << p_chi2i.size() << std::endl;
+            // }
+
+            // Look up channel index using the cache
+            auto chi2i_it = p_chi2i.find(channel_ident);
+            if (chi2i_it == p_chi2i.end()) {
+            return false;
+            }
+
+            // if (flag_print) {
+            //     std::cout << "Found channel index: " << chi2i_it->second << " " << (int)channels.size() << std::endl;
+            // }
+
+            int channel_attach = chi2i_it->second;
+            if (channel_attach < 0 || channel_attach >= (int)channels.size()) {
+            return false;
+            }
+
+            auto ich = channels[channel_attach];
+
+            // if (flag_print){
+            //     std::cout << "Checking channel: " << ich << " " << activity.size() << std::endl;
+            // }
+
+            // Look up charge in activity map and check uncertainty
+            auto ait = activity.find(ich);
+            if (ait != activity.end()) {
+                auto act = ait->second;
+                double uncertainty = act.uncertainty();
+
+                // if (flag_print) {
+                //     std::cout << "Checking wire " << wire_index << " in plane " << plane_layer 
+                //             << ": charge=" << act.value() << ", uncertainty=" << uncertainty 
+                //             << ", threshold=" << dead_threshold << std::endl;
+                // }
+
+                // Plane is considered bad if uncertainty exceeds threshold
+                return uncertainty > dead_threshold;
+            }
+
+            return false;
+        };
+
+        // Check both first and last wire
+        return is_wire_bad(first_wire_index) || is_wire_bad(last_wire_index);
+    }
+
+
+    // Helper function to get wire charge using the same pattern as make_dataset
+    double get_wire_charge(const coordinate_t& coord, 
+                          const ISlice::map_t& activity, 
+                          IAnodeFace::pointer iface, int ndummy_index = 2, bool flag_print = false) {
+        
+        // Get the appropriate plane
+        int plane_index = coord.layer-ndummy_index;
+        if (plane_index < 0 || plane_index >= (int)iface->planes().size()) {
+            return 0.0;
+        }
+        
+        auto iplane = iface->planes()[plane_index];
+        const IWire::vector& iwires = iplane->wires();
+        const IChannel::vector& channels = iplane->channels();
+        
+        // Bounds check for wire index
+        if (coord.grid < 0 || coord.grid >= (int)iwires.size()) {
+            return 0.0;
+        }
+        
+        // Get the wire and its channel
+        IWire::pointer iwire = iwires[coord.grid];
+        int channel_ident = iwire->channel();
+        
+        // Build/use cache for channel ident to index mapping (same as make_dataset)
+        auto& p_chi2i = plane_ident2index[iplane];
+        if (p_chi2i.empty()) {
+            const size_t nchannels = channels.size();
+            for (size_t chind=0; chind<nchannels; ++chind) {
+                auto ich = channels[chind];
+                p_chi2i[ich->ident()] = chind;
+            }
+        }
+        
+        // Look up channel index using the cache
+        auto chi2i_it = p_chi2i.find(channel_ident);
+        if (chi2i_it == p_chi2i.end()) {
+            return 0.0;
+        }
+        
+        int channel_attach = chi2i_it->second;
+        if (channel_attach < 0 || channel_attach >= (int)channels.size()) {
+            return 0.0;
+        }
+        
+        auto ich = channels[channel_attach];
+        
+        // Look up charge in activity map
+        auto ait = activity.find(ich);
+
+        if (ait != activity.end()) {
+            auto act = ait->second;
+            return act.value();
+        }
+        
+        return 0.0;
+    }
+};
+
+// ===========================================================================
+// BlobSampler Extension for Runtime Configuration
+// ===========================================================================
+
+std::tuple<PointCloud::Dataset, PointCloud::Dataset> 
+BlobSampler::sample_blob_with_config(const IBlob::pointer& iblob, 
+                       int blob_index, 
+                       const Configuration& runtime_config) {
+    
+    PointCloud::Dataset ret_main;
+    PointCloud::Dataset ret_aux;
+    
+    for (auto& sampler : m_samplers) {
+        sampler->begin_sample(blob_index, iblob);
+        
+        // Check if this is a ChargeStepped sampler
+        auto charge_stepped = dynamic_cast<ChargeStepped*>(sampler.get());
+        if (charge_stepped) {
+            // Use the configuration-aware sampling
+            charge_stepped->sample_with_config(ret_main, ret_aux, runtime_config);
+        } else {
+            // Use regular sampling
+            sampler->sample(ret_main, ret_aux);
+        }
+        
+        sampler->end_sample();
+    }
+    
+    return {ret_main, ret_aux};
+}
+
+
 
 void BlobSampler::add_strategy(Configuration strategy)
 {
@@ -870,8 +1529,13 @@ void BlobSampler::add_strategy(Configuration strategy)
         m_samplers.back()->configure(full);
         return;
     }
+    if (startswith(name, "charge_stepped")) {
+        m_samplers.push_back(std::make_unique<ChargeStepped>(full, m_samplers.size()));
+        m_samplers.back()->configure(full);
+        return;
+    }
 
     THROW(ValueError() << errmsg{"unknown strategy: " + name});
 }
 
-        
+
