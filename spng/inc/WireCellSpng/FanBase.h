@@ -54,8 +54,8 @@ namespace WireCell::SPNG {
         /// Subclass must implement to set out which starts as nullptr.
         virtual void fanin_combine(const input_vector& inv, output_pointer& out) = 0;
 
-        /// Let subclass do EOS processing or logging.
-        virtual void fanin_eos() { };
+        /// Let subclass do EOS processing or override default logging.
+        virtual void fanin_eos() { this->logit("EOS"); };
 
         virtual bool operator()(const input_vector& inv, output_pointer& out) {
             TorchSemaphore sem(this->context());
@@ -74,11 +74,9 @@ namespace WireCell::SPNG {
             size_t neos = std::count(inv.begin(), inv.end(), nullptr);
             if (neos) {
                 fanin_eos();
-                this->logit("EOS");
             }
             else {
                 fanin_combine(inv, out);
-                this->logit(out, "fanin");
             }
             this->next_count();
             return true;
@@ -122,8 +120,8 @@ namespace WireCell::SPNG {
         /// Subclass must implement.  outv is pre-sized and holds nullptrs.
         virtual void fanout_separate(const input_pointer& in, output_vector& outv) = 0;
 
-        /// Let subclass do EOS processing or logging.
-        virtual void fanout_eos() { }
+        /// Let subclass do EOS processing or override default logging.
+        virtual void fanout_eos() { this->logit("EOS"); }
 
         virtual bool operator()(const input_pointer& in, output_vector& outv) {
             TorchSemaphore sem(this->context());
@@ -138,11 +136,9 @@ namespace WireCell::SPNG {
             outv.resize(multiplicity, nullptr);
             if (! in) {
                 fanout_eos();
-                this->logit("EOS");
             }
             else {
                 fanout_separate(in, outv);
-                this->logit(in, "fanout");
             }
             this->next_count();
             return true;
