@@ -15,7 +15,7 @@ WIRECELL_FACTORY(SPNGTorchPacker,
 using namespace WireCell;
 
 SPNG::TorchPacker::TorchPacker(size_t multiplicity)
-    : Aux::Logger("TorchPacker", "spng")
+    : Logger("TorchPacker", "spng")
     , m_multiplicity(multiplicity)
 {
 }

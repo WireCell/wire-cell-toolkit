@@ -2,43 +2,43 @@
 #define WIRECELL_SPNG_TORCHPACKER
 
 #include "WireCellSpng/ITorchPacker.h"
+#include "WireCellSpng/Logger.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/Logging.h"
-#include "WireCellAux/Logger.h"
 
-namespace WireCell {
-    namespace SPNG {
+namespace WireCell::SPNG {
 
-        // Fan out 1 frame to N set at construction or configuration time.
-        class TorchPacker : public Aux::Logger, public ITorchPacker, public IConfigurable {
-           public:
-            TorchPacker(size_t multiplicity = 0);
-            virtual ~TorchPacker();
 
-            // INode, override because we get multiplicity at run time.
-            virtual std::vector<std::string> input_types();
+    // Fan out 1 frame to N set at construction or configuration time.
+    class TorchPacker : public Logger, public ITorchPacker, public virtual IConfigurable {
+    public:
+        TorchPacker(size_t multiplicity = 0);
+        virtual ~TorchPacker();
 
-            // IFanout
-            virtual bool operator()(const input_vector& invec, output_pointer& out);
+        // INode, override because we get multiplicity at run time.
+        virtual std::vector<std::string> input_types();
 
-            // IConfigurable
-            virtual void configure(const WireCell::Configuration& cfg);
-            virtual WireCell::Configuration default_configuration() const;
+        // IFanout
+        virtual bool operator()(const input_vector& invec, output_pointer& out);
 
-           private:
-            /// Configuration: "multiplicity"
-            ///
-            /// Set the fan size.  Default is 2.
-            size_t m_multiplicity{2};
+        // IConfigurable
+        virtual void configure(const WireCell::Configuration& cfg);
+        virtual WireCell::Configuration default_configuration() const;
+
+    private:
+        /// Configuration: "multiplicity"
+        ///
+        /// Set the fan size.  Default is 2.
+        size_t m_multiplicity{2};
             
-            /// Configuration: "count"
-            ///
-            /// Set the initial "count" which is used to set the ident number of
-            /// the output ITorchTensorSet.  Default is 0.
-            size_t m_count{0};
+        /// Configuration: "count"
+        ///
+        /// Set the initial "count" which is used to set the ident number of
+        /// the output ITorchTensorSet.  Default is 0.
+        size_t m_count{0};
 
-        };
-    }  // namespace SPNG
-}  // namespace WireCell
+    };
+
+}
 
 #endif
