@@ -162,137 +162,7 @@ public:
             vtx2->wcpt().point = last_wcp;
             WireCell::Clus::PR::add_segment(*pr_graph, segment, vtx1, vtx2);
 
-            // geo_point_t test_p(10,10,10);
-            // const auto& fit_seg_dpc = segment->dpcloud("main");
-            // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
-            // double closest_3d_distance = sqrt(closest_result[0].second);
-            // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
-            // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
-            // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
-            // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
-            // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
-
-            m_track_fitter.add_segment(segment);
-            m_track_fitter.do_single_tracking(segment, true, true, false, true);
-            // Extract fit results from the segment
-            const auto& fits = segment->fits();
-            std::vector<double> vec_dQ, vec_dx;
-            // Print position, dQ, and dx for each fit point
-            std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
-            for (size_t i = 0; i < fits.size(); ++i) {
-                const auto& fit = fits[i];
-                // std::cout << "  Point " << i << ": position=(" 
-                //          << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
-                //          << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
-                vec_dQ.push_back(fit.dQ);
-                vec_dx.push_back(fit.dx);
-            }
-            // std::cout << std::endl;
-            const auto& wcpts = segment->wcpts();
-            std::cout << "Segment WCPoints (" << wcpts.size() << "):" << std::endl;
-            for (size_t i = 0; i < wcpts.size(); ++i) {
-                const auto& wcp = wcpts[i];
-                std::cout << "  [" << i << "]: (" 
-                          << wcp.point.x()/units::cm << ", "
-                          << wcp.point.y()/units::cm << ", "
-                          << wcp.point.z()/units::cm << ") cm" << std::endl;
-            }
-
-
-            // test point cloud fit
-            create_segment_fit_point_cloud(segment, m_dv, "fit");
-            
-            // Now access it directly from the segment
-            auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
-
-            if (fit_dpcloud) {
-                const auto& points = fit_dpcloud->get_points();
-                
-                std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
-                // for (size_t i = 0; i < points.size(); ++i) {
-                //     std::cout << "  Point " << i << ": (" 
-                //             << points[i].x/units::cm << ", "
-                //             << points[i].y/units::cm << ", "
-                //             << points[i].z/units::cm << ") cm" << std::endl;
-                // }
-                
-                // // You can also verify against the segment's fit data
-                // const auto& fits = segment->fits();
-                // std::cout << "\nVerification:" << std::endl;
-                // std::cout << "  Point cloud size: " << points.size() << std::endl;
-                // std::cout << "  Segment fits size: " << fits.size() << std::endl;
-                
-                // if (points.size() == fits.size()) {
-                //     std::cout << "  ✓ Sizes match!" << std::endl;
-                // }
-            } else {
-                std::cout << "Fit point cloud not found on segment!" << std::endl;
-            }
-
-            std::cout << "Direct Length: " << segment_track_direct_length(segment) / units::cm << " cm; " <<  segment_track_direct_length(segment, 0, 10) / units::cm << " cm" << " " << segment_track_direct_length(segment, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
-
-            std::cout << "Segment Length: " << segment_track_length(segment) / units::cm << " cm; " << segment_track_length(segment,0, 0, 10) / units::cm << " cm" << " " << segment_track_length(segment,0, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
-            std::cout << "Max deviation: " << segment_track_max_deviation(segment) / units::cm << " cm; " <<  segment_track_max_deviation(segment, 0, 10) / units::cm << " cm"  << std::endl;
-            std::cout << "dQ_dx: " << segment_rms_dQ_dx(segment) << " " << segment_median_dQ_dx(segment) << " " << segment_median_dQ_dx(segment,0,10) << std::endl;
-
-            auto kink_results = segment_search_kink(segment, first_wcp, "fit");
-            std::cout <<"Kink search: " << std::get<0>(kink_results) << " " << std::get<1>(kink_results) << " " << std::get<2>(kink_results) << " " << std::get<3>(kink_results) <<std::endl;
-            std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
-            std::cout <<"3D Vector: " << segment->dirsign() << " " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
-
-            // vec_dQ.clear();
-            // vec_dx.clear();
-
-            // vec_dQ.push_back(35750.7); vec_dx.push_back(0.591606 * units::cm);
-            // vec_dQ.push_back(32381.5); vec_dx.push_back(0.532785 * units::cm);
-            // vec_dQ.push_back(30075.9); vec_dx.push_back(0.482393 * units::cm);
-            // vec_dQ.push_back(32805.1); vec_dx.push_back(0.49908  * units::cm);
-            // vec_dQ.push_back(46702.9); vec_dx.push_back(0.664835 * units::cm);
-            // vec_dQ.push_back(58132.3); vec_dx.push_back(0.779598 * units::cm);
-            // vec_dQ.push_back(58407.1); vec_dx.push_back(0.759001 * units::cm);
-            // vec_dQ.push_back(55774.6); vec_dx.push_back(0.767953 * units::cm);
-            // vec_dQ.push_back(51256.7); vec_dx.push_back(0.746227 * units::cm);
-            // vec_dQ.push_back(42653.3); vec_dx.push_back(0.607304 * units::cm);
-            // vec_dQ.push_back(47765.7); vec_dx.push_back(0.644757 * units::cm);
-            // vec_dQ.push_back(55210.0); vec_dx.push_back(0.726355 * units::cm);
-            // vec_dQ.push_back(44971.7); vec_dx.push_back(0.624519 * units::cm);
-            // vec_dQ.push_back(35688.0); vec_dx.push_back(0.541333 * units::cm);
-            // vec_dQ.push_back(37316.4); vec_dx.push_back(0.613396 * units::cm);
-            // vec_dQ.push_back(37136.7); vec_dx.push_back(0.643779 * units::cm);
-            // vec_dQ.push_back(33273.7); vec_dx.push_back(0.544746 * units::cm);
-            // vec_dQ.push_back(32636.5); vec_dx.push_back(0.546531 * units::cm);
-            // vec_dQ.push_back(35736.8); vec_dx.push_back(0.634489 * units::cm);
-            // vec_dQ.push_back(35515.5); vec_dx.push_back(0.620087 * units::cm);
-            // vec_dQ.push_back(36371.2); vec_dx.push_back(0.657168 * units::cm);
-            // vec_dQ.push_back(37250.7); vec_dx.push_back(0.78021  * units::cm);
-            // vec_dQ.push_back(29661.0); vec_dx.push_back(0.648785 * units::cm);
-            // vec_dQ.push_back(27046.6); vec_dx.push_back(0.578585 * units::cm);
-            // vec_dQ.push_back(28468.3); vec_dx.push_back(0.611002 * units::cm);
-            // vec_dQ.push_back(33398.8); vec_dx.push_back(0.685772 * units::cm);
-            // vec_dQ.push_back(42891.4); vec_dx.push_back(0.714633 * units::cm);
-            // vec_dQ.push_back(44924.0); vec_dx.push_back(0.628143 * units::cm);
-
-            std::cout <<"Kine dQ_dx: " << segment_cal_kine_dQdx(segment, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_dQdx(vec_dQ, vec_dx, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_range(segment_track_length(segment), 13, particle_data()) << std::endl;
-
-            std::vector<double> L, dQ_dx;
-            for (size_t i = 0; i < vec_dQ.size(); ++i) {
-                if (i==0){
-                  L.push_back(0.);
-                }else{
-                  L.push_back(L.back() + vec_dx.at(i));
-                }
-                dQ_dx.push_back(vec_dQ.at(i)/vec_dx.at(i)); // convert to per cm
-            }
-            auto pid_results = WireCell::Clus::PR::do_track_comp(L, dQ_dx, 35*units::cm, 0*units::cm, particle_data());
-            std::cout << "Particle ID results: " << pid_results.at(0) << " " << pid_results.at(1) << " " << pid_results.at(2) << " " << pid_results.at(3) << std::endl;
-            auto results = segment_do_track_pid(segment, L, dQ_dx, particle_data());
-            std::cout << std::get<0>(results) << " " << std::get<1>(results) << " " << std::get<2>(results) << " " << std::get<3>(results) << std::endl;
-            std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
-
-            segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true) ;
-            segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true); 
-
-            // Hack: Override segment wcpts with specific data
+                 // Hack: Override segment wcpts with specific data
             {
                 std::vector<WireCell::Clus::PR::WCPoint> new_wcpts;
                 new_wcpts.push_back({WireCell::Point(219.539*units::cm, -86.9317*units::cm, 209.05*units::cm)});
@@ -345,6 +215,139 @@ public:
                 segment->wcpts(new_wcpts);
                 std::cout << "Hacked segment wcpts with " << new_wcpts.size() << " points" << std::endl;
             }
+
+
+            // // geo_point_t test_p(10,10,10);
+            // // const auto& fit_seg_dpc = segment->dpcloud("main");
+            // // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
+            // // double closest_3d_distance = sqrt(closest_result[0].second);
+            // // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
+            // // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
+            // // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
+            // // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
+            // // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
+
+            m_track_fitter.add_segment(segment);
+            m_track_fitter.do_single_tracking(segment, true, true, false, true);
+            // // Extract fit results from the segment
+            // const auto& fits = segment->fits();
+            // std::vector<double> vec_dQ, vec_dx;
+            // // Print position, dQ, and dx for each fit point
+            // std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            // for (size_t i = 0; i < fits.size(); ++i) {
+            //     const auto& fit = fits[i];
+            //     // std::cout << "  Point " << i << ": position=(" 
+            //     //          << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+            //     //          << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            //     vec_dQ.push_back(fit.dQ);
+            //     vec_dx.push_back(fit.dx);
+            // }
+            // // std::cout << std::endl;
+            // const auto& wcpts = segment->wcpts();
+            // std::cout << "Segment WCPoints (" << wcpts.size() << "):" << std::endl;
+            // for (size_t i = 0; i < wcpts.size(); ++i) {
+            //     const auto& wcp = wcpts[i];
+            //     std::cout << "  [" << i << "]: (" 
+            //               << wcp.point.x()/units::cm << ", "
+            //               << wcp.point.y()/units::cm << ", "
+            //               << wcp.point.z()/units::cm << ") cm" << std::endl;
+            // }
+
+
+            // // test point cloud fit
+            // create_segment_fit_point_cloud(segment, m_dv, "fit");
+            
+            // // Now access it directly from the segment
+            // auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
+
+            // if (fit_dpcloud) {
+            //     const auto& points = fit_dpcloud->get_points();
+                
+            //     std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
+            //     // for (size_t i = 0; i < points.size(); ++i) {
+            //     //     std::cout << "  Point " << i << ": (" 
+            //     //             << points[i].x/units::cm << ", "
+            //     //             << points[i].y/units::cm << ", "
+            //     //             << points[i].z/units::cm << ") cm" << std::endl;
+            //     // }
+                
+            //     // // You can also verify against the segment's fit data
+            //     // const auto& fits = segment->fits();
+            //     // std::cout << "\nVerification:" << std::endl;
+            //     // std::cout << "  Point cloud size: " << points.size() << std::endl;
+            //     // std::cout << "  Segment fits size: " << fits.size() << std::endl;
+                
+            //     // if (points.size() == fits.size()) {
+            //     //     std::cout << "  ✓ Sizes match!" << std::endl;
+            //     // }
+            // } else {
+            //     std::cout << "Fit point cloud not found on segment!" << std::endl;
+            // }
+
+            // std::cout << "Direct Length: " << segment_track_direct_length(segment) / units::cm << " cm; " <<  segment_track_direct_length(segment, 0, 10) / units::cm << " cm" << " " << segment_track_direct_length(segment, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
+
+            // std::cout << "Segment Length: " << segment_track_length(segment) / units::cm << " cm; " << segment_track_length(segment,0, 0, 10) / units::cm << " cm" << " " << segment_track_length(segment,0, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
+            // std::cout << "Max deviation: " << segment_track_max_deviation(segment) / units::cm << " cm; " <<  segment_track_max_deviation(segment, 0, 10) / units::cm << " cm"  << std::endl;
+            // std::cout << "dQ_dx: " << segment_rms_dQ_dx(segment) << " " << segment_median_dQ_dx(segment) << " " << segment_median_dQ_dx(segment,0,10) << std::endl;
+
+            // auto kink_results = segment_search_kink(segment, first_wcp, "fit");
+            // std::cout <<"Kink search: " << std::get<0>(kink_results) << " " << std::get<1>(kink_results) << " " << std::get<2>(kink_results) << " " << std::get<3>(kink_results) <<std::endl;
+            // std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
+            // std::cout <<"3D Vector: " << segment->dirsign() << " " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
+
+            // // vec_dQ.clear();
+            // // vec_dx.clear();
+
+            // // vec_dQ.push_back(35750.7); vec_dx.push_back(0.591606 * units::cm);
+            // // vec_dQ.push_back(32381.5); vec_dx.push_back(0.532785 * units::cm);
+            // // vec_dQ.push_back(30075.9); vec_dx.push_back(0.482393 * units::cm);
+            // // vec_dQ.push_back(32805.1); vec_dx.push_back(0.49908  * units::cm);
+            // // vec_dQ.push_back(46702.9); vec_dx.push_back(0.664835 * units::cm);
+            // // vec_dQ.push_back(58132.3); vec_dx.push_back(0.779598 * units::cm);
+            // // vec_dQ.push_back(58407.1); vec_dx.push_back(0.759001 * units::cm);
+            // // vec_dQ.push_back(55774.6); vec_dx.push_back(0.767953 * units::cm);
+            // // vec_dQ.push_back(51256.7); vec_dx.push_back(0.746227 * units::cm);
+            // // vec_dQ.push_back(42653.3); vec_dx.push_back(0.607304 * units::cm);
+            // // vec_dQ.push_back(47765.7); vec_dx.push_back(0.644757 * units::cm);
+            // // vec_dQ.push_back(55210.0); vec_dx.push_back(0.726355 * units::cm);
+            // // vec_dQ.push_back(44971.7); vec_dx.push_back(0.624519 * units::cm);
+            // // vec_dQ.push_back(35688.0); vec_dx.push_back(0.541333 * units::cm);
+            // // vec_dQ.push_back(37316.4); vec_dx.push_back(0.613396 * units::cm);
+            // // vec_dQ.push_back(37136.7); vec_dx.push_back(0.643779 * units::cm);
+            // // vec_dQ.push_back(33273.7); vec_dx.push_back(0.544746 * units::cm);
+            // // vec_dQ.push_back(32636.5); vec_dx.push_back(0.546531 * units::cm);
+            // // vec_dQ.push_back(35736.8); vec_dx.push_back(0.634489 * units::cm);
+            // // vec_dQ.push_back(35515.5); vec_dx.push_back(0.620087 * units::cm);
+            // // vec_dQ.push_back(36371.2); vec_dx.push_back(0.657168 * units::cm);
+            // // vec_dQ.push_back(37250.7); vec_dx.push_back(0.78021  * units::cm);
+            // // vec_dQ.push_back(29661.0); vec_dx.push_back(0.648785 * units::cm);
+            // // vec_dQ.push_back(27046.6); vec_dx.push_back(0.578585 * units::cm);
+            // // vec_dQ.push_back(28468.3); vec_dx.push_back(0.611002 * units::cm);
+            // // vec_dQ.push_back(33398.8); vec_dx.push_back(0.685772 * units::cm);
+            // // vec_dQ.push_back(42891.4); vec_dx.push_back(0.714633 * units::cm);
+            // // vec_dQ.push_back(44924.0); vec_dx.push_back(0.628143 * units::cm);
+
+            // std::cout <<"Kine dQ_dx: " << segment_cal_kine_dQdx(segment, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_dQdx(vec_dQ, vec_dx, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_range(segment_track_length(segment), 13, particle_data()) << std::endl;
+
+            // std::vector<double> L, dQ_dx;
+            // for (size_t i = 0; i < vec_dQ.size(); ++i) {
+            //     if (i==0){
+            //       L.push_back(0.);
+            //     }else{
+            //       L.push_back(L.back() + vec_dx.at(i));
+            //     }
+            //     dQ_dx.push_back(vec_dQ.at(i)/vec_dx.at(i)); // convert to per cm
+            // }
+            // auto pid_results = WireCell::Clus::PR::do_track_comp(L, dQ_dx, 35*units::cm, 0*units::cm, particle_data());
+            // std::cout << "Particle ID results: " << pid_results.at(0) << " " << pid_results.at(1) << " " << pid_results.at(2) << " " << pid_results.at(3) << std::endl;
+            // auto results = segment_do_track_pid(segment, L, dQ_dx, particle_data());
+            // std::cout << std::get<0>(results) << " " << std::get<1>(results) << " " << std::get<2>(results) << " " << std::get<3>(results) << std::endl;
+            // std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
+
+            // segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true) ;
+            // segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true); 
+
+       
             
             // // hack ...
             // std::set<std::shared_ptr<PR::Segment>> segs;
@@ -366,21 +369,21 @@ public:
                 std::cout << " Segment 2 fits size: " << seg2->fits().size() << std::endl;
                 std::cout << " Break vertex position: " << vtx_break->fit().point << " " << vtx_break->wcpt().point << std::endl;
 
-                std::set<std::shared_ptr<PR::Segment>> segs;
-                segs.insert(seg1);
-                segs.insert(seg2);
-                clustering_points_segments(segs, m_dv, "associate_points");
+            //     std::set<std::shared_ptr<PR::Segment>> segs;
+            //     segs.insert(seg1);
+            //     segs.insert(seg2);
+            //     clustering_points_segments(segs, m_dv, "associate_points");
 
-                auto associate_dpcloud_seg1 = seg1->dpcloud("associate_points");  // Get the DynamicPointCloud
-                auto associate_dpcloud_seg2 = seg2->dpcloud("associate_points");  // Get the DynamicPointCloud
+            //     auto associate_dpcloud_seg1 = seg1->dpcloud("associate_points");  // Get the DynamicPointCloud
+            //     auto associate_dpcloud_seg2 = seg2->dpcloud("associate_points");  // Get the DynamicPointCloud
 
-                std::cout << "Fit point cloud has " << associate_dpcloud_seg1->get_points().size() << " " << associate_dpcloud_seg2->get_points().size() <<  " points: " << seg1->cluster()->npoints() << std::endl;
-            // if (associate_dpcloud) {
-            //     const auto& points = associate_dpcloud->get_points();
-            //     std::cout << "Fit point cloud has " << points.size() << " points: " << segment->cluster()->npoints() << std::endl;
-            // }
-                std::cout << segment_is_shower_topology(seg1) << " " << segment_determine_shower_direction(seg1, particle_data(), m_recomb_model) << std::endl;
-                std::cout << segment_is_shower_topology(seg2) << " " << segment_determine_shower_direction(seg2, particle_data(), m_recomb_model) << std::endl;
+            //     std::cout << "Fit point cloud has " << associate_dpcloud_seg1->get_points().size() << " " << associate_dpcloud_seg2->get_points().size() <<  " points: " << seg1->cluster()->npoints() << std::endl;
+            // // if (associate_dpcloud) {
+            // //     const auto& points = associate_dpcloud->get_points();
+            // //     std::cout << "Fit point cloud has " << points.size() << " points: " << segment->cluster()->npoints() << std::endl;
+            // // }
+            //     std::cout << segment_is_shower_topology(seg1) << " " << segment_determine_shower_direction(seg1, particle_data(), m_recomb_model) << std::endl;
+            //     std::cout << segment_is_shower_topology(seg2) << " " << segment_determine_shower_direction(seg2, particle_data(), m_recomb_model) << std::endl;
 
             }
 

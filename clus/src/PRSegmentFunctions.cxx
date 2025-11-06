@@ -411,9 +411,9 @@ namespace WireCell::Clus::PR {
 
 
         // reject if test point is at begin or end of fits.
-        if (itfits == fits.begin() || itfits+1 == fits.end()) {
-            return std::make_tuple(false, std::pair<SegmentPtr, SegmentPtr>(), VertexPtr());
-        }
+        // if (itfits == fits.begin() || itfits+1 == fits.end()) {
+            // return std::make_tuple(false, std::pair<SegmentPtr, SegmentPtr>(), VertexPtr());
+        // }
 
         const auto& wcpts = seg->wcpts();        
         auto itwcpts = closest_point(wcpts, point, owp_to_point<WCPoint>);
@@ -453,9 +453,11 @@ namespace WireCell::Clus::PR {
         seg2->cluster(seg->cluster());
 
         // Split fits - break point included in both
-        seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
-        seg2->fits(std::vector<Fit>(itfits, fits.end()));
-        vtx->fit(*itfits);
+        if (fits.size()>0){
+            seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
+            seg2->fits(std::vector<Fit>(itfits, fits.end()));
+            vtx->fit(*itfits);
+        }
 
         // Copy segment properties from original to both new segments (matching WCPPID)
         seg1->dir_weak(seg->dir_weak());
