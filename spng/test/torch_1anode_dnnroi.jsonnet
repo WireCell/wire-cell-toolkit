@@ -88,6 +88,32 @@ function(
                     device: (if debug_force_cpu then 'cpu' else 'gpu'),
                 }
             },
+
+            local preprocess = {
+                type: "SPNGDNNROIPreProcess",
+                name: "preprocess",
+                data: {
+                    nchunks: 1,
+                    input_scale: 1.0,
+                    input_offset: 0.0,
+                    nticks: 6000,
+                    tick_per_slice: 4,
+
+                },
+            },
+
+            local postprocess = {
+                type: "SPNGDNNROIPostProcess",
+                name: "postprocess",
+                data: {
+                    output_scale: 1.0,
+                    output_offset: 0.0,
+                    nticks: 6000,
+                    nchunks: 1,
+                    tick_per_slice: 4,
+                },
+            },
+
             local tf_fans = make_fanout(tools.anodes[0]),
             local u_stacker =  g.pnode({
                 type: 'TorchTensorSetStacker',
@@ -400,25 +426,43 @@ function(
                 }, nin=2, nout=1) for plane in ['u', 'v', 'w1', 'w2']
             ],
 
+            //local dnn_rois = [
+            //   g.pnode({
+            //        type: 'SPNGDNNROI',
+            //        name: 'dnnroi_%s' % plane,
+            //        data: {
+            //            
+            //            plane: plane,
+            //            input_scale: 1.0/4000,
+            //            input_offset: 0.0,
+            //            mask_threshold: 0.5,
+            //            output_scale: 1.0,
+            //           output_offset: 0.0,
+            //            nchunks: 1,
+            //           forward: wc.tn(SPNGTorchService),
+            //        },
+            //
+            //        },
+            //    }, nin=1, nout=1, uses=[SPNGTorchService]) for plane in ['u', 'v']
+           // ],
             local dnn_rois = [
                 g.pnode({
-                    type: 'SPNGDNNROI',
+                    type: 'SPNGDNNROIProcess',
                     name: 'dnnroi_%s' % plane,
                     data: {
-                        
                         plane: plane,
                         input_scale: 1.0/4000,
                         input_offset: 0.0,
                         mask_threshold: 0.5,
                         output_scale: 1.0,
                         output_offset: 0.0,
-                        nchunks: 4,
+                        nchunks: 1,
                         forward: wc.tn(SPNGTorchService),
-
+                        postprocess: wc.tn(postprocess),
+                        preprocess: wc.tn(preprocess),
                     },
-                }, nin=1, nout=1, uses=[SPNGTorchService]) for plane in ['u', 'v']
+                }, nin=1, nout=1, uses=[SPNGTorchService,preprocess,postprocess]) for plane in ['u', 'v']
             ],
-
             local tensor_sinks = [g.pnode({
                 type: 'TensorFileSink',
                 name: 'tfsink_mp_finding_%s' % plane,

@@ -148,6 +148,10 @@ namespace WireCell::SPNG {
         return oss.str();
     }
 
+    void write_torch_to_npy(const torch::Tensor &ten, const std::string &filename){
+        torch::save(ten,filename);
+    }
+
 
 }
 

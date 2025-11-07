@@ -134,6 +134,7 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
         log->debug("DNNROI: EOS ");
         return true;
     }
+    //TODO: Add TimeKeeper (see pytorch DNNROIFinding for example)
     log->debug("Running DNNROI");
     
      //TODO -- Loop over input tensors
@@ -145,6 +146,7 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     torch::Tensor a = tensors->at(2)->tensor().clone(); //target plane
     torch::Tensor b = tensors->at(1)->tensor().clone(); //MP2
     torch::Tensor c = tensors->at(0)->tensor().clone(); //MP3
+
     //print the shapes of the tensors
     log->debug("DNNROI: Input tensor a shape: {} device {}", tensor_shape_string(a), a.device().str());
     log->debug("DNNROI: Input tensor b shape: {} device {}", tensor_shape_string(b), b.device().str());
@@ -153,7 +155,9 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     a = a*m_cfg.input_scale + m_cfg.input_offset;
     b = b*m_cfg.input_scale + m_cfg.input_offset;
     c = c*m_cfg.input_scale + m_cfg.input_offset;
-
+    SPNG::write_torch_to_npy(a, "DNNROI_a_scaled.pt");
+    SPNG::write_torch_to_npy(b, "DNNROI_b_scaled.pt");
+    SPNG::write_torch_to_npy(c, "DNNROI_c_scaled.pt");
     // b and c have 1500 ticks and a has 6000 ticks
     //assert that both b and c have the same number of ticks
     if(b.size(2) != c.size(2)) {
@@ -215,7 +219,9 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
         auto iitens = to_itensor(inputs); // convert inputs to ITorchTensorSet        
         log->debug("DNNROI: ITorchTensorSet shape: {}", tensor_shape_string(iitens->tensors()->at(0)->tensor()));
         log->debug("DNNROI: Forwarding chunk with shape: {} from inputs of shape {}", tensor_shape_string(iitens->tensors()->at(0)->tensor()),tensor_shape_string(chunk));
+        SPNG::write_torch_to_npy(chunk, fmt::format("DNNROI_chunk_preinfer_{}.pt", outputs.size()));
         auto out_chunks = m_forward->forward(chunk);
+        SPNG::write_torch_to_npy(out_chunks, fmt::format("DNNROI_chunk_postinfer_{}.pt", outputs.size()));  
         //log->debug("DNNROI: Output chunk shape: {}", tensor_shape_string(oitens->tensors()->at(0)->tensor()));
         //torch::Tensor out_chunk = oitens.toTensor().to(torch::kCUDA); // keep the data in gpu if needed for other stuff.
         //torch::Tensor out_chunk = from_itensor(oitens, m_is_gpu)[0].toTensor(); // convert ITorchTensorSet to torch::Tensor
@@ -226,6 +232,7 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     //now concatenate along the time dimensions (3)
     torch::Tensor output = torch::cat(outputs, 3);
     log->debug("DNNROI: Output shape: {}", tensor_shape_string(output));
+    SPNG::write_torch_to_npy(output, "DNNROI_output_concat.pt");
     //shape of the output is [1, 1, 1500, 800] 
     //we want to reshape it to [1, 3, 800, 1500] to match the input shape
     //so that we can replace the target plane with the output tensor

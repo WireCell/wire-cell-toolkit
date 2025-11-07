@@ -16,8 +16,8 @@ namespace WireCell {
             DNNROIPostProcess();
             virtual ~DNNROIPostProcess();
             
-            void configure(const Configuration& cfg) override;
-            std::vector<torch::Tensor> postprocess(
+            virtual void configure(const Configuration& cfg) override;
+            virtual std::vector<torch::Tensor> postprocess(
                 const std::vector<torch::Tensor>& dnn_output,
                 const Configuration& preprocess_metadata) override;
                 
@@ -25,7 +25,9 @@ namespace WireCell {
             struct Config {
                 double output_scale = 1.0;
                 double output_offset = 0.0;
-                bool save_debug = false;
+                int ntick = 6000;
+                int nchunk = 1;
+                int tick_per_slice = 4;
             } m_cfg;
         };
         

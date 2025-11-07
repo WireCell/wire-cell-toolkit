@@ -26,6 +26,7 @@ DNNROIPostProcess::~DNNROIPostProcess()
 
 void DNNROIPostProcess::configure(const Configuration& cfg)
 {
+
     #ifdef HAVE_NVTX
     log->debug("NVTX support enabled");
     #else
@@ -34,51 +35,76 @@ void DNNROIPostProcess::configure(const Configuration& cfg)
     
     m_cfg.output_scale = get(cfg, "output_scale", m_cfg.output_scale);
     m_cfg.output_offset = get(cfg, "output_offset", m_cfg.output_offset);
-    m_cfg.save_debug = get(cfg, "save_debug", m_cfg.save_debug);
-
-    log->debug("DNNROIPostProcess configured with scale: {}, offset: {}, save_debug: {}",
-               m_cfg.output_scale, m_cfg.output_offset, m_cfg.save_debug);
+    m_cfg.ntick = get(cfg, "ntick", m_cfg.ntick);
+    m_cfg.tick_per_slice = get(cfg, "tick_per_slice", m_cfg.tick_per_slice);
+    m_cfg.nchunk = get(cfg, "nchunks", m_cfg.nchunk);
 }
-
+//TODO: Should I use std::vector<torch::Tensor>& as input instead?
 std::vector<torch::Tensor> DNNROIPostProcess::postprocess(
     const std::vector<torch::Tensor>& dnn_output,
     const Configuration& preprocess_metadata)
 {
-    // Extract metadata
     NVTX_SCOPED_RANGE("DNNROIPostProcess::postprocess");
-    int tick_per_slice = get(preprocess_metadata, "tick_per_slice", 1);
-    int nticks_a = get(preprocess_metadata, "nticks_a", 6000);
-    int nchunks = get(preprocess_metadata, "nchunks", 1);
-    
+
+    if (dnn_output.empty()) {
+        log->warn("DNNROIPostProcess: empty DNN output");
+        return {};
+    }
+    int nchunks = m_cfg.nchunk;
+    if (nchunks > static_cast<int>(dnn_output.size())) {
+        log->warn("DNNROIPostProcess: metadata nchunks ({}) exceeds provided outputs ({}); clamping", nchunks, dnn_output.size());
+        nchunks = static_cast<int>(dnn_output.size());
+    }
+
     // chunks should be merged before other operations
     std::vector<torch::Tensor> merged_dnn_output;
     if (nchunks > 1) {
         std::vector<torch::Tensor> merged_chunks;
+        merged_chunks.reserve(nchunks);
         for (int i = 0; i < nchunks; ++i) {
             merged_chunks.push_back(dnn_output[i]);
         }
-        torch::Tensor merged = torch::cat(merged_chunks, 2);
+        // concatenate along tick dimension (dim=3) as in preprocessing
+        torch::Tensor merged = torch::cat(merged_chunks, /*dim=*/3);
         merged_dnn_output = {merged};
+    } else {
+        merged_dnn_output = dnn_output; // pass-through
     }
 
-    // Apply output scaling
+    // Apply output scaling and upsample along the tick dimension
+    using torch::indexing::Slice;
     std::vector<torch::Tensor> processed_outputs;
-    for (const auto& tensor : merged_dnn_output) {
-        torch::Tensor output = tensor * m_cfg.output_scale + m_cfg.output_offset;
-        // Reshape and transpose
+    processed_outputs.reserve(merged_dnn_output.size());
 
-        output = output.squeeze(); // Remove batch and channel dimensions
-        output = torch::transpose(output, 0, 1);
-        output = output.unsqueeze(0); // Add batch dimension back
-        
-        // Upsample to original time resolution
-        output = output.repeat({1, 1, tick_per_slice});
-        output = output.index({
-            torch::indexing::Slice(), 
-            torch::indexing::Slice(), 
-            torch::indexing::Slice(0, nticks_a)
-        });
-        
+    for (const auto& tensor : merged_dnn_output) {
+        if (!tensor.defined()) {
+            log->warn("DNNROIPostProcess: encountered undefined tensor; skipping");
+            continue;
+        }
+        torch::Tensor output = tensor.to(torch::kFloat32) * m_cfg.output_scale + m_cfg.output_offset;
+        //shape of output
+        log->debug("Postprocessed output before upsampling shape: {}", tensor_shape_string(output));
+
+        output = torch::transpose(output,2,3); //transpose back to [B,C,T,W]
+        log->debug("Postprocessed output after transpose shape: {}", tensor_shape_string(output));
+        //remove the batch dimension if exists
+        if (output.dim() == 4 && output.size(0) == 1) {
+            output = output.squeeze(0); // [C,T,W]
+        }
+        else if (output.dim() == 3) {
+            // do nothing
+        }
+        else {
+            log->error("DNNROIPostProcess: unexpected tensor shape after transpose: {}", tensor_shape_string(output));
+            throw std::runtime_error("DNNROIPostProcess: unexpected tensor shape");
+        }
+        //now the upsampling
+        //*******NOTE: How you upsample depends upon how you downsample...be consistent*****
+        //This assumes you used simple mean downsampling (x.mean(-1))
+        //before upsampling shape
+        SPNG::write_torch_to_npy(output, "DNNROIPostProcess_output_before_upsample.pt");
+        output = output.repeat_interleave(m_cfg.tick_per_slice, /*dim=*/2); //upsample along tick dimension
+
         log->debug("Postprocessed output shape: {}", tensor_shape_string(output));
         processed_outputs.push_back(output);
     }

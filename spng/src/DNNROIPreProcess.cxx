@@ -7,8 +7,7 @@
 
 WIRECELL_FACTORY(SPNGDNNROIPreProcess,
      WireCell::SPNG::DNNROIPreProcess, 
-     WireCell::INamed,
-     WireCell::SPNG::ITorchTensorSetFilter,
+    WireCell::SPNG::IDNNROIPreProcess,
      WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -24,78 +23,90 @@ DNNROIPreProcess::~DNNROIPreProcess()
 {
 }
 
+Configuration DNNROIPreProcess::default_configuration() const
+{
+    Configuration cfg;
+    cfg["input_scale"] = 1.0;
+    cfg["input_offset"] = 0.0;
+    cfg["nchunks"] = 1;
+    return cfg;
+}
+
 void DNNROIPreProcess::configure(const WireCell::Configuration& cfg)
 {
-    #ifdef HAVE_NVTX
-    log->debug("NVTX support enabled");
-    #else
-    log->debug("NVTX support not enabled");
-    #endif
     m_cfg.input_scale = get(cfg, "input_scale", m_cfg.input_scale);
     m_cfg.input_offset = get(cfg, "input_offset", m_cfg.input_offset);
-
     m_cfg.nchunks = get(cfg, "nchunks", m_cfg.nchunks);
+    m_cfg.nticks = get(cfg, "nticks", m_cfg.nticks);
+    m_cfg.tick_per_slice = get(cfg, "tick_per_slice", m_cfg.tick_per_slice);
 }
 
 //preprocessing
 std::vector<torch::Tensor> DNNROIPreProcess::preprocess(const ITorchTensorSet::pointer& input)
 {
     NVTX_SCOPED_RANGE("DNNROIPreProcess::preprocess");
-    std::vector<torch::Tensor> to_save = {};
+
     auto tensors = input->tensors();
-    //make sure there is target and mp2/mp3 information
-    if(tensors->size()!=3) {
-        log->error("DNNROIPreProcess: Expecting 3 input tensors, got {}", tensors->size());
+    if (!tensors || tensors->size() != 3) {
+        log->error("DNNROIPreProcess: Expecting 3 input tensors, got {}", tensors ? tensors->size() : 0);
         throw std::runtime_error("DNNROIPreProcess: Invalid number of input tensors");
     }
-    torch::Tensor ten_target = tensors->at(2)->tensor().clone(); //target plane
-    torch::Tensor ten_mp2 = tensors->at(1)->tensor().clone(); //mp2 plane
-    torch::Tensor ten_mp3 = tensors->at(0)->tensor().clone(); //mp3 plane
 
-    //Apply scaling and offset
-    ten_target = ten_target*m_cfg.input_scale + m_cfg.input_offset;
-    ten_mp2 = ten_mp2*m_cfg.input_scale + m_cfg.input_offset;
-    ten_mp3 = ten_mp3*m_cfg.input_scale + m_cfg.input_offset;
+    torch::Tensor ten_target = tensors->at(2)->tensor().clone(); // target plane
+    torch::Tensor ten_mp2    = tensors->at(1)->tensor().clone(); // mp2 plane
+    torch::Tensor ten_mp3    = tensors->at(0)->tensor().clone(); // mp3 plane
+    //print shape of each tensor
+    
+    log->debug("DNNROIPreProcess: Input tensor shapes - target: {}, mp2: {}, mp3: {}",
+               tensor_shape_string(ten_target),
+               tensor_shape_string(ten_mp2),
+               tensor_shape_string(ten_mp3));
+    
+    if (ten_target.dim() < 3 || ten_mp2.dim() < 3 || ten_mp3.dim() < 3) {
+        log->error("DNNROIPreProcess: Each input tensor must have at least 3 dims, got target={}, mp2={}, mp3={}",
+                   ten_target.dim(), ten_mp2.dim(), ten_mp3.dim());
+        throw std::runtime_error("DNNROIPreProcess: Invalid tensor rank");
+    }
 
-    //downsample target tensor
+    if (ten_mp2.size(2) != ten_mp3.size(2)) {
+        log->error("DNNROIPreProcess: mp2 and mp3 must have same tick dimension: mp2={}, mp3={}",
+                   ten_mp2.size(2), ten_mp3.size(2));
+        throw std::runtime_error("DNNROIPreProcess: Inconsistent tick dimension between mp2 and mp3");
+    }
+    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_before.pt");
+    SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_before.pt");
+    SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_before.pt");
+    // Downsample the target tensor along tick dimension to match mp2/mp3
+    //Save before downsampling
+    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_before_downsample.pt");
+    ten_target = ten_target.view({ten_target.size(0), ten_target.size(1), m_cfg.nticks/m_cfg.tick_per_slice, m_cfg.tick_per_slice});
+    //average it...
+    ten_target = ten_target.mean(-1);
+    log->debug("DNNROIPreProcess: Target tensor shape after downsampling: {}", tensor_shape_string(ten_target));
+    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_after_downsample.pt");
 
-    int nticks_a = ten_target.size(2); //number of ticks in target plane
-    int nticks_mp2 = ten_mp2.size(2); //number of ticks in mp2 plane
-    int tick_per_slice = nticks_a/nticks_mp2; //downsampling factor
-    int nticks_ds_a = nticks_a / tick_per_slice; //number of ticks after downsampling
-    //make sure that the target plane is downsampled to the mp2/mp3 plane size
-    torch::Tensor a_trimmed = ten_target.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, nticks_ds_a*tick_per_slice)});
-    torch::Tensor a_reshaped = a_trimmed.view({a_trimmed.size(0), a_trimmed.size(1), nticks_ds_a, tick_per_slice});
-    torch::Tensor a_downsampled = torch::mean(a_reshaped, /*dim=*/3);
-    to_save.push_back(a_downsampled);
-    to_save.push_back(ten_target);
-    to_save.push_back(ten_mp2);
-    to_save.push_back(ten_mp3);
+    // Apply scaling and offset
+    
+    ten_target = ten_target * m_cfg.input_scale + m_cfg.input_offset;
 
-    //now stack tensors along the new dimension [3, 800, 1500]
-    torch::Tensor stacked = torch::stack({a_downsampled, ten_mp2, ten_mp3}, /*dim=*/1);
+    // Stack channels: [B, 3, C, T]
+    torch::Tensor stacked = torch::stack({ten_target, ten_mp2, ten_mp3}, /*dim=*/1);
     log->debug("DNNROIPreProcess: Stacked tensor shape: {}", tensor_shape_string(stacked));
-    //remove the batch dimension
+
+    // Remove the batch dimension if it's singleton -> [3, C, T]
     stacked = stacked.squeeze(0);
-    //now transpose the tensor
-    auto transposed = torch::stack({torch::transpose(stacked,1,2)},0);
+
+    // Transpose to [3, T, C] and re-introduce batch dim -> [1, 3, T, C]
+    auto transposed = torch::transpose(stacked, /*dim0=*/1, /*dim1=*/2).unsqueeze(0);
     log->debug("DNNROIPreProcess: Transposed tensor shape: {}", tensor_shape_string(transposed));
-    if(transposed.dtype() != torch::kFloat32){
+
+    if (transposed.dtype() != torch::kFloat32) {
         transposed = transposed.to(torch::kFloat32);
         log->debug("DNNROIPreProcess: Converted tensor to float32");
     }
 
-    //now chunk along the channel dimension (2)
-    int nchunks = m_cfg.nchunks;
-    std::vector<torch::Tensor> chunk = transposed.chunk(nchunks, /*dim=*/2);
-
-    //store the meta-data for post-processing if needed
-    m_metadata = Configuration{};
-    m_metadata["tick_per_slice"] = tick_per_slice;
-    m_metadata["nticks_target"] = nticks_a;
-    m_metadata["nticks_mp2"] = nticks_mp2;
-    m_metadata["nticks_ds_a"] = nticks_ds_a;
-    m_metadata["nchunks"] = nchunks;
+    // Chunk along the tick dimension (dim=2)
+    std::vector<torch::Tensor> chunk = transposed.chunk(m_cfg.nchunks, /*dim=*/2);
     return chunk;
 }
 

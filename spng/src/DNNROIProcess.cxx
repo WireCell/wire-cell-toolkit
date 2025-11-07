@@ -34,23 +34,27 @@ void DNNROIProcess::configure(const WireCell::Configuration& cfg)
 
     m_is_gpu = get(cfg, "is_gpu", m_is_gpu);
     m_cfg.forward = get(cfg, "forward", m_cfg.forward);
+    m_cfg.preprocess = get(cfg, "preprocess", m_cfg.preprocess);
+    m_cfg.postprocess = get(cfg, "postprocess", m_cfg.postprocess);
     log->debug("DNNROIProcess: Using forwarder {}", m_cfg.forward);
 
     //now the pre-processor initialization
-    m_preprocess = std::make_shared<DNNROIPreProcess>();
+    //m_preprocess = std::make_shared<DNNROIPreProcess>();
+    m_preprocess = Factory::find_tn<IDNNROIPreProcess>(m_cfg.preprocess);
     Configuration pre_cfg;
     pre_cfg["input_scale"] = get(cfg, "input_scale", 1.0);
     pre_cfg["input_offset"] = get(cfg, "input_offset", 0.0);
     pre_cfg["nchunks"] = get(cfg, "nchunks", 1);
-    m_preprocess->configure(pre_cfg);
+    //m_preprocess->configure(pre_cfg);
     log->debug("DNNROIProcess: Preprocess configured");
     
     //now the post-processor initialization
-    m_postprocess = std::make_shared<DNNROIPostProcess>();
+    //m_postprocess = std::make_shared<DNNROIPostProcess>();
+    m_postprocess = Factory::find_tn<IDNNROIPostProcess>(m_cfg.postprocess);
     Configuration post_cfg;
     post_cfg["output_scale"] = get(cfg, "output_scale", 1.0);
     post_cfg["output_offset"] = get(cfg, "output_offset", 0.0);
-    m_postprocess->configure(post_cfg);
+    //m_postprocess->configure(post_cfg);
     log->debug("DNNROIProcess: Postprocess configured");
 
     //find the TorchForward instance
@@ -78,17 +82,13 @@ bool DNNROIProcess::operator()(const input_pointer& in, output_pointer& out)
         log->error("DNNROIProcess: Expected 3 tensors in input ITorchTensorSet, got {}", tensors->size());
         return false;
     }
-
+    
     //now the pre-processing
     std::vector<torch::Tensor> chunks;
     Configuration preprocess_metadata;
 
     chunks = m_preprocess->preprocess(in);
-    preprocess_metadata = m_preprocess->get_metadata();
     log->debug("DNNROIProcess: Preprocess done, got {} chunks", chunks.size());
-
-    push_debug_tensor(chunks);
-
     //now the inference
     std::vector<torch::Tensor> outputs;
     for(auto& chunk : chunks){
@@ -97,12 +97,11 @@ bool DNNROIProcess::operator()(const input_pointer& in, output_pointer& out)
         outputs.push_back(out_tensor);
     }
     log->debug("DNNROIProcess: Inference done, got {} output chunks", outputs.size());
-    push_debug_tensor(outputs);
+    SPNG::write_torch_to_npy(outputs[0], "DNNROIProcess_inference_output_chunk0.pt");
     //now the post-processing
     std::vector<torch::Tensor> postprocessed = m_postprocess->postprocess(outputs, preprocess_metadata);
     log->debug("DNNROIProcess: Postprocess done, output ITorchTensorSet has {} tensors", postprocessed.size());
-    push_debug_tensor(postprocessed);
-    save_debug_tensors("DNNROIProcess_debug.pt");
+    SPNG::write_torch_to_npy(postprocessed[0], "DNNROIProcess_postprocess_output_tensor0.pt");
     //now convert to ITorchTensorSet
     //loop over postprocessed and make a SimpleTorchTensor for each
     //then make a SimpleTorchTensorSet from the vector of SimpleTorchTensor

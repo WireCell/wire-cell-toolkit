@@ -20,7 +20,7 @@ namespace WireCell {
             virtual Configuration get_metadata() const = 0;
         };
         
-    }
-}
+    } //namespace WireCell
+} //namespace WIRECELL_IDNNROIPREPROCESS_H
 
 #endif

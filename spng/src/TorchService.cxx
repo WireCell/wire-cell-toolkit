@@ -169,6 +169,8 @@ torch::Tensor SPNG::TorchService::forward(const torch::Tensor& input) const
 
         // Convert tensor to IValue vector for TorchScript module
         //if input is not float type, convert it to float32
+        //print what is the input type
+        log->debug("TorchService::forward input tensor type: {}", input.dtype().name());
         std::vector<torch::IValue> inputs;
         if (input.scalar_type() != torch::kFloat32) {
             log->debug("TorchService::forward converting input tensor to float32");
@@ -177,9 +179,8 @@ torch::Tensor SPNG::TorchService::forward(const torch::Tensor& input) const
         else{
             inputs.push_back(input);
         }
-
+        
         //print if inputs is a CUDADoubleType or CUDAFloatType
-        log->debug("TorchService::forward input tensor type: {}", input.dtype().name());
 
         torch::IValue output_ival = m_module.forward(inputs);
         output = output_ival.toTensor();

@@ -19,6 +19,6 @@ namespace WireCell {
         };
         
     }
-}
+} //namespace WireCell
 
-#endif
+#endif //WIRECELL_IDNNROIPOSTPROCESS_H

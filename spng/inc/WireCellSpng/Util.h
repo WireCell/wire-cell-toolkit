@@ -216,6 +216,8 @@ namespace WireCell::SPNG {
     */
     std::string tensor_shape_string(const torch::Tensor& tensor);
 
+    void write_torch_to_npy(const torch::Tensor &ten, const std::string &filename);
+
 }
 
 #endif

@@ -219,8 +219,9 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     m_device = ((
         (torch::cuda::is_available() && !m_debug_force_cpu) ? torch::kCUDA : torch::kCPU
     ));
-
-    m_raygrid_views = m_raygrid_views.to(m_device);
+    //what device
+    log->debug("Using device: {}", (m_device == torch::kCUDA) ? "CUDA" : "CPU");
+    //m_raygrid_views = m_raygrid_views.to(m_device);
 
     // std::cout << m_raygrid_views[0] << std::endl;
 

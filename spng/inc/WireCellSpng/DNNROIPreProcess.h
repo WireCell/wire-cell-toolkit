@@ -17,12 +17,13 @@ namespace WireCell {
                                        public Aux::Logger {
         public:
             DNNROIPreProcess();
-            virtual ~DNNROIPreProcess();
-            
+            ~DNNROIPreProcess() override;
+
+            Configuration default_configuration() const override;
             void configure(const Configuration& cfg) override;
             std::vector<torch::Tensor> preprocess(const ITorchTensorSet::pointer& input) override;
             Configuration get_metadata() const override;
-            
+
         private:
             struct Config {
                 double input_scale{1.0};
@@ -30,6 +31,8 @@ namespace WireCell {
                 double output_scale{1.0};
                 double output_offset{0.0};
                 int nchunks{1};
+                int nticks{6000};
+                int tick_per_slice{4};
             } m_cfg;
             
             Configuration m_metadata;
