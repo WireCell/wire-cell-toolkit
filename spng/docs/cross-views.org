@@ -1,0 +1,47 @@
+#+title: CrossViews
+
+* WCT OSP's equivalent
+
+WCT OSP produces "MP2/MP3" images as 2 inputs to DNNROI.  These are formed from
+3 planes of initial ROI channel-vs-tick images.  If a channel in a "target" view
+has a high channel for which any wire is near a crossing of wires in the other
+two channels that have high channels, the MP3 pixel is set as "on".  OTOH, if
+that target view channel is NOT high then MP2 pixel is set as "on".
+
+* SPNG's extension and difference
+
+The =CrossViews= node extends and differs from the older OSP production in the
+following ways:
+
+- The input is boolean tensors (threshold is applied upstream).
+- No internal resampling is done (again, may be applied upstream).
+- Each of the three input tensors span ALL channels of an AnodePlane.
+- Both wire plane faces are considered.
+- A single "cross views" tensor is output instead of two MP2/MP3.
+- The output tensor encodes also MP1 (target is high, no high crossings in other views) and MP0 (neither target nor others are high).
+- The MPn is calculated and output on a per-wire segment and the output channel "pixel" retains all this information.
+
+* CrossViews algorithm
+
+The algorithm is largely written by Jake Calcutt in =NoTileMPCoincidence= which
+was the original port of OSP's algorithm.  =CrossViews= changes in a few minor
+ways.  First, it tabulates MP0 and MP1 values in addition to MP2 and MP3 (all
+mutually exclusive) and it keeps per-segment information distinct on output.
+Second, it processes both wire faces (for two-faced, wrapped detectors).
+
+* CrossViews tensor
+
+The =CrossViews= produces a single 2D (or 3D-batched) tensor of a novel (for WCT)
+value.  Pixels are integer value and hold packed one-hot bit patterns.  The DUNE
+APAs with wrapped wires can have as many as 3 wire segments feeding an
+electronics channel.  Each segment can have an MPn value and the "n" is
+represented one "on" bit in a nibble (half byte) for the segment.  This allows
+the =CrossViews= tensor to be have short int type.
+
+The =CrossViews= tensor can be transformed into separate MP2 and MP3 images for
+compatibility with the OSP paradigm.  However, it is expected that this
+additional information can be fed into a DNNROI-like network either as is, or
+after some preprocessing to transform the MPn/segment values into explicit
+entries on a tensor's feature dimension.
+
+

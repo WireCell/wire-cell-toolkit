@@ -45,11 +45,16 @@ namespace SPNG {
         torch::Device m_device{torch::kCPU};
 
         torch::Tensor m_raygrid_views;
+
+        // can be local to configure()
         std::string m_anode_tn{"AnodePlane"};
         IAnodePlane::pointer m_anode;
         int m_face_index{0};
         std::vector<std::unordered_map<int, std::vector<int>>> m_chan_index_to_wires{3};
+
+        // Only used for target plane in operator()
         std::map<int, int> m_plane_nwires;
+
         std::map<int, torch::Tensor> m_plane_wires_to_channels;
         std::map<int, torch::Tensor> m_plane_channels_to_wires;
 

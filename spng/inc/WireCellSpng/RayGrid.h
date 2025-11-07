@@ -76,6 +76,17 @@ public:
     // needed for main ray-grid coordinate calculations
     torch::Tensor ray_dir;
 
+    /** @brief Construct uninitialized coordinates.  Must Coordinates::init() to
+     * initialize before use.
+     */
+    Coordinates() = default;
+
+    /**
+     * @brief Initializes or reinitializes the coordinate system.
+     * @param pitches A tensor of shape (Nviews, 2, 2) representing the views.
+     */
+    void init(const torch::Tensor& pitches);
+
     /**
      * @brief Constructs Ray Grid coordinates specified by views.
      *
@@ -175,12 +186,6 @@ public:
      */
     torch::Tensor active_bounds() const;
 
-private:
-    /**
-     * @brief Initializes or reinitializes the coordinate system.
-     * @param pitches A tensor of shape (Nviews, 2, 2) representing the views.
-     */
-    void init(const torch::Tensor& pitches);
 };
 
 } // namespace RayGrid
