@@ -3,5 +3,6 @@
 
 #pragma GCC system_header
 #include <torch/script.h>
+#include <torch/torch.h>
 
 #endif

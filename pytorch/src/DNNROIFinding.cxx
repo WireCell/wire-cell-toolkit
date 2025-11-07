@@ -1,7 +1,7 @@
 
 #include "WireCellPytorch/DNNROIFinding.h"
 #include "WireCellPytorch/Util.h"
-
+#include "WireCellPytorch/Torch.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/ITrace.h"
 
@@ -16,7 +16,7 @@
 
 #include <string>
 #include <vector>
-
+#include <nlohmann/json.hpp>
 // Uncomment to enable local writing of HDF5 file for debugging
 // purposes.  A temporary HDF5 dependency must be added in
 // wscript_build.  Do not commit with this.
@@ -237,9 +237,9 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         outframe = nullptr;
         return true;
     }
+    //dump the inframe content....
 
     TimeKeeper tk(fmt::format("call={}", m_save_count));
-
     // frame to eigen
     std::vector<Array::array_xxf> ch_eigen;
     for (auto tag : m_cfg.intags) {
@@ -260,8 +260,14 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     for (unsigned int i = 0; i < ch_eigen.size(); ++i) {
         ch.push_back(torch::from_blob(ch_eigen[i].data(), {ch_eigen[i].cols(), ch_eigen[i].rows()}));
     }
+    //plot each input data
+    for (unsigned int i = 0; i < ch.size(); ++i) {
+        Pytorch::write_torch_to_npy(ch[i], fmt::format("input_{}.pt", i));
+    }
     // ret: {ntags, nticks, nchannels}
     auto img = torch::stack(ch, 0);
+    //shape of img after stack
+    log->debug("DNNROIFinding: input tensor shape after stack: {} ", Pytorch::tensor_shape_string(img));
     // ret: {1, ntags, nchannels, nticks}
     auto batch = torch::stack({torch::transpose(img, 1, 2)}, 0);
 
@@ -274,19 +280,27 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         // G.P. If chunking is enabled, then the array is not contiguous in memory.
         // To work around this, we need to clone the array.
         std::vector<torch::IValue> itens {(m_cfg.nchunks > 1) ? chunk.clone() : chunk};
-
+        Pytorch::write_torch_to_npy(itens[0].toTensor(), fmt::format("DNNROIFinding_chunk_preinfer_part{}.pt",outputs.size()));
         auto iitens = Pytorch::to_itensor(itens);
         auto oitens = m_forward->forward(iitens);
         torch::Tensor ochunk = Pytorch::from_itensor({oitens}).front().toTensor().cpu();
+        //save each ochunk
+        Pytorch::write_torch_to_npy(ochunk, fmt::format("DNNROIFinding_chunk_postinfer_part{}.pt",outputs.size()));
+        //dump the tensor ochunk
+        //dump_tensor_to_json(ochunk, "DNNROIFinding_ochunk_call"+std::to_string(m_save_count)+".json");
         // NOTE: ochunk DOES NOT copy data from oitens!
         // from_blob() in from_itensor() is used to create a tensor from the same memory.
         outputs.push_back(ochunk.clone());
     }
     torch::Tensor output = torch::cat(outputs, 2);
+    Pytorch::write_torch_to_npy(output, "DNNROIFinding_output_concat.pt");
+    //dump the tensor output
+    //dump_tensor_to_json(output, "DNNROIFinding_output_call"+std::to_string(m_save_count)+".json");
     log->debug(tk(fmt::format("call={} inference done", m_save_count)));
 
     // tensor to eigen
     Eigen::Map<Eigen::ArrayXXf> out_e(output[0][0].data_ptr<float>(), output.size(3), output.size(2));
+
     auto mask_e = Array::upsample(out_e, m_cfg.tick_per_slice, 0);
 
     log->debug(tk(fmt::format("call={} tensor2eigen", m_save_count)));
@@ -343,10 +357,11 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     sframe->tag_traces(m_cfg.outtag, m_trace_indices, summary);
     outframe = IFrame::pointer(sframe);
     log->debug("call={} output frame: {}", m_save_count, Aux::taginfo(outframe));
-
+    //dump the outframe content...
+    //dump_trace_to_json(outframe, "DNNROIFinding_outframe_call"+std::to_string(m_save_count)+".json");
     log->debug(tk(fmt::format("call={} finish", m_save_count)));
     ++m_save_count;
-
+    
     return true;
 }
 

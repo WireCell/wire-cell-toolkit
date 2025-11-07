@@ -4,6 +4,7 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellAux/SimpleTensorSet.h"
 #include "WireCellAux/SimpleTensor.h"
+#include "WireCellPytorch/Torch.h"
 
 using namespace WireCell;
 
@@ -71,4 +72,22 @@ std::vector<torch::IValue> Pytorch::from_itensor(const ITensorSet::pointer &inpu
     }
 
     return ret;
+}
+
+void Pytorch::write_torch_to_npy(const torch::Tensor &ten, const std::string &filename)
+{
+    //use torch to write to numpy file
+    torch::save(ten, filename);
+}
+
+std::string Pytorch::tensor_shape_string(const torch::Tensor& t) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < t.sizes().size(); ++i) {
+        oss << t.sizes()[i];
+        if (i != t.sizes().size() - 1)
+            oss << ", ";
+    }
+    oss << "]";
+    return oss.str();
 }

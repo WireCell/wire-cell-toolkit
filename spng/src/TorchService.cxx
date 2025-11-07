@@ -180,6 +180,7 @@ torch::Tensor SPNG::TorchService::forward(const torch::Tensor& input) const
             inputs.push_back(input);
         }
         
+        
         //print if inputs is a CUDADoubleType or CUDAFloatType
 
         torch::IValue output_ival = m_module.forward(inputs);
