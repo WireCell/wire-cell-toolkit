@@ -143,6 +143,7 @@ namespace {
             }
             boost::add_edge(old_tit->second, old_hit->second, cg_out);
         }
+        // (void)nblobs;
         // std::cout << "boost::num_vertices(cg_out): " << boost::num_vertices(cg_out) << std::endl;
         return cg_out;
     }

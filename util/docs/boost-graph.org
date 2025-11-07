@@ -1,0 +1,28 @@
+#+title: Guidance on using Boost Graph
+
+* Vertices
+
+Behavior greatly depends on the vertex container.  Note: LLMs get all this WRONG
+even when they are pushed!  What follows is understood to be true by looking at
+Boost Graph source and writing/running tests.
+
+** vecS
+
+- graph has vertex_index_t and is a built-in property map
+
+- user can chose the integer type but can not set values
+
+- graph uses index.
+
+- graph stores a vertex_ptr in a vector.  the descriptor is an (the?) index.
+
+** setS
+
+- graph has no built-in index but one may be provided.
+
+- user can chose the integer type and can set values
+
+- graph does not use the index.
+
+- graph stores a vertex_ptr in a set.  the descriptor is the pointer.
+

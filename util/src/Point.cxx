@@ -115,3 +115,23 @@ WireCell::Ray WireCell::box_intersect(const Ray& s1, const Ray& s2)
     }
     return bb_ray;
 }
+
+bool WireCell::plane_split(const WireCell::Point& point, const WireCell::Vector& normal, const WireCell::Ray& ray)
+{
+    const auto& [v1,v2] = ray;
+
+    // If projection onto normal are different signs, then the ray is split by
+    // the plane.
+    return normal.dot(v1-point) * normal.dot(v2-point) < 0;
+}
+
+WireCell::Point WireCell::plane_intersection(const WireCell::Point& point, const WireCell::Vector& normal, const WireCell::Ray& segment)
+{
+    const double denom = normal.dot(segment.second - segment.first);
+    if (denom == 0) {           // line is parallel to the plane
+        return point + normal;
+    }
+
+    double t = normal.dot(point - segment.first) / denom;
+    return segment.first + t*(segment.second - segment.first);
+}

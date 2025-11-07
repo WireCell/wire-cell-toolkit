@@ -72,6 +72,23 @@ namespace WireCell::NaryTree {
         using facade_type = Facade<Value>;
         using facade_ptr = std::unique_ptr<facade_type>;
 
+        // Note to future self: A Faced gives out a BARE pointer to the facade
+        // object while retaining ownership via unique pointer.  There is no way
+        // to notify any holders of the bare pointer when the facade is
+        // destroyed.  There are two solutions but both require changing the
+        // bare pointer to something else.  Solution 1 is to change from unique
+        // point to shared pointer and providing a weak pointer.  This will let
+        // the facade live beyond the life of the nary tree node - which is very
+        // bad because that will cause the facade to be a hollow shell.  The
+        // second solution is to return a handle that holds the bare pointer and
+        // a shared_ptr<bool> which is also shared by the Faced.  The handle has
+        // a get() to return the bare pointer but returns nullptr if the shared
+        // bool is false.  The Faced sets the bool to false when it destroys the
+        // unique pointer.  Anyone holding the handle can test for validity
+        // prior to using the bare pointer.  The Faced must also reset the
+        // shared bool if it ends up remaking a new facade.  This second one is
+        // not thread safe between the Faced and code holding the handle.
+
         Faced() = default;
         Faced(Faced&& other) = default;
         Faced& operator=(Faced&& other) = default;
@@ -298,10 +315,10 @@ namespace WireCell::NaryTree {
 
         // Vector-like iterator version of merge.  The target will adopt the
         // children of the facades given in the iterator range {cbeg,cend}.  If
-        // target is not given, a new target facade one is created.  The range
+        // target is not given, a new target facade is created.  The range
         // of facades are removed by default unless keep is true.
         //
-        // A commented components (CC) style array is returned and records the
+        // A connected components (CC) style array is returned and records the
         // provenience of the children now held by the target facade.  Children
         // that originally came from the target facade are given CC element
         // value (ID) of 'existingID', default -1.  Children from facades in the

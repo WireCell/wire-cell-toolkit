@@ -1,0 +1,54 @@
+#+title: Guidelines for defining WCT interfaces
+
+* Overview
+
+A fundamental aspect of the toolkit is the ~Interface~ class.  A WCT *interface* is
+a pure abstract base class (ABC) inheriting from ~Interface~ and defining a small
+number of pure virtual methods.  A WCT *component* is a class that inherits from
+one or more interface classes and implements the pure virtual methods.  Any code
+may then retrieve an *instance* of a *component* class by its "type/name" string and
+the *interface* class in order to then execute the methods.
+
+This retrieval is a run-time operation.  There is no compile-time dependency
+between retriever and retrieved.  The application that will retrieve an
+component instance must arrange for the plugin library that provides the
+component class to have been loaded and for the instance to have been created.
+This is typically assured via WCT's ~Main~ and driven by user configuration.
+
+The WCT ~iface/~ subpackage provides a "zoo" of subclasses to ~Interface~ and is
+intended to collect all interfaces that do not require packages outside the WCT
+core dependencies.  Users are of course free to define their own interfaces in
+their own packages but their use will be limited 
+
+The rest of this document provides guidance on defining interfaces.
+
+* Scope of an interface
+
+TBD.  Balance between number of methods and number of interfaces.  Separation of concern.  
+
+* Inheritance structure
+
+TBD. ~INode~, ~IData~, when to use it, when to avoid it.
+
+* Method names
+
+Define method names assuming a flat method namespace.
+
+A user typically accesses a component by an interface type.  This limits the set
+of methods the user may call and thus the method namespace is limited and there
+is no concern for name collision.  However, take some care to balance brevity
+and verbosity in choosing a name.
+
+#+begin_src c++
+  // not great
+  virtual float value() const = 0;
+
+  // better
+  virtual float drift_speed() const = 0;
+#+end_src
+
+Take some care to choose method names that are unique across known interfaces
+and especially between interfaces that likely may be implemented by a single
+component.
+
+

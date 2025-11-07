@@ -170,6 +170,11 @@ static std::vector<std::string> get_path()
         return ret;
     }
     for (auto path : String::split(cpath)) {
+        if (! Persist::exists(path)) {
+            debug("skip non existent directory in load path: {}", path);
+            continue;
+        }
+
         ret.push_back(path);
     }
     return ret;
@@ -334,6 +339,11 @@ WireCell::Persist::Parser::Parser(const std::vector<std::string>& load_paths, co
     }
     // load paths into jsonnet backwards to counteract its reverse ordering
     for (auto pit = m_load_paths.rbegin(); pit != m_load_paths.rend(); ++pit) {
+        if (! exists(*pit)) {
+            debug("skip non existent directory in load path: {}", pit->native());
+            continue;
+        }
+
         auto path = boost::filesystem::canonical(*pit).string();
         add_load_path(path);
     }

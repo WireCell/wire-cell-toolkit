@@ -1,0 +1,13 @@
+#+title: Facade's Mixin
+
+A class inherits a "mixin" in order to gain a "bag of methods".  In
+~Facade_Util.h~ the ~Mixin~ class provides common methods to ~Grouping~, ~Cluster~ and
+~Blob~ facades that cover these features:
+
+- Access to the "local PCs" (point cloud datasets and their arrays).  Users of
+  the facades should learn about this and avoid reinventing PC access methods.
+
+- A systemic, hermetic but monolithic caching mechanism.  Developers of the
+  facades should learn about this.
+
+More information is in the ~Facade_Util.h~ comments.

@@ -1,0 +1,42 @@
+#!/bin/bash
+
+usage () {
+cat <<EOF
+
+bats-debug [BATS args] <BATS test script>
+
+This command wraps the "bats" to simplify running in a "debug" mode.  It merely
+sets some environment variables if not already set.  
+
+- WCT_BATS_TMPDIR $PWD/tmp
+
+  The location for a PERSISTENT directory in which to run tests.
+
+- WCT_BATS_LOG_SINK terminal
+
+  The output used for logging.
+
+- WCT_BATS_LOG_LEVEL debug
+
+  The log level
+
+EOF
+
+}
+
+
+
+if [ -z "$1" ] ; then
+    usage
+    exit 1
+fi
+
+export WCT_BATS_TMPDIR=${WCT_BATS_TMPDIR:-$PWD/tmp}
+export WCT_BATS_LOG_SINK=${WCT_BATS_LOG_SINK:-terminal}
+export WCT_BATS_LOG_LEVEL=${WCT_BATS_LOG_LEVEL:-debug}
+
+echo "bats-debug: test output retained at: $WCT_BATS_TMPDIR"
+mkdir -p "$WCT_BATS_TMPDIR"
+
+exec bats "$@"
+

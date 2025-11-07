@@ -200,6 +200,10 @@ void Root::UbooneBlobSource::bodge_activity(ISlice::map_t& activity, const RayGr
 void Root::UbooneBlobSource::dummy_activity(ISlice::map_t& activity)
 {
     for (auto ich : m_dummy->channels()) {
+
+        // if (activity[ich].value() != 0.0) {
+        //     std::cout << activity[ich] << " " << m_bodge << std::endl;
+        // }
         activity[ich] = m_bodge;
         // fixme: MaskSlices in principle can use different values for "dummy"
         // and "masked" aka "bad" activity.
@@ -389,7 +393,7 @@ void Root::UbooneBlobSource::load_dead()
 
 
             slice = std::make_shared<SimpleSlice>(iframe, tsid, start, span);
-            dummy_activity(slice->activity());
+            dummy_activity(slice->activity()); 
             slices[tsid] = slice;
             blobsets[tsid] = bset = std::make_shared<SimpleBlobSet>(tsid, slice);
         }

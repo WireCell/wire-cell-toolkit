@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <sstream>
 
 using spdlog::debug;
 using namespace WireCell::PointCloud;
@@ -26,6 +27,7 @@ std::size_t Tree::Scope::hash() const
     for (const auto& c : coords) {
         boost::hash_combine(h, c);
     }
+    boost::hash_combine(h, name);
     return h;
 }
 
@@ -101,7 +103,11 @@ void Tree::ScopedBase::fill_cache() const
 
 void Tree::ScopedBase::fill_cache()
 {
+    // This leaves open a possible bug where the user adds and removes the same
+    // number of nodes.  In that case, the old cache will be kept.
     if (m_node_count == m_nodes.size()) return;
+
+    invalidate();               // propagate to subclass
 
     m_node_count = 0;
     m_pcs.clear();
@@ -126,6 +132,37 @@ const Tree::ScopedBase::pointclouds_t& Tree::ScopedBase::pcs() const
 }
 
 
+Tree::pointcloud_t Tree::ScopedBase::flat_coords() const
+{
+    Tree::pointcloud_t flat;
+
+    const Scope& s = scope();
+    for (auto* node : m_nodes) {
+        const auto& lpc = node->value.local_pc(s.pcname);
+        flat.append(lpc.subset(s.coords));
+    }
+    return flat;
+}
+
+Tree::pointcloud_t Tree::ScopedBase::flat_pc(const std::string& pcname,
+                                             const Dataset::name_list_t& arrnames) const
+{
+    Tree::pointcloud_t flat;
+    
+    // arbitrary PC name
+    for (auto* node : m_nodes) {
+        const auto& lpc = node->value.local_pc(pcname);
+        if (arrnames.empty()) { // user gets all arrays
+            flat.append(lpc);
+        }
+        else {                  // user wants select arrays
+            flat.append(lpc.subset(arrnames));
+        }
+    }
+    return flat;
+}
+
+
 size_t Tree::ScopedBase::npoints() const
 {
     fill_cache();
@@ -142,18 +179,25 @@ const Tree::ScopedBase::selections_t& Tree::ScopedBase::selections() const
 //  Points
 //
 
-// Tree::Scoped& Tree::Points::scoped(const Scope& scope)
-// {
-//     auto it = m_scoped.find(scope);
-//     if (it == m_scoped.end()) {
-//         raise<KeyError>("no scope %s", scope);
-//     }
-//     Scoped* sptr = it->second.get();
-//     if (!sptr) {
-//         raise<KeyError>("null scope %s", scope); // should not happen!
-//     }
-//     return *sptr;
-// }
+
+bool Tree::Points::has_pc(const std::string& name) const
+{
+    auto it = m_lpcs.find(name);
+    return it != m_lpcs.end();
+}
+
+const Tree::pointcloud_t& Tree::Points::local_pc(const std::string& name,
+                                                 const pointcloud_t& defpc) const
+{
+    auto it = m_lpcs.find(name);
+    if (it == m_lpcs.end()) return defpc;
+    return it->second;
+}
+
+Tree::pointcloud_t& Tree::Points::local_pc(const std::string& name)
+{
+    return m_lpcs[name];
+}
 
 const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
 {
@@ -161,41 +205,89 @@ const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
     if (it == m_scoped.end()) {
         return nullptr;
     }
-    return it->second.get();
+    auto& sci = m_scoped[scope];
+    if (!sci.indices_valid) {
+        rebuild_indices(scope);
+        sci.indices_valid = true;
+    }
+    return it->second.scoped.get();
 }
 
 Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) 
 {
     return const_cast<Tree::ScopedBase*>(
         const_cast<const self_t*>(this)->get_scoped(scope));
-
-    // auto it = m_scoped.find(scope);
-    // if (it == m_scoped.end()) {
-    //     return nullptr;
-    // }
-    // return it->second.get();
 }
 
+void WireCell::PointCloud::Tree::Points::rebuild_indices(const WireCell::PointCloud::Tree::Scope& scope) const
+{
+    auto& sci = m_scoped[scope];
+    auto* svptr = dynamic_cast<ScopedView<double>*>(sci.scoped.get());
+    if (!svptr) {
+        return;
+    }
 
+    // Clear the index mappings
+    svptr->clear_index_mappings();
+
+    // For each node in the scope, add its points to the mapping
+    size_t global_index = 0;
+    for (auto& node : m_node->depth(scope.depth)) {
+        auto& value = node.value;
+        auto it = value.m_lpcs.find(scope.pcname);
+        if (it == value.m_lpcs.end()) {
+            continue;
+        }
+
+        bool want_if_in_scope = sci.nodes_in_scope.find(&node) != sci.nodes_in_scope.end();
+        if (want_if_in_scope) {
+            // For each point in this node, add its global index to the mapping
+            for (size_t i = 0; i < it->second.size_major(); ++i) {
+                svptr->append(global_index + i);
+            }
+        }
+        global_index += it->second.size_major();
+    }
+    sci.indices_valid = true;
+}
 
 // Called new scoped view is created.
 void WireCell::PointCloud::Tree::Points::init(const WireCell::PointCloud::Tree::Scope& scope) const
 {
-    auto& sv = m_scoped[scope];
+    auto& sci = m_scoped[scope]; // may create
+    auto* svptr = dynamic_cast<ScopedView<double>*>(sci.scoped.get());
+
+    size_t global_index = 0;
+
     // Walk the tree in scope, adding in-scope nodes.
-    for (auto& node : m_node->depth(scope.depth)) { // depth part of sceop.
+    for (auto& node : m_node->depth(scope.depth)) { // depth part of scope.
         auto& value = node.value;
         auto it = value.m_lpcs.find(scope.pcname); // PC name part of scope.
         if (it == value.m_lpcs.end()) {
-            continue;           // it is okay if node lacks PC
+            continue;           // it is okay if node lacks PC, but such a node can not be in a scope
         }
-
         // Check for coordintate arrays on first construction. 
         Dataset& pc = it->second;
         assure_arrays(pc.keys(), scope); // throws if user logic error detected
-        // Tell scoped view about its new node.
-        sv->append(&node);
+        
+        bool want_if_in_scope = sci.selector(node);
+        // Tell scoped view about its new node if selector wants it
+        if (want_if_in_scope) {
+            sci.scoped->append(&node);
+            sci.nodes_in_scope.insert(&node);  // Store node for quick lookup
+
+            // If we have the ScopedView with index mapping, add point indices
+            if (svptr) {
+                // For each point in this node, add its global index to the mapping
+                for (size_t i = 0; i < pc.size_major(); ++i) {
+                    svptr->append(global_index + i);
+                }
+            }
+        }
+        global_index += pc.size_major();
     }
+
+    sci.indices_valid = true;
 }
 
 
@@ -221,7 +313,7 @@ bool in_scope(const Tree::Scope& scope, const Tree::Points::node_t* node, size_t
     if (pcit == lpcs.end()) {
         // debug("not in scope: node has no named lpc in scope:{}", scope);
         // for (auto lit : lpcs) {
-        //     debug("\tname: {}", lit.first);
+        //     debug("\tinserted pc: {}", lit.first);
         // }
         return false;
     }
@@ -242,14 +334,29 @@ bool in_scope(const Tree::Scope& scope, const Tree::Points::node_t* node, size_t
 
 bool Tree::Points::on_insert(const std::vector<node_type*>& path)
 {
-    auto* node = path.back();
+    // {                           // debug
+    //     debug("inserting with path length {} in node with pcs:", path.size());
+    //     // The scope must name a node-local PC 
+
+    //     for (auto lit : local_pcs()) {
+    //         debug("\tparent pc: {}", lit.first);
+    //     }
+    // }
+
+    // auto* node = path.back();
+    auto* node = path.front();
 
     // Give node to any views for which the node is in scope.
-    for (auto& [scope,sv] : m_scoped) {
+    for (auto& [scope,sci] : m_scoped) {
+        // invalid indices ...
+        sci.indices_valid = false;
         if (! in_scope(scope, node, path.size())) {
             continue;
         }
-        sv->append(node);
+        if (sci.selector(*node)) {
+            sci.scoped->append(node);
+            sci.nodes_in_scope.insert(node);  // Store node for quick lookup
+        }
     }
     return true;
 }
@@ -260,7 +367,9 @@ bool Tree::Points::on_remove(const std::vector<node_type*>& path)
     auto* leaf = path.front();
     size_t psize = path.size();
     std::vector<Tree::Scope> dead;
-    for (auto const& [scope, _] : m_scoped) {
+    for (auto& [scope, sci] : m_scoped) {
+        // invalid indices ...
+        sci.indices_valid = false;
         if (in_scope(scope, leaf, psize)) {
             dead.push_back(scope);
         }
@@ -272,3 +381,26 @@ bool Tree::Points::on_remove(const std::vector<node_type*>& path)
     return true;                // continue ascent
 }
 
+std::string Tree::Points::as_string(bool recur, int level) const
+{
+    std::stringstream ss;
+    std::string tab(level, ' ');
+    ss << level << "\t" << tab << "pcs:[";
+    for (auto lit : local_pcs()) {
+        ss << " " << lit.first;
+    }
+    ss << " ] scopes:[";
+    for (auto& [scope, sci] : m_scoped) {
+        ss << " " << scope;
+    }
+    ss << " ]";
+    if (! recur) {
+        return ss.str();
+    }
+    auto children = m_node->children();
+    ss << " " << children.size() << " children:\n";
+    for (const auto& child : children) {
+        ss << child->value.as_string(recur, level+1);
+    }
+    return ss.str();
+}

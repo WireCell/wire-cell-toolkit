@@ -1,5 +1,10 @@
+#+BEGIN_COMMENT
+\mainpage
+#+END_COMMENT
+
 #+TITLE: Wire-Cell Toolkit 
 #+SETUPFILE: docs/setup-readme.org
+
 
 
 Welcome to the Wire-Cell Toolkit (WCT) source repository at https://github.com/wirecell/wire-cell-toolkit.

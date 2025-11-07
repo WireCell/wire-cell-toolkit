@@ -13,9 +13,6 @@ WireCell::WirePlaneId::WirePlaneId(WirePlaneLayer_t layer, int face, int apa)
 WireCell::WirePlaneId::WirePlaneId(int packed)
   : m_pack(packed)
 {
-    // It is very dubious that I allow this constructor.  I do it for
-    // reading WireSchema files where the packing is done by the user.
-    // Very dubious indeed.
 }
 
 int WireCell::WirePlaneId::ident() const { return m_pack; }
@@ -31,7 +28,7 @@ int WireCell::WirePlaneId::index() const
         return 1;
     case kWlayer:
         return 2;
-    case kUnknownLayer:
+    default:
         return -1;
     }
     return -1;
@@ -41,9 +38,49 @@ int WireCell::WirePlaneId::apa() const { return m_pack >> apa_shift; }
 
 bool WireCell::WirePlaneId::valid() const
 {
-    int ind = index();
+    if (apa() < 0) return false;
+    if (face() < 0) return false;
+    if (layer() == kAllLayers) return true;
+    const int ind = index();
     return 0 <= ind && ind < 3;
 }
+
+// WireCell::WirePlaneId::operator bool() const
+// {
+//     if (apa() < 0) return false;
+//     if (face() < 0) return false;
+//     if (layer() == kAllLayers) return true;
+//     const int ind = index();
+//     return 0 <= ind && ind < 3;
+// }
+
+WirePlaneId WirePlaneId::to_layer(WirePlaneLayer_t layer) const
+{
+    return WirePlaneId(layer, face(), apa());
+}
+WirePlaneId WirePlaneId::to_u() const
+{
+    return to_layer(kUlayer);
+}
+WirePlaneId WirePlaneId::to_v() const
+{
+    return to_layer(kVlayer);
+}
+WirePlaneId WirePlaneId::to_w() const
+{
+    return to_layer(kWlayer);
+}
+WirePlaneId WirePlaneId::to_all() const
+{
+    return to_layer(kAllLayers);
+}
+std::string WirePlaneId::name() const
+{
+    std::stringstream ss;
+    ss << "a" << apa() << "f" << face() << "p" << layer();
+    return ss.str();
+}
+
 
 bool WireCell::WirePlaneId::operator==(const WirePlaneId& rhs) const { return m_pack == rhs.m_pack; }
 
@@ -51,26 +88,37 @@ bool WireCell::WirePlaneId::operator!=(const WirePlaneId& rhs) const { return !(
 
 bool WireCell::WirePlaneId::operator<(const WirePlaneId& rhs) const
 {
-    if (!this->valid() || !rhs.valid()) {
-        return false;
-    }
+    return m_pack < rhs.m_pack;
+    // if (!this->valid() || !rhs.valid()) {
+    //     return false;
+    // }
 
-    if (apa() == rhs.apa()) {
-        if (face() == rhs.face()) {
-            return index() < rhs.index();
-        }
-        return face() < rhs.face();
-    }
-    return apa() < rhs.apa();
+    // if (apa() == rhs.apa()) {
+    //     if (face() == rhs.face()) {
+    //         return index() < rhs.index();
+    //     }
+    //     return face() < rhs.face();
+    // }
+    // return apa() < rhs.apa();
 }
 
 std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneId& wpid)
 {
-    o << "[WirePlaneId " << wpid.ident() << " ind:" << wpid.index() << " layer:" << wpid.layer()
+    o << "[WirePlaneId \"" << wpid.name() << "\" ident=" << wpid.ident()
+      << " ind:" << wpid.index() << " layer:" << wpid.layer()
       << " apa:" << wpid.apa() << " face:" << wpid.face();
-    if (!wpid.valid()) {
+    if (wpid.valid()) {
+        o << " valid";
+    }
+    else {
         o << " bogus";
     }
+    // if (wpid) {
+    //     o << " true";
+    // }
+    // else {
+    //     o << " false";
+    // }
     o << "]";
     return o;
 }
@@ -79,16 +127,19 @@ std::ostream& WireCell::operator<<(std::ostream& o, const WireCell::WirePlaneLay
 {
     switch (layer) {
     case WireCell::kUlayer:
-        o << "<U>";
+        o << "U";
         break;
     case WireCell::kVlayer:
-        o << "<V>";
+        o << "V";
         break;
     case WireCell::kWlayer:
-        o << "<W>";
+        o << "W";
+        break;
+    case WireCell::kAllLayers:
+        o << "A";
         break;
     default:
-        o << "<?>";
+        o << "?";
         break;
     }
     return o;

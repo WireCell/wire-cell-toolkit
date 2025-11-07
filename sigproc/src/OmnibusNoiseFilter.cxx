@@ -203,6 +203,7 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
             Waveform::merge(cmm, masks, m_maskmap);
             // ++filt_count;
         }
+        // (void)filt_count; // silence unused warning
     }
     traces.clear();  // done with our copy of vector of shared pointers
 

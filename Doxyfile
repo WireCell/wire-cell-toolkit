@@ -177,6 +177,7 @@ SHORT_NAMES            = NO
 # description. If set to NO, the Javadoc-style will behave just like regular Qt-
 # style comments (thus requiring an explicit @brief command for a brief
 # description.)
+### this is comments like /** ... */
 # The default value is: NO.
 
 JAVADOC_AUTOBRIEF      = YES
@@ -281,7 +282,7 @@ OPTIMIZE_OUTPUT_VHDL   = NO
 # Note that for custom extensions you also need to set FILE_PATTERNS otherwise
 # the files are not read by doxygen.
 
-EXTENSION_MAPPING      = 
+EXTENSION_MAPPING      = org=md
 
 # If the MARKDOWN_SUPPORT tag is enabled then doxygen pre-processes all comments
 # according to the Markdown format, which allows for more readable
@@ -774,7 +775,8 @@ INPUT_ENCODING         = UTF-8
 # *.md, *.mm, *.dox, *.py, *.f90, *.f, *.for, *.tcl, *.vhd, *.vhdl, *.ucf,
 # *.qsf, *.as and *.js.
 
-FILE_PATTERNS          = *.c \
+FILE_PATTERNS          = *.org \
+                         *.c \
                          *.cc \
                          *.cxx \
                          *.cpp \
@@ -846,7 +848,7 @@ EXCLUDE_SYMLINKS       = NO
 # Note that the wildcards are matched against the file with absolute path, so to
 # exclude all test directories for example use the pattern */test/*
 
-EXCLUDE_PATTERNS       = */test/*
+EXCLUDE_PATTERNS       = */test/* **/talks/*
 
 # The EXCLUDE_SYMBOLS tag can be used to specify one or more symbol names
 # (namespaces, classes, functions, etc.) that should be excluded from the
@@ -909,7 +911,9 @@ INPUT_FILTER           =
 # filters are used. If the FILTER_PATTERNS tag is empty or if none of the
 # patterns match the file name, INPUT_FILTER is applied.
 
-FILTER_PATTERNS        = 
+## Run "./run-doxygen" instead of bare "doxygen" to make this line work
+## Note, the filter takes the source file as first arg and prints result to stdout
+FILTER_PATTERNS        = "*.org=run-doxygen org2md"
 
 # If the FILTER_SOURCE_FILES tag is set to YES, the input filter (if set using
 # INPUT_FILTER ) will also be used to filter the input files that are used for
@@ -931,7 +935,7 @@ FILTER_SOURCE_PATTERNS =
 # (index.html). This can be useful if you have a project on for instance GitHub
 # and want to reuse the introduction page also for the doxygen output.
 
-USE_MDFILE_AS_MAINPAGE = docs/README.org
+USE_MDFILE_AS_MAINPAGE = README.org
 
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing

@@ -13,82 +13,165 @@
 #include "WireCellUtil/Graph.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IDetectorVolumes.h"
 
+#include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
 
-// using namespace WireCell;  NO!  do not open up namespaces in header files!
+// forward declare
+namespace WireCell::Clus {
+    class FiducialUtils;
+    using FiducialUtilsPtr = std::shared_ptr<FiducialUtils>;
+}
 
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
     class Cluster;
+    using namespace WireCell::PointCloud;
 
     struct GroupingCache {
 
-        mapfp_t<double> proj_centers;
-        mapfp_t<double> pitch_mags;
+        std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>> proj_centers;
+        std::unordered_map<int, std::unordered_map<int, std::unordered_map<int,double >>> pitch_mags;
+
+        // what cluster_wpids the grouping has.
+        std::set<WireCell::WirePlaneId> cluster_wpids;
+        std::set<WireCell::WirePlaneId> dv_wpids;
 
         mapfp_t<Tree::Scope> ctpc_scopes;
 
         // #381 if you give a crap about dead_winds.  
 
+        // detector volume
+        std::map<int, std::map<int, double> > map_time_offset;
+        std::map<int, std::map<int, double> > map_drift_speed;
+        std::map<int, std::map<int, double> > map_tick;
+        std::map<int, std::map<int, std::map<int, double> > > map_wire_angles;
+        std::map<int, std::map<int, int> > map_drift_dir;
+        std::map<int, std::map<int, int> > map_nticks_per_slice;
+        std::map<int, std::map<int, std::map<int, IChannel::vector> > > map_plane_channels;
+
+        // Simple wire data cache organized by APA/face
+        struct WireDataCache {
+            // [plane][time_slice][wire_index] -> (charge, uncertainty)
+            std::array<std::unordered_map<int, std::unordered_map<int, std::pair<double, double> >>, 3> charge_data;
+            
+            // [plane][wire_index] -> (start_x_position, end_x_position)
+            std::array<std::map<int, std::pair<double, double>>, 3> dead_wires;
+            
+            // Track which planes have been cached
+            std::array<bool, 3> cached = {false, false, false};
+        };
+        
+        // [apa][face] -> WireDataCache
+        mutable std::unordered_map<int, std::unordered_map<int, WireDataCache>> wire_caches;
     };
 
     // Give a node "Grouping" semantics.  A grouping node's children are cluster
     // nodes that are related in some way.
-    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>, public Mixin<Grouping, GroupingCache> {
+    class Grouping : public NaryTree::FacadeParent<Cluster, points_t>,
+                     public Mixins::Cached<Grouping, GroupingCache> {
 
-        TPCParams m_tp{};  // use default value by default.
-        /// TODO: replace TPCParams with this in the future?
-        IAnodePlane::pointer m_anode{nullptr};
+        std::map<int, IAnodePlane::pointer> m_anodes;
+        IDetectorVolumes::pointer m_dv{nullptr};
+
+        /// TODO: remove these in the future
+        // IAnodePlane::pointer m_anode{nullptr};
+        // TPCParams m_tp{};  // use default value by default.
 
        public:
 
-        Grouping() : Mixin<Grouping, GroupingCache>(*this, "grouping_scalar") {}
+        Grouping() : Mixins::Cached<Grouping, GroupingCache>(*this, "grouping_scalar") {}
 
-        // MUST call this sometimes after construction if non-default value needed.
-        // FIXME: TPCParams should be moved out of the facade!
-        void set_params(const TPCParams& tp) { m_tp = tp; }
+        /// Incrementally set the ident number on clusters in children-order.
+        ///
+        /// The sort_order names a sorting algorithm.
+        /// - tree :: use as-is child-order
+        /// - size :: use cluster_less() order
+        /// - * :: anything else leaves clusters unchanged.
+        /// 
+        /// Note, convention is to start counting from 1.
+        void enumerate_idents(const std::string& sort_order="tree", int start=1);
+
+
+        /// Separate a cluster into many according to groups.
+        ///
+        /// The return map represents loaned Clusters.  This Grouping retains
+        /// ownership.
+        /// 
+        /// This overrides (and calls) the NaryTree::FacadeParent base class
+        /// method.  See its documentation for reference.  This method will the
+        /// idents of the separated clusters to that of the input cluster.
+        ///
+        /// Note, the setting of IDs are not strongly constrained.  Algorithms
+        /// are cautioned to NOT assume any particular ID assignment rule.  See
+        /// enumerate_idents() and the "mabc.org" document.
+        virtual
+        std::map<int, Cluster*> separate(Cluster*& cluster,
+                                         const std::vector<int> groups,
+                                         bool remove=false,
+                                         bool notify_value=true);
+
+
+        // TODO: remove this in the future
+        // void set_params(const TPCParams& tp) { m_tp = tp; }
         void set_params(const WireCell::Configuration& cfg);
-        const TPCParams& get_params() const { return m_tp; }
-        std::tuple<double, double, double> wire_angles() const { return {m_tp.angle_u, m_tp.angle_v, m_tp.angle_w}; }
+        // const TPCParams& get_params() const { return m_tp; }
 
-        void set_anode(const IAnodePlane::pointer anode) { m_anode = anode; }
+        std::tuple<double, double, double> wire_angles(const int apa, const int face) const { return {cache().map_wire_angles.at(apa).at(face).at(0), cache().map_wire_angles.at(apa).at(face).at(1), cache().map_wire_angles.at(apa).at(face).at(2)}; }
+        std::map<int, std::map<int, double> > get_tick() const { return cache().map_tick;}
+        std::map<int, std::map<int, double> > get_time_offset() const { return cache().map_time_offset;}
+        std::map<int, std::map<int, double> > get_drift_speed() const { return cache().map_drift_speed;}
+        std::map<int, std::map<int, int> > get_drift_dir() const { return cache().map_drift_dir;}
+        std::map<int, std::map<int, int> > get_nticks_per_slice() const { return cache().map_nticks_per_slice;}
+        IChannel::vector get_plane_channels(const int apa, const int face, const WirePlaneLayer_t layer) const{return cache().map_plane_channels.at(apa).at(face).at(layer);}
+        std::shared_ptr<const WireCell::IChannel> get_plane_channel_wind(const int apa, const int face, const WirePlaneLayer_t layer, const int wind) const{ return cache().map_plane_channels.at(apa).at(face).at(layer).at(wind);}
+
+        /// Set other's non-tree info on this.
+        ///
+        /// This may be appropriate when making a new grouping from an existing
+        /// grouping.  It will transfer information not related to the PC tree
+        /// such as the any anodes.  It specifically does not transfer any
+        /// information about children clusters.
+        void from(const Grouping& other);
+
+        /// TODO: remove this in the future
+        void set_anodes(const std::vector<IAnodePlane::pointer>& anodes);
+        const IAnodePlane::pointer get_anode(const int ident) const;  // also apa
+
+        void set_detector_volumes(const IDetectorVolumes::pointer dv) { m_dv = dv; }
+        // const IDetectorVolumes::pointer get_detector_volumes() const { return m_dv; }
 
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
-        const mapfp_t< std::map<int, std::pair<double, double>> >& all_dead_winds() const {
-            // this is added in order that we may dump it in json_summary() for debugging.
-            return m_dead_winds;
-        }
+        std::set<WireCell::WirePlaneId> wpids() const { return cache().cluster_wpids; }
+        std::set<WireCell::WirePlaneId> dv_wpids() const { return cache().dv_wpids; }
 
-        std::map<int, std::pair<double, double>>& get_dead_winds(const int face, const int pind) const
-        {
-            // make one if not exist
-            return m_dead_winds[face][pind];
+        const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& all_dead_winds() const;
+        std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const;
+        
 
-            // This is utter garbage.  #381.
-        }
         using sv2d_t = Tree::ScopedView<float_t>;
         using kd2d_t = sv2d_t::nfkd_t;
         using kd_results_t = kd2d_t::results_type;
 
-        const kd2d_t& kd2d(const int face, const int pind) const;
+        const kd2d_t& kd2d(const int apa, const int face, const int pind) const;
 
-        const mapfp_t<double>& proj_centers() const {
+        const std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>>& proj_centers() const {
             return cache().proj_centers;
         }
-        const mapfp_t<double>& pitch_mags() const {
+        const std::unordered_map<int, std::unordered_map<int, std::unordered_map<int, double >>>& pitch_mags() const {
             return cache().pitch_mags;
         }
 
-        bool is_good_point(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
+        bool is_good_point(const geo_point_t& point, const int apa, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
                            const int allowed_bad = 1) const;
         // In Facade_Grouping.h, inside the Grouping class declaration
-        bool is_good_point_wc(const geo_point_t& point, const int face, const double radius = 0.6 * units::cm, 
+        bool is_good_point_wc(const geo_point_t& point, const int apa, const int face, const double radius = 0.6 * units::cm, 
                             const int ch_range = 1, const int allowed_bad = 1) const;
         // In the Grouping class declaration in Facade_Grouping.h
-        std::vector<int> test_good_point(const geo_point_t& point, const int face, 
+        std::vector<int> test_good_point(const geo_point_t& point, const int apa, const int face, 
                                 double radius = 0.6 * units::cm, int ch_range = 1) const;
 
 
@@ -98,24 +181,26 @@ namespace WireCell::PointCloud::Facade {
         /// @param face
         /// @param pind plane index
         /// @return
-        kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int face, int pind) const;
+        kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
 
         /// @brief true if the point is within the dead region, [wind+ch_range, wind-ch_range] and [xmin, xmax]
-        bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int face, int pind) const;
+        bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa , const int face, int pind) const;
 
         /// @brief convert_3Dpoint_time_ch
-        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int face, const int pind) const;
+        std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;
         // In class Grouping definition
-        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int face, const int plane) const;
+        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int apa, const int face, const int plane) const;
 
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
         /// @return Number of points in the specified plane
-        size_t get_num_points(const int face, const int pind) const;
+        size_t get_num_points(const int apa, const int face, const int pind) const;
 
         // In Facade_Grouping.h, add to public section:
-        double get_ave_3d_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0) const;
-        double get_ave_charge(const geo_point_t& point, const double radius = 0.3 * units::cm, const int face = 0, const int pind = 0) const;
+        double get_ave_3d_charge(const geo_point_t& point, const int apa, const int face, const double radius = 0.3 * units::cm) const;
+        double get_ave_charge(const geo_point_t& point, const int apa, const int face, const int pind,  const double radius = 0.3 * units::cm) const;
+
+        bool is_blob_plane_bad(const Blob* blob, int plane, double cut_ratio = 0.5) const; 
 
         /// @brief Get ranges of dead channels that overlap with given time and channel window
         /// @param min_time Minimum time
@@ -126,33 +211,51 @@ namespace WireCell::PointCloud::Facade {
         /// @param pind Plane index
         /// @param flag_ignore_time If true, ignore time window check
         /// @return Vector of pairs representing ranges of dead channels
-        std::vector<std::pair<int, int>> get_overlap_dead_chs(const int min_time, const int max_time, 
-            const int min_ch, const int max_ch, const int face, const int pind, 
+        std::vector<std::pair<int, int> > get_overlap_dead_chs(const int min_time, const int max_time, 
+            const int min_ch, const int max_ch, const int apa, const int face, const int pind, 
             const bool flag_ignore_time=false) const;
 
         // In Facade_Grouping.h, inside the Grouping class public section:
-        std::map<int, std::pair<int, int>> get_all_dead_chs(const int face, const int pind, int expand = 12) const;
+        std::map<int, std::pair<int, int>> get_all_dead_chs(const int apa, const int face, const int pind, int expand = 0) const;
         // Get overlapping good channel charges in a time-channel window
         std::map<std::pair<int,int>, std::pair<double,double>> get_overlap_good_ch_charge(
-            int min_time, int max_time, int min_ch, int max_ch, 
+            int min_time, int max_time, int min_ch, int max_ch, const int apa, 
             const int face, const int pind) const;
 
-        // We override this from Mixin in order to inject propagation of the
+        // Get wire charge and uncertainty for specific wire/time
+        std::pair<double, double> get_wire_charge(int apa, int face, int plane, 
+                                                int wire_index, int time_slice) const;
+        
+        // Check if a wire is dead at a specific time
+        bool is_wire_dead(int apa, int face, int plane, 
+                        int wire_index, int time_slice) const;
+
+        // We override this from Mixins::Cached in order to inject propagation of the
         // utter garbage handling of dead_winds.  If someone fixes that, this
         // method may be removed.  #381.
         virtual void clear_cache() const;
 
+      public:
+        // The grouping is simply a bus to maybe hold this object.  See
+        // MakeFiducialUtils as an ensemble visitor to construct and add a
+        // FiducialUtils.
+        FiducialUtilsPtr get_fiducialutils() const { return m_fiducialutils; }
+        void set_fiducialutils(FiducialUtilsPtr fd) { m_fiducialutils = fd; }
       private:
+        FiducialUtilsPtr m_fiducialutils;
 
-        // This "cache" is utterly abused.  Someone else fix it.  #381.
-        mutable mapfp_t< std::map<int, std::pair<double, double>> > m_dead_winds;
+        // Build cache for a specific APA/face/plane
+        void build_wire_cache(int apa, int face, int plane) const;
 
-       protected:
+      protected:
         // Receive notification when this facade is created on a node. #381.
         virtual void on_construct(node_type* node);
 
         virtual void fill_cache(GroupingCache& cache) const;
-        
+
+        virtual void fill_dv_cache(GroupingCache& cache) const;
+
+
     };
     std::ostream& operator<<(std::ostream& os, const Grouping& grouping);
 
@@ -161,8 +264,8 @@ namespace WireCell::PointCloud::Facade {
     // about the blobs.
     std::string dump(const Grouping& grouping, int level = 0);
 
-}  // namespace WireCell::PointCloud::Facade
+}  // namespace WireCell::Clus::Facade
 
-template <> struct fmt::formatter<WireCell::PointCloud::Facade::Grouping> : fmt::ostream_formatter {};
+template <> struct fmt::formatter<WireCell::Clus::Facade::Grouping> : fmt::ostream_formatter {};
 
 #endif

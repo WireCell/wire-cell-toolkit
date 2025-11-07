@@ -44,7 +44,7 @@ local img = {
         //name: 'chsel%d' % n,
         name: 'chsel%d' % anode.data.ident,
         data: {
-          channels: std.range(5638 * anode.data.ident, 5638 * (anode.data.ident + 1) - 1), // v0200: 5632, v0202: 5638
+          channels: std.range(5632 * anode.data.ident, 5632 * (anode.data.ident + 1) - 1),
           //tags: ['orig%d' % n], // traces tag //commented? Ewerton 2023-09-xx
           tags: ['gauss%d' % anode.data.ident, 'wiener%d' % anode.data.ident], // changed Ewerton 2023-09-27
         },
@@ -125,7 +125,8 @@ local img = {
                 anode: wc.tn(anode),
             },
         }, nin=1, nout=1, uses=[anode]),
-        ret: g.pipeline([chsel_pipes, cmm_mod, frame_masking, charge_err], "uboone-preproc"), // mag
+        //ret: g.pipeline([chsel_pipes, mag, cmm_mod, frame_masking, charge_err], "uboone-preproc"), //changed Ewerton 2023-10-05
+        ret: g.pipeline([chsel_pipes, cmm_mod, frame_masking, charge_err], "uboone-preproc"), //changed Ewerton 2023-10-05
     }.ret,
 
     // A functio that sets up slicing for an APA.
@@ -145,9 +146,9 @@ local img = {
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
-                // nthreshold: [1e-6, 1e-6, 1e-6],
+                //nthreshold: [1e-6, 1e-6, 1e-6],
                 nthreshold: [3.6, 3.6, 3.6], //original
-                // nthreshold: [1.0, 1.0, 1.0], //changed Ewerton
+                //nthreshold: [2.5, 2.5, 2.5], //changed Ewerton
                 // nthreshold: [0, 0, 0], //changed Ewerton
             },
         }, nin=1, nout=1, uses=[anode]),
@@ -184,20 +185,6 @@ local img = {
             for n in iota],
         local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
         ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_active_slicing_tiling-%s"%anode.name),
-    }.ret,
-
-    //
-    multi_masked_1view_slicing_tiling :: function(anode, name, span=500) {
-        local dummy_planes = [[1,2],[0,2],[0,1]],
-        local masked_planes = [[0],[1],[2]],
-        local iota = std.range(0,std.length(dummy_planes)-1),
-        local slicings = [$.slicing(anode, name+"_%d"%n, span,
-            active_planes=[],masked_planes=masked_planes[n], dummy_planes=dummy_planes[n])
-            for n in iota],
-        local tilings = [$.tiling(anode, name+"_%d"%n)
-            for n in iota],
-        local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
-        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling-%s"%anode.name),
     }.ret,
 
     //
@@ -254,7 +241,6 @@ local img = {
                     weighting_strategies: ["uniform"], //"uniform", "simple", "uboone"
                     solve_config: "uboone",
                     whiten: true,
-                    lasso_lambda_scale: 1.0,
                 }
             }, nin=1, nout=1),
             local cs2 = g.pnode({
@@ -264,7 +250,6 @@ local img = {
                     weighting_strategies: ["uboone"], //"uniform", "simple", "uboone"
                     solve_config: "uboone",
                     whiten: true,
-                    lasso_lambda_scale: 1.0,
                 }
             }, nin=1, nout=1),
             local local_clustering = g.pnode({
@@ -311,9 +296,8 @@ local img = {
         local cs3 = self.solving("3rd"),
         local ld3 = self.local_deghosting(3,"3rd"),
 
-        ret: g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc],"uboone-solving"),
-        // ret: g.pipeline([bc, cs1, gc],"simple-solving"),
-        // ret: g.pipeline([bc, ld1, gc],"tiling only"),
+        // ret: g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc],"uboone-solving"),
+        ret: g.pipeline([bc, cs1, ld1, gc],"simple-solving"),
     }.ret,
 
     dump :: function(anode, aname, drift_speed) {
@@ -360,16 +344,13 @@ function() {
         else g.pipeline([
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             img.tiling(anode, anode.name),]),
-        local mt = if multi_slicing == "multi-2view"
-        then img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500) // 109, 1744 (total 9592)
-        else img.multi_masked_1view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592),
         local active_fork = g.pipeline([
             st,
             img.solving(anode, anode.name+"-ms-active"),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
         local masked_fork = g.pipeline([
-            mt,
+            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592)
             img.clustering(anode, anode.name+"-ms-masked"),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else []),

@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.realpath("./waft"))
 
 def options(opt):
     opt.load("wcb")
+    opt.load("clang_compilation_database")
 
     # this used in cfg/wscript_build
     opt.add_option('--install-config', type=str, default="",
@@ -75,6 +76,7 @@ def is_development():
 
 
 def configure(cfg):
+
     # Save to BuildConfig.h and env
     cfg.define("WIRECELL_VERSION", VERSION)
     cfg.env.VERSION = VERSION
@@ -101,6 +103,7 @@ def configure(cfg):
 
     # See comments at top of Exceptions.h for context.
     cfg.load('compiler_cxx')
+    cfg.load('clang_compilation_database')
     cfg.check_cxx(lib='backtrace', use='backtrace',
                   uselib_store='BACKTRACE',
                  define_name = 'HAVE_BACKTRACE_LIB',

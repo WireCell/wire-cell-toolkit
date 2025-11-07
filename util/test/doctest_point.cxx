@@ -116,3 +116,101 @@ TEST_CASE("point3d rays")
     debug("r1={} r2={} rp={}", r1, r2, c12);
 }
 
+TEST_CASE("bounding box")
+{
+    BoundingBox bb(Ray(Point(-1,-1,-1), Point(1,1,1)));
+
+    for (int axis=0; axis<3; ++axis) {
+        Point inside;
+        auto ad = bb.axis_distances(inside, axis);
+        REQUIRE(ad.size() == 2);
+        CHECK(ad[0] == -1);
+        CHECK(ad[1] == +1);
+
+        const int axis1 = (axis+1)%3;
+        const int axis2 = (axis+2)%3;
+        
+        
+        Point outside1, outside2;
+        outside1[axis1] = 2;
+        outside2[axis2] = 2;
+        CHECK(bb.axis_distances(outside1, axis).empty());
+        CHECK(bb.axis_distances(outside2, axis).empty());
+    }
+
+    // both points inside.
+    {
+        Ray r1(Point(-0.5,-0.5,-0.5), Point(0.5,0.5,0.5));
+        CHECK(r1 == bb.crop(r1));
+    }
+    // Both points outside
+    {
+        Ray r1(Point(-2, -2, -2), Point(2, 2, 2));
+        {
+            auto r2 = bb.intersect(r1);
+            CHECK(r2.first  == Point(-1,-1,-1));
+            CHECK(r2.second == Point( 1, 1, 1));
+        }
+        {
+            auto r2 = bb.crop(r1);
+            CHECK(r2.first  == Point(-1,-1,-1));
+            CHECK(r2.second == Point( 1, 1, 1));
+        }
+    }
+    // Both points outside, reverse order
+    {
+        Ray r1(Point(2, 2, 2), Point(-2, -2, -2));
+        {
+            auto r2 = bb.intersect(r1);
+            CHECK(r2.first  == Point( 1, 1, 1));
+            CHECK(r2.second == Point(-1,-1,-1));
+        }
+        {
+            auto r2 = bb.crop(r1);
+            CHECK(r2.first  == Point( 1, 1, 1));
+            CHECK(r2.second == Point(-1,-1,-1));
+        }
+    }
+    // One point inside, one outside.
+    {
+        Ray r1(Point(-2, -2, -2), Point(0,0,0));
+        auto r2 = bb.crop(r1);
+        CHECK(r2.first  == Point(-1,-1,-1));
+        CHECK(r2.second == Point( 0,0,0));
+    }
+    {
+        Ray r1(Point(0,0,0), Point(2, 2, 2));
+        auto r2 = bb.crop(r1);
+        CHECK(r2.first  == Point(0,0,0));
+        CHECK(r2.second == Point( 1, 1, 1));
+    }
+    // One point inside, one outside, reverse order.
+    {
+        Ray r1(Point(0,0,0), Point(-2, -2, -2));
+        auto r2 = bb.crop(r1);
+        CHECK(r2.first  == Point( 0,0,0));
+        CHECK(r2.second == Point(-1,-1,-1));
+    }
+    {
+        Ray r1(Point(2, 2, 2), Point(0,0,0));
+        auto r2 = bb.crop(r1);
+        CHECK(r2.first  == Point( 1, 1, 1));
+        CHECK(r2.second == Point(0,0,0));
+    }
+
+
+}
+TEST_CASE("plane and point")
+{
+    Point point;
+    Vector normal(1, 0, 0);
+    CHECK( plane_split(point, normal, Ray(Point(-1,0,0), Point(1,0,0))));
+    CHECK(!plane_split(point, normal, Ray(Point(1,0,0), Point(2,0,0))));
+    CHECK(!plane_split(point, normal, Ray(Point(-2,0,0), Point(-1,0,0))));
+    CHECK(plane_split(point, normal, Ray(Point(-1,-1,-1), Point(1,1,1))));
+
+    Point inter = plane_intersection(point, normal, Ray(Point(-1,-1,-1), Point(1,1,1)));
+    CHECK(inter[0] == 0);
+    CHECK(inter[1] == 0);
+    CHECK(inter[2] == 0);
+}

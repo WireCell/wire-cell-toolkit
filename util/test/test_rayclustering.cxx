@@ -216,11 +216,14 @@ struct Chirp {
             const auto& br = one[ind];
             dumper(br, 10.0, 1.0, 1, ind);
         }
+        // (void)number;
+        // number = 0;
         for (const auto ind : *sel2) {
             const auto& br = two[ind];
             dumper(br, 20.0, 1.0, 2, ind);
         }
 
+        // (void)number; // suppress unused variable warning if needed
         return;
     }
 };

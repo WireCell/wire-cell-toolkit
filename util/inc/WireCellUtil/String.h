@@ -50,10 +50,16 @@ namespace WireCell {
 
             int a=42;
             std::string foo = "bar";
+            // Assuming positional order
             std::string msg = format("the answer to %s is %d", foo, a);
+            // Changing positional order
+            std::string msg2 = format("the answer %2% to the question %1%", foo, a);
 
-            Note, the "%"-formatting markup syntax is different than
-            that used in logging.
+            WARNING, the "%"-formatting markup syntax used here IS DIFFERENT
+            than that what is used in SPDLOG logging functions.  It is a very
+            common mistake to confuse the two.  Making this all uniform is a
+            "fixme" in WCT that can be done once C++20 and std::fmt is
+            available.  See #429.
         */
 
         template <typename... TYPES>

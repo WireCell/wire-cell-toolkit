@@ -324,6 +324,11 @@
                then obj.type + ":" + obj.name
                else obj.type,
 
+    // The "plural" version of tn().  Return an array of type/names given an
+    // array of objects.  This is simply a list comprehension to save a little
+    // typing.
+    tns(objs) :: [$.tn(obj) for obj in objs],
+
 
     // Return a new list where only the first occurrence of any object is kept.
     unique_helper(l, x):: if std.count(l,x) == 0 then l + [x] else l,

@@ -1,11 +1,53 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+
+class ClusteringExamineBundles;
+WIRECELL_FACTORY(ClusteringExamineBundles, ClusteringExamineBundles,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_examine_bundles(
+        Grouping& live_grouping,
+        IDetectorVolumes::pointer dv, 
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope,
+        const bool use_ctpc);
+
+class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringExamineBundles() {}
+    virtual ~ClusteringExamineBundles() {}
+    
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+
+        // If false, then DV and PCTS are not needed.
+        use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
+    }
+
+    void visit(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_);
+    }
+        
+private:
+    bool use_ctpc_{true};
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -18,52 +60,32 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
-void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping,
+// All APA Faces 
+static void clustering_examine_bundles(
+    Grouping& live_grouping, 
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope,
     const bool use_ctpc)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
 
     std::vector<Cluster *> live_clusters = live_grouping.children();
-    // for (size_t i = 0; i != live_clusters.size(); i++) {
-    //    auto blobs = live_clusters.at(i)->kd_blobs();
-    //    int nblobs = blobs.size();
-
-    //     //    if(nblobs > 10){
-    //         // std::cout << "Test: " << nblobs << " " <<  std::endl;
-
-    //     auto flash = live_clusters.at(i)->get_flash();
-    //     if (flash) {
-    //         std::cout << "Tests: " << nblobs << " at time " << flash.time() << "\n";
-
-    //         auto values = flash.values();
-    //         std::cout << values.size() << " ";
-    //         for (const auto& value : values) {
-    //             std::cout << value << " ";
-    //         }
-    //         std::cout << std::endl;
-    //     }
-
-    //         // auto local_pcs = live_clusters.at(i)->local_pcs();
-    //         // for (auto it = local_pcs.begin(); it !=local_pcs.end(); it++){
-    //         //     auto keys = it->second.keys();
-    //         //     for (auto it1 = keys.begin(); it1 != keys.end(); it1++){
-    //         //         std::cout << "Test: " << it->first << " " << *it1 << std::endl;
-    //         //     }
-    //         // }
-    //         // auto flash = live_clusters.at(i)->get_scalar<int>("flash");
-    //         // std::cout << "Test: Flash: " << flash << std::endl;
-    //         //    }
-    // }
-
 
     for (size_t i=0;i!=live_clusters.size();i++){
+        if (!live_clusters.at(i)->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
+        if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
+            live_clusters.at(i)->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+
         // if there is a cc component, record the main cluster as id of the blobs???
         auto old_cc_array = live_clusters.at(i)->get_pcarray("isolated", "perblob");
         
         // currently reset the cc component (todo: find the main component)
 
         // do the examine graph
-        auto b2groupid = live_clusters.at(i)->examine_graph(true);
+        auto b2groupid = live_clusters.at(i)->connected_blobs(dv, pcts);
         
         bool flag_largest = false;
         // Compare old and new cluster groupings
@@ -140,18 +162,11 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
 
         live_clusters.at(i)->put_pcarray(b2groupid, "isolated", "perblob");
 
-        // auto blobs = live_clusters.at(i)->kd_blobs();
-        // int nblobs = blobs.size();
-
-        // for (const auto& id : b2groupid) {
-        //     std::cout << id << " ";
-        // }
-        // std::cout << std::endl;
-
-        // if (nblobs > 10){
-        //     // find the main cluster and set it to the cc tree ...
-        //     std::cout << "Test: " << nblobs << " " << old_cc_array.size() << " " << b2groupid.size() << std::endl;
-        // }
     }
+
+
+
+
+
 
 }

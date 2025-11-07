@@ -47,7 +47,14 @@ namespace WireCell::PointCloud {
             An exception is thrown if the name is already used or if
             the size of the array does not match others in the dataset.
         */
+        using mutable_array_ptr = std::shared_ptr<Array>;
+
+        /// Add the named array to the dataset via copy.  The array must have a
+        /// size_major matching that of existing arrays in the dataset.
         void add(const std::string& name, const Array& arr);
+
+        /// Add the named array to the dataset via move.  The array must have a
+        /// size_major matching that of existing arrays in the dataset.
         void add(const std::string& name, Array&& arr);
 
         // Remove all arrays and become empty. 
@@ -55,6 +62,15 @@ namespace WireCell::PointCloud {
 
         // Remove one array if it exists o.w. do nothing.
         void erase(const std::string& name) { m_store.erase(name); }
+
+        /// Construct and return a new array at a name with the given shape initialized to zeros.
+        template<typename ElementType>
+        mutable_array_ptr allocate(const std::string& name, const Array::shape_t& shape) {
+            Array arr;
+            arr.resize<ElementType>(shape);
+            add(name, std::move(arr));
+            return get(name);
+        }
 
         /** A selection is an ordered subset of arrays in the dataset.
 
@@ -73,6 +89,26 @@ namespace WireCell::PointCloud {
         using const_selection_t = std::vector<array_ptr>;
         const_selection_t selection(const name_list_t& names) const;
         
+        /** Return a Dataset with copies of named arrays.
+
+            If any requested name is not provided by this dataset then
+            an empty collection is returned.
+         */
+        Dataset subset(const name_list_t& names) const;
+
+        /** Return a subset by indices and names.
+
+            If any requested name is not provided by this dataset or an index is
+            out of bounds then an empty collection is returned.
+
+            If names is empty then all arrays are considered.
+           
+            The order of points in the returned Dataset is aligned with the
+            order of indices.
+         */
+
+        Dataset subset(const std::vector<size_t>& indices, name_list_t names={}) const;
+
         /** Return named array or nullptr if not found.
 
             Even in non-const case, the array pointer is merely lent.
@@ -85,15 +121,13 @@ namespace WireCell::PointCloud {
             Caller is warned that changing entries directly through
             this array will not trigger the auto update callbacks.
          */
-        using mutable_array_ptr = std::shared_ptr<Array>;
         mutable_array_ptr get(const std::string& name);
 
         // FIXME, add something that returns something that produces a
         // typed tuple of array elements given their common index.
 
         /// Return the sorted names of the arrays in this.
-        using keys_t = std::vector<std::string>;
-        keys_t keys() const;
+        name_list_t keys() const;
         bool has(const std::string& key) const;
 
         /// Return a Dataset with same name and type of arrays as this
