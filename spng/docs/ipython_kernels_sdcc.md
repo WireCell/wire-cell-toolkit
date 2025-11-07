@@ -25,4 +25,4 @@
 
 At this point you can start using packages installed in the virtual environment we made. You can also continue to add more packages.
 If you are in an environment and install another package, you will at least need to _restart_ your kernel. If you can't import the 
-package, try logging out and back in. 
+package even after restarting the kernel, try logging out and back in and it should work.
