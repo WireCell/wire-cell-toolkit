@@ -2,7 +2,7 @@ function(
   input_file='tensor_frames.npz',
   output_path='spng%s.tar',     // MUST give %s for gpu and NOT for cpu.
   device='gpu',
-  do_spng=false,
+  do_spng=true,
   ts_model_file="/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
   device='gpu',
   do_sim=false,

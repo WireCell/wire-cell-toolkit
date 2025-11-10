@@ -7,7 +7,8 @@
 
 WIRECELL_FACTORY(SPNGDNNROIPreProcess,
      WireCell::SPNG::DNNROIPreProcess, 
-    WireCell::SPNG::IDNNROIPreProcess,
+    WireCell::INamed,
+    WireCell::SPNG::ITorchTensorSetFilter,
      WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -42,11 +43,16 @@ void DNNROIPreProcess::configure(const WireCell::Configuration& cfg)
 }
 
 //preprocessing
-std::vector<torch::Tensor> DNNROIPreProcess::preprocess(const ITorchTensorSet::pointer& input)
+bool DNNROIPreProcess::operator()(const input_pointer& in, output_pointer& out)
 {
     NVTX_SCOPED_RANGE("DNNROIPreProcess::preprocess");
+    out = nullptr;
+    if(!in){
+        log->debug("DNNROIPreProcess: EOS ");
+        return true;
+    }
 
-    auto tensors = input->tensors();
+    auto tensors = in->tensors();
     if (!tensors || tensors->size() != 3) {
         log->error("DNNROIPreProcess: Expecting 3 input tensors, got {}", tensors ? tensors->size() : 0);
         throw std::runtime_error("DNNROIPreProcess: Invalid number of input tensors");
@@ -105,12 +111,12 @@ std::vector<torch::Tensor> DNNROIPreProcess::preprocess(const ITorchTensorSet::p
         log->debug("DNNROIPreProcess: Converted tensor to float32");
     }
 
-    // Chunk along the tick dimension (dim=2)
-    std::vector<torch::Tensor> chunk = transposed.chunk(m_cfg.nchunks, /*dim=*/2);
-    return chunk;
+    auto shared_vec = std::make_shared<ITorchTensor::vector>();
+    shared_vec->push_back(std::make_shared<SimpleTorchTensor>(transposed, tensors->at(0)->metadata()));
+    shared_vec->push_back(std::make_shared<SimpleTorchTensor>(ten_mp2, tensors->at(1)->metadata()));
+    shared_vec->push_back(std::make_shared<SimpleTorchTensor>(ten_mp3, tensors->at(2)->metadata()));
+    out = std::make_shared<SimpleTorchTensorSet>(in->ident(), in->metadata(), shared_vec);
+    log->debug("DNNROIPreProcess: Output ITorchTensorSet created with {} tensors", shared_vec->size());
+    return true;
 }
 
-Configuration DNNROIPreProcess::get_metadata() const
-{
-    return m_metadata;
-}

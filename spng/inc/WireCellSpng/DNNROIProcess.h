@@ -68,9 +68,6 @@ namespace WireCell {
             //IDNNROIPreProcess::pointer m_preprocess;
             //std::shared_ptr<DNNROIPreProcess> m_preprocess;
             //std::shared_ptr<DNNROIPostProcess> m_postprocess;
-
-            IDNNROIPreProcess::pointer m_preprocess;
-            IDNNROIPostProcess::pointer m_postprocess;
             
             //Additional (and not necessary) helper functions for debugging
             //something to save the tensors for debugging

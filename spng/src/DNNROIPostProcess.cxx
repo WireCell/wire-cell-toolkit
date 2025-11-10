@@ -1,6 +1,6 @@
 #include "WireCellSpng/DNNROIPostProcess.h"
-#include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/Util.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellSpng/TorchnvTools.h"
@@ -9,7 +9,8 @@
 
 WIRECELL_FACTORY(SPNGDNNROIPostProcess,
     WireCell::SPNG::DNNROIPostProcess,
-    WireCell::SPNG::IDNNROIPostProcess,
+    WireCell::INamed,
+    WireCell::SPNG::ITorchTensorSetFilter,
     WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -22,6 +23,17 @@ DNNROIPostProcess::DNNROIPostProcess()
 
 DNNROIPostProcess::~DNNROIPostProcess()
 {
+}
+
+Configuration DNNROIPostProcess::default_configuration() const
+{
+    Configuration cfg;
+    cfg["output_scale"] = 1.0;
+    cfg["output_offset"] = 0.0;
+    cfg["ntick"] = 6000;
+    cfg["nchunks"] = 1;
+    cfg["tick_per_slice"] = 4;
+    return cfg;
 }
 
 void DNNROIPostProcess::configure(const Configuration& cfg)
@@ -40,42 +52,33 @@ void DNNROIPostProcess::configure(const Configuration& cfg)
     m_cfg.nchunk = get(cfg, "nchunks", m_cfg.nchunk);
 }
 //TODO: Should I use std::vector<torch::Tensor>& as input instead?
-std::vector<torch::Tensor> DNNROIPostProcess::postprocess(
-    const std::vector<torch::Tensor>& dnn_output,
-    const Configuration& preprocess_metadata)
+bool DNNROIPostProcess::operator()(const input_pointer &in, output_pointer& out)
 {
     NVTX_SCOPED_RANGE("DNNROIPostProcess::postprocess");
-
-    if (dnn_output.empty()) {
-        log->warn("DNNROIPostProcess: empty DNN output");
-        return {};
+    out = nullptr;
+    if(!in){
+        log->debug("DNNROIPostProcess: EOS ");
+        return true;
     }
-    int nchunks = m_cfg.nchunk;
-    if (nchunks > static_cast<int>(dnn_output.size())) {
-        log->warn("DNNROIPostProcess: metadata nchunks ({}) exceeds provided outputs ({}); clamping", nchunks, dnn_output.size());
-        nchunks = static_cast<int>(dnn_output.size());
-    }
-
-    // chunks should be merged before other operations
+    //int nchunks = m_cfg.nchunk;
+    //Needs proper implementation to account for the chunking....
+    auto tensors = in->tensors();
     std::vector<torch::Tensor> merged_dnn_output;
-    if (nchunks > 1) {
-        std::vector<torch::Tensor> merged_chunks;
-        merged_chunks.reserve(nchunks);
-        for (int i = 0; i < nchunks; ++i) {
-            merged_chunks.push_back(dnn_output[i]);
-        }
-        // concatenate along tick dimension (dim=3) as in preprocessing
-        torch::Tensor merged = torch::cat(merged_chunks, /*dim=*/3);
-        merged_dnn_output = {merged};
-    } else {
-        merged_dnn_output = dnn_output; // pass-through
+    std::vector<torch::Tensor> merged_chunks;
+    int nchunks = m_cfg.nchunk;
+    merged_chunks.reserve(nchunks);
+    for (int i = 0; i < nchunks; ++i) {
+        merged_chunks.push_back(tensors->at(i)->tensor());
     }
+    // concatenate along tick dimension (dim=3) as in preprocessing
+    torch::Tensor merged = torch::cat(merged_chunks, /*dim=*/3);
+    merged_dnn_output = {merged};
+     
 
     // Apply output scaling and upsample along the tick dimension
     using torch::indexing::Slice;
-    std::vector<torch::Tensor> processed_outputs;
-    processed_outputs.reserve(merged_dnn_output.size());
-
+    //TODO: Do we really need the for loop here?
+    auto shared_vec = std::make_shared<ITorchTensor::vector>();
     for (const auto& tensor : merged_dnn_output) {
         if (!tensor.defined()) {
             log->warn("DNNROIPostProcess: encountered undefined tensor; skipping");
@@ -104,9 +107,9 @@ std::vector<torch::Tensor> DNNROIPostProcess::postprocess(
         //before upsampling shape
         SPNG::write_torch_to_npy(output, "DNNROIPostProcess_output_before_upsample.pt");
         output = output.repeat_interleave(m_cfg.tick_per_slice, /*dim=*/2); //upsample along tick dimension
-
+        shared_vec->push_back(std::make_shared<SimpleTorchTensor>(output, in->tensors()->at(0)->metadata()));
         log->debug("Postprocessed output shape: {}", tensor_shape_string(output));
-        processed_outputs.push_back(output);
     }
-    return processed_outputs;
+    out = std::make_shared<SimpleTorchTensorSet>(in->ident(), in->metadata(), shared_vec);
+    return true;
 }

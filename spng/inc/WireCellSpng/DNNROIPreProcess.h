@@ -1,9 +1,6 @@
 #ifndef WIRECELLSPNG_DNNROIPREPROCESS_H
 #define WIRECELLSPNG_DNNROIPREPROCESS_H
 
-#include "WireCellSpng/IDNNROIPreProcess.h"
-#include "WireCellSpng/ITorchToTensorSet.h"
-#include "WireCellSpng/ITorchForward.h"
 #include "WireCellSpng/ITorchTensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/Logging.h"
@@ -12,17 +9,16 @@
 namespace WireCell {
     namespace SPNG {
 
-        class DNNROIPreProcess : public IDNNROIPreProcess, 
+        class DNNROIPreProcess : public ITorchTensorSetFilter, 
                                        public IConfigurable,
                                        public Aux::Logger {
         public:
             DNNROIPreProcess();
-            ~DNNROIPreProcess() override;
+            virtual ~DNNROIPreProcess();
 
-            Configuration default_configuration() const override;
-            void configure(const Configuration& cfg) override;
-            std::vector<torch::Tensor> preprocess(const ITorchTensorSet::pointer& input) override;
-            Configuration get_metadata() const override;
+            virtual Configuration default_configuration() const;
+            virtual void configure(const Configuration& cfg);
+            virtual bool operator()(const input_pointer &in, output_pointer& out);
 
         private:
             struct Config {
