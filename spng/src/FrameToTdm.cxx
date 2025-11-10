@@ -48,8 +48,9 @@ namespace WireCell::SPNG {
         for (const int chid : m_anode->channels()) {
             auto ichan = m_anode->channel(chid);
             const int wpid = ichan->planeid().ident();
-            const size_t wan = ichan->index();
-            m_channel_order[chid] = ((size_t)wpid << 32) & wan;
+            // const size_t wan = ichan->index();
+            // m_channel_order[chid] = ((size_t)wpid << 32) & wan;
+            m_channel_order[chid] = ichan->global_order();
             m_wpid_channels[wpid].insert(chid);
         }
 

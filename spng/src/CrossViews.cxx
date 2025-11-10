@@ -20,110 +20,125 @@ namespace WireCell::SPNG {
         WireCell::configure_bases<CrossViews, FaninBase<ITorchTensor>>(this, config);
         from_json(m_cfg, config);
 
-        // Sanity check config
-        if (m_cfg.face_ident < 0) {
-            raise<ValueError>("CrossViews requires a .face_ident configured to select wires");
-        }
-
-        if (m_cfg.views.size() != 3 ) {
-            raise<ValueError>("CrossViews requires three .views configured");
-        }
-        for (int vind=0; vind<3; ++vind) {
-            auto vcfg = m_cfg.views[vind];
-            if (vcfg.plane_ident < 0) {
-                vcfg.plane_ident = vind; // default conflation of ident and index
-            }
-            if (vcfg.face_idents.empty() || vcfg.face_idents.size() > 2) {
-                raise<ValueError>("CrossViews requires one or two faces configured for each view");
-            }
-        }
-
         // Determine which of the three input ports provides the "target"
         // tensor.
         m_targ_index = m_cfg.target_index;
+        if (m_targ_index<0 || m_targ_index>2) {
+            raise<ValueError>("CrossViews target index out of expected range of [0,2], inclusive");
+        }
 
-        // Transfer WCT/C++ ray grid to Torch version.
+        // Sanity check the config
+        size_t nfaces = m_cfg.face_idents.size();
+        if (nfaces > 2) {
+            raise<ValueError>("CrossViews can no understand how yhou give it %d faces", nfaces);
+        }
+
+        // Initialize the face view data. 
+        m_face_view_info.clear();
+        m_face_view_info.resize(nfaces);
+
         auto anode = Factory::find_tn<IAnodePlane>(m_cfg.anode);
-        auto iwireface = anode->face(m_cfg.face_ident);
-        const auto& coords = iwireface->raygrid();
-        const auto& centers = coords.centers();
-        const auto& pitch_dirs = coords.pitch_dirs();
-        const auto& pitch_mags = coords.pitch_mags();
-        auto next_rays = centers;
-        for (int ilayer = 0; ilayer < coords.nlayers(); ++ilayer) {
-            next_rays[ilayer] += pitch_dirs[ilayer]*pitch_mags[ilayer];
+
+        // Transfer WCT/C++ ray grid to a Torch version for each face.
+        for (size_t find=0; find<nfaces; ++find) {
+
+
+            const int face_ident = m_cfg.face_idents[find];
+            auto iface = anode->face(face_ident);
+
+            auto iwireface = anode->face(face_ident);
+            const auto& coords = iwireface->raygrid();
+            const auto& centers = coords.centers();
+            const auto& pitch_dirs = coords.pitch_dirs();
+            const auto& pitch_mags = coords.pitch_mags();
+            auto next_rays = centers;
+            for (int ilayer = 0; ilayer < coords.nlayers(); ++ilayer) {
+                next_rays[ilayer] += pitch_dirs[ilayer]*pitch_mags[ilayer];
+            }
+            auto raygrid_views = torch::zeros({5, 2, 2});
+            // Hard-wire layer the indices 
+            std::vector<int> layers = {0, 1, aux1_index()+2, aux2_index()+2, targ_index()+2};
+            for (int layer_count=0; layer_count<5; ++layer_count) {
+                const int ilayer = layers[layer_count];
+                raygrid_views.index_put_({layer_count, 0, 0}, centers[ilayer][2]);
+                raygrid_views.index_put_({layer_count, 0, 1}, centers[ilayer][1]);
+                raygrid_views.index_put_({layer_count, 1, 0}, next_rays[ilayer][2]);
+                raygrid_views.index_put_({layer_count, 1, 1}, next_rays[ilayer][1]);
+            }
+
+            // Construct ray grid coordinates and move to device.
+            auto& face_view = m_face_view_info[find];
+            face_view.raygrid.init(raygrid_views);
+            face_view.raygrid.to(device());
         }
-        auto raygrid_views = torch::zeros({5, 2, 2});
-        // Hard-wire layer the indices 
-        std::vector<int> layers = {0, 1, aux1_index()+2, aux2_index()+2, targ_index()+2};
-        for (int layer_count=0; layer_count<5; ++layer_count) {
-            const int ilayer = layers[layer_count];
-            raygrid_views.index_put_({layer_count, 0, 0}, centers[ilayer][2]);
-            raygrid_views.index_put_({layer_count, 0, 1}, centers[ilayer][1]);
-            raygrid_views.index_put_({layer_count, 1, 0}, next_rays[ilayer][2]);
-            raygrid_views.index_put_({layer_count, 1, 1}, next_rays[ilayer][1]);
-        }
-        // Construct our ray grid coordinates and move to our device.
-        m_raygrid.init(raygrid_views);
-        m_raygrid.to(device());
 
+        // For each input port / plane in U, V, W, find the wire<-->chan maps.
+        for (size_t pind=0; pind<3; ++pind) {
 
-        // Populate the plane info.
-        m_view_info.clear();
-        m_view_info.resize(3);
-        for (int vind=0; vind<3; ++vind) {
-            auto pi = m_view_info[vind];
-
-            const auto& vcfg = m_cfg.views[vind];
-            const int plane_ident = vcfg.plane_ident;
-
-            // Initialize wires-to-chans
-            auto iwireplane = iwireface->plane(plane_ident);
-            const auto& iwires = iwireplane->wires();
-            const int nwires = iwires.size();
-            pi.w2c = torch::zeros({nwires},torch::kInt32);
-
-            // Initialize intermediate channel ID to channel index following
-            // users order of channel faces.
-            std::unordered_map<int, size_t> chid_to_index;
+            // Find the complete map from channel ID to its tensor row index
+            // based on user's face_ident and WAN ordering.  This requires
+            // iterating both (channel) faces.
             int nchans = 0;
-            for (int chan_face_ident : vcfg.face_idents) {
-                auto chan_face = anode->face(chan_face_ident);
-                for (const auto& ichan : chan_face->plane(plane_ident)->channels()) {
+            std::unordered_map<int, size_t> chid_to_index;
+            for (size_t find=0; find<nfaces; ++find) {
+
+                const int face_ident = m_cfg.face_idents[find];
+                auto iface = anode->face(face_ident);
+
+                auto iplane = iface->planes()[pind];
+
+                for (const auto& ichan : iplane->channels()) {
                     chid_to_index[ichan->ident()] = nchans++;
                 }
             }
-            pi.c2w = -1 * torch::ones({nchans},torch::kInt32);
+                
+            // Go through faces again to map the wires in each face to its
+            // channels and vice versa
+            for (size_t find=0; find<nfaces; ++find) {
 
-            // Iterate along the wire array
-            for (int wind=0; wind<nwires; ++wind) {
-                auto iwire = iwires[wind];
-                const int chid = iwire->channel();
-                auto cit = chid_to_index.find(chid);
-                if (cit == chid_to_index.end()) {
-                    log->warn("wire:{} has no channel for chid:{} face ID:{} plane ID:{} not given",
-                              wind, chid, m_cfg.face_ident, plane_ident);
-                    continue;
+                const int face_ident = m_cfg.face_idents[find];
+                auto iface = anode->face(face_ident);
+
+                // The maps for this wire face and view
+                auto& view_info = m_face_view_info[find].views[pind];
+
+                auto iplane = iface->planes()[pind];
+                const auto& iwires = iplane->wires();
+                const int nwires = iwires.size();
+
+                view_info.w2c = torch::zeros({nwires},torch::kInt32);
+                view_info.c2w = -1 * torch::ones({nchans},torch::kInt32);
+
+                // Iterate along the wire array
+                for (int wind=0; wind<nwires; ++wind) {
+                    auto iwire = iwires[wind];
+                    const int chid = iwire->channel();
+                    auto cit = chid_to_index.find(chid);
+                    if (cit == chid_to_index.end()) {
+                        log->warn("no channel for wire index:{}, chID:{} fID:{}, fIND:{}, pIND:{}",
+                                  wind, chid, face_ident, find, pind);
+                        continue;
+                    }
+                    const int cind = cit->second;
+                    view_info.w2c[wind] = cind;
+                    view_info.c2w[cind] = wind;
+                    view_info.seg[wind] = iwire->segment();
                 }
-                const int cind = cit->second;
-                pi.w2c[wind] = cind;
-                pi.c2w[cind] = wind;
-                pi.seg[wind] = iwire->segment();
-            }
 
-            // Warn user if extra channels are given.
-            for (int cind=0; cind<nchans; ++cind) {
-                if (pi.c2w[cind].item<int>() >= 0) {
-                    continue;
+                // Warn user if extra channels are given.
+                for (int cind=0; cind<nchans; ++cind) {
+                    if (view_info.c2w[cind].item<int>() >= 0) {
+                        continue;
+                    }
+                    log->warn("no wire for tensor channel/row {}, fID:{}, fIND:(), pIND:{}",
+                              cind, face_ident, find, pind);
                 }
-                log->warn("ch index:{} has no wire in face ID:{} and plane ID:{} not given",
-                          cind, m_cfg.face_ident, plane_ident);
-            }
 
-            pi.to(device());                
+                view_info.to(device());              
+            }
         }
+    } // configuration().
 
-    }
     
     WireCell::Configuration CrossViews::default_configuration() const
     {
@@ -134,12 +149,13 @@ namespace WireCell::SPNG {
     }
     
 
-
-    bool CrossViews::pre_input(const input_vector& inv, std::vector<torch::Tensor>& inputs)
+    bool CrossViews::pre_input(const input_vector& inv, std::vector<torch::Tensor>& inputs, Configuration& md)
     {
         inputs.clear();
         bool batched = false;
-        for (int ind=0; ind<3; ++ind) {
+        for (size_t ind=0; ind<3; ++ind) {
+            update(md, inv[ind]->metadata());
+
             auto ten = inv[ind]->tensor();
             if (ten.dim() == 2) {
                 ten = ten.unsqueeze(0);
@@ -153,10 +169,11 @@ namespace WireCell::SPNG {
             }
 
             // sanity check.  not yet sure what best to do if it fails.
-            int nchans = ten.size(-2);
-            if (nchans != m_view_info[ind].nchans()) {
+            int nchans_data = ten.size(-2);
+            int nchans_view = m_face_view_info[0].views[ind].nchans();
+            if (nchans_data != nchans_view) {
                 log->warn("channel size mismatch on input {}. input data has {}, view has {}",
-                          ind, nchans, m_view_info[ind].nchans());
+                          ind, nchans_data, nchans_view);
                 // for now, pray
             }
 
@@ -164,7 +181,6 @@ namespace WireCell::SPNG {
         }
         return batched;
     }
-
 
 
     // Gemini-provided extension to NoTileMPCoincidence's version to encode
@@ -271,30 +287,23 @@ namespace WireCell::SPNG {
         return output;
     }
 
-
-    void CrossViews::fanin_combine(const input_vector& inv, output_pointer& out)
+    torch::Tensor CrossViews::do_face(const FaceViews& face_info,
+                                      std::vector<torch::Tensor>& inputs)
     {
-        std::vector<torch::Tensor> inputs;
-        const bool batched = pre_input(inv, inputs);
-        
+        std::vector<torch::Tensor> wire_tensors(0);
+
         // Convert from (nbatch,nchan,ntick) to (nbatch*ntick,nwire).  Each wire
         // tensor has same size dim=0.
-        Configuration md;
-        std::vector<torch::Tensor> wire_tensors;
-        for (int vind=0; vind<3; ++vind) {
-            /// FIXME: probably not the best way to set the output MD....
-            update(md, inv[vind]->metadata());
-            
-
+        for (size_t vind=0; vind<3; ++vind) {
             auto input = inputs[vind];
-            auto ten = input.index({Ellipsis, m_view_info[vind].w2c, Ellipsis});
+            auto ten = input.index({Ellipsis, face_info.views[vind].w2c, Ellipsis});
             ten = ten.transpose(-1, -2);
             ten = ten.reshape({-1, ten.size(-1)});
             wire_tensors.push_back(ten);
         }
 
         // Give semantic aliases.
-        const auto& targ_info = m_view_info[targ_index()];
+        const auto& targ_info = face_info.views[targ_index()];
         const auto& targ_wires = wire_tensors[targ_index()];
         const int targ_nwires = targ_wires.size(-2);
 
@@ -307,9 +316,7 @@ namespace WireCell::SPNG {
         // cross views true), 3 is mp3 (all three views true) and zero otherwise
         // (all three views false).  Shape: (nbatch, nwire, ntick)
         torch::Tensor cross_views_wires = torch::zeros({
-                nbatch, targ_info.nwires(), nticks}, torch::kInt);
-
-        
+                nbatch, targ_info.nwires(), nticks}, torch::kInt32);
 
         const auto& aux1_wires = wire_tensors[aux1_index()];
         const auto& aux2_wires = wire_tensors[aux2_index()];
@@ -328,7 +335,7 @@ namespace WireCell::SPNG {
 
             // Form crossing pairs of wires
             auto cross = torch::zeros({aux1_true.size(0), aux2_true.size(0), 2},
-                                      tensor_options(torch::kInt));
+                                      tensor_options(torch::kInt32));
             cross.index_put_({Ellipsis, 1}, aux2_true);
             cross = cross.permute({1, 0, 2});
             cross.index_put_({Ellipsis, 0}, aux1_true);
@@ -341,19 +348,19 @@ namespace WireCell::SPNG {
 
             // Make view tensors in shapes of the ray pairs.  These are fixed
             // indices because we constructed the ray grid coordinates to match.
-            auto view1 = torch::full_like(r1, 2, tensor_options(torch::kInt));
-            auto view2 = torch::full_like(r1, 3, tensor_options(torch::kInt));
-            auto view3 = torch::full_like(r1, 4, tensor_options(torch::kInt));
+            auto view1 = torch::full_like(r1, 2, tensor_options(torch::kInt32));
+            auto view2 = torch::full_like(r1, 3, tensor_options(torch::kInt32));
+            auto view3 = torch::full_like(r1, 4, tensor_options(torch::kInt32));
 
             // Get the locations of crossing wires within view3
-            auto view3_locs = m_raygrid.pitch_location(view1, r1, view2, r2, view3);
+            auto view3_locs = face_info.raygrid.pitch_location(view1, r1, view2, r2, view3);
 
             // Also just a scalar
-            auto view3_short = torch::tensor(4, tensor_options(torch::kInt));
+            auto view3_short = torch::tensor(4, tensor_options(torch::kInt32));
 
             // Convert the locations to pitch indices
             // 1D, small, varied
-            auto results = m_raygrid.pitch_index( view3_locs, view3_short );
+            auto results = face_info.raygrid.pitch_index( view3_locs, view3_short );
 
             // Make sure the returned indices are within the active volume
             // 1D, small, varied
@@ -381,8 +388,28 @@ namespace WireCell::SPNG {
         }
 
         auto cross_views_chans = convert_wires_to_channels_extended(
-            cross_views_wires, targ_info.w2c, targ_info.seg);
-        cross_views_chans = cross_views_chans.reshape({nbatch, nticks, -1}).transpose(-1, -2);
+            cross_views_wires, targ_info.c2w, targ_info.seg);
+        return cross_views_chans.reshape({nbatch, nticks, -1}).transpose(-1, -2);
+
+    }
+
+    void CrossViews::fanin_combine(const input_vector& inv, output_pointer& out)
+    {
+        std::vector<torch::Tensor> inputs;
+        Configuration md;
+        const bool batched = pre_input(inv, inputs, md);
+        
+        // Initialize output tensor
+        const auto& targ_chans = inputs[targ_index()];
+        auto cross_views_chans = to(torch::zeros(targ_chans.sizes(), torch::kInt32));
+
+        // Each wire face 
+        const size_t nfaces = m_face_view_info.size();
+        for (size_t find=0; find<nfaces; ++find) {
+            const auto& face_info = m_face_view_info[find];
+            auto cvc = do_face(face_info, inputs);
+            cross_views_chans = torch::bitwise_or(cross_views_chans, cvc);
+        }
 
         if (!batched) {
             cross_views_chans = cross_views_chans.squeeze(0);
