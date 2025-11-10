@@ -34,6 +34,21 @@ namespace WireCell {
 
         /// The ID of the plane of wire zero.  This is just sugar.
         virtual WirePlaneId planeid() const;
+
+        /// Provide a global order number for this channel.  WirePlaneID makes
+        /// up the high 4 bytes and channel ident the low 4 bytes.  Note, if
+        /// channel IDs are larger than 2 billion, this order will have
+        /// collisions.  This gives a "face-major" order, with fastest increase
+        /// along wire-attachment-number (WAN aka IChannel::index()).  Next,
+        /// increases by layer (wire plane) then by face and finally by anode
+        /// (APA) number.
+        virtual size_t global_order() const {
+            const size_t wpid = planeid().ident();
+            const size_t wan = index();
+            return ((size_t)wpid << 32) & (0xFFFFFFFF & wan);
+
+        }
+
     };
 }  // namespace WireCell
 
