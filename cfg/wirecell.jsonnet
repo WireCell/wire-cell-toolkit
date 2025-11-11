@@ -318,6 +318,8 @@
         face: (wpid&(1 << face_shift))>>face_shift,
         layer: wpid&layer_mask,
         index: $.wpid_layer_to_index(self.layer),
+        letter: "uvw"[self.index],
+        name: "a" + std.toString(self.apa) + "f" + std.toString(self.face) + self.letter,
     },
 
 
