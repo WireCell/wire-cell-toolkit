@@ -49,7 +49,19 @@ namespace WireCell::SPNG {
         3D-batched.
 
         The channel dimension is expected to be in channel-index aka
-        wire-attachment-number order.
+        wire-attachment-number order.  See CrossViewsConfig.
+
+        The cross-views tensor is integer value with an "MPn" number as a
+        one-hot bit in one nibble per segment.  First 4 bits covers segment 0,
+        etc.  A value of MPn for one segment has only bit "n" set to 1, ie
+
+            MPn = 1<<n
+
+        For a 3 segment channel each MPn is shifted by one nibble:
+
+            (MPn2 << 8) | (MPn1 << 4) | MPn0.
+
+        See CrossViewsExtact for a way to unpack this into individual tensors.
 
      */
     struct CrossViews : public FaninBase<ITorchTensor>, virtual public IConfigurable {

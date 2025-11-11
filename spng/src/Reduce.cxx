@@ -10,6 +10,7 @@ using WireCell::String::has;
 namespace WireCell::SPNG {
 
     Reduce::Reduce()
+        : FaninBase<ITorchTensor>("Reduce")
     {
     }
 
