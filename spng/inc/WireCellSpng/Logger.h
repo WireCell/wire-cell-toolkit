@@ -3,21 +3,27 @@
 
 #include "WireCellSpng/ITorchTensorSet.h"
 #include "WireCellSpng/TensorIndex.h"
-#include "WireCellSpng/HanaConfigurable.h"
+
 #include "WireCellIface/INamed.h"
+#include "WireCellIface/IConfigurable.h"
+
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/HanaJsonCPP.h"
 
 namespace WireCell::SPNG {
 
     /** @brief Logging configuration
      */
     struct LoggerConfig {
-        /// The name for the underlying logger, should be set to component name.
+        /// The name for the underlying logger.  Typically, should be set to
+        /// component name given to the WIRECELL_FACTORY() macro.
         std::string type_name = "SPNG"; 
+
         /// the name for the logger group, should be set to package name, okay to leave as-is.
         std::string group_name = "spng"; 
-        /// These names should NOT be instance names.  See set_name() and
-        /// get_name() in the Logger class.  
+
+        /// Note, neither of the above names are instance names.  Instance name
+        /// is set via set_name() typically by WireCell::Main.
 
         // The verbosity level.  See comments in Logger class.
         int verbosity = 0;
@@ -29,27 +35,44 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::LoggerConfig, type_name, group_name, ver
 namespace WireCell::SPNG {
     /** @brief Logging functionality.
 
-        This may be used as a base class to provide a "log" data member or the
-        class may be used as a class member variable.
+        This may be used as a base class to provide a "log" data member and
+        debug() etc as well as data-aware logit() methods.  Logger may also
+        be used as a class member variable.  
     */
-    struct Logger : public HanaConfigurable<Logger, LoggerConfig>, virtual public INamed {
+    struct Logger : virtual public IConfigurable, virtual public INamed {
 
-        /** Construct a logger with a default "gropu name" equal to the package name.
+        /** Construct a logger with a default "group name" of "spng".
 
-            User can later set the "type name".
+            See also init().
          */
-        Logger(const std::string& group_name="spng");
+        Logger();
+
+        /** Construct a logger with a "group name".
+
+            See also init().
+         */
+        Logger(const std::string& group_name);
+
         /** Construct logger with fully qualified names
 
+            See also init().
         */
-        Logger(const std::string& type_name, const std::string& group_name="spng");
+        Logger(const std::string& type_name, const std::string& group_name);
+
         virtual ~Logger() = default;
+
+        /** Set type and group names and initialize underlying SPDLOG object.
+         *
+         * User may call this to set custom names in cases that the default
+         * constructor must be used.
+         */
+        void init(const std::string& type_name="", const std::string& group_name="spng");
 
         // INamed
         /** Return a name for this instance.
 
             This will return the name set by set_name() or if none set, a
-            default is constructed from the configured log and gropu names.
+            default is constructed from the configured log and group names.
         */
         virtual std::string get_name() const;
 
@@ -83,10 +106,10 @@ namespace WireCell::SPNG {
         void set_verbosity(int level);
         int verbosity() const;
 
-        // Respond to configuration change.
-        virtual void configured();
+        // IConfigurable API.
+        virtual void configure(const WireCell::Configuration& jconfig);
+        virtual WireCell::Configuration default_configuration() const;
 
-        
         /** @brief The logger includes a "count" in log messages.
 
             The logger does not automatically advance the count.  The user
@@ -121,6 +144,8 @@ namespace WireCell::SPNG {
             log->critical(std::forward<Args>(args)...);
         }
 
+        LoggerConfig config() { return m_config; }
+
     protected:
 
         /// The actual log object can be accessed via subclass or use debug(), etc.
@@ -137,6 +162,7 @@ namespace WireCell::SPNG {
         /// We want to mutate this to handle recursive calls.
         mutable int m_verbosity = 0;
 
+        LoggerConfig m_config;
     };
 }
 

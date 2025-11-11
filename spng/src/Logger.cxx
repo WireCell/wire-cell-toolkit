@@ -5,6 +5,9 @@
 
 #include <sstream>
 
+using WireCell::HanaJsonCPP::from_json;
+using WireCell::HanaJsonCPP::to_json;
+
 // Used in formatting the log line prefix.
 static
 std::string centered(std::string s, size_t target, char space = ' ')
@@ -23,22 +26,37 @@ std::string centered(std::string s, size_t target, char space = ' ')
 namespace WireCell::SPNG {
 
 
+    Logger::Logger()
+    {
+        init("", "spng");
+    }
+
     Logger::Logger(const std::string& group_name)
-        : log(Log::logger(group_name))
-
     {
-        m_hana_config.group_name = group_name;
+        init("", group_name);
     }
 
-    Logger::Logger(const std::string& log_name, const std::string& group_name)
-        : log(Log::logger(group_name))
+    Logger::Logger(const std::string& type_name, const std::string& group_name)
     {
+        init(type_name, group_name);
     }
+
+    void Logger::init(const std::string& type_name, const std::string& group_name)
+    {
+        if (! type_name.empty()) {
+            m_config.type_name = type_name;
+        }
+        if (! group_name.empty()) {
+            m_config.group_name = group_name;
+        }
+        log = Log::logger(m_config.group_name);
+    }
+
 
     std::string Logger::get_name() const
     {
         if (m_interface_name.empty()) {
-            return m_hana_config.group_name+m_hana_config.type_name;
+            return m_config.group_name+m_config.type_name;
         }
         return m_interface_name;
     }
@@ -51,7 +69,7 @@ namespace WireCell::SPNG {
 
         m_interface_name = name;
 
-        std::string log_name = m_hana_config.group_name + "/" + m_hana_config.type_name + "/" + m_interface_name;
+        std::string log_name = m_config.group_name + "/" + m_config.type_name + "/" + m_interface_name;
 
         // Make allow unique sinks so we can set unique pattern.
         // Note, this spawns an SPDLOG thread....
@@ -59,7 +77,7 @@ namespace WireCell::SPNG {
 
         // Set the pattern
         std::stringstream ss;
-        ss << "[%H:%M:%S.%03e] %L [" << centered(m_hana_config.group_name, 8) << "] <" << m_hana_config.type_name << ":" << m_interface_name << "> %v %@";
+        ss << "[%H:%M:%S.%03e] %L [" << centered(m_config.group_name, 8) << "] <" << m_config.type_name << ":" << m_interface_name << "> %v %@";
 
         log->set_pattern(ss.str());
 
@@ -166,18 +184,26 @@ namespace WireCell::SPNG {
 
     void Logger::set_verbosity(int level)
     {
-        m_hana_config.verbosity = level;
+        m_config.verbosity = level;
     }
     int Logger::verbosity() const
     {
-        return m_hana_config.verbosity;
+        return m_config.verbosity;
     }
-    void Logger::configured()
+
+    void Logger::configure(const WireCell::Configuration& jconfig)
     {
-        // we need this mutable.
-        m_verbosity = m_hana_config.verbosity;
+        from_json(m_config, jconfig);
+
+        // we need a mutable version to change during recursive calls to logit().
+        m_verbosity = m_config.verbosity;
         debug("logger with verbosity: {}", m_verbosity);
 
     }
+    WireCell::Configuration Logger::default_configuration() const
+    {
+        return to_json(m_config);
+    }
+
 
 }

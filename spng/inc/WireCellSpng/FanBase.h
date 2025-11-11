@@ -23,13 +23,17 @@ namespace WireCell::SPNG {
 
     /** @brief Base class providing a fanin DFP node.
 
-        The sub class should implement at least fanin_combine().
+        The sub class should implement at least fanin_combine() to apply a fan
+        operation.
 
-        The type in the fan is IFansType and output is IScalarType which defaults to IFansType.
+        The data type of objects in the fan is IFansType and output is
+        IScalarType which defaults to IFansType.
 
     */
     template<typename IFansType, typename IScalarType = IFansType>  
-    struct FaninBase : public HanaConfigurable<FaninBase<IFansType, IScalarType>, FanConfig, Logger, ContextBase>,
+    struct FaninBase : public Logger,
+                       public ContextBase,
+                       public virtual IConfigurable,
                        public virtual IFaninNode<IFansType, IScalarType, 0>
     {
         using fan_type = IFaninNode<IFansType, IScalarType, 0>;
@@ -37,17 +41,32 @@ namespace WireCell::SPNG {
         using output_pointer = typename fan_type::output_pointer;
 
 
-        FaninBase(const std::string& type_name,
-                  const std::string& group_name="spng") {
-            auto& cfg = this->Logger::hana_config();
-            cfg.type_name = type_name;
-            cfg.group_name = group_name;
+        // If you must call this default constructor, best to call Logger::init().
+        FaninBase() = default;
+        FaninBase(const std::string& group_name)
+            : Logger(group_name) {
         }
 
+        FaninBase(const std::string& type_name,
+                  const std::string& group_name)
+            : Logger(type_name, group_name) {
+        }
 
-        void configured() {
+        FanConfig m_config;
+
+        // IConfigurable API.
+        virtual void configure(const WireCell::Configuration& jconfig) {
+            WireCell::configure_bases<FaninBase<IFansType, IScalarType>, Logger, ContextBase>(this, jconfig);
+            HanaJsonCPP::from_json(m_config, jconfig);
+
             this->debug("fanin multiplicity: {}", 
-                        this->m_hana_config.multiplicity);
+                        this->m_config.multiplicity);
+        }
+                
+        virtual WireCell::Configuration default_configuration() const {
+            auto cfg = WireCell::default_configuration_bases<FaninBase<IFansType, IScalarType>, Logger, ContextBase>(this);
+            update(cfg, HanaJsonCPP::to_json(m_config));
+            return cfg;
         }
 
         /// Subclass must implement to set out which starts as nullptr.
@@ -59,7 +78,7 @@ namespace WireCell::SPNG {
         virtual bool operator()(const input_vector& inv, output_pointer& out) {
             TorchSemaphore sem(this->context());
 
-            size_t multiplicity = this->hana_config().multiplicity;
+            size_t multiplicity = m_config.multiplicity;
 
             if (inv.empty()) {
                 this->critical("empty vector input to fanin, something dreadfully wrong");
@@ -83,9 +102,8 @@ namespace WireCell::SPNG {
 
         /// Supply the IFaninNode 
         virtual std::vector<std::string> input_types() {
-            int multiplicity = this->hana_config().multiplicity;
             const std::string tname = std::string(typeid(IFansType).name());
-            std::vector<std::string> ret(multiplicity, tname);
+            std::vector<std::string> ret(m_config.multiplicity, tname);
             return ret;
         }
         virtual std::string signature() { return typeid(fan_type).name(); }
@@ -99,23 +117,41 @@ namespace WireCell::SPNG {
         The type in the fan is IFansType and output is IScalarType which defaults to IFansType.
     */
     template<typename IFansType, typename IScalarType = IFansType>  
-    struct FanoutBase : public HanaConfigurable<FanoutBase<IFansType, IScalarType>, FanConfig, Logger, ContextBase>,
+    struct FanoutBase : public Logger,
+                        public ContextBase,
+                        public virtual IConfigurable,
                         public virtual IFanoutNode<IScalarType, IFansType, 0>
     {
         using fan_type = IFanoutNode<IScalarType, IFansType, 0>;
         using input_pointer = typename fan_type::input_pointer;
         using output_vector = typename fan_type::output_vector;
 
-        FanoutBase(const std::string& type_name,
-                   const std::string& group_name="spng") {
-            auto& cfg = this->Logger::hana_config();
-            cfg.type_name = type_name;
-            cfg.group_name = group_name;
+        // If you must call this default constructor, best to call Logger::init().
+        FanoutBase() = default;
+        FanoutBase(const std::string& group_name)
+            : Logger(group_name) {
         }
 
-        void configured() {
-            this->debug("fanout multiplicity: {}", 
-                        this->m_hana_config.multiplicity);
+        FanoutBase(const std::string& type_name,
+                   const std::string& group_name)
+            : Logger(type_name, group_name) {
+        }
+
+        FanConfig m_config;
+
+        // IConfigurable API.
+        virtual void configure(const WireCell::Configuration& jconfig) {
+            configure_bases<FanoutBase<IFansType, IScalarType>, Logger, ContextBase>(this, jconfig);
+            HanaJsonCPP::from_json(m_config, jconfig);
+
+            this->debug("fanin multiplicity: {}", 
+                        this->m_config.multiplicity);
+        }
+                
+        virtual WireCell::Configuration default_configuration() const {
+            auto cfg = default_configuration_bases<FanoutBase<IFansType, IScalarType>, Logger, ContextBase>(this);
+            update(cfg, HanaJsonCPP::to_json(m_config));
+            return cfg;
         }
 
         /// Subclass must implement.  outv is pre-sized and holds nullptrs.
@@ -127,7 +163,7 @@ namespace WireCell::SPNG {
         virtual bool operator()(const input_pointer& in, output_vector& outv) {
             TorchSemaphore sem(this->context());
 
-            size_t multiplicity = this->hana_config().multiplicity;
+            size_t multiplicity = m_config.multiplicity;
             if (outv.size() > 0 && outv.size() != multiplicity) {
                 raise<ValueError>("fanout got unexpected multiplicity, got:%d want:%d",
                                   outv.size(), multiplicity);
@@ -147,9 +183,8 @@ namespace WireCell::SPNG {
 
         /// Supply IFanoutNode interface.
         virtual std::vector<std::string> output_types() {
-            int multiplicity = this->hana_config().multiplicity;
             const std::string tname = std::string(typeid(IFansType).name());
-            std::vector<std::string> ret(multiplicity, tname);
+            std::vector<std::string> ret(m_config.multiplicity, tname);
             return ret;
         }
         virtual std::string signature() { return typeid(fan_type).name(); }
