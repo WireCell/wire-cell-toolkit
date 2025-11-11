@@ -4,7 +4,6 @@ function(
   device='gpu',
   do_spng=true,
   ts_model_file="/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
-  device='gpu',
   do_sim=false,
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
