@@ -1,9 +1,11 @@
 #include "WireCellSpng/Reduce.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/Torch.h"
+#include "WireCellUtil/String.h"
 
 using WireCell::HanaJsonCPP::from_json;
 using WireCell::HanaJsonCPP::to_json;
+using WireCell::String::has;
 
 namespace WireCell::SPNG {
 
@@ -74,6 +76,7 @@ namespace WireCell::SPNG {
         }
         
         // Functions ignoring 'dim' (Element-wise Reduction or specific stacking)
+
         else if (m_config.operation == "max") {
             m_op = iterative_reduction(
                 [](const torch::Tensor& a, const torch::Tensor& b) { return torch::max(a, b); }
@@ -86,14 +89,14 @@ namespace WireCell::SPNG {
             );
         }
 
-        else if (m_config.operation == "sum") {
+        else if (has({"sum","add"}, m_config.operation)) {
             m_op = [](const std::vector<torch::Tensor>& tensors) {
                 auto s = torch::stack(tensors, 0);
                 return s.sum(0);
             };
         }
 
-        else if (m_config.operation == "mean") {
+        else if (has({"mean","avg"}, m_config.operation)) {
             m_op = [](const std::vector<torch::Tensor>& tensors) {
                 auto s = torch::stack(tensors, 0);
                 s = s.sum(0);
@@ -101,11 +104,13 @@ namespace WireCell::SPNG {
             };
         }
 
-        else if (m_config.operation == "mul") {
+        else if (has({"mul","prod"}, m_config.operation)) {
             m_op = iterative_reduction(
                 [](const torch::Tensor& a, const torch::Tensor& b) { return torch::mul(a, b); }
             );
         }
+
+        // These last are alias for doing cat or stack on specific dimensions.
 
         else if (m_config.operation == "hstack") {
             m_op = [](const std::vector<torch::Tensor>& tensors) {

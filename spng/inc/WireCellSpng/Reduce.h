@@ -34,11 +34,11 @@ namespace WireCell::SPNG {
 
             - max :: Maximum elements across the tensors.
 
-            - mean :: Mean of elements across the tensors.
+            - mean :: Mean of elements across the tensors.  The alias "avg" is accepted.
 
-            - sum :: Summation of elements across the tensors.
+            - sum :: Summation of elements across the tensors.  The alias "add" is accepted.
 
-            - mul :: Multiplication of elements across the tensors.
+            - mul :: Multiplication of elements across the tensors.  The alias "prod" is accepted.
 
         */
 
