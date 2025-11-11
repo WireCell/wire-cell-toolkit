@@ -1494,7 +1494,7 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             double dis_step = 0.2*units::cm;
             double temp_dis = sqrt(pow(temp_start.x() - ps_list.front().x(), 2) + pow(temp_start.y() - ps_list.front().y(), 2) + pow(temp_start.z() - ps_list.front().z(), 2));
             int ntest = std::round(temp_dis/dis_step);
-            for (size_t i = 1; i < ntest; i++) {
+            for (int i = 1; i < ntest; i++) {
                 WireCell::Point test_p(temp_start.x() + (ps_list.front().x() - temp_start.x())/ntest * i,
                                        temp_start.y() + (ps_list.front().y() - temp_start.y())/ntest * i,
                                        temp_start.z() + (ps_list.front().z() - temp_start.z())/ntest * i);
@@ -1531,7 +1531,7 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             double dis_step = 0.2*units::cm;
             double temp_dis = sqrt(pow(temp_end.x() - ps_list.back().x(), 2) + pow(temp_end.y() - ps_list.back().y(), 2) + pow(temp_end.z() - ps_list.back().z(), 2));
             int ntest = std::round(temp_dis/dis_step);
-            for (size_t i = 1; i < ntest; i++) {
+            for (int i = 1; i < ntest; i++) {
                 WireCell::Point test_p(temp_end.x() + (ps_list.back().x() - temp_end.x())/ntest * i,
                                        temp_end.y() + (ps_list.back().y() - temp_end.y())/ntest * i,
                                        temp_end.z() + (ps_list.back().z() - temp_end.z())/ntest * i);
@@ -4323,6 +4323,7 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
       // Extract APA and face information
     int apa = apa_face.first;
     int face = apa_face.second;
+    const int total_pss = static_cast<int>(pss_vec.size());
     
     // Get geometry parameters for this APA/face
     WirePlaneId wpid(kAllLayers, face, apa);
@@ -4575,7 +4576,7 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
         }
         
         // Check last point protection
-        if (i + 1 == pss_vec.size() && angle > m_params.skip_angle_cut_3 && mag2 < m_params.skip_dis_cut) {
+        if (i + 1 == total_pss && angle > m_params.skip_angle_cut_3 && mag2 < m_params.skip_dis_cut) {
             return true;
         }
     }
@@ -5653,7 +5654,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     double close_ind_weight = 0.25;
     double close_col_weight = 0.75;
     
-    for (size_t i = 0; i < n_3D_pos; i++) {
+    const size_t n3d = static_cast<size_t>(n_3D_pos);
+    for (size_t i = 0; i < n3d; i++) {
         if (i >= connected_vec.size()) continue;
         
         bool flag_u = reg_flag_u[i];

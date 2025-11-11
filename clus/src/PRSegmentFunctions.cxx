@@ -163,14 +163,15 @@ namespace WireCell::Clus::PR {
                 WireCell::Vector v10(0,0,0);
                 WireCell::Vector v20(0,0,0);
                 
-                if (i >= (j+1)*2) {
-                    v10 = fits[i].point - fits[i-(j+1)*2].point;
+                const size_t offset = static_cast<size_t>((j + 1) * 2);
+                if (i >= offset) {
+                    v10 = fits[i].point - fits[i-offset].point;
                 } else {
                     v10 = fits[i].point - fits.front().point;
                 }
                 
-                if (i+(j+1)*2 < fits.size()) {
-                    v20 = fits[i+(j+1)*2].point - fits[i].point;
+                if (i + offset < fits.size()) {
+                    v20 = fits[i+offset].point - fits[i].point;
                 } else {
                     v20 = fits.back().point - fits[i].point;
                 }
@@ -741,7 +742,7 @@ namespace WireCell::Clus::PR {
         int n_shower_like = 0;
         WireCell::Vector drift_dir(1, 0, 0);
         
-        for (size_t j = 0; j < ncount; j++) {
+        for (int j = 0; j < ncount; j++) {
             int first_idx = sections[j].first;
             int second_idx = sections[j].second;
             
@@ -1003,12 +1004,13 @@ namespace WireCell::Clus::PR {
         }
         
         // Create reference vectors for different particles
-        std::vector<double> muon_ref(ncount);
-        std::vector<double> const_ref(ncount, MIP_dQdx);  // MIP-like constant
-        std::vector<double> proton_ref(ncount);
-        std::vector<double> electron_ref(ncount);
+        const size_t count = static_cast<size_t>(ncount);
+        std::vector<double> muon_ref(count);
+        std::vector<double> const_ref(count, MIP_dQdx);  // MIP-like constant
+        std::vector<double> proton_ref(count);
+        std::vector<double> electron_ref(count);
         
-        for (size_t i = 0; i != ncount; i++) {
+        for (size_t i = 0; i < count; i++) {
             muon_ref[i] = particle_data->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm) /units::cm;
             proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm)/ units::cm;
             electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm)/ units::cm;
@@ -1499,7 +1501,7 @@ namespace WireCell::Clus::PR {
                 }
                 // std::cout << "Debug: Number of graph vertices: " << num_graph_vertices << std::endl;
                 // now examine to remove ghost points ....
-                for (size_t i=0;i!=num_graph_vertices;i++){
+                for (int i = 0; i < num_graph_vertices; i++){
                     if (map_pindex_segment.find(vertex_to_nearest_terminal.at(i).first) == map_pindex_segment.end()) continue;
                     geo_point_t gp(points[0][i], points[1][i], points[2][i]);
                     auto main_sg = map_pindex_segment[vertex_to_nearest_terminal.at(i).first].first;
@@ -1755,8 +1757,9 @@ namespace WireCell::Clus::PR {
             // Group consecutive segments with large spread in forward direction
             // Each tuple: (start_index, end_index, max_rms_in_range)
             std::vector<std::tuple<int, int, double>> threshold_segs;
+            const int sample_count = static_cast<int>(vec_dQ_dx.size());
             
-            for (size_t i = 0; i < vec_dQ_dx.size(); i++) {
+            for (int i = 0; i < sample_count; i++) {
                 double angle = std::acos(main_dir1.dot(vec_dir.at(i))) * 180.0 / M_PI;
                 if ((angle < 30 || (flag_skip_angle1 && angle < 60)) && 
                     (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4 || vec_dQ_dx.at(i) > 1.6)) {
@@ -2053,8 +2056,9 @@ namespace WireCell::Clus::PR {
         if (flag_shower_topology) {
             // Group consecutive segments with large spread in forward direction
             std::vector<std::tuple<int, int, double>> threshold_segs;
+            const int sample_count = static_cast<int>(vec_dQ_dx.size());
             
-            for (size_t i = 0; i < vec_dQ_dx.size(); i++) {
+            for (int i = 0; i < sample_count; i++) {
                 if (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4) {
                     if (threshold_segs.empty()) {
                         threshold_segs.push_back(std::make_tuple(i, i, std::get<2>(vec_rms_vals.at(i))));
