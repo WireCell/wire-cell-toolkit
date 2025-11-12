@@ -29,6 +29,7 @@ namespace WireCell {
                 int nchunks{1};
                 int nticks{6000};
                 int tick_per_slice{4};
+                bool preprocess_all{false};
             } m_cfg;
             
             Configuration m_metadata;

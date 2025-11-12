@@ -40,6 +40,7 @@ void DNNROIPreProcess::configure(const WireCell::Configuration& cfg)
     m_cfg.nchunks = get(cfg, "nchunks", m_cfg.nchunks);
     m_cfg.nticks = get(cfg, "nticks", m_cfg.nticks);
     m_cfg.tick_per_slice = get(cfg, "tick_per_slice", m_cfg.tick_per_slice);
+    m_cfg.preprocess_all = get(cfg, "preprocess_all", m_cfg.preprocess_all);
 }
 
 //preprocessing
@@ -90,10 +91,24 @@ bool DNNROIPreProcess::operator()(const input_pointer& in, output_pointer& out)
     ten_target = ten_target.mean(-1);
     log->debug("DNNROIPreProcess: Target tensor shape after downsampling: {}", tensor_shape_string(ten_target));
     SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_after_downsample.pt");
-
+    //if all preprocess is true, then preprocess all tensors
+    if(m_cfg.preprocess_all){
+        //downsample mp2
+        ten_mp2 = ten_mp2.view({ten_mp2.size(0), ten_mp2.size(1), m_cfg.nticks/m_cfg.tick_per_slice, m_cfg.tick_per_slice});
+        ten_mp2 = ten_mp2.mean(-1);
+        log->debug("DNNROIPreProcess: mp2 tensor shape after downsampling: {}", tensor_shape_string(ten_mp2));
+        SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_after_downsample.pt");
+        //downsample mp3
+        ten_mp3 = ten_mp3.view({ten_mp3.size(0), ten_mp3.size(1), m_cfg.nticks/m_cfg.tick_per_slice, m_cfg.tick_per_slice});
+        ten_mp3 = ten_mp3.mean(-1);
+        log->debug("DNNROIPreProcess: mp3 tensor shape after downsampling: {}", tensor_shape_string(ten_mp3));
+        SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_after_downsample.pt");
+    }
     // Apply scaling and offset
     
     ten_target = ten_target * m_cfg.input_scale + m_cfg.input_offset;
+    ten_mp2    = ten_mp2    * m_cfg.input_scale + m_cfg.input_offset;
+    ten_mp3    = ten_mp3    * m_cfg.input_scale + m_cfg.input_offset;
 
     // Stack channels: [B, 3, C, T]
     torch::Tensor stacked = torch::stack({ten_target, ten_mp2, ten_mp3}, /*dim=*/1);

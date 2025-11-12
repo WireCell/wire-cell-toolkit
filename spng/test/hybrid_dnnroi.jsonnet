@@ -6,7 +6,7 @@
 function(
     input_file='tensor_frames.npz',
     output_path='spng%s.tar',     // MUST give %s for gpu and NOT for cpu.
-    device='gpu',
+    device='cpu',
     ts_model_file='/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts',
     plane='u',
 ){
@@ -84,10 +84,39 @@ function(
         input_offset: 0.0,
         output_scale: 1.0,
         output_offset: 0.0,
+        all_preprocess: true,
     },
 
     local sp = sp_maker(params, tools, sp_override),
     local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes],
+
+    //need to have frame to torch conversion node
+    local frame_to_torch = 
+        g.pnode({
+            type: 'FrameToTorch',
+            data: {},
+        }, nin=1, nout=1),
+
+    local intags = [
+        'loose_lf%d' % tools.anodes[0].data.ident,
+        'mp2_roi%d' % tools.anodes[0].data.ident,
+        'mp3_roi%d' % tools.anodes[0].data.ident
+    ],
+
+    local frame_to_tensorset = g.pnode({
+        type: 'FrameToTorchSet',
+        data: {
+            intags: intags,
+        },
+    }, nin=1, nout=1),
+
+    local torch_packer = g.pnode({
+        type: "SPNGTorchPacker",
+        name: "torch_tensor_packer_%s" % plane,
+        data: {
+            'multiplicity':1,
+        },
+    }, nin=1, nout=1),
 
     //define the TorchService node helper
     local SPNGTorchService={
@@ -105,6 +134,9 @@ function(
     local dnnroi = import 'spng_helpers/dnn-roi.jsonnet',
     local toolkit_pipe = g.pipeline([
         sp_pipes[0],
+        //frame_to_torch,
+        frame_to_tensorset,
+        //torch_packer,
         dnnroi(SPNGTorchService, plane, prefix="dnnroi", config=config)
     ]),
 
