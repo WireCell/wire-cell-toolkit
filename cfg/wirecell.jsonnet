@@ -301,6 +301,8 @@
     Wlayer:1<<2,
     WirePlaneId(layer, face=0, apa=0) :: (layer&7) | (face << 3) | (apa << 4),
 
+    wpid_index_to_layer(layer):: 1<<layer,
+
     // Return INDEX of all layers that are identified in the layer bitmap.
     wpid_layer_to_indices(layer) ::
         [bit for bit in [0,1,2] if (layer & (1<<bit)) != 0],
@@ -369,6 +371,13 @@
             std.objectValues(l)
         else
             l,
+
+    // Flatten a list of lists of items to a list of items.
+    flatten(lol):: [item for sublist in lol for item in sublist],
+
+    // Flatten a list of lists of .... of lists of items to a list of items.
+    deep_flatten(lolol):: std.flatMap(function(x)
+            if std.type(x) == 'array' then $.deep_flatten(x) else [x], lolol),
 
     // Round a floating point to nearest integer.  It's a bit weird to
     // go through a format/parse.  Maybe there's a better way?
