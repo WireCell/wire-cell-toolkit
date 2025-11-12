@@ -10,16 +10,33 @@ local known_detectors = import "detectors.jsonnet";
     /// Many components have time binning using specific variable names.  This converts
     binning_to_time(b):: { nticks: b.nsteps, tick: b.step, start: b.start },
 
+    /// Note, do NOT change this even if you target some other value.
+    default_adc_period: 500*wc.ns,
 
     /// Describe an ADC
-    adc(resolution=14, gain=1.0, baselines=[1*wc.volt,1*wc.volt,1*wc.volt], fullscale=[0*wc.volt,2*wc.volt]):: {
-        resolution: resolution, // how many bits in the ADC
-        gain: gain,           // a relative, unitless gain
-        baselines: baselines, // per-plane baseline volutabes
-        fullscale: fullscale, // ADC fullscale voltage range
+    adc(tick=$.default_adc_period, // sampling period
+        resolution=14,          // number of bits 
+        gain=1.0,               // unitless pregain VIN->VADC
+        /// voltage baseline biases
+        baselines=[1*wc.volt,1*wc.volt,1*wc.volt],
+        /// Full scale of VADC
+        fullscale=[0*wc.volt,2*wc.volt])::
+        {
+            tick: tick,
+            resolution: resolution, // how many bits in the ADC
+            gain: gain,           // a relative, unitless gain
+            baselines: baselines, // per-plane baseline volutabes
+            fullscale: fullscale, // ADC fullscale voltage range
 
-        max_count: std.pow(2,self.resolution),
-    },
+            max_count: 1 << self.resolution,
+
+            /// How much voltage is in one ADC count (ignoring gain)
+            vadc_per_count: (self.fullscale[1] - self.fullscale[0]) / (self.max_count),
+            /// How much input / "line level" voltage per ADC count.
+            /// This is what should be multiplied to amplifier output voltage.
+            vin_per_count: self.vadc_per_count/self.gain,
+
+        },
 
     /// Describe the longitudinal drift dimension of one face by giving absolute X
     /// locations of three planes.
@@ -80,7 +97,7 @@ local known_detectors = import "detectors.jsonnet";
     },
     
     /// Get a wires file registered for the named detector
-    wires_from_detector(detname):: $.wires_from_file(known_detectors[detname].wires),
+    wires_from_name(detname):: $.wires_from_file(known_detectors[detname].wires),
     
     /// The field response object
     fields_from_file(filename):: {
@@ -92,9 +109,9 @@ local known_detectors = import "detectors.jsonnet";
     /// Get a field response registered by detector name.  In general, a list of
     /// fields can be registered and may be referenced by index.  The convention is
     /// not strong but usually index=0 is "nominal".
-    fields_from_detector(detname, index=0):: $.fields_from_file(known_detectors[detname].fields[index]),
+    fields_from_name(detname, index=0):: $.fields_from_file(known_detectors[detname].fields[index]),
 
-    default_er_binning: $.binning(100,500*wc.ns),
+    default_er_binning: $.binning(100, $.default_adc_period),
 
     /// Define a cold electronics response
     ///
@@ -141,7 +158,7 @@ local known_detectors = import "detectors.jsonnet";
     /// @param faces An array of faces.  This MUST have a null place holder for insensitive faces, order matters.
     anode(ident, wires_object, faces):: {
         type : "AnodePlane",
-        name : std.toString(ident),
+        name : "a"+std.toString(ident),
         data : {
             // This IDENT must match a set of wires
             ident : ident,
@@ -152,57 +169,89 @@ local known_detectors = import "detectors.jsonnet";
         uses: [wires_object],
     },
 
+
+    /// Define a filter configuration.  Kind can be "lowpass" (aka hf) or
+    /// "highpass" (aka lf).  The kind maps to an analytical function of the
+    /// other parameters.
+    filter_config(scale,               // 
+                  power=2.0,           // exponential power
+                  kind="lowpass",
+                  period=$.default_adc_period, // sampling period
+                  // if true, zero-frequency is zeroed
+                  ignore_baseline=true)::
+        {
+            scale: scale,
+            power: power,
+            kind: kind,
+            period: period,
+            ignore_baseline: ignore_baseline
+        },
+
+    /// Various filters in the time dimension are defined with semantic labels.
+    /// These each should be defined with filter_config().  The filter set are 
+    /// specified on a per-view basis.
+    time_filters(gauss, wiener, dnnroi):: {
+        /// The filter for final output signals from SPNG.  This should preserve
+        /// signal.
+        gauss: gauss,
+        // The filter for input to threshold-based intial ROI construction.  It
+        // should maximize signal/noise.
+        wiener: wiener,         
+        // The filter used to provide the non-MP2/MP3 image input to DNNROI. 
+        dnnroi: dnnroi,
+    },
     
-    /// An anode face is composed of 3 layers wire planes labeled "u", "v" and
-    /// "w".  When an anode has two faces, some number of the 3 layers on one
-    /// face may be electrically connected to wires on the other face.  Eg, DUNE
-    /// VD have 2 faces side-by-side with 1 face edge of U and V connected
-    /// ("jumpered" connect=1) while DUNE HD has 2 opposing faces and both face
-    /// edges connected ("wrapped" connect=2) while both have independent
-    /// collection faces (connect=0).  The view_layer object defines these
-    /// associations.
-    ///
-    /// @param view_index: 0 for U, 1 for V and 2 for W layers.
-    /// @param connect: 0 for independent faces, 1 for one-side jumper, 2 for two-side wrapped.
-    /// @param face_idents: the order of face IDENTS to make when connect>0. 
-    ///
-    /// Given face_idents=[f1,f2] then the channels may be arranged in
-    /// wire-attachment-number (WAN) of each face in order [f1,f2] such that the
-    /// two channels at the boundary between the two blocks of channels "f1" and
-    /// "f2" have neighboring wires.  This is most important for connect=1.  For
-    /// connect=2 both [f1,f2] and [f2,f1] meet the condition as the wires array
-    /// is cyclic.  For connect=2 case, it merely sets an order convention.
-    ///
-    /// The face ident numbers are as given in the wires file.  
-    view_layer(view_index, connect, face_idents=[0,1]) :: {
-        view_index: view_index, connect: connect, face_idents: face_idents
+    /// There is just one type of channel filter  per view which is used in decon.
+    channel_filters(decon):: {
+        decon: decon
     },
 
-    /// This groups configuration related to an anode and its drift volume(s).
-    ///
-    /// This is not directly mapped to any one WCT component but holds context
-    /// used by many.
-    ///
-    /// @param anode An anode config object.
-    /// @param adc An adc() object.
-    /// @param view_layers An array of view_layers objects, one for u, v and w views.
-    /// @param fr A field response config object
-    /// @param er An electronics response config object
-    /// @param rc An array of zero or more long-time response objects.
-    tpc(anode, adc, view_layers, fr, er, rc=[], name=""):: {
-        name: name,
-        anode: anode, adc:adc,
-        view_layers: view_layers,
-        fr:fr, er:er, rc:rc,
-        // fixme: add readout binning, various time offsets.
+    /// Collect the time and channel filters for one view.
+    view_filters(time_filters, channel_filters):: {
+        time: time_filters,
+        channel: channel_filters
     },
+
+    /// Collect all the per-view filters in view index order
+    tpc_filters(u, v, w):: [ u, v, w ],
+
+    /// Define a TPC.
+    ///
+    /// Ultimately, all arguments must be provided but one may define a "nominal
+    /// TPC" and the override it with custom TPCs.
+    ///
+    tpc(anode=null, adc=null, fr=null, er=null, rc=[], connections=null, filters=null, faces=null)::{
+        anode: anode,
+        adc:adc,
+        fr:fr, er:er, rc:rc,
+        connections: connections,
+        filters: filters,
+        faces: faces,
+
+        ident: anode.data.ident,
+        name: "tpc" + std.toString(anode.data.ident),
+
+            
+    },
+
+    
+
+    /// Make many customizations of a base object.  
+    override(base, customs):: [base + std.prune(custom) for custom in customs],
 
     /// Construct a detector as a named collection of tpcs.
     ///
     /// This is what each detectors/<name>.jsonnet should export.
-    detector(tpcs, name=""):: {
-        name: name,
-        tpcs: tpcs,
+    detector(tpcs)::            // array of tpc() objects
+        {
+            tpcs: tpcs,
+            tpc: {[t.name]:t for t in tpcs},
+        },
+
+    /// Some components accept various control parameters.  This bundles them.
+    control(device="cpu", verbosity=0):: {
+        verbosity: verbosity, // 0:silent 1:one-per-exec 2:many-per-exec
+        device: device,   // "cpu", "cuda", "gpu0", "gpu1", ...
     },
 
     test: {
