@@ -99,10 +99,15 @@ local wc = import "wirecell.jsonnet";
         type: "Pnode",
         name: $.prune_array([name, inode.name, ""])[0],
         edges: [],
-        uses: uses + [inode],
+        // Lift the port multiplicity into data so we can better draw the graph.
+        // This relies on C++ components being liberal with extra config data!
+        uses: uses + [inode + { _pnode: {nin:nin, nout:nout} }],
+        // uses: uses + [inode],
         iports: [$.port(inode, n) for n in std.range(0,nin)][:nin],
         oports: [$.port(inode, n) for n in std.range(0,nout)][:nout],
+
     },
+
 
     // Produce an abstract pnode from a sugraph of other pnodes.  The
     // resulting "uses" and "edges" are then resolved, aggregated,
@@ -136,6 +141,24 @@ local wc = import "wirecell.jsonnet";
         oports: if std.length(elements[nele-1].oports) == 0 then [] else elements[nele-1].oports,
     },
 
+    // Produce an abstract pnode of a group of nodes that are at the same rank.
+    crossline(elements, name=""):: $.intern(innodes=elements, outnodes=elements, name=name),
+
+    // Connect N outputs upstream to N inputs of downstream.  Custom port
+    // indices can be given for upstream and/or downstream node, otherwise all
+    // oports and/or iports are used.  Number of ports must match.
+    shuntline(upstream, downstream, uports=[], dports=[], name="")::
+        local up = if std.length(uports) == 0
+                   then wc.iota(std.length(upstream.oports))
+                   else uports;
+        local dp = if std.length(dports) == 0
+                   then wc.iota(std.length(downstream.iports))
+                   else dports;
+        $.intern(innodes=[upstream], outnodes=[downstream],
+                 edges=[
+                     $.edge(upstream, downstream, up[ind], dp[ind])
+                     for ind in wc.iota(std.length(up))
+                 ], name=name),
 
     // Collect a number of closed component graphs into a single graph
     // represented by one pnode.  Each component must be closed in the
@@ -385,7 +408,6 @@ local wc = import "wirecell.jsonnet";
             'Pgrapher': ["WireCellPgraph"],
         };
 
-        local uses = $.uses(graph);
         local all_plugins = std.set(core_plugins + app_plugins[app] + plugins);
         local appcfg = {
             type: app,

@@ -339,6 +339,18 @@
     /// count.
     iota(end) :: std.range(0, end-1),
 
+    /// Return sequence of objects {index:i, value:sequence[i]} over sequence.
+    enumerate(sequence) :: [
+        { index: i, value: sequence[i] }
+        for i in std.range(0, std.length(sequence) - 1)
+    ],
+
+    /// Return sequence of pairs [i,sequence[i]] over sequence.
+    enumerate_pair(sequence) :: [
+        [i, sequence[i]]
+        for i in std.range(0, std.length(sequence) - 1)
+    ],
+
     /// Return canonical "type:name" or just "type" if no name from a
     /// configuration object.  Use this instead of bare names to
     /// better guard against typos and changes in dependent
