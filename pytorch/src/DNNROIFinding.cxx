@@ -251,8 +251,16 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         else { 
             log->debug("call={} tag={} ntraces={}", m_save_count, tag, traces.size());
         }
+        //auto temp_tensor = torch::from_blob(arr.data(), {static_cast<int64_t>(arr.cols()), static_cast<int64_t>(arr.rows())});
+       // Pytorch::write_torch_to_npy(temp_tensor, fmt::format("DNNROIFinding_input_tag_{}_plane_{}.pt", tag, m_cfg.plane));
+        // apply
+        //print the offset and input scale
+        //log->debug("DNNROIFinding: input offset: {}, input scale: {}", m_cfg.input_offset, m_cfg.input_scale);
         arr = arr * m_cfg.input_scale + m_cfg.input_offset;
         ch_eigen.push_back(Array::downsample(arr, m_cfg.tick_per_slice, 1));
+        //write tensors after downsample
+        //temp_tensor = torch::from_blob(ch_eigen.back().data(), {static_cast<int64_t>(ch_eigen.back().cols()), static_cast<int64_t>(ch_eigen.back().rows())});
+        //Pytorch::write_torch_to_npy(temp_tensor, fmt::format("DNNROIFinding_input_tag_{}_downsampled_plane_{}.pt", tag, m_cfg.plane));
     }
 
     // eigen to tensor
@@ -261,16 +269,17 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         ch.push_back(torch::from_blob(ch_eigen[i].data(), {ch_eigen[i].cols(), ch_eigen[i].rows()}));
     }
     //plot each input data
-    for (unsigned int i = 0; i < ch.size(); ++i) {
-        Pytorch::write_torch_to_npy(ch[i], fmt::format("input_{}.pt", i));
-    }
+    //for (unsigned int i = 0; i < ch.size(); ++i) {
+    //    Pytorch::write_torch_to_npy(ch[i], fmt::format("input_{}_plane_{}.pt", i, m_cfg.plane));
+    //}
     // ret: {ntags, nticks, nchannels}
     auto img = torch::stack(ch, 0);
     //shape of img after stack
     log->debug("DNNROIFinding: input tensor shape after stack: {} ", Pytorch::tensor_shape_string(img));
     // ret: {1, ntags, nchannels, nticks}
     auto batch = torch::stack({torch::transpose(img, 1, 2)}, 0);
-
+    //shape of batch after stack
+    //log->debug("DNNROIFinding: input tensor shape after transpose and batch dim: {}", Pytorch::tensor_shape_string(batch));
     auto chunks = batch.chunk(m_cfg.nchunks, 2);
     std::vector<torch::Tensor> outputs;
 
@@ -280,12 +289,12 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         // G.P. If chunking is enabled, then the array is not contiguous in memory.
         // To work around this, we need to clone the array.
         std::vector<torch::IValue> itens {(m_cfg.nchunks > 1) ? chunk.clone() : chunk};
-        Pytorch::write_torch_to_npy(itens[0].toTensor(), fmt::format("DNNROIFinding_chunk_preinfer_part{}.pt",outputs.size()));
+        //Pytorch::write_torch_to_npy(itens[0].toTensor(), fmt::format("DNNROIFinding_chunk_preinfer_part{}_plane_{}.pt", outputs.size(), m_cfg.plane));
         auto iitens = Pytorch::to_itensor(itens);
         auto oitens = m_forward->forward(iitens);
         torch::Tensor ochunk = Pytorch::from_itensor({oitens}).front().toTensor().cpu();
         //save each ochunk
-        Pytorch::write_torch_to_npy(ochunk, fmt::format("DNNROIFinding_chunk_postinfer_part{}.pt",outputs.size()));
+        //Pytorch::write_torch_to_npy(ochunk, fmt::format("DNNROIFinding_chunk_postinfer_part{}_plane_{}.pt", outputs.size(), m_cfg.plane));
         //dump the tensor ochunk
         //dump_tensor_to_json(ochunk, "DNNROIFinding_ochunk_call"+std::to_string(m_save_count)+".json");
         // NOTE: ochunk DOES NOT copy data from oitens!
@@ -293,7 +302,7 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         outputs.push_back(ochunk.clone());
     }
     torch::Tensor output = torch::cat(outputs, 2);
-    Pytorch::write_torch_to_npy(output, "DNNROIFinding_output_concat.pt");
+   // Pytorch::write_torch_to_npy(output, fmt::format("DNNROIFinding_output_concat_plane_{}.pt", m_cfg.plane));
     //dump the tensor output
     //dump_tensor_to_json(output, "DNNROIFinding_output_call"+std::to_string(m_save_count)+".json");
     log->debug(tk(fmt::format("call={} inference done", m_save_count)));
@@ -302,7 +311,9 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     Eigen::Map<Eigen::ArrayXXf> out_e(output[0][0].data_ptr<float>(), output.size(3), output.size(2));
 
     auto mask_e = Array::upsample(out_e, m_cfg.tick_per_slice, 0);
-
+    //save the upsampled mask
+    //torch::Tensor t_ten = torch::from_blob(mask_e.data(), {static_cast<int64_t>(mask_e.cols()), static_cast<int64_t>(mask_e.rows())});
+    //Pytorch::write_torch_to_npy(t_ten, fmt::format("DNNROIFinding_upsampled_mask_plane_{}.pt", m_cfg.plane));
     log->debug(tk(fmt::format("call={} tensor2eigen", m_save_count)));
 
     // decon charge frame to eigen
@@ -318,7 +329,9 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
             log->debug("call={} tag={} ntraces={}", m_save_count, m_cfg.decon_charge_tag, traces.size());
         }
     }
-
+    //save the upsampled charges
+    //auto temp_tensor = torch::from_blob(decon_charge_eigen.data(), {static_cast<int64_t>(decon_charge_eigen.cols()), static_cast<int64_t>(decon_charge_eigen.rows())});
+    //Pytorch::write_torch_to_npy(temp_tensor, fmt::format("DNNROIFinding_decon_charge_plane_{}.pt", m_cfg.plane));
     // apply ROI
     auto sp_charge_T = Array::mask(decon_charge_eigen.transpose(), mask_e, m_cfg.mask_thresh /*0.7*/);
     sp_charge_T = Array::baseline_subtraction(sp_charge_T) * m_cfg.output_scale + m_cfg.output_offset;
@@ -339,7 +352,9 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     }
     log->debug(tk(fmt::format("call={} h5", m_save_count)));
 #endif
-
+    //after all processing, save
+    //temp_tensor = torch::from_blob(sp_charge.data(), {static_cast<int64_t>(sp_charge.cols()), static_cast<int64_t>(sp_charge.rows())});
+    //Pytorch::write_torch_to_npy(temp_tensor, fmt::format("DNNROIFinding_final_output_plane_{}.pt", m_cfg.plane));
     // eigen to frame
     auto traces = eigen_to_traces(sp_charge, m_cfg.save_negative_charge);
     Aux::SimpleFrame* sframe = new Aux::SimpleFrame(
