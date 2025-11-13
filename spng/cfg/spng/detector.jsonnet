@@ -215,29 +215,91 @@ local known_detectors = import "detectors.jsonnet";
     /// Collect all the per-view filters in view index order
     tpc_filters(u, v, w):: [ u, v, w ],
 
+    /// See Threshold.h for what these mean.
+    crossview_threshold(nominal=0.0, rms_nsigma=0.0, rms_axis=-1, rms_max_value=0, binary=true):: {
+        nominal: nominal,
+        rms_nsigma: rms_nsigma,
+        rms_axis: rms_axis,
+        rms_max_value: rms_max_value,
+        binary: binary,
+    },
+    /// Per-view list
+    crossview_thresholds(cvt_u, cvt_v, cvt_w):: [cvt_u, cvt_v, cvt_w],
+
+    /// A view group collects the wire planes in a common layer / view index
+    /// in one face or two faces that are connected in an unspecified anode.
+    ///
+    /// The term "view" is introduced here to distinguish from (wire) "plane" (a
+    /// physical unit) or "layer" (a logical/relative location).  A "view" is
+    /// the combination of both.  When a view has two faces, the face ident
+    /// array gives an ordering.
+    ///
+    /// @param connection A number describing face connectivity:
+    ///        0: one face not connected to the other side
+    ///        1: two faces connected on one edge (jumper)
+    ///        2: two faces connected on both edges (wrapped)
+    /// @param view_index The view/plane index. 0:U, 1:V 2:W
+    /// @param face_idents An array of one or two face ID numbers.
+    view_group(connection, view_index, face_idents):: {
+        name: 'group_v' +  std.toString(view_index) +
+              'f' + std.join('f',std.map(std.toString, face_idents)) +
+              'c' + std.toString(connection),
+        view_index: view_index,
+        view_layer: wc.wpid_index_to_layer(view_index),
+        face_idents: face_idents,
+        connection: connection,
+
+        // Get the wpids for this view group in a given anode.
+        wpids(anode_ident):: [wc.WirePlaneId(self.view_layer, fid, anode_ident)
+                              for fid in self.face_idents],
+    },
+
+    /// Helper to resolve case of 1 vs 2 face groups
+    view_groups_one_layer(connection, view_index, face_idents)::
+        if connection > 0
+        then [$.view_group(connection, view_index, face_idents)]
+        else [$.view_group(connection, view_index, [fid]) for fid in face_idents],
+
+    /// Partition the set of faces and layers by connections and face_idents
+    view_groups(connections,     // per-plane connection number: 0:none, 1:jumper, 2:wrapped
+                face_idents)::   // which face(s), and provide an ordering
+        wc.flatten([ $.view_groups_one_layer(connections[view_index], view_index, face_idents)
+          for view_index in [0,1,2]]),
+
     /// Define a TPC.
     ///
     /// Ultimately, all arguments must be provided but one may define a "nominal
     /// TPC" and the override it with custom TPCs.
     ///
-    tpc(anode=null, adc=null, fr=null, er=null, rc=[], connections=null, filters=null, faces=null)::{
-        anode: anode,
-        adc:adc,
-        fr:fr, er:er, rc:rc,
-        connections: connections,
-        filters: filters,
-        faces: faces,
+    tpc(anode=null, adc=null, fr=null, er=null, rc=[],
+        connections=null, filters=null, faces=null,
+        crossview_thresholds=null)::
+        {
+            // the AnodePlane config object
+            anode: anode,
+            // ADC related parameters
+            adc:adc,
+            // response object configs, rc may be an array of
+            fr:fr, er:er, rc:rc,
+            // how same-layer views on connected across faces
+            connections: connections,
+            // The decon filters config
+            filters: filters,
+            // Ordered enumeration of face idents
+            faces: faces,
 
-        ident: anode.data.ident,
-        name: "tpc" + std.toString(anode.data.ident),
+            // Configuration for Threshold for input to CrossViews
+            crossview_thresholds: crossview_thresholds,
 
-            
+            // derived info below
+
+            // Note, these can not be accessed while null!
+            ident: anode.data.ident,
+            name: "tpc" + std.toString(anode.data.ident),
+
+            view_groups: $.view_groups(connections, faces),
     },
 
-    
-
-    /// Make many customizations of a base object.  
-    override(base, customs):: [base + std.prune(custom) for custom in customs],
 
     /// Construct a detector as a named collection of tpcs.
     ///

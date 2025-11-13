@@ -2,6 +2,13 @@
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/Torch.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGReduce,
+                 WireCell::SPNG::Reduce,
+                 WireCell::SPNG::Reduce::fan_type,
+                 WireCell::IConfigurable,
+                 WireCell::INamed);
 
 using WireCell::HanaJsonCPP::from_json;
 using WireCell::HanaJsonCPP::to_json;

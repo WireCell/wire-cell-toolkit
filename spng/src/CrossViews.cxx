@@ -3,6 +3,12 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellIface/IAnodePlane.h"
 
+WIRECELL_FACTORY(SPNGCrossViews,
+                 WireCell::SPNG::CrossViews,
+                 WireCell::SPNG::CrossViews::fan_type,
+                 WireCell::IConfigurable,
+                 WireCell::INamed);
+
 using namespace torch::indexing;
 
 using WireCell::HanaJsonCPP::to_json;

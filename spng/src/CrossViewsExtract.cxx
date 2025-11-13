@@ -1,8 +1,17 @@
 #include "WireCellSpng/CrossViewsExtract.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGCrossViewsExtract,
+                 WireCell::SPNG::CrossViewsExtract,
+                 WireCell::SPNG::CrossViewsExtract::fan_type,
+                 WireCell::IConfigurable,
+                 WireCell::INamed);
 
 using WireCell::HanaJsonCPP::from_json;
+
 using WireCell::HanaJsonCPP::to_json;
+
 
 namespace WireCell::SPNG {
 

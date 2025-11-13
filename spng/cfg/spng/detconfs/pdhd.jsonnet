@@ -55,10 +55,20 @@ local filters = [
                      channel_filters=api.channel_filters(channel_filters[i]))
     for i in [0,1,2]];
 
+// use defaults for now
+local cvt = api.crossview_threshold();
+local cvts = api.crossview_thresholds(cvt, cvt, cvt);
+
+
+local crossview_thresholds = [
+
+    ];
+
 // All TPCs are identical except for their anodes
-local tpcs = [ api.tpc(anode) for anode in anodes ];
+local tpcs = [ api.tpc(anode, adc=adc, fr=fr, er=er,
+                       connections=[2,2,0], filters=filters, faces=[0,1],
+                       crossview_thresholds=cvts)
+               for anode in anodes ];
 
-local nominal_tpc = api.tpc(adc=adc, fr=fr, er=er, connections=[2,2,0], filters=filters, faces=[0,1]);
-
-api.detector(api.override(nominal_tpc, tpcs))
+api.detector(tpcs)
 

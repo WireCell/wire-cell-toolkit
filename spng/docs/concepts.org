@@ -1,0 +1,70 @@
+* Detector parts
+
+** Anode
+
+A WCT *anode* names the contiguous set of sensitive electrodes (*wires*) and their
+readout electronics *channels*.  In DUNE HD, an *anode* is associated with each APA.
+In DUNE VD, one *anode* is associated with each CRU (not CRM not CRP).  In
+MicroBooNE, there is only one *anode*.
+
+** Wire
+
+WCT says *wire* where almost always it means "a single, straight segment of
+sensitive electrode".  The *wire* may be cylindrical (eg, an actual wire) or flat
+long rectangle (aka "strip").  A wire has a *segment* number which counts how many
+other wires are between it and the input to the electronics *channel*.  All
+MicroBooNE wires have *segment* number 0.  Likewise, all collection wires in DUNE
+APA and CRU designs.  APA induction wires may have *segment* numbers 0, 1, or 2
+and CRP 0 or 1.
+
+** Face
+
+An *anode* may have one or two *faces*.  Initially a *face* defined one side of the
+two sided APA with each face facing apposing directions.  But *face* has since
+been generalized to refer to each cross sectional region in the plane transverse
+to the drift that is formed by an intersection of all *wire planes* sensitive to a
+drift volume.  Thus, a CRU has two *faces* which are side-by-side and facing the
+same direction.  The two *faces* of the CRU are formed because an induction
+channel may have two *wires* (strips) that together cover two sets of collection
+*wires*.  MicroBooNE has only one *face* as all its *wire planes* contiguously cover
+the same sensitive area.
+
+** Wire Plane
+
+A *wire plane* is a physical array of mutually parallel *wires* on one *face*.  It is
+identified by an index in the context of one *face* or by letters: U=0, V=1, W=2.
+
+The *wires* in a *wire plane* are ordered in "increasing pitch".  A convention
+defines that pitch increases generally in the positive Z axis of global
+coordinates, except for the special case of horizontal wires which have pitch
+increasing in positive Y.  A *wire* is identified in a *wire plane* by its *index* in
+this ordering.  This index is, in general, different from the wire *ident* number.
+
+** Channel Plane
+
+One *channel plane* is defined as the set of electronics channels spanning the
+segment-zero wires in one *wire plane*.  The *channels* in one *channel plane* are
+ordered according to its segment-zero wires.  The *channel plane* is identified by
+the letter or index of its segment-zero *wire plane*.
+
+** Layer
+
+A (wire) *layer* is a logical location for a *wire plane*.  A *layer* is identified by
+an enumerated bit pattern: =1<<plane_index=.  It may also be identified by the
+letter of its wire plane.  The paring of a *layer* with a *face* gives a *plane*.
+
+** View
+
+A view is the combination of one or two *wire planes* with in a common *layer*
+across one or two *faces* and a *connection* number taking value:
+
+- 0 :: one *wire plane* in one *face* (APA/CRU collection, all MicroBooNE)
+- 1 :: two *wire planes* connected alone one edge eg, via jumpers (CRU induction)
+- 2 :: two *wire planes* connected alone both edges eg, wrapped (APA induction)
+
+
+
+
+* TODO
+
+- [ ] explain ident and other numbering, especially include face "which" number.
