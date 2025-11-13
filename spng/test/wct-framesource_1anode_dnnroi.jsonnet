@@ -1,8 +1,8 @@
 function(
   input_file='tensor_frames.npz',
   output_path='spng%s.tar',     // MUST give %s for gpu and NOT for cpu.
-  device='gpu',
-  do_spng=true,
+  device='cpu',
+  do_spng=false,
   ts_model_file="/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
   do_sim=false,
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet

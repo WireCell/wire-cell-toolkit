@@ -87,7 +87,8 @@ bool DNNROIProcess::operator()(const input_pointer& in, output_pointer& out)
     torch::Tensor ten_target  = in_tensors->at(0)->tensor().clone(); // target plane
     //now inference
     auto out_tensor = m_forward->forward(ten_target);
-
+    //write out_tensor to file for debugging
+    //SPNG::write_torch_to_npy(out_tensor, "DNNROIProcess_post_forward_tensor.pt");
     //now prep for post processing
     auto out_ptr = std::make_shared<SimpleTorchTensor>(out_tensor, in_tensors->at(0)->metadata());
     auto out_set_vec = std::make_shared<ITorchTensor::vector>();

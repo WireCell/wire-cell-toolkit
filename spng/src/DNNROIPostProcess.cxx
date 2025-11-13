@@ -88,7 +88,7 @@ bool DNNROIPostProcess::operator()(const input_pointer &in, output_pointer& out)
         //shape of output
         log->debug("Postprocessed output before upsampling shape: {}", tensor_shape_string(output));
 
-        output = torch::transpose(output,2,3); //transpose back to [B,C,T,W]
+        //output = torch::transpose(output,2,3); //transpose back to [B,C,T,W]
         log->debug("Postprocessed output after transpose shape: {}", tensor_shape_string(output));
         //remove the batch dimension if exists
         if (output.dim() == 4 && output.size(0) == 1) {
@@ -104,9 +104,9 @@ bool DNNROIPostProcess::operator()(const input_pointer &in, output_pointer& out)
         //now the upsampling
         //*******NOTE: How you upsample depends upon how you downsample...be consistent*****
         //This assumes you used simple mean downsampling (x.mean(-1))
-        //before upsampling shape
-        SPNG::write_torch_to_npy(output, "DNNROIPostProcess_output_before_upsample.pt");
         output = output.repeat_interleave(m_cfg.tick_per_slice, /*dim=*/2); //upsample along tick dimension
+        //write the output after upsample
+        //SPNG::write_torch_to_npy(output, "DNNROIPostProcess_output_after_upsample.pt");
         shared_vec->push_back(std::make_shared<SimpleTorchTensor>(output, in->tensors()->at(0)->metadata()));
         log->debug("Postprocessed output shape: {}", tensor_shape_string(output));
     }

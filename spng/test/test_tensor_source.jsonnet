@@ -6,7 +6,7 @@ function() {
         type: 'TensorFileSource',
         name: 'ttfsource',
         data: {
-            inname: 'testout2.tar',
+            inname: 'testout2_mp_finding_u.tar',
         },
     }, nin=0, nout=1),
     local frame_sink = g.pnode({
@@ -17,6 +17,7 @@ function() {
             prefix: ''
         },
     }, nin=1, nout=0),
+    
 local sig_proc = g.pnode({
         type: 'SPNGSigProc',
         name: 'spngsigproc'

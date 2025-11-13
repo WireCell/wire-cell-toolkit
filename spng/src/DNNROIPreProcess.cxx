@@ -58,12 +58,31 @@ bool DNNROIPreProcess::operator()(const input_pointer& in, output_pointer& out)
         log->error("DNNROIPreProcess: Expecting 3 input tensors, got {}", tensors ? tensors->size() : 0);
         throw std::runtime_error("DNNROIPreProcess: Invalid number of input tensors");
     }
+    //TODO: get the tensors based on tags...
+    torch::Tensor ten_target, ten_mp2, ten_mp3;
+    //assign tensors based on metadata tag
+    for (const auto& tensor_ptr : *tensors) {
+        auto tag = tensor_ptr->metadata().get("tag", "");
+        if (tag == "target") {
+            ten_target = tensor_ptr->tensor().clone();
+        } else if (tag == "mp2") {
+            ten_mp2 = tensor_ptr->tensor().clone();
+        } else if (tag == "mp3") {
+            ten_mp3 = tensor_ptr->tensor().clone();
+        } else {
+            log->warn("DNNROIPreProcess: Unknown tensor tag '{}'", tag);
+            ten_target = tensors->at(2)->tensor().clone(); // target plane
+            ten_mp2    = tensors->at(1)->tensor().clone(); // mp2 plane
+            ten_mp3    = tensors->at(0)->tensor().clone(); // mp3 plane
+            //break from for loop
+            break;
+        }
+    }
+    //ten_target = tensors->at(2)->tensor().clone(); // target plane
+   // ten_mp2    = tensors->at(1)->tensor().clone(); // mp2 plane
+   // ten_mp3    = tensors->at(0)->tensor().clone(); // mp3 plane
 
-    torch::Tensor ten_target = tensors->at(2)->tensor().clone(); // target plane
-    torch::Tensor ten_mp2    = tensors->at(1)->tensor().clone(); // mp2 plane
-    torch::Tensor ten_mp3    = tensors->at(0)->tensor().clone(); // mp3 plane
     //print shape of each tensor
-    
     log->debug("DNNROIPreProcess: Input tensor shapes - target: {}, mp2: {}, mp3: {}",
                tensor_shape_string(ten_target),
                tensor_shape_string(ten_mp2),
@@ -80,47 +99,57 @@ bool DNNROIPreProcess::operator()(const input_pointer& in, output_pointer& out)
                    ten_mp2.size(2), ten_mp3.size(2));
         throw std::runtime_error("DNNROIPreProcess: Inconsistent tick dimension between mp2 and mp3");
     }
-    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_before.pt");
-    SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_before.pt");
-    SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_before.pt");
+    //SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_input.pt");
+    //SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_input.pt");
+    //SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_input.pt");
     // Downsample the target tensor along tick dimension to match mp2/mp3
-    //Save before downsampling
-    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_before_downsample.pt");
+    //apply scale and offset first before downsampling
+    log->debug("DNNROIPreProcess: Applying input scale {} and offset {} to target tensor before downsampling", m_cfg.input_scale, m_cfg.input_offset);
+    ten_target = ten_target * m_cfg.input_scale + m_cfg.input_offset;
     ten_target = ten_target.view({ten_target.size(0), ten_target.size(1), m_cfg.nticks/m_cfg.tick_per_slice, m_cfg.tick_per_slice});
     //average it...
     ten_target = ten_target.mean(-1);
     log->debug("DNNROIPreProcess: Target tensor shape after downsampling: {}", tensor_shape_string(ten_target));
-    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_after_downsample.pt");
     //if all preprocess is true, then preprocess all tensors
     if(m_cfg.preprocess_all){
         //downsample mp2
+        //apply scale and offset first before downsampling
+        log->debug("DNNROIPreProcess: Applying input scale {} and offset {} to mp2 tensor before downsampling", m_cfg.input_scale, m_cfg.input_offset);
+        ten_mp2 = ten_mp2 * m_cfg.input_scale + m_cfg.input_offset;
         ten_mp2 = ten_mp2.view({ten_mp2.size(0), ten_mp2.size(1), m_cfg.nticks/m_cfg.tick_per_slice, m_cfg.tick_per_slice});
         ten_mp2 = ten_mp2.mean(-1);
         log->debug("DNNROIPreProcess: mp2 tensor shape after downsampling: {}", tensor_shape_string(ten_mp2));
-        SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_after_downsample.pt");
+        //SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_after_downsample.pt");
         //downsample mp3
+        //apply scale and offset first before downsampling
+        log->debug("DNNROIPreProcess: Applying input scale {} and offset {} to mp3 tensor before downsampling", m_cfg.input_scale, m_cfg.input_offset);
+        ten_mp3 = ten_mp3 * m_cfg.input_scale + m_cfg.input_offset;
         ten_mp3 = ten_mp3.view({ten_mp3.size(0), ten_mp3.size(1), m_cfg.nticks/m_cfg.tick_per_slice, m_cfg.tick_per_slice});
         ten_mp3 = ten_mp3.mean(-1);
         log->debug("DNNROIPreProcess: mp3 tensor shape after downsampling: {}", tensor_shape_string(ten_mp3));
-        SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_after_downsample.pt");
+        //SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_after_downsample.pt");
     }
-    // Apply scaling and offset
-    
-    ten_target = ten_target * m_cfg.input_scale + m_cfg.input_offset;
-    ten_mp2    = ten_mp2    * m_cfg.input_scale + m_cfg.input_offset;
-    ten_mp3    = ten_mp3    * m_cfg.input_scale + m_cfg.input_offset;
+    //save after downsample
+    SPNG::write_torch_to_npy(ten_target, "DNNROIPreProcess_target_input_after_downsample.pt");
+    SPNG::write_torch_to_npy(ten_mp2, "DNNROIPreProcess_mp2_input_after_downsample.pt");
+    SPNG::write_torch_to_npy(ten_mp3, "DNNROIPreProcess_mp3_input_after_downsample.pt");
 
+    //create a vector of tensors to stack
+    std::vector<torch::Tensor> tensor_list = {ten_target, ten_mp2, ten_mp3};
     // Stack channels: [B, 3, C, T]
-    torch::Tensor stacked = torch::stack({ten_target, ten_mp2, ten_mp3}, /*dim=*/1);
+    torch::Tensor stacked = torch::stack(tensor_list, /*dim=*/1);
     log->debug("DNNROIPreProcess: Stacked tensor shape: {}", tensor_shape_string(stacked));
-
+    //print the first 20 elements of the stacked tensor for debugging
     // Remove the batch dimension if it's singleton -> [3, C, T]
     stacked = stacked.squeeze(0);
 
-    // Transpose to [3, T, C] and re-introduce batch dim -> [1, 3, T, C]
-    auto transposed = torch::transpose(stacked, /*dim0=*/1, /*dim1=*/2).unsqueeze(0);
+    // Only re introduce the batch dim
+    auto transposed = stacked.unsqueeze(0);
+    //auto transposed = torch::transpose(stacked, /*dim0=*/1, /*dim1=*/2).unsqueeze(0);
     log->debug("DNNROIPreProcess: Transposed tensor shape: {}", tensor_shape_string(transposed));
-
+    
+    //print the first 20 elements of the transposed tensor for debugging
+    //log->debug("DNNROIPreProcess: First 20 elements of transposed tensor: {}", transposed.flatten().slice(0,0,20));
     if (transposed.dtype() != torch::kFloat32) {
         transposed = transposed.to(torch::kFloat32);
         log->debug("DNNROIPreProcess: Converted tensor to float32");

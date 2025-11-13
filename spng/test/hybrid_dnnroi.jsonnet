@@ -9,6 +9,7 @@ function(
     device='cpu',
     ts_model_file='/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts',
     plane='u',
+    anode_index=0,
 ){
     local g = import 'pgraph.jsonnet',
     local f = import 'pgrapher/common/funcs.jsonnet',
@@ -41,7 +42,7 @@ function(
     local frame_input = (fileio.frame_tensor_file_source(input_file)),
 
     //graph is:
-    //channelselector --> OmnibusSigProc --> Fanout --> DNNROI (U,V) --> FanIn --> Retagger --> FrameTensorSink
+    //channelselector --> OmnibusSigProc --> FrameToTorch --> DNNROI (U,V) --> FanIn --> Retagger --> FrameTensorSink
 
     local selectors = [
         g.pnode({
@@ -80,7 +81,7 @@ function(
         nticks: 6000,
         tick_per_slice: 4,
         nchunks: 1,
-        input_scale: 1.0,
+        input_scale: 0.00025,
         input_offset: 0.0,
         output_scale: 1.0,
         output_offset: 0.0,
@@ -98,15 +99,18 @@ function(
         }, nin=1, nout=1),
 
     local intags = [
-        'loose_lf%d' % tools.anodes[0].data.ident,
-        'mp2_roi%d' % tools.anodes[0].data.ident,
-        'mp3_roi%d' % tools.anodes[0].data.ident
+        'loose_lf%d' % tools.anodes[anode_index].data.ident,
+        'mp2_roi%d' % tools.anodes[anode_index].data.ident,
+        'mp3_roi%d' % tools.anodes[anode_index].data.ident
     ],
 
     local frame_to_tensorset = g.pnode({
         type: 'FrameToTorchSet',
         data: {
             intags: intags,
+            anode: wc.tn(tools.anodes[anode_index]),
+            plane: (if plane == 'u' then 0 else if plane == 'v' then 1 else 2),
+            nticks: config.nticks,
         },
     }, nin=1, nout=1),
 

@@ -1,12 +1,15 @@
 import torch
 import numpy as numpy
 import matplotlib.pyplot as plt
-
+import os,sys
 # Usage : alias tpython=/nfs/data/1/abashyal/spng/spng_dev_08252025/.direnv/python-3.11.9/bin/python
 # Usage: tpython plot_torch_tensors.py file1.pt file2.pt ...
-
-import sys
-for tensor_file in sys.argv[1:]:
+# create a list of pt files with the path from a given path
+files = os.listdir(sys.argv[1] if len(sys.argv)>1 else '.')
+#files with path
+pt_files = [os.path.join(sys.argv[1], f) for f in files if f.endswith('.pt')]
+print(f"Found {len(pt_files)} .pt files in the current directory.")
+for tensor_file in pt_files:
     tensor = torch.jit.load(tensor_file)
     print(f"Loaded tensor from {tensor_file}")
     ## get the param
