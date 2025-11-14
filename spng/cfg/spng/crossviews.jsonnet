@@ -25,7 +25,7 @@ local fans = import "fans.jsonnet";
 
     /// Build the cross views block producing a 3->3 subgraph with fully connected inner.
     crossfan(tpc, extra_name="")::
-        local fanouts = [fans.tensor_fanout(tpc.name + 'crossfan_v'+std.toString(view_index), 3)
+        local fanouts = [fans.fanout(tpc.name + 'crossfan_v'+std.toString(view_index), 3)
                          for view_index in [0,1,2]];
         local crossviews = [$.crossview(tpc, view_index, extra_name=extra_name)
                             for view_index in [0,1,2]];

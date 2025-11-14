@@ -26,11 +26,30 @@ local util = import "util.jsonnet";
                   ]),
         
 
-    /// Produce the layer between deoncs+crossviews for input to inference.
+    /// Produce the layer between decons+crossviews for input to inference.
     prepare(name, decons, crossviews, what=["mp2","mp3"])::
         pg.crossline([
             $.prepare_pipe(name, vi, decons, crossviews, what)
             for vi in [0,1,2]]),
     
+    /// Apply ROI inference.
+    /// FIXME: this is a dummy for now.
+    forward(name, inputs):: inputs,        
+
+
+    /// Apply ROIs.
+    /// FIXME: for now, this uses Multiply but a dedicated Rebaseline node is needed.
+    apply(name, decons, rois)::
+        local mults = [pg.pnode({
+            type: "Multiply",
+            name: name + "v" + std.toString(view_index),
+            data: { multiplicity: 2 }
+        }, nin=2, nout=1) for view_index in [0,1,2]];
+        pg.intern(innodes=[decons, rois], outnodes=mults,
+                  edges=wc.flatten([[
+                      pg.edge(decons, mults[view_index], view_index, 0),
+                      pg.edge(rois, mults[view_index], view_index, 1)]
+                                    for view_index in [0,1,2]])),
+            
 }
 

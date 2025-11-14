@@ -2,21 +2,21 @@ local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
 {
-    tensor_fanin(name, multiplicity=2):: pg.pnode({
-        type: "SPNGTensorFanin",
+    fanin(name, multiplicity=2, type='Tensor'):: pg.pnode({
+        type: "SPNG"+type+"Fanin",
         name: name,
         data: { multiplicity: multiplicity },
     }, nin=multiplicity, nout=1),
 
-    tensor_fanout(name, multiplicity=2):: pg.pnode({
-        type: "SPNGTensorFanout",
+    fanout(name, multiplicity=2, type='Tensor'):: pg.pnode({
+        type: "SPNG"+type+"Fanout",
         name: name,
         data: { multiplicity: multiplicity },
     }, nin=1, nout=multiplicity),
 
     /// A fanout + shuntlines.  Fan out N oports of upstream node to N ports of
     /// each in list of downstream nodes.  
-    tensor_fanout_shuntline(upstream, downstreams, extra_name="")::
+    fanout_shuntline(upstream, downstreams, extra_name="")::
         local Nu = std.length(upstream.oports);
         local Nd = std.length(downstreams);
         local fans = [pg.pnode({
