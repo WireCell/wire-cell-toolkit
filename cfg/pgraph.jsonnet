@@ -160,9 +160,11 @@ local wc = import "wirecell.jsonnet";
                      for ind in wc.iota(std.length(up))
                  ], name=name),
 
-    // Collect a number of closed component graphs into a single graph
-    // represented by one pnode.  Each component must be closed in the
-    // sense that it has no unattached ports.
+    // Collect a subgraphs into a single graph represented by one pnode.
+    //
+    // The subgraphs can have duplicate nodes which will result in the subgraphs
+    // becoming connected.  For example, build an A->B and a B->C and add them
+    // as components and an A->B->C graph will result.
     components(subgraphs, name="") :: $.intern(centernodes=subgraphs, name=name),
 
 
