@@ -34,9 +34,14 @@ namespace WireCell {
             return false;
         }
 
+        /// Split up the string by the delimiter returning vector if the parts.
         std::vector<std::string> split(const std::string& in, const std::string& delim = ":");
 
         std::pair<std::string, std::string> parse_pair(const std::string& in, const std::string& delim = ":");
+
+        /// Return new string that has instances of "have" in "s" replaced with "want".
+        std::string replace(const std::string s,
+                            const std::string& have, const std::string& want);
 
         // format_flatten converts from "%"-list to variadic function call.
         template <typename TYPE>

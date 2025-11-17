@@ -43,7 +43,7 @@
 #pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 // We need FMT version but it is found in core.h in different locations
 // depending on if fmtlib is external to or bundled with spdlog.
