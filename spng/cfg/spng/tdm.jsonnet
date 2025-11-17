@@ -1,4 +1,11 @@
-// Flexible ways to build an SPNG related graph or final config.
+// Flexible ways to build subgraphs with TDM nodes.
+//
+// Example cmd line test
+//
+// @code{sh}
+// wcpy pgraph dotify -A stage=graph_crossview -A finalize=true --no-services --no-params test-tdm.pdf
+// @endcode
+
 
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
@@ -9,11 +16,14 @@ local decon = import "decon.jsonnet";
 local cv = import "crossviews.jsonnet";
 local dnnroi = import "dnnroi.jsonnet";
 
-local detconf = import "detconf.jsonnet";
+local tlas = import "tlas.jsonnet";
 
 /// Return an object with all possible subgraphs for one tpc
-local one_tpc(tpc) = {
+local one_tpc(tpc, control) = {
+
+    // allow dumping of some details
     tpc: tpc,
+    anode: tpc.anode,
 
     // Node: 1->1: IFrame -> frame tensor set.  This converts an ADC IFrame into
     // corresponding TDM tensor set.
@@ -27,11 +37,16 @@ local one_tpc(tpc) = {
     // ADC frame into individual ADC tensors grouped by channel groups. 
     frame_set_unpack: frame.tensorset_unpacker(tpc),
 
+    // Node: 1->ngroup: directly connect without a fanout. 
+    frame_direct_unpack: pg.pipeline([$.frame_to_tdm, $.frame_set_unpack]),
+
     // Node: ngroup->nview: apply per-group response decon and merge any split groups
     // to produce a subgraph with 3 per-view tensors of decon signal.  Note,
     // only FR*ER response channel filter is decon'ed.  Not time filter nor "RC"
     // response decon is included.
     response_decon: decon.group_decon_view(tpc),
+
+    unpack_to_decon: pg.shuntline($.frame_set_unpack, $.response_decon),
 
     // Nodes: 3->3, each.  Apply the three types of time filters intended to follow
     // response decon.  These names are canonical.  Each detector must define
@@ -71,15 +86,17 @@ local one_tpc(tpc) = {
     // Node: 3->3. Connect threshold to the cross fan.
     threshold_crossviews: pg.shuntline($.filter_threshold, $.crossfan),
     
+    crossviews_repack: pg.shuntline($.threshold_crossviews, $.frame_set_repack),
+
     // Node: 1->3. A subgraph consuming IFrame and producing 3 crossview
     // tensors.  It excludes gauss and dnnroi filtered processing.
     graph_crossview: pg.components([
-        $.frame_to_tdm,
-        $.frame_set_unpack,
-        $.response_decon,
+        $.frame_direct_unpack,
+        $.unpack_to_decon,
         $.crossview_filters,
         $.filter_threshold,
-        $.threshold_crossviews
+        $.threshold_crossviews,
+        $.crossviews_repack
     ]),
 
     // Node: 2x3 -> 3.  Connect the dnnroi filters and output of crossviews
@@ -109,22 +126,24 @@ local one_tpc(tpc) = {
                                        targets=[$.frame_set_unpack, $.frame_from_tdm]),
 
 
-    all: pg.components([$.frame_filters, $.threshold_cv, $.dnnroi_prepare]),
+    // all: pg.components([$.frame_filters, $.threshold_cv, $.dnnroi_prepare]),
 
 
 
 };
 
-function(detname="pdhd", tpcid="tpc0", stage="decon_pack", main=true)
-    local det = detconf[detname];
-    local tpc = det.tpc[tpcid];
-    // fixme: support "alltpcs" as loop over what follows
+tlas.single_tpc(one_tpc)
 
-    local stages = one_tpc(tpc);
-    local graph = stages[stage];
-    if main == true || main == "true"
-    then pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])
-    else graph
+// function(detname="pdhd", tpcid="tpc0", stage="decon_pack", main=true)
+//     local det = detconf[detname];
+//     local tpc = det.tpc[tpcid];
+//     // fixme: support "alltpcs" as loop over what follows
+
+//     local stages = one_tpc(tpc);
+//     local graph = stages[stage];
+//     if main == true || main == "true"
+//     then pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])
+//     else graph
 
 
 

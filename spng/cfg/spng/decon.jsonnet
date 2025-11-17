@@ -32,7 +32,7 @@ local pg = import "pgraph.jsonnet";
                 period: tpc.adc.tick, // sample period of kernel time dimension.
                 plane_index: plane_index,
                 // Scale to units of ADC and negate to give positive signals.
-                scale: -1 / tpc.adc.vin_per_count,
+                scale: -1 / tpc.adc.lsb_voltage,
                 debug_filename: debug_filename
             },
             uses: [tpc.fr, tpc.er],

@@ -1,7 +1,7 @@
 #ifndef WIRECELL_ITORCHTENSORSET
 #define WIRECELL_ITORCHTENSORSET
 
-#include "ITorchTensor.h"
+#include "WireCellSpng/ITorchTensor.h"
 #include "WireCellUtil/Configuration.h"
 
 namespace WireCell {

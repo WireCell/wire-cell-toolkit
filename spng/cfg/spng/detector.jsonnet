@@ -20,7 +20,9 @@ local known_detectors = import "detectors.jsonnet";
         /// voltage baseline biases
         baselines=[1*wc.volt,1*wc.volt,1*wc.volt],
         /// Full scale of VADC
-        fullscale=[0*wc.volt,2*wc.volt])::
+        fullscale=[0*wc.volt,2*wc.volt],
+        /// Duration of one ADC waveform
+        readout_duration=1*wc.ms)::
         {
             tick: tick,
             resolution: resolution, // how many bits in the ADC
@@ -28,14 +30,60 @@ local known_detectors = import "detectors.jsonnet";
             baselines: baselines, // per-plane baseline volutabes
             fullscale: fullscale, // ADC fullscale voltage range
 
+            readout_duration: readout_duration,
+            // It would probably be better to use std.round but I don't have it
+            // in my current version of Jsonnet.  This function came in >to
+            // Jsonnet 0.21.0, April 2023.
+            readout_nticks: std.floor(readout_duration/tick),
+
             max_count: 1 << self.resolution,
 
-            /// How much voltage is in one ADC count (ignoring gain)
-            vadc_per_count: (self.fullscale[1] - self.fullscale[0]) / (self.max_count),
-            /// How much input / "line level" voltage per ADC count.
-            /// This is what should be multiplied to amplifier output voltage.
-            vin_per_count: self.vadc_per_count/self.gain,
+            
+            valid_range: self.fullscale[1] - self.fullscale[0],
 
+            /// How much voltage the ADC sees for each count, ie, after relative gain.
+            vadc_per_count: self.valid_range / (self.max_count),
+            /// Line-level Voltage of least-significant bit, ie before relative gain.
+            lsb_voltage: self.vadc_per_count/self.gain,
+
+        },
+
+
+    /// Describe one "anode" aka AnodePlane.  An AnodePlane is what holds "wires"
+    /// (which may be in the shape of strips).  An AnodePlane has one (uboone) or
+    /// two (DUNE HD and VD) "faces".  Faces can be opposing (DUNE HD) or aligned
+    /// (DUNE VD).  The wires and the faces together imply one or two drift volumes
+    ///
+    /// @param ident The identifier in the wires file for wires of this anode.
+    /// @param wires_object A WireSchemaFile config.
+    /// @param faces An array of faces.  This MUST have a null place holder for insensitive faces, order matters.
+    anode(ident, wires_object, faces):: {
+        type : "AnodePlane",
+        name : "a"+std.toString(ident),
+        data : {
+            // This IDENT must match a set of wires
+            ident : ident,
+            // The wire schema file
+            wire_schema: wc.tn(wires_object),
+            faces : faces,
+        },
+        uses: [wires_object],
+    },
+
+    /// Define some liquid argon.
+    lar(DL,                     // Longitudinal diffusion constant
+        DT,                     // Transverse diffusion constant
+        lifetime,               // Electron lifetime
+        drift_speed=1.6*wc.mm/wc.us, // Electron drift speed, assumes a certain applied E-field
+        density=1.389*wc.g/wc.centimeter3, // LAr density
+        ar39activity=1*wc.Bq/wc.kg):: // Decay rate per mass for natural Ar39.
+        {
+            DL : DL,
+            DT : DT,
+            lifetime : lifetime,
+            drift_speed : drift_speed,
+            density: density,
+            ar39activity: ar39activity,
         },
 
     /// Describe the longitudinal drift dimension of one face by giving absolute X
@@ -148,25 +196,50 @@ local known_detectors = import "detectors.jsonnet";
         
     // fixme: add rc
     
-    /// Describe one "anode" aka AnodePlane.  An AnodePlane is what holds "wires"
-    /// (which may be in the shape of strips).  An AnodePlane has one (uboone) or
-    /// two (DUNE HD and VD) "faces".  Faces can be opposing (DUNE HD) or aligned
-    /// (DUNE VD).  The wires and the faces together imply one or two drift volumes
-    ///
-    /// @param ident The identifier in the wires file for wires of this anode.
-    /// @param wires_object A WireSchemaFile config.
-    /// @param faces An array of faces.  This MUST have a null place holder for insensitive faces, order matters.
-    anode(ident, wires_object, faces):: {
-        type : "AnodePlane",
-        name : "a"+std.toString(ident),
-        data : {
-            // This IDENT must match a set of wires
-            ident : ident,
-            // The wire schema file
-            wire_schema: wc.tn(wires_object),
-            faces : faces,
+    // Create a plane impact response (PIR) for one plane.  Any null values will
+    // be supplied by tpc.
+    plane_impact_response(context_name, plane,
+                          tick,   // usually adc.tick
+                          nticks, // usually adc.readout_nticks
+                          fr, er,
+                          rcs=[], // one or two "RC" responses.  Padding is
+                          // typically not customized, but it needs to be big
+                          // enough to avoid DFT cyclic artifacts.
+                          long_padding=1.5*wc.ms,
+                          overall_short_padding=200*wc.us,
+                         )::
+        {
+            type: "PlaneImpactResponse",
+            name: context_name + "p" + std.toString(plane),
+            data: {
+                plane : plane,
+                field_response : fr,
+
+                start: 0,
+                tick: tick,
+                nticks: nticks,
+
+                overall_short_padding: overall_short_padding,
+                short_responses: [er],
+
+                long_padding : long_padding,
+                long_responses: rcs,
+            }
+
         },
-        uses: [wires_object],
+    /// Each TPC gets one PIR per plane collected into an array.
+    plane_impact_responses(u, v, w):: [u, v, w],
+
+    /// A detector's empirical noise model parameters not derived from tpc or control.
+    empirical_noise(spectra_file, wire_length_scale=10, replacement_percentage=0.02, chanstat=""):: {
+        spectra_file: spectra_file,
+        wire_length_scale: wire_length_scale,
+        replacement_percentage: replacement_percentage,
+        chanstat: chanstat,
+    },
+    /// Bundle the types of noise model parameters
+    noise(empirical):: {
+        empirical: empirical,
     },
 
 
@@ -266,27 +339,41 @@ local known_detectors = import "detectors.jsonnet";
         wc.flatten([ $.view_groups_one_layer(connections[view_index], view_index, face_idents)
           for view_index in [0,1,2]]),
 
-    /// Define a TPC.
+    /// Define a TPC API.
     ///
-    /// Ultimately, all arguments must be provided but one may define a "nominal
-    /// TPC" and the override it with custom TPCs.
+    /// This rolls up all params required to cover all the higher-level
+    /// construction.
     ///
-    tpc(anode=null, adc=null, fr=null, er=null, rc=[],
+    /// In general, each TPC may have unique parameters though typically they
+    /// will all be identical.  
+    ///
+    tpc(anode=null,
+        lar=null,
+        adc=null, fr=null, er=null, rcs=[],
+        pirs=null, noise=null,
         connections=null, filters=null, faces=null,
         crossview_thresholds=null)::
         {
             // the AnodePlane config object
             anode: anode,
+            // The liquid argone
+            lar: lar,
             // ADC related parameters
             adc:adc,
-            // response object configs, rc may be an array of
-            fr:fr, er:er, rc:rc,
+            // response object configs, rcs may be an array of "RC" long responses.
+            fr:fr, er:er, rcs:rcs,
             // how same-layer views on connected across faces
             connections: connections,
             // The decon filters config
             filters: filters,
             // Ordered enumeration of face idents
             faces: faces,
+
+            // plane impact responses
+            pirs: pirs,
+
+            // noise models and their params
+            noise: noise,
 
             // Configuration for Threshold for input to CrossViews
             crossview_thresholds: crossview_thresholds,
@@ -303,12 +390,14 @@ local known_detectors = import "detectors.jsonnet";
 
     /// Construct a detector as a named collection of tpcs.
     ///
-    /// This is what each detectors/<name>.jsonnet should export.
-    detector(tpcs)::            // array of tpc() objects
-        {
-            tpcs: tpcs,
-            tpc: {[t.name]:t for t in tpcs},
-        },
+    detector(name, tpcs, lar=null):: {
+        name: name,
+        tpcs: tpcs,
+        tpc: {[t.name]:t for t in tpcs},
+        lar: if std.type(lar) == "null"
+             then tpcs[0].lar
+             else lar,
+    },
 
     /// Some components accept various control parameters.  This bundles them.
     control(device="cpu", verbosity=0):: {

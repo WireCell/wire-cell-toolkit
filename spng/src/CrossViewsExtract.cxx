@@ -1,6 +1,6 @@
 #include "WireCellSpng/CrossViewsExtract.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
-#include "WireCellSpng/NamedFactory.h"
+#include "WireCellUtil/NamedFactory.h"
 
 WIRECELL_FACTORY(SPNGCrossViewsExtract,
                  WireCell::SPNG::CrossViewsExtract,

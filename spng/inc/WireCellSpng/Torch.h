@@ -33,7 +33,7 @@
 // #pragma GCC diagnostic ignored "-Wc++20-extensions"
 // #endif
 
-#include <torch/torch.h>  // should be only include site in entire spng!
+#include "torch/torch.h"  // should be only include site in entire spng!
 
 // #if HAS_WARNING("-Wc++20-extensions")
 // #pragma GCC diagnostic pop

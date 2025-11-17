@@ -13,17 +13,35 @@ local adc_tick = 500*wc.ns;
 local adc = api.adc(tick=adc_tick,
                     resolution=14, 
                     baselines=[1003.4*wc.millivolt,1003.4*wc.millivolt,507.7*wc.millivolt],
-                    fullscale=[0.2*wc.volt, 1.6*wc.volt]);
+                    fullscale=[0.2*wc.volt, 1.6*wc.volt],
+                    readout_duration=3.0*wc.ms);
 local fr = api.fields_from_name(detname);
 local er = api.elec_response(gain=14.0*wc.mV/wc.fC,
                              shaping=2.2*wc.us,
                              binning=api.binning(100, adc_tick));
+
+// rcs...
 
 local wires_obj = api.wires_from_name(detname);
 
 local anodes = [
     api.anode(anode_ident, wires_obj, api.hd_like_faces(anode_ident))
     for anode_ident in [0,1,2,3]];
+
+// These were taken from dunereco a0029f0fd0ec8821429abe568338da84fbc06057
+local lar = api.lar(DT=8.8 * wc.cm2 / wc.ns,
+                    DL= 4.0 * wc.cm2 / wc.ns,
+                    lifetime= 35.0 * wc.us,
+                    drift_speed= 1.60563* wc.mm / wc.us);
+local pirs(anode) = [
+    api.plane_impact_response("a" + std.toString(anode.data.ident), plane,
+                              tick=adc.tick,
+                              nticks=adc.readout_nticks,
+                              fr=fr, er=er,
+                              rcs=[])
+    for plane in [0,1,2]];
+
+local noise = api.noise(empirical = api.empirical_noise(det.noise));
 
 local gauss_filter = api.filter_config(scale=0.12 * wc.megahertz);
 local gauss_filters = [
@@ -65,10 +83,12 @@ local crossview_thresholds = [
     ];
 
 // All TPCs are identical except for their anodes
-local tpcs = [ api.tpc(anode, adc=adc, fr=fr, er=er,
-                       connections=[2,2,0], filters=filters, faces=[0,1],
-                       crossview_thresholds=cvts)
-               for anode in anodes ];
+local tpcs = [
+    api.tpc(anode, lar=lar, adc=adc, fr=fr, er=er,
+            pirs=pirs(anode), noise=noise,
+            connections=[2,2,0], filters=filters, faces=[0,1],
+            crossview_thresholds=cvts)
+    for anode in anodes ];
 
-api.detector(tpcs)
+api.detector("pdhd", tpcs)
 
