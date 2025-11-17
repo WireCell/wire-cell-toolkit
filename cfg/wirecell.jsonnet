@@ -373,6 +373,31 @@
     unique_helper(l, x):: if std.count(l,x) == 0 then l + [x] else l,
     unique_list(l):: std.foldl($.unique_helper, l, []),
 
+    // Return set of unique objects.  This may not preserve order.
+    unique_objects(objects)::
+        std.set(objects, function(item) std.toString(item)),
+
+    // Return unique array keeping order
+    unique_objects_ordered(objects)::
+        std.foldl(
+            function(acc, item)
+                local result = acc[0];
+                local seen = acc[1];
+                local key = std.toString(item);
+
+                // If the key is already in the 'seen' set, return the accumulator unchanged.
+                if std.objectHas(seen, key) then
+                    acc
+                else
+                    // If new, update both the result array and the seen set.
+                    [
+                        result + [item], // New result: append the item
+                        seen { [key]: null } // New seen: add the key
+                    ],
+                objects,
+                [[], {}])[0],      // initial
+
+
 
     // Return an array.  If l is array, return it.  If string, split it, if object return field names
     listify(l, d=',') ::
