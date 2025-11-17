@@ -50,8 +50,8 @@ def options(opt):
                    help="Force the build mode (default, detect based on git branch)")
 
     # fixme: add to spdlog entry in wcb.py
-    opt.add_option('--with-spdlog-static', type=str, default="yes",
-                   help="Def is true, set to false if your spdlog is not compiled (not recomended)")
+    opt.add_option('--with-spdlog-static', type=str, default="",
+                   help="Default is unset and answer comes from pkg-config, set true if you lack that tool")
     opt.add_option('--with-spdlog-active-level',
                    default = "debug",
                    choices = log_levels,
@@ -126,10 +126,9 @@ int main(int argc,const char *argv[])
     cfg.env.CXXFLAGS += ['-std=c++17']
     cfg.env.CXXFLAGS += ['-DEIGEN_HAS_CXX11']
 
-
     if cfg.options.with_spdlog_static.lower() in ("yes","on","true"):
         cfg.env.CXXFLAGS += ['-DSPDLOG_COMPILED_LIB=1']
-    
+
     if cfg.options.with_nvtx:
         cfg.env.CXXFLAGS += ['-DHAVE_NVTX=1']
 
@@ -158,4 +157,7 @@ def dumpenv(bld):
 
 
 def packrepo(bld):
+    bld.load('wcb')
+
+def compile_flags(bld):
     bld.load('wcb')

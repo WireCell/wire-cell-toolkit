@@ -300,3 +300,72 @@ def packrepo(bld):
 class PackrepoenvContext(BuildContext):
     cmd = 'packrepo'
     fun = 'packrepo'
+
+
+def compile_flags(bld):
+    '''
+    Produce a compile_flags.txt file that clangd can use eg to help eglot in emacs.
+
+    In addition, the user may want to run:
+
+    ./wcb clean
+    bear -- ./wcb
+
+    To produce the more rich compile_commands.json file.  Subsequent partial
+    builds may be done with:
+
+    bear --append -- ./wcb
+
+    The compile_flags.txt augments compile_commands.json so that clangd knows
+    how to find include paths when looking at headers, since they are not compiled.
+
+    Caution: configuring to build with GCC may lead to incompatibilities when
+    trying to use clangd.
+    '''
+    flags = getattr(bld.env, 'CXXFLAGS', [])
+    #flags = set()
+
+    # WCT includes, first BuildConfig.h location
+    bld_dir = bld.root.find_dir(bld.out_dir)
+    flags.append( '-I' + bld_dir.abspath() )
+
+    # Then all the configured subdir inc/'s.
+    for subdir in bld.env.SUBDIRS:
+        subnode = bld.path.find_dir(subdir)
+        if not subnode:
+            continue
+
+        incnode = subnode.find_dir('inc')
+        if not incnode:
+            continue
+
+        flags.append( '-I' + incnode.abspath())
+
+
+    for key in bld.env:
+        val = bld.env[key]
+
+        if key.startswith('INCLUDES'):
+            if isinstance(val, str):
+                val = val.split()
+            flags += [f'-I{path}' for path in val]
+            continue
+
+        if key.startswith('DEFINES') and key != "DEFINES_ST":
+            if isinstance(val, str):
+                val = val.split()
+            flags += [f'-D{path}' for path in val]
+
+    flags = [flag for flag in flags
+             if not flag.startswith(('-c', '-o', '-shared', '-fPIC'))] 
+
+
+    content = '\n'.join(flags) + '\n'
+
+    target_node = bld.path.make_node('compile_flags.txt')
+    
+    bld(rule=lambda task: task.outputs[0].write(content), target=target_node, name='compile_flags.txt')
+
+class CompileFlagsContext(BuildContext):
+    cmd = 'compile_flags'
+    fun = 'compile_flags'
