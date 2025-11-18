@@ -856,18 +856,20 @@ WireCell::Waveform::ChannelMaskMap PDVD::OneChannelNoise::apply(int ch, signal_t
         PDVD::RemoveFilterFlags(signal);
     }
 
-    // const float min_rms = m_noisedb->min_rms_cut(ch);
-    // const float max_rms = m_noisedb->max_rms_cut(ch);
-    // // alternative RMS tagging
-    // PDVD::SignalFilter(signal);
-    // bool is_noisy = PDVD::NoisyFilterAlg(signal, min_rms, max_rms);
-    // PDVD::RemoveFilterFlags(signal);
-    // if (is_noisy) {
-    //     WireCell::Waveform::BinRange temp_bin_range;
-    //     temp_bin_range.first = 0;
-    //     temp_bin_range.second = signal.size();
-    //     ret["noisy"][ch].push_back(temp_bin_range);
-    // }
+    const float min_rms = m_noisedb->min_rms_cut(ch);
+    const float max_rms = m_noisedb->max_rms_cut(ch);
+    // std::cout<<"min_rms = "<<min_rms<<std::endl;
+    // std::cout<<"max_rms = "<<max_rms<<std::endl;
+    // alternative RMS tagging
+    PDVD::SignalFilter(signal);
+    bool is_noisy = PDVD::NoisyFilterAlg(signal, min_rms, max_rms);
+    PDVD::RemoveFilterFlags(signal);
+    if (is_noisy) {
+        WireCell::Waveform::BinRange temp_bin_range;
+        temp_bin_range.first = 0;
+        temp_bin_range.second = signal.size();
+        ret["noisy"][ch].push_back(temp_bin_range);
+    }
 
     return ret;
 }
