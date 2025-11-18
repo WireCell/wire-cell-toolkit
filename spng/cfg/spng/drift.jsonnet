@@ -15,24 +15,27 @@ function(det, control) {
 
 
     /// Create a per-depo drifter.  Pretty much never use this bare.
-    depo_drifter: pg.pnode({
-        type: 'Drifter',
-        name: det.name,
-        data: det.lar + {
-            xregions: $.xregions,
-            time_offset: 0.0,     // fixme: need to expose this to user
-            fluctuate: true,      // fixme: this too
-            rng: wc.tn(control.rng),
-        },
-    }, nin=1, nout=1, uses=[control.rng]),
 
     // A drifter of depo sets.
-    drifter: pg.pnode({
-        type: "DepoSetDrifter",
-        name: det.name,
-        data: {
-            drifter: wc.tn($.depo_drifter),
-        },
-    }, nin=1, nout=1, uses=[$.depo_drifter]),
+    drifter: 
+        local depo_drifter = {
+            type: 'Drifter',
+            name: det.name,
+            data: det.lar + {
+                xregions: $.xregions,
+                time_offset: 0.0,     // fixme: need to expose this to user
+                fluctuate: true,      // fixme: this too
+                rng: wc.tn(control.rng),
+            },
+            uses: [control.rng],
+        };
+        pg.pnode({
+            type: "DepoSetDrifter",
+            name: det.name,
+            data: {
+                drifter: wc.tn(depo_drifter)
+            },
+        }, nin=1, nout=1, uses=[pg.pnode(depo_drifter, nin=1, nout=1)]),
+
 
 }

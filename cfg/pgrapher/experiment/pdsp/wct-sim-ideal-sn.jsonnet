@@ -10,7 +10,7 @@ local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import "pgrapher/common/funcs.jsonnet";
 
-local io = import "pgrapher/common/fileio.jsonnet";
+local io = import "fileio.jsonnet";
 local params = import "pgrapher/experiment/pdsp/simparams.jsonnet";
 local tools_maker = import "pgrapher/common/tools.jsonnet";
 
@@ -56,17 +56,16 @@ local output = "wct-pdsp-sim-ideal-sn.npz";
 local depos = sim.tracks(tracklist);
 
 
-local deposio = io.numpy.depos(output);
+local deposio = io.depo_file_source(output);
 local drifter = sim.drifter;
 local bagger = sim.make_bagger();
 local sn_pipes = sim.splusn_pipelines;
 local sn_graph = f.fanpipe('DepoSetFanout', sn_pipes, 'FrameFanin', "sn");
 
 
-local frameio = io.numpy.frames(output);
-local sink = sim.frame_sink;
+local sink = io.frame_file_sink(output);
 
-local graph = g.pipeline([depos, deposio, drifter, bagger, sn_graph, frameio, sink]);
+local graph = g.pipeline([depos, drifter, bagger, sn_graph, sink]);
 
 local app = {
     type: "Pgrapher",

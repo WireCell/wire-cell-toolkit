@@ -1,0 +1,105 @@
+#+title: WCT test data
+
+This directory holds a very minimal amount of data committed to git for tests to
+consume.  Do NOT add more files willy nilly as large files make git annoying.
+
+* muon-depos.npz
+
+Has these numpy arrays
+
+#+begin_example
+depo_data_0
+depo_info_0
+#+end_example
+
+#+begin_src python
+  m = numpy.load("test/data/muon-depos.npz")
+  dd  = m['depo_data_0']
+  dd.shape # -> (7, 32825)
+#+end_src
+
+The depo data array is produced by =DepoFileSink= calling =Aux::fill()= from =WireCellAux/DepoTools.h=.
+Here is some comments from that code.
+
+#+begin_quote
+             
+        The "data" array will be shaped (ndepos,7) and each
+        7-tuple holds: (time, charge, x, y, z, long, tran).
+
+        The "info" array is integer and shaped (nedpos, 4).  Each
+        4-tuple holds: (id, pdg, gen, child).
+
+#+end_quote
+
+Here's the bounding box of the file from:
+
+#+begin_example
+wcpy gen depos-bb muon-depos.npz
+#+end_example
+
+|-----+-----+--------+-------+------|
+| ind | val |    min |   max | unit |
+|-----+-----+--------+-------+------|
+|   0 | t   |    500 |   564 | ns   |
+|   1 | q   | -10062 |    -0 | el   |
+|   2 | x   |    428 |  1652 | mm   |
+|   3 | y   |     12 |  1254 | mm   |
+|   4 | z   |   2500 | 13211 | mm   |
+|   5 | L   |      0 |     0 | mm   |
+|   6 | T   |      0 |     0 | mm   |
+|-----+-----+--------+-------+------|
+
+
+If this misses your detector, you can shift the depos.  Eg, the zeroth
+AnodePlane in PDHD subtends:
+#+begin_src json
+  "faces" : 
+  [
+      {
+          "anode" : -3520.9450000000002,
+          "cathode" : -1.5875000000000909,
+          "response" : -3430.4650000000001
+      },
+      null
+  ],
+#+end_src
+
+And,
+#+begin_example
+wcpy util wires-info protodunehd-wires-larsoft-v1.json.bz2
+anode:0 face:0 X=[-3532.02,-3522.19]mm Y=[76.10,6066.70]mm Z=[-1.00,2305.73]mm
+	0: x=-3522.19mm dx=9.8300mm n=1148 pitch=(4.6694 +/- 0.000041 [4.6612<4.6745], p0=4.6693) 
+	1: x=-3527.11mm dx=4.9100mm n=1148 pitch=(4.6690 +/- 0.000042 [4.6621<4.6732], p0=4.6690) 
+	2: x=-3532.02mm dx=0.0000mm n=480 pitch=(4.7920 +/- 0.000137 [4.7900<4.8000], p0=4.7920)
+anode:0 face:1 X=[-3627.72,-3617.89]mm Y=[76.10,6066.70]mm Z=[-1.00,2305.73]mm
+	0: x=-3627.72mm dx=-9.8300mm n=1148 pitch=(4.6684 +/- 0.000048 [4.6606<4.6728], p0=4.6687) 
+	1: x=-3622.81mm dx=-4.9200mm n=1148 pitch=(4.6694 +/- 0.000040 [4.6612<4.6754], p0=4.6693) 
+	2: x=-3617.89mm dx=0.0000mm n=480 pitch=(4.7920 +/- 0.000138 [4.7900<4.8000], p0=4.7920)
+...
+#+end_example
+
+Which means we can hit roughly the center of the drift volume with:
+
+#+begin_example
+$ wcpy gen shift-depos -c '-2*m,3*m,1*m' muon-depos.npz muon-depos-moved.npz
+#+end_example
+
+#+begin_example
+$ wcpy gen depos-bb muon-depos.npz muon-depos-shifted.npz
+#+end_example
+
+
+Gives:
+
+|-----+-----+--------+-------+------|
+| ind | val |    min |   max | unit |
+|-----+-----+--------+-------+------|
+|   0 | t   |    500 |   564 | ns   |
+|   1 | q   | -10062 |    -0 | el   |
+|   2 | x   |  -2656 | -1431 | mm   |
+|   3 | y   |   2243 |  3486 | mm   |
+|   4 | z   |  -3920 |  6791 | mm   |
+|   5 | L   |      0 |     0 | mm   |
+|   6 | T   |      0 |     0 | mm   |
+|-----+-----+--------+-------+------|
+

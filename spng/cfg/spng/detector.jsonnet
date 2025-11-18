@@ -213,18 +213,19 @@ local known_detectors = import "detectors.jsonnet";
             name: context_name + "p" + std.toString(plane),
             data: {
                 plane : plane,
-                field_response : fr,
+                field_response : wc.tn(fr),
 
                 start: 0,
                 tick: tick,
                 nticks: nticks,
 
                 overall_short_padding: overall_short_padding,
-                short_responses: [er],
+                short_responses: [wc.tn(er)],
 
                 long_padding : long_padding,
-                long_responses: rcs,
-            }
+                long_responses: [wc.tn(rc) for rc in rcs],
+            },
+            uses: [fr, er] + rcs
 
         },
     /// Each TPC gets one PIR per plane collected into an array.
@@ -339,6 +340,9 @@ local known_detectors = import "detectors.jsonnet";
         wc.flatten([ $.view_groups_one_layer(connections[view_index], view_index, face_idents)
           for view_index in [0,1,2]]),
 
+    /// Name for TPC of given ident.
+    tpc_name(tpc_ident):: "tpc" + std.toString(tpc_ident),
+
     /// Define a TPC API.
     ///
     /// This rolls up all params required to cover all the higher-level
@@ -382,7 +386,7 @@ local known_detectors = import "detectors.jsonnet";
 
             // Note, these can not be accessed while null!
             ident: anode.data.ident,
-            name: "tpc" + std.toString(anode.data.ident),
+            name: $.tpc_name(self.ident),
 
             view_groups: $.view_groups(connections, faces),
     },
