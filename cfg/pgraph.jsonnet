@@ -163,11 +163,25 @@ local wc = import "wirecell.jsonnet";
                      for ind in wc.iota(std.length(up))
                  ], name=name),
 
-    // Collect a subgraphs into a single graph represented by one pnode.
+    // Make shuntline connections between nodes[0] and nodes[1], nodes[1] and nodes[2], etc.
+    // This requires oport/iport multiplicity match between each shunted pair.
+    shuntlines(nodes)::
+        if std.length(nodes) == 0 then
+            error('shuntlines got empty nodes array')
+        else if std.length(nodes) then
+            nodes[0]
+        else std.foldl(function(acc, item) $.shuntline(acc, item),
+                       std.slice(nodes, 1),
+                       nodes[0]),
+
+    // Collect a set of subgraphs into a single graph represented by one pnode.
     //
-    // The subgraphs can have duplicate nodes which will result in the subgraphs
-    // becoming connected.  For example, build an A->B and a B->C and add them
-    // as components and an A->B->C graph will result.
+    // The input subgraphs may have duplicate nodes which will result in the
+    // subgraphs becoming connected.  For example, build an A->B and a B->C and
+    // add them as components and an A->B->C graph will result.
+    //
+    // Note, this assumes the resulting graph is complete.  There are no i/o
+    // ports exposed.  If your subgraphs are incomplete, use intern() directly.
     components(subgraphs, name="") :: $.intern(centernodes=subgraphs, name=name),
 
 
