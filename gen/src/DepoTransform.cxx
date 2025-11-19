@@ -178,6 +178,9 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
     }
 
     auto depos = in->depos();
+
+    log->debug("call={} ndepos_in={} depo set ID={}", m_count, depos->size(), in->ident());
+
     size_t ndepos_used=0;
 
     Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
@@ -236,9 +239,7 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
     }
 
     auto frame = make_shared<SimpleFrame>(m_frame_count, m_start_time, traces, m_tick);
-    log->debug("call={} count={} ndepos_in={} ndepos_used={}",
-               m_count, m_frame_count, depos->size(), ndepos_used);
-    log->debug("output: {}", Aux::taginfo(frame));
+    log->debug("output: call={}, ndepos_used={}, {}", m_count, ndepos_used, Aux::taginfo(frame));
 
     ++m_frame_count;
     ++m_count;

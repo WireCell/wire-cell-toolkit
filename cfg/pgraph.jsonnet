@@ -142,6 +142,9 @@ local wc = import "wirecell.jsonnet";
     },
 
     // Produce an abstract pnode of a group of nodes that are at the same rank.
+    // The resulting iports iterate over input node iports, etc oports.  This is
+    // typically useful to combine an array of "side-by-side" pnodes into a
+    // single pnode.
     crossline(elements, name=""):: $.intern(innodes=elements, outnodes=elements, name=name),
 
     // Connect N outputs upstream to N inputs of downstream.  Custom port
