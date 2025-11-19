@@ -302,7 +302,7 @@ namespace WireCell::SPNG {
             }
             else if (crop == -1) {
                 // crop away the "faster" padding keep the basic convoulutional size
-                tensor == resize_tensor_tail(tensor, batched_dim, basic_shape[dim]);
+                tensor = resize_tensor_tail(tensor, batched_dim, basic_shape[dim]);
             }
             else if (crop == -2) {
                 // crop both the "faster" and the convolutional padding

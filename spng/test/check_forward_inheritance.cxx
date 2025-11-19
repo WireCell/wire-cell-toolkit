@@ -39,8 +39,8 @@ public:
     TestInterface();
     virtual ~TestInterface();
     //~TestInterface();
-    virtual WireCell::ITorchTensorSet::pointer forward(const WireCell::ITorchTensorSet::pointer& input) const;
-    virtual void configure(const WireCell::Configuration& cfg);
+    virtual WireCell::ITorchTensorSet::pointer forward(const WireCell::ITorchTensorSet::pointer& input) const override;
+    virtual void configure(const WireCell::Configuration& cfg) override;
     virtual void dummyMethod() override;
 
 private:

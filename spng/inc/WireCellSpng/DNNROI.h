@@ -113,15 +113,15 @@ namespace WireCell {
             
             std::unordered_set<int>m_chset; // channels to processstd
             std::vector<int>m_chlist; // channels to process in order
-            size_t m_nrows{0}, m_ncols{0};
+            // size_t m_nrows{0}, m_ncols{0};
             
             //AB: Forward the pointer
             ITorchForward::pointer m_forward{nullptr};
             
             
             //std::shared_ptr<ITorchSpectrum> base_frer_spectrum, base_wire_filter;
-            int m_coarse_time_offset = 0;
-            int m_save_count = 0;
+            // int m_coarse_time_offset = 0;
+            // int m_save_count = 0;
             bool m_is_gpu{false};
 
         };

@@ -177,6 +177,8 @@ std::vector<int64_t> sizes_in_range(int64_t min_size, int64_t max_size)
 
 struct consumer_func {
     
+    virtual ~consumer_func() = default;
+
     virtual void operator()(int64_t size,
                             const std::vector<double>& cpu_times,
                             const std::vector<double>& gpu_times) = 0;
@@ -199,7 +201,7 @@ struct csv_file : public consumer_func {
         }
     }
 
-    ~csv_file() {
+    virtual ~csv_file() {
         out.close();
         if (verbose > 0 ) {
             std::cerr << "Results written to " << output_filename << std::endl;
@@ -375,7 +377,7 @@ struct json_file : public consumer_func {
     {
     }
 
-    ~json_file() {
+    virtual ~json_file() {
         WireCell::Persist::dump(output_filename, obj, true);
         if (verbose > 0) {
             std::cerr << "Results written to " << output_filename << std::endl;

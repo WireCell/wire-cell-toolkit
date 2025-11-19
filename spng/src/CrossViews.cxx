@@ -45,6 +45,9 @@ namespace WireCell::SPNG {
 
         auto anode = Factory::find_tn<IAnodePlane>(m_cfg.anode);
 
+        // We don't are about the sem per se but want to turn off autograd
+        TorchSemaphore sem(this->context());
+
         // Transfer WCT/C++ ray grid to a Torch version for each face.
         for (size_t find=0; find<nfaces; ++find) {
 
@@ -114,6 +117,7 @@ namespace WireCell::SPNG {
 
                 view_info.w2c = torch::zeros({nwires},torch::kInt32);
                 view_info.c2w = -1 * torch::ones({nchans},torch::kInt32);
+                view_info.seg = torch::zeros({nwires},torch::kInt32);
 
                 // Iterate along the wire array
                 for (int wind=0; wind<nwires; ++wind) {

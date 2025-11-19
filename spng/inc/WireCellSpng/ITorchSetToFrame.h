@@ -1,5 +1,4 @@
-#ifndef WIRECELL_SPNG_ITORCHSETTOFRAME
-#define WIRECELL_SPNG_ITORCHSETToFRAME
+#pragma once
 
 #include "WireCellIface/IFunctionNode.h"
 #include "WireCellIface/IFrame.h"
@@ -20,4 +19,3 @@ namespace WireCell::SPNG {
     };
 }  // namespace WireCell::SPNG
 
-#endif

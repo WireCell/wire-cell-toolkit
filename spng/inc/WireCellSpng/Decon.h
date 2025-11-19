@@ -49,7 +49,7 @@ namespace SPNG {
         bool m_debug_no_wire_filter = false;
         bool m_debug_no_roll = false;
         bool m_use_fft_best_length = false;
-        bool m_debug_force_cpu = false;
+        // bool m_debug_force_cpu = false;
         bool m_pad_wire_domain = false;
         
         Json::Value m_output_set_tag{"Decon2D"}, m_output_tensor_tag{"Default"};

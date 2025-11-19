@@ -58,17 +58,17 @@ namespace WireCell {
             
             //Relevant for Field Response
             int m_plane_id = 0;
-            bool m_do_average = false;
+            // bool m_do_average = false;
             int64_t m_fravg_nticks = 0, m_fravg_nchans = 0;
             double m_fravg_period;
             double m_gain, m_ADC_mV;
             double m_readout_period;
 
             //Relevant for Cold Elec Response
-            float m_extra_scale = 1.;
+            // float m_extra_scale = 1.;
             int m_default_nticks = 0;
             int m_default_nchans = 0;
-            bool m_do_fft = false;
+            // bool m_do_fft = false;
             
             std::vector<int64_t> m_shape;
 

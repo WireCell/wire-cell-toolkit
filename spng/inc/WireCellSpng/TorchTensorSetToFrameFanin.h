@@ -46,7 +46,7 @@ namespace WireCell {
 
 
             //Expand dimensionality on output
-            bool m_unsqueeze_output{false};
+            // bool m_unsqueeze_output{false};
 
             std::string m_anode_tn{"AnodePlane"};
             IAnodePlane::pointer m_anode;

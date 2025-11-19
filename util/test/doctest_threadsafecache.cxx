@@ -136,7 +136,7 @@ TEST_CASE("util thread safe cache Concurrent Puts with LRU Eviction") {
 
     std::vector<std::thread> threads;
     for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&cache, i, puts_per_thread]() {
+        threads.emplace_back([&cache, i /*, puts_per_thread*/]() {
             for (int j = 0; j < puts_per_thread; ++j) {
                 // Keys will be from 0 to num_threads*puts_per_thread - 1
                 int key = i * puts_per_thread + j;
@@ -180,7 +180,7 @@ TEST_CASE("util thread safe cache Concurrent Gets and LRU Update (Unique_lock im
     std::atomic<int> successful_reads(0);
 
     for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&cache, &successful_reads, capacity, gets_per_thread]() {
+        threads.emplace_back([&cache, &successful_reads/*, capacity, gets_per_thread*/]() {
             for (int j = 0; j < gets_per_thread; ++j) {
                 int key = j % capacity; // Cycle through existing keys
                 std::optional<int> value_opt = cache.get(key);

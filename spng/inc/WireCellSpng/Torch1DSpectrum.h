@@ -45,7 +45,7 @@ namespace WireCell::SPNG {
         int64_t m_default_length = 0;
 
 
-        bool m_debug_force_cpu = false;
+        // bool m_debug_force_cpu = false;
 
         //List holding the type & name of spectra i.e. {HfFilter, Wiener_tight_V}
         std::vector<std::string> m_spectra_tns{};

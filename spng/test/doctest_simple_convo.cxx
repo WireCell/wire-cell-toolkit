@@ -40,9 +40,9 @@ static void do_simple_convo(const std::vector<INT>& signal_shape,
     torch::Tensor resp;
     {
         const auto n0 = response_shape[0];
-        auto g0 = SPNG::gaussian1d(n0/2, sigma, {n0}, 0, n0-1, topt);
+        auto g0 = SPNG::gaussian1d(n0/2, sigma, n0, 0, n0-1, topt);
         const auto n1 = response_shape[1];
-        auto g1 = SPNG::gaussian1d(n1/2, sigma, {n1}, 0, n1-1, topt);
+        auto g1 = SPNG::gaussian1d(n1/2, sigma, n1, 0, n1-1, topt);
         resp = torch::outer(g0,g1);
     }
     resp = resp / torch::max(resp); // unit gain.

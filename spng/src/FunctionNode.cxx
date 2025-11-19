@@ -137,7 +137,7 @@ namespace WireCell::SPNG {
         
     TensorIndex FunctionNode::transform_tensors(TensorIndex ti) const
     {
-        return std::move(ti);
+        return ti;
     }
 
     TensorIndex FunctionNode::sys_transform_tensors(TensorIndex ti) const

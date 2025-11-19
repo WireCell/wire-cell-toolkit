@@ -16,21 +16,32 @@ bats_load_library wct-bats.sh
     [[ -f $ifile ]]
     local jfile=test-detsim.json
 
-    # Explicitly compile to json.  Normally we let wire-cell do this internally
-    run_idempotently -s $ifile -t $jfile -- \
-                     wcsonnet -o $jfile -P $cfgdir \
-                     -A input_filename=$depofile \
-                     -A output_filename_pattern=frames-anode%d.npz \
-                     $cfile
-    file_larger_than $jfile 0
-    [ -z "$(grep Pnode: $jfile)" ]
-
-    run_idempotently -s $depofile -s $jfile -t sim.log \
-                     -t frames-anode0.npz \
-                     -t frames-anode1.npz \
-                     -t frames-anode2.npz \
-                     -t frames-anode3.npz \
+        
+    run_idempotently -s $ifile \
+                     -t $jfile \
+                     -t muon-anode0.npz \
+                     -t muon-anode1.npz \
+                     -t muon-anode2.npz \
+                     -t muon-anode3.npz \
                      -- \
-                     wire-cell -L debug -l sim.log -c $jfile
+                     wire-cell \
+                     -L debug -l muon.log \
+                     -P $cfgdir \
+                     -A engine=TbbFlow \
+                     -A input=$depofile \
+                     -A output=muon-anode%d.npz \
+                     spng/test-detsim.jsonnet
+
+    # Per-anode files all about the same size, mostly noise.
+    file_larger_than muon-anode0.npz 16000000
+    file_larger_than muon-anode1.npz 16000000
+    file_larger_than muon-anode2.npz 16000000
+    file_larger_than muon-anode3.npz 16000000
+
+    # the muon-depos land in tpc3.
+    [ -z "$(grep 'DepoTransform:tpc0.*output: call=0, ndepos_used=8087' muon.log)" ]
+    [ -z "$(grep 'DepoTransform:tpc1.*output: call=0, ndepos_used=8087' muon.log)" ]
+    [ -z "$(grep 'DepoTransform:tpc2.*output: call=0, ndepos_used=8087' muon.log)" ]
+    [ -n "$(grep 'DepoTransform:tpc3.*output: call=0, ndepos_used=8087' muon.log)" ]
 
 }

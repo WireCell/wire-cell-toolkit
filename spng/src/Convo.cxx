@@ -18,7 +18,7 @@ namespace WireCell::SPNG {
                 shape[ind] += sizes[0] - 1;
             }
         }
-        return std::move(shape);
+        return shape;
     }
 
 

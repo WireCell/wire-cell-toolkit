@@ -107,7 +107,7 @@ TEST_CASE("util thread safe map Concurrent Puts (Multiple Writers)") {
     std::vector<std::thread> threads;
 
     for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&cache, i, puts_per_thread]() {
+        threads.emplace_back([&cache, i/*, puts_per_thread*/]() {
             for (int j = 0; j < puts_per_thread; ++j) {
                 std::string key = make_key(i * puts_per_thread + j); // Unique key per put
                 cache.put(key, i + j);
@@ -147,7 +147,7 @@ TEST_CASE("util thread safe map Concurrent Gets (Multiple Readers)") {
     std::atomic<int> successful_and_correct_reads(0);
 
     for (int i = 0; i < num_readers; ++i) {
-        threads.emplace_back([&cache, &successful_and_correct_reads, num_initial_items, reads_per_reader]() {
+        threads.emplace_back([&cache, &successful_and_correct_reads]() {
             for (int j = 0; j < reads_per_reader; ++j) {
                 int key_idx = j % num_initial_items; // Cycle through existing keys
                 std::string key = make_key(key_idx);
@@ -177,10 +177,10 @@ TEST_CASE("util thread safe map Mixed Concurrent Operations (Put, Get, Remove)")
     std::vector<std::thread> threads;
 
     // Use an offset to generate distinct keys across test runs
-    int key_offset = 10000;
+    const int key_offset = 10000;
 
     for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&cache, i, operations_per_thread, key_offset]() {
+        threads.emplace_back([&cache, i]() {
             for (int j = 0; j < operations_per_thread; ++j) {
                 int current_key = key_offset + i * operations_per_thread + j;
                 std::string current_value = "val_" + std::to_string(current_key);
@@ -227,7 +227,7 @@ TEST_CASE("util thread safe map Multiple writers and a concurrent reader") {
     std::vector<std::thread> writer_threads;
 
     for (int i = 0; i < num_writers; ++i) {
-        writer_threads.emplace_back([&cache, i, items_per_writer]() {
+        writer_threads.emplace_back([&cache, i]() {
             for (int j = 0; j < items_per_writer; ++j) {
                 cache.put(i * items_per_writer + j, "writer_" + std::to_string(i) + "_val_" + std::to_string(j));
             }
@@ -236,7 +236,7 @@ TEST_CASE("util thread safe map Multiple writers and a concurrent reader") {
 
     // A single reader thread that attempts to read all possible keys while writers are active.
     // This tests if reads can proceed concurrently with other reads, and are blocked by writes.
-    std::thread reader_thread([&cache, num_writers, items_per_writer]() {
+    std::thread reader_thread([&cache]() {
         for (int i = 0; i < num_writers * items_per_writer; ++i) {
             auto value_out = cache.get(i);
             // The value might be empty if the key hasn't been written yet or was removed.
