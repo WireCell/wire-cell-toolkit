@@ -416,9 +416,13 @@
     deep_flatten(lolol):: std.flatMap(function(x)
             if std.type(x) == 'array' then $.deep_flatten(x) else [x], lolol),
 
-    // Round a floating point to nearest integer.  It's a bit weird to
-    // go through a format/parse.  Maybe there's a better way?
+    // Round a floating point to nearest integer.  It's a bit weird to go
+    // through a format/parse.  Maybe there's a better way?  Note, std.round()
+    // comes in 0.21.
     roundToInt(x):: std.parseInt("%d" % (x+0.5)),
+
+    // 0.20.0 gets this native as std.sum().
+    sum(arr):: std.foldl(function(a, b) a+b, arr, 0),
 
     // Like the shell command of the same name.  
     basename(name, ext="",  delim="/") ::
