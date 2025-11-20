@@ -17,14 +17,47 @@ local fans = import "fans.jsonnet";
             type: 'SPNGCrossViews',
             name: tpc.name + 'v' + std.toString(view_index) + extra_name,
             data: {
-                anode: tpc.anode,
+                anode: wc.tn(tpc.anode),
                 target_index: view_index,
                 face_idents: tpc.faces,
+                multiplicity: 3,
             },
         }, nin=3, nout=1, uses=[tpc.anode]),
 
-    /// Build the cross views block producing a 3->3 subgraph with fully connected inner.
-    crossfan(tpc, extra_name="")::
+    /// A 3->3 with fans and crossviews in the middle.
+    /// Connect a partial crossfan based on marking each view as crossed (1) or
+    /// not (0) in view_crossed.
+    crossfan(tpc, view_crossed=[1,1,0], extra_name="")::
+        local ncrosses = wc.sum(view_crossed);
+        local fanouts = [       // 3
+            fans.fanout(tpc.name+'crossfan_v'+std.toString(view_index),
+                        ncrosses+1-view_crossed[view_index])
+            for view_index in [0,1,2] ];
+        local crossviews = [    // 3, sparse
+            if view_crossed[view_index] == 1
+            then $.crossview(tpc, view_index, extra_name=extra_name)
+            else null
+            for view_index in [0,1,2] ];
+        // less than or equal to 3
+        local crossviews_only = [c for c in crossviews if std.type(c) != "null"];
+        
+        pg.intern(innodes=fanouts,
+                  centernodes=crossviews_only,
+                  oports=[
+                      if view_crossed[view_index] == 1
+                      then crossviews[view_index].oports[0]
+                      else fanouts[view_index].oports[ncrosses]
+                      for view_index in [0,1,2]
+                  ],
+                  edges=[
+                      pg.edge(f.value, c.value, c.index, f.index)
+                      for f in wc.enumerate(fanouts)
+                      for c in wc.enumerate(crossviews_only)
+                  ]),
+        
+
+    /// Build a full cross views block producing a 3->3 subgraph with fully connected inner.
+    crossfanfull(tpc, extra_name="")::
         local fanouts = [fans.fanout(tpc.name + 'crossfan_v'+std.toString(view_index), 3)
                          for view_index in [0,1,2]];
         local crossviews = [$.crossview(tpc, view_index, extra_name=extra_name)

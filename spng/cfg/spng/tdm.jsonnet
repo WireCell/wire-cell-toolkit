@@ -18,8 +18,8 @@ local dnnroi = import "dnnroi.jsonnet";
 
 local tlas = import "tlas.jsonnet";
 
-/// Return an object with all possible subgraphs for one tpc
-local one_tpc(tpc, control) = {
+/// Return an object with various TDM subgraphs for one tpc
+function(tpc, control) {
 
     // allow dumping of some details
     tpc: tpc,
@@ -90,14 +90,19 @@ local one_tpc(tpc, control) = {
 
     // Node: 1->3. A subgraph consuming IFrame and producing 3 crossview
     // tensors.  It excludes gauss and dnnroi filtered processing.
-    graph_crossview: pg.components([
-        $.frame_direct_unpack,
-        $.unpack_to_decon,
-        $.crossview_filters,
-        $.filter_threshold,
-        $.threshold_crossviews,
-        $.crossviews_repack
-    ]),
+    graph_crossview: pg.intern(
+        innodes=[$.frame_direct_unpack],
+        centernodes=[
+            $.unpack_to_decon,
+            $.crossview_filters,
+            $.filter_threshold,
+            $.threshold_crossviews,
+        ],
+        outnodes=[
+            $.crossviews_repack
+        ],
+        // note, edges are handled already
+    ),
 
     // Node: 2x3 -> 3.  Connect the dnnroi filters and output of crossviews
     dnnroi_prepare: dnnroi.prepare(tpc.name, filters.dnnroi, $.crossfan),
@@ -130,39 +135,4 @@ local one_tpc(tpc, control) = {
 
 
 
-};
-
-tlas.single_tpc(one_tpc)
-
-// function(detname="pdhd", tpcid="tpc0", stage="decon_pack", main=true)
-//     local det = detconf[detname];
-//     local tpc = det.tpc[tpcid];
-//     // fixme: support "alltpcs" as loop over what follows
-
-//     local stages = one_tpc(tpc);
-//     local graph = stages[stage];
-//     if main == true || main == "true"
-//     then pg.main(graph, 'Pgrapher', plugins=["WireCellSpng"])
-//     else graph
-
-
-
-
-
-        // // connect groups
-        // // 1 frame -> 1frame tensor set + nview tenors
-        // input_pack: pg.intern(innodes=[self.input_data],
-        //                       outnodes=[self.input_data, self.decon_pack],
-        //                       oports=[self.input_data.oports[0]]+self.decon_pack.oports,
-        //                       edges=[
-        //                           pg.edge(self.input_data, self.decon_pack, g+1, g)
-        //                           for g in wc.iota(std.length(tpc.view_groups))]),
-
-        // // short circuit convolution->gauss filter.
-        // // More generally we must fanout to 3 filter types.
-        // input_gauss: pg.intern(innodes=[self.input_pack],
-        //                        outnodes=[self.input_pack, filters.gauss],
-        //                        edges=[
-        //                            pg.edge(self.input_pack, filters.gauss, v+1, v)
-        //                            for v in [0,1,2]]),
-        
+}

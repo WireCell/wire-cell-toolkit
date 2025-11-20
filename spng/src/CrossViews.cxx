@@ -1,5 +1,7 @@
 #include "WireCellSpng/CrossViews.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/Util.h"
+#include "WireCellSpng/RayGridOG.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellIface/IAnodePlane.h"
 
@@ -18,7 +20,7 @@ namespace WireCell::SPNG {
 
     CrossViews::CrossViews()
         : FaninBase<ITorchTensor>("CrossViews", "spng") { }
-            
+
 
     void CrossViews::configure(const WireCell::Configuration& config)
     {
@@ -48,32 +50,23 @@ namespace WireCell::SPNG {
         // We don't are about the sem per se but want to turn off autograd
         TorchSemaphore sem(this->context());
 
+        log->debug("anode={} aux1={} aux2={} targ={} with {} faces",
+                   anode->ident(), aux1_index(), aux2_index(), targ_index(), nfaces);
+
         // Transfer WCT/C++ ray grid to a Torch version for each face.
         for (size_t find=0; find<nfaces; ++find) {
-
 
             const int face_ident = m_cfg.face_idents[find];
             auto iface = anode->face(face_ident);
 
             auto iwireface = anode->face(face_ident);
             const auto& coords = iwireface->raygrid();
-            const auto& centers = coords.centers();
-            const auto& pitch_dirs = coords.pitch_dirs();
-            const auto& pitch_mags = coords.pitch_mags();
-            auto next_rays = centers;
-            for (int ilayer = 0; ilayer < coords.nlayers(); ++ilayer) {
-                next_rays[ilayer] += pitch_dirs[ilayer]*pitch_mags[ilayer];
-            }
-            auto raygrid_views = torch::zeros({5, 2, 2});
-            // Hard-wire layer the indices 
-            std::vector<int> layers = {0, 1, aux1_index()+2, aux2_index()+2, targ_index()+2};
-            for (int layer_count=0; layer_count<5; ++layer_count) {
-                const int ilayer = layers[layer_count];
-                raygrid_views.index_put_({layer_count, 0, 0}, centers[ilayer][2]);
-                raygrid_views.index_put_({layer_count, 0, 1}, centers[ilayer][1]);
-                raygrid_views.index_put_({layer_count, 1, 0}, next_rays[ilayer][2]);
-                raygrid_views.index_put_({layer_count, 1, 1}, next_rays[ilayer][1]);
-            }
+
+            std::vector<int64_t> layers = {0, 1,
+                                           aux1_index()+2,
+                                           aux2_index()+2,
+                                           targ_index()+2};
+            auto raygrid_views = to_spng_views(coords, layers);
 
             // Construct ray grid coordinates and move to device.
             auto& face_view = m_face_view_info[find];
@@ -101,6 +94,7 @@ namespace WireCell::SPNG {
                 }
             }
                 
+
             // Go through faces again to map the wires in each face to its
             // channels and vice versa
             for (size_t find=0; find<nfaces; ++find) {
@@ -120,6 +114,7 @@ namespace WireCell::SPNG {
                 view_info.seg = torch::zeros({nwires},torch::kInt32);
 
                 // Iterate along the wire array
+                int n_no_channels = 0;
                 for (int wind=0; wind<nwires; ++wind) {
                     auto iwire = iwires[wind];
                     const int chid = iwire->channel();
@@ -127,6 +122,7 @@ namespace WireCell::SPNG {
                     if (cit == chid_to_index.end()) {
                         log->warn("no channel for wire index:{}, chID:{} fID:{}, fIND:{}, pIND:{}",
                                   wind, chid, face_ident, find, pind);
+                        ++n_no_channels;
                         continue;
                     }
                     const int cind = cit->second;
@@ -134,14 +130,9 @@ namespace WireCell::SPNG {
                     view_info.c2w[cind] = wind;
                     view_info.seg[wind] = iwire->segment();
                 }
-
-                // Warn user if extra channels are given.
-                for (int cind=0; cind<nchans; ++cind) {
-                    if (view_info.c2w[cind].item<int>() >= 0) {
-                        continue;
-                    }
-                    log->warn("no wire for tensor channel/row {}, fID:{}, fIND:(), pIND:{}",
-                              cind, face_ident, find, pind);
+                if (n_no_channels) {
+                    log->warn("no channel for {} out of {} wires in face index={} ident={}, plane index={}",
+                              n_no_channels, nwires, find, face_ident, pind);
                 }
 
                 view_info.to(device());              
@@ -170,8 +161,12 @@ namespace WireCell::SPNG {
             if (ten.dim() == 2) {
                 ten = ten.unsqueeze(0);
             }
-            else {
+            else if (ten.dim() == 3) {
                 batched = true;
+            }
+            else {
+                log->critical("unsupported tensor shape on input {}: {}", ind, to_string(ten));
+                raise<ValueError>("bad tensor shape");
             }
             if (ten.dtype() != torch::kBool) {
                 log->warn("coercing input {} to bool with threshold at 0.0", ind);
@@ -186,6 +181,9 @@ namespace WireCell::SPNG {
                           ind, nchans_data, nchans_view);
                 // for now, pray
             }
+
+            // (nbatch, nchannel, ntick)
+            log->debug("tensor on input {}: {}", ind, to_string(ten));
 
             inputs.push_back(ten);
         }
@@ -300,26 +298,50 @@ namespace WireCell::SPNG {
     torch::Tensor CrossViews::do_face(const FaceViews& face_info,
                                       std::vector<torch::Tensor>& inputs)
     {
+        // input: (nbatch, nchan, ntick)
+
         std::vector<torch::Tensor> wire_tensors(0);
+
+        const auto nbatch = inputs[0].size(0);
+        const auto nticks = inputs[0].size(-1);
+        
+        // eg, nbatch=1, nticks=6000
+        log->debug("do_face nbatch={} nticks={}", nbatch, nticks);
 
         // Convert from (nbatch,nchan,ntick) to (nbatch*ntick,nwire).  Each wire
         // tensor has same size dim=0.
         for (size_t vind=0; vind<3; ++vind) {
+
             auto input = inputs[vind];
-            auto ten = input.index({Ellipsis, face_info.views[vind].w2c, Ellipsis});
+            // (nbatch, nchan, ntick)
+            log->debug("do_face view:{}: input:{}", vind, to_string(input));
+
+            auto ten = input.index({"...", face_info.views[vind].w2c, Slice()});
+            // (nbatch, nwire, ntick)
+            log->debug("do_face view:{}: index:{}", vind, to_string(ten));
+
             ten = ten.transpose(-1, -2);
+            // (nbatch, ntick, nwire)
+            log->debug("do_face view:{}: trans:{}", vind, to_string(ten));
+
             ten = ten.reshape({-1, ten.size(-1)});
+            // (nbatch*ntick, nwire)
+            log->debug("do_face view:{}: shape:{}", vind, to_string(ten));
             wire_tensors.push_back(ten);
         }
 
-        // Give semantic aliases.
         const auto& targ_info = face_info.views[targ_index()];
-        const auto& targ_wires = wire_tensors[targ_index()];
-        const int targ_nwires = targ_wires.size(-2);
 
-        auto nbatch = targ_wires.size(0);
-        auto nticks = targ_wires.size(-1);
-        
+        // (nbatch*ntick, nwire)
+        const auto& targ_wires = wire_tensors[targ_index()];
+        const auto& aux1_wires = wire_tensors[aux1_index()];
+        const auto& aux2_wires = wire_tensors[aux2_index()];
+
+        log->debug("do_face aux1_wires={} aux2_wires={} targ_wires={}",
+                   to_string(aux1_wires),
+                   to_string(aux2_wires),
+                   to_string(targ_wires));
+
         // Initialize the "cross views" tensor in the wires basis.  Pixel values
         // encode four mutually exclusive values: 1 is "mp1" (name coined here,
         // target is true, both cross-views false), 2 is mp2 (target false, both
@@ -327,15 +349,22 @@ namespace WireCell::SPNG {
         // (all three views false).  Shape: (nbatch, nwire, ntick)
         torch::Tensor cross_views_wires = torch::zeros({
                 nbatch, targ_info.nwires(), nticks}, torch::kInt32);
+        log->debug("do_face cross_views_wires: {}", to_string(cross_views_wires));
+        // (nbatch, nwire, ntick)
 
-        const auto& aux1_wires = wire_tensors[aux1_index()];
-        const auto& aux2_wires = wire_tensors[aux2_index()];
-        const int aux1_nwires = aux1_wires.size(-2);
+        const long int targ_nwires = targ_wires.size(1);
+        // (nbatch*ntick, nwire)
+        cross_views_wires = cross_views_wires.transpose(-1, -2).reshape({-1, targ_nwires});
+        log->debug("do_face cross_views_wires: {}", to_string(cross_views_wires));
 
+
+        // aux1 shape (nbatch*ntick, nwire_1)
         // Loop over nbatch*ntick "rows" of different sizes nwire.
-        for (long int irow = 0; irow < aux1_nwires; ++irow) {
+        const long int nrows = targ_wires.size(0);
+        for (long int irow = 0; irow < nrows; ++irow) {
 
             // 1D along each nwire size
+            // nwires_aux1
             auto aux1_row = aux1_wires.index({irow});
             auto aux2_row = aux2_wires.index({irow});
             
@@ -346,11 +375,12 @@ namespace WireCell::SPNG {
             // Form crossing pairs of wires
             auto cross = torch::zeros({aux1_true.size(0), aux2_true.size(0), 2},
                                       tensor_options(torch::kInt32));
-            cross.index_put_({Ellipsis, 1}, aux2_true);
+            cross.index_put_({"...", 1}, aux2_true);
             cross = cross.permute({1, 0, 2});
-            cross.index_put_({Ellipsis, 0}, aux1_true);
+            cross.index_put_({"...", 0}, aux1_true);
             cross = cross.reshape({-1, 2});
             // Now shape: (ncrossings, 2 wire indices one in each view)
+            log->debug("row {} of {} cross:{}", irow, nrows, to_string(cross));
 
             // Get the ray indices for each plane/view
             auto r1 = cross.index({Slice(), 0});
@@ -369,8 +399,11 @@ namespace WireCell::SPNG {
             auto view3_short = torch::tensor(4, tensor_options(torch::kInt32));
 
             // Convert the locations to pitch indices
-            // 1D, small, varied
+            // 1D, (possibly many)
+            log->debug("row {} of {} view3_locs:{}", irow, nrows, to_string(view3_locs));
             auto results = face_info.raygrid.pitch_index( view3_locs, view3_short );
+
+            log->debug("row {} of {} raygrid:{}", irow, nrows, to_string(results));
 
             // Make sure the returned indices are within the active volume
             // 1D, small, varied
@@ -380,17 +413,29 @@ namespace WireCell::SPNG {
                         {torch::where((results >= 0) & (results < targ_nwires))[0]}
                         )));
 
+            log->debug("row {} of {} unique:{}", irow, nrows, to_string(results));
+
             auto targ_row = targ_wires.index({irow, results});
 
-            // Start by setting all target high wires as MP1.
+            // |-----+--------+-------|
+            // | MP# | target | cross |
+            // |-----+--------+-------|
+            // |   0 | low    | low   |
+            // |   1 | HIGH   | low   |
+            // |   2 | low    | HIGH  |
+            // |   3 | HIGH   | HIGH  |
+            // |-----+--------+-------|
+
+            // MP1 and MP3 have target=HIGH.  Start by marking them all MP1
             auto targ_true = torch::nonzero(targ_row);
+            log->debug("row {} of {} targ_true:{}", irow, nrows, to_string(targ_true));
             cross_views_wires.index_put_({irow, targ_true}, 1);
 
             // Overwrite some with MP3, MP3 means a high wire in the target
             // plane overlaps with a crossing pair in the other two planes
             cross_views_wires.index_put_({irow, results.index({targ_true})}, 3);
         
-            // MP2 means a low wire in the target plane
+            // MP0 and MP2 have target=low
             // overlaps with a crossing pair in the other two planes.
             auto targ_false = torch::nonzero(targ_row == false);
             cross_views_wires.index_put_({irow, results.index({targ_false})}, 2);

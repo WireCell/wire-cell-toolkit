@@ -12,6 +12,9 @@ base {
   // redefine the detector volumes with the cryostat side included
   det : {
 
+      // fixme: it's really bafd to have this here
+      local nanodes=std.extVar("nanodes"),
+
       // The "faces" is consumed by, at least, the Drifter and
       // AnodePlane.  The "wires" number is used to set
       // AnodePlane.ident used to lookup the anode in WireSchema.
@@ -91,7 +94,7 @@ base {
                   }
 
               ],
-          } for n in std.range(0,std.extVar("nanodes")-1)],
+          } for n in std.range(0,nanodes-1)],
 
       // This describes some rough, overall bounding box.  It's not
       // directly needed but can be useful on the Jsonnet side, for

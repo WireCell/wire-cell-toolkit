@@ -8,7 +8,7 @@ local pg = import "pgraph.jsonnet";
 {
     // Simple torch tensor set sink.  
     pickle_tensor_set(filename, digitize=null): pg.pnode({
-        type: 'TensorSetPickleSink',
+        type: 'SPNGTensorSetPickleSink',
         name: filename, 
         data: {
             filename: filename,

@@ -233,6 +233,7 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
             WireCell::SPNG::RayGrid::Coordinates(m_raygrid_views);
     m_raygrid_coords.to(m_device);
 
+    // for u: target=0, aux_l=2, aux_m=1
     log->debug("planes: target={}, aux_l={}, aux_m={}",
                m_target_plane_index, m_aux_plane_l_index, m_aux_plane_m_index);
 
@@ -276,11 +277,14 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     //     output_file.close();
     // }
 
-    // tensor shapes, eg: (1, 480, 6000)
 
-    // log->debug("aux_tensor_l={} [start]", to_string(aux_tensor_l));
-    // log->debug("aux_tensor_m={} [start]", to_string(aux_tensor_m));
-    // log->debug("target_tensor_n={} [start]", to_string(target_tensor_n));
+    // (nbatch, nchannel, ntick) eg for u:
+    // aux_tensor_l=(1, 480, 6000) dtype:double [start] 
+    // aux_tensor_m=(1, 800, 6000) dtype:double [start] 
+    // target_tensor_n=(1, 800, 6000) dtype:double [start] 
+    log->debug("aux_tensor_l={} [start]", to_string(aux_tensor_l));
+    log->debug("aux_tensor_m={} [start]", to_string(aux_tensor_m));
+    log->debug("target_tensor_n={} [start]", to_string(target_tensor_n));
 
     //Transform into bool tensors (activities)
     // auto tester = torch::zeros({1}).to(m_device);
@@ -288,12 +292,15 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     aux_tensor_l = (pool(aux_tensor_l) > 0);
     aux_tensor_m = (pool(aux_tensor_m) > 0);
 
-    // eg (1, 480, 6000) -> (1, 480, 1500)
     target_tensor_n = pool(target_tensor_n);
 
-    // log->debug("aux_tensor_l={} [pool]", to_string(aux_tensor_l));
-    // log->debug("aux_tensor_m={} [pool]", to_string(aux_tensor_m));
-    // log->debug("target_tensor_n={} [pool]", to_string(target_tensor_n));
+    // for u:
+    // aux_tensor_l=(1, 480, 1500) dtype:bool [pool] 
+    // aux_tensor_m=(1, 800, 1500) dtype:bool [pool] 
+    // target_tensor_n=(1, 800, 1500) dtype:double [pool] 
+    log->debug("aux_tensor_l={} [pool]", to_string(aux_tensor_l));
+    log->debug("aux_tensor_m={} [pool]", to_string(aux_tensor_m));
+    log->debug("target_tensor_n={} [pool]", to_string(target_tensor_n));
 
     if (m_debug_output) {
         to_save.insert("aux_tensor_l", aux_tensor_l);
@@ -304,7 +311,8 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     auto nbatch = target_tensor_n.size(0);
     auto nsamples = target_tensor_n.size(-1);
 
-    // log->debug("Running on nbatches:{} nsamples:{}", nbatch, nsamples);
+    // for u: Running on nbatches:1 nsamples:1500
+    log->debug("Running on nbatches:{} nsamples:{}", nbatch, nsamples);
 
     torch::Tensor output_tensor_active = torch::zeros({
         nbatch,
@@ -313,14 +321,19 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
         torch::TensorOptions(m_device).dtype(torch::kFloat64));
     torch::Tensor output_tensor_inactive = torch::zeros_like(output_tensor_active, torch::TensorOptions(m_device).dtype(torch::kFloat64));
 
-    // log->debug("output_tensor_active={}", to_string(output_tensor_active));
+    // for u: output_tensor_active=(1, 1148, 1500) dtype:double
+    log->debug("output_tensor_active={}", to_string(output_tensor_active));
     auto l_rows = aux_tensor_l.index({"...", m_plane_wires_to_channels[m_aux_plane_l_index], torch::indexing::Slice()});
     auto m_rows = aux_tensor_m.index({"...", m_plane_wires_to_channels[m_aux_plane_m_index], torch::indexing::Slice()});
     auto target_rows = target_tensor_n.index({"...", m_plane_wires_to_channels[m_target_plane_index], torch::indexing::Slice()});
     
-    // log->debug("l_rows={} [index]", to_string(l_rows));
-    // log->debug("m_rows={} [index]", to_string(m_rows));
-    // log->debug("target_rows={} [index]", to_string(target_rows));
+    // for u:
+    // l_rows=(1, 480, 1500) dtype:bool [index] 
+    // m_rows=(1, 1148, 1500) dtype:bool [index] 
+    // target_rows=(1, 1148, 1500) dtype:double [index] 
+    log->debug("l_rows={} [index]", to_string(l_rows));
+    log->debug("m_rows={} [index]", to_string(m_rows));
+    log->debug("target_rows={} [index]", to_string(target_rows));
 
     l_rows = l_rows.transpose(-1, -2);
     l_rows = l_rows.reshape({-1, l_rows.size(-1)});
@@ -331,16 +344,22 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
     target_rows = target_rows.transpose(-1, -2);
     target_rows = target_rows.reshape({-1, target_rows.size(-1)});
     
-    // log->debug("l_rows={} [reshape]", to_string(l_rows));
-    // log->debug("m_rows={} [reshape]", to_string(m_rows));
-    // log->debug("target_rows={} [reshape]", to_string(target_rows));
+    // for u:
+    // l_rows=(1500, 480) dtype:bool [reshape] 
+    // m_rows=(1500, 1148) dtype:bool [reshape] 
+    // target_rows=(1500, 1148) dtype:double [reshape] 
+    log->debug("l_rows={} [reshape]", to_string(l_rows));
+    log->debug("m_rows={} [reshape]", to_string(m_rows));
+    log->debug("target_rows={} [reshape]", to_string(target_rows));
 
     output_tensor_active = output_tensor_active.transpose(-1, -2).reshape({-1, m_plane_nwires[m_target_plane_index]});
     output_tensor_inactive = output_tensor_inactive.transpose(-1, -2).reshape({-1, m_plane_nwires[m_target_plane_index]});
 
-    // log->debug("output_tensor_active={}", to_string(output_tensor_active));
+    // for u: output_tensor_active=(1500, 1148) dtype:double 
+    log->debug("output_tensor_active={}", to_string(output_tensor_active));
 
-    for (long int irow = 0; irow < l_rows.size(-2); ++irow) {
+    const long int nrows = l_rows.size(-2);
+    for (long int irow = 0; irow < nrows; ++irow) {
 
         auto l_row = l_rows.index({irow});
         auto m_row = m_rows.index({irow});
@@ -353,12 +372,13 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
         // log->debug("row:{} l_hi:{} m_hi:{}", irow, to_string(l_hi), to_string(m_hi));
 
         //Make Nl x Nm pairs of indices of the active wires (rays) in each plane
-        auto cross = torch::zeros({l_hi.size(0), m_hi.size(0), 2}, torch::TensorOptions(m_device).dtype(l_hi.dtype()));
+        auto cross = torch::zeros({l_hi.size(0), m_hi.size(0), 2},
+                                  torch::TensorOptions(m_device).dtype(l_hi.dtype()));
         cross.index_put_({"...", 1}, m_hi);
         cross = cross.permute({1, 0, 2});
         cross.index_put_({"...", 0}, l_hi);
         cross = cross.reshape({-1, 2});
-        // log->debug("row:{} cross:{}", irow, to_string(cross));
+        log->debug("row:{} cross:{}", irow, to_string(cross));
         // cross becomes (small number, 2). 
 
         //Get the ray indices for each plane/view
@@ -381,6 +401,7 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
             view3_locs,
             view3_short
         );
+        log->debug("row: {} of {} raygrid:{}", irow, nrows, to_string(results));
         
         // log->debug("row: {} results:{}", irow, to_string(results));
 
@@ -398,8 +419,7 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
         results = std::get<0>(at::_unique(results.index(
             {torch::where((results >= 0) & (results < m_plane_nwires[m_target_plane_index]))[0]}
         )));
-
-        // log->debug("row: {} unique:{}", irow, to_string(results));
+        log->debug("row: {} of {} unique:{}", irow, nrows, to_string(results));
 
         //Get the corresponding statuses in the target plane
         // auto target_row = target_rows.index({results, irow});
@@ -420,15 +440,23 @@ bool WireCell::SPNG::NoTileMPCoincidence::operator()(const input_pointer& in, ou
 
     convert_wires_to_channels(output_tensor_active, m_plane_channels_to_wires[m_target_plane_index]);
     convert_wires_to_channels(output_tensor_inactive, m_plane_channels_to_wires[m_target_plane_index]);
-    // log->debug("output_tensor_active={} [tochan]", to_string(output_tensor_active));
-    // log->debug("output_tensor_inactive={} [tochan]", to_string(output_tensor_active));
+
+    // for u:
+    // output_tensor_active=(1500, 800) dtype:double [tochan] 
+    // output_tensor_inactive=(1500, 800) dtype:double [tochan] 
+    log->debug("output_tensor_active={} [tochan]", to_string(output_tensor_active));
+    log->debug("output_tensor_inactive={} [tochan]", to_string(output_tensor_active));
     // now eg, (1500, 800)
 
 
+    // for u:
+    // output_tensor_active=(1, 800, 1500) dtype:double [reshape] 
+    // output_tensor_inactive=(1, 800, 1500) dtype:double [reshape] 
     output_tensor_active = output_tensor_active.reshape({nbatch, nsamples, -1}).transpose(-1, -2);
     output_tensor_inactive = output_tensor_inactive.reshape({nbatch, nsamples, -1}).transpose(-1, -2);
-    // log->debug("output_tensor_active={} [reshape]", to_string(output_tensor_active));
-    // log->debug("output_tensor_inactive={} [reshape]", to_string(output_tensor_active));
+
+    log->debug("output_tensor_active={} [reshape]", to_string(output_tensor_active));
+    log->debug("output_tensor_inactive={} [reshape]", to_string(output_tensor_active));
     // now eg, (1, 800, 1500)
 
     // TODO: set md?

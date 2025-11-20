@@ -1,22 +1,29 @@
-// This provides various "full-graph" constructions.
-//
-// Each function takes a "system" object, see system.jsonnet and par-function arguments and options.
-//
-// A top level Jsonnet may then define a system and call job function.
+// This provides various "full-sub-graph" constructions.  Each function is
+// provided with an upstream source node and a downstream sink node of the
+// proper multiplicity.
 
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local detsim = import "detsim.jsonnet";
+local frame = import "frame.jsonnet";
 
 {
-    depos_to_adc(system, input_filename, output_filename_pattern)::
-        local sim = detsim(system.scope.det, system.scope.tpcs, system.control);
+    /// Connect depo source to adc frame sink with drift and detsim.  Sink is
+    /// expected to have one input port per tpc.
+    depos_to_adc_frame(det, depos_source, adc_sink, control)::
+        local sim = detsim(det, control);
         local nout = std.length(sim.oports);
-        local output_filenames = [output_filename_pattern % ind for ind in wc.iota(nout)];
-        local depos_in = system.io.depo_source(input_filename);
-        local adc_outs = pg.crossline([system.io.frame_sink(ofn, digitize=true) for ofn in output_filenames]);
-        local head = pg.pipeline([depos_in, sim]);
-        pg.shuntline(head, adc_outs)
-        // local tail = pg.shuntline(sim, adc_outs);
-        // pg.components([head, tail]),
+        local head = pg.pipeline([depos_source, sim]);
+        pg.shuntline(head, adc_sink),
+
+    /// Connect ADC frame source to ADC tensorset sink as frame to TDM tensor
+    /// converters in between.  Source and sink expected to have per-TPC ports.
+    frame_to_tensorset(det, adc_frame_source, adc_tensorset_sink, control)::
+        local converters = pg.crossline([
+            frame.to_tdm(tpc, control=control)
+            for tpc in det.tpcs]);
+        pg.shuntlines([adc_frame_source, converters, adc_tensorset_sink]),
+
+
+
 }

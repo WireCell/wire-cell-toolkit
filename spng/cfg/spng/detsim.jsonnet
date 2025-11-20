@@ -9,12 +9,9 @@ local pg = import "pgraph.jsonnet";
 local drift = import "drift.jsonnet";
 local sim = import "sim.jsonnet";
 
-function(det, tpcs=[], control={})
-    local the_tpcs = if std.length(tpcs) == 0
-                     then det.tpcs
-                     else tpcs;
+function(det, control={})
     local drifter = drift(det, control).drifter;
-    local the_sims = [sim(tpc, control) for tpc in the_tpcs];
+    local the_sims = [sim(tpc, control) for tpc in det.tpcs];
     local pipes = [pg.pipeline([
         the_sim.depo_transform,
         the_sim.reframer,
@@ -23,7 +20,7 @@ function(det, tpcs=[], control={})
     ]) for the_sim in the_sims];
 
     local dr = if std.length(pipes) == 1
-               then pipes
+               then pipes[0]
                else pg.fan.fanout('DepoSetFanout', pipes);
 
 

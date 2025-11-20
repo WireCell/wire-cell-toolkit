@@ -39,6 +39,13 @@ local pg = import "pgraph.jsonnet";
     frame_array_source: fileio.frame_file_source,
     frame_array_sink: fileio.frame_file_sink,
 
+    // A non-file sink.  It merely spews a bit of summary to the debug log.
+    frame_null_sink(name, digitize=null): pg.pnode({
+        type: "DumpFrames",
+        name: name,
+        data: {},
+    }, nin=1, nout=0),
+
     // This maps the WCT frame array data model to HDF.  There is currently only
     // a sink.  DNNROI training consumes files of this type.  Note, it does
     // substantial processing of the data prior to saving so does not exactly

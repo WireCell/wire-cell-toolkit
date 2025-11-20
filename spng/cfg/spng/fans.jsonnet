@@ -3,13 +3,13 @@ local pg = import "pgraph.jsonnet";
 
 {
     fanin(name, multiplicity=2, type='Tensor'):: pg.pnode({
-        type: "SPNG"+type+"Fanin",
+        type: "SPNGFanin"+type+'s',
         name: name,
         data: { multiplicity: multiplicity },
     }, nin=multiplicity, nout=1),
 
     fanout(name, multiplicity=2, type='Tensor'):: pg.pnode({
-        type: "SPNG"+type+"Fanout",
+        type: "SPNGFanout"+type+'s',
         name: name,
         data: { multiplicity: multiplicity },
     }, nin=1, nout=multiplicity),
@@ -20,7 +20,7 @@ local pg = import "pgraph.jsonnet";
         local Nu = std.length(upstream.oports);
         local Nd = std.length(downstreams);
         local fans = [pg.pnode({
-            type: 'SPNGTensorFanout',
+            type: 'SPNGFanoutTensors',
             name: upstream.name + 'fan' + std.toString(ifan) + extra_name,
             data: {
                 multiplicity: Nd,

@@ -9,6 +9,8 @@
 
     Note: this also fixes Nyquist bin handling which is currently still needed
     in the original LMN.h.
+
+    For a node that uses this, see Resample.
 */
 #ifndef WIRECELL_SPNG_LMN_TORCHLMN
 #define WIRECELL_SPNG_LMN_TORCHLMN
@@ -91,7 +93,10 @@ namespace WireCell::SPNG::LMN {
         kInterpolation,         // for sampling of instantaneous function
         kIntegral,              // for integral over sample period
         kEnergy,                // for samples of probability amplitude
+
     };
+    /// Convert a string describing a Normalization to a Normalization.
+    Normalization norm(std::string name);
 
     /**
      * @brief Combine the primitive operations into a full LMN resampling.

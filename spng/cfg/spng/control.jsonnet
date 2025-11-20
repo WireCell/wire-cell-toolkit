@@ -16,8 +16,8 @@
         data: {}
     },
 
-    bundle(device="cpu", rng=$.random(), dft=$.fftwdft):: {
-        device: device, rng:rng, dft:dft
+    bundle(device="cpu", rng=$.random(), dft=$.fftwdft, verbosity=0):: {
+        device: device, rng:rng, dft:dft, verbosity:verbosity
     },
 
 }

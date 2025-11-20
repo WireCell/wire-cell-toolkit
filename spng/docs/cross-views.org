@@ -1,12 +1,40 @@
 #+title: CrossViews
 
-* WCT OSP's equivalent
+* CrossViews MP numbers
 
-WCT OSP produces "MP2/MP3" images as 2 inputs to DNNROI.  These are formed from
-3 planes of initial ROI channel-vs-tick images.  If a channel in a "target" view
-has a high channel for which any wire is near a crossing of wires in the other
-two channels that have high channels, the MP3 pixel is set as "on".  OTOH, if
-that target view channel is NOT high then MP2 pixel is set as "on".
+CrossViews adds two more "MP Numbers" from what OSP constructs:
+
+|-----+--------+-------|
+| MP# | target | cross |
+|-----+--------+-------|
+|   0 | low    | low   |
+|   1 | HIGH   | low   |
+|   2 | low    | HIGH  |
+|   3 | HIGH   | HIGH  |
+|-----+--------+-------|
+
+The "target" and "cross" and the MP number are *wire* attributes.  If the
+channel(s) connected to the wire(s) measure above-threshold signal then the wire
+is marked "HIGH", else "low".
+
+For the "target" wire, this marking is straightforward.  However, when more than
+one segment feeds a channel there is ambiguity as to which segment received
+induced current from activity.
+
+The "cross" refers to the collection of pairs of wires that cross near the
+target wire.  The "low" value means all such crossing pairs were themselves
+"low" while "HIGH" means at least one pair of wires were both "HIGH".
+
+Again, single-segment vs multi-segment channels make interpreting "HIGH"
+ambiguous.  It is possible that no activity is near a given target and yet it
+has a HIGH cross.  
+
+With the ambiguity, we may think of the MP Numbers to mean:
+
+- MP0 :: The measured (lack of) activity in the target channel is likely true.
+- MP1 :: The measured activity in the target channel is likely false.
+- MP2 :: The measured (lack of) activity in the target channel is likely false.
+- MP3 :: The measured activity in that target channel is likely true.
 
 * SPNG's extension and difference
 

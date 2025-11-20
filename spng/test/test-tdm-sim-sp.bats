@@ -45,3 +45,16 @@ bats_load_library wct-bats.sh
     [ -n "$(grep 'DepoTransform:tpc3.*output: call=0, ndepos_used=8087' muon.log)" ]
 
 }
+
+@test "spng sim crossviews" {
+    cd_tmp file
+    local cfgdir=$(srcdir spng)/cfg
+
+    wire-cell -L debug -l stderr \
+                     -P $cfgdir \
+                     -A engine=Pgrapher \
+                     -A input=muon-anode%d.npz \
+                     -A output=muon-crossviews-anode%d.pkl \
+                     spng/test-crossviews.jsonnet
+
+}

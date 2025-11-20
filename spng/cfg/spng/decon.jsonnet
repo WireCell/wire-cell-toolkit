@@ -130,14 +130,16 @@ local pg = import "pgraph.jsonnet";
         $.kernel_convolve(name, kernel, co.decon_resp, tag=""),
 
     
-    /// Return nodes[0] if length one else return a subgraph fanning in the nodes
+    /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.
     group_fanin(nodes)::
         local n = std.length(nodes);
         local fanin = pg.pnode({
-            type: 'SPNGFaninTensors',
+            type: 'SPNGReduce',
             name: std.join('-', [node.name for node in nodes]),
             data: {
                 multiplicity: n,
+                operation: "cat",
+                dim: -2         // concatenate along channel dimension
             },
         }, nin=n, nout=1);
         

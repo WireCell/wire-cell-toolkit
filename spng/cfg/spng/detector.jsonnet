@@ -71,8 +71,8 @@ local known_detectors = import "detectors.jsonnet";
     },
 
     /// Define some liquid argon.
-    lar(DL,                     // Longitudinal diffusion constant
-        DT,                     // Transverse diffusion constant
+    lar(DL,                     // Longitudinal diffusion constant, O(10 * wc.cm2/wc.s)
+        DT,                     // Transverse diffusion constant, O(10 * wc.cm2/wc.s)
         lifetime,               // Electron lifetime
         drift_speed=1.6*wc.mm/wc.us, // Electron drift speed, assumes a certain applied E-field
         density=1.389*wc.g/wc.centimeter3, // LAr density
@@ -403,11 +403,18 @@ local known_detectors = import "detectors.jsonnet";
              else lar,
     },
 
-    /// Some components accept various control parameters.  This bundles them.
-    control(device="cpu", verbosity=0):: {
-        verbosity: verbosity, // 0:silent 1:one-per-exec 2:many-per-exec
-        device: device,   // "cpu", "cuda", "gpu0", "gpu1", ...
-    },
+    /// Return a detector with a subset of TPCs selected by ID numbers.
+    subset(det, tpc_idents)::
+        if std.length(tpc_idents) == 0
+        then det
+        else det { tpcs: [det.tpc[$.tpc_name(ident)] for ident in tpc_idents] },
+
+
+    // /// Some components accept various control parameters.  This bundles them.
+    // control(device="cpu", verbosity=0):: {
+    //     verbosity: verbosity, // 0:silent 1:one-per-exec 2:many-per-exec
+    //     device: device,   // "cpu", "cuda", "gpu0", "gpu1", ...
+    // },
 
     test: {
         adc: $.adc(),

@@ -2,6 +2,7 @@
 #include "WireCellSpng/TorchLMN.h"
 #include "WireCellSpng/Util.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/String.h"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
@@ -10,7 +11,26 @@
 
 namespace WireCell::SPNG::LMN {
 
+
     using WireCell::SPNG::nhalf;
+
+    Normalization norm(std::string name)
+    {
+        using WireCell::String::startswith;
+
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        if (startswith(name, "inter")) {
+            return Normalization::kInterpolation;
+        }
+        if (startswith(name, "integ")) {
+            return Normalization::kIntegral;
+        }
+        if (startswith(name, "energ")) {
+            return Normalization::kEnergy;
+        }
+        return Normalization::kUnknown;
+    }
+
 
     double gcd(double a, double b, double eps)
     {

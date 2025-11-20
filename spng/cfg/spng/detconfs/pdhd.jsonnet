@@ -29,10 +29,10 @@ local anodes = [
     for anode_ident in [0,1,2,3]];
 
 // These were taken from dunereco a0029f0fd0ec8821429abe568338da84fbc06057
-local lar = api.lar(DT=8.8 * wc.cm2 / wc.ns,
-                    DL= 4.0 * wc.cm2 / wc.ns,
-                    lifetime= 35.0 * wc.us,
-                    drift_speed= 1.60563* wc.mm / wc.us);
+local lar = api.lar(DT = 8.8 * wc.cm2 / wc.s,
+                    DL = 4.0 * wc.cm2 / wc.s,
+                    lifetime = 35.0 * wc.us,
+                    drift_speed = 1.60563* wc.mm / wc.us);
 local pirs(anode) = [
     api.plane_impact_response("a" + std.toString(anode.data.ident), plane,
                               tick=adc.tick,
