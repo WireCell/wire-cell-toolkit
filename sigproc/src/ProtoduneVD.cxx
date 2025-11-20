@@ -112,7 +112,7 @@ bool PDVD::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& chansi
     if (ave_coef1 > 0) {
         ave_coef = ave_coef / ave_coef1;
     }
-    const int achannel = chansig.begin()->first;
+    // const int achannel = chansig.begin()->first;
     // std::string filename = "scale_output"+ std::to_string(achannel)+"_"+std::to_string(ave_coef)+".txt";
     // std::ofstream outfile(filename);
     
