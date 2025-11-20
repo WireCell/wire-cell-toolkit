@@ -46,7 +46,27 @@ function(tpc, control) {
     // response decon is included.
     response_decon: decon.group_decon_view(tpc),
 
+
+
     unpack_to_decon: pg.shuntline($.frame_set_unpack, $.response_decon),
+
+    // FIXME: this is temporary.  We definitely do NOT want to leave this as-is.
+    // It is mathematically correct to apply the downsample after the FR*ER
+    // decon.  This means not having to do one downsample per filter.  In fact,
+    // it is even faster if we apply the downsample while FR*ER decon is still
+    // in Fourier space.  However, any downsampling done upstream of filtering
+    // requires the filter kernel to have its sample period adjusted.  For right
+    // now we do it after filtering.
+    downsampler(name):: pg.crossline([pg.pnode({
+        type:'Resampler',
+        name: tpc.name + name + "_downsample_v" + std.toString(view),
+        data: {
+            ratio: 0.25,
+            // fixme: do we need integral norm?
+        },
+    }, nin=1, nout=1) for view in [0,1,2]]),
+
+
 
     // Nodes: 3->3, each.  Apply the three types of time filters intended to follow
     // response decon.  These names are canonical.  Each detector must define
@@ -61,9 +81,12 @@ function(tpc, control) {
     // - gauss :: provides final signals to which ROIs are applied.
     local filter_names = ["gauss", "wiener", "dnnroi"],
     local filters = {
-        [filter]: decon.time_filter_views(tpc, filter)
+        [filter]: pg.shuntline(decon.time_filter_views(tpc, filter),
+                               $.downsampler(filter))
         for filter in filter_names
     },
+
+    
 
     // Node: 3->3*3. Fanout each view's decon result to each filter.  This provides a
     // single Pnode which we won't use except to add as a component. We will use
@@ -71,6 +94,7 @@ function(tpc, control) {
     decon_filters: fans.fanout_shuntline($.response_decon, [
         filters.gauss, filters.wiener, filters.dnnroi
     ]),
+
 
     // Node: 3->3.  Connect decons directly to wiener filters for running a job
     // that ends does not include dnnroi nor gauss.

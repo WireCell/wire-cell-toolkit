@@ -168,10 +168,10 @@ local wc = import "wirecell.jsonnet";
     shuntlines(nodes)::
         if std.length(nodes) == 0 then
             error('shuntlines got empty nodes array')
-        else if std.length(nodes) then
+        else if std.length(nodes) == 1 then
             nodes[0]
         else std.foldl(function(acc, item) $.shuntline(acc, item),
-                       std.slice(nodes, 1),
+                       nodes[1:],
                        nodes[0]),
 
     // Collect a set of subgraphs into a single graph represented by one pnode.
