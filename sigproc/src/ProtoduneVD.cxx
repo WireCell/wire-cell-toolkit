@@ -1277,7 +1277,7 @@ WireCell::Waveform::ChannelMaskMap PDVD::ShieldCouplingSub::apply(
 
     WireCell::Waveform::realseq_t medians = PDVD::CalcMedian_shieldCoupling_u(chansig);
 
-    const int achannel = chansig.begin()->first;
+    // const int achannel = chansig.begin()->first;
    
     
     // if(false){
