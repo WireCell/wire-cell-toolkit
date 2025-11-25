@@ -409,6 +409,16 @@
         else
             l,
 
+    // Return an int from possibly a string
+    intify(number)::
+        if std.type(number) == "string"
+        then std.parseInt(number)
+        else std.ceil(number),
+
+    // Return an object that has no more keys than in the given keys.  If obj
+    // does not have the key it is omitted.
+    object_with(obj, keys):: {[k]:obj[k] for k in keys if std.objectHas(obj, k)},
+
     // Flatten a list of lists of items to a list of items.
     flatten(lol):: [item for sublist in lol for item in sublist],
 
