@@ -105,7 +105,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         };
         torch::Tensor expected = to_tensor(expected_data);
         
-        torch::Tensor actual = resample(in, 2, 0);
+        torch::Tensor actual = resample_fourier(in, 2, 0);
         CHECK(check_tensor_close(actual, expected));
     }
     
@@ -134,7 +134,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         expected.narrow(0, 0, 1).copy_(to_tensor(exp_row1));
         expected.narrow(0, 1, 1).copy_(to_tensor(exp_row2));
         
-        torch::Tensor actual = resample(in, 8, 1);
+        torch::Tensor actual = resample_fourier(in, 8, 1);
         CHECK(check_tensor_close(actual, expected));
     }
     
@@ -158,7 +158,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         };
         torch::Tensor expected = to_tensor(expected_data).reshape({4, 1});
         
-        torch::Tensor actual = resample(in, 4, 0);
+        torch::Tensor actual = resample_fourier(in, 4, 0);
         CHECK(check_tensor_close(actual, expected));
     }
 
@@ -184,7 +184,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         };
         torch::Tensor expected = to_tensor(expected_data);
         
-        torch::Tensor actual = resample(in, 8, 0);
+        torch::Tensor actual = resample_fourier(in, 8, 0);
         CHECK(check_tensor_close(actual, expected));
     }
     
@@ -210,7 +210,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         };
         torch::Tensor expected = to_tensor(expected_data);
         
-        torch::Tensor actual = resample(in, 4, 0);
+        torch::Tensor actual = resample_fourier(in, 4, 0);
         CHECK(check_tensor_close(actual, expected));
     }
     
@@ -230,7 +230,7 @@ TEST_SUITE("LMN Resample (Frequency Domain)") {
         std::vector<std::complex<float>> expected_data = {DC, P1, {2.0f, 0.0f}, N1};
         torch::Tensor expected = to_tensor(expected_data).reshape({1, 4});
         
-        torch::Tensor actual = resample(in, 4, 1);
+        torch::Tensor actual = resample_fourier(in, 4, 1);
         CHECK(check_tensor_close(actual, expected));
     }
 }

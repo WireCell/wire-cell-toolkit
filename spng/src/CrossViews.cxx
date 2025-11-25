@@ -337,10 +337,9 @@ namespace WireCell::SPNG {
         const auto& aux1_wires = wire_tensors[aux1_index()];
         const auto& aux2_wires = wire_tensors[aux2_index()];
 
-        log->debug("do_face aux1_wires={} aux2_wires={} targ_wires={}",
-                   to_string(aux1_wires),
-                   to_string(aux2_wires),
-                   to_string(targ_wires));
+        log->debug("do_face aux1_wires={} sum={}", to_string(aux1_wires), torch::sum(aux1_wires).item<int>());
+        log->debug("do_face aux2_wires={} sum={}", to_string(aux2_wires), torch::sum(aux2_wires).item<int>());
+        log->debug("do_face targ_wires={} sum={}", to_string(targ_wires), torch::sum(targ_wires).item<int>());
 
         // Initialize the "cross views" tensor in the wires basis.  Pixel values
         // encode four mutually exclusive values: 1 is "mp1" (name coined here,
@@ -380,7 +379,9 @@ namespace WireCell::SPNG {
             cross.index_put_({"...", 0}, aux1_true);
             cross = cross.reshape({-1, 2});
             // Now shape: (ncrossings, 2 wire indices one in each view)
-            log->debug("row {} of {} cross:{}", irow, nrows, to_string(cross));
+            if (irow == 0) {
+                log->debug("row {} of {} cross:{}", irow, nrows, to_string(cross));
+            }
 
             // Get the ray indices for each plane/view
             auto r1 = cross.index({Slice(), 0});
@@ -400,10 +401,14 @@ namespace WireCell::SPNG {
 
             // Convert the locations to pitch indices
             // 1D, (possibly many)
-            log->debug("row {} of {} view3_locs:{}", irow, nrows, to_string(view3_locs));
+            if (irow == 0) {
+                log->debug("row {} of {} view3_locs:{}", irow, nrows, to_string(view3_locs));
+            }
             auto results = face_info.raygrid.pitch_index( view3_locs, view3_short );
 
-            log->debug("row {} of {} raygrid:{}", irow, nrows, to_string(results));
+            if (irow == 0) {
+                log->debug("row {} of {} raygrid:{}", irow, nrows, to_string(results));
+            }
 
             // Make sure the returned indices are within the active volume
             // 1D, small, varied
@@ -413,7 +418,9 @@ namespace WireCell::SPNG {
                         {torch::where((results >= 0) & (results < targ_nwires))[0]}
                         )));
 
-            log->debug("row {} of {} unique:{}", irow, nrows, to_string(results));
+            if (irow == 0) {
+                log->debug("row {} of {} unique:{}", irow, nrows, to_string(results));
+            }
 
             auto targ_row = targ_wires.index({irow, results});
 
@@ -428,7 +435,9 @@ namespace WireCell::SPNG {
 
             // MP1 and MP3 have target=HIGH.  Start by marking them all MP1
             auto targ_true = torch::nonzero(targ_row);
-            log->debug("row {} of {} targ_true:{}", irow, nrows, to_string(targ_true));
+            if (irow == 0) {
+                log->debug("row {} of {} targ_true:{}", irow, nrows, to_string(targ_true));
+            }
             cross_views_wires.index_put_({irow, targ_true}, 1);
 
             // Overwrite some with MP3, MP3 means a high wire in the target

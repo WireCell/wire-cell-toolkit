@@ -4,15 +4,15 @@ local fans = import "fans.jsonnet";
 
 {
     /// Apply Threshold on each view making a 3->3 subgraph
-    threshold_views(tpc, extra_name=""):: pg.crossline([pg.pnode(
+    threshold_views(tpc, extra_name="", control={verbosity:0}):: pg.crossline([pg.pnode(
         {
             type: 'SPNGThreshold',
             name: tpc.name + 'v' + std.toString(it.index),
-            data: it.value
+            data: it.value + control,
         }, nin=1, nout=1) for it in wc.enumerate(tpc.crossview_thresholds)]),
 
     /// One CrossViews node
-    crossview(tpc, view_index, extra_name="")::
+    crossview(tpc, view_index, extra_name="", control={verbosity:0})::
         pg.pnode({
             type: 'SPNGCrossViews',
             name: tpc.name + 'v' + std.toString(view_index) + extra_name,
@@ -21,21 +21,21 @@ local fans = import "fans.jsonnet";
                 target_index: view_index,
                 face_idents: tpc.faces,
                 multiplicity: 3,
-            },
+            } + control,
         }, nin=3, nout=1, uses=[tpc.anode]),
 
     /// A 3->3 with fans and crossviews in the middle.
     /// Connect a partial crossfan based on marking each view as crossed (1) or
     /// not (0) in view_crossed.
-    crossfan(tpc, view_crossed=[1,1,0], extra_name="")::
+    crossfan(tpc, view_crossed=[1,1,0], extra_name="", control={})::
         local ncrosses = wc.sum(view_crossed);
         local fanouts = [       // 3
             fans.fanout(tpc.name+'crossfan_v'+std.toString(view_index),
-                        ncrosses+1-view_crossed[view_index])
+                        ncrosses+1-view_crossed[view_index], control=control)
             for view_index in [0,1,2] ];
         local crossviews = [    // 3, sparse
             if view_crossed[view_index] == 1
-            then $.crossview(tpc, view_index, extra_name=extra_name)
+            then $.crossview(tpc, view_index, extra_name=extra_name, control=control)
             else null
             for view_index in [0,1,2] ];
         // less than or equal to 3
@@ -57,10 +57,10 @@ local fans = import "fans.jsonnet";
         
 
     /// Build a full cross views block producing a 3->3 subgraph with fully connected inner.
-    crossfanfull(tpc, extra_name="")::
-        local fanouts = [fans.fanout(tpc.name + 'crossfan_v'+std.toString(view_index), 3)
+    crossfanfull(tpc, extra_name="", control={})::
+        local fanouts = [fans.fanout(tpc.name + 'crossfan_v'+std.toString(view_index), 3, control=control)
                          for view_index in [0,1,2]];
-        local crossviews = [$.crossview(tpc, view_index, extra_name=extra_name)
+        local crossviews = [$.crossview(tpc, view_index, extra_name=extra_name, control=control)
                             for view_index in [0,1,2]];
         pg.intern(innodes=fanouts, outnodes=crossviews, 
                   edges=[

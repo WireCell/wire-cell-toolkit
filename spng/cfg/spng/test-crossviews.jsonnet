@@ -2,6 +2,7 @@
 
 local scope = import "spng/scope.jsonnet";
 local jobs = import "spng/jobs.jsonnet";
+local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local io = import "spng/io.jsonnet";
 local tio = import "spng/torchio.jsonnet";
@@ -11,7 +12,7 @@ local tdm = import "spng/tdm.jsonnet";
 
 local detconf = import "spng/detconf.jsonnet";
 local detector = import "spng/detector.jsonnet";
-local control = import "spng/control.jsonnet";
+local control_module = import "spng/control.jsonnet";
 
 /// Top-level arguments:
 ///
@@ -21,7 +22,7 @@ local control = import "spng/control.jsonnet";
 function(input, output, view_crossed=[1,1,0],
          detname='pdhd', tpcids=[], engine='Pgrapher', device='cpu', verbosity=0)
     
-    local ctrl = control.bundle(device=device, verbosity=verbosity);
+    local control = control_module.bundle(device=device, verbosity=wc.intify(verbosity));
     local det = detector.subset(detconf[detname], tpcids);
 
     // Iframe -> cv tensor set per TPC

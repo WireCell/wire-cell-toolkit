@@ -45,10 +45,10 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResamplerConfig,
 
 namespace WireCell::SPNG {
 
-    class Resampler : public ContextBase,
-                      public Logger,
-                      public ITorchTensorFilter,
-                      virtual public IConfigurable {
+    struct Resampler : public ContextBase,
+                       public Logger,
+                       public ITorchTensorFilter,
+                       virtual public IConfigurable {
 
         Resampler();
         virtual ~Resampler() = default ;

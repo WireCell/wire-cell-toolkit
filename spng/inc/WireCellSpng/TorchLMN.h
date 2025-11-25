@@ -70,7 +70,10 @@ namespace WireCell::SPNG::LMN {
     size_t rational(double Ts, double Tr, double eps=1e-6);
 
     /**
-     * @brief Resamples a dimension of a complex, frequency-domain spectrum tensor to a target number of samples.
+     * @brief Resamples a dimension of a COMPLEX, FREQUENCY-DOMAIN spectrum
+     * tensor to a target number of samples.
+     *
+     * This function does NOT ACCEPT INTERVAL DOMAIN tensors.
      *
      * This function adjusts the spectral resolution of the input by
      * manipulating its Fourier components.  If the target size (Nr) is smaller
@@ -81,10 +84,10 @@ namespace WireCell::SPNG::LMN {
      *
      * @param fourier_spectrum The complex tensor representing the frequency-domain spectrum.
      * @param Nr The target number of samples (size) along the specified axis.
-     * @param axis The dimension along which resampling is performed. Defaults to 1.
+     * @param axis The dimension along which resampling is performed. Defaults to last dimension.
      * @return The resampled complex tensor of size Nr along the specified axis.
      */
-    torch::Tensor resample(const torch::Tensor& fourier_spectrum, int64_t Nr, int64_t axis = 1);
+    torch::Tensor resample_fourier(const torch::Tensor& fourier_spectrum, int64_t Nr, int64_t axis = -1);
 
     /// One must assume an interpretation of the original sampling to properly
     /// normalize the resampled value.
@@ -100,10 +103,11 @@ namespace WireCell::SPNG::LMN {
 
     /**
      * @brief Combine the primitive operations into a full LMN resampling.
+     *
      * @param interval An interval-space tensor.
      * @param Ts The sampling period of the tensor dimension to resample.
      * @param Tr The sampling period target for the resampled dimension.
-     * @param axis The dimension of the tensor to resample.
+     * @param axis The dimension of the tensor to resample.  Defaults to last dimension.
      * @param ni The interpretation of the samples to assume when normalizing.
      * @param fourier_space If true, return the Fourier space representation, default will apply ifft() and return the interval-space representation.
      * @param eps A small number passed when determining the rational size.
@@ -115,7 +119,7 @@ namespace WireCell::SPNG::LMN {
      *
      */
     torch::Tensor resample_interval(const torch::Tensor& interval, double Ts, double Tr,
-                                    int64_t axis = 1,
+                                    int64_t axis = -1,
                                     Normalization ni = Normalization::kInterpolation,
                                     bool fourier_space = false,
                                     double eps=1e-6);

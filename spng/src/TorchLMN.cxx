@@ -87,11 +87,11 @@ namespace WireCell::SPNG::LMN {
 
 
 
-    torch::Tensor resample(const torch::Tensor& in, int64_t Nr, int64_t axis)
+    torch::Tensor resample_fourier(const torch::Tensor& in, int64_t Nr, int64_t axis)
     {
         TORCH_CHECK(in.is_complex(), "Input tensor must be complex for frequency domain resampling.");
-        TORCH_CHECK(in.dim() <= 2, "LMN::resample expected 1D or 2D tensor.");
     
+        axis = modulo(axis, in.dim());
         const int64_t Ns = in.size(axis);
 
         if (Ns == Nr) {
@@ -186,9 +186,8 @@ namespace WireCell::SPNG::LMN {
                                     double eps)
     {
         TORCH_CHECK(interval.is_floating_point(), "Input tensor must be real-valued (floating point).");
-        TORCH_CHECK(interval.dim() <= 2, "Input tensor must be 1D or 2D.");
-        TORCH_CHECK(axis >= 0 && axis < interval.dim(), "Axis index out of bounds.");
 
+        axis = modulo(axis, interval.dim());
         const int64_t Ns = interval.size(axis);
 
         if (std::abs(Ts - Tr) < eps) {
@@ -230,7 +229,7 @@ namespace WireCell::SPNG::LMN {
 
         // 6. Resample in Fourier space
         // This performs the zero-padding/truncation and Nyquist handling.
-        torch::Tensor resampled_freq = LMN::resample(freq_domain, Nr, axis);
+        torch::Tensor resampled_freq = LMN::resample_fourier(freq_domain, Nr, axis);
 
         // 7. Apply inverse FFT and return real part
         torch::Tensor time_domain_complex = torch::fft::ifft(resampled_freq, Nr, axis);
