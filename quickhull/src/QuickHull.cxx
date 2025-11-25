@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <deque>
 #include <limits>
+#include <stdexcept>
 #include "WCPQuickhull/Mesh.h"
 
 namespace quickhull {
@@ -429,7 +430,9 @@ namespace quickhull {
 		}
 
 		// These three points form the base triangle for our tetrahedron.
-		assert(selectedPoints.first != maxI && selectedPoints.second != maxI);
+		if (selectedPoints.first == maxI || selectedPoints.second == maxI) {
+			throw std::runtime_error("QuickHull: failed to find a third point distinct from the selected extremes");
+		}
 		std::array<size_t,3> baseTriangle{selectedPoints.first, selectedPoints.second, maxI};
 		const Vector3<T> baseTriangleVertices[]={ m_vertexData[baseTriangle[0]], m_vertexData[baseTriangle[1]],  m_vertexData[baseTriangle[2]] };
 		
@@ -493,4 +496,3 @@ namespace quickhull {
 	template class QuickHull<float>;
 	template class QuickHull<double>;
 }
-

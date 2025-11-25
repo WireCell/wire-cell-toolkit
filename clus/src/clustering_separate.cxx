@@ -451,6 +451,11 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
     double det_FV_zmax_margin = dv->metadata(wpid_all)["FV_zmax_margin"].asDouble();
 
     boundary_points = cluster->get_hull();
+
+    // if get_hull failed, return false
+    if (boundary_points.size() == 0) {
+        return false;
+    }
     std::vector<geo_point_t> hy_points;
     std::vector<geo_point_t> ly_points;
     std::vector<geo_point_t> hz_points;

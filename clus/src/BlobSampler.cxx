@@ -305,6 +305,10 @@ struct BlobSampler::Sampler : public Aux::Logger
             std::vector<double> pitch_coord(npts,0), wire_coord(npts,0), charge_val(npts,0), charge_unc(npts,0);
 
             const IWire::vector& iwires = iplane->wires();
+            if (iwires.empty()) {
+                log->error("sampler={}, plane={} has no wires", my_ident, pind);
+                THROW (LogicError() << errmsg{"BlobSampler plane has no wires"});
+            }
 
             for (size_t ipt=0; ipt<npts; ++ipt) {
                 const Point xwp = pimpos->transform(pts[ipt]);
@@ -319,8 +323,12 @@ struct BlobSampler::Sampler : public Aux::Logger
                 if (wind < 0) {
                     log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
                     log->warn("wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
+                    wind = 0;
+                }
+                if (wind >= (int)iwires.size()) {
+                    log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
+                    log->warn("wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
                     wind = (int)iwires.size() - 1;
-                    if (wind < 0) wind = 0;
                 }
                 wire_index[ipt] = wind;
         

@@ -174,14 +174,15 @@ void Grouping::fill_cache(GroupingCache& gc) const
         }
         for (const auto& [ident, anode] : m_anodes) {
             for (const auto& face : anode->faces()) {
+                // std::cout << "DEBUG Grouping::fill_cache anode " << anode->ident() << " face " << face->ident() << " which " << face->which() << std::endl;
                 const auto& coords = face->raygrid();
                 // skip dummy layers so the vector matches 0, 1, 2 plane order
                 for (int layer=ndummy_layers; layer<coords.nlayers(); ++layer) {
                     const auto& pitch_dir = coords.pitch_dirs()[layer];
                     const auto& center = coords.centers()[layer];
                     double proj_center = center.dot(pitch_dir);
-                    gc.proj_centers[anode->ident()][face->ident()][layer - ndummy_layers] = proj_center;
-                    gc.pitch_mags[anode->ident()][face->ident()][layer - ndummy_layers] = coords.pitch_mags()[layer];
+                    gc.proj_centers[anode->ident()][face->which()][layer - ndummy_layers] = proj_center;
+                    gc.pitch_mags[anode->ident()][face->which()][layer - ndummy_layers] = coords.pitch_mags()[layer];
                 }
             }
         }

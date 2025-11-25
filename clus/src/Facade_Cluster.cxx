@@ -1,6 +1,7 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/ClusteringConsts.h"
 #include "WireCellClus/Graphs.h"
 
 #include "WireCellUtil/Array.h"
@@ -1717,7 +1718,7 @@ double Cluster::get_length() const
         // std::cout << "Test: " << wpid.apa() << " " << wpid.face() << " " << tp.tick_drift << " " << tick * drift_speed << std::endl;
 
         const auto [u, v, w, t] = uvwt;
-        auto face = grouping->get_anode(wpid.apa())->face(wpid.face());
+        auto face = grouping->get_anode(wpid.apa())->faces()[wpid.face()];
         const double pu = u * face->plane(0)->pimpos()->pitch() ;
         const double pv = v * face->plane(1)->pimpos()->pitch();
         const double pw = w * face->plane(2)->pimpos()->pitch();
@@ -1776,9 +1777,9 @@ double Facade::get_length(const Cluster* cluster, const std::vector<int>& b2id, 
         const double drift_speed = cluster->grouping()->get_drift_speed().at(wpid.apa()).at(wpid.face());
 
         const auto [u, v, w, t] = uvwt;
-        const double pu = u * cluster->grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(0)->pimpos()->pitch();
-        const double pv = v * cluster->grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(1)->pimpos()->pitch();
-        const double pw = w * cluster->grouping()->get_anode(wpid.apa())->face(wpid.face())->plane(2)->pimpos()->pitch();
+        const double pu = u * cluster->grouping()->get_anode(wpid.apa())->faces()[wpid.face()]->plane(0)->pimpos()->pitch();
+        const double pv = v * cluster->grouping()->get_anode(wpid.apa())->faces()[wpid.face()]->plane(1)->pimpos()->pitch();
+        const double pw = w * cluster->grouping()->get_anode(wpid.apa())->faces()[wpid.face()]->plane(2)->pimpos()->pitch();
         const double pt = t * tick * drift_speed;
         length += std::sqrt(2. / 3. * (pu * pu + pv * pv + pw * pw) + pt * pt);
     }
@@ -2151,23 +2152,33 @@ std::vector<geo_point_t> Cluster::get_hull() const
         return hull_points;
     }
 
+    if (npoints() > WireCell::Clus::Facade::Constants::MaxHullPoints) {
+        auto log = Log::logger("clus");
+        log->warn("Cluster::get_hull number of points is too large: {} return cached points", npoints());
+        return hull_points;
+    }
+
     quickhull::QuickHull<float> qh;
     std::vector<quickhull::Vector3<float>> pc;
     const auto& points = this->points();
     for (int i = 0; i != npoints(); i++) {
         pc.emplace_back(points[0][i], points[1][i], points[2][i]);
     }
-    quickhull::ConvexHull<float> hull = qh.getConvexHull(pc, false, true);
-    std::set<int> indices;
-
-    for (size_t i = 0; i != hull.getIndexBuffer().size(); i++) {
-        indices.insert(hull.getIndexBuffer().at(i));
-    }
-
-    for (auto i : indices) {
-        hull_points.push_back({points[0][i], points[1][i], points[2][i]});
-    }
+    try {
+        quickhull::ConvexHull<float> hull = qh.getConvexHull(pc, false, true);
+        std::set<int> indices;
     
+        for (size_t i = 0; i != hull.getIndexBuffer().size(); i++) {
+            indices.insert(hull.getIndexBuffer().at(i));
+        }
+    
+        for (auto i : indices) {
+            hull_points.push_back({points[0][i], points[1][i], points[2][i]});
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "QuickHull exception: " << e.what() << std::endl;
+    }
+        
     return hull_points;
 }
 
