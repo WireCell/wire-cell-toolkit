@@ -157,6 +157,9 @@ local wc = import "wirecell.jsonnet";
         local dp = if std.length(dports) == 0
                    then wc.iota(std.length(downstream.iports))
                    else dports;
+        local same_size = std.assertEqual(std.length(up), std.length(dp));
+        local up_okay = std.assertEqual(true, std.length(up) <= std.length(upstream.oports));
+        local dp_okay = std.assertEqual(true, std.length(dp) <= std.length(downstream.iports));
         $.intern(innodes=[upstream], outnodes=[downstream],
                  edges=[
                      $.edge(upstream, downstream, up[ind], dp[ind])
