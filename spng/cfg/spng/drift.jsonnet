@@ -25,6 +25,7 @@ function(det, control) {
                 xregions: $.xregions,
                 time_offset: 0.0,     // fixme: need to expose this to user
                 fluctuate: true,      // fixme: this too
+                scale_factor: 1.0,    // fixme: and this
                 rng: wc.tn(control.rng),
             },
             uses: [control.rng],

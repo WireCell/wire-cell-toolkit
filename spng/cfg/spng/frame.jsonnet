@@ -145,6 +145,23 @@ local fans = import "fans.jsonnet";
                       pg.edge(bypass, targets[0], 0, 0),
                       pg.edge(bypass, targets[1], 1, 0)]),
     
+    /// Return a subgraph that shunts across inputs of given multiplicity to
+    /// outputs of same and that taps each into the given tensor set sink.  The
+    /// sink is interned.
+    ///
+    sink_taps(name, multiplicity, sink, control={}, digitize=null)::
+        local fanouts = [fans.fanout(name + std.toString(index), control=control)
+                         for index in wc.iota(multiplicity)];
+        local packer = $.tensorset_view_repacker(name, multiplicity, control=control);
+        pg.intern(innodes=fanouts, centernodes=[packer, sink],
+                  oports=[fo.oports[0] for fo in fanouts], // fanout port 0 of each is out
+                  edges=[
+                      pg.edge(fo.value, packer, 1, fo.index) // fanout port 1 to packer
+                      for fo in wc.enumerate(fanouts)
+                  ] + [
+                      pg.edge(packer, sink) // packer to sink
+                  ]),
+        
 }
 
 

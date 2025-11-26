@@ -37,6 +37,11 @@ def needs_log(tensor, title):
     if "_fr" in title and "phase" not in title: return True
     return False
 
+def maybe_abs(tensor):
+    if "complex" in str(tensor.dtype):
+        return torch.abs(tensor)
+    return tensor
+
 def do_plot(tensor, title, pdf):
     if "complex" in str(tensor.dtype):
         do_plot(torch.abs(tensor), '(amplitude) ' + title, pdf)
@@ -55,13 +60,16 @@ def do_plot(tensor, title, pdf):
     elif ndim == 2:
         norm = None
         if logit:
-            pos = torch.abs(tensor)
+            pos = maybe_abs(tensor)
             avmin = torch.min(pos).item()
             avmax = torch.max(pos).item()
             linthresh = avmax*1e-8
             vlim = avmax*1e-3
-            norm = pcolors.SymLogNorm(linthresh=linthresh, 
-                                      vmin=-vlim, vmax=vlim)
+            if "bool" in str(tensor.dtype):
+                norm = None
+            else:
+                norm = pcolors.SymLogNorm(linthresh=linthresh, 
+                                          vmin=-vlim, vmax=vlim)
         plt.imshow(tensor, aspect='auto', norm=norm, interpolation='none', cmap='rainbow')
         plt.colorbar()
         plt.title(title)

@@ -1,18 +1,18 @@
 // This produces a final graph to input depos and output crossview tensors
 
-local scope = import "spng/scope.jsonnet";
 local jobs = import "spng/jobs.jsonnet";
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local io = import "spng/io.jsonnet";
 local tio = import "spng/torchio.jsonnet";
-local tdm = import "spng/tdm.jsonnet";
+local tpc_nodes = import "spng/tpc.jsonnet";
 
 
 
 local detconf = import "spng/detconf.jsonnet";
 local detector = import "spng/detector.jsonnet";
 local control_module = import "spng/control.jsonnet";
+
 
 /// Top-level arguments:
 ///

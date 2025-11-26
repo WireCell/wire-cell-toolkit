@@ -8,7 +8,7 @@ local tests = {
     anode: tpc.anode,
     fr: tpc.fr,
     er: tpc.er,
-    rc: tpc.rc,
+    rcs: tpc.rcs,
     faces: tpc.faces,
     connections: tpc.connections,
     filters: tpc.filters,

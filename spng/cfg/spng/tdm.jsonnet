@@ -18,10 +18,11 @@ local dnnroi = import "dnnroi.jsonnet";
 
 local tlas = import "tlas.jsonnet";
 
-/// Return an object with various TDM subgraphs for one tpc
+/// Return an object with various TDM nodes and subgraphs for one tpc
+///
 function(tpc, control) {
 
-    // allow dumping of some details
+    // Pull these out to help debug dumping.
     tpc: tpc,
     anode: tpc.anode,
 

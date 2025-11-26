@@ -17,14 +17,16 @@ function(tpc, control) {
 
             drift_speed: tpc.lar.drift_speed,
 
-            // fixme: expose to user.
+            // FIXME: expose to user.
             first_frame_number: 0,
             flucutate: true,
             nsigma: 3,
 
             pirs: [wc.tn(pir) for pir in tpc.pirs],
-            readout_time: tpc.adc.readout_duration,
-            tick: tpc.adc.tick,
+            tick: tpc.ductor.tick,
+            readout_time: tpc.ductor.readout_duration,
+            start_time : tpc.ductor.start_time,
+
         },            
     }, nin=1, nout=1, uses=[tpc.anode, control.dft, control.rng]+tpc.pirs),
 

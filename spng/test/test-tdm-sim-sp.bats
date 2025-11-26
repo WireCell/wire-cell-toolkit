@@ -8,15 +8,19 @@ bats_load_library wct-bats.sh
 
     local cfgdir=$(srcdir spng)/cfg
 
-    local depofile=( $(resolve_file test/data/muon-depos.npz) )
-    [[ -f $depofile ]]
+    local og_depofile=( $(resolve_file test/data/muon-depos.npz) )
+    [[ -f $og_depofile ]]
+
+    local depofile=muon-depos-moved.npz
+        
+    run_idempotently -s $og_depofile -t $depofile -- \
+                     wcpy gen shift-depos -c '-2*m,3*m,1*m' $og_depofile $depofile
 
     local cfile=spng/test-detsim.jsonnet
     local ifile=$cfgdir/$cfile
     [[ -f $ifile ]]
     local jfile=test-detsim.json
 
-        
     run_idempotently -s $ifile \
                      -t $jfile \
                      -t muon-anode0.npz \
@@ -39,10 +43,11 @@ bats_load_library wct-bats.sh
     file_larger_than muon-anode3.npz 16000000
 
     # the muon-depos land in tpc3.
-    [ -z "$(grep 'DepoTransform:tpc0.*output: call=0, ndepos_used=8087' muon.log)" ]
-    [ -z "$(grep 'DepoTransform:tpc1.*output: call=0, ndepos_used=8087' muon.log)" ]
-    [ -z "$(grep 'DepoTransform:tpc2.*output: call=0, ndepos_used=8087' muon.log)" ]
-    [ -n "$(grep 'DepoTransform:tpc3.*output: call=0, ndepos_used=8087' muon.log)" ]
+
+    [ -n "$(grep 'DepoTransform:tpc0.*output: call=0, ndepos_used=7512,' muon.log)" ]
+    [ -n "$(grep 'DepoTransform:tpc1.*output: call=0, ndepos_used=0,' muon.log)" ]
+    [ -n "$(grep 'DepoTransform:tpc2.*output: call=0, ndepos_used=6793,' muon.log)" ]
+    [ -n "$(grep 'DepoTransform:tpc3.*output: call=0, ndepos_used=0,' muon.log)" ]
 
 }
 

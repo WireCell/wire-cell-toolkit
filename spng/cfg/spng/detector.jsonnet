@@ -13,6 +13,49 @@ local known_detectors = import "detectors.jsonnet";
     /// Note, do NOT change this even if you target some other value.
     default_adc_period: 500*wc.ns,
 
+
+    /// Define some liquid argon.
+    lar(DL,                     // Longitudinal diffusion constant, O(10 * wc.cm2/wc.s)
+        DT,                     // Transverse diffusion constant, O(10 * wc.cm2/wc.s)
+        lifetime,               // Electron lifetime
+        drift_speed=1.6*wc.mm/wc.us, // Electron drift speed, assumes a certain applied E-field
+        density=1.389*wc.g/wc.centimeter3, // LAr density
+        ar39activity=1*wc.Bq/wc.kg):: // Decay rate per mass for natural Ar39.
+        {
+            DL : DL,
+            DT : DT,
+            lifetime : lifetime,
+            drift_speed : drift_speed,
+            density: density,
+            ar39activity: ar39activity,
+        },
+
+    /// Describe one "anode" aka AnodePlane.  An AnodePlane is what holds "wires"
+    /// (which may be in the shape of strips).  An AnodePlane has one (uboone) or
+    /// two (DUNE HD and VD) "faces".  Faces can be opposing (DUNE HD) or aligned
+    /// (DUNE VD).  The wires and the faces together imply one or two drift volumes
+    ///
+    /// @param ident The identifier in the wires file for wires of this anode.
+    /// @param wires_object A WireSchemaFile config.
+    /// @param faces An array of faces.  This MUST have a null place holder for insensitive faces, order matters.
+    anode(ident, wires_object, faces):: {
+        type : "AnodePlane",
+        name : "a"+std.toString(ident),
+        data : {
+            // This IDENT must match a set of wires
+            ident : ident,
+            // The wire schema file
+            wire_schema: wc.tn(wires_object),
+            faces : faces,
+        },
+        uses: [wires_object],
+    },
+
+    /// Provide parameters governing response simulation (DepoTransform).
+    ductor(tick, readout_duration, start_time=0):: {
+        tick: tick, readout_duration: readout_duration, start_time: start_time
+    },
+
     /// Describe an ADC
     adc(tick=$.default_adc_period, // sampling period
         resolution=14,          // number of bits 
@@ -46,44 +89,6 @@ local known_detectors = import "detectors.jsonnet";
             /// Line-level Voltage of least-significant bit, ie before relative gain.
             lsb_voltage: self.vadc_per_count/self.gain,
 
-        },
-
-
-    /// Describe one "anode" aka AnodePlane.  An AnodePlane is what holds "wires"
-    /// (which may be in the shape of strips).  An AnodePlane has one (uboone) or
-    /// two (DUNE HD and VD) "faces".  Faces can be opposing (DUNE HD) or aligned
-    /// (DUNE VD).  The wires and the faces together imply one or two drift volumes
-    ///
-    /// @param ident The identifier in the wires file for wires of this anode.
-    /// @param wires_object A WireSchemaFile config.
-    /// @param faces An array of faces.  This MUST have a null place holder for insensitive faces, order matters.
-    anode(ident, wires_object, faces):: {
-        type : "AnodePlane",
-        name : "a"+std.toString(ident),
-        data : {
-            // This IDENT must match a set of wires
-            ident : ident,
-            // The wire schema file
-            wire_schema: wc.tn(wires_object),
-            faces : faces,
-        },
-        uses: [wires_object],
-    },
-
-    /// Define some liquid argon.
-    lar(DL,                     // Longitudinal diffusion constant, O(10 * wc.cm2/wc.s)
-        DT,                     // Transverse diffusion constant, O(10 * wc.cm2/wc.s)
-        lifetime,               // Electron lifetime
-        drift_speed=1.6*wc.mm/wc.us, // Electron drift speed, assumes a certain applied E-field
-        density=1.389*wc.g/wc.centimeter3, // LAr density
-        ar39activity=1*wc.Bq/wc.kg):: // Decay rate per mass for natural Ar39.
-        {
-            DL : DL,
-            DT : DT,
-            lifetime : lifetime,
-            drift_speed : drift_speed,
-            density: density,
-            ar39activity: ar39activity,
         },
 
     /// Describe the longitudinal drift dimension of one face by giving absolute X
@@ -197,11 +202,12 @@ local known_detectors = import "detectors.jsonnet";
     // fixme: add rc
     
     // Create a plane impact response (PIR) for one plane.  Any null values will
-    // be supplied by tpc.
+    // be supplied by tpc.  The context_name can be explicitly passed as "" if a
+    // PIR for a given plane is the same for all anodes.
     plane_impact_response(context_name, plane,
                           tick,   // usually adc.tick
                           nticks, // usually adc.readout_nticks
-                          fr, er,
+                          fr, er, // as used in sim, may differ than osp and spng
                           rcs=[], // one or two "RC" responses.  Padding is
                           // typically not customized, but it needs to be big
                           // enough to avoid DFT cyclic artifacts.
@@ -353,6 +359,7 @@ local known_detectors = import "detectors.jsonnet";
     ///
     tpc(anode=null,
         lar=null,
+        ductor=null,
         adc=null, fr=null, er=null, rcs=[],
         pirs=null, noise=null,
         connections=null, filters=null, faces=null,
@@ -362,6 +369,8 @@ local known_detectors = import "detectors.jsonnet";
             anode: anode,
             // The liquid argone
             lar: lar,
+            // Induction parameters
+            ductor: ductor,
             // ADC related parameters
             adc:adc,
             // response object configs, rcs may be an array of "RC" long responses.

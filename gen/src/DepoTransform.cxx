@@ -183,7 +183,10 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
 
     size_t ndepos_used=0;
 
-    Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
+    const Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
+    log->debug("depo binning: {} bins in {} -> {} = {} [us]", tbins.nbins(),
+               tbins.min()/units::us, tbins.max()/units::us, tbins.span()/units::us);
+
     ITrace::vector traces;
     for (auto face : m_anode->faces()) {
         // Select the depos which are in this face's sensitive volume
@@ -203,12 +206,12 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
 
             const Pimpos* pimpos = plane->pimpos();
 
-            Binning tbins(m_readout_time / m_tick, m_start_time, m_start_time + m_readout_time);
-
             Gen::BinnedDiffusion_transform bindiff(*pimpos, tbins, m_nsigma, m_rng);
+            size_t nadded = 0;
             for (auto depo : face_depos) {
                 depo = modify_depo(plane->planeid(), depo);
-                bindiff.add(depo, depo->extent_long() / m_drift_speed, depo->extent_tran());
+                bool added = bindiff.add(depo, depo->extent_long() / m_drift_speed, depo->extent_tran());
+                if (added) ++nadded;
             }
 
             auto& wires = plane->wires();
@@ -217,11 +220,13 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
             Gen::ImpactTransform transform(pir, m_dft, bindiff);
 
             const int nwires = pimpos->region_binning().nbins();
+            size_t nempty=0;
             for (int iwire = 0; iwire < nwires; ++iwire) {
                 auto wave = transform.waveform(iwire);
 
                 auto mm = Waveform::edge(wave);
                 if (mm.first == (int) wave.size()) {  // all zero
+                    ++nempty;
                     continue;
                 }
 
@@ -233,8 +238,8 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
                 traces.push_back(trace);
             }
             // fixme: use SPDLOG_LOGGER_DEBUG
-            log->debug("plane={} face={} depos={} total traces={}",
-                       iplane, face->ident(), face_depos.size(), traces.size());
+            log->debug("plane={} face={} depos={}/{} total traces={} ({} empty)",
+                       iplane, face->ident(), nadded, face_depos.size(), traces.size(), nempty);
         }
     }
 

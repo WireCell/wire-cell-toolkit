@@ -10,15 +10,39 @@ local det = detectors[detname];  // me
 // to the FR among other things.
 local adc_tick = 500*wc.ns;
 
+// These were taken from dunereco a0029f0fd0ec8821429abe568338da84fbc06057
+local lar = api.lar(DT = 8.8 * wc.cm2 / wc.s,
+                    DL = 4.0 * wc.cm2 / wc.s,
+                    lifetime = 35.0 * wc.ms,
+                    drift_speed = 1.60563* wc.mm / wc.us);
+
+
+local readout_time = 3*wc.ms;
+local tick0_time = -250*wc.us;
+//local tick0_time = 0*wc.us;
+local response_plane = 10*wc.cm; // relative to collection wires
+local response_time_offset = response_plane / lar.drift_speed;
+local response_duration = readout_time + response_time_offset;
+
+local response_start_time = tick0_time - response_time_offset;
+
+local ductor = api.ductor(adc_tick, response_duration, response_start_time);
+
+
 local adc = api.adc(tick=adc_tick,
                     resolution=14, 
                     baselines=[1003.4*wc.millivolt,1003.4*wc.millivolt,507.7*wc.millivolt],
                     fullscale=[0.2*wc.volt, 1.6*wc.volt],
                     readout_duration=3.0*wc.ms);
 local fr = api.fields_from_name(detname);
-local er = api.elec_response(gain=14.0*wc.mV/wc.fC,
-                             shaping=2.2*wc.us,
-                             binning=api.binning(100, adc_tick));
+// SPNG ER duration covers where ER is nonzero
+local er_spng = api.elec_response(gain=14.0*wc.mV/wc.fC,
+                                  shaping=2.2*wc.us,
+                                  binning=api.binning(100, adc_tick));
+// SIM ER duration is ridiculously chosen to be the entire readout  which makes no sense.
+local er_sim = api.elec_response(gain=14.0*wc.mV/wc.fC,
+                                 shaping=2.2*wc.us,
+                                 binning=api.binning(adc.readout_nticks, adc_tick));
 
 // rcs...
 
@@ -28,16 +52,11 @@ local anodes = [
     api.anode(anode_ident, wires_obj, api.hd_like_faces(anode_ident))
     for anode_ident in [0,1,2,3]];
 
-// These were taken from dunereco a0029f0fd0ec8821429abe568338da84fbc06057
-local lar = api.lar(DT = 8.8 * wc.cm2 / wc.s,
-                    DL = 4.0 * wc.cm2 / wc.s,
-                    lifetime = 35.0 * wc.us,
-                    drift_speed = 1.60563* wc.mm / wc.us);
 local pirs(anode) = [
-    api.plane_impact_response("a" + std.toString(anode.data.ident), plane,
+    api.plane_impact_response("", plane,
                               tick=adc.tick,
                               nticks=adc.readout_nticks,
-                              fr=fr, er=er,
+                              fr=fr, er=er_sim,
                               rcs=[])
     for plane in [0,1,2]];
 
@@ -84,7 +103,7 @@ local crossview_thresholds = [
 
 // All TPCs are identical except for their anodes
 local tpcs = [
-    api.tpc(anode, lar=lar, adc=adc, fr=fr, er=er,
+    api.tpc(anode, lar=lar, ductor=ductor, adc=adc, fr=fr, er=er_spng,
             pirs=pirs(anode), noise=noise,
             connections=[2,2,0], filters=filters, faces=[0,1],
             crossview_thresholds=cvts)
