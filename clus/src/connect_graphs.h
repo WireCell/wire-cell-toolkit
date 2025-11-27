@@ -45,6 +45,8 @@ namespace WireCell::Clus::Graphs {
         Weighted::Graph& graph);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
+
+    std::vector<bool> check_direction(const Facade::Cluster& cluster, Facade::geo_vector_t& v1, int apa, int face, double angle_cut_1 = 12.5, double angle_cut_2 = 10);
 }
     
 #endif

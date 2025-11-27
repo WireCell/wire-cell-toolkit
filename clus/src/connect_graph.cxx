@@ -514,3 +514,74 @@ bool Graphs::is_point_good(const Cluster& cluster, size_t point_index, int ncut)
     
     return ncount >= ncut;
 }
+
+std::vector<bool> check_direction(const Facade::Cluster& cluster, Facade::geo_vector_t& v1, int apa, int face, double angle_cut_1, double angle_cut_2){
+    // Get grouping to access wire geometry
+    auto grouping = cluster.grouping();
+    if (!grouping) {
+        // Return all false if no grouping available
+        return std::vector<bool>(4, false);
+    }
+    
+    // Get wire angles from grouping for this APA and face
+    auto [angle_u, angle_v, angle_w] = grouping->wire_angles(apa, face);
+    
+    // Get drift direction from grouping
+    int drift_dirx = grouping->get_drift_dir().at(apa).at(face);
+    Facade::geo_vector_t drift_dir_abs(fabs(drift_dirx), 0, 0);
+    
+    // Construct wire direction vectors
+    // U wire: angle_u from Y axis in YZ plane
+    Facade::geo_vector_t U_dir(0, std::cos(angle_u), std::sin(angle_u));
+    // V wire: angle_v from Y axis in YZ plane  
+    Facade::geo_vector_t V_dir(0, std::cos(angle_v), std::sin(angle_v));
+    // W wire: angle_w from Y axis in YZ plane
+    Facade::geo_vector_t W_dir(0, std::cos(angle_w), std::sin(angle_w));
+    
+    // Project v1 onto YZ plane
+    Facade::geo_vector_t tempV1(0, v1.y(), v1.z());
+    Facade::geo_vector_t tempV5;
+    
+    // Prolonged U - project onto plane perpendicular to U wire direction
+    double angle1 = tempV1.angle(U_dir);
+    tempV5 = Facade::geo_vector_t(
+        std::fabs(v1.x()),
+        std::sqrt(v1.y()*v1.y() + v1.z()*v1.z()) * std::sin(angle1),
+        0
+    );
+    angle1 = tempV5.angle(drift_dir_abs);
+    
+    // Prolonged V - project onto plane perpendicular to V wire direction
+    double angle2 = tempV1.angle(V_dir);
+    tempV5 = Facade::geo_vector_t(
+        std::fabs(v1.x()),
+        std::sqrt(v1.y()*v1.y() + v1.z()*v1.z()) * std::sin(angle2),
+        0
+    );
+    angle2 = tempV5.angle(drift_dir_abs);
+    
+    // Prolonged W - project onto plane perpendicular to W wire direction
+    double angle3 = tempV1.angle(W_dir);
+    tempV5 = Facade::geo_vector_t(
+        std::fabs(v1.x()),
+        std::sqrt(v1.y()*v1.y() + v1.z()*v1.z()) * std::sin(angle3),
+        0
+    );
+    angle3 = tempV5.angle(drift_dir_abs);
+    
+    // Parallel - angle with respect to drift direction
+    double angle4 = v1.angle(drift_dir);
+    
+    std::vector<bool> results(4, false);
+    
+    // Check if prolonged along U wire (< 12.5 degrees)
+    if (angle1 < angle_cut_1 / 180.0 * M_PI) results.at(0) = true;
+    // Check if prolonged along V wire (< 12.5 degrees)
+    if (angle2 < angle_cut_1 / 180.0 * M_PI) results.at(1) = true;
+    // Check if prolonged along W wire (< 12.5 degrees)
+    if (angle3 < angle_cut_1 / 180.0 * M_PI) results.at(2) = true;
+    // Check if perpendicular to drift (within 10 degrees of 90 degrees)
+    if (std::fabs(angle4 - M_PI/2.0) < angle_cut_2 / 180.0 * M_PI) results.at(3) = true;
+    
+    return results;
+}
