@@ -117,6 +117,16 @@ namespace WireCell::Clus::PR {
     /// one with a "wcpoint" closest to the segment's initial "wcpoint".
     std::pair<VertexPtr, VertexPtr> find_endpoints(Graph& graph, SegmentPtr seg);
 
+    /// Return the other vertex connected to a segment, given one known vertex.
+    ///
+    /// Returns nullptr if:
+    /// - The segment edge is not in the graph
+    /// - The given vertex is not connected to the segment
+    ///
+    /// This is useful when you have one vertex of a segment and need to find
+    /// the vertex at the other end.
+    VertexPtr find_other_vertex(Graph& graph, SegmentPtr seg, VertexPtr vertex);
+
     
 
 };
