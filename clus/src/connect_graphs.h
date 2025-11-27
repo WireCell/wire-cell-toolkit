@@ -47,6 +47,9 @@ namespace WireCell::Clus::Graphs {
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 
     std::vector<bool> check_direction(const Facade::Cluster& cluster, Facade::geo_vector_t& v1, int apa, int face, double angle_cut_1 = 12.5, double angle_cut_2 = 10);
+    
+    bool check_connectivity(const Facade::Cluster& cluster,  IDetectorVolumes::pointer dv, 
+    IPCTransformSet::pointer pcts, std::tuple<int, int, double>& index_index_dis,  std::shared_ptr<Facade::Simple3DPointCloud> pc1, std::shared_ptr<Facade::Simple3DPointCloud> pc2, double step_size = 0.6*units::cm, bool flag_strong_check = false);
 }
     
 #endif

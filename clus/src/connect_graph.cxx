@@ -515,7 +515,7 @@ bool Graphs::is_point_good(const Cluster& cluster, size_t point_index, int ncut)
     return ncount >= ncut;
 }
 
-std::vector<bool> check_direction(const Facade::Cluster& cluster, Facade::geo_vector_t& v1, int apa, int face, double angle_cut_1, double angle_cut_2){
+std::vector<bool> Graphs::check_direction(const Facade::Cluster& cluster, Facade::geo_vector_t& v1, int apa, int face, double angle_cut_1, double angle_cut_2){
     // Get grouping to access wire geometry
     auto grouping = cluster.grouping();
     if (!grouping) {
@@ -528,7 +528,7 @@ std::vector<bool> check_direction(const Facade::Cluster& cluster, Facade::geo_ve
     
     // Get drift direction from grouping
     int drift_dirx = grouping->get_drift_dir().at(apa).at(face);
-    Facade::geo_vector_t drift_dir_abs(fabs(drift_dirx), 0, 0);
+    Facade::geo_vector_t drift_dir_abs(std::fabs(drift_dirx), 0, 0);
     
     // Construct wire direction vectors
     // U wire: angle_u from Y axis in YZ plane
@@ -570,7 +570,7 @@ std::vector<bool> check_direction(const Facade::Cluster& cluster, Facade::geo_ve
     angle3 = tempV5.angle(drift_dir_abs);
     
     // Parallel - angle with respect to drift direction
-    double angle4 = v1.angle(drift_dir);
+    double angle4 = v1.angle(drift_dir_abs);
     
     std::vector<bool> results(4, false);
     

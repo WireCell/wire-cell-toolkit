@@ -602,3 +602,167 @@ void Graphs::connect_graph_relaxed(
     
 }
 
+ bool check_connectivity(const Facade::Cluster& cluster,  IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, std::tuple<int, int, double>& index_index_dis, std::shared_ptr<Facade::Simple3DPointCloud> pc1, std::shared_ptr<Facade::Simple3DPointCloud> pc2, double step_size, bool flag_strong_check){
+    
+    // Check if indices are valid
+    if (std::get<0>(index_index_dis) == -1 || std::get<1>(index_index_dis) == -1) return false;
+    
+    // Get points from cluster
+    const auto& points = cluster.points();
+    
+    // Get the two points from the point cloud
+    int idx1 = std::get<0>(index_index_dis);
+    int idx2 = std::get<1>(index_index_dis);
+    
+    geo_point_t p1(points[0][idx1], points[1][idx1], points[2][idx1]);
+    geo_point_t p2(points[0][idx2], points[1][idx2], points[2][idx2]);
+    
+    // Get wire plane IDs for the two points
+    auto wpid_p1 = cluster.wire_plane_id(idx1);
+    auto wpid_p2 = cluster.wire_plane_id(idx2);
+    auto wpid_pc = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
+    
+    int apa1 = wpid_p1.apa();
+    int face1 = wpid_p1.face();
+    int apa2 = wpid_p2.apa();
+    int face2 = wpid_p2.face();
+    int apa3 = wpid_pc.apa();
+    int face3 = wpid_pc.face();
+    
+    // Get grouping for CTPC checks
+    const auto* grouping = cluster.grouping();
+    
+    // Calculate directions using VHoughTrans equivalent (vhough_transform)
+    // Use point clouds pc1 and pc2 for local direction calculation
+    geo_vector_t dir1 = cluster.vhough_transform(p1, 15*units::cm, Cluster::HoughParamSpace::theta_phi);
+    dir1 = dir1 * -1;
+    
+    geo_vector_t dir2 = cluster.vhough_transform(p2, 15*units::cm, Cluster::HoughParamSpace::theta_phi);
+    dir2 = dir2 * -1;
+    
+    geo_vector_t dir3(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
+    
+    // Check directions using the check_direction function
+    std::vector<bool> flag_1 = check_direction(cluster, dir1, apa1, face1);
+    std::vector<bool> flag_2 = check_direction(cluster, dir2, apa2, face2);
+    
+    // For dir3, use either apa/face from p1 or p2 (use p1 as reference)
+    std::vector<bool> flag_3 = check_direction(cluster, dir3, apa3, face3);
+    
+    bool flag_prolonged_u = false;
+    bool flag_prolonged_v = false;
+    bool flag_prolonged_w = false;
+    bool flag_parallel = false;
+    
+    // Check if prolonged along wire directions or parallel to drift
+    if (flag_3.at(0) && (flag_1.at(0) || flag_2.at(0))) flag_prolonged_u = true;
+    if (flag_3.at(1) && (flag_1.at(1) || flag_2.at(1))) flag_prolonged_v = true;
+    if (flag_3.at(2) && (flag_1.at(2) || flag_2.at(2))) flag_prolonged_w = true;
+    if (flag_3.at(3) && (flag_1.at(3) && flag_2.at(3))) flag_parallel = true;
+    
+    // Calculate distance and number of steps
+    double dis = std::sqrt(std::pow(p1.x() - p2.x(), 2) + 
+                          std::pow(p1.y() - p2.y(), 2) + 
+                          std::pow(p1.z() - p2.z(), 2));
+    int num_steps = std::round(dis / step_size);
+    
+    if (num_steps == 0) num_steps = 1;
+    
+    int num_bad[5] = {0, 0, 0, 0, 0};
+    
+    double radius_cut = 0.6 * units::cm;
+    if (step_size < radius_cut) radius_cut = step_size;
+    
+    // Check points along the path
+    for (int i = 0; i != num_steps; i++) {
+        geo_point_t test_p(
+            p1.x() + (p2.x() - p1.x()) / (num_steps + 1.0) * (i + 1),
+            p1.y() + (p2.y() - p1.y()) / (num_steps + 1.0) * (i + 1),
+            p1.z() + (p2.z() - p1.z()) / (num_steps + 1.0) * (i + 1)
+        );
+        
+        // Get wire plane ID for test point
+        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
+        
+        if (test_wpid.apa() == -1) continue;
+        
+        // Transform point if needed
+        geo_point_t test_p_raw = test_p;
+        if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()) {
+            const auto transform = pcts->pc_transform(cluster.get_scope_transform());
+            double cluster_t0 = cluster.get_cluster_t0();
+            test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+        }
+        
+        // Test point quality with appropriate radius
+        double test_radius;
+        if (i == 0 || i + 1 == num_steps) {
+            test_radius = dis / (num_steps + 1.0) * 0.98;
+        } else {
+            if (flag_strong_check) {
+                test_radius = dis / (num_steps + 1.0);
+            } else {
+                test_radius = radius_cut;
+            }
+        }
+        
+        // Get detailed scores for this point
+        std::vector<int> scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), test_radius);
+        
+        int num_bad_details = 0;
+        
+        // Check U plane (indices 0=live, 3=dead)
+        if (scores.at(0) + scores.at(3) == 0) {
+            if (!flag_prolonged_u) num_bad[0]++;
+            num_bad_details++;
+        }
+        
+        // Check V plane (indices 1=live, 4=dead)
+        if (scores.at(1) + scores.at(4) == 0) {
+            if (!flag_prolonged_v) num_bad[1]++;
+            num_bad_details++;
+        }
+        
+        // Check W plane (collection, indices 2=live, 5=dead)
+        if (scores.at(2) + scores.at(5) == 0) {
+            if (!flag_prolonged_w) num_bad[2]++;
+            num_bad_details++;
+        }
+        
+        // Count overall bad points
+        if (flag_parallel) {
+            // Parallel case: more than one plane bad
+            if (num_bad_details > 1) num_bad[3]++;
+        } else {
+            // Non-parallel: any plane bad
+            if (num_bad_details > 0) num_bad[3]++;
+        }
+    }
+    
+    // Strong check - very strict criteria
+    if (flag_strong_check && ((num_bad[0] + num_bad[1] + num_bad[2]) > 0 || num_bad[3] >= 2)) {
+        return false;
+    }
+    
+    // Prolonged case - allow some bad points but not too many
+    if (num_bad[0] <= 2 && num_bad[1] <= 2 && num_bad[2] <= 2 &&
+        (num_bad[0] + num_bad[1] + num_bad[2] <= 3) && 
+        num_bad[0] < 0.1 * num_steps && 
+        num_bad[1] < 0.1 * num_steps && 
+        num_bad[2] < 0.1 * num_steps &&
+        (num_bad[0] + num_bad[1] + num_bad[2]) < 0.15 * num_steps) {
+        
+        // Special case: if prolonged in all three directions, check overall quality
+        if (flag_prolonged_u && flag_prolonged_v && flag_prolonged_w) {
+            if (num_bad[3] >= 0.6 * num_steps) return false;
+        }
+        
+        return true;
+    } 
+    // Alternative case - overall good quality
+    else if (num_bad[3] <= 2 && num_bad[3] < 0.1 * num_steps) {
+        return true;
+    }
+    
+    return false;
+ }
