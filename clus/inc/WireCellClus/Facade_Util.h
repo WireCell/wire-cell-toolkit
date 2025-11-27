@@ -144,6 +144,9 @@ namespace WireCell::Clus::Facade {
         results_type get_closest_index(const geo_point_t& p, const size_t N) const;
         /// @return index, geo_point_t
         std::pair<size_t, geo_point_t> get_closest_wcpoint(const geo_point_t& p) const;
+        double get_closest_dis(const geo_point_t& p) const;
+
+        std::vector<std::pair<size_t, geo_point_t>> get_closest_wcpoints_radius(const geo_point_t& p, const double radius) const;
 
         /// @param p_test1 is the point to start from
         /// @param dir is the direction to search along
