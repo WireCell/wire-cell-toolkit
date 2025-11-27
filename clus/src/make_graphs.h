@@ -47,6 +47,11 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
 
+    Weighted::Graph make_graph_relaxed_pid(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv, 
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif
