@@ -115,7 +115,7 @@ namespace WireCell::Clus::PR {
     /// The two Vertex objects are those associated with the source/target nodes
     /// of the segment's edge.  The pair is ordered.  The first Vertex is the
     /// one with a "wcpoint" closest to the segment's initial "wcpoint".
-    std::pair<VertexPtr, VertexPtr> find_endpoints(Graph& graph, SegmentPtr seg);
+    std::pair<VertexPtr, VertexPtr> find_vertices(Graph& graph, SegmentPtr seg);
 
     /// Return the other vertex connected to a segment, given one known vertex.
     ///
@@ -127,7 +127,15 @@ namespace WireCell::Clus::PR {
     /// the vertex at the other end.
     VertexPtr find_other_vertex(Graph& graph, SegmentPtr seg, VertexPtr vertex);
 
-    
+    /// Find the segment connecting two vertices.
+    ///
+    /// Returns nullptr if:
+    /// - Either vertex is not in the graph
+    /// - No edge exists between the two vertices
+    ///
+    /// This function searches for an edge between the two given vertices and
+    /// returns the associated segment if found.
+    SegmentPtr find_segment(Graph& graph, VertexPtr vtx1, VertexPtr vtx2);
 
 };
 #endif
