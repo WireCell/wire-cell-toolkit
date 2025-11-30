@@ -116,6 +116,21 @@ SegmentPtr PatternAlgorithms::create_segment_for_cluster(WireCell::Clus::Facade:
     return segment;
 }
 
+SegmentPtr PatternAlgorithms::create_segment_from_vertices(Graph& graph, Facade::Cluster& cluster, VertexPtr v1, VertexPtr v2, IDetectorVolumes::pointer dv){
+     // Create Segment using the vertices to derive a path 
+    auto path_points = do_rough_path(cluster, v1->wcpt().point, v2->wcpt().point);
+    
+    // Check if path has enough points (similar to WCPPID check)
+    if (path_points.size() <= 1) {
+        return nullptr;
+    }
+    
+    auto seg = create_segment_for_cluster(cluster, dv, path_points, 1);
+    WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
+    return seg;
+}
+
+
 
 SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& cluster, Facade::Cluster* main_cluster,TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_back_search)
 {
@@ -176,18 +191,21 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     VertexPtr v2 = make_vertex(graph);
     v2->wcpt().point = second_pt;
     v2->cluster(&cluster);
-    // Create Segment using the vertices to derive a path 
-    auto path_points = do_rough_path(cluster, first_pt, second_pt);
-    
-    // Check if path has enough points (similar to WCPPID check)
-    if (path_points.size() <= 1) {
+
+    auto seg = create_segment_from_vertices(graph, cluster, v1, v2, dv);
+    if (!seg) {
         remove_vertex(graph, v1);
         remove_vertex(graph, v2);
         return nullptr;
     }
-    
-    auto seg = create_segment_for_cluster(cluster, dv, path_points, 1);
-    WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
+
+    // // Create Segment using the vertices to derive a path 
+    // auto path_points = do_rough_path(cluster, first_pt, second_pt);
+    // // Check if path has enough points (similar to WCPPID check)
+    // if (path_points.size() <= 1) {     
+    // }
+    // auto seg = create_segment_for_cluster(cluster, dv, path_points, 1);
+    // WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
 
     // perform fitting ...
     track_fitter.add_segment(seg);
