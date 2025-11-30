@@ -1,4 +1,5 @@
 #include "WireCellClus/TaggerCheckNeutrino.h"
+#include "WireCellClus/NeutrinoPatternBase.h" // pattern recognition ...
 
 class TaggerCheckNeutrino;
 WIRECELL_FACTORY(TaggerCheckNeutrino, TaggerCheckNeutrino,
@@ -7,6 +8,7 @@ WIRECELL_FACTORY(TaggerCheckNeutrino, TaggerCheckNeutrino,
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
+using namespace WireCell::Clus::PR;
 
 struct edge_base_t {
     typedef boost::edge_property_tag kind;
@@ -63,6 +65,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             main_cluster = cluster;
         }
     }
+
+    // tempoarary ... 
+    auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
+    WireCell::Clus::PR::PatternAlgorithms pattern_algos;
+    auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, m_track_fitter, m_dv);
+
+
 }
 
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)
