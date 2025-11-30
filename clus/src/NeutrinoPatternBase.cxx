@@ -152,19 +152,20 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
                 std::swap(first_pt, second_pt);
             }
         }
-    } else{
+    } else if (main_cluster) {
         // Non-main cluster: start from the point closest to main cluster
-        auto main_steiner_pc = main_cluster->get_pc("steiner_pc");
         // Find closest distances to main cluster's Steiner point cloud
         auto knn1 = main_cluster->kd_steiner_knn(1, first_pt, "steiner_pc");
         auto knn2 = main_cluster->kd_steiner_knn(1, second_pt, "steiner_pc");
         
-        double dis1 = std::sqrt(knn1[0].second);
-        double dis2 = std::sqrt(knn2[0].second);
-        
-        // Start from the point closer to main cluster
-        if (dis2 < dis1) {
-            std::swap(first_pt, second_pt);
+        if (!knn1.empty() && !knn2.empty()) {
+            double dis1 = std::sqrt(knn1[0].second);
+            double dis2 = std::sqrt(knn2[0].second);
+            
+            // Start from the point closer to main cluster
+            if (dis2 < dis1) {
+                std::swap(first_pt, second_pt);
+            }
         }
     }
     
@@ -177,6 +178,14 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     v2->cluster(&cluster);
     // Create Segment using the vertices to derive a path 
     auto path_points = do_rough_path(cluster, first_pt, second_pt);
+    
+    // Check if path has enough points (similar to WCPPID check)
+    if (path_points.size() <= 1) {
+        remove_vertex(graph, v1);
+        remove_vertex(graph, v2);
+        return nullptr;
+    }
+    
     auto seg = create_segment_for_cluster(cluster, dv, path_points, 1);
     WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
 
