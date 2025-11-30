@@ -71,7 +71,7 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
         // Load JSON file
         std::ifstream file(config_file);
         if (!file.is_open()) {
-            std::cerr << "TaggerCheckSTM: Cannot open config file: " << config_file << std::endl;
+            std::cerr << "TaggerCheckNeutrino: Cannot open config file: " << config_file << std::endl;
             return;
         }
         
@@ -80,7 +80,7 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
         std::string errs;
         
         if (!Json::parseFromStream(builder, file, &root, &errs)) {
-            std::cerr << "TaggerCheckSTM: Failed to parse JSON: " << errs << std::endl;
+            std::cerr << "TaggerCheckNeutrino: Failed to parse JSON: " << errs << std::endl;
             return;
         }
         
@@ -91,18 +91,18 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
             try {
                 double value = root[param_name].asDouble();
                 m_track_fitter.set_parameter(param_name, value);
-                std::cout << "TaggerCheckSTM: Set " << param_name << " = " << value << std::endl;
+                std::cout << "TaggerCheckNeutrino: Set " << param_name << " = " << value << std::endl;
             } catch (const std::exception& e) {
-                std::cerr << "TaggerCheckSTM: Failed to set parameter " << param_name 
+                std::cerr << "TaggerCheckNeutrino: Failed to set parameter " << param_name 
                         << ": " << e.what() << std::endl;
             }
         }
         
-        std::cout << "TaggerCheckSTM: Successfully loaded TrackFitting configuration" << std::endl;
+        std::cout << "TaggerCheckNeutrino: Successfully loaded TrackFitting configuration" << std::endl;
         
     } catch (const std::exception& e) {
-        std::cerr << "TaggerCheckSTM: Exception loading config: " << e.what() << std::endl;
-        std::cerr << "TaggerCheckSTM: Using default TrackFitting parameters" << std::endl;
+        std::cerr << "TaggerCheckNeutrino: Exception loading config: " << e.what() << std::endl;
+        std::cerr << "TaggerCheckNeutrino: Using default TrackFitting parameters" << std::endl;
     }
 }
 
