@@ -263,3 +263,106 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     
     return seg;
 }
+
+
+std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(const Facade::Cluster& cluster, Facade::geo_point_t& p, Facade::geo_vector_t& dir, Facade::geo_vector_t& dir_other, bool flag_continue){
+    const double step_dis = 1.0 * units::cm;
+    
+    // Get steiner point cloud data
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& steiner_x = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& steiner_y = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& steiner_z = steiner_pc.get(coords.at(2))->elements<double>();
+    
+    // Find closest point in steiner point cloud
+    auto curr_knn_results = cluster.kd_steiner_knn(1, p, "steiner_pc");
+    if (curr_knn_results.empty()) {
+        return std::make_pair(p, -1); // No steiner point found ...
+    }
+    
+    size_t curr_index = curr_knn_results[0].first;
+    Facade::geo_point_t curr_wcp(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
+    Facade::geo_point_t next_wcp = curr_wcp;
+    
+    // Save starting position and direction
+    Facade::geo_point_t saved_start_wcp = curr_wcp;
+    Facade::geo_vector_t saved_dir = dir;
+    
+    // Forward search
+    while(flag_continue){
+        flag_continue = false;
+        
+        for (int i = 0; i != 3; i++){
+            Facade::geo_point_t test_p(
+                curr_wcp.x() + dir.x() * step_dis * (i + 1),
+                curr_wcp.y() + dir.y() * step_dis * (i + 1),
+                curr_wcp.z() + dir.z() * step_dis * (i + 1)
+            );
+            
+            // Try steiner point cloud first
+            auto next_knn_steiner = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
+            if (!next_knn_steiner.empty()) {
+                size_t next_index = next_knn_steiner[0].first;
+                next_wcp = Facade::geo_point_t(steiner_x[next_index], steiner_y[next_index], steiner_z[next_index]);
+                Facade::geo_vector_t dir2(
+                    next_wcp.x() - curr_wcp.x(), 
+                    next_wcp.y() - curr_wcp.y(), 
+                    next_wcp.z() - curr_wcp.z()
+                );
+                
+                double mag2 = dir2.magnitude();
+                if (mag2 != 0) {
+                    double angle = std::acos(dir2.dot(dir) / mag2) / 3.1415926 * 180.0;
+                    if (angle < 25.0) {
+                        flag_continue = true;
+                        curr_wcp = next_wcp;
+                        curr_index = next_index;
+                        dir = dir2 + dir * 5.0 * units::cm; // momentum trick
+                        dir = dir / dir.magnitude();
+                        break;
+                    }
+                }
+            }
+            
+            // Try regular point cloud
+            auto closest_result = cluster.get_closest_wcpoint(test_p);
+            // size_t regular_index = closest_result.first;
+            next_wcp = closest_result.second;
+            
+            Facade::geo_vector_t dir1(
+                next_wcp.x() - curr_wcp.x(), 
+                next_wcp.y() - curr_wcp.y(), 
+                next_wcp.z() - curr_wcp.z()
+            );
+            
+            double mag1 = dir1.magnitude();
+            if (mag1 != 0) {
+                double angle = std::acos(dir1.dot(dir) / mag1) / 3.1415926 * 180.0;
+                if (angle < 17.5) {
+                    flag_continue = true;
+                    curr_wcp = next_wcp;
+                    // For regular point cloud, we need to find it in steiner cloud again
+                    auto updated_knn = cluster.kd_steiner_knn(1, curr_wcp, "steiner_pc");
+                    if (!updated_knn.empty()) {
+                        curr_index = updated_knn[0].first;
+                    }
+                    dir = dir1 + dir * 5.0 * units::cm; // momentum trick
+                    dir = dir / dir.magnitude();
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Ensure we return the steiner point cloud position
+    Facade::geo_point_t test_p(curr_wcp.x(), curr_wcp.y(), curr_wcp.z());
+    auto final_knn = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
+    if (!final_knn.empty()) {
+        curr_index = final_knn[0].first;
+        curr_wcp = Facade::geo_point_t(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
+    }
+    
+    // Return: point, (cloud_type=2 for steiner, point_index)
+    return std::make_pair(curr_wcp,  curr_index);
+}
