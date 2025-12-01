@@ -366,3 +366,80 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     // Return: point, (cloud_type=2 for steiner, point_index)
     return std::make_pair(curr_wcp,  curr_index);
 }
+
+bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const Facade::geo_point_t& first_wcp, const Facade::geo_point_t& curr_wcp, const Facade::geo_point_t& last_wcp, std::list<Facade::geo_point_t>& wcps_list1, std::list<Facade::geo_point_t>& wcps_list2, bool flag_pass_check){
+    
+    // Calculate distances
+    double dis1 = std::sqrt(std::pow(curr_wcp.x() - first_wcp.x(), 2) + 
+                            std::pow(curr_wcp.y() - first_wcp.y(), 2) + 
+                            std::pow(curr_wcp.z() - first_wcp.z(), 2));
+    double dis2 = std::sqrt(std::pow(curr_wcp.x() - last_wcp.x(), 2) + 
+                            std::pow(curr_wcp.y() - last_wcp.y(), 2) + 
+                            std::pow(curr_wcp.z() - last_wcp.z(), 2));
+    
+    // Check if distances are sufficient or if we should pass the check
+    if ((dis1 > 1.0 * units::cm && dis2 > 1.0 * units::cm) || flag_pass_check) {
+        // Find shortest path from first_wcp to curr_wcp using steiner graph
+        Facade::geo_point_t first_point = first_wcp;
+        Facade::geo_point_t curr_point = curr_wcp;
+        auto path1 = do_rough_path(cluster, first_point, curr_point);
+        // Convert vector to list
+        wcps_list1.clear();
+        for (const auto& pt : path1) {
+            wcps_list1.push_back(pt);
+        }
+        
+        // Find shortest path from curr_wcp to last_wcp using steiner graph
+        Facade::geo_point_t curr_point2 = curr_wcp;
+        Facade::geo_point_t last_point = last_wcp;
+        auto path2 = do_rough_path(cluster, curr_point2, last_point);
+        // Convert vector to list
+        wcps_list2.clear();
+        for (const auto& pt : path2) {
+            wcps_list2.push_back(pt);
+        }
+        
+        // Remove overlapping points at the junction
+        // Count how many points overlap from the end of list1 and beginning of list2
+        int count = 0;
+        if (!wcps_list1.empty() && !wcps_list2.empty()) {
+            // Compare points from the end of list1 with the beginning of list2
+            // Use reverse iterator for list1 and forward iterator for list2
+            auto it1 = wcps_list1.rbegin();  // Start from the back of list1
+            auto it2 = wcps_list2.begin();   // Start from the front of list2
+            
+            while (it1 != wcps_list1.rend() && it2 != wcps_list2.end()) {
+                // Check if points are the same (within tolerance)
+                double dx = it1->x() - it2->x();
+                double dy = it1->y() - it2->y();
+                double dz = it1->z() - it2->z();
+                double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+                
+                if (dist < 0.01 * units::cm) {  // same point
+                    count++;
+                    ++it1;
+                    ++it2;
+                } else {
+                    break;  // no more overlapping points
+                }
+            }
+            
+            // Remove overlapping points (keep one copy at the junction)
+            for (int i = 0; i < count; i++) {
+                if (i + 1 != count) {  // Keep the last overlapping point
+                    if (!wcps_list1.empty()) wcps_list1.pop_back();
+                    if (!wcps_list2.empty()) wcps_list2.pop_front();
+                }
+            }
+        }
+        
+        // Check if we have valid paths
+        if (wcps_list1.size() <= 1 || wcps_list2.size() <= 1) {
+            return false;
+        }
+        
+        return true;
+    } else {
+        return false;
+    }
+}
