@@ -511,4 +511,63 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     return true;
 }
 
-
+ bool PatternAlgorithms::break_segment_into_two(Graph& graph, VertexPtr vtx1, SegmentPtr seg, VertexPtr vtx2, std::list<Facade::geo_point_t>& path_point_list1, Facade::geo_point_t& break_point, std::list<Facade::geo_point_t>& path_point_list2, IDetectorVolumes::pointer dv){
+    // Get the cluster from the old segment
+    auto cluster = seg->cluster();
+    if (!cluster) {
+        return false;
+    }
+    
+    // Verify that vtx1 and vtx2 are the endpoints of seg
+    auto [v1, v2] = find_vertices(graph, seg);
+    if ((v1 != vtx1 || v2 != vtx2) && (v1 != vtx2 || v2 != vtx1)) {
+        return false;  // The provided vertices don't match the segment endpoints
+    }
+    
+    // Create new vertex at the break point
+    VertexPtr new_vtx = make_vertex(graph);
+    new_vtx->wcpt().point = break_point;
+    new_vtx->cluster(cluster);
+    
+    // Convert lists to vectors for create_segment_for_cluster
+    std::vector<Facade::geo_point_t> path_points1;
+    for (const auto& pt : path_point_list1) {
+        path_points1.push_back(pt);
+    }
+    
+    std::vector<Facade::geo_point_t> path_points2;
+    for (const auto& pt : path_point_list2) {
+        path_points2.push_back(pt);
+    }
+    
+    // Check if paths have enough points
+    if (path_points1.size() <= 1 || path_points2.size() <= 1) {
+        remove_vertex(graph, new_vtx);
+        return false;
+    }
+    
+    // Create first new segment with path_points1
+    SegmentPtr new_seg1 = create_segment_for_cluster(*cluster, dv, path_points1, seg->dirsign());
+    if (!new_seg1) {
+        remove_vertex(graph, new_vtx);
+        return false;
+    }
+    
+    // Create second new segment with path_points2
+    SegmentPtr new_seg2 = create_segment_for_cluster(*cluster, dv, path_points2, seg->dirsign());
+    if (!new_seg2) {
+        remove_vertex(graph, new_vtx);
+        return false;
+    }
+    
+    // Remove the old segment
+    remove_segment(graph, seg);
+    
+    // Add the first new segment connecting vtx1 and new_vtx
+    add_segment(graph, new_seg1, vtx1, new_vtx);
+    
+    // Add the second new segment connecting new_vtx and vtx2
+    add_segment(graph, new_seg2, new_vtx, vtx2);
+    
+    return true;
+ }
