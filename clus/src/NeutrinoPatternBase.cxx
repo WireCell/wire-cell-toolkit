@@ -125,7 +125,7 @@ SegmentPtr PatternAlgorithms::create_segment_from_vertices(Graph& graph, Facade:
         return nullptr;
     }
     
-    auto seg = create_segment_for_cluster(cluster, dv, path_points, 1);
+    auto seg = create_segment_for_cluster(cluster, dv, path_points);
     WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
     return seg;
 }
@@ -204,7 +204,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     // // Check if path has enough points (similar to WCPPID check)
     // if (path_points.size() <= 1) {     
     // }
-    // auto seg = create_segment_for_cluster(cluster, dv, path_points, 1);
+    // auto seg = create_segment_for_cluster(cluster, dv, path_points);
     // WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
 
     // perform fitting ...
@@ -443,3 +443,72 @@ bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const
         return false;
     }
 }
+
+bool PatternAlgorithms::break_segments(Graph& graph, std::vector<SegmentPtr>& remaining_segments, float dis_cut) {
+    
+    return true;
+}
+
+
+bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg, VertexPtr& vtx, std::list<Facade::geo_point_t>& path_point_list, Facade::geo_point_t& break_point, IDetectorVolumes::pointer dv) {
+    // Check that the vertex is only connected to one segment
+    if (!vtx->descriptor_valid()) {
+        return false;
+    }
+    auto vd = vtx->get_descriptor();
+    if (boost::degree(vd, graph) != 1) {
+        return false;  // Vertex is connected to more than one segment, cannot replace
+    }
+    
+    // Get the cluster from the old segment
+    auto cluster = seg->cluster();
+    if (!cluster) {
+        return false;
+    }
+    
+    // Get the other vertex connected to this segment (the one we'll keep)
+    VertexPtr other_vertex = find_other_vertex(graph, seg, vtx);
+    if (!other_vertex) {
+        return false;
+    }
+    
+    // Create new vertex at the break point
+    VertexPtr new_vtx = make_vertex(graph);
+    new_vtx->wcpt().point = break_point;
+    new_vtx->cluster(cluster);
+    
+    // Convert list to vector for create_segment_for_cluster
+    std::vector<Facade::geo_point_t> path_points;
+    for (const auto& pt : path_point_list) {
+        path_points.push_back(pt);
+    }
+    
+    // Check if path has enough points
+    if (path_points.size() <= 1) {
+        remove_vertex(graph, new_vtx);
+        return false;
+    }
+    
+    // Create new segment with the path points
+    SegmentPtr new_seg = create_segment_for_cluster(*cluster, dv, path_points, seg->dirsign());
+    if (!new_seg) {
+        remove_vertex(graph, new_vtx);
+        return false;
+    }
+    
+    // Remove the old segment (this will disconnect it from the graph)
+    remove_segment(graph, seg);
+    // Remove the old vertex 
+    remove_vertex(graph, vtx);
+    
+    // Add the new segment connecting other_vertex and new_vtx
+    add_segment(graph, new_seg, other_vertex, new_vtx);
+    
+    // Update the output parameters
+    seg = new_seg;
+    vtx = new_vtx;
+    
+    return true;
+}
+
+
