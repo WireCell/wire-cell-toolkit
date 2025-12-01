@@ -444,18 +444,53 @@ bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const
     }
 }
 
+bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg, VertexPtr old_vertex, VertexPtr new_vertex, IDetectorVolumes::pointer dv){
+    // Get the cluster from the old segment
+    auto cluster = seg->cluster();
+    if (!cluster) {
+        return false;
+    }
+    
+    // Get the other vertex connected to this segment (the one we'll keep)
+    VertexPtr other_vertex = find_other_vertex(graph, seg, old_vertex);
+    if (!other_vertex) {
+        return false;
+    }
+    
+    // Create new segment with the path points
+    SegmentPtr new_seg = create_segment_from_vertices(graph, *cluster, other_vertex, new_vertex, dv);
+    if (!new_seg) {
+        return false;
+    }
+    
+    // Remove the old segment (this will disconnect it from the graph)
+    remove_segment(graph, seg);
+    
+    // Remove the old vertex if it no longer has any connected segments
+    if (old_vertex->descriptor_valid()) {
+        auto vd = old_vertex->get_descriptor();
+        if (boost::degree(vd, graph) == 0) {
+            remove_vertex(graph, old_vertex);
+        }
+    }
+        
+    // Update the output parameter
+    seg = new_seg;
+    
+    return true;
+}
 
 
 
 bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg, VertexPtr& vtx, std::list<Facade::geo_point_t>& path_point_list, Facade::geo_point_t& break_point, IDetectorVolumes::pointer dv) {
-    // Check that the vertex is only connected to one segment
-    if (!vtx->descriptor_valid()) {
-        return false;
-    }
-    auto vd = vtx->get_descriptor();
-    if (boost::degree(vd, graph) != 1) {
-        return false;  // Vertex is connected to more than one segment, cannot replace
-    }
+    // // Check that the vertex is only connected to one segment
+    // if (!vtx->descriptor_valid()) {
+    //     return false;
+    // }
+    // auto vd = vtx->get_descriptor();
+    // if (boost::degree(vd, graph) != 1) {
+    //     return false;  // Vertex is connected to more than one segment, cannot replace
+    // }
     
     // Get the cluster from the old segment
     auto cluster = seg->cluster();
@@ -495,8 +530,10 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     
     // Remove the old segment (this will disconnect it from the graph)
     remove_segment(graph, seg);
-    // Remove the old vertex 
-    remove_vertex(graph, vtx);
+
+    // Remove the old vertex, if it no longer has any connected segments  
+    auto vd = vtx->get_descriptor();
+    if (boost::degree(vd, graph) == 0) remove_vertex(graph, vtx);
     
     // Add the new segment connecting other_vertex and new_vtx
     add_segment(graph, new_seg, other_vertex, new_vtx);
