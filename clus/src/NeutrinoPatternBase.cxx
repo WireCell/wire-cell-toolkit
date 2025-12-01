@@ -801,3 +801,80 @@ bool PatternAlgorithms::merge_two_segments_into_one(Graph& graph, SegmentPtr& se
     
     return true;
 }
+
+bool PatternAlgorithms::merge_vertex_into_another(Graph& graph, VertexPtr& vtx_from, VertexPtr& vtx_to, IDetectorVolumes::pointer dv){
+    if (!vtx_from || !vtx_to) {
+        return false;
+    }
+    
+    // Step 1: Check if there's a segment between vtx_from and vtx_to, and delete it
+    SegmentPtr seg_between = find_segment(graph, vtx_from, vtx_to);
+    if (seg_between) {
+        remove_segment(graph, seg_between);
+    }
+    
+    // Step 2 & 3: Check if vertices are at the same position
+    double distance = ray_length(Ray{vtx_from->wcpt().point, vtx_to->wcpt().point});
+    bool same_position = (distance < 0.1 * units::cm);
+    
+    // Get all segments connected to vtx_from
+    if (!vtx_from->descriptor_valid()) {
+        return false;
+    }
+    
+    auto vd_from = vtx_from->get_descriptor();
+    std::vector<std::pair<SegmentPtr, VertexPtr>> segments_to_reconnect;
+    
+    // Collect all segments and their other endpoints
+    auto edge_range = boost::out_edges(vd_from, graph);
+    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        if (seg) {
+            VertexPtr other_vtx = find_other_vertex(graph, seg, vtx_from);
+            if (other_vtx) {
+                segments_to_reconnect.push_back(std::make_pair(seg, other_vtx));
+            }
+        }
+    }
+    
+    // Process each segment
+    for (auto& [old_seg, other_vtx] : segments_to_reconnect) {
+        auto cluster = old_seg->cluster();
+        if (!cluster) continue;
+        
+        SegmentPtr new_seg;
+        
+        if (same_position) {
+            // Step 2: Vertices are at same position - just reconnect the segment
+            // Extract the path from the old segment
+            const auto& wcpts = old_seg->wcpts();
+            std::vector<Facade::geo_point_t> path_points;
+            for (const auto& wcp : wcpts) {
+                path_points.push_back(wcp.point);
+            }
+            
+            if (path_points.size() > 1) {
+                // Create new segment with same path
+                new_seg = create_segment_for_cluster(*cluster, dv, path_points, old_seg->dirsign());
+                if (new_seg) {
+                    // Remove old segment
+                    remove_segment(graph, old_seg);
+                    // Add new segment connecting vtx_to and other_vtx
+                    add_segment(graph, new_seg, vtx_to, other_vtx);
+                }
+            }
+        } else {
+            // Step 3: Vertices are not at same position - recalculate the path
+            // Remove old segment first
+            remove_segment(graph, old_seg);
+            // Create new segment from vtx_to to other_vtx
+            new_seg = create_segment_from_vertices(graph, *cluster, vtx_to, other_vtx, dv);
+            // create_segment_from_vertices already adds the segment to the graph
+        }
+    }
+    
+    // Step 4: Delete vtx_from
+    remove_vertex(graph, vtx_from);
+    
+    return true;
+}
