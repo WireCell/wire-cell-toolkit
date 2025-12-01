@@ -766,3 +766,38 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     
     return flag_modified;
 }
+
+
+bool PatternAlgorithms::merge_two_segments_into_one(Graph& graph, SegmentPtr& seg1, VertexPtr& vtx, SegmentPtr& seg2, IDetectorVolumes::pointer dv){
+    // Get cluster from seg1 (should be same as seg2)
+    auto cluster = seg1->cluster();
+    if (!cluster || cluster != seg2->cluster()) {
+        return false;
+    }
+    
+    // Get the other vertices (not vtx) from seg1 and seg2
+    VertexPtr vtx1 = find_other_vertex(graph, seg1, vtx);
+    VertexPtr vtx2 = find_other_vertex(graph, seg2, vtx);
+    
+    if (!vtx1 || !vtx2) {
+        return false;
+    }
+    
+    // Create new segment from vtx1 to vtx2
+    SegmentPtr new_seg = create_segment_from_vertices(graph, *cluster, vtx1, vtx2, dv);
+    if (!new_seg) {
+        return false;
+    }
+    
+    // Delete old segments
+    remove_segment(graph, seg1);
+    remove_segment(graph, seg2);
+    
+    // Delete the middle vertex
+    remove_vertex(graph, vtx);
+    
+    // Update output parameter
+    seg1 = new_seg;
+    
+    return true;
+}
