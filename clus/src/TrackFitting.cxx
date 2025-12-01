@@ -229,6 +229,8 @@ void TrackFitting::clear_segments(){
 }
 
 void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
+    if (m_graph == graph) return;
+    
     m_graph = graph;
 
     if (!m_graph){

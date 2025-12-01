@@ -4,7 +4,7 @@
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
-std::set<VertexPtr> PatternAlgorithms::find_vertices(Graph& graph, const Facade::Cluster& cluster)
+std::set<VertexPtr> PatternAlgorithms::find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster)
 {
     std::set<VertexPtr> result;
     
@@ -22,7 +22,7 @@ std::set<VertexPtr> PatternAlgorithms::find_vertices(Graph& graph, const Facade:
     return result;
 }
 
-std::set<SegmentPtr> PatternAlgorithms::find_segments(Graph& graph, const Facade::Cluster& cluster)
+std::set<SegmentPtr> PatternAlgorithms::find_cluster_segments(Graph& graph, const Facade::Cluster& cluster)
 {
     std::set<SegmentPtr> result;
     
@@ -45,7 +45,7 @@ bool PatternAlgorithms::clean_up_graph(Graph& graph, const Facade::Cluster& clus
     bool modified = false;
     
     // First, find and remove all segments associated with this cluster
-    std::set<SegmentPtr> segments_to_remove = find_segments(graph, cluster);
+    std::set<SegmentPtr> segments_to_remove = find_cluster_segments(graph, cluster);
     for (auto seg : segments_to_remove) {
         if (remove_segment(graph, seg)) {
             modified = true;
@@ -55,7 +55,7 @@ bool PatternAlgorithms::clean_up_graph(Graph& graph, const Facade::Cluster& clus
     // Then, find and remove all vertices associated with this cluster
     // Note: vertices that are still connected to other segments won't be removed
     // until their segments are removed first
-    std::set<VertexPtr> vertices_to_remove = find_vertices(graph, cluster);
+    std::set<VertexPtr> vertices_to_remove = find_cluster_vertices(graph, cluster);
     for (auto vtx : vertices_to_remove) {
         if (remove_vertex(graph, vtx)) {
             modified = true;
@@ -444,10 +444,7 @@ bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const
     }
 }
 
-bool PatternAlgorithms::break_segments(Graph& graph, std::vector<SegmentPtr>& remaining_segments, float dis_cut) {
-    
-    return true;
-}
+
 
 
 bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg, VertexPtr& vtx, std::list<Facade::geo_point_t>& path_point_list, Facade::geo_point_t& break_point, IDetectorVolumes::pointer dv) {
@@ -571,3 +568,164 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     
     return true;
  }
+
+ bool PatternAlgorithms::break_segments(Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, std::vector<SegmentPtr>& remaining_segments, float dis_cut) {
+    bool flag_modified = false;
+    int count = 0;
+    std::set<size_t> saved_break_wcp_indices;
+    
+    while(!remaining_segments.empty() && count < 2) {
+        SegmentPtr curr_sg = remaining_segments.back();
+        auto cluster = curr_sg->cluster();
+        remaining_segments.pop_back();
+        
+        // Get the two vertices of this segment
+        auto [start_v, end_v] = find_vertices(graph, curr_sg);
+        if (!start_v || !end_v) {
+            continue;
+        }
+        
+        // Check if vertices match the segment endpoints
+        const auto& wcpts = curr_sg->wcpts();
+        if (wcpts.size() < 2) continue;
+        
+        auto front_pt = wcpts.front().point;
+        auto back_pt = wcpts.back().point;
+        
+        // Determine which vertex is start and which is end based on point positions
+        double dis_sv_front = ray_length(Ray{start_v->wcpt().point, front_pt});
+        double dis_sv_back = ray_length(Ray{start_v->wcpt().point, back_pt});
+        
+        if (dis_sv_front > dis_sv_back) {
+            std::swap(start_v, end_v);
+        }
+        
+        // Initialize the start test point
+        Facade::geo_point_t break_wcp = start_v->wcpt().point;
+        const auto& point_vec = curr_sg->wcpts();
+        Facade::geo_point_t test_start_p = point_vec.front().point;
+        
+        if (dis_cut > 0) {
+            for (size_t i = 0; i < point_vec.size(); ++i) {
+                double dis = ray_length(Ray{point_vec[i].point, point_vec.front().point});
+                if (dis > dis_cut) {
+                    test_start_p = point_vec[i].point;
+                    break;
+                }
+            }
+        }
+        
+        // Search for kinks and extend the break point
+        while(ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
+              ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
+            
+            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
+            auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
+            
+            if (dir1.magnitude() != 0) {
+                // Find the extreme point
+                Facade::geo_vector_t dir1_geo(dir1.x(), dir1.y(), dir1.z());
+                Facade::geo_vector_t dir2_geo(dir2.x(), dir2.y(), dir2.z());
+                Facade::geo_point_t kink_geo(kink_point.x(), kink_point.y(), kink_point.z());
+                
+                auto [break_pt, break_idx] = proto_extend_point(*cluster, kink_geo, dir1_geo, dir2_geo, flag_continue);
+                break_wcp = break_pt;
+                
+                // Check if we've seen this break point before
+                if (saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
+                    test_start_p = kink_geo;
+                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
+                    auto& [kink_point2, dir1_2, dir2_2, flag_continue2] = kink_tuple;
+                    Facade::geo_vector_t dir1_geo2(dir1_2.x(), dir1_2.y(), dir1_2.z());
+                    Facade::geo_vector_t dir2_geo2(dir2_2.x(), dir2_2.y(), dir2_2.z());
+                    Facade::geo_point_t kink_geo2(kink_point2.x(), kink_point2.y(), kink_point2.z());
+                    auto [break_pt2, break_idx2] = proto_extend_point(*cluster, kink_geo2, dir1_geo2, dir2_geo2, flag_continue2);
+                    break_wcp = break_pt2;
+                    break_idx = break_idx2;
+                } else {
+                    saved_break_wcp_indices.insert(break_idx);
+                }
+                
+                if (ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
+                    ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
+                    test_start_p = kink_geo;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        // Check if we should break the segment
+        if (ray_length(Ray{start_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
+            std::list<Facade::geo_point_t> wcps_list1;
+            std::list<Facade::geo_point_t> wcps_list2;
+            
+            bool flag_break;
+            bool flag_pass_check = false;
+            
+            // Check if end vertex is close to break point and has only one connection
+            if (ray_length(Ray{end_v->wcpt().point, break_wcp}) < 1.0 * units::cm) {
+                auto vd = end_v->get_descriptor();
+                if (boost::degree(vd, graph) == 1) {
+                    flag_pass_check = true;
+                }
+            }
+            
+            flag_break = proto_break_tracks(*cluster, start_v->wcpt().point, break_wcp, 
+                                           end_v->wcpt().point, wcps_list1, wcps_list2, flag_pass_check);
+            
+            if (flag_break) {
+                // Check geometry constraints
+                Facade::geo_vector_t tv1 = end_v->wcpt().point - start_v->wcpt().point;
+                Facade::geo_vector_t tv2 = end_v->wcpt().point - break_wcp;
+                
+                double min_dis = 1e9;
+                for (const auto& wcp : wcps_list1) {
+                    double dis = ray_length(Ray{wcp, end_v->wcpt().point});
+                    if (dis < min_dis) min_dis = dis;
+                }
+                
+                double angle = std::acos(tv1.dot(tv2) / (tv1.magnitude() * tv2.magnitude())) / 3.1415926 * 180.0;
+                
+                // Check if we should replace end vertex instead of breaking
+                if (min_dis / units::cm < 1.5 && angle > 120) {
+                    auto vd = end_v->get_descriptor();
+                    if (boost::degree(vd, graph) == 1) {
+                        // Replace segment and end vertex
+                        SegmentPtr new_seg = curr_sg;
+                        VertexPtr new_vtx = end_v;
+                        if (replace_segment_and_vertex(graph, new_seg, new_vtx, wcps_list1, break_wcp, dv)) {
+                            flag_modified = true;
+                            // Perform tracking
+                            // track_fitter.add_graph(&graph); added already
+                            track_fitter.do_multi_tracking(true, true, false);
+                        }
+                    }
+                } else {
+                    // Break segment into two
+                    if (break_segment_into_two(graph, start_v, curr_sg, end_v, wcps_list1, break_wcp, wcps_list2, dv)) {
+                        flag_modified = true;
+                        // Perform tracking
+                        // track_fitter.add_graph(&graph); added already
+                        track_fitter.do_multi_tracking(true, true, false);
+                        
+                        // Find the new segment connecting to end_v and add it back to remaining_segments
+                        auto [new_vtx, new_end_v] = find_vertices(graph, curr_sg);
+                        // The new segment created from wcps_list2 connects new_vtx to end_v
+                        // We need to find it
+                        auto erange = boost::out_edges(end_v->get_descriptor(), graph);
+                        for (auto eit = erange.first; eit != erange.second; ++eit) {
+                            SegmentPtr seg = graph[*eit].segment;
+                            if (seg && seg->cluster() == curr_sg->cluster()) {
+                                remaining_segments.push_back(seg);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return flag_modified;
+}

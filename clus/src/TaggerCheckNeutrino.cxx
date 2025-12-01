@@ -70,6 +70,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
     auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, m_track_fitter, m_dv);
+    m_track_fitter.add_graph(pr_graph);
 
 
 }

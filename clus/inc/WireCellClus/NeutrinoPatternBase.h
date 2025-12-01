@@ -5,8 +5,8 @@
 namespace WireCell::Clus::PR {
     class PatternAlgorithms{
         public:
-        std::set<VertexPtr> find_vertices(Graph& graph, const Facade::Cluster& cluster);
-        std::set<SegmentPtr> find_segments(Graph& graph, const Facade::Cluster& cluster);
+        std::set<VertexPtr> find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster);
+        std::set<SegmentPtr> find_cluster_segments(Graph& graph, const Facade::Cluster& cluster);
         bool clean_up_graph(Graph& graph, const Facade::Cluster& cluster);
 
         SegmentPtr init_first_segment(Graph& graph, Facade::Cluster& cluster, Facade::Cluster* main_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_back_search = true);
@@ -27,7 +27,7 @@ namespace WireCell::Clus::PR {
         // return Steiner Graph path in wcps_list1 and wcps_list2
         bool proto_break_tracks(const Facade::Cluster& cluster, const Facade::geo_point_t& first_wcp, const Facade::geo_point_t& curr_wcp, const Facade::geo_point_t& last_wcp, std::list<Facade::geo_point_t>& wcps_list1, std::list<Facade::geo_point_t>& wcps_list2, bool flag_pass_check);
         // breaking segments ...
-        bool break_segments(Graph& graph, std::vector<SegmentPtr>& remaining_segments, float dis_cut);
+        bool break_segments(Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, std::vector<SegmentPtr>& remaining_segments, float dis_cut);
 
 
     };
