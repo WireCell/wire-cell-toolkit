@@ -9,8 +9,7 @@ local tests = {
     fr: tpc.fr,
     er: tpc.er,
     rcs: tpc.rcs,
-    faces: tpc.faces,
-    connections: tpc.connections,
+    view_groups: tpc.view_groups,
     filters: tpc.filters,
     one_channel_filter: tpc.filters[0].channel.decon,
 };

@@ -24,7 +24,7 @@ local control_module = import "spng/control.jsonnet";
 /// view_crossed :: which views should be subject to crossviews
 ///
 /// wrap :: if given, it provides a filename pattern with "%(tier)s" and "%(tpcid)d".
-/// dump :: if given, a list of tiers to dump
+/// dump :: if given, a list of tiers to dump.  See pipeline definition below for labels
 function(input, output, tpcid=0, view_crossed=[1,1,0],
          wrap="tensors-%(tier)s-%(tpcid)d.pkl",
          dump="",
@@ -57,7 +57,9 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     local rebin = dump_views_maybe("rebin", tpc_nodes.downsampler("decon"));
     local filter = dump_views_maybe("filter", tpc_nodes.time_filter("wiener"));
     local threshold = dump_views_maybe("threshold", tpc_nodes.threshold);
-    local crossviews = dump_views_maybe("crossviews", tpc_nodes.crossfan(view_crossed));
+    //local crossviews = dump_views_maybe("crossviews", tpc_nodes.crossfan(view_crossed));
+    // this is ultimate output right now, so don't offer it for dumping
+    local crossviews = tpc_nodes.crossfan(view_crossed);
     // until here which is 3->1
     local repack = tpc_nodes.frame_set_repack;
     local sink = tio.pickle_tensor_set(output);

@@ -34,25 +34,27 @@ namespace WireCell::SPNG {
         return cfg;
     }
     
+    /// Return IChannels spanning wpid in anode in order of increasing
+    /// IChannel::index().  If wpid_num is negative, reverse the order.
+    static IChannel::vector get_ordered_channels(IAnodePlane::pointer anode, int wpid_num)
+    {
+        WirePlaneId wpid(std::abs(wpid_num));
+        auto face = anode->face(wpid.face());
+        auto plane = face->planes()[wpid.index()];
+        IChannel::vector chans = plane->channels(); // already ordered by IChannel::index().
+        
+        if (wpid_num < 0) {
+            std::reverse(chans.begin(), chans.end());
+        }
+        return chans;
+    }
+
     void FrameToTdm::configure(const WireCell::Configuration& cfg)
     {
         this->Logger::configure(cfg);
 
-        std::string anode = cfg["anode"].asString();
-        m_anode = Factory::find_tn<IAnodePlane>(anode);
-
-
-        // build global channel order.  FIXME: we may not actually need to keep
-        // m_anode after this....
-        m_channel_order.clear();
-        for (const int chid : m_anode->channels()) {
-            auto ichan = m_anode->channel(chid);
-            const int wpid = ichan->planeid().ident();
-            // const size_t wan = ichan->index();
-            // m_channel_order[chid] = ((size_t)wpid << 32) & wan;
-            m_channel_order[chid] = ichan->global_order();
-            m_wpid_channels[wpid].insert(chid);
-        }
+        std::string anode_tn = cfg["anode"].asString();
+        auto anode = Factory::find_tn<IAnodePlane>(anode_tn);
 
         m_basepath = get<std::string>(cfg, "basepath", m_basepath.string());
         m_frame_relpath = get<std::string>(cfg, "frame_relpath", m_frame_relpath.string());
@@ -73,7 +75,10 @@ namespace WireCell::SPNG {
         }
 
         // WCT config wrangling is exhausting.
+        int rule_num = -1;
         for (const auto& jrule : jrules) {
+            ++rule_num;
+
             auto jgroups = jrule["groups"];
             if (! jgroups.isArray()) {
                 log->warn("skipping rule config with no groups: {}", jrule);
@@ -85,7 +90,10 @@ namespace WireCell::SPNG {
                 tag = "";
             }
             Rule rule{tag};
+            int group_num = -1;
             for (const auto& jgroup : jgroups) {
+                ++group_num;
+
                 Group group;
                 auto relpath = get<std::string>(jgroup, "relpath");
                 if (relpath.size()) {
@@ -93,17 +101,25 @@ namespace WireCell::SPNG {
                 }
                 auto wpids = get<std::vector<int>>(jgroup, "wpids", {});
                 for (int wpid : wpids) {
-                    group.wpids.insert(wpid);
-                }
-                for (const auto& chid : get<std::vector<int>>(jgroup, "channels", {})) {
-                    group.channels.insert(chid);
-                }
+                    auto ichans = get_ordered_channels(anode, wpid);
 
-                if (group.wpids.empty() && group.channels.empty()) {
-                    log->warn("neither wpids nor channels for tag \"{}\", group at relpath {}",
-                              tag, relpath);
+                    log->debug("rule {}, group {}, wpid {}, chids:{}->{}, wire0head:{}->{}",
+                               rule_num, group_num, WirePlaneId(std::abs(wpid)),
+                               ichans.front()->ident(), ichans.back()->ident(),
+                               ichans.front()->wires()[0]->ray().second,
+                               ichans.back()->wires()[0]->ray().second);
+
+                    for (auto ich : ichans) {
+                        group.chid2row[ich->ident()] = group.chid2row.size();
+                    }
+                }
+                if (group.chid2row.empty()) {
+                    log->warn("rule {} group {} is empty for tag \"{}\", relpath {}",
+                              rule_num, group_num, tag, relpath);
                     continue;
                 }
+                log->warn("rule {} group {} has {} channels for tag \"{}\", relpath {}",
+                          rule_num, group_num, group.chid2row.size(), tag, relpath);
 
                 rule.groups.push_back(std::move(group));
             }
@@ -234,59 +250,6 @@ namespace WireCell::SPNG {
     }
 
         
-    // Return trace indices for tag.  
-    std::vector<size_t> FrameToTdm::tag_indices(const IFrame::pointer& iframe, const std::string& tag) const
-    {
-        // FIXME: this could go into aux's FrameTools.h
-        std::vector<size_t> inds;
-        if (tag.empty()) { // all
-            const size_t ntraces = iframe->traces()->size();
-            inds.resize(ntraces);
-            std::iota(inds.begin(), inds.end(), 0);
-        }
-        else {
-            inds = iframe->tagged_traces(tag);
-        }
-        return inds;
-    }
-
-    /// Return subset of channel IDs from have that are consistent with group.
-    /// Sort according to global channel order.
-    std::vector<int> FrameToTdm::group_channels(const std::vector<int>& have,
-                                                const Group& group) const
-    {
-        std::set<int> want(group.channels.begin(), group.channels.end());
-        for (const auto& wpid : group.wpids) {
-            auto wit = m_wpid_channels.find(wpid);
-            if (wit == m_wpid_channels.end()) {
-                continue;
-            }
-            for (int chid : wit->second) {
-                want.insert(chid);
-            }
-        }
-
-        std::vector<int> got;
-        std::set_intersection(have.begin(), have.end(),
-                              want.begin(), want.end(),
-                              std::inserter(got, got.begin()));
-
-        std::sort(got.begin(), got.end(), [&](int a, int b) {
-            auto ait = m_channel_order.find(a);
-            auto bit = m_channel_order.find(b);
-            auto eit = m_channel_order.end();
-            if (ait != eit && bit != eit) {
-                return ait->second < bit->second;
-            }
-            if (ait != eit) {
-                return true;
-            }
-            return false;
-        });
-        return got;
-    }
-
-
     
     ITorchTensor::pointer FrameToTdm::make_datatype(
         const std::string& datatype, const boost::filesystem::path& relpath,
@@ -315,7 +278,6 @@ namespace WireCell::SPNG {
     {
         ITorchTensor::vector tensors;
 
-        const ITrace::vector& all_traces = *(iframe->traces());
         const int frame_ident = iframe->ident();
 
 
@@ -327,71 +289,61 @@ namespace WireCell::SPNG {
         /// 2. map from channel ID to tensor row by the global sort.
         /// 3. iterate over indices, use map to find row, store.
 
+        /// Keep track of each trace temporarily below
+        struct TIR {
+            ITrace::pointer trace;
+            int64_t index; // into a summary or channels vector
+            int64_t row;   // tensor row index
+        };
+
         int rule_index = -1;
         for (const auto& rule : m_rules) {
             ++rule_index;
             std::string tag = rule.tag;
             
-            // The trace indices relevant to the tag.
-            auto tag_inds = tag_indices(iframe, tag);
-            std::vector<int> tag_chids;
-            for (size_t ind : tag_inds) {
-                tag_chids.push_back(all_traces[ind]->channel());
-            }
+            auto tagged_traces = Aux::tagged_traces(iframe, tag);
 
             int group_index = -1;
             for (const auto& group : rule.groups) {
                 ++group_index;
+                
+                std::vector<TIR> group_tirs;
 
-                // Vector of output ordered channel IDs
-                auto ordered_chids = group_channels(tag_chids, group);
+                int64_t summary_index = -1;
+                int tbeg=0, tend=0;
+                // Go through traces, find which are compatible with group,
+                // record their tensor row and summary index and sus out tensor
+                // bounds
+                for (auto trace : tagged_traces) {
+                    ++summary_index;
 
-                // Map chid to its eventual 
-                std::unordered_map<int, long> chid_row;
-                for (auto chid : ordered_chids) {
-                    chid_row[chid] = chid_row.size();
-                }
-
-                struct TIR {
-                    ITrace::pointer trace;
-                    size_t index; // into a summary or channels vector
-                    int row;   // tensor row index
-                };
-                std::vector<TIR> tirs;
-
-                // Find subset of indices with channels in grp_chids.
-                // And, find traces bounds.
-                std::vector<size_t> grp_inds;
-                int tbeg=0, tend=0, nrows=0;
-                size_t sindex=0; // the index into a summary
-                for (size_t ind : tag_inds) {
-                    const auto& trace = all_traces[ind];
-                    int chid = trace->channel();
-                    
-                    auto it = chid_row.find(chid);
-                    if (it == chid_row.end()) {
-                        // a tagged trace but its channel is not in our group.
-                        ++sindex;
+                    auto rit = group.chid2row.find(trace->channel());
+                    if (rit == group.chid2row.end()) {
                         continue;
                     }
-                    
-                    int row = it->second;
-                    tirs.emplace_back(TIR{trace, sindex, row});
-                    ++sindex;
+                    const int64_t row = rit->second;
+
                     
                     int tbin = trace->tbin();
                     int nbins = trace->charge().size();
                     
-                    ++nrows;
-                    if (nrows == 1) { // first time
+                    group_tirs.emplace_back(TIR{trace, summary_index, row});
+
+                    if (group_tirs.empty()) { // first time
                         tbeg = tbin;
                         tend = tbin+nbins;
                         continue;
                     }
                     if (tbeg < tbin) { tbeg = tbin; }
                     if (tend < tbin+nbins) { tend = tbin+nbins;}
+
                 }
+                int nrows = group.chid2row.size(); // span all channels as traces may be sparse
                 int ncols = tend-tbeg;
+
+                log->debug("ntirs={} ntraces={} nrows={} ncols={} nchid2row={}",
+                           group_tirs.size(), tagged_traces.size(), nrows, ncols, group.chid2row.size());
+
   
                 // Common md for all parts: traces, summaries, chids.
                 Configuration common_md;
@@ -404,11 +356,13 @@ namespace WireCell::SPNG {
                 // Build traces tensor
                 {
                     torch::Tensor ten = torch::zeros({nrows, ncols}, torch::kFloat32);
-                    for (const auto& tir : tirs) {
+                    for (const auto& tir : group_tirs) {
                         const auto& charge = tir.trace->charge();
                         int tbin = tir.trace->tbin();
                         int col_beg = tbin - tbeg;
                         int col_end = col_beg + charge.size();
+                        // log->debug("rule={} grp={} row={} tbin={} beg={} end={}",
+                        //            rule_index, group_index, tir.row, tbin, col_beg, col_end);
                         auto tmp = torch::tensor(charge, torch::kFloat32);
                         ten.index({tir.row, torch::indexing::Slice(col_beg, col_end)}) += tmp;
                     }
@@ -425,7 +379,7 @@ namespace WireCell::SPNG {
                 auto summary = iframe->trace_summary(tag);
                 if (summary.size()) {
                     torch::Tensor ten = torch::zeros({nrows}, torch::kFloat64);
-                    for (const auto& tir : tirs) {
+                    for (const auto& tir : group_tirs) {
                         const double value = summary[tir.index];
                         ten.index({tir.row}) += value;
                     }
@@ -435,7 +389,7 @@ namespace WireCell::SPNG {
                 // Build chids tensor
                 {
                     torch::Tensor ten = torch::zeros({nrows}, torch::kInt);
-                    for (const auto& tir : tirs) {
+                    for (const auto& tir : group_tirs) {
                         int chid = tir.trace->channel();
                         ten.index_put_({tir.row}, chid); // no accumulate
                     }

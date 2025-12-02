@@ -306,45 +306,80 @@ local known_detectors = import "detectors.jsonnet";
     /// Per-view list
     crossview_thresholds(cvt_u, cvt_v, cvt_w):: [cvt_u, cvt_v, cvt_w],
 
-    /// A view group collects the wire planes in a common layer / view index
-    /// in one face or two faces that are connected in an unspecified anode.
+    /// A "view group" defines a set of wires and channels from a common wire
+    /// plane layer in a way that is symmetric between the case where they are
+    /// contiguous across one face or two faces ("wrapped" or "jumpered").
     ///
-    /// The term "view" is introduced here to distinguish from (wire) "plane" (a
-    /// physical unit) or "layer" (a logical/relative location).  A "view" is
-    /// the combination of both.  When a view has two faces, the face ident
-    /// array gives an ordering.
+    /// A "view group" is defined by the following parameters:
     ///
-    /// @param connection A number describing face connectivity:
-    ///        0: one face not connected to the other side
-    ///        1: two faces connected on one edge (jumper)
-    ///        2: two faces connected on both edges (wrapped)
-    /// @param view_index The view/plane index. 0:U, 1:V 2:W
-    /// @param face_idents An array of one or two face ID numbers.
-    view_group(connection, view_index, face_idents):: {
-        name: 'group_v' +  std.toString(view_index) +
-              'f' + std.join('f',std.map(std.toString, face_idents)) +
-              'c' + std.toString(connection),
+    /// - view_index :: the plane index for the wire planes in the view group.
+    ///
+    /// - connection :: a number thae encodes if and how the two blocks of
+    /// channels are connected by their wires across block boundaries.  When
+    /// only one face is in the view group, the connection number is not
+    /// relevant and taken to be zero.  When an anode is "unfolded" aka
+    /// "jumpered" (eg DUNE VD CRU) the connection number is 1.  When the anode
+    /// is "wrapped" (eg DUNE HD APA) the connection number is 2.
+    ///
+    /// - faces :: a list of one or two face IDs.  The order of this list
+    /// determines the order of the blocks of channels for the faces in a
+    /// concatenated waveform tensor.
+    ///
+    /// - order :: an ordering number of +1 or -1 for each face in faces.  If
+    /// +1, the channels in the face or sorted in ascending IChannel::index()
+    /// number and descending if -1.  Channels MUST be ordered to allow their
+    /// wires to be sequential neighbors as their channels go across a
+    /// connection boundary.  See FrameToTDM log output dumping the "rule
+    /// groups" to confirm order.  It will print, edited for brevity eg:
+    ///
+    /// group 0, <U> face:1 chids:   0->399,  wire0head:(-3627.72 6066.7 2297.81)->(-3627.72 6066.7 3.59417) 
+    /// group 0, <U> face:0 chids: 400->799,  wire0head:(-3522.19 6066.7 6.91436)->(-3522.19 6066.7 2301.13) 
+    /// group 1, <V> face:1 chids:1199->800,  wire0head:(-3622.81 6063.35 2301.57)->(-3622.81 6063.35 7.3492) 
+    /// group 1, <V> face:0 chids:1599->1200, wire0head:(-3527.11 6063.35 3.15764)->(-3527.11 6063.35 2297.37) 
+    /// group 2, <W> face:0 chids:2080->2559, wire0head:(-3532.02 6060 4.60095)->(-3532.02 6060 2299.97) 
+    /// group 3, <W> face:1 chids:1600->2079, wire0head:(-3617.89 6060 4.75087)->(-3617.89 6060 2300.12)     
+    ///
+    /// This is PDHD.  Note how the channels are in order and the wire0head.Z
+    /// value goes large->small->small->large over the group 0 face boundary.
+    ///
+    /// The group 0 was accomplished with:
+    ///
+    ///    view_group(0, 2, [1, 0], [-1, 1]),
+    ///
+    /// Note, the anode ID number is not specified in the view group.  Different
+    /// anodes may have same or different view groups.
+    view_group(view_index, connection, face_idents, order=[1,1]):: {
         view_index: view_index,
         view_layer: wc.wpid_index_to_layer(view_index),
-        face_idents: face_idents,
         connection: connection,
+        face_idents: face_idents,
+        order: order, 
 
-        // Get the wpids for this view group in a given anode.
+        name: 'group_v' +  std.toString(self.view_index) +
+              'c' + std.toString(self.connection) +
+              'f' + std.join('f',std.map(std.toString, self.face_idents)),
+
+        // Construct wpids list given an anode ID number.
         wpids(anode_ident):: [wc.WirePlaneId(self.view_layer, fid, anode_ident)
                               for fid in self.face_idents],
+        
+        // Return wpids that are signed by "order".  See FrameToTdm
+        signed_wpids(anode_ident)::
+            [self.order[fobj.index]*wc.WirePlaneId(self.view_layer, fobj.value, anode_ident)
+            for fobj in wc.enumerate(face_idents)],
     },
 
-    /// Helper to resolve case of 1 vs 2 face groups
-    view_groups_one_layer(connection, view_index, face_idents)::
-        if connection > 0
-        then [$.view_group(connection, view_index, face_idents)]
-        else [$.view_group(connection, view_index, [fid]) for fid in face_idents],
+    // /// Helper to resolve case of 1 vs 2 face groups
+    // view_groups_one_layer(connection, view_index, face_idents)::
+    //     if connection > 0
+    //     then [$.view_group(connection, view_index, face_idents)]
+    //     else [$.view_group(connection, view_index, [fid]) for fid in face_idents],
 
-    /// Partition the set of faces and layers by connections and face_idents
-    view_groups(connections,     // per-plane connection number: 0:none, 1:jumper, 2:wrapped
-                face_idents)::   // which face(s), and provide an ordering
-        wc.flatten([ $.view_groups_one_layer(connections[view_index], view_index, face_idents)
-          for view_index in [0,1,2]]),
+    // /// Partition the set of faces and layers by connections and face_idents
+    // view_groups(connections,     // per-plane connection number: 0:none, 1:jumper, 2:wrapped
+    //             face_idents)::   // which face(s), and provide an ordering
+    //     wc.flatten([ $.view_groups_one_layer(connections[view_index], view_index, face_idents)
+    //       for view_index in [0,1,2]]),
 
     /// Name for TPC of given ident.
     tpc_name(tpc_ident):: "tpc" + std.toString(tpc_ident),
@@ -362,25 +397,26 @@ local known_detectors = import "detectors.jsonnet";
         ductor=null,
         adc=null, fr=null, er=null, rcs=[],
         pirs=null, noise=null,
-        connections=null, filters=null, faces=null,
+        view_groups=null, filters=null,
         crossview_thresholds=null)::
         {
             // the AnodePlane config object
             anode: anode,
+
             // The liquid argone
             lar: lar,
+
             // Induction parameters
             ductor: ductor,
+
             // ADC related parameters
             adc:adc,
+
             // response object configs, rcs may be an array of "RC" long responses.
             fr:fr, er:er, rcs:rcs,
-            // how same-layer views on connected across faces
-            connections: connections,
+
             // The decon filters config
             filters: filters,
-            // Ordered enumeration of face idents
-            faces: faces,
 
             // plane impact responses
             pirs: pirs,
@@ -397,7 +433,12 @@ local known_detectors = import "detectors.jsonnet";
             ident: anode.data.ident,
             name: $.tpc_name(self.ident),
 
-            view_groups: $.view_groups(connections, faces),
+            // The view groups
+            view_groups: view_groups,
+
+            // all faces
+            faces: std.set(wc.flatten([vg.face_idents for vg in view_groups])),
+
     },
 
 

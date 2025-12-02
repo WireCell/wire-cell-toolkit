@@ -19,7 +19,7 @@ local fans = import "fans.jsonnet";
             rules: [{
                 tag: tag,
                 groups: [{
-                    wpids: g.wpids(tpc.ident),
+                    wpids: g.signed_wpids(tpc.ident),
                 }, for g in tpc.view_groups]
             }],                 // just one rule
         } + wc.object_with(control, ["verbosity", "device"]),

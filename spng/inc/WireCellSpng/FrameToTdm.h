@@ -63,7 +63,7 @@ namespace WireCell::SPNG {
         /// Configuration: "anode"
         ///
         /// The type:name of an anode plane component.
-        IAnodePlane::pointer m_anode;
+        // IAnodePlane::pointer m_anode;
 
         /// Configuration: "chmasks"
         ///
@@ -93,11 +93,15 @@ namespace WireCell::SPNG {
         ///   attributes:
         ///
         ///   - wpids :: An array of WirePlaneId values (use wc.WirePlaneId() in
-        ///     Jsonnet) that traces by their channels into a group.
-        ///
-        ///   - channels :: An array of channel IDs to select traces into a
-        ///     group.  If both wpids and channels are given, a union of
-        ///     channels are found.
+        ///     Jsonnet) determines the set and order of waveform traces along
+        ///     the channel dimension of the tensor.  Each WPID defines one
+        ///     block of channels/rows and the blocks are in order of the
+        ///     entries in the wpids array.  In a single block, channels/rows
+        ///     are ordered according to increasing IChannel::index() for
+        ///     channels that are "in" the WPID.  A WPID can be given as a
+        ///     negative value in which case decreasing IChannel::index() order
+        ///     is constructed for the WPID.  The tensor will be sized to span
+        ///     all channels in the given WPIDs.
         ///
         ///   - relpath :: A datapath relative to basepath under which the parts
         ///     "traces", "chids", "summaries" are placed.  This must be unique
@@ -114,7 +118,8 @@ namespace WireCell::SPNG {
             };
             std::string name;    // optional, "" by default
             std::set<int> wpids;
-            std::set<int> channels;
+            // The map of channel ID to its row. 
+            std::map<int, int64_t> chid2row;
         };
         struct Rule {
             std::string tag;    // traces tag
@@ -123,12 +128,6 @@ namespace WireCell::SPNG {
 
         std::vector<Rule> m_rules;
             
-        // Map channel ID to a global ordering by major value wire-plane-id and
-        // minor value wire-attachment-number.
-        std::unordered_map<int, size_t> m_channel_order;
-
-        // All the channels in a wireplane ID
-        std::unordered_map<int, std::set<int> > m_wpid_channels;
 
     private:
 
@@ -144,16 +143,6 @@ namespace WireCell::SPNG {
         torch::Tensor chmask_tensor(const Waveform::ChannelMasks& cms) const;
 
         
-        /// Return the channel IDs that are in the intersection of have and group.
-        ///
-        /// The returned vector is sorted by increasing major value of wpid and
-        /// minor value of wire-attachment-number (IChannel::index()).
-        std::vector<int> group_channels(const std::vector<int>& have, const Group& group) const;
-
-        /// Return trace indices in tagged set.  A tag of "" or "*" returns all
-        /// indices simply enumerating those in the full traces vector.
-        std::vector<size_t> tag_indices(const IFrame::pointer& iframe, const std::string& tag) const;
-
         /// Convert tensors according to the rules.
         ITorchTensor::vector rules_tensors(const IFrame::pointer& iframe, const std::string& parent) const;
 

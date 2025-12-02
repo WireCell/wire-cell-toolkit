@@ -52,6 +52,18 @@ local anodes = [
     api.anode(anode_ident, wires_obj, api.hd_like_faces(anode_ident))
     for anode_ident in [0,1,2,3]];
 
+// Check, eg, FrameToTdm logs to assure correct channel/wire ordering.
+local view_groups = [
+    // The wrapped U
+    api.view_group(0, 2, [1, 0], [-1, 1]),
+    // The wrapped V
+    api.view_group(1, 2, [1, 0], [-1, 1]),
+    // One W face
+    api.view_group(2, 0, [0,]),
+    // Other W face
+    api.view_group(2, 0, [1,]),
+];
+
 local pirs(anode) = [
     api.plane_impact_response("", plane,
                               tick=adc.tick,
@@ -98,14 +110,14 @@ local cvts = api.crossview_thresholds(cvt, cvt, cvt);
 
 
 local crossview_thresholds = [
-
+    // fixme: writeme
     ];
 
 // All TPCs are identical except for their anodes
 local tpcs = [
     api.tpc(anode, lar=lar, ductor=ductor, adc=adc, fr=fr, er=er_spng,
             pirs=pirs(anode), noise=noise,
-            connections=[2,2,0], filters=filters, faces=[0,1],
+            view_groups=view_groups, filters=filters,
             crossview_thresholds=cvts)
     for anode in anodes ];
 

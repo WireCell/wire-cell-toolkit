@@ -42,7 +42,15 @@ def maybe_abs(tensor):
         return torch.abs(tensor)
     return tensor
 
+def maybe_median(tensor):
+    if "bool" in str(tensor.dtype):
+        return tensor
+    return (tensor.T - torch.median(tensor, axis=1).values).T
+    
+
 def do_plot(tensor, title, pdf):
+    print(f'plotting {tensor.dtype} {tensor.shape} {title} sum={torch.sum(tensor)}')
+
     if "complex" in str(tensor.dtype):
         do_plot(torch.abs(tensor), '(amplitude) ' + title, pdf)
         do_plot(torch.angle(tensor), '(phase) ' + title, pdf)
@@ -50,6 +58,8 @@ def do_plot(tensor, title, pdf):
 
     axes = plt.gca()
     logit = needs_log(tensor, title)
+
+    tensor = maybe_median(tensor)
 
     ndim = tensor.dim()
     if ndim == 1:
@@ -68,6 +78,7 @@ def do_plot(tensor, title, pdf):
             if "bool" in str(tensor.dtype):
                 norm = None
             else:
+                print(f'norm by {linthresh=} {vlim=}')
                 norm = pcolors.SymLogNorm(linthresh=linthresh, 
                                           vmin=-vlim, vmax=vlim)
         plt.imshow(tensor, aspect='auto', norm=norm, interpolation='none', cmap='rainbow')
