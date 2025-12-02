@@ -175,6 +175,30 @@ static std::vector<std::string> get_path()
     return ret;
 }
 
+
+std::string WireCell::Persist::resolve(const std::string& file_or_detector_name, const std::string& kind)
+{
+    auto maybe = WireCell::Persist::resolve(file_or_detector_name);
+    if (! maybe.empty()) { return maybe; }
+
+    auto detpath = WireCell::Persist::resolve("detectors.jsonnet");
+    if (detpath.empty()) { return ""; }
+
+    auto jdets = WireCell::Persist::load(detpath);
+    auto jdet = jdets[file_or_detector_name];
+    if (jdet.isNull()) { return ""; }
+
+    auto jkind = jdet[kind];
+    if (jkind.isNull()) { return ""; }
+
+    if (jkind.isString()) { return WireCell::Persist::resolve(jkind.asString()); }
+
+    if (jkind.isArray()) { return WireCell::Persist::resolve(jkind[0].asString()); }
+
+    return "";
+}
+
+
 std::string WireCell::Persist::resolve(const std::string& filename)
 {
     if (filename.empty()) {

@@ -82,6 +82,11 @@ namespace WireCell {
          * be checked. Failure to resolve returns an empty string. */
         std::string resolve(const std::string& filename);
 
+        /** Apply resolve() to file_or_detector_name and if it fails to return,
+         * then attempt to lookup file name of given "kind" from detectors.jsonnet
+         */
+        std::string resolve(const std::string& file_or_detector_name, const std::string& kind);
+
         /** Return a string holding the entire contents of the file.
          * File resolution is performed.  WireCell::IOError is thrown
          * if file is not found. */

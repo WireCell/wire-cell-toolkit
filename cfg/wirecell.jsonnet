@@ -307,9 +307,12 @@
     wpid_layer_to_indices(layer) ::
         [bit for bit in [0,1,2] if (layer & (1<<bit)) != 0],
 
-    // Return FIRST INDEX of layers that are identified in the layer bitmap.
+    // Return the layer's index.  The layer is bit-field with exactly 1 high bit.
     wpid_layer_to_index(layer) ::
-        self.wpid_layer_to_indices(layer)[0],
+        local indices = $.wpid_layer_to_indices(layer);
+        local is_one = std.assertEqual(std.length(indices), 1);
+        indices[0],
+
 
     // Unpack a WirePlaneId into its constituents
     unpack_wpid(wpid) :: {

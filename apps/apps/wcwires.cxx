@@ -3,32 +3,18 @@
 #include "CLI11.hpp"
 
 #include "WireCellUtil/WireSchema.h"
-#include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/Logging.h"
 
-#include <iostream>
 #include <vector>
-#include <map>
+#include <string>
+#include <cstdlib>              // setenv
 
 using namespace WireCell;
 using namespace WireCell::WireSchema;
 
-// static void
-// parse_param(std::string name,
-//             const std::vector<std::string>& args,
-//             std::map<std::string,std::string>& store)
-// {
-//     for (auto one : args) {
-//         auto two = String::split(one, "=");
-//         if (two.size() != 2) {
-//             std::cerr
-//                 << name
-//                 << ": parameters are set as <name>=<value>, got "
-//                 << one << std::endl;
-//             throw CLI::CallForHelp();
-//         }
-//         store[two[0]] = two[1];
-//     }
-// }
+using spdlog::debug;
+using spdlog::info;
+using spdlog::error;
 
 int main(int argc, char** argv)
 {
@@ -40,6 +26,17 @@ int main(int argc, char** argv)
     bool do_validate = false;
     bool do_fail_fast = false;
     double repsilon = 1e-6;
+
+    std::string logsink = "stderr";
+    std::string loglevel = "info";
+
+    app.add_option("-l,--logsink", logsink,
+                   "Set log sink as <filename> or 'stdout' or 'stderr' (default)"
+        )->type_size(1)->allow_extra_args(false);
+
+    app.add_option("-L,--loglevel", loglevel,
+                   "Set log level as 'debug' or 'info' (default)"
+        )->type_size(1)->allow_extra_args(false);
 
     app.add_option("-P,--path", load_path,
                    "Search paths to consider in addition to those in WIRECELL_PATH"
@@ -66,6 +63,23 @@ int main(int argc, char** argv)
 
     CLI11_PARSE(app, argc, argv);
 
+    Log::default_logging(logsink, loglevel, true);
+    Log::set_level(loglevel);
+    debug("logging to {} at level {}", logsink, loglevel);
+
+    for (const auto& path : load_path) {
+        std::string wpath = getenv("WIRECELL_PATH");
+        debug("adding to WIRECELL_PATH: {}", path);
+        if (wpath.empty()) {
+            wpath = path;
+        }
+        else {
+            wpath = path + ":" + wpath;
+        }
+        setenv ("WIRECELL_PATH", path.c_str(), 1);
+    }
+
+
     if (output.empty()) {
         if (do_validate) {
             Store raw = load(filename.c_str(), Correction::load);
@@ -73,10 +87,10 @@ int main(int argc, char** argv)
                 validate(raw, repsilon, do_fail_fast);
             }
             catch (...) {
-                std::cerr << "input invalid\n";
+                error("wires file {} is invalid", filename);
                 return 1;
             }
-            std::cerr << "input valid\n";
+            info("valid");
         }
     }
     else {
@@ -104,7 +118,7 @@ int main(int argc, char** argv)
                 cor = Correction::pitch;
                 break;
         };
-        std::cerr << "Loading " << filename << " with " << corstr << " corrections\n";
+        debug("Loading {} with {} corrections", filename, corstr);
 
         Store store = load(filename.c_str(), cor);
         if (do_validate) {
@@ -112,10 +126,10 @@ int main(int argc, char** argv)
                 validate(store, repsilon, do_fail_fast);
             }
             catch (...) {
-                std::cerr << "output invalid\n";
+                error("wires file {} is invalid", filename);
                 return 1;
             }
-            std::cerr << "output valid\n";
+            info("valid");
         }
         dump(output.c_str(), store);
     }
