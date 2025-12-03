@@ -209,7 +209,7 @@ void Graph::print_timers(bool include_execmon) const
         l_timer->info("Timer: {} : {} sec", tags[2].substr(5), it->first);
         total_time += it->first;
     }
-    l_timer->info("Timer: Total node execution : {} sec", total_time);
+    l_timer->info("Timer: Total node execution : {} core sec", total_time);
 
     if (include_execmon) {
         l_timer->debug("ExecMon:\n{}", m_em.summary());
