@@ -93,6 +93,27 @@ namespace WireCell::SPNG {
         // Handle ingesting the input tensors.  Return true if input is batched.
         bool pre_input(const input_vector& inv, std::vector<torch::Tensor>& inputs, Configuration& md);
 
+        // Gemini-provided extension to NoTileMPCoincidence's version to encode
+        // segment level information.
+        /**
+         * @brief Convert cross views tensor from wire to channel basis.
+         *
+         * This encodes the MPn values on each wire as 1-hot bit nibbles per wire-segment on each channel.
+         *
+         * @param N_channels The size of the channel dimension of the output.
+         * @param input The input tensor (N_rows, N_wires) of type kInt, with values 0-3 (MP value).
+         * @param indices The index tensor (N_wires) of type kLong or kInt, mapping wire index to channel index.
+         * @param segment The segment tensor (N_wires) of type kInt, with values 0-2.
+         * @return torch::Tensor The output tensor (N_rows, N_channels) of type kInt32, where each
+         * element is a bitmask resulting from the aggregation.
+         */
+        torch::Tensor convert_wires_to_channels_extended(
+            int64_t N_channels,
+            torch::Tensor input,
+            torch::Tensor wires_to_channels,
+            torch::Tensor segment);
+
+
         /// A "view" here represents one layer / plane of wires on one face.
         /// Given wrapped wires, channels from both faces must be considered.
         /// Eg, for a DUNE APA, we have two sets of three "views".

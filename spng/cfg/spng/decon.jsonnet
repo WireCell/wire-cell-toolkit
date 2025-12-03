@@ -25,7 +25,7 @@ local pg = import "pgraph.jsonnet";
                     control={})::
         {
             type: "SPNGResponseKernel",
-            name: tpc.name + extra_name,
+            name: tpc.name + "v" + std.toString(plane_index) + extra_name,
             data: {
                 field_response: wc.tn(tpc.fr),
                 elec_response: wc.tn(tpc.er),
@@ -33,7 +33,7 @@ local pg = import "pgraph.jsonnet";
                 elec_duration: tpc.er.data.nticks*tpc.er.data.tick,
                 period: tpc.adc.tick, // sample period of kernel time dimension.
                 plane_index: plane_index,
-                // Scale to units of ADC and negate to give positive signals.
+                // Scale to units of ADC
                 scale: -1 / tpc.adc.lsb_voltage,
                 debug_filename: debug_filename
             } + wc.object_with(control, ["verbosity", "device"]),
@@ -105,8 +105,8 @@ local pg = import "pgraph.jsonnet";
         ][connection],
         local decon_time =
             if streaming
-            then {cyclic: false, crop: 0, baseline: true, roll_mode: "decon"}
-            else {cyclic: false, crop: -2, baseline: true, roll_mode: "decon"},
+            then {cyclic: false, crop: 0, baseline: true/*, roll_mode: "decon"*/}
+            else {cyclic: false, crop: -2, baseline: true/*, roll_mode: "decon"*/},
 
         local nothing = {padding: "none", dft: false},
         local just_filter = {padding: "none", dft: true},
@@ -166,11 +166,12 @@ local pg = import "pgraph.jsonnet";
     group_decon_view(tpc, control={})::
         local groups = tpc.view_groups;
         local ngroups = std.length(groups);
-        local response_kernels = [$.response_kernel(tpc, view_index, control=control) for view_index in [0,1,2]];
+        //local response_kernels = [$.response_kernel(tpc, view_index, control=control) for view_index in [0,1,2]];
+
         local decon_kernels = [$.tpc_group_decon_kernel(tpc, group_index, extra_name="", control=control)
                                for group_index in wc.iota(ngroups)];
         local decon_frers = [$.tpc_group_decon_frer(tpc, it.index,
-                                                    response_kernels[it.value.view_index], control=control)
+                                                    decon_kernels[it.value.view_index], control=control)
                              for it in wc.enumerate(groups)
                             ];
         local view_frers = $.collect_groups_by_view(tpc, decon_frers, control=control);

@@ -39,64 +39,67 @@ namespace WireCell::SPNG {
 
     void FilterKernel::configme()
     {
-        if (m_cfg.axis.empty()) {
-            raise<ValueError>("FilterKernel has empty 'axis' parameter, check config?");
-        }
-
-        m_funcs.clear();
         const size_t ndim = m_cfg.axis.size();
 
+        if (ndim == 0) {
+            raise<ValueError>("FilterKernel has empty 'axis' parameter, check config?");
+        }
         if (ndim > 3) {
             raise <ValueError>("a filter kernel only supports up to 3D (currently)");
         }
 
+        m_funcs.clear();
+
         for (size_t ind=0; ind<ndim; ++ind) {
             const auto& axis = m_cfg.axis[ind];
 
-            log->debug("filter axis {} kind=\"{}\" size={} period={} scale={} power={} ignore_baseline={}",
-                       ind, axis.kind, axis.size, axis.period, axis.scale, axis.power, axis.ignore_baseline);
+            axis_functions funcs;
 
-            // No other configurations matter when axis is the identity filter
-            if (axis.kind == "none") {
-                // We will unsqueeze() to form this axis.
-                m_funcs.emplace_back([](double freq) -> float {
-                    // We are never called because "sampling" is done with torch::ones().
-                    raise<LogicError>("identity spectrum is never explicitly sampled");
-                    return 1.0;
-                });
-                continue;
-            }
+            for (auto filter : axis.filters) {
 
-            if (axis.kind == "flat") {
-                m_funcs.emplace_back([axis](double freq) -> float {
-                    return axis.scale;
-                });
-                continue;
-            }
+                log->debug("add to filter axis {} kind=\"{}\" "
+                           "size={} period={} scale={} power={} ignore_baseline={}",
+                           ind, filter.kind, axis.size, axis.period, filter.scale,
+                           filter.power, axis.ignore_baseline);
+                
+                if (filter.kind == "flat") {
+                    funcs.emplace_back([filter](double freq) -> float {
+                        return filter.scale;
+                    });
+                    continue;
+                }
             
-            // the "pass" filters have parameter constraints.
-            if (axis.period <= 0) {
-                raise<ValueError>("period must be positive");
-            }
-            if (axis.scale <= 0) {
-                raise<ValueError>("scale must be positive");
-            }
+                // the "pass" filters have parameter constraints.
+                if (axis.period <= 0) {
+                    raise<ValueError>("period must be positive");
+                }
+                if (filter.scale <= 0) {
+                    raise<ValueError>("scale must be positive");
+                }
 
-            if (axis.kind == "lowpass") { // aka "hf"
-                m_funcs.emplace_back([axis](double freq) -> float {
-                    return exp(-0.5 * pow(freq / axis.scale, axis.power));
-                });
+                if (filter.kind == "lowpass") { // aka "hf"
+                    funcs.emplace_back([filter](double freq) -> float {
+                        return exp(-0.5 * pow(freq / filter.scale, filter.power));
+                    });
+                }
+                else if (filter.kind == "highpass") { // aka "lf"
+                    funcs.emplace_back([filter](double freq) -> float {
+                        return 1 - exp(-pow(freq / filter.scale, filter.power));
+                    });
+                }
+                else {
+                    raise<ValueError>("unsupported filter kind: %s", filter.kind);
+                }
             }
-            else if (axis.kind == "highpass") { // aka "lf"
-                m_funcs.emplace_back([axis](double freq) -> float {
-                    return 1 - exp(-pow(freq / axis.scale, axis.power));
-                });
-            }
-            else {
-                raise<ValueError>("unsupported axis kind: %s", axis.kind);
-            }
+            m_funcs.emplace_back([funcs](double freq) -> float {
+                double val = 1.0;
+                for (const auto& func : funcs) {
+                    val *= func(freq);
+                }
+                return val;
+            });
         }
-
+            
         if (m_cfg.debug_filename.size()) {
             log->debug("writing debug file: {}", m_cfg.debug_filename);
             write_debug(m_cfg.debug_filename);
@@ -149,8 +152,7 @@ namespace WireCell::SPNG {
 
         const int64_t size = shape[axis];            
 
-        //log->debug("spectrum_axis {} size {} kind \"{}\"", axis, size, m_cfg.axis[axis].kind);
-        if (m_cfg.axis[axis].kind == "none") {
+        if (cfg.filters.empty()) {
             // Note, this "sampling" does not get into a final kernel.
             return torch::ones(size, torch::kFloat);
         }
@@ -201,10 +203,10 @@ namespace WireCell::SPNG {
         for (size_t idim=0; idim<ndims; ++idim) {
             auto s = spectrum_axis(shape, idim);
 
-            log->debug("filter spectrum dim={} size={} kind=\"{}\"", idim, shape[idim], m_cfg.axis[idim].kind);
+            log->debug("filter spectrum dim={} size={} nfuncs=\"{}\"",
+                       idim, shape[idim], m_cfg.axis[idim].filters.size());
 
-            if (m_cfg.axis[idim].kind == "none") {
-
+            if (m_cfg.axis[idim].filters.empty()) {
                 none_axis.push_back(s);
                 none_dims.push_back(idim);
             }

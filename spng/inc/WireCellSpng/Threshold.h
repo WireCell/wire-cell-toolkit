@@ -29,9 +29,9 @@ namespace WireCell::SPNG {
         double rms_max_value = 0;
 
         /// If binary is true (default) the output tensor is of type bool and is
-        /// value true above threshold, false otherwise.  If false, below
-        /// threshold values are set to zero and remaining are left unchanged
-        /// from input.
+        /// value gives Boolean true for above threshold, false if at or below
+        /// threshold.  If binary is false, values at or below threshold are set
+        /// to zero and remaining values are left unchanged from input.
         bool binary = true;
 
 

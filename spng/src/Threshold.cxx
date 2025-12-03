@@ -45,6 +45,13 @@ namespace WireCell::SPNG {
     {
         WireCell::configure_bases<Threshold, ContextBase, Logger>(this, config);
         from_json(m_cfg, config);
+
+        log->debug("nominal={}, RMS: nsigma={} max={} axis={} binary={}",
+                   m_cfg.nominal,
+                   m_cfg.rms_nsigma,
+                   m_cfg.rms_max_value,
+                   m_cfg.rms_axis,
+                   m_cfg.binary);
     }
 
     torch::Tensor Threshold::rms_threshold(torch::Tensor tensor)
@@ -92,6 +99,7 @@ namespace WireCell::SPNG {
         else {
             tensor = rms_threshold(tensor);
         }
+
         out = std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
 
         logit(out, "output");

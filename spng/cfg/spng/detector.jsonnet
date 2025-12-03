@@ -198,7 +198,7 @@ local known_detectors = import "detectors.jsonnet";
             postgain: postgain, 
         } + $.binning_to_time(binning)
     },
-        
+    
     // fixme: add rc
     
     // Create a plane impact response (PIR) for one plane.  Any null values will
@@ -250,26 +250,24 @@ local known_detectors = import "detectors.jsonnet";
     },
 
 
-    /// Define a filter configuration.  Kind can be "lowpass" (aka hf) or
+    /// Define a filter function.  Kind can be "lowpass" (aka hf) or
     /// "highpass" (aka lf).  The kind maps to an analytical function of the
     /// other parameters.
-    filter_config(scale,               // 
-                  power=2.0,           // exponential power
-                  kind="lowpass",
-                  period=$.default_adc_period, // sampling period
-                  // if true, zero-frequency is zeroed
-                  ignore_baseline=true)::
-        {
-            scale: scale,
-            power: power,
-            kind: kind,
-            period: period,
-            ignore_baseline: ignore_baseline
-        },
+    filter_function(scale, power=2.0, kind="lowpass"):: {
+        scale: scale, power:power, kind:kind,
+    },
+    /// Define filters for one axis.  The funcs is an array of zero or more
+    /// filter_function() objects.  An empty funcs list is valid which will be
+    /// interpreted as the identify filter.  Period is the sample period.  If
+    /// ignore_baseline is true the zero frequency sample will be set to zero.
+    /// The size is the "natural" size.
+    filter_axis(funcs, period=$.default_adc_period, ignore_baseline=true, size=128):: {
+        filters: funcs, period:period, ignore_baseline:ignore_baseline, size:size,
+    },
 
-    /// Various filters in the time dimension are defined with semantic labels.
-    /// These each should be defined with filter_config().  The filter set are 
-    /// specified on a per-view basis.
+    /// Given semantic labels to various axis filters over the time dimension.
+    /// These each should be defined with filter_axis().  See view_filters() for
+    /// grouping these on a per-view basis.
     time_filters(gauss, wiener, dnnroi):: {
         /// The filter for final output signals from SPNG.  This should preserve
         /// signal.
@@ -281,7 +279,8 @@ local known_detectors = import "detectors.jsonnet";
         dnnroi: dnnroi,
     },
     
-    /// There is just one type of channel filter  per view which is used in decon.
+    /// There is just one semantically distinct channel filter per view which is
+    /// the one used in decon.
     channel_filters(decon):: {
         decon: decon
     },
@@ -366,7 +365,7 @@ local known_detectors = import "detectors.jsonnet";
         // Return wpids that are signed by "order".  See FrameToTdm
         signed_wpids(anode_ident)::
             [self.order[fobj.index]*wc.WirePlaneId(self.view_layer, fobj.value, anode_ident)
-            for fobj in wc.enumerate(face_idents)],
+             for fobj in wc.enumerate(face_idents)],
     },
 
     // /// Helper to resolve case of 1 vs 2 face groups
@@ -439,7 +438,7 @@ local known_detectors = import "detectors.jsonnet";
             // all faces
             faces: std.set(wc.flatten([vg.face_idents for vg in view_groups])),
 
-    },
+        },
 
 
     /// Construct a detector as a named collection of tpcs.

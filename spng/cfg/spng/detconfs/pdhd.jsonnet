@@ -74,44 +74,54 @@ local pirs(anode) = [
 
 local noise = api.noise(empirical = api.empirical_noise(det.noise));
 
-local gauss_filter = api.filter_config(scale=0.12 * wc.megahertz);
-local gauss_filters = [
-    gauss_filter,
-    gauss_filter,
-    gauss_filter,
+// Same for all views?
+local gauss_filter = api.filter_function(scale=0.12 * wc.megahertz);
+
+// by view
+local hf_tight = [
+    // PDSP Wiener_tight_{U,V,W}
+    api.filter_function(scale=0.1487880 * wc.megahertz, power=3.76194),
+    api.filter_function(scale=0.1596568 * wc.megahertz, power=4.36125),
+    api.filter_function(scale=0.1362300 * wc.megahertz, power=3.35324),
 ];
+local hf_wide = [
+    // PDSP's Wiener_wide_{U,V,W}
+    api.filter_function(scale=0.186765 * wc.megahertz, power=5.05429),
+    api.filter_function(scale=0.193600 * wc.megahertz, power=5.77422),
+    api.filter_function(scale=0.175722 * wc.megahertz, power=4.37928),
+];
+local lf_loose =   api.filter_function(0.002 * wc.megahertz, kind="highpass");
+local lf_tight =   api.filter_function(0.016 * wc.megahertz, kind="highpass");
+local lf_tighter = api.filter_function(0.080 * wc.megahertz, kind="highpass");
+
 local wiener_filters = [
-    api.filter_config(scale=0.1487880 * wc.megahertz, power=3.76194),
-    api.filter_config(scale=0.1596568 * wc.megahertz, power=4.36125),
-    api.filter_config(scale=0.1362300 * wc.megahertz, power=3.35324),
+    api.filter_axis([hf_tight[0], lf_tight]),
+    api.filter_axis([hf_tight[1], lf_tight]),
+    api.filter_axis([hf_tight[2]])
 ];
 
-local looself = api.filter_config(scale= 0.002 * wc.megahertz);
-local dnnroi_filters = [
-    looself,
-    looself,
-    looself,
-];
+// same for all views?
+local dnnroi_filter = api.filter_axis([lf_loose]);
     
 local channel_filters = [
-    api.filter_config(scale=1.0 / wc.sqrtpi * 0.75, period=1.0, ignore_baseline=false),
-    api.filter_config(scale=1.0 / wc.sqrtpi * 0.75, period=1.0, ignore_baseline=false),
-    api.filter_config(scale=1.0 / wc.sqrtpi * 10.0, period=1.0, ignore_baseline=false),
+    api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
+                    period=1.0, ignore_baseline=false),
+    api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
+                     period=1.0, ignore_baseline=false),
+    api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 10.0)],
+                    period=1.0, ignore_baseline=false)
 ];
 
 local filters = [
-    api.view_filters(time_filters=api.time_filters(gauss_filters[i], wiener_filters[i], dnnroi_filters[i]),
+    api.view_filters(time_filters=api.time_filters(gauss=gauss_filter,
+                                                   wiener=wiener_filters[i],
+                                                   dnnroi=dnnroi_filter),
                      channel_filters=api.channel_filters(channel_filters[i]))
     for i in [0,1,2]];
 
 // use defaults for now
-local cvt = api.crossview_threshold();
+local cvt = api.crossview_threshold(rms_nsigma=5.0);
 local cvts = api.crossview_thresholds(cvt, cvt, cvt);
-
-
-local crossview_thresholds = [
-    // fixme: writeme
-    ];
 
 // All TPCs are identical except for their anodes
 local tpcs = [

@@ -109,8 +109,8 @@ namespace WireCell::SPNG {
                 const auto& iwires = iplane->wires();
                 const int nwires = iwires.size();
 
-                view_info.w2c = torch::zeros({nwires},torch::kInt32);
-                view_info.c2w = -1 * torch::ones({nchans},torch::kInt32);
+                view_info.w2c = torch::zeros({nwires},torch::kInt64);
+                view_info.c2w = -1 * torch::ones({nchans},torch::kInt64);
                 view_info.seg = torch::zeros({nwires},torch::kInt32);
 
                 // Iterate along the wire array
@@ -191,19 +191,8 @@ namespace WireCell::SPNG {
     }
 
 
-    // Gemini-provided extension to NoTileMPCoincidence's version to encode
-    // segment level information.
-    /**
-     * @brief Encode MPn values as 1-hot bit nibbles per wire-segment.
-     *
-     * @param input The input tensor (N_rows, N_wires) of type kInt, with values 0-3 (MP value).
-     * @param indices The index tensor (N_wires) of type kLong or kInt, mapping wire index to channel index.
-     * @param segment The segment tensor (N_wires) of type kInt, with values 0-2.
-     * @return torch::Tensor The output tensor (N_rows, N_channels) of type kInt32, where each
-     * element is a bitmask resulting from the aggregation.
-     */
-    static
-    torch::Tensor convert_wires_to_channels_extended(
+    torch::Tensor CrossViews::convert_wires_to_channels_extended(
+        int64_t N_channels,
         torch::Tensor input,
         torch::Tensor indices,
         torch::Tensor segment)
@@ -213,12 +202,20 @@ namespace WireCell::SPNG {
             throw std::runtime_error("Input must be (R, W), indices (W), segment (W).");
         }
         if (input.size(1) != indices.size(0) || indices.size(0) != segment.size(0)) {
+            log->critical("tensor mismatch: input={} indices={} segment={}",
+                          to_string(input), to_string(indices), to_string(segment));
             throw std::runtime_error("Wire dimension (W) must be consistent across input, indices, and segment.");
         }
-        if (input.dtype() != torch::kInt32 || indices.dtype() != torch::kInt64 || segment.dtype() != torch::kInt32) {
-            std::cerr << "Warning: Casting input tensors to required types (Int32/Int64)." << std::endl;
+        if (input.dtype() != torch::kInt32) {
+            log->debug("casting input tensor to int32: {}", to_string(input));
             input = input.to(torch::kInt32);
+        }
+        if (indices.dtype() != torch::kInt64) {
+            log->debug("casting indices tensor to int64: {}", to_string(indices));
             indices = indices.to(torch::kInt64); // Indices should be Long for scatter operations
+        }
+        if (segment.dtype() != torch::kInt32) {
+            log->debug("casting segment tensor to int32: {}", to_string(segment));
             segment = segment.to(torch::kInt32);
         }
     
@@ -227,17 +224,6 @@ namespace WireCell::SPNG {
         // N_wires: Number of wires
         const int64_t N_wires = input.size(1);
     
-        // Determine N_channels: max index + 1. Using max().value() is safer than max().item<int64_t>()
-        // because it handles empty tensors gracefully (though indices won't be empty here).
-        const int64_t N_channels = (indices.numel() > 0) 
-            ? indices.max().values().item<int64_t>() + 1 
-            : 0;
-
-        if (N_channels == 0) {
-            // Return an empty tensor if no channels are found
-            return torch::zeros({N_rows, 0}, input.options());
-        }
-
         // --- 2. Calculate Bit Value to Set ---
         // Goal: Determine the value to add to the aggregation for each (row, wire)
         // The MP value (0-3) determines the bit position (0-3) within the nibble.
@@ -299,10 +285,9 @@ namespace WireCell::SPNG {
                                       std::vector<torch::Tensor>& inputs)
     {
         // input: (nbatch, nchan, ntick)
-
         std::vector<torch::Tensor> wire_tensors(0);
-
         const auto nbatch = inputs[0].size(0);
+        const auto nchan = inputs[0].size(-2);
         const auto nticks = inputs[0].size(-1);
         
         // eg, nbatch=1, nticks=6000
@@ -452,7 +437,8 @@ namespace WireCell::SPNG {
         }
 
         auto cross_views_chans = convert_wires_to_channels_extended(
-            cross_views_wires, targ_info.c2w, targ_info.seg);
+            nchan,
+            cross_views_wires, targ_info.w2c, targ_info.seg);
         return cross_views_chans.reshape({nbatch, nticks, -1}).transpose(-1, -2);
 
     }

@@ -25,6 +25,7 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.colors as pcolors
+import numpy
 
 @click.group()
 def cli():
@@ -87,7 +88,7 @@ def do_plot(tensor, title, pdf):
     else:
         print(f'{ndim}-dimension tensor not plotted');
         return
-
+    plt.grid(True)
     pdf.savefig(plt.gcf())
     plt.close();
 
@@ -113,6 +114,40 @@ def cmd_plot_raw(debug_filenames):
             for name in fp:
                 do_plot(fp[name], f'{name} - {fname}', pdf)
     
+@cli.command("tonp")
+@click.argument("debug_filenames", nargs=-1)
+def cmd_tonp(debug_filenames):
+    '''
+    Convert .pkl files to WCT numpy .npz files.
+
+    This makes a huge assumption that the torch tensor rows are in channel ID
+    order and the channel IDs are sequential counts starting from zero.  In
+    general this is NOT true.
+
+    This should produce a .npz file that teepeesee can consume.
+    '''
+
+    for debug_filename in debug_filenames:
+
+        fname = Path(debug_filename).stem
+
+        output = fname + ".npz"
+        print(f'writing {output}')
+
+        fp = torch.load(debug_filename, map_location='cpu', weights_only=False)
+        tensors = torch.vstack(tuple(fp.values()))
+        print(f'{tensors.shape=}')
+        channels = torch.arange(tensors.shape[0]) # this makes huge assumptions!
+        tickinfo = torch.tensor([0,500,0])
+        arrays = {
+            'frame_*_0': tensors.numpy(),
+            'channels_*_0': channels.numpy(),
+            'tickinfo_*_0': tickinfo.numpy()
+        }
+        numpy.savez_compressed(output, **arrays)
+            
+
+
 def main():
     cli(obj=dict())
 

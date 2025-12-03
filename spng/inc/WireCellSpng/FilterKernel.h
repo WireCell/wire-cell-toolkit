@@ -12,10 +12,9 @@
 
 namespace WireCell::SPNG {
 
-    /// The configuration for FilterKernel which accepts a JSON object of the
-    /// same schema.
-    struct FilterKernelAxisConfig {
-
+    /// Configuration for one filter of one axis.  These are multiplied
+    /// element-wise (frequency sample) to make up the filter for the axis.
+    struct FilterKernelFilterConfig {
         /// Required string specifying the kind of filter.  Two are kinds of
         /// filters supported:
         ///
@@ -30,14 +29,7 @@ namespace WireCell::SPNG {
         ///
         /// - "flat" :: all filter values are given by "scale" and ignore_baseline is applied.
         ///
-        /// - "none" :: no filter, tensor dimension may be provided by an unsqueeze().
         std::string kind{""};
-
-        /// Required, give the interval-domain sampling period in
-        /// interval-domain units.  This may be time units (eg 500ns) for time
-        /// domain or unitless (eg 1.0) for wire/channel domain.  As usual, the
-        /// sampling frequency is 1/period, Nyquist frequency is 0.5/period.
-        double period=-1.0;
 
         /// Required, the "scale" parameter in units of frequency.
         ///
@@ -49,6 +41,19 @@ namespace WireCell::SPNG {
         /// kinds.
         double power = 2.0;
 
+    };
+
+    /// Configuration for one axis of the filter
+    struct FilterKernelAxisConfig {
+        /// Each axis has zero or more filter functions.
+        std::vector<FilterKernelFilterConfig> filters;
+
+        /// Required, give the interval-domain sampling period in
+        /// interval-domain units.  This may be time units (eg 500ns) for time
+        /// domain or unitless (eg 1.0) for wire/channel domain.  As usual, the
+        /// sampling frequency is 1/period, Nyquist frequency is 0.5/period.
+        double period=-1.0;
+
         /// Optional bool, default is true.  When true, zero out the "zero
         /// frequency bin" which effectively leaves the baseline unchanged.
         /// O.w. retain whatever value the underlying filter function provides.
@@ -59,6 +64,7 @@ namespace WireCell::SPNG {
         /// needed to satisfy the API.
         int size = 128;
     };
+
     struct FilterKernelConfig {
 
         /// The full N-D filter kernel is the outer product of a 1D filter
@@ -75,12 +81,8 @@ namespace WireCell::SPNG {
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelAxisConfig,
-                        kind,
-                        period,
-                        scale,
-                        power,
-                        ignore_baseline, size);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelFilterConfig, kind, scale, power);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelAxisConfig, filters, period, ignore_baseline, size);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FilterKernelConfig, axis, debug_filename);
 
 
@@ -139,8 +141,9 @@ namespace WireCell::SPNG {
         void configme();        // trigger application of m_cfg;
 
         using filter_function = std::function<float(float)>;
+        using axis_functions = std::vector<filter_function>;
         // Per-dimension filter functions
-        std::vector<filter_function> m_funcs;
+        axis_functions m_funcs;
 
     };
 

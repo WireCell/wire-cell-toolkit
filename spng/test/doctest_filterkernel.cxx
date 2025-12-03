@@ -54,7 +54,12 @@ TEST_SUITE("spng filter kernel") {
 
         FilterKernel fk;
 
-        FilterKernelConfig cfg {{ {"lowpass", 0.5, 0.2, 2.0, true} }};
+        // from: kind, period, scale, power, ignore, size
+        // to: {kind, scale, power}, period, ignore, sacle
+
+        //FilterKernelConfig cfg {{ { {"lowpass", 0.5, 0.2, 2.0, true} } }};
+        FilterKernelConfig cfg {{{{{"lowpass",  0.2, 2.0}}, 0.5, true, 128}}};
+
         REQUIRE(cfg.axis.size() > 0);
 
         Configuration wc_cfg = WireCell::HanaJsonCPP::to_json(cfg);
@@ -74,8 +79,8 @@ TEST_SUITE("spng filter kernel") {
         // Check a mid-range frequency
         const auto& axis = cfg.axis[0];
         const double period = axis.period;
-        const double scale = axis.scale;
-        const double power = axis.power;
+        const double scale = axis.filters[0].scale;
+        const double power = axis.filters[0].power;
         const size_t nbins = shape[0];
         Binning bins(nbins, 0, 1.0/period); // Frequencies from 0 to fs
 
@@ -87,7 +92,7 @@ TEST_SUITE("spng filter kernel") {
 
 // Test constructor with FilterKernelConfig struct
     TEST_CASE("spng filter kernel config ctor") {
-        FilterKernelConfig cfg {{ {"highpass", 0.01, 10.0, 3.0, false} }};
+        FilterKernelConfig cfg{{{{{"highpass", 10.0, 3.0}}, 0.01, false, 128}}};
         FilterKernel fk(cfg);
 
         // Verify some properties by getting a spectrum
@@ -99,8 +104,8 @@ TEST_SUITE("spng filter kernel") {
 
         // Check the zero frequency bin with ignore_baseline=false
         const double period = cfg.axis[0].period;
-        const double scale = cfg.axis[0].scale;
-        const double power = cfg.axis[0].power;
+        const double scale = cfg.axis[0].filters[0].scale;
+        const double power = cfg.axis[0].filters[0].power;
         float expected_dc_val = get_highpass_func(0.0f, scale, power); // Should be 0.0 for highpass
         CHECK(almost_equal_float(spec[0].item<float>(), expected_dc_val));
 
@@ -116,11 +121,11 @@ TEST_SUITE("spng filter kernel") {
 
 // Test configure method with invalid values
     TEST_CASE("spng filter kernel invalid configurations") {
-        FilterKernelConfig base_cfg = {{ {"lowpass", 1.0, 1.0, 2.0} }};
+        FilterKernelConfig base_cfg = {{{{{"lowpass", 1.0, 2.0}}, 1.0, true, 128}}};
 
         // Invalid kind
         FilterKernelConfig invalid_kind_cfg = base_cfg;
-        invalid_kind_cfg.axis[0].kind = "unknown";
+        invalid_kind_cfg.axis[0].filters[0].kind = "unknown";
         Configuration wc_cfg_kind = WireCell::HanaJsonCPP::to_json(invalid_kind_cfg);
         FilterKernel fk_kind;
         CHECK_THROWS_AS(fk_kind.configure(wc_cfg_kind), ValueError);
@@ -139,12 +144,12 @@ TEST_SUITE("spng filter kernel") {
 
         // Invalid scale (non-positive)
         FilterKernelConfig invalid_scale_cfg = base_cfg;
-        invalid_scale_cfg.axis[0].scale = 0.0;
+        invalid_scale_cfg.axis[0].filters[0].scale = 0.0;
         Configuration wc_cfg_scale = WireCell::HanaJsonCPP::to_json(invalid_scale_cfg);
         FilterKernel fk_scale;
         CHECK_THROWS_AS(fk_scale.configure(wc_cfg_scale), ValueError);
 
-        invalid_scale_cfg.axis[0].scale = -1.0;
+        invalid_scale_cfg.axis[0].filters[0].scale = -1.0;
         wc_cfg_scale = WireCell::HanaJsonCPP::to_json(invalid_scale_cfg);
         CHECK_THROWS_AS(fk_scale.configure(wc_cfg_scale), ValueError);
     }
@@ -166,17 +171,17 @@ TEST_SUITE("spng filter kernel") {
         // Check if recovered config matches the struct's default values
         // Note: initial FilterKernelConfig defaults are:
         // kind{""}, period=-1.0, scale=-1.0, power=2.0, ignore_baseline=true
-        CHECK(recovered_cfg.axis[0].kind == "");
+        CHECK(recovered_cfg.axis[0].filters[0].kind == "");
         CHECK(almost_equal_float(recovered_cfg.axis[0].period, -1.0f));
-        CHECK(almost_equal_float(recovered_cfg.axis[0].scale, -1.0f));
-        CHECK(almost_equal_float(recovered_cfg.axis[0].power, 2.0f));
+        CHECK(almost_equal_float(recovered_cfg.axis[0].filters[0].scale, -1.0f));
+        CHECK(almost_equal_float(recovered_cfg.axis[0].filters[0].power, 2.0f));
         CHECK(recovered_cfg.axis[0].ignore_baseline == true);
     }
 
 // Test spectrum generation for lowpass filter
     TEST_CASE("spng filter kernel spectrum lowpass filter details") {
         // fs = 2.0, Nyquist = 1.0
-        FilterKernelConfig cfg = {{ {"lowpass", 0.5, 0.2, 2.0, true} }};
+        FilterKernelConfig cfg = {{{{{"lowpass", 0.2, 2.0}}, 0.5, true, 128}}};
 
         FilterKernel fk(cfg);
         WireCell::ITorchSpectrum::shape_t shape = {100}; // Even number of bins
@@ -186,8 +191,8 @@ TEST_SUITE("spng filter kernel") {
         REQUIRE(spec.dtype() == torch::kFloat);
 
         const double period = cfg.axis[0].period;
-        const double scale = cfg.axis[0].scale;
-        const double power = cfg.axis[0].power;
+        const double scale = cfg.axis[0].filters[0].scale;
+        const double power = cfg.axis[0].filters[0].power;
         const size_t nbins = shape[0];
         Binning bins(nbins, 0, 1.0/period); // Frequencies from 0 to fs
 
@@ -207,7 +212,7 @@ TEST_SUITE("spng filter kernel") {
 // Test spectrum generation for highpass filter
     TEST_CASE("spng filter kernel spectrum highpass filter details") {
         // fs = 100.0, Nyquist = 50.0
-        FilterKernelConfig cfg = {{ {"highpass", 0.01, 10.0, 3.0, true} }};
+        FilterKernelConfig cfg = {{{{{"highpass", 10.0, 3.0}}, 0.01, true, 128}}};
 
         FilterKernel fk(cfg);
         WireCell::ITorchSpectrum::shape_t shape = {51}; // Odd number of bins
@@ -217,8 +222,8 @@ TEST_SUITE("spng filter kernel") {
         REQUIRE(spec.dtype() == torch::kFloat);
 
         const double period = cfg.axis[0].period;
-        const double scale = cfg.axis[0].scale;
-        const double power = cfg.axis[0].power;
+        const double scale = cfg.axis[0].filters[0].scale;
+        const double power = cfg.axis[0].filters[0].power;
         const size_t nbins = shape[0];
         Binning bins(nbins, 0, 1.0/period); // Frequencies from 0 to fs
 
@@ -236,11 +241,11 @@ TEST_SUITE("spng filter kernel") {
 
 // Test ignore_baseline option
     TEST_CASE("spng filter kernel spectrum ignore baseline option") {
-        FilterKernelConfig cfg = {{ {"lowpass", 1.0, 0.5, 2.0} }};
+        FilterKernelConfig cfg = {{{{{"lowpass", 0.5, 2.0}}, 1.0}}};
         
         WireCell::ITorchSpectrum::shape_t shape = {20};
-        const double scale = cfg.axis[0].scale;
-        const double power = cfg.axis[0].power;
+        const double scale = cfg.axis[0].filters[0].scale;
+        const double power = cfg.axis[0].filters[0].power;
 
         // Case 1: ignore_baseline = true (default)
         cfg.axis[0].ignore_baseline = true;
@@ -256,7 +261,7 @@ TEST_SUITE("spng filter kernel") {
         CHECK(almost_equal_float(spec_false[0].item<float>(), expected_dc_lowpass));
 
         // For highpass, DC is always 0.0, so ignore_baseline shouldn't change s[0]
-        cfg.axis[0].kind = "highpass";
+        cfg.axis[0].filters[0].kind = "highpass";
         float expected_dc_highpass = get_highpass_func(0.0f, scale, power); // Should be 0.0
         
         cfg.axis[0].ignore_baseline = true;
@@ -272,7 +277,7 @@ TEST_SUITE("spng filter kernel") {
 
 // Test that only 1D shapes are supported
     TEST_CASE("spng filter kernel spectrum shape constraint") {
-        FilterKernelConfig cfg = {{ {"lowpass", 1.0, 1.0} }};
+        FilterKernelConfig cfg = {{{{{"lowpass", 1.0}}, 1.0}}};
         
         FilterKernel fk(cfg);
 
