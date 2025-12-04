@@ -1,0 +1,34 @@
+digraph mini {
+    rankdir=LR
+
+    label="Function"
+    labelloc="top"
+    node[shape=ellipse]
+    u_ti_in[label="input\nTensorIndex"]
+    u_ti_sel[label="selected\nTensorIndex"]
+    u_ti_tran[label="transformed\nTensorIndex"]
+    u_ti_comb[label="combined\nTensorIndex"]
+    u_ti_ren[label="renamed\nTensorIndex"]
+    u_ts_in[label="input\nTensorSet"]
+    u_ts_out[label="output\nTensorSet"]
+
+    node[shape=box]
+    u_ind[label="index"]
+    u_sel[label="select"]
+    u_tran[label="transform"]
+    u_comb[label="combine"]
+    u_ren[label="rename"]
+    u_pack[label="pack"]
+
+    node[shape=diamond]
+    u_port_in[label="input\nport"]
+    u_port_out[label="output\nport"]
+
+
+    u_port_in -> u_ts_in -> u_ind -> u_ti_in -> u_sel -> u_ti_sel -> u_tran -> u_ti_tran -> u_comb -> u_ti_comb -> u_ren -> u_ti_ren -> u_pack -> u_ts_out -> u_port_out
+    u_ti_in -> u_comb[constraint=false]
+
+}
+
+
+

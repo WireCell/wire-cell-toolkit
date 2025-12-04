@@ -1,0 +1,25 @@
+digraph mini {
+    rankdir=LR
+
+    label="Fanin"
+    node[shape=ellipse]
+    i_ts_in1[label="input\nTensorSet"]
+    i_ts_in2[label="input\nTensorSet"]
+    i_ts_in3[label="input\nTensorSet"]
+    i_ts_out[label="output\nTensorSet"]
+
+    node[shape=box]
+    i_com[label="combine"]
+
+    node[shape=diamond]
+    i_port_in1[label="input\nport"]
+    i_port_in2[label="input\nport"]
+    i_port_in3[label="input\nport"]
+    i_port_out[label="output\nport"]
+    
+    i_port_in1 -> i_ts_in1 -> i_com
+    i_port_in2 -> i_ts_in2 -> i_com
+    i_port_in3 -> i_ts_in3 -> i_com
+    i_com -> i_ts_out -> i_port_out
+
+}
