@@ -56,12 +56,16 @@ namespace WireCell::SPNG {
 
     torch::Tensor Threshold::rms_threshold(torch::Tensor tensor)
     {
-        // rms_nsigma, rms_axis, rms_max_value
-        auto big = torch::abs(tensor) > m_cfg.rms_max_value;
         auto clamped = tensor.clone();
-        clamped.masked_fill_(big, 0);
+        // rms_nsigma, rms_axis, rms_max_value
+        if (m_cfg.rms_max_value > 0) {
+            auto big = torch::abs(tensor) > m_cfg.rms_max_value;
+            clamped.masked_fill_(big, 0);
+        }            
         // keepdims, unbiased
         auto thresh = m_cfg.rms_nsigma*torch::std(clamped, m_cfg.rms_axis, true, true) + m_cfg.nominal;
+        log->debug("threshold: rms of rms:{} thresh={}",
+                   torch::std(thresh, 0, true, true).item<float>(), to_string(thresh));
 
         if (m_cfg.binary) {
             return tensor > thresh;

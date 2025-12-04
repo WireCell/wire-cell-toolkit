@@ -95,8 +95,8 @@ local lf_tight =   api.filter_function(0.016 * wc.megahertz, kind="highpass");
 local lf_tighter = api.filter_function(0.080 * wc.megahertz, kind="highpass");
 
 local wiener_filters = [
-    api.filter_axis([hf_tight[0], lf_tight]),
-    api.filter_axis([hf_tight[1], lf_tight]),
+    api.filter_axis([hf_tight[0], lf_tighter]),
+    api.filter_axis([hf_tight[1], lf_tighter]),
     api.filter_axis([hf_tight[2]])
 ];
 
@@ -119,9 +119,10 @@ local filters = [
                      channel_filters=api.channel_filters(channel_filters[i]))
     for i in [0,1,2]];
 
-// use defaults for now
-local cvt = api.crossview_threshold(rms_nsigma=5.0);
-local cvts = api.crossview_thresholds(cvt, cvt, cvt);
+// OSP defaults are 3/5 sigma for ind/col plus a nominal 1.0 (no units) 
+local cvt_ind = api.crossview_threshold(rms_nsigma=3.0, nominal=1);
+local cvt_col = api.crossview_threshold(rms_nsigma=5.0, nominal=1);
+local cvts = api.crossview_thresholds(cvt_ind, cvt_ind, cvt_col);
 
 // All TPCs are identical except for their anodes
 local tpcs = [

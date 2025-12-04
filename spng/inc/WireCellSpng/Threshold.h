@@ -12,12 +12,19 @@
 namespace WireCell::SPNG {
 
     struct ThresholdConfig {
-        /// Nominal absolute threshold
+        /// Nominal absolute threshold.
+        ///
+        /// This is in addition to an RMS-based threshold.
+        ///
+        /// Warning, this quantity is compared directly to the waveforms and so
+        /// must be expressed in commensurate units.  WARNING: OSP sets this to
+        /// 1.0 (no units).
         double nominal = 0.0;
 
         /// A multiple of the calcualted RMS to add to the nominal_threshold to
         /// form applied threshold.  If zero (default) RMS does not contribute
-        /// to the threshold.
+        /// to the threshold.  OSP defaults chooses 5.0 for collection and 3.0
+        /// for induction.
         double rms_nsigma = 0.0;
 
         /// The dimension over which to calculate RMS.  Negative axis counts
