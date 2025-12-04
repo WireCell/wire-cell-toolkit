@@ -206,10 +206,10 @@ void Graph::print_timers(bool include_execmon) const
         std::string iden = it->second->ident();
         std::vector<std::string> tags;
         boost::split(tags, iden, [](char c) { return c == ' '; });
-        l_timer->info("Timer: {} : {} sec", tags[2].substr(5), it->first);
+        l_timer->info("Timer: {} : {} core-sec", tags[2].substr(5), it->first);
         total_time += it->first;
     }
-    l_timer->info("Timer: Total node execution : {} core sec", total_time);
+    l_timer->info("Timer: Total node execution : {} core-sec", total_time);
 
     if (include_execmon) {
         l_timer->debug("ExecMon:\n{}", m_em.summary());
