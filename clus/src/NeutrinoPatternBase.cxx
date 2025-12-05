@@ -1011,3 +1011,4 @@ Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex
     
     return dir;
 }
+

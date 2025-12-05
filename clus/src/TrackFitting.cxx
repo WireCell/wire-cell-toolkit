@@ -931,7 +931,7 @@ std::vector<PR::Fit> TrackFitting::generate_fits_with_projections(
             int apa = test_wpid.apa();
             int face = test_wpid.face();
             
-            auto p_raw = transform->backward(pts.at(i), cluster_t0, apa, face);
+            auto p_raw = transform->backward(pts.at(i), cluster_t0, face, apa);
             WirePlaneId wpid(kAllLayers, face, apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
@@ -1717,7 +1717,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
     if (temp_dis < dis_cut){
         
-        // auto p_raw = transform->backward(p, cluster_t0, apa, face);
+        // auto p_raw = transform->backward(p, cluster_t0, face, apa);
         // std::cout << "WirePlaneId: " << wpid << ", Angles: (" << angle_u << ", " << angle_v << ", " << angle_w << ")" << " " << time_tick_width/units::cm << " " << pitch_u/units::cm << " " << pitch_v/units::cm << " " << pitch_w/units::cm << std::endl;
         // Get graph algorithms interface
         // auto cached_gas = cluster->get_cached_graph_algorithms();
@@ -1933,7 +1933,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             auto total_vertices_found = ga.find_neighbors_nlevel(closest_point_index, nlevel);
 
             // find the raw point ...
-            auto closest_point_raw = transform->backward(closest_point, cluster_t0, apa, face);
+            auto closest_point_raw = transform->backward(closest_point, cluster_t0, face, apa);
 
             // std::cout << p << " " << closest_point << " "  << closest_point_raw << std::endl;
 
@@ -1972,7 +1972,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                                                 y_coords[vertex_idx], 
                                                 z_coords[vertex_idx]};
 
-                    auto vertex_point_raw = transform->backward(vertex_point, cluster_t0, apa, face);
+                    auto vertex_point_raw = transform->backward(vertex_point, cluster_t0, face, apa);
                     auto vertex_u = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 0);
                     auto vertex_v = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 1);
                     auto vertex_w = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 2);
@@ -2364,7 +2364,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
     if (apa == -1 || face == -1) return;
 
     // // Convert 3D point to wire/time coordinates for each plane
-    geo_point_t p_raw = transform->backward(p, cluster_t0, apa, face);
+    geo_point_t p_raw = transform->backward(p, cluster_t0, face, apa);
     auto [time_u, wire_u] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 0);
     auto [time_v, wire_v] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 1);
     auto [time_w, wire_w] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 2);
@@ -3486,7 +3486,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             vertex_fit.index = -1;
 
             // Store 2D projections (following WCP pattern with offsets)
-            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0, test_wpid.apa(), test_wpid.face());
+            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0,  test_wpid.face(), test_wpid.apa());
             vertex_fit.pu = offset_u  + (slope_yu * fitted_p_raw.y() + slope_zu * fitted_p_raw.z());
             vertex_fit.pv = offset_v  + (slope_yv * fitted_p_raw.y() + slope_zv * fitted_p_raw.z());
             vertex_fit.pw = offset_w  + (slope_yw * fitted_p_raw.y() + slope_zw * fitted_p_raw.z());
@@ -3614,7 +3614,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                 auto offset_it = wpid_offsets.find(wpid);
                 auto slope_it = wpid_slopes.find(wpid);
                 
-                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0, test_wpid.apa(), test_wpid.face());
+                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0,  test_wpid.face(), test_wpid.apa());
                 fit.paf = std::make_pair(test_wpid.apa(), test_wpid.face());
 
                 if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
@@ -4193,7 +4193,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         int apa = saved_paf.at(i).first;
         int face = saved_paf.at(i).second;
 
-        auto p_raw = transform->backward(p, cluster_t0, apa, face);
+        auto p_raw = transform->backward(p, cluster_t0, face, apa);
         WirePlaneId wpid(kAllLayers, face, apa);
         auto offset_it = wpid_offsets.find(wpid);
         auto slope_it = wpid_slopes.find(wpid);
@@ -6552,7 +6552,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             // First half (prev to curr)
             WireCell::Point reco_pos = prev_rec_pos + (curr_rec_pos - prev_rec_pos) * (j + 0.5) / 5.0;
             // find out the raw position ...
-            auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, apa, face);
+            auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, face, apa);
 
             double central_T = offset_t + slope_x * reco_pos_raw.x();
             double central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
@@ -6583,7 +6583,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             
             // Second half (curr to next)
             reco_pos = next_rec_pos + (curr_rec_pos - next_rec_pos) * (j + 0.5) / 5.0;
-            reco_pos_raw = transform->backward(reco_pos, cluster_t0, apa, face);
+            reco_pos_raw = transform->backward(reco_pos, cluster_t0, face, apa);
 
             central_T = offset_t + slope_x * reco_pos_raw.x();
             central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
@@ -7611,7 +7611,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
             int apa = test_wpid.apa();
             int face = test_wpid.face();
 
-            auto p_raw = transform->backward(p, cluster_t0, apa, face);
+            auto p_raw = transform->backward(p, cluster_t0, face, apa);
             WirePlaneId wpid(kAllLayers, face, apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);

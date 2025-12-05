@@ -563,7 +563,7 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
                 if (max_dis < dis) {
                     max_dis = dis;
                     max_wcp_point = test_p;
-                    max_wcp_idx = idx;
+                    // max_wcp_idx = idx;
                     found_candidate = true;
                 }
             }
