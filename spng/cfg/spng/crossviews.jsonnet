@@ -1,6 +1,7 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
-local fans = import "fans.jsonnet";
+local fans = import "spng/fans.jsonnet";
+local util = import "spng/util.jsonnet";
 
 {
     /// Apply Threshold on each view making a 3->3 subgraph
@@ -54,7 +55,7 @@ local fans = import "fans.jsonnet";
                       for f in wc.enumerate(fanouts)
                       for c in wc.enumerate(crossviews_only)
                   ]),
-        
+    
 
     /// Build a full cross views block producing a 3->3 subgraph with fully connected inner.
     crossfanfull(tpc, extra_name="", control={})::
@@ -71,4 +72,47 @@ local fans = import "fans.jsonnet";
     
 
 
+    /// An N+1 -> 1 fanin that inputs N "dense" inputs and one crossviews for
+    /// one view and outputs a stacked tensor consisting of N + Ncv where Ncv
+    /// are the number of MP numbers to extract from the crossviews.  The N
+    /// dense inputs should be connected to the first N iports and the
+    /// crossviews to the last iport.
+    extract_stack_one(tpc, view_index, ndense=1, mps=["mp2", "mp3"])::
+        local this_name = tpc.name + "v" + std.toString(view_index);
+        local nex = std.length(mps);
+        local ex = pg.pnode({
+            type: 'SPNGCrossViewsExtract',
+            name: this_name,
+            data: {
+                extraction: mps
+            },
+        }, nin=1, nout=nex);
+        local op = util.reduce_one("stack", dim=-3, multiplicity=ndense+nex, name=this_name);
+        pg.intern(outnodes=[op], // single output
+                  centernodes=[ex],
+                  iports=[      // ndense stack iports exposed followed by extract iports
+                      op.iports[ind]
+                      for ind in wc.iota(ndense)
+                  ] + ex.iports,
+                  edges=[       // connect extract oports to last stack iports
+                      pg.edge(ex, op, wind, wind+ndense)
+                      for wind in wc.iota(nex)
+                  ]),
+    
+    /// Connect 'dense' and crossviews ('cvs') each a source of 3, per-view
+    /// oports with the cross views extract ('exs') with 3, per-view iports.
+    /// Returns effectively a source with 3, per-view oports.
+    ///
+    /// This idea is broken because it assumes all views have dense and
+    /// crossviews while W tends to skip this.
+    connect_extract_stack(tpc, dense, cvs, exs, extra_name="")::
+        pg.intern(name=extra_name,
+                  oports=exs,
+                  edges=[
+                      pg.edge(dense, exs[view_index], view_index, 0)
+                      for view_index in [0,1,2]
+                  ] + [
+                      pg.edge(cvs, exs[view_index], view_index, 1)
+                      for view_index in [0,1,2]
+                  ]),
 }

@@ -51,14 +51,14 @@ function(tpc, control) {
     response_decon: decon.group_decon_view(tpc, control=control),
 
     // Node: [nview]tensor -> tensor [nview] downsample
-    downsampler(name, downsample_factor=4):: pg.crossline([pg.pnode({
+    downsampler(name, downsample_factor=4, views=[0,1,2]):: pg.crossline([pg.pnode({
         type:'SPNGResampler',
         name: tpc.name + name + "_downsample_v" + std.toString(view),
         data: {
             ratio: 1.0/downsample_factor,
             // fixme: do we need integral norm?
         } + wc.object_with(control, ["verbosity", "device"])
-    }, nin=1, nout=1) for view in [0,1,2]]),
+    }, nin=1, nout=1) for view in views]),
 
 
     // Node: [nview]tensor -> tensor[nview].  Apply a time filter.
@@ -71,7 +71,8 @@ function(tpc, control) {
     //
     // - gauss :: provides final signals to which ROIs are applied.
     local filter_names = ["gauss", "wiener", "dnnroi"],
-    time_filter(filter_name):: decon.time_filter_views(tpc, filter_name, control=control),
+    time_filter(filter_name, views=[0,1,2])::
+        decon.time_filter_views(tpc, filter_name, views=views, control=control),
         
     local time_filters = {
         [filter_name]: $.time_filter(filter_name)

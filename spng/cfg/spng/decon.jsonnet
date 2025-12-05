@@ -186,10 +186,10 @@ local pg = import "pgraph.jsonnet";
 
 
     /// Apply a time filter across each of the views for a 3->3 subgraph.
-    time_filter_views(tpc, filter="gauss", streaming=false, control={})::
+    time_filter_views(tpc, filter="gauss", views=[0,1,2], streaming=false, control={})::
         local nodes = [
             $.time_filter_one(tpc, filter, view_index, extra_name=filter, streaming=streaming, control=control)
-            for view_index in [0,1,2]];
+            for view_index in views];
         pg.crossline(nodes),
         
     

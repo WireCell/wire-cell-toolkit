@@ -20,4 +20,5 @@ local pg = import "pgraph.jsonnet";
             $.reduce_one(op, dim, multiplicity, name="v"+std.toString(view_index)+name)
             for view_index in [0,1,2]]),
 
+
 }

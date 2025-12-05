@@ -37,4 +37,84 @@ local pg = import "pgraph.jsonnet";
                       for id in wc.iota(Nd)
                   ]),
 
+    /// An N-by-M fanout has N iports and N*M oports organized into M nodes with
+    /// N outputs, each of which corresponds to the N iports.  This returns
+    /// [sink, [sources]] where sink has N iports (no oports) and each of M
+    /// sources have N oports (no iports).  You may then connect them to
+    /// upstream/downstream, respectively.
+    fanout_cross(name, N, M, type='Tensor', control={})::
+        local fans = [pg.pnode({
+            type: "SPNGFanout"+type+"s",
+            name: name + "f" + std.toString(num),
+            data: { multiplicity: M } + wc.object_with(control, ["verbosity"]),
+        }, nin=1, nout=M) for num in wc.iota(N)];
+        local sink = pg.intern(innodes=fans); // sets their iports
+        local sources = [
+            pg.intern(centernodes=fans, // fixme, even give this?
+                      oports=[
+                          fans[fnum].oports[mnum]
+                          for fnum in wc.iota(N)
+                      ])
+            for mnum in wc.iota(M)
+        ];
+        [sink, sources],
+
+
+    /// Fanout N source ports according to targets.
+    ///
+    /// Targets is a list of a list of string.  Each list-of-string gives the
+    /// target group names for a given source port.  One Pnode for each group
+    /// name is returned which has oports connected to one of corresponding
+    /// source port.
+    ///
+    /// An object is returned with "sink" providing N iports and "targets"
+    /// providing an object with keys as in targets and values a Pnode.
+    ///
+    /// For example:
+    /// fanout_select("", 3, [["w","g","d"], ["w","g","d"], ["w","g"]])
+    ///
+    /// returns:
+    /// {
+    ///   sink: <a 3 iport pnode>,
+    ///   targets: {
+    ///      w: <a 3 oport pnode>
+    ///      g: <a 3 oport pnode>
+    ///      d: <a 2 oport pnode>
+    ///   }
+    /// }
+    // The "d" target's 2 ports connect to source port 0 and 1.
+
+    fanout_select(name, N, targets_list, type='Tensor', control={})::
+        local tnames = std.set(std.flattenArrays(targets_list));
+        local the_fans = [
+            local M = std.length(targets_list[num]);
+            pg.pnode({
+                type: "SPNGFanout"+type+"s",
+                name: name + "f" + std.toString(num),
+                data: { multiplicity: M} + wc.object_with(control, ["verbosity"]),
+            }, nin=1, nout=M) for num in wc.iota(N)];
+
+        local fan_port(fanind, group) =
+                  wc.index_of(targets_list[fanind], group);
+
+        local group_fan_index = {
+            [name]:[x.index for x in wc.enumerate(targets_list) if std.member(x.value, name)]
+            for name in tnames
+        };
+
+        local tobj = {
+            [group]: pg.intern(oports=[
+                the_fans[fanind].oports[fan_port(fanind, group)]
+                for fanind in wc.iota(N) if std.member(targets_list[fanind], group)])
+            for group in tnames
+        };
+
+        {
+            sink: pg.crossline(the_fans),
+            targets: tobj,
+
+        },
+
+
+
 }
