@@ -878,3 +878,136 @@ bool PatternAlgorithms::merge_vertex_into_another(Graph& graph, VertexPtr& vtx_f
     
     return true;
 }
+
+Facade::geo_vector_t PatternAlgorithms::vertex_get_dir(VertexPtr& vertex, Graph& graph, double dis_cut){
+    if (!vertex || !vertex->cluster()) {
+        return Facade::geo_vector_t(0, 0, 0);
+    }
+    
+    Facade::geo_point_t center(0, 0, 0);
+    int ncount = 0;
+    
+    // Get vertex position (use fit if available, otherwise wcpt)
+    Facade::geo_point_t vtx_point = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+    
+    // Loop through all segments in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        
+        // Skip if segment doesn't belong to same cluster
+        if (!sg || sg->cluster() != vertex->cluster()) continue;
+        
+        // Get points from segment (skip first and last)
+        const auto& fits = sg->fits();
+        if (fits.size() > 2) {
+            for (size_t i = 1; i + 1 < fits.size(); i++) {
+                double dis = std::sqrt(std::pow(fits[i].point.x() - vtx_point.x(), 2) +
+                                      std::pow(fits[i].point.y() - vtx_point.y(), 2) +
+                                      std::pow(fits[i].point.z() - vtx_point.z(), 2));
+                if (dis < dis_cut) {
+                    center = center + Facade::geo_vector_t(fits[i].point.x(), fits[i].point.y(), fits[i].point.z());
+                    ncount++;
+                }
+            }
+        }
+    }
+    
+    // Loop through all vertices in the graph
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr other_vtx = graph[*vit].vertex;
+        
+        // Skip if vertex doesn't belong to same cluster
+        if (!other_vtx || other_vtx->cluster() != vertex->cluster()) continue;
+        
+        // Get other vertex position
+        Facade::geo_point_t other_vtx_point = other_vtx->fit().valid() ? other_vtx->fit().point : other_vtx->wcpt().point;
+        
+        double dis = std::sqrt(std::pow(other_vtx_point.x() - vtx_point.x(), 2) +
+                              std::pow(other_vtx_point.y() - vtx_point.y(), 2) +
+                              std::pow(other_vtx_point.z() - vtx_point.z(), 2));
+        if (dis < dis_cut) {
+            center = center + Facade::geo_vector_t(other_vtx_point.x(), other_vtx_point.y(), other_vtx_point.z());
+            ncount++;
+        }
+    }
+    
+    if (ncount == 0) {
+        return Facade::geo_vector_t(0, 0, 0);
+    }
+    
+    // Calculate average center
+    center = Facade::geo_vector_t(center.x() / ncount, center.y() / ncount, center.z() / ncount);
+    
+    // Calculate direction from vertex to center
+    Facade::geo_vector_t dir(center.x() - vtx_point.x(),
+                            center.y() - vtx_point.y(),
+                            center.z() - vtx_point.z());
+    
+    // Normalize to unit vector
+    double mag = dir.magnitude();
+    if (mag > 0) {
+        dir = Facade::geo_vector_t(dir.x() / mag, dir.y() / mag, dir.z() / mag);
+    }
+    
+    return dir;
+}
+Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex, SegmentPtr& segment, Graph& graph, double dis_cut){
+    // Return zero vector if inputs are invalid
+    if (!vertex || !segment) {
+        return Facade::geo_vector_t(0, 0, 0);
+    }
+    
+    // Check if this segment is connected to this vertex
+    if (!vertex->descriptor_valid()) {
+        return Facade::geo_vector_t(0, 0, 0);
+    }
+    
+    bool segment_connected = false;
+    auto vd = vertex->get_descriptor();
+    auto edge_range = boost::out_edges(vd, graph);
+    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+        if (graph[*eit].segment == segment) {
+            segment_connected = true;
+            break;
+        }
+    }
+    
+    if (!segment_connected) {
+        return Facade::geo_vector_t(0, 0, 0);
+    }
+    
+    // Get vertex position (use fit if available, otherwise wcpt)
+    Facade::geo_point_t vtx_point = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+    
+    // Get points from segment
+    const auto& pts = segment->wcpts();
+    
+    // Find the point on the segment whose distance from vertex is closest to dis_cut
+    double min_dis = 1e9;
+    Facade::geo_point_t min_point = vtx_point;
+    
+    for (size_t i = 0; i < pts.size(); i++) {
+        double tmp_dis = std::sqrt(std::pow(pts[i].point.x() - vtx_point.x(), 2) +
+                                   std::pow(pts[i].point.y() - vtx_point.y(), 2) +
+                                   std::pow(pts[i].point.z() - vtx_point.z(), 2));
+        if (std::fabs(tmp_dis - dis_cut) < min_dis) {
+            min_dis = std::fabs(tmp_dis - dis_cut);
+            min_point = pts[i].point;
+        }
+    }
+    
+    // Calculate direction from vertex to the found point
+    Facade::geo_vector_t dir(min_point.x() - vtx_point.x(),
+                            min_point.y() - vtx_point.y(),
+                            min_point.z() - vtx_point.z());
+    
+    // Normalize to unit vector
+    double mag = dir.magnitude();
+    if (mag > 0) {
+        dir = Facade::geo_vector_t(dir.x() / mag, dir.y() / mag, dir.z() / mag);
+    }
+    
+    return dir;
+}
