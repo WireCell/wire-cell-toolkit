@@ -354,6 +354,9 @@
         for i in std.range(0, std.length(sequence) - 1)
     ],
 
+    index_of(arr, val)::
+        [x.index for x in $.enumerate(arr) if x.value == val][0],
+
     /// Return canonical "type:name" or just "type" if no name from a
     /// configuration object.  Use this instead of bare names to
     /// better guard against typos and changes in dependent
