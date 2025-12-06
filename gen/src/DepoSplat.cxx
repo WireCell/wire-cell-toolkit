@@ -269,7 +269,6 @@ ITrace::vector Gen::DepoSplat::process_face(IAnodeFace::pointer face, const IDep
 
         int t_dropped{0}, p_dropped{0};
 
-        int idepo = 0;
         for (auto depo : depos) {
             // const double tsig = depo->extent_long() * difusion_scaler;
             // const double psig = depo->extent_tran() * difusion_scaler;
@@ -366,12 +365,11 @@ ITrace::vector Gen::DepoSplat::process_face(IAnodeFace::pointer face, const IDep
                     charge[it] += std::abs(patch(irow, icol) * charge_scaler);
                 }
             }
-            ++idepo;
         } // over depos
         l->debug("DepoSplat: plane {} "
                  "dropped {} (time) and {} (pitch) from {} total",
                  iplane, t_dropped, p_dropped, depos.size());
-         (void)idepo;
+        //  (void)idepo;
     }
 
     // make output traces

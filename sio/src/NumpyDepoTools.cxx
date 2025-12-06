@@ -44,17 +44,17 @@ bool Sio::NumpyDepoTools::load(const std::string& fname, int count,
     }
     const size_t ndepos = ndatas;
 
-    size_t npositive = 0;
+    // size_t npositive = 0;
 
     std::vector<Aux::SimpleDepo*> sdepos;
     for (size_t ind=0; ind < ndepos; ++ind) {
 
-        {
-            auto q = data(ind, 1);
-            if (q > 0) {
-                ++npositive;
-            }
-        }
+        // {
+        //     auto q = data(ind, 1);
+        //     if (q > 0) {
+        //         ++npositive;
+        //     }
+        // }
 
         auto sdepo = new Aux::SimpleDepo(
             data(ind, 0),        // t
@@ -92,7 +92,7 @@ bool Sio::NumpyDepoTools::load(const std::string& fname, int count,
         }
     }
 
-    (void)npositive; // silence unused warning
+    // (void)npositive; // silence unused warning
 
     return true;
 }

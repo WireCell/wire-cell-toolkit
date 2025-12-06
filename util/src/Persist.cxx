@@ -51,6 +51,31 @@ static std::string file_extension(const std::string& filename)
     return filename.substr(ind);
 }
 
+WireCell::Persist::TempDir::TempDir(const boost::filesystem::path& model, bool systmp, bool keep)
+    : path(systmp ? boost::filesystem::temp_directory_path() / boost::filesystem::unique_path(model) : boost::filesystem::unique_path(model))
+    , keep(keep)
+{
+    boost::filesystem::create_directories(path);
+}
+#include <iostream> // debug
+WireCell::Persist::TempDir::~TempDir()
+{
+    if (keep) return;
+
+    boost::filesystem::remove_all(path);
+    // const std::string spath = path.native();
+    // boost::system::error_code ec;
+    // std::size_t removed_count =  boost::filesystem::remove_all(path, ec);
+    // if (ec) {
+    //     //debug("Error removing directory: {}", ec.message());
+    //     std::cerr << "Error removing directory: " << ec.message() << endl;
+    // }
+    // else {
+    //     std::cerr << "Removed: " << removed_count << " from " << spath << "\n";
+    // }
+}
+
+
 void WireCell::Persist::dump(const std::string& filename, const Json::Value& jroot, bool pretty)
 {
     string ext = file_extension(filename);

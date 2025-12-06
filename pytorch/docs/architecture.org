@@ -1,0 +1,62 @@
+#+title: Architecture of this wire-cell-toolkit/pytorch package
+
+* Caveat: the name
+
+The name of this package is confusing.  While it uses software from the project
+from https://pytorch.org, it does so via their C++ ~libtorch~ and there is no
+dependency on Python.  An GitHub Issue exists for this minor naming "problem".
+
+https://github.com/WireCell/wire-cell-toolkit/issues/343
+
+Here, we will say simply "torch" to relate to what ~libtorch~ provides.
+
+* Components
+
+The package provides data-flow programming graph nodes and "service" components
+utilizing torch.
+
+** TorchDFT
+
+The ~TorchDFT~ component name provides an ~IDFT~ to perform FFT related functions
+using PyTorch implementation.  It uses a ~TorchContext~ and a ~TorchSemaphore~.
+
+** DNNROIFinding
+
+The ~DNNROIFinding~ component name provides an ~IFrameFilter~ DFP graph node that
+transforms an input frame by delegating to an ~ITensorForward~ to apply some model
+(ie, a DNN).  Around this core transform, layers of data type transformations
+convert input ~IFrame~ ultimately to torch tensors, and vice versa on output.
+This node also supports a chunked processing pattern and down/up sampling as
+attempts to limit (CPU) memory usage.
+
+** TorchService
+
+The ~TorchService~ component name provides an ~ITensorForward~ service component
+that implements a tensor transformation provided by a torch ~Module~ (ie, a DNN
+network).  The torch ~Module~ is provided in the form of a "torch script" file.
+In practice, the torch script file provides a trained DNN model.  However, torch
+script is essentially Python and other functionality could be provided in the
+future.  The ~TorchService~ makes use of a ~TorchContext~ and a ~TorchSemaphore~.
+
+* Support classes
+
+Low level, normal (non-Interface) support classes include:
+
+** TorchContext
+
+The ~TorchContext~ class provides access to the torch device the ~TorchSemaphore~.
+
+** TorchSemaphor
+
+The ~TorchSemaphore~ class uses a ~TorchContext~ to manage the torch semaphore in a
+C++ scope basis.  Code may create a ~TorchSemaphore~ in a code scope to assure the
+code in that scope honors the semaphore and the semaphore is freed automatically
+at the end of the scope.
+
+* Semaphore
+
+The semaphore referred to above is intended to attempt to protect a torch device
+resources (GPU memory) from resource exhaustion.  Its use is voluntary and the
+resources that may be used by other code is not considered.  It is also
+imperfect at the semaphore asserts merely a task count and it has no knowledge
+of the resource needs of individual tasks.

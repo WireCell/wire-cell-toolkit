@@ -110,6 +110,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         }
     }
 
+    m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
+
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
@@ -829,6 +831,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
     perf("dump live clusters to bee");
 
+    if (m_grouping2file_prefix.size()) {
+        std::string fname = String::format("%s-%d.npz", m_grouping2file_prefix, m_count);
+        auto live = ensemble.with_name("live");
+        grouping2file(*live[0], fname);
+    }
     auto grouping_names = ensemble.names();
 
     if (m_dump_json) {

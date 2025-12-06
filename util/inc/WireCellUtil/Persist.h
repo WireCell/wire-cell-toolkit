@@ -53,6 +53,27 @@ namespace WireCell {
         bool assuredir(const std::string& pathname);
 
 
+        // An object representing a path to a directory that may exist only as
+        // long as the object does.
+        struct TempDir {
+            // Create a temp path using the model for the path.  If systmp is
+            // true then interpret model as relative to the system temp
+            // directory.  If keep=true, disable removing the directory and its
+            // contents when destructing
+            TempDir(const boost::filesystem::path& model="%%%%-%%%%-%%%%-%%%%",
+                    bool systmp=false, bool keep=false);
+
+            // Remove the directory if keep is false.
+            ~TempDir();
+
+            // The path to the temporary directory
+            const boost::filesystem::path path;
+
+            // You may set this to true after the fact to disable deletion.
+            bool keep = false;
+        };
+            
+
         /** Return full path to a file of the given filename.  If the
          * file is not directly located and is a relative path then
          * the file will be first located in the current working

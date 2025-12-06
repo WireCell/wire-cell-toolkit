@@ -74,7 +74,8 @@ tmp
 README.tex
 larsoft-cfg
 *.dot
-configure
+configure*
+*.sh
 
 *.gz
 styles
@@ -84,6 +85,7 @@ styles
 *.svg
 AutoDict_*
 spng
+version.txt
 .cache
 .clangd
 junk*
@@ -95,4 +97,3 @@ doxy
 doxy_quick
 html
 latex
-version.txt

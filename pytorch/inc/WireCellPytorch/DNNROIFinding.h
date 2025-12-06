@@ -58,7 +58,7 @@ namespace WireCell {
             // probability-like value.  It is tuned to balance efficiency and
             // noise reduction and strictly is best optimized for the given
             // model.
-            double mask_thresh{0.7};
+            double mask_thresh{0.5};
 
             // The IForward service to use
             std::string forward{"TorchService"};
@@ -87,6 +87,9 @@ namespace WireCell {
             std::string outtag{""};
 
             int nchunks{1};
+
+            // if true, save the negative parts of the charge traces
+            bool save_negative_charge{false};
         };
 
         class DNNROIFinding : public Aux::Logger,
@@ -133,7 +136,7 @@ namespace WireCell {
             IFrame::trace_summary_t get_summary_e(const IFrame::pointer& inframe, const std::string &tag) const;
 
             // Convert dense array to (dense) traces
-            ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr);
+            ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr, bool save_negative_charge);
 
             int m_save_count;  // count frames saved
         };

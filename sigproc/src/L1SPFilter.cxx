@@ -14,6 +14,16 @@
 #include <numeric>
 #include <iostream>
 
+#ifdef __clang__
+#  if defined(__has_warning)
+#    define HAS_WARNING(warning) __has_warning(warning)
+#  else
+#    define HAS_WARNING(warning) 1
+#  endif
+#else
+#  define HAS_WARNING(warning) 1
+#endif
+
 WIRECELL_FACTORY(L1SPFilter,
                  WireCell::SigProc::L1SPFilter,
                  WireCell::INamed, WireCell::IFrameFilter, WireCell::IConfigurable)
@@ -539,7 +549,15 @@ int L1SPFilter::L1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
             int temp_nbin_fit = boundaries.at(i + 1) - boundaries.at(i);
             VectorXd W = VectorXd::Zero(temp_nbin_fit);
             for (int j = 0; j != temp_nbin_fit; j++) {
+                #if HAS_WARNING("-Wstringop-overread")
+                #pragma GCC diagnostic push
+                #pragma GCC diagnostic warning "-Wstringop-overread"
+                #pragma GCC diagnostic ignored "-Wstringop-overread"
+                #endif
                 W(j) = init_W(boundaries.at(i) + j);
+                #if HAS_WARNING("-Wstringop-overread")
+                #pragma GCC diagnostic pop
+                #endif
             }
 
             // for matrix G

@@ -89,13 +89,13 @@ void blob_weight_simple(const cluster_graph_t& cgraph, graph_t& csg)
 
 void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
 {
-    int nblobs = 0;
+    // int nblobs = 0;
     for (auto desc : vertex_range(csg)) {
         auto& vtx = csg[desc];
         if (vtx.kind != node_t::blob) {
             continue;
         }
-        ++nblobs;
+        // ++nblobs;
         // check if blob is connected to other blobs in other slices
         // connection | weight
         // non | 9
@@ -132,7 +132,7 @@ void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
         // TODO remove this
         // std::cout << String::format("cent_time: %f next_con: %d, prev_con: %d, weight: %d", cent_time, next_con, prev_con, weight) << std::endl;
     }
-    (void)nblobs; // unused, but useful for debugging
+    // (void)nblobs; // unused, but useful for debugging
     // TODO remove this
     // std::cout << String::format("nblobs: %d", nblobs) << std::endl;
 }
@@ -166,6 +166,8 @@ void Img::ChargeSolving::configure(const WireCell::Configuration& cfg)
 
     m_lasso_tolerance = get(cfg, "lasso_tolerance", m_lasso_tolerance);
     m_lasso_minnorm = get(cfg, "lasso_minnorm", m_lasso_minnorm);
+    m_lasso_lambda_scale =
+        get<float>(cfg, "lasso_lambda_scale", m_lasso_lambda_scale);
 
     m_weighting_strategies =
         get<std::vector<std::string>>(cfg, "weighting_strategies",
@@ -274,7 +276,7 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
 
     std::vector<float> blob_threshold(nstrats, m_blob_thresh.value());
 
-    SolveParams sparams{gSolveParamsConfigMap.at(m_solve_config), 1000, m_whiten};
+    SolveParams sparams{gSolveParamsConfigMap.at(m_solve_config), 1000*m_lasso_lambda_scale, m_whiten};
     for (size_t ind = 0; ind < nstrats; ++ind) {
         const auto& strategy = m_weighting_strategies[ind];
         log->debug("cluster: {} strategy={}",

@@ -421,15 +421,11 @@ svggpp::xml_t WireCell::RaySvg::g_active_wires(const Geom& geom, const RayGrid::
 
 svggpp::xml_t WireCell::RaySvg::g_blob_corners(const Geom& geom, const RayGrid::blobs_t& blobs)
 {
-    int count=0;
     auto top = group(css_class("blob_corners"));
     auto& topb = body(top);
 
     for (const auto& blob : blobs) {
-        ++count;
 
-        // don't classify each blob
-        // css_class(format("blob%d", count))
         auto grp = group();
 
         for (const auto& [a,b] : blob.corners()) {
@@ -442,7 +438,6 @@ svggpp::xml_t WireCell::RaySvg::g_blob_corners(const Geom& geom, const RayGrid::
         }
     }
 
-    (void)count;
     return top;
 }
 

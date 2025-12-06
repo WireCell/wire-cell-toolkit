@@ -58,24 +58,58 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     }
     double tol2 = TOL * TOL * nbeta;
 
+    // const double inner_product_complexity = nbeta * nbeta * X.rows();
+
     // calculate the inner product
     Eigen::VectorXd ydX(nbeta);
     Eigen::SparseMatrix<double> XdX(nbeta, nbeta);
-    for (int i = 0; i != nbeta; i++) {
-        ydX(i) = y.dot(X.col(i));
-        // beta(i) = ydX(i) / norm(i); // first time result saved here ...
-        for (int j = 0; j != nbeta; j++) {
-            double value = X.col(i).dot(X.col(j));
-            if (value != 0) XdX.insert(i, j) = value;
-            // std::cout << i << " " << j << " " << value << " " << XdX.coeffRef(i,j) << std::endl;
+    // std::cout << "Lasso begin inner product nbeta "  << nbeta << " X.rows " << X.rows() << " X.cols " << X.cols() << std::endl;
+    // double sum_non_zeros = 0;
+
+    // orig
+    // std::cout << " orig method " << std::endl;
+    // for (int i = 0; i != nbeta; i++) {
+    //     ydX(i) = y.dot(X.col(i));
+    //     // beta(i) = ydX(i) / norm(i); // first time result saved here ...
+    //     for (int j = 0; j != nbeta; j++) {
+    //         double value = X.col(i).dot(X.col(j));
+    //         if (value != 0) XdX.insert(i, j) = value;
+    //         sum_non_zeros += value;
+    //     }
+    //     if ( nbeta == 5582) {
+    //         std::cout << " inner_product nbeta == 5582 " << i << std::endl;
+    //     }
+    // }
+
+    // triplet
+    {
+        // std::cout << " triplet method " << std::endl;
+        const size_t estimated_nonzeros = nbeta * (nbeta / 2);
+        XdX.reserve(Eigen::VectorXi::Constant(nbeta, nbeta/2));
+        typedef Eigen::Triplet<double> T;
+        std::vector<T> tripletList;
+        tripletList.reserve(estimated_nonzeros);
+        for (int i = 0; i < nbeta; i++) {
+            ydX(i) = y.dot(X.col(i));
+            for (int j = 0; j < nbeta; j++) {
+                double value = X.col(i).dot(X.col(j));
+                if (value != 0)
+                    tripletList.push_back(T(i,j,value));
+                // sum_non_zeros += value;
+            }
+            // if ( nbeta == 5582) {
+            //     std::cout << " inner_product nbeta == 5582 " << i << std::endl;
+            // }
         }
-        // std::cout << ydX(i) << " " << norm(i) << std::endl;
+        XdX.setFromTriplets(tripletList.begin(), tripletList.end());
     }
-    //  std::cout << "Xin " << nbeta << std::endl;
+    // std::cout << "Lasso end inner product. sum_non_zeros " << sum_non_zeros << " XdX.nonZeros() " << XdX.nonZeros() 
+    //           << " XdX.rows() " << XdX.rows() << " XdX.cols() " << XdX.cols() << std::endl;
 
     // start interation ...
     int double_check = 0;
     for (int i = 0; i < max_iter; i++) {
+        // std::cout << "Lasso begin iter " << i << std::endl;
         VectorXd betalast = beta;
 
         // loop through sparse matrix ...
@@ -104,7 +138,7 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         // cout << endl;
         VectorXd diff = beta - betalast;
 
-        // std::cout << i << " " << diff.squaredNorm() << " " << tol2 << std::endl;
+        // std::cout << "Lasso iter " << i << " " << diff.squaredNorm() << " " << tol2 << std::endl;
 
         if (diff.squaredNorm() < tol2) {
             if (double_check != 1) {

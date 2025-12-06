@@ -1,4 +1,4 @@
-#include <torch/script.h>
+#include "WireCellPytorch/Torch.h"
 #include <iostream>
 #include <string>
 

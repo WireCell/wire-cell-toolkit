@@ -11,6 +11,25 @@
 #include <vector>
 #include <array>
 #include <limits>
+
+#pragma GCC system_header
+
+#ifdef __clang__
+#  if defined(__has_warning)
+#    define HAS_WARNING(warning) __has_warning(warning)
+#  else
+#    define HAS_WARNING(warning) 1
+#  endif
+#else
+#  define HAS_WARNING(warning) 1
+#endif
+
+#if HAS_WARNING("-Wmaybe-uninitialized")
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wmaybe-uninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include "Vector3.h"
 #include "Plane.h"
 #include "Pool.h"
@@ -18,8 +37,6 @@
 #include "ConvexHull.h"
 #include "HalfEdgeMesh.h"
 #include "MathUtils.h"
-
-
 /*
  * Implementation of the 3D QuickHull algorithm by Antti Kuukka
  *
@@ -202,6 +219,11 @@ namespace quickhull {
 	}
 
 }
+
+
+#if HAS_WARNING("-Wmaybe-uninitialized")
+#pragma GCC diagnostic pop
+#endif
 
 
 #endif /* QUICKHULL_HPP_ */

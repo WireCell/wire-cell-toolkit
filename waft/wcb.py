@@ -44,7 +44,19 @@ package_descriptions = [
     ('ZYRE',     dict(incs=["zyre.h"], libs=['zyre'], pcname='libzyre', mandatory=False)),
     ('ZIO',      dict(incs=["zio/node.hpp"], libs=['zio'], pcname='libzio', mandatory=False,
                       extuses=("ZYRE","CZMQ","ZMQ"))),
-
+    ('GRPC',     dict(incs=['grpcpp/grpcpp.h'], libs=['grpc++', 'grpc', 'gpr'], pcname='grpc++', mandatory=False)),
+    ('PROTOBUF', dict(incs=['google/protobuf/message.h'], libs=['protobuf'], pcname='protobuf', mandatory=False)),
+    ('TRITON',   dict(incs=['grpc_client.h'],   
+    libs=[
+        'grpcclient',
+        'tritoncommonerror',
+        'tritoncommonmodelconfig',
+        'tritoncommonlogging',
+        'tritontableprinter',
+        'tritonthreadpool',
+        'tritonasyncworkqueue',
+    ],
+    mandatory=False))
     # Note, this list may be modified (appended) in wscript files.
     # The list here represents the minimum wire-cell-toolkit requires.
 ]
@@ -156,7 +168,8 @@ def configure(cfg):
             ("cuda","HAVE_CUDA"),
             ("hio", "INCLUDES_HDF5"),
             ("pytorch", "LIB_LIBTORCH"),
-            ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ")
+            ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ"),
+            ("triton", "LIB_GRPC LIB_PROTOBUF LIB_TRITON"), # LIB_PROTOBUF LIB_TRITON
     ]:
         exts = to_list(ext)
         for have in exts:

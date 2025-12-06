@@ -56,7 +56,8 @@ namespace WireCell {
                            int plane,
                            const std::vector<float>& perwire_rmses,
                            IFrame::trace_summary_t& threshold,
-                           const std::string& loglabel);
+                           const std::string& loglabel,
+                           const bool save_negative_charge = false);
 
             // save ROI into the out frame (set use_roi_debug_mode=true)
             void save_roi(ITrace::vector& itraces, IFrame::trace_list_t& indices, int plane,
@@ -74,7 +75,7 @@ namespace WireCell {
             void init_overall_response(IFrame::pointer frame);
 
             void restore_baseline(WireCell::Array::array_xxf& arr);
-	    void rebase_waveform(WireCell::Array::array_xxf& arr, const int& nbins);
+	    void rebase_waveform(Eigen::Ref<Array::array_xxf> arr, const int& nbins);
             // This little struct is used to map between WCT channel idents
             // and internal OmnibusSigProc wire/channel numbers.  See
             // m_channel_map and m_channel_range below.
@@ -176,6 +177,9 @@ namespace WireCell {
             // https://github.com/WireCell/wire-cell-toolkit/issues/322
             std::vector<int> m_plane2layer{0,1,2};
 
+            // MP threshold feature_val method, 0: ThreePointCheck, 1: MaxPointCheck
+            int m_MP_feature_val_method{0};
+
 
             // fixme: this is apparently not used:
             // channel offset
@@ -218,6 +222,8 @@ namespace WireCell {
 
             // average overall responses
             std::vector<Waveform::realseq_t> overall_resp[3];
+            // filters for overall responses
+            std::vector<std::string> m_filter_resps_tn{};
 
             // tag name for traces
             std::string m_wiener_tag{"wiener"};
@@ -227,7 +233,7 @@ namespace WireCell {
             std::string m_frame_tag{"sigproc"};
 
             bool m_use_roi_debug_mode{false};
-            bool m_save_negtive_charge{false};
+            bool m_save_negative_charge{false};
             bool m_use_roi_refinement{true};
             std::string m_tight_lf_tag{"tight_lf"};
             std::string m_loose_lf_tag{"loose_lf"};
@@ -246,7 +252,7 @@ namespace WireCell {
             int m_mp_tick_resolution{4};
 
 	    //Rebase waveforms for each channel of spesific wire-plane. 
-	    std::vector<int> m_rebase_planes{}; 
+	    std::vector<int> m_rebase_planes{0,1,2}; 
             int m_rebase_nbins=200;
 
             bool m_isWrapped{false};

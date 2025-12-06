@@ -26,6 +26,23 @@
 
 // #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_DEBUG
 #include "WireCellUtil/BuildConfig.h"
+
+#ifdef __clang__
+#  if defined(__has_warning)
+#    define HAS_WARNING(warning) __has_warning(warning)
+#  else
+#    define HAS_WARNING(warning) 1
+#  endif
+#else
+#  define HAS_WARNING(warning) 1
+#endif
+
+#if HAS_WARNING("-Wstringop-overflow")
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wstringop-overflow"
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+
 #include <spdlog/spdlog.h>
 
 // We need FMT version but it is found in core.h in different locations
@@ -67,5 +84,9 @@ namespace fmt {
 }
 #endif
 
+
+#if HAS_WARNING("-Wstringop-overflow")
+#pragma GCC diagnostic pop
+#endif
 
 #endif

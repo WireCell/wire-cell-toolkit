@@ -358,7 +358,6 @@ void Gen::Fourdee::execute_old()
     // here we make a manual pipeline.  In a "real" app this might be
     // a DFP executed by TBB.
     int count = 0;
-    int ndepos = 0;
     int ndrifted = 0;
     ExecMon em;
     cerr << "Gen::Fourdee: starting\n";
@@ -372,10 +371,6 @@ void Gen::Fourdee::execute_old()
         if (!depo) {
             cerr << "Got null depo from source at loop iteration " << count << endl;
         }
-        else {
-            ++ndepos;
-        }
-        // cerr << "Gen::FourDee: seen " << ndepos << " depos\n";
 
         IDrifter::output_queue drifted;
         if (!(*m_drifter)(depo, drifted)) {
@@ -471,6 +466,4 @@ void Gen::Fourdee::execute_old()
     }
 bail:  // what's this weird syntax?  What is this, BASIC?
     cerr << em.summary() << endl;
-
-(void)ndepos;
 }

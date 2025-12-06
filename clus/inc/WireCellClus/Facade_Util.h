@@ -42,6 +42,7 @@ namespace WireCell::Clus::Facade {
 
     class Cluster;
     class Blob;
+    class Grouping;
 
     // map for face, plane to something
     /// TODO: face (ident? which?) -> plane (index) -> Dataset
@@ -299,8 +300,8 @@ namespace WireCell::Clus::Facade {
         return false;
     }
 
+    void grouping2file(const Grouping& grouping, const std::string& filename);
 
-
-}  // namespace WireCell::Clus::Facade
+}  // namespace WireCell::PointCloud::Facade
 
 #endif

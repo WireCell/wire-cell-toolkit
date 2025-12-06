@@ -290,7 +290,7 @@ local wc = import "wirecell.jsonnet";
 
         // Build a fanout-[pipelines]-fanin graph.  pipelines is a
         // list of pnode objects, one for each spine of the fan.
-        pipe :: function(fout, pipelines, fin, name="fanpipe", outtags=[], tag_rules=[]) {
+        pipe :: function(fout, pipelines, fin, name="fanpipe", outtags=[], tag_rules=[], in_tag_rules=[]) {
 
             local fanmult = std.length(pipelines),
 
@@ -309,6 +309,7 @@ local wc = import "wirecell.jsonnet";
                 name: name,
                 data: {
                     multiplicity: fanmult,
+                    tag_rules: in_tag_rules,
                     tags: outtags,
                 },
             }, nin=fanmult, nout=1),

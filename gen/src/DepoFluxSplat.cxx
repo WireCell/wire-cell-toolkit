@@ -58,8 +58,6 @@ WireCell::Configuration Gen::DepoFluxSplat::default_configuration() const
     cfg["reference_time"] = 0;
     cfg["time_offsets"] = Json::arrayValue;
 
-    cfg["process_planes"] = Json::arrayValue;
-
     cfg["smear_long"] = 0.0;
     cfg["smear_tran"] = 0.0;
 
@@ -121,7 +119,7 @@ void Gen::DepoFluxSplat::configure(const WireCell::Configuration& cfg)
     //Check which plane to work on
     m_process_planes = {0,1,2};
 
-    if (cfg.isMember("process_planes")) {
+    if (cfg["process_planes"].isArray()) {
 	m_process_planes.clear();
 	for (auto jplane : cfg["process_planes"]) {
 	    m_process_planes.push_back(jplane.asInt());
@@ -216,7 +214,7 @@ static intrange_t make_intrange(int beg, size_t siz)
 static intrange_t union_intrange(intrange_t const& r1, intrange_t const& r2)
 {
     return std::make_pair(std::min(r1.first, r2.first),
-                          std::min(r1.second, r2.second));
+                          std::max(r1.second, r2.second));
 }
 
 // Accumulate in a dense way.
@@ -275,17 +273,17 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
     }
 
     size_t ndepos_seen=0;
-    size_t ndepos_skipped=0;
+    // size_t ndepos_skipped=0;
     size_t nplanes_skipped=0;
     for (const auto& depo : *in->depos()) {
         if (!depo) {
-            ++ndepos_skipped;
+            // ++ndepos_skipped;
             continue;
         }
 
         auto face = find_face(depo);
         if (!face) {
-            ++ndepos_skipped;
+            // ++ndepos_skipped;
             continue;
         }
 
@@ -326,7 +324,7 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
 
                 double eff_nsigma = depo->extent_long() > 0 ? m_nsigma : 0;
                 if (nmin_sigma > eff_nsigma || nmax_sigma < -eff_nsigma) {
-                    ++ndepos_skipped;
+                    // ++ndepos_skipped;
                     continue;
                 }
             }
@@ -414,7 +412,7 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
                out->ident(), ndepos_seen, in->depos()->size(), nplanes_skipped, accum->ntraces());
     ++m_count;
 
-    (void)ndepos_skipped;
+    // (void)ndepos_skipped;
     return true;
 }
 

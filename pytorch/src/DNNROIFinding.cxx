@@ -97,6 +97,7 @@ void Pytorch::DNNROIFinding::configure(const WireCell::Configuration& cfg)
     m_cfg.outtag = get(cfg, "outtag", m_cfg.outtag);
     m_cfg.debugfile = get(cfg, "debugfile", m_cfg.debugfile);
     m_cfg.nchunks = get(cfg, "nchunks", m_cfg.nchunks);
+    m_cfg.save_negative_charge = get(cfg, "save_negative_charge", m_cfg.save_negative_charge);
 
     m_nrows = m_chlist.size();
     m_ncols = m_cfg.nticks;
@@ -163,6 +164,7 @@ WireCell::Configuration Pytorch::DNNROIFinding::default_configuration() const
     cfg["outtag"] = m_cfg.outtag;
     cfg["debugfile"] = m_cfg.debugfile;
     cfg["nchunks"] = m_cfg.nchunks;
+    cfg["save_negative_charge"] = m_cfg.save_negative_charge;
     return cfg;
 }
 
@@ -208,7 +210,7 @@ IFrame::trace_summary_t Pytorch::DNNROIFinding::get_summary_e(const IFrame::poin
     return summary_e;
 }
 
-ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr)
+ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr, bool save_negative_charge)
 {
     ITrace::vector traces;
     ITrace::ChargeSequence charge(m_ncols, 0.0);
@@ -216,6 +218,9 @@ ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array
         auto wave = arr.row(irow);
         for (size_t icol=0; icol<m_ncols; ++icol) {
             charge[icol] = wave(icol);
+            if (!save_negative_charge) { // set negative charge to zero
+                charge[icol] = charge[icol] < 0 ? 0 : charge[icol];
+            }
         }
         const auto ch = m_chlist[irow];
         traces.push_back(std::make_shared<Aux::SimpleTrace>(ch, 0, charge));
@@ -322,7 +327,7 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
 #endif
 
     // eigen to frame
-    auto traces = eigen_to_traces(sp_charge);
+    auto traces = eigen_to_traces(sp_charge, m_cfg.save_negative_charge);
     Aux::SimpleFrame* sframe = new Aux::SimpleFrame(
         inframe->ident(), inframe->time(),
         traces,

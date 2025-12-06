@@ -136,6 +136,17 @@ void Blob::fill_cache(BlobCache& cache) const
     ///
     ///  MAKE SURE YOU UPDATE doctest_clustering_prototype.cxx if you change.
     ///
+    // const auto& lpcs = m_node->value.local_pcs();
+    // const auto& pc_corner = lpcs.at("corner");
+    // const auto& x = pc_corner.get("x")->elements<float_t>();
+    // const auto& y = pc_corner.get("y")->elements<float_t>();
+    // const auto& z = pc_corner.get("z")->elements<float_t>();
+    // const size_t size = x.size();
+    // cache.corners_.resize(size);
+    // for (size_t ind = 0; ind < size; ++ind) {
+    //     cache.corners_[ind] = {x[ind], y[ind], z[ind]};
+    //     // std::cout << "corner " << cache.corners_[ind] << std::endl;
+    // }
 }
 
 bool Blob::overlap_fast(const Blob& b, const int offset) const

@@ -3,12 +3,10 @@
 #include <cmath>                // fmod
 #include <algorithm>            // std::copy
 
-using Eigen::seq;
-using Eigen::seqN;
-using Eigen::lastN;
-// This is gives deprecated warning.
-// using Eigen::placeholders::all;
-using Eigen::all;
+using Eigen::indexing::seq;
+using Eigen::indexing::seqN;
+using Eigen::indexing::lastN;
+using Eigen::indexing::all;
 
 using namespace WireCell;
 using namespace WireCell::Array;

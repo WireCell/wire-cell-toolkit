@@ -9,7 +9,7 @@
 #include "WireCellAux/Logger.h"
 #include "WireCellPytorch/TorchContext.h"
 
-#include <torch/script.h>  // One-stop header.
+#include "WireCellPytorch/Torch.h"  // One-stop header.
 
 namespace WireCell::Pytorch {
     class TorchService : public Aux::Logger,

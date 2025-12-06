@@ -81,7 +81,6 @@ void Gen::TrackDepos::add_track(double time, const WireCell::Ray& ray, double ch
     const WireCell::Vector dir = WireCell::ray_unit(ray);
     const double length = WireCell::ray_length(ray);
     double step = 0;
-    int count = 0;
 
     double charge_per_depo = units::eplus;  // charge of one positron
     if (charge > 0) {
@@ -97,13 +96,11 @@ void Gen::TrackDepos::add_track(double time, const WireCell::Ray& ray, double ch
         Aux::SimpleDepo* sdepo = new Aux::SimpleDepo(now, here, charge_per_depo);
         m_depos.push_back(WireCell::IDepo::pointer(sdepo));
         step += m_stepsize;
-        ++count;
     }
 
     // earliest first
     std::sort(m_depos.begin(), m_depos.end(), ascending_time);
     log->debug("depos: {} over {}mm", m_depos.size(), length / units::mm);
-    (void)count;  // unused, but useful for debugging
 }
 
 bool Gen::TrackDepos::operator()(output_pointer& out)

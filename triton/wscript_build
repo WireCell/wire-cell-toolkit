@@ -1,0 +1,6 @@
+test_use = []
+if 'HAVE_LIBTORCH' in bld.env:
+    test_use.append('WireCellPytorch LIBTORCH')
+
+bld.smplpkg('WireCellTriton', use='WireCellAux TRITON GRPC PROTOBUF',
+            test_use=test_use)

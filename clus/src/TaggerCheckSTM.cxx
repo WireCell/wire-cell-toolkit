@@ -586,8 +586,10 @@ private:
         std::vector<double> refl_angles(fine_tracking_path.size(), 0);
         std::vector<double> para_angles(fine_tracking_path.size(), 0);
 
+        const int path_size = static_cast<int>(fine_tracking_path.size());
+
         // First part: Calculate reflection and parallel angles for each point
-        for (size_t i = 0; i != fine_tracking_path.size(); i++) {
+        for (int i = 0; i < path_size; i++) {
             double angle1 = 0;  // reflection angle
             double angle2 = 0;  // parallel angle
             
@@ -604,7 +606,7 @@ private:
                 }
                 
                 // Forward vector (from point i to point i+j+1)
-                if (i + j + 1 < fine_tracking_path.size()) {
+                if (i + j + 1 < path_size) {
                     v20 = WireCell::Vector(fine_tracking_path.at(i+j+1).first.x() - fine_tracking_path.at(i).first.x(),
                                         fine_tracking_path.at(i+j+1).first.y() - fine_tracking_path.at(i).first.y(),
                                         fine_tracking_path.at(i+j+1).first.z() - fine_tracking_path.at(i).first.z());
@@ -645,15 +647,13 @@ private:
         }
 
         // Second part: Analyze charge and find breakpoints
-        for (int i = 0; i != fine_tracking_path.size(); i++) {
+        for (int i = 0; i < path_size; i++) {
             double min_dQ_dx = dQ.at(i) / dx.at(i);
             
             // Find minimum dQ/dx in the next 5 points
-            for (size_t j = 1; j != 6; j++) {
-                if (i + j < fine_tracking_path.size()) {
-                    if (dQ.at(i + j) / dx.at(i + j) < min_dQ_dx) {
-                        min_dQ_dx = dQ.at(i + j) / dx.at(i + j);
-                    }
+            for (int j = 1; j <= 5; j++) {
+                if (i + j < path_size && dQ.at(i + j) / dx.at(i + j) < min_dQ_dx) {
+                    min_dQ_dx = dQ.at(i + j) / dx.at(i + j);
                 }
             }
             
@@ -662,7 +662,7 @@ private:
             double nsum = 0;
             
             for (int j = -2; j != 3; j++) {
-                if (i + j >= 0 && i + j < fine_tracking_path.size()) {
+                if (i + j >= 0 && i + j < path_size) {
                     if (para_angles.at(i + j) > 10) {
                         sum_angles += pow(refl_angles.at(i + j), 2);
                         nsum++;
@@ -746,7 +746,7 @@ private:
             // Calculate previous point direction
             geo_point_t prev_p(0, 0, 0);
             int num_p = 0;
-            for (size_t i = 1; i != 6; i++) {
+            for (int i = 1; i != 6; i++) {
                 if (save_i >= i) {
                     prev_p.at(0) += fine_tracking_path.at(save_i - i).first.x();
                     prev_p.at(1) += fine_tracking_path.at(save_i - i).first.y();
@@ -927,6 +927,7 @@ private:
         if (fine_tracking_path.empty()) {
             return -1;
         }
+        const int dq_size = static_cast<int>(dQ.size());
 
         // Define drift direction (X direction in detector coordinates)
         WireCell::Vector drift_dir_abs(1.0, 0.0, 0.0);
@@ -936,9 +937,10 @@ private:
         std::vector<double> para_angles(fine_tracking_path.size(), 0);
         std::vector<double> ave_angles(fine_tracking_path.size(), 0);
         std::vector<int> max_numbers(fine_tracking_path.size(), -1);
+        const int path_size = static_cast<int>(fine_tracking_path.size());
         
         // Calculate reflection and parallel angles for each point
-        for (size_t i = 0; i != fine_tracking_path.size(); i++) {
+        for (int i = 0; i < path_size; i++) {
             double angle1 = 0;
             double angle2 = 0;
             
@@ -954,7 +956,7 @@ private:
                 }
                 
                 // Forward vector (from point i to point i+j+1)
-                if (i + j + 1 < fine_tracking_path.size()) {
+                if (i + j + 1 < path_size) {
                     v20 = WireCell::Vector(fine_tracking_path.at(i+j+1).first.x() - fine_tracking_path.at(i).first.x(),
                                         fine_tracking_path.at(i+j+1).first.y() - fine_tracking_path.at(i).first.y(),
                                         fine_tracking_path.at(i+j+1).first.z() - fine_tracking_path.at(i).first.z());
@@ -995,14 +997,14 @@ private:
         }
         
         // Calculate average angles in a 5-point window
-        for (int i = 0; i != fine_tracking_path.size(); i++) {
+        for (int i = 0; i < path_size; i++) {
             double sum_angles = 0;
             double nsum = 0;
             double max_angle = 0;
             int max_num = -1;
             
             for (int j = -2; j != 3; j++) {
-                if (i + j >= 0 && i + j < fine_tracking_path.size()) {
+                if (i + j >= 0 && i + j < path_size) {
                     if (para_angles.at(i + j) > 12) {
                         sum_angles += pow(refl_angles.at(i + j), 2);
                         nsum++;
@@ -1022,7 +1024,7 @@ private:
         }
         
         // Look for kink candidates
-        for (int i = 0; i != fine_tracking_path.size(); i++) {
+        for (int i = 0; i < path_size; i++) {
             geo_point_t current_point(fine_tracking_path.at(i).first.x(),
                                     fine_tracking_path.at(i).first.y(),
                                     fine_tracking_path.at(i).first.z());
@@ -1045,7 +1047,7 @@ private:
                 }
                 
                 double angle3p = angle3;
-                if (i + 1 != fine_tracking_path.size()) {
+                if (i + 1 < path_size) {
                     WireCell::Vector v11(fine_tracking_path.at(i+1).first.x() - fine_tracking_path.front().first.x(),
                                         fine_tracking_path.at(i+1).first.y() - fine_tracking_path.front().first.y(),
                                         fine_tracking_path.at(i+1).first.z() - fine_tracking_path.front().first.z());
@@ -1093,7 +1095,7 @@ private:
                             sum_fQ += dQ.at(i - k - 1);
                             sum_fx += dx.at(i - k - 1);
                         }
-                        if (i + k + 1 < dQ.size()) {
+                        if (i + k + 1 < dq_size) {
                             sum_bQ += dQ.at(i + k + 1);
                             sum_bx += dx.at(i + k + 1);
                         }
@@ -1107,7 +1109,7 @@ private:
                         (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) && 
                         v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
                         
-                        if (i + 2 < dQ.size()) {
+                        if (i + 2 < dq_size) {
                             std::cout << "Kink: " << i << " " << refl_angles.at(i) << " " << para_angles.at(i) 
                                     << " " << ave_angles.at(i) << " " << max_numbers.at(i) << " " << angle3 
                                     << " " << dQ.at(i)/dx.at(i)*units::cm/50e3 << " " << pu.at(i) 
@@ -1119,7 +1121,7 @@ private:
             }
         }
 
-        for (int i=0;i!=fine_tracking_path.size();i++){
+        for (int i = 0; i < path_size; i++){
             // std::cout << i << " " << refl_angles.at(i) << " " << ave_angles.at(i) << " " << inside_fiducial_volume(fine_tracking_path.at(i)) << std::endl;
             
             geo_point_t current_point(fine_tracking_path.at(i).first.x(),
@@ -1197,7 +1199,7 @@ private:
                             sum_fQ += dQ.at(i-k-1);
                             sum_fx += dx.at(i-k-1);
                         }
-                        if (i+k+1 < dQ.size()){
+                        if (i+k+1 < dq_size){
                             sum_bQ += dQ.at(i+k+1);
                             sum_bx += dx.at(i+k+1);
                         }
@@ -1208,7 +1210,7 @@ private:
                     if (std::abs(sum_fQ-sum_bQ) < 0.07*(sum_fQ+sum_bQ) && (flag_bad_u||flag_bad_v||flag_bad_w)) continue;
                     
                     if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
-                        if (i+2<dQ.size()){
+                        if (i+2<dq_size){
                             std::cout << "Kink: " << i << " " << refl_angles.at(i) << " " << para_angles.at(i) << " " << ave_angles.at(i) << " " << max_numbers.at(i) << " " << angle3 << " " << dQ.at(i)/dx.at(i)*units::cm/50e3 << std::endl;
                             return max_numbers.at(i);
                         }
@@ -1218,7 +1220,7 @@ private:
         }
 
 
-        return fine_tracking_path.size();  // Placeholder return value
+        return static_cast<int>(fine_tracking_path.size());  // Placeholder return value
     }
 
     bool detect_proton(std::shared_ptr<PR::Segment> segment, int kink_num, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments) const{
@@ -1257,13 +1259,14 @@ private:
         for (const auto& path_point : fine_tracking_path) {
             pts.push_back(path_point.first);
         }
+        const int num_pts = static_cast<int>(pts.size());
 
         // Determine end point
         WireCell::Point end_p;
-        if (kink_num == pts.size()) {
+        if (kink_num < 0 || kink_num >= num_pts) {
             end_p = pts.back();
         } else {
-            end_p = pts.at(kink_num);
+            end_p = pts.at(static_cast<size_t>(kink_num));
         }
 
         // Calculate main track direction vector
@@ -1350,13 +1353,14 @@ private:
         }
 
         double end_L;
-        double max_num;
-        if (kink_num == pts.size()) {
+        size_t max_num;
+        if (kink_num < 0 || kink_num >= num_pts) {
             end_L = L.back();
             max_num = L.size();
         } else {
-            end_L = L[kink_num] - 0.5*units::cm;
-            max_num = kink_num;
+            const size_t kink_idx = static_cast<size_t>(kink_num);
+            end_L = L[kink_idx] - 0.5*units::cm;
+            max_num = kink_idx;
         }
 
         // Find the maximum bin
@@ -1432,14 +1436,16 @@ private:
 
         if (ncount >= 5) {
             // Create reference vectors for comparison
-            std::vector<double> muon_ref(ncount);
-            std::vector<double> const_ref(ncount, 50e3);
-            std::vector<double> muon_ref_p(ncount_p);
+            const size_t count = static_cast<size_t>(ncount);
+            const size_t count_p = static_cast<size_t>(ncount_p);
+            std::vector<double> muon_ref(count);
+            std::vector<double> const_ref(count, 50e3);
+            std::vector<double> muon_ref_p(count_p);
 
-            for (size_t i = 0; i != ncount; i++) {
+            for (size_t i = 0; i < count; i++) {
                 muon_ref[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm);
             }
-            for (size_t i = 0; i != ncount_p; i++) {
+            for (size_t i = 0; i < count_p; i++) {
                 muon_ref_p[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_xp[i])/units::cm);
             }
 
@@ -1518,6 +1524,7 @@ private:
         for (const auto& path_point : fine_tracking_path) {
             pts.push_back(path_point.first);
         }
+        const int num_pts = static_cast<int>(pts.size());
         
         std::vector<double> L(pts.size(), 0);
         std::vector<double> dQ_dx(pts.size(), 0);
@@ -1534,13 +1541,14 @@ private:
         }
 
         double end_L;
-        double max_num;
-        if (kink_num == pts.size()) {
+        size_t max_num;
+        if (kink_num < 0 || kink_num >= num_pts) {
             end_L = L.back();
             max_num = L.size();
         } else {
-            end_L = L[kink_num] - 0.5 * units::cm;
-            max_num = kink_num;
+            const size_t kink_idx = static_cast<size_t>(kink_num);
+            end_L = L[kink_idx] - 0.5 * units::cm;
+            max_num = kink_idx;
         }
 
         double max_bin = -1;
@@ -1632,11 +1640,12 @@ private:
         // std::cout << "Test: " << res_length/units::cm << " " << ave_res_dQ_dx << " " << res_length1/units::cm << " " << res_dis1/units::cm << std::endl;
 
         // Create vectors for KS test instead of histograms
-        std::vector<double> test_data(ncount);
-        std::vector<double> ref_muon(ncount);
-        std::vector<double> ref_flat(ncount);
+        const size_t count = static_cast<size_t>(ncount);
+        std::vector<double> test_data(count);
+        std::vector<double> ref_muon(count);
+        std::vector<double> ref_flat(count);
 
-        for (size_t i = 0; i != ncount; i++) {
+        for (size_t i = 0; i < count; i++) {
             test_data[i] = vec_y[i];
             ref_muon[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i] + offset_length) / units::cm);
             ref_flat[i] = 50e3;
@@ -1921,7 +1930,8 @@ private:
             if (flag_tagged[sep_clusters[comp_idx].front()] || ncounts[comp_idx] == 1) continue;    
             // Find connection point to existing track
             size_t special_A = SIZE_MAX;
-            for (size_t j = 0; j < ncounts[comp_idx]; j++) {
+            const int cluster_size = ncounts[comp_idx];
+            for (int j = 0; j < cluster_size; j++) {
                 if (map_connection.find(sep_clusters[comp_idx][j]) != map_connection.end()) {
                     special_A = sep_clusters[comp_idx][j];
                     break;
@@ -1935,7 +1945,7 @@ private:
             int number_not_faked = 0;
             double max_dis_u = 0, max_dis_v = 0, max_dis_w = 0;
             
-            for (size_t j = 0; j < ncounts[comp_idx]; j++) {
+            for (int j = 0; j < cluster_size; j++) {
                 size_t point_idx = sep_clusters[comp_idx][j];
                 geo_point_t p1(x_coords[special_A], y_coords[special_A], z_coords[special_A]);
                 geo_point_t p2(x_coords[point_idx], y_coords[point_idx], z_coords[point_idx]);
@@ -2601,6 +2611,7 @@ private:
             for (const auto& path_point : fine_tracking_path) {
                 pts.push_back(path_point.first);
             }
+            const int total_pts = static_cast<int>(pts.size());
 
             // std::cout << "Collect points " << pts.size() << std::endl;
 
@@ -2613,11 +2624,22 @@ private:
             double exit_L = 0; 
             double exit_Q = 0;
             
-            for (size_t i=0; i != kink_num && i < dx.size(); i++){
+            const size_t dx_size = dx.size();
+            size_t first_loop_end = dx_size;
+            size_t second_loop_start = dx_size;
+            if (kink_num == 0) {
+                first_loop_end = 0;
+                second_loop_start = 0;
+            } else if (kink_num > 0) {
+                const size_t kink_idx = std::min(static_cast<size_t>(kink_num), dx_size);
+                first_loop_end = kink_idx;
+                second_loop_start = kink_idx;
+            }
+            for (size_t i = 0; i < first_loop_end; i++){
                 exit_L += dx.at(i);
                 exit_Q += dQ.at(i);
             }
-            for (size_t i = kink_num; i < dx.size(); i++){
+            for (size_t i = second_loop_start; i < dx_size; i++){
                 left_L += dx.at(i);
                 left_Q += dQ.at(i);
             }
@@ -2631,14 +2653,15 @@ private:
 
                 bool flag_TGM_anode = false;
                 if ((pts.back().x() < 2*units::cm || pts.front().x() < 2*units::cm) && 
-                    kink_num >= 0 && kink_num < pts.size()) {
-                    if (pts.at(kink_num).x() < 6*units::cm){
-                        geo_point_t v10(pts.back().x()-pts.at(kink_num).x(),
-                                       pts.back().y()-pts.at(kink_num).y(),
-                                       pts.back().z()-pts.at(kink_num).z());
-                        geo_point_t v20(pts.front().x()-pts.at(kink_num).x(),
-                                       pts.front().y()-pts.at(kink_num).y(),
-                                       pts.front().z()-pts.at(kink_num).z());
+                    kink_num >= 0 && kink_num < total_pts) {
+                    const size_t kink_idx = static_cast<size_t>(kink_num);
+                    if (pts.at(kink_idx).x() < 6*units::cm){
+                        geo_point_t v10(pts.back().x()-pts.at(kink_idx).x(),
+                                       pts.back().y()-pts.at(kink_idx).y(),
+                                       pts.back().z()-pts.at(kink_idx).z());
+                        geo_point_t v20(pts.front().x()-pts.at(kink_idx).x(),
+                                       pts.front().y()-pts.at(kink_idx).y(),
+                                       pts.front().z()-pts.at(kink_idx).z());
                         
                         if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90)<12.5 && v10.magnitude()>15*units::cm) || 
                             (fabs(v20.angle(drift_dir)/3.1415926*180.-90)<12.5 && v20.magnitude()>15*units::cm)) {
@@ -2799,6 +2822,7 @@ private:
             for (const auto& path_point : fine_tracking_path) {
                 pts.push_back(path_point.first); 
             }
+            const int total_pts = static_cast<int>(pts.size());
 
             int kink_num = find_first_kink(adjusted_segment);
             
@@ -2807,11 +2831,22 @@ private:
             double exit_L = 0;
             double exit_Q = 0;
             
-            for (size_t i=0; i != kink_num && i < dx.size(); i++){
+            const size_t dx_size = dx.size();
+            size_t first_loop_end = dx_size;
+            size_t second_loop_start = dx_size;
+            if (kink_num == 0) {
+                first_loop_end = 0;
+                second_loop_start = 0;
+            } else if (kink_num > 0) {
+                const size_t kink_idx = std::min(static_cast<size_t>(kink_num), dx_size);
+                first_loop_end = kink_idx;
+                second_loop_start = kink_idx;
+            }
+            for (size_t i=0; i < first_loop_end; i++){
                 exit_L += dx.at(i);
                 exit_Q += dQ.at(i);
             }
-            for (size_t i = kink_num; i != dx.size(); i++){
+            for (size_t i = second_loop_start; i < dx_size; i++){
                 left_L += dx.at(i);
                 left_Q += dQ.at(i);
             }
@@ -2827,14 +2862,15 @@ private:
                 bool flag_TGM_anode = false;
                 
                 if ((pts.back().x() < 2*units::cm || pts.front().x() < 2*units::cm) && 
-                    kink_num >= 0 && kink_num < pts.size()) {
-                    if (pts.at(kink_num).x() < 6*units::cm){
-                        geo_point_t v10(pts.back().x()-pts.at(kink_num).x(),
-                                       pts.back().y()-pts.at(kink_num).y(),
-                                       pts.back().z()-pts.at(kink_num).z());
-                        geo_point_t v20(pts.front().x()-pts.at(kink_num).x(),
-                                       pts.front().y()-pts.at(kink_num).y(),
-                                       pts.front().z()-pts.at(kink_num).z());
+                    kink_num >= 0 && kink_num < total_pts) {
+                    const size_t kink_idx = static_cast<size_t>(kink_num);
+                    if (pts.at(kink_idx).x() < 6*units::cm){
+                        geo_point_t v10(pts.back().x()-pts.at(kink_idx).x(),
+                                       pts.back().y()-pts.at(kink_idx).y(),
+                                       pts.back().z()-pts.at(kink_idx).z());
+                        geo_point_t v20(pts.front().x()-pts.at(kink_idx).x(),
+                                       pts.front().y()-pts.at(kink_idx).y(),
+                                       pts.front().z()-pts.at(kink_idx).z());
                         
                         if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90)<12.5 && v10.magnitude()>15*units::cm) || 
                             (fabs(v20.angle(drift_dir)/3.1415926*180.-90)<12.5 && v20.magnitude()>15*units::cm)) {

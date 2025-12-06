@@ -1,6 +1,10 @@
 #include "WireCellClus/Facade.h"
 #include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/Facade_Blob.h"
+#include "WireCellClus/Graphs.h"
 #include <boost/container_hash/hash.hpp>
+#include "WireCellAux/SimpleTensor.h"
 
 using namespace WireCell;
 using namespace WireCell::PointCloud;
@@ -550,6 +554,164 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     double wind = (y - center) / pitch - 0.5; // subtract 0.5 to match WCP (wire center vs. edge difference ...) ...
     return std::round(wind);
+}
+
+
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#include <boost/iostreams/filtering_stream.hpp>
+#pragma GCC diagnostic pop
+#include "WireCellUtil/Stream.h"
+
+#include <regex>
+
+/// @param arr: 2D array
+/// @param fname: file name
+/// @param pname: package name
+static void arr2file(const boost::multi_array<float, 2>& arr, const std::string& fname, boost::iostreams::filtering_ostream& m_out)
+{
+    std::vector<size_t> shape = {arr.shape()[0], arr.shape()[1]};
+    // Stream::write(m_out, fname, arr.data(), shape, "float");
+    Json::Value md = Json::objectValue;
+    auto ten = std::make_shared<Aux::SimpleTensor>(shape, arr.data(), md);
+    Stream::write(m_out, fname, ten->data(), shape, ten->dtype());
+    std::cout << "ten->dtype() " << ten->dtype() << std::endl;
+    m_out.flush();
+}
+
+void Facade::grouping2file(const Grouping& grouping, const std::string& filename)
+{
+
+    typedef boost::multi_array<float, 2> MultiArray;
+    // ctpc: x, y, charge, charge_err, cident, wind, slice_index
+
+    using ostream_t = boost::iostreams::filtering_ostream;
+    ostream_t m_out;
+    custard::output_filters(m_out, filename);
+    if (m_out.empty()) {
+        raise<ValueError>("ten2file: unsupported outname: %s", filename.c_str());
+    }
+
+    const auto& gpcs = grouping.node()->value.local_pcs();
+    std::regex ctpc_name_pattern("^ctpc_f([0-9]+)p([0-9]+)$");
+    for (const auto& [name, pc] : gpcs) {
+        // std::cout << "grouping2file: gpc name: " << name << " npts: " << pc.size_major() << std::endl;
+        std::smatch matches;
+        if (!std::regex_match(name, matches, ctpc_name_pattern)) {
+            continue; // not a ctpc
+        }
+        // int apa_ident = -1; ///FIXME: figure this out
+        // int face_idx = -1;
+        // int plane_idx = -1;
+        // sscanf(name.c_str(), "ctpc_f%dp%d", &face_idx, &plane_idx);
+        // std::cout << " face_idx " << face_idx << " plane_idx " << plane_idx << std::endl;
+
+        size_t npts = pc.size_major();
+        MultiArray actpc(boost::extents[npts][7]);
+        const auto& x = pc.get("x")->elements<double>();
+        const auto& y = pc.get("y")->elements<double>();
+        const auto& charge = pc.get("charge")->elements<double>();
+        const auto& charge_err = pc.get("charge_err")->elements<double>();
+        const auto& cident = pc.get("cident")->elements<int>();
+        const auto& wind = pc.get("wind")->elements<int>();
+        const auto& slice_index = pc.get("slice_index")->elements<int>();
+        for (size_t i = 0; i < npts; ++i) {
+            actpc[i][0] = x[i];
+            actpc[i][1] = y[i];
+            actpc[i][2] = charge[i];
+            actpc[i][3] = charge_err[i];
+            actpc[i][4] = cident[i];
+            actpc[i][5] = wind[i];
+            actpc[i][6] = slice_index[i];
+        }
+        arr2file(actpc, name, m_out);
+    }
+    size_t nblobs = 0;
+    for (const auto& cluster : grouping.children()) {
+        nblobs += cluster->children().size();
+    }
+    // q, ncorners, corner0_x, corner0_y, corner0_z, ... corner11_z [max 12 corners, 36 columns]
+    MultiArray ablobs(boost::extents[nblobs][38]);
+    int gbidx = 0;
+    std::unordered_map<const Blob*, int> b2idx;
+    for (const auto& cluster : grouping.children()) {
+        for (const auto& blob : cluster->children()) {
+            ablobs[gbidx][0] = blob->charge();
+            int ncorners = std::min(12, int(blob->corners().size()));
+            ablobs[gbidx][1] = ncorners;
+            for(int i=0; i<ncorners; ++i) {
+                ablobs[gbidx][2+i*3] = blob->corners().at(i).x();
+                ablobs[gbidx][3+i*3] = blob->corners().at(i).y();
+                ablobs[gbidx][4+i*3] = blob->corners().at(i).z();
+            }
+            b2idx[blob] = gbidx;
+            gbidx++;
+        }
+    }
+
+    int npoints = 0;
+    int nedges = 0;
+    for (const auto& cluster : grouping.children()) {
+        /// TODO: use ctpc?
+        // cluster->Create_graph(true);
+        const auto& g = cluster->find_graph();
+        npoints += boost::num_vertices(g);
+        nedges += boost::num_edges(g);
+    }
+
+    // x, y, z, q, bidx, cidx
+    MultiArray apoints(boost::extents[npoints][6]);
+    // head node, tail node, weight
+    MultiArray aedges(boost::extents[nedges][3]);
+
+    // global point index
+    int gcidx = 0;
+    int gpidx = 0;
+    int geidx = 0;
+    int gpoffset = 0;
+    for (const auto& cluster : grouping.children()) {
+        const auto& g = cluster->find_graph();
+        auto vrange = boost::vertices(g);
+        const auto vindex = boost::get(boost::vertex_index, g);
+        for (auto vit = vrange.first; vit != vrange.second; ++vit) {
+            auto v = *vit;
+            gpidx = gpoffset + v;
+            if (gpidx >= npoints) {
+                raise<ValueError>("graph2json: gpidx %d >= npoints %d", gpidx, npoints);
+            }
+
+            const auto point_idx = boost::get(vindex, v);
+            const auto& p3 = cluster->point3d(point_idx);
+            apoints[gpidx][0] = p3.x();
+            apoints[gpidx][1] = p3.y();
+            apoints[gpidx][2] = p3.z();
+            /// TODO: placeholder for charge
+            const auto [tmppt, blob] = cluster->get_closest_point_blob({apoints[gpidx][0], apoints[gpidx][1], apoints[gpidx][2]});
+            apoints[gpidx][3] = blob->charge()/blob->npoints();
+            apoints[gpidx][4] = b2idx[blob];
+            apoints[gpidx][5] = gcidx;
+        }
+        auto erange = boost::edges(g);
+        for (auto eit = erange.first; eit != erange.second; ++eit) {
+            auto e = *eit;
+            auto source = boost::source(e, g);
+            auto target = boost::target(e, g);
+            aedges[geidx][0] = source+gpoffset;
+            aedges[geidx][1] = target+gpoffset;
+            /// TODO: placeholder
+            aedges[geidx][2] = boost::get(boost::edge_weight, g, e);
+            geidx++;
+        }
+        gpoffset += boost::num_vertices(g);
+        gcidx += 1;
+    }
+
+    arr2file(ablobs, "blobs", m_out);
+    arr2file(apoints, "points", m_out);
+    arr2file(aedges, "ppedges", m_out);
+    m_out.pop();
+
 }
 
 double Facade::wind2point2dproj(const int wind, const double angle, const double pitch, const double center)

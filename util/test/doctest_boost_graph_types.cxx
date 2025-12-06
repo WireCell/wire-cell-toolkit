@@ -104,14 +104,13 @@ TEST_CASE("boost graph vertex index")
 #endif
 
     boost::remove_vertex(v0, g);
+    v0 = boost::graph_traits<Graph>::null_vertex();
     {
         auto index_map = get(boost::vertex_index, g);
-        auto idx0 = index_map[v0];
         auto idx1 = index_map[v1];
 
         std::cerr << "after removal of v0\n";
-        std::cerr << "v0:" << v0 << " i0:" << idx0 << "\n";
+        std::cerr << "v0: <invalid after removal>\n";
         std::cerr << "v1:" << v1 << " i1:" << idx1 << "\n";
     }
 }
-

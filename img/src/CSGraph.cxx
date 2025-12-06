@@ -32,6 +32,13 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
 {
     graph_t csg_out;
 
+    // {
+    //     auto& gp = csg[boost::graph_bundle];
+    //     auto tick = gp.islice->start()/gp.islice->span();
+    //     SPDLOG_INFO("CS solve: {} ticks={} span={}",
+    //                  gp.islice->ident(), tick, gp.islice->span());
+    // }
+
     // Copy graph level properties
     csg_out[boost::graph_bundle] = csg[boost::graph_bundle];
 
@@ -162,12 +169,14 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
         R_mat = params.scale*U*A;
     }
     if (verbose) {
-        SPDLOG_INFO("CS params {} {}", params.scale, params.whiten);
-        SPDLOG_INFO("ress param {} {}", rparams.lambda, rparams.tolerance);
-        SPDLOG_INFO("R_mat \n{}", String::stringify(R_mat));
-        SPDLOG_INFO("m_vec \n{}", String::stringify(m_vec));
-        SPDLOG_INFO("source \n{}", String::stringify(source));
-        SPDLOG_INFO("weight \n{}", String::stringify(weight));
+        SPDLOG_INFO("CS params scale {} whiten {}", params.scale, params.whiten);
+        SPDLOG_INFO("ress lambda {} tolerance {}", rparams.lambda, rparams.tolerance);
+        SPDLOG_INFO("m_vec {}", m_vec.size());
+        SPDLOG_INFO("R_mat {} {}", R_mat.rows(), R_mat.cols());
+        // SPDLOG_INFO("R_mat \n{}", String::stringify(R_mat));
+        // SPDLOG_INFO("m_vec \n{}", String::stringify(m_vec));
+        // SPDLOG_INFO("source \n{}", String::stringify(source));
+        // SPDLOG_INFO("weight \n{}", String::stringify(weight));
     }
     // std::cerr << "R:\n" << R_mat << "\nm:\n" << m_vec << std::endl;
     auto solution = Ress::solve(R_mat, m_vec, rparams,
@@ -340,7 +349,9 @@ void CS::unpack(const cluster_graph_t& cgraph,
                     continue;
                 }
                 if (!(msum.uncertainty()>0)) {
-                    THROW(ValueError() << errmsg{String::format("uncertainty %d <=0", msum.uncertainty())});
+                    SPDLOG_WARN("msum {} {} ", msum.value(), msum.uncertainty());
+                    continue;
+                    // THROW(ValueError() << errmsg{String::format("uncertainty %d <=0", msum.uncertainty())});
                 }
                 const int ordering = mnode.ident();
                 node_t meas{mvtx, node_t::meas, ordering, msum};

@@ -70,7 +70,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
 
     m_face = get<int>(cfg, "face", 0);
     log->debug("using face: {}", m_face);
-    if (m_anode->face(m_face) == nullptr) {
+    if (m_anode->faces()[m_face] == nullptr) {
         raise<ValueError>("failed to get face %d", m_face);
     }
 

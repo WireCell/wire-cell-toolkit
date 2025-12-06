@@ -136,7 +136,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         }
     }
 
-    if (config.isMember("process_planes")) {
+    if (config["process_planes"].isArray()) {
         m_process_planes.clear();
         for (auto jplane : config["process_planes"]) {
             m_process_planes.push_back(jplane.asInt());
@@ -150,7 +150,16 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         }
     }
 
+    m_MP_feature_val_method = get(config, "MP_feature_val_method", m_MP_feature_val_method);
+
     m_charge_ch_offset = get(config, "charge_ch_offset", m_charge_ch_offset);
+
+    if (config.isMember("filter_responses_tn")) {
+        m_filter_resps_tn.clear();
+        for (auto tn: config["filter_responses_tn"]) {
+            m_filter_resps_tn.push_back(tn.asString());
+        }
+    }
 
     m_wiener_tag = get(config, "wiener_tag", m_wiener_tag);
     // m_wiener_threshold_tag = get(config, "wiener_threshold_tag", m_wiener_threshold_tag);
@@ -162,7 +171,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_frame_tag = get(config, "frame_tag", m_frame_tag);
 
     m_use_roi_debug_mode = get(config, "use_roi_debug_mode", m_use_roi_debug_mode);
-    m_save_negtive_charge = get(config, "save_negtive_charge", m_save_negtive_charge);
+    m_save_negative_charge = get(config, "save_negative_charge", m_save_negative_charge);
     m_use_roi_refinement = get(config, "use_roi_refinement", m_use_roi_refinement);
     m_tight_lf_tag = get(config, "tight_lf_tag", m_tight_lf_tag);
     m_loose_lf_tag = get(config, "loose_lf_tag", m_loose_lf_tag);
@@ -355,6 +364,11 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
 void OmnibusSigProc::load_data(const input_pointer& in, int plane)
 {
     m_r_data[plane] = Array::array_xxf::Zero(m_fft_nwires[plane], m_fft_nticks);
+    // for (int i = 0; i < m_r_data[plane].rows(); ++i) {
+    //     for (int j = 0; j < m_r_data[plane].cols(); ++j) {
+    //         m_r_data[plane](i, j) = 7370;
+    //     }
+    // }
 
     auto traces = in->traces();
 
@@ -394,7 +408,8 @@ void OmnibusSigProc::load_data(const input_pointer& in, int plane)
     //rebase for this plane
     if (std::find(m_rebase_planes.begin(), m_rebase_planes.end(), plane) != m_rebase_planes.end()) {
         log->debug("rebase_waveform for plane {} with m_rebase_nbins = {}", plane, m_rebase_nbins);
-        rebase_waveform(m_r_data[plane],m_rebase_nbins);
+        auto m_r_data_ref = m_r_data[plane].block(0, 0, m_r_data[plane].rows(), m_nticks);
+        rebase_waveform(m_r_data_ref,m_rebase_nbins);
     }
 
     log->debug("call={} load plane index: {}, ntraces={}, input bad regions: {}",
@@ -425,7 +440,8 @@ void OmnibusSigProc::save_data(
     int plane,
     const std::vector<float>& perwire_rmses,
     IFrame::trace_summary_t& threshold,
-    const std::string& loglabel)
+    const std::string& loglabel,
+    const bool save_negative_charge)
 {
     check_data(plane, loglabel + " before save");
 
@@ -442,7 +458,7 @@ void OmnibusSigProc::save_data(
             const float q = m_r_data[plane](och.wire, itick);
             // charge.at(itick) = q > 0.0 ? q : 0.0;
             // charge.at(itick) = q ;
-            if (m_use_roi_debug_mode && m_save_negtive_charge) {
+            if (save_negative_charge) {
                 charge.at(itick) = q;  // debug mode: save all decons
             }
             else {              // nominal: threshold at zero.
@@ -760,6 +776,15 @@ void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& i
 
 void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
 {
+    // Fixme: this should be moved into configure()
+    auto ifr = Factory::find_tn<IFieldResponse>(m_field_response);
+    // Get full, "fine-grained" field responses defined at impact
+    // positions.
+    Response::Schema::FieldResponse fr = ifr->field_response();
+
+    // Make a new data set which is the average FR
+    Response::Schema::FieldResponse fravg = Response::wire_region_average(fr);
+
     m_period = frame->tick();
     {
         std::vector<int> tbins;
@@ -776,34 +801,29 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
         log->debug("call={} init nticks={} tbinmin={} tbinmax={}", m_count, m_nticks, tbinmin, tbinmax);
 
         if (m_fft_flag == 0) {
-            m_fft_nticks = m_nticks;
+            m_fft_nticks = m_nticks+fravg.planes[0].paths[0].current.size()/5;
+            log->debug("call={} init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
         }
         else {
-            m_fft_nticks = fft_best_length(m_nticks);
-            log->debug("call={} init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
+            m_fft_nticks = fft_best_length(m_nticks, false);
+            log->debug("call={} using fft_best_length init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
         }
         //
 
         m_pad_nticks = m_fft_nticks - m_nticks;
     }
 
-    // Fixme: this should be moved into configure()
-    auto ifr = Factory::find_tn<IFieldResponse>(m_field_response);
-    // Get full, "fine-grained" field responses defined at impact
-    // positions.
-    Response::Schema::FieldResponse fr = ifr->field_response();
-
-    // Make a new data set which is the average FR
-    Response::Schema::FieldResponse fravg = Response::wire_region_average(fr);
-
     for (int i = 0; i != 3; i++) {
         //
         if (m_fft_flag == 0) {
-            m_fft_nwires[i] = m_nwires[i];
+            m_fft_nwires[i] = m_nwires[i] + fravg.planes[0].paths.size() - 1;
+            log->debug("call={} init enlarge wire number in plane {} from {} to {}",
+                       m_count, i, m_nwires[i],
+                       m_fft_nwires[i]);
         }
         else {
-            m_fft_nwires[i] = fft_best_length(m_nwires[i] + fravg.planes[0].paths.size() - 1, 1);
-            log->debug("call={} init enlarge wire number in plane {} from {} to {}",
+            m_fft_nwires[i] = fft_best_length(m_nwires[i] + fravg.planes[0].paths.size() - 1, true);
+            log->debug("call={} using fft_best_length init enlarge wire number in plane {} from {} to {}",
                        m_count, i, m_nwires[i],
                        m_fft_nwires[i]);
         }
@@ -967,7 +987,7 @@ void OmnibusSigProc::restore_baseline(Array::array_xxf& arr)
 }
 
 
-void OmnibusSigProc::rebase_waveform(Array::array_xxf& arr,const int& n_bins)
+void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int& n_bins)
 {
     	for (int i = 0; i != arr.rows(); ++i) {
             Waveform::realseq_t signal(arr.cols());
@@ -1621,6 +1641,18 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         // load data into EIGEN matrices ...
         load_data(in, iplane);  // load into a large matrix
         // initial decon ...
+                
+        // additional filters for overall resposne
+        if (!m_filter_resps_tn.empty()) {
+            for (size_t i = 0; i != overall_resp[iplane].size(); i++) {
+                auto fltresp = Factory::find_tn<IChannelResponse>(m_filter_resps_tn[iplane]);
+                const Waveform::realseq_t& flt = fltresp->channel_response(i); // filter at wire: i
+                for (int j = 0; j != std::min<int>(m_fft_nticks, flt.size()); j++) {
+                    overall_resp[iplane].at(i).at(j) *= flt.at(j); 
+                }
+            }
+        }
+
         decon_2D_init(iplane);  // decon in large matrix
         check_data(iplane, "after 2D init");
 
@@ -1644,7 +1676,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         std::vector<double> dummy;
         // [wgu] save decon result after tight LF
         if (m_use_roi_debug_mode and !m_tight_lf_tag.empty()) {
-            save_data(*itraces, tight_lf_traces, iplane, perwire_rmses, dummy, "tight_lf");
+            save_data(*itraces, tight_lf_traces, iplane, perwire_rmses, dummy, "tight_lf", true);
         }
 
         // Form loose ROIs
@@ -1653,7 +1685,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
             if (m_use_roi_debug_mode) {
                 decon_2D_looseROI_debug_mode(iplane);
                 if (!m_loose_lf_tag.empty()) {
-                    save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf");
+                    save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf", true);
                 }
             }
 
@@ -1668,7 +1700,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         // but save something to be consistent
         if (m_use_roi_debug_mode and iplane == 2) {
             if (!m_loose_lf_tag.empty()) {
-                save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf");
+                save_data(*itraces, loose_lf_traces, iplane, perwire_rmses, dummy, "loose_lf", true);
             }
         }
 
@@ -1681,7 +1713,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
             // special case to dump decon without needs of ROIs
             if (m_use_roi_debug_mode and !m_decon_charge_tag.empty()) {
                 decon_2D_charge(iplane);
-                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy, "decon");
+                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy, "decon", true);
             }
             m_c_data[iplane].resize(0, 0);  // clear memory
             m_r_data[iplane].resize(0, 0);  // clear memory
@@ -1707,9 +1739,9 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                     // mp3: 3 plane protection based on cleaup ROI
                     // f->which(): per-Anode face index
                     // Default values: wire_resolution = 2, nbounds_layers = 2
-                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
+                    roi_refine.MP3ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer, m_MP_feature_val_method);
                     // mp2: 2 plane protection based on cleaup ROI
-                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer);
+                    roi_refine.MP2ROI(iplane, m_anode, f, m_roi_ch_ch_ident, roi_form, m_mp_th1, m_mp_th2, m_mp_tick_resolution, 2, 2, m_plane2layer, m_MP_feature_val_method);
                 }
                 save_mproi(*itraces, mp3_roi_traces, iplane, roi_refine.get_mp3_rois());
                 save_mproi(*itraces, mp2_roi_traces, iplane, roi_refine.get_mp2_rois());
@@ -1775,14 +1807,21 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 // We only use an intermediate index list here to give
                 // some clarity to log msg about range added
                 IFrame::trace_list_t perframe;
-                save_data(*itraces, perframe, iplane, perwire_rmses, thresholds, "wiener");
+                save_data(*itraces, perframe, iplane, perwire_rmses, thresholds, "wiener", m_save_negative_charge);
                 wiener_traces.insert(wiener_traces.end(), perframe.begin(), perframe.end());
+            }
+
+            if (!m_filter_resps_tn.empty()) {
+                // reload data and field response
+                init_overall_response(in);
+                load_data(in, iplane); 
+                decon_2D_init(iplane);  // decon in large matrix
             }
 
             decon_2D_charge(iplane);
             std::vector<double> dummy_thresholds;
             if (m_use_roi_debug_mode and !m_decon_charge_tag.empty()) {
-                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy_thresholds, "decon");
+                save_data(*itraces, decon_charge_traces, iplane, perwire_rmses, dummy_thresholds, "decon", true);
             }
             roi_refine.apply_roi(iplane, m_r_data[iplane]);
             // roi_form.apply_roi(iplane, m_r_data[plane],1);
@@ -1790,7 +1829,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
                 // We only use an intermediate index list here to give
                 // some clarity to log msg about range added
                 IFrame::trace_list_t perframe;
-                save_data(*itraces, perframe, iplane, perwire_rmses, dummy_thresholds, "gauss");
+                save_data(*itraces, perframe, iplane, perwire_rmses, dummy_thresholds, "gauss", m_save_negative_charge);
                 gauss_traces.insert(gauss_traces.end(), perframe.begin(), perframe.end());
             }
 

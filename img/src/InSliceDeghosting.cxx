@@ -198,6 +198,62 @@ namespace {
     }
 
 
+    // bool adjacent(std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid1,
+    //     std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid2)
+    // {
+    //     std::map<WireCell::WirePlaneLayer_t, int> map_plane_score;
+
+    //     // Initialize score map
+    //     for (auto it = cid1.begin(); it != cid1.end(); it++) {
+    //         map_plane_score[it->first] = 0;
+    //     }
+
+    //     int sum_score = 0;
+    //     for (auto it = map_plane_score.begin(); it != map_plane_score.end(); it++) {
+    //         WireCell::WirePlaneLayer_t plane = it->first;
+            
+    //         // Skip if this plane doesn't exist in both maps
+    //         if (cid1.find(plane) == cid1.end() || cid2.find(plane) == cid2.end()) {
+    //             continue;
+    //         }
+
+    //         const std::set<int>& set1 = cid1[plane];
+    //         const std::set<int>& set2 = cid2[plane];
+            
+    //         // Check for overlap between sets
+    //         bool has_overlap = false;
+    //         for (int ch1 : set1) {
+    //             if (set2.find(ch1) != set2.end()) {
+    //                 has_overlap = true;
+    //                 break;
+    //             }
+    //         }
+            
+    //         // Check for adjacency (difference of 1) between any elements
+    //         bool is_adjacent = false;
+    //         for (int ch1 : set1) {
+    //             if (set2.find(ch1 + 1) != set2.end() || set2.find(ch1 - 1) != set2.end()) {
+    //                 is_adjacent = true;
+    //                 break;
+    //             }
+    //         }
+            
+    //         // Apply the same scoring logic
+    //         if (is_adjacent && !has_overlap) {
+    //             map_plane_score[plane] = 1;
+    //         }
+    //         else if (has_overlap) {
+    //             map_plane_score[plane] = 2;
+    //         }
+
+    //         if (map_plane_score[plane] == 0) return false;
+    //         sum_score += map_plane_score[plane];
+    //     }
+
+    //     return sum_score >= 5;
+    // }
+
+
     // Helper function to calculate overlap ratio between two sets of wires
     double calculate_wire_overlap(const std::set<int>& wires1, const std::set<int>& wires2) {
         std::vector<int> common_wires;

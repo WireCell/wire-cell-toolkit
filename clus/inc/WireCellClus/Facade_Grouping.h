@@ -38,6 +38,8 @@ namespace WireCell::Clus::Facade {
         std::set<WireCell::WirePlaneId> cluster_wpids;
         std::set<WireCell::WirePlaneId> dv_wpids;
 
+        mapfp_t<Tree::Scope> ctpc_scopes;
+
         // #381 if you give a crap about dead_winds.  
 
         // detector volume

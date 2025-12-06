@@ -35,7 +35,6 @@ WireCell::Configuration ConfigDumper::default_configuration() const
 void ConfigDumper::execute()
 {
     ConfigManager cm;
-    int nfailed = 0;
 
     std::vector<std::string> comps;
     for (auto jone : m_cfg["components"]) {
@@ -56,12 +55,10 @@ void ConfigDumper::execute()
         }
         catch (FactoryException& fe) {
             warn("failed lookup component: \"{}\":\"{}\"", type, name);
-            ++nfailed;
             continue;
         }
         cm.add(cfg, type, name);
     }
 
     Persist::dump(get<string>(m_cfg, "filename"), cm.all());
-    (void)nfailed; // unused, but useful for debugging
 }

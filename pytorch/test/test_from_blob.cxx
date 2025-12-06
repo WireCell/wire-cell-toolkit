@@ -1,4 +1,4 @@
-#include <torch/script.h>
+#include "WireCellPytorch/Torch.h"
 #include <torch/csrc/api/include/torch/fft.h>
 
 #include <vector>
