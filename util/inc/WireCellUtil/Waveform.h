@@ -83,6 +83,10 @@ namespace WireCell {
         /// scalar type of Val.
         ///
         /// See also Spectrum::resample()
+        ///
+        /// Caution: this is really a decimation and will lead to aliasing if
+        /// the original wave is not band limited to below the new Nyquist
+        /// frequency.
         template <typename Val, typename Scalar>
         Sequence<Val> resample(const Sequence<Val>& wave, const Domain& domain, int nsamples, const Domain& newdomain)
         {

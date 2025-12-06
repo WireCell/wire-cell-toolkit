@@ -205,7 +205,7 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
             continue;
         }
 
-        auto channels = Aux::channels(traces);
+        auto channels = Aux::channels(traces, true);
         size_t nrows = channels.size();
 
         auto tbinmm = Aux::tbin_range(traces);

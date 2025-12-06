@@ -34,8 +34,7 @@ local wcls_input = g.pnode({
     name: 'sigs',
     data: {
         nticks: params.daq.nticks,
-        frame_scale: 50,                             // scale up input recob::Wire by this factor
-        summary_scale: 50,                             // scale up input summary by this factor
+        scale: 50,                             // scale up input recob::Wire by this factor
         frame_tags: ["orig"],                 // frame tags (only one frame in this module)
         recobwire_tags: std.extVar('recobwire_tags'), // ["sptpc2d:gauss", "sptpc2d:wiener"],
         trace_tags: std.extVar('trace_tags'), // ["gauss", "wiener"],

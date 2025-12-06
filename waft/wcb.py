@@ -131,6 +131,23 @@ def configure(cfg):
     submodules = find_submodules(cfg)
     debug(f'wcb: {submodules=}')
 
+    # List any packages that may exist in the source but are not ready for
+    # release builds.  Development builds will include them.  
+    pre_release_packages = ["patrec"]
+    if cfg.env.IS_DEVELOPMENT:
+        # add any development-only config
+        debug("wcb: development build options")
+    else:
+
+        strict_flags = "-Werror -Wall -Werror=return-type -pedantic -Wno-unused-local-typedefs"
+        info(f'Adding strict compiler flags for release: "{strict_flags}"')
+        cfg.env.CXXFLAGS += strict_flags.split()
+
+        for notyet in pre_release_packages:
+            if notyet in submodules:
+                info(f'Removing package "{notyet}" due to not yet being ready for release')
+                submodules.remove(notyet)
+
     # Remove WCT packages if they an optional dependency wasn't found
     for pkg,ext in [
             ("root","HAVE_ROOTSYS"),

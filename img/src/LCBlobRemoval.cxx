@@ -62,7 +62,7 @@ static void dump_cg(const cluster_graph_t& cg, Log::logptr_t& log)
             ++mcount;
         }
     }
-    log->debug("cluster graph: vertices={} edges={} $blob={} bval={} #meas={}",
+    log->debug("cluster graph: vertices={} edges={} #blob={} bval={} #meas={}",
                boost::num_vertices(cg), boost::num_edges(cg),
                bcount, bval, mcount);
 }

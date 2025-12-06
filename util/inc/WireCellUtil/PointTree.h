@@ -15,6 +15,7 @@
 #include "WireCellUtil/Limits.h" // SIZE_MAX
 
 #include "WireCellUtil/Logging.h" // debug
+#include "WireCellUtil/Spdlog.h"
 
 #include <boost/range/adaptors.hpp>
 #include <boost/iterator/transform_iterator.hpp>

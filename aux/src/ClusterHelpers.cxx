@@ -319,3 +319,55 @@ std::map<std::string, size_t> Aux::count(const cluster_graph_t& cgraph, bool nod
 }
 
 
+
+
+std::unordered_map<int, std::set<cluster_vertex_t> > Aux::blob_clusters(
+    const cluster_graph_t& cg)
+{
+    std::unordered_map<int, std::set<cluster_vertex_t> > groups;
+    cluster_graph_t cg_blob;
+
+    size_t nblobs = 0;
+    std::unordered_map<cluster_vertex_t, cluster_vertex_t> old2new;
+    std::unordered_map<cluster_vertex_t, cluster_vertex_t> new2old;
+    for (const auto& vtx : GraphTools::mir(boost::vertices(cg))) {
+        const auto& node = cg[vtx];
+        if (node.code() == 'b') {
+            ++nblobs;
+            auto newvtx = boost::add_vertex(node, cg_blob);
+            old2new[vtx] = newvtx;
+            new2old[newvtx] = vtx;
+        }
+    }
+
+    if (!nblobs) {
+        return groups;
+    }
+
+    for (auto edge : GraphTools::mir(boost::edges(cg))) {
+        auto old_tail = boost::source(edge, cg);
+        auto old_head = boost::target(edge, cg);
+
+        auto old_tit = old2new.find(old_tail);
+        if (old_tit == old2new.end()) {
+            continue;
+        }
+        auto old_hit = old2new.find(old_head);
+        if (old_hit == old2new.end()) {
+            continue;
+        }
+        const auto& hnode = cg_blob[old_hit->second];
+        const auto& tnode = cg_blob[old_tit->second];
+        if (hnode.code() == 'b' && tnode.code() == 'b') {
+            boost::add_edge(old_tit->second, old_hit->second, cg_blob);
+        }
+    }
+
+    std::unordered_map<cluster_vertex_t, int> desc2id;
+    boost::connected_components(cg_blob, boost::make_assoc_property_map(desc2id));
+    for (auto& [desc, id] : desc2id) {  // invert
+        groups[id].insert(new2old[desc]);
+    }
+
+    return groups;
+}

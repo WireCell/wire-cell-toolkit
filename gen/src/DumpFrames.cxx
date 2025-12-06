@@ -20,7 +20,8 @@ bool Gen::DumpFrames::operator()(const IFrame::pointer& frame)
         return true;
     }
     auto traces = frame->traces();
-    const int ntraces = traces->size();
+    int ntraces = 0;
+    if (traces) ntraces = traces->size();
 
     std::stringstream ss;
     ss << "sink frame: #" << frame->ident() << " @" << frame->time() / units::ms << " with " << ntraces << " traces";

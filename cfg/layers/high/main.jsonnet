@@ -6,8 +6,10 @@ local pg = import "pgraph.jsonnet";
 
 local basic_plugins = [
     "WireCellSio", "WireCellAux",
-    "WireCellGen", "WireCellSigProc", "WireCellImg", "WireCellClus",
-    "WireCellApps"];
+    "WireCellGen", "WireCellSigProc", "WireCellImg",
+    "WireCellApps",
+#    "WireCellClus", ## we do not include clus in main yet.
+];
 
 local app_plugins = {
     'TbbFlow': ["WireCellTbb"],
