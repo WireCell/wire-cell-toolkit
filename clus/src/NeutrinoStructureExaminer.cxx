@@ -1286,3 +1286,109 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
     
     return false;
 }
+
+bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_continue = false;
+    
+    VertexPtr v1 = nullptr;
+    VertexPtr v2 = nullptr;
+    VertexPtr v3 = nullptr;
+    
+    // Iterate through all vertices in the graph
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        // Check if vertex has exactly 2 connections (potential candidate)
+        if (boost::degree(*vit, graph) != 2) continue;
+        
+        // Get the two connected segments
+        std::vector<SegmentPtr> connected_segments;
+        auto [ebegin, eend] = boost::out_edges(*vit, graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr seg = graph[*eit].segment;
+            if (seg) connected_segments.push_back(seg);
+        }
+        
+        if (connected_segments.size() != 2) continue;
+        
+        // Check each segment
+        for (auto seg : connected_segments) {
+            // Only consider short segments (<4cm)
+            if (segment_track_length(seg) > 4.0 * units::cm) continue;
+            
+            // Find the other vertex of this segment
+            VertexPtr vtx1 = find_other_vertex(graph, seg, vtx);
+            if (!vtx1) continue;
+            
+            // The other vertex must have at least 2 connections
+            if (!vtx1->descriptor_valid()) continue;
+            auto vd1 = vtx1->get_descriptor();
+            if (boost::degree(vd1, graph) < 2) continue;
+            
+            // Check if these two vertices represent the same physical point
+            if (examine_vertices_1p(graph, vtx, vtx1, track_fitter, dv)) {
+                v1 = vtx;
+                v2 = vtx1;
+                
+                // Find v3: the vertex on the other side of v1
+                for (auto seg2 : connected_segments) {
+                    if (seg2 == seg) continue;
+                    VertexPtr vtx_other = find_other_vertex(graph, seg2, v1);
+                    if (vtx_other) {
+                        v3 = vtx_other;
+                        break;
+                    }
+                }
+                
+                flag_continue = true;
+                break;
+            }
+        }
+        
+        if (flag_continue) break;
+    }
+    
+    // Merge vertices if found
+    if (v1 && v2 && v3) {
+        // Find the segments to be removed
+        SegmentPtr sg = find_segment(graph, v1, v2);  // segment between v1 and v2
+        SegmentPtr sg1 = find_segment(graph, v1, v3); // segment between v1 and v3
+        
+        if (!sg || !sg1) {
+            return false;
+        }
+        
+        // Create new segment from v3 to v2 using Steiner graph shortest path
+        auto path_points = do_rough_path(cluster, v3->wcpt().point, v2->wcpt().point);
+        
+        if (path_points.size() < 2) {
+            return false;
+        }
+        
+        // Create the new segment
+        auto sg2 = create_segment_for_cluster(cluster, dv, path_points, 0);
+        if (!sg2) {
+            return false;
+        }
+        
+        std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type I " 
+                  << "combining two segments into new segment" << std::endl;
+        
+        // Add new segment to graph
+        add_segment(graph, sg2, v2, v3);
+        
+        // Remove old segments and vertex
+        remove_segment(graph, sg);
+        remove_segment(graph, sg1);
+        remove_vertex(graph, v1);
+        
+        // Update tracking
+        track_fitter.do_multi_tracking(true, true, true);
+    }
+    
+    return flag_continue;
+}
+
+
