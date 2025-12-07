@@ -884,3 +884,211 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
     
     return flag;
 }
+
+void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    // Step 1: Examine short segments with multiple connections at both ends
+    auto [ebegin, eend] = boost::edges(graph);
+    std::vector<SegmentPtr> segments_to_examine;
+    
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        double length = segment_track_length(sg);
+        if (length > 4 * units::cm) continue;
+        
+        auto [v1, v2] = find_vertices(graph, sg);
+        if (!v1 || !v2) continue;
+        
+        // Check both vertices have at least 2 connections
+        auto v1d = v1->get_descriptor();
+        auto v2d = v2->get_descriptor();
+        if (boost::degree(v1d, graph) < 2 || boost::degree(v2d, graph) < 2) continue;
+        
+        segments_to_examine.push_back(sg);
+    }
+    
+    // Examine each short segment for potential crawling
+    for (auto sg : segments_to_examine) {
+        auto [v1, v2] = find_vertices(graph, sg);
+        if (!v1 || !v2) continue;
+        
+        std::vector<VertexPtr> cand_vertices = {v1, v2};
+        
+        for (size_t i = 0; i < 2; i++) {
+            VertexPtr vtx = cand_vertices[i];
+            if (!vtx->descriptor_valid()) continue;
+            
+            // Calculate direction of current segment at this vertex
+            Facade::geo_point_t vtx_point = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            auto dir1 = segment_cal_dir_3vector(sg, vtx_point, 2 * units::cm);
+            
+            double max_angle = 0;
+            double min_angle = 180;
+            
+            // Check angles with other connected segments
+            auto vd = vtx->get_descriptor();
+            auto edge_range = boost::out_edges(vd, graph);
+            
+            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                SegmentPtr sg1 = graph[*eit].segment;
+                if (!sg1 || sg1 == sg) continue;
+                
+                auto dir3 = segment_cal_dir_3vector(sg1, vtx_point, 2 * units::cm);
+                
+                // Calculate angle between directions
+                double dot_product = dir1.dot(dir3);
+                double mag1 = dir1.magnitude();
+                double mag3 = dir3.magnitude();
+                
+                if (mag1 > 0 && mag3 > 0) {
+                    double cos_angle = dot_product / (mag1 * mag3);
+                    // Clamp to [-1, 1] to handle numerical errors
+                    if (cos_angle > 1.0) cos_angle = 1.0;
+                    if (cos_angle < -1.0) cos_angle = -1.0;
+                    double angle = std::acos(cos_angle) / 3.1415926 * 180.0;
+                    
+                    if (angle > max_angle) max_angle = angle;
+                    if (angle < min_angle) min_angle = angle;
+                }
+            }
+            
+            // If angles indicate a sharp turn, try to crawl the segment
+            if (max_angle > 150 && min_angle > 105) {
+                crawl_segment(graph, cluster, sg, vtx, track_fitter, dv);
+            }
+        }
+    }
+    
+    // Step 2: Merge vertices at the same position
+    std::set<VertexPtr> all_vertices;
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (vtx && vtx->cluster() == &cluster) {
+            all_vertices.insert(vtx);
+        }
+    }
+    
+    bool flag_merge = true;
+    while (flag_merge) {
+        flag_merge = false;
+        VertexPtr vtx1 = nullptr;
+        VertexPtr vtx2 = nullptr;
+        
+        for (auto it1 = all_vertices.begin(); it1 != all_vertices.end(); ++it1) {
+            vtx1 = *it1;
+            for (auto it2 = it1; it2 != all_vertices.end(); ++it2) {
+                vtx2 = *it2;
+                
+                // Check if two different vertices are at the same position
+                if (vtx1 != vtx2 && 
+                    ray_length(Ray{vtx1->wcpt().point, vtx2->wcpt().point}) < 0.01 * units::cm) {
+                    
+                    // Find segments to remove (connected to both vertices)
+                    std::vector<SegmentPtr> to_be_removed_segments;
+                    
+                    if (vtx2->descriptor_valid()) {
+                        auto v2d = vtx2->get_descriptor();
+                        auto edge_range = boost::out_edges(v2d, graph);
+                        
+                        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                            SegmentPtr sg = graph[*eit].segment;
+                            if (!sg) continue;
+                            
+                            // Check if this segment is also connected to vtx1
+                            auto [seg_v1, seg_v2] = find_vertices(graph, sg);
+                            if ((seg_v1 == vtx1 || seg_v2 == vtx1) && 
+                                (seg_v1 == vtx2 || seg_v2 == vtx2)) {
+                                to_be_removed_segments.push_back(sg);
+                            }
+                        }
+                    }
+                    
+                    // Merge vtx2 into vtx1
+                    if (merge_vertex_into_another(graph, vtx2, vtx1, dv)) {
+                        // Remove duplicate segments
+                        for (auto sg : to_be_removed_segments) {
+                            remove_segment(graph, sg);
+                        }
+                        
+                        all_vertices.erase(vtx2);
+                        flag_merge = true;
+                        break;
+                    }
+                }
+            }
+            if (flag_merge) break;
+        }
+    }
+    
+    // Step 3: Remove duplicate segments (same endpoints)
+    std::set<SegmentPtr> segments_to_be_removed;
+    
+    for (auto it = all_vertices.begin(); it != all_vertices.end(); ++it) {
+        VertexPtr vtx = *it;
+        if (!vtx->descriptor_valid()) continue;
+        
+        auto vd = vtx->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        std::vector<SegmentPtr> tmp_segments;
+        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (sg) tmp_segments.push_back(sg);
+        }
+        
+        // Compare all pairs of segments
+        for (size_t i = 0; i < tmp_segments.size(); i++) {
+            auto [v1_i, v2_i] = find_vertices(graph, tmp_segments[i]);
+            if (!v1_i || !v2_i) continue;
+            
+            for (size_t j = i + 1; j < tmp_segments.size(); j++) {
+                auto [v1_j, v2_j] = find_vertices(graph, tmp_segments[j]);
+                if (!v1_j || !v2_j) continue;
+                
+                // Check if segments have the same endpoints
+                bool same_endpoints = false;
+                
+                double dis_v1i_v1j = ray_length(Ray{v1_i->wcpt().point, v1_j->wcpt().point});
+                double dis_v1i_v2j = ray_length(Ray{v1_i->wcpt().point, v2_j->wcpt().point});
+                double dis_v2i_v1j = ray_length(Ray{v2_i->wcpt().point, v1_j->wcpt().point});
+                double dis_v2i_v2j = ray_length(Ray{v2_i->wcpt().point, v2_j->wcpt().point});
+                
+                if ((dis_v1i_v1j < 0.01 * units::cm && dis_v2i_v2j < 0.01 * units::cm) ||
+                    (dis_v1i_v2j < 0.01 * units::cm && dis_v2i_v1j < 0.01 * units::cm)) {
+                    same_endpoints = true;
+                }
+                
+                if (same_endpoints) {
+                    segments_to_be_removed.insert(tmp_segments[j]);
+                }
+            }
+        }
+    }
+    
+    // Remove duplicate segments
+    for (auto sg : segments_to_be_removed) {
+        remove_segment(graph, sg);
+    }
+    
+    // Step 4: Remove isolated vertices (no connections)
+    std::set<VertexPtr> vertices_to_be_removed;
+    auto [vbegin2, vend2] = boost::vertices(graph);
+    
+    for (auto vit = vbegin2; vit != vend2; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (vtx && vtx->cluster() == &cluster) {
+            if (vtx->descriptor_valid()) {
+                auto vd = vtx->get_descriptor();
+                if (boost::degree(vd, graph) == 0) {
+                    vertices_to_be_removed.insert(vtx);
+                }
+            }
+        }
+    }
+    
+    for (auto vtx : vertices_to_be_removed) {
+        remove_vertex(graph, vtx);
+    }
+}
