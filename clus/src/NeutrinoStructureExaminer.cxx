@@ -638,3 +638,249 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
     
     return flag_update;
 }
+
+
+bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, SegmentPtr seg, VertexPtr vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
+    bool flag = false;
+    
+    // Validate that segment, vertex, and cluster all match
+    if (!seg || !vertex || seg->cluster() != &cluster || vertex->cluster() != &cluster) {
+        return flag;
+    }
+    
+    // Step 1: Find points at ~3cm distance from vertex on other connected segments
+    std::map<SegmentPtr, Facade::geo_point_t> map_segment_point;
+    
+    if (!vertex->descriptor_valid()) return flag;
+    auto vd = vertex->get_descriptor();
+    auto edge_range = boost::out_edges(vd, graph);
+    
+    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg == seg) continue;
+        
+        const auto& fits = sg->fits();
+        if (fits.empty()) continue;
+        
+        Facade::geo_point_t min_point = fits.front().point;
+        double min_dis = 1e9;
+        
+        for (size_t i = 0; i < fits.size(); i++) {
+            double dis = std::fabs(ray_length(Ray{fits[i].point, vertex->fit().point}) - 3.0 * units::cm);
+            if (dis < min_dis) {
+                min_dis = dis;
+                min_point = fits[i].point;
+            }
+        }
+        map_segment_point[sg] = min_point;
+    }
+    
+    // Step 2: Determine which end of seg connects to vertex
+    const auto& seg_wcpts = seg->wcpts();
+    const auto& seg_fits = seg->fits();
+    if (seg_wcpts.size() < 2) return flag;
+    
+    bool flag_start = false;
+    double dis_front = ray_length(Ray{vertex->wcpt().point, seg_wcpts.front().point});
+    double dis_back = ray_length(Ray{vertex->wcpt().point, seg_wcpts.back().point});
+    
+    if (dis_front < dis_back) {
+        flag_start = true;
+    }
+    
+    // Step 3: Build list of points to test (from vertex end, excluding endpoints)
+    std::vector<Facade::geo_point_t> pts_to_be_tested;
+    
+    if (flag_start) {
+        for (size_t i = 1; i + 1 < seg_fits.size(); i++) {
+            pts_to_be_tested.push_back(seg_fits[i].point);
+        }
+    } else {
+        for (int i = int(seg_fits.size()) - 2; i > 0; i--) {
+            pts_to_be_tested.push_back(seg_fits[i].point);
+        }
+    }
+    
+    if (pts_to_be_tested.empty()) return flag;
+    
+    // Step 4: Test points for good connectivity
+    double step_size = 0.3 * units::cm;
+    int max_bin = -1;
+    
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    
+    for (size_t i = 0; i < pts_to_be_tested.size(); i++) {
+        int n_bad = 0;
+        Facade::geo_point_t end_p = pts_to_be_tested[i];
+        
+        for (auto it = map_segment_point.begin(); it != map_segment_point.end(); it++) {
+            Facade::geo_point_t start_p = it->second;
+            double distance = ray_length(Ray{start_p, end_p});
+            int ncount = std::round(distance / step_size);
+            
+            for (int j = 1; j < ncount; j++) {
+                Facade::geo_point_t test_p(
+                    start_p.x() + (end_p.x() - start_p.x()) / ncount * j,
+                    start_p.y() + (end_p.y() - start_p.y()) / ncount * j,
+                    start_p.z() + (end_p.z() - start_p.z()) / ncount * j
+                );
+                
+                // Check if point is good
+                auto test_wpid = dv->contained_by(test_p);
+                if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                    auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                        n_bad++;
+                    }
+                }
+            }
+        }
+        
+        if (n_bad == 0) max_bin = i;
+    }
+    
+    // Step 5: Update segment and vertex if good point found
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    
+    while (max_bin >= 0) {
+        // Find closest steiner point to the test point
+        auto vtx_new_knn = cluster.kd_steiner_knn(1, pts_to_be_tested[max_bin], "steiner_pc");
+        if (vtx_new_knn.empty()) {
+            max_bin--;
+            continue;
+        }
+        
+        size_t new_idx = vtx_new_knn[0].first;
+        Facade::geo_point_t vtx_new_point(x_coords[new_idx], y_coords[new_idx], z_coords[new_idx]);
+        
+        // Check if new point is valid (not the same as current endpoints)
+        if (flag_start && ray_length(Ray{vtx_new_point, seg_wcpts.back().point}) < 0.01 * units::cm) {
+            max_bin--;
+            continue;
+        }
+        if (!flag_start && ray_length(Ray{vtx_new_point, seg_wcpts.front().point}) < 0.01 * units::cm) {
+            max_bin--;
+            continue;
+        }
+        if (ray_length(Ray{vtx_new_point, vertex->wcpt().point}) < 0.01 * units::cm) {
+            break;
+        }
+        
+        // Update current segment
+        std::vector<Facade::geo_point_t> new_path;
+        if (flag_start) {
+            // Keep points from back to new vertex
+            double dis_limit = ray_length(Ray{vtx_new_point, seg_wcpts.back().point});
+            for (int idx = seg_wcpts.size() - 1; idx >= 0; idx--) {
+                double dis = ray_length(Ray{seg_wcpts[idx].point, seg_wcpts.back().point});
+                if (dis < dis_limit) {
+                    new_path.push_back(seg_wcpts[idx].point);
+                }
+            }
+            std::reverse(new_path.begin(), new_path.end());
+            if (new_path.size() > 1 && ray_length(Ray{new_path.front(), vtx_new_point}) < 0.01 * units::cm) {
+                new_path.erase(new_path.begin());
+            }
+            new_path.insert(new_path.begin(), vtx_new_point);
+        } else {
+            // Keep points from front to new vertex
+            double dis_limit = ray_length(Ray{vtx_new_point, seg_wcpts.front().point});
+            for (size_t idx = 0; idx < seg_wcpts.size(); idx++) {
+                double dis = ray_length(Ray{seg_wcpts[idx].point, seg_wcpts.front().point});
+                if (dis < dis_limit) {
+                    new_path.push_back(seg_wcpts[idx].point);
+                }
+            }
+            if (new_path.size() > 1 && ray_length(Ray{new_path.back(), vtx_new_point}) < 0.01 * units::cm) {
+                new_path.pop_back();
+            }
+            new_path.push_back(vtx_new_point);
+        }
+        
+        // Replace segment with updated path
+        auto other_vertex = find_other_vertex(graph, seg, vertex);
+        if (!other_vertex) break;
+        
+        remove_segment(graph, seg);
+        auto new_seg = create_segment_for_cluster(cluster, dv, new_path, 0);
+        if (!new_seg) break;
+        
+        add_segment(graph, new_seg, flag_start ? other_vertex : vertex, 
+                                     flag_start ? vertex : other_vertex);
+        seg = new_seg;
+        
+        // Update other connected segments
+        for (auto it = map_segment_point.begin(); it != map_segment_point.end(); it++) {
+            SegmentPtr other_sg = it->first;
+            const auto& other_wcpts = other_sg->wcpts();
+            if (other_wcpts.empty()) continue;
+            
+            bool flag_front = (ray_length(Ray{other_wcpts.front().point, vertex->wcpt().point}) < 
+                              ray_length(Ray{other_wcpts.back().point, vertex->wcpt().point}));
+            Facade::geo_point_t min_p = it->second;
+            
+            // Find closest point in other segment to min_p
+            size_t min_idx = 0;
+            double min_dis = 1e9;
+            for (size_t j = 0; j < other_wcpts.size(); j++) {
+                double dis = ray_length(Ray{min_p, other_wcpts[j].point});
+                if (dis < min_dis) {
+                    min_dis = dis;
+                    min_idx = j;
+                }
+            }
+            
+            // Build new path from vtx_new_point to min point
+            Facade::geo_point_t min_wcpt_point = other_wcpts[min_idx].point;
+            auto path_points = do_rough_path(cluster, vtx_new_point, min_wcpt_point);
+            
+            // Combine with rest of segment
+            std::vector<Facade::geo_point_t> combined_path;
+            if (flag_front) {
+                combined_path = path_points;
+                for (size_t j = min_idx + 1; j < other_wcpts.size(); j++) {
+                    combined_path.push_back(other_wcpts[j].point);
+                }
+            } else {
+                for (size_t j = 0; j < min_idx; j++) {
+                    combined_path.push_back(other_wcpts[j].point);
+                }
+                std::reverse(path_points.begin(), path_points.end());
+                combined_path.insert(combined_path.end(), path_points.begin(), path_points.end());
+            }
+            
+            if (combined_path.size() <= 1) continue;
+            
+            // Replace other segment
+            auto other_v2 = find_other_vertex(graph, other_sg, vertex);
+            if (!other_v2) continue;
+            
+            remove_segment(graph, other_sg);
+            auto new_other_seg = create_segment_for_cluster(cluster, dv, combined_path, 0);
+            if (!new_other_seg) continue;
+            
+            add_segment(graph, new_other_seg, flag_front ? vertex : other_v2,
+                                              flag_front ? other_v2 : vertex);
+        }
+        
+        // Update vertex position
+        vertex->wcpt().point = vtx_new_point;
+        if (vertex->fit().valid()) {
+            vertex->fit().point = vtx_new_point;
+        }
+        
+        // Perform multi-tracking
+        track_fitter.do_multi_tracking(true, true, true);
+        
+        flag = true;
+        break;
+    }
+    
+    return flag;
+}
