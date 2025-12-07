@@ -1391,4 +1391,126 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
     return flag_continue;
 }
 
+bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_continue = false;
+    
+    VertexPtr v1 = nullptr;
+    VertexPtr v2 = nullptr;
+    SegmentPtr sg = nullptr;
+    
+    // Iterate through all edges (segments) in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr segment = graph[*eit].segment;
+        if (!segment || segment->cluster() != &cluster) continue;
+        
+        // Get the two vertices of this segment
+        auto vertices = find_vertices(graph, segment);
+        VertexPtr vtx1 = vertices.first;
+        VertexPtr vtx2 = vertices.second;
+        
+        if (!vtx1 || !vtx2) continue;
+        
+        // Get positions (prefer fit point over wcpt)
+        Facade::geo_point_t p1 = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+        Facade::geo_point_t p2 = vtx2->fit().valid() ? vtx2->fit().point : vtx2->wcpt().point;
+        
+        // Calculate distance between vertices
+        double dis = ray_length(Ray{p1, p2});
+        
+        // Check if vertices are very close (<0.45cm) or moderately close (<1.5cm with both having degree 2)
+        if (dis < 0.45 * units::cm) {
+            v1 = vtx1;
+            v2 = vtx2;
+            sg = segment;
+            flag_continue = true;
+            break;
+        } else if (dis < 1.5 * units::cm) {
+            // Check if both vertices have exactly 2 connections
+            if (!vtx1->descriptor_valid() || !vtx2->descriptor_valid()) continue;
+            auto vd1 = vtx1->get_descriptor();
+            auto vd2 = vtx2->get_descriptor();
+            
+            if (boost::degree(vd1, graph) == 2 && boost::degree(vd2, graph) == 2) {
+                v1 = vtx1;
+                v2 = vtx2;
+                sg = segment;
+                flag_continue = true;
+                break;
+            }
+        }
+    }
+    
+    // Merge vertices if found
+    if (v1 && v2 && sg) {
+        std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type II" << std::endl;
+        
+        // Remove the segment between v1 and v2
+        remove_segment(graph, sg);
+        
+        // Collect all segments connected to v2 (excluding the one we just removed)
+        std::vector<SegmentPtr> v2_segments;
+        if (v2->descriptor_valid()) {
+            auto vd2 = v2->get_descriptor();
+            auto [ebegin2, eend2] = boost::out_edges(vd2, graph);
+            for (auto eit2 = ebegin2; eit2 != eend2; ++eit2) {
+                SegmentPtr seg2 = graph[*eit2].segment;
+                if (seg2) {
+                    v2_segments.push_back(seg2);
+                }
+            }
+        }
+        
+        // For each segment connected to v2, create a new segment from v3 to v1
+        for (auto old_seg : v2_segments) {
+            // Find the other vertex (v3) connected to v2 through this segment
+            VertexPtr v3 = find_other_vertex(graph, old_seg, v2);
+            if (!v3) continue;
+            
+            // Create new segment from v3 to v1 using Steiner graph shortest path
+            auto path_points = do_rough_path(cluster, v3->wcpt().point, v1->wcpt().point);
+            
+            if (path_points.size() < 2) continue;
+            
+            // Create the new segment
+            auto new_seg = create_segment_for_cluster(cluster, dv, path_points, 0);
+            if (!new_seg) continue;
+            
+            // Add new segment to graph
+            add_segment(graph, new_seg, v3, v1);
+            
+            // Remove old segment
+            remove_segment(graph, old_seg);
+        }
+        
+        // Remove v2 vertex
+        remove_vertex(graph, v2);
+        
+        // Clean up isolated vertices (vertices with no connections)
+        std::vector<VertexPtr> isolated_vertices;
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            if (boost::degree(*vit, graph) == 0) {
+                VertexPtr vtx = graph[*vit].vertex;
+                if (vtx) {
+                    isolated_vertices.push_back(vtx);
+                }
+            }
+        }
+        
+        for (auto vtx : isolated_vertices) {
+            remove_vertex(graph, vtx);
+        }
+        
+        // Update tracking
+        track_fitter.do_multi_tracking(true, true, true);
+    }
+    
+    return flag_continue;
+}
+
+
+
+
+
 
