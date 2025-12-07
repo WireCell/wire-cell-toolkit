@@ -1934,6 +1934,31 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
     return flag_continue;
 }
 
+void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_continue = true;
+    
+    while (flag_continue) {
+        flag_continue = false;
+        
+        // Examine and clean up segment topology
+        examine_segment(graph, cluster, track_fitter, dv);
+        
+        // Merge vertex if the kink is not at right location (Type I)
+        flag_continue = flag_continue || examine_vertices_1(graph, cluster, track_fitter, dv);
+        
+        // Count vertices in the graph
+        size_t num_vertices = boost::num_vertices(graph);
+        
+        // Merge vertices if they are too close (Type II) - only if more than 2 vertices
+        if (num_vertices > 2) {
+            flag_continue = flag_continue || examine_vertices_2(graph, cluster, track_fitter, dv);
+        }
+        
+        // Merge vertices if they are reasonably close (Type III/IV)
+        flag_continue = flag_continue || examine_vertices_4(graph, cluster, track_fitter, dv);
+    }
+}
+
 
 
 
