@@ -1092,3 +1092,197 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
         remove_vertex(graph, vtx);
     }
 }
+
+
+bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    if (!v1 || !v2 || !v1->cluster() || v1->cluster() != v2->cluster()) {
+        return false;
+    }
+    
+    auto& cluster = *v1->cluster();
+    
+    // Find the segment between v1 and v2
+    SegmentPtr sg = find_segment(graph, v1, v2);
+    if (!sg) return false;
+    
+    // Check that v1 has exactly 2 connections
+    if (!v1->descriptor_valid()) return false;
+    auto v1d = v1->get_descriptor();
+    if (boost::degree(v1d, graph) != 2) return false;
+    
+    // Get vertex positions
+    Facade::geo_point_t v1_p = v1->fit().valid() ? v1->fit().point : v1->wcpt().point;
+    Facade::geo_point_t v2_p = v2->fit().valid() ? v2->fit().point : v2->wcpt().point;
+    
+    // Get wpid for coordinate conversion
+    auto v1_wpid = dv->contained_by(v1_p);
+    auto v2_wpid = dv->contained_by(v2_p);
+    if (v1_wpid.face() == -1 || v1_wpid.apa() == -1 || 
+        v2_wpid.face() == -1 || v2_wpid.apa() == -1) {
+        return false;
+    }
+    
+    int v1_apa = v1_wpid.apa();
+    int v1_face = v1_wpid.face();
+   
+    int v2_apa = v2_wpid.apa();
+    int v2_face = v2_wpid.face();
+    
+    // Get time normalization factor from first blob
+    auto first_blob = cluster.children()[0];
+    int ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+    if (ntime_ticks <= 0) ntime_ticks = 1;  // avoid division by zero
+    
+    // Convert vertices to U/V/W/T coordinates
+    auto [v1_t_raw, v1_u_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 0);
+    auto [v1_t_u, v1_v_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 1);
+    auto [v1_t_v, v1_w_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 2);
+    
+    auto [v2_t_raw, v2_u_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 0);
+    auto [v2_t_u, v2_v_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 1);
+    auto [v2_t_v, v2_w_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 2);
+    
+    // Normalize time by ntime_ticks to account for convention difference
+    double v1_t = double(v1_t_raw) / ntime_ticks;
+    double v2_t = double(v2_t_raw) / ntime_ticks;
+    
+    double v1_u = v1_u_ch;
+    double v1_v = v1_v_ch;
+    double v1_w = v1_w_ch;
+    
+    double v2_u = v2_u_ch;
+    double v2_v = v2_v_ch;
+    double v2_w = v2_w_ch;
+    
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    
+    int ncount_close = 0;
+    int ncount_dead = 0;
+    int ncount_line = 0;
+    
+    // Check each plane (U, V, W)
+    for (int pind = 0; pind < 3; pind++) {
+        double v1_wire, v2_wire;
+        if (pind == 0) { v1_wire = v1_u; v2_wire = v2_u; }
+        else if (pind == 1) { v1_wire = v1_v; v2_wire = v2_v; }
+        else { v1_wire = v1_w; v2_wire = v2_w; }
+        
+        // Check if vertices are close in this 2D projection
+        double dist_2d = std::sqrt(std::pow(v1_wire - v2_wire, 2) + std::pow(v1_t - v2_t, 2));
+        
+        if (dist_2d < 2.5) {
+            ncount_close++;
+        } else {
+            // Check if segment points are all in dead region
+            bool flag_dead = true;
+            const auto& seg_fits = sg->fits();
+
+            for (size_t i = 0; i < seg_fits.size(); i++) {
+                auto test_wpid = dv->contained_by(seg_fits[i].point);
+                auto p_raw = transform->backward(seg_fits[i].point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                if (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, test_wpid.apa(), test_wpid.face(), pind)) {
+                    flag_dead = false;
+                    break;
+                }
+            }
+            
+            if (flag_dead) {
+                ncount_dead++;
+            } else {
+                // Check if the third view forms a line
+                // Find the other segment connected to v1
+                SegmentPtr sg1 = nullptr;
+                auto edge_range = boost::out_edges(v1d, graph);
+                for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                    SegmentPtr temp_sg = graph[*eit].segment;
+                    if (temp_sg && temp_sg != sg) {
+                        sg1 = temp_sg;
+                        break;
+                    }
+                }
+                
+                if (!sg1) continue;
+                
+                const auto& pts_2 = sg1->fits();
+                
+                // Direction vector from v1 to v2 in this 2D projection
+                Facade::geo_vector_t v1_2d(v2_wire - v1_wire, v2_t - v1_t, 0);
+                Facade::geo_vector_t v2_2d(0, 0, 0);
+                double min_dis = 1e9;
+                Facade::geo_point_t start_p = v2_p;
+                Facade::geo_point_t end_p;
+                
+                // Find point on sg1 that's approximately 9 units away from v1
+                for (size_t i = 0; i < pts_2.size(); i++) {
+                    auto test_wpid = dv->contained_by(pts_2[i].point);
+                    auto [p_t_raw, p_wire_ch] = cluster.grouping()->convert_3Dpoint_time_ch(pts_2[i].point, test_wpid.apa(), test_wpid.face(), pind);
+                    double p_t = double(p_t_raw) / ntime_ticks;
+                    double p_wire = p_wire_ch;
+                    
+                    Facade::geo_vector_t v3(p_wire - v1_wire, p_t - v1_t, 0);
+                    double dis = std::fabs(v3.magnitude() - 9.0);
+                    if (dis < min_dis) {
+                        min_dis = dis;
+                        v2_2d = v3;
+                        end_p = pts_2[i].point;
+                    }
+                }
+                
+                // Check angle between v1_2d and v2_2d
+                double mag1 = v1_2d.magnitude();
+                double mag2 = v2_2d.magnitude();
+                double angle = 180.0;
+                
+                if (mag1 > 0 && mag2 > 0) {
+                    double cos_angle = v1_2d.dot(v2_2d) / (mag1 * mag2);
+                    if (cos_angle > 1.0) cos_angle = 1.0;
+                    if (cos_angle < -1.0) cos_angle = -1.0;
+                    angle = 180.0 - std::acos(cos_angle) / 3.1415926 * 180.0;
+                }
+                
+                if (angle < 30.0 || (mag1 < 8.0 && angle < 35.0)) {
+                    ncount_line++;
+                } else {
+                    // Check if path from v2 to end_p is good
+                    double step_size = 0.6 * units::cm;
+                    double path_length = ray_length(Ray{start_p, end_p});
+                    int ncount = std::round(path_length / step_size);
+                    int n_bad = 0;
+                    
+                    for (int i = 1; i < ncount; i++) {
+                        Facade::geo_point_t test_p(
+                            start_p.x() + (end_p.x() - start_p.x()) / ncount * i,
+                            start_p.y() + (end_p.y() - start_p.y()) / ncount * i,
+                            start_p.z() + (end_p.z() - start_p.z()) / ncount * i
+                        );
+                        
+                        auto test_wpid = dv->contained_by(test_p);
+                        if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                            auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                                n_bad++;
+                            }
+                        }
+                    }
+                    
+                    if (n_bad <= 1) {
+                        ncount_line++;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Decision logic
+    if (ncount_close >= 2 ||
+        (ncount_close == 1 && ncount_dead == 1 && ncount_line >= 1) ||
+        (ncount_close == 1 && ncount_dead == 2) ||
+        (ncount_close == 1 && ncount_line >= 2) ||
+        ncount_line >= 3) {
+        return true;
+    }
+    
+    return false;
+}
