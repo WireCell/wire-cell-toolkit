@@ -1959,6 +1959,249 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
     }
 }
 
+void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_continue = true;
+    
+    // Get steiner point cloud
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    
+    while (flag_continue) {
+        flag_continue = false;
+        
+        // Iterate through all vertices
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            VertexPtr vtx = graph[*vit].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            
+            // Only process vertices with more than 2 connections
+            size_t degree = boost::degree(*vit, graph);
+            if (degree <= 2) continue;
+            
+            // Collect all segments connected to this vertex
+            std::vector<SegmentPtr> connected_segments;
+            auto [ebegin, eend] = boost::out_edges(*vit, graph);
+            for (auto eit = ebegin; eit != eend; ++eit) {
+                SegmentPtr seg = graph[*eit].segment;
+                if (seg) connected_segments.push_back(seg);
+            }
+            
+            // Find pair of segments with maximum overlap distance
+            SegmentPtr max_sg1 = nullptr;
+            SegmentPtr max_sg2 = nullptr;
+            double max_dis = 0;
+            Facade::geo_point_t max_point;
+            
+            for (size_t i = 0; i < connected_segments.size(); i++) {
+                SegmentPtr sg1 = connected_segments[i];
+                const auto& pts_1 = sg1->wcpts();
+                if (pts_1.empty()) continue;
+                
+                // Order points from vertex outward
+                std::vector<Facade::geo_point_t> test_pts;
+                bool front_is_vtx = (ray_length(Ray{pts_1.front().point, vtx->wcpt().point}) <
+                                    ray_length(Ray{pts_1.back().point, vtx->wcpt().point}));
+                
+                if (front_is_vtx) {
+                    for (const auto& pt : pts_1) {
+                        test_pts.push_back(pt.point);
+                    }
+                } else {
+                    for (auto it = pts_1.rbegin(); it != pts_1.rend(); ++it) {
+                        test_pts.push_back(it->point);
+                    }
+                }
+                
+                // Compare with other segments
+                for (size_t j = i + 1; j < connected_segments.size(); j++) {
+                    SegmentPtr sg2 = connected_segments[j];
+                    
+                    // Check overlap along sg1
+                    for (size_t k = 0; k < test_pts.size(); k++) {
+                        auto [closest_dis, closest_pt] = segment_get_closest_point(sg2, test_pts[k], "fit");
+                        
+                        if (closest_dis < 0.3 * units::cm) {
+                            // Get position for vertex
+                            Facade::geo_point_t vtx_point = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                            double dis = ray_length(Ray{test_pts[k], vtx_point});
+                            
+                            if (dis > max_dis) {
+                                max_dis = dis;
+                                max_point = test_pts[k];
+                                max_sg1 = sg1;
+                                max_sg2 = sg2;
+                            }
+                        } else {
+                            break; // No longer overlapping
+                        }
+                    }
+                }
+            }
+            
+            // If significant overlap found (>5cm), split the vertex
+            if (max_dis > 5.0 * units::cm) {
+                // Find closest existing vertex to max_point
+                double min_dis = 1e9;
+                VertexPtr min_vertex = nullptr;
+                
+                auto [vbegin2, vend2] = boost::vertices(graph);
+                for (auto vit2 = vbegin2; vit2 != vend2; ++vit2) {
+                    VertexPtr vtx1 = graph[*vit2].vertex;
+                    if (!vtx1 || vtx1->cluster() != &cluster) continue;
+                    
+                    Facade::geo_point_t vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+                    double dis = ray_length(Ray{max_point, vtx1_point});
+                    
+                    if (dis < min_dis) {
+                        min_dis = dis;
+                        min_vertex = vtx1;
+                    }
+                }
+                
+                if (min_dis < 0.3 * units::cm) {
+                    // Merge to existing vertex
+                    
+                    // Check if there's already a segment between min_vertex and vtx
+                    SegmentPtr good_segment = find_segment(graph, min_vertex, vtx);
+                    
+                    // If no existing segment, create one
+                    if (!good_segment) {
+                        auto path_points = do_rough_path(cluster, min_vertex->wcpt().point, vtx->wcpt().point);
+                        if (path_points.size() >= 2) {
+                            auto sg3 = create_segment_for_cluster(cluster, dv, path_points, 0);
+                            if (sg3) {
+                                add_segment(graph, sg3, min_vertex, vtx);
+                            }
+                        }
+                    }
+                    
+                    // Reconnect max_sg1 to min_vertex
+                    if (max_sg1 && max_sg1 != good_segment) {
+                        VertexPtr tmp_vtx = find_other_vertex(graph, max_sg1, vtx);
+                        if (tmp_vtx && tmp_vtx != min_vertex) {
+                            auto path_points = do_rough_path(cluster, min_vertex->wcpt().point, tmp_vtx->wcpt().point);
+                            if (path_points.size() >= 2) {
+                                std::vector<WCPoint> new_wcpts;
+                                for (const auto& p : path_points) {
+                                    WCPoint wcp;
+                                    wcp.point = p;
+                                    new_wcpts.push_back(wcp);
+                                }
+                                max_sg1->wcpts(new_wcpts);
+                                
+                                remove_segment(graph, max_sg1);
+                                add_segment(graph, max_sg1, min_vertex, tmp_vtx);
+                            }
+                        } else if (tmp_vtx == min_vertex) {
+                            remove_segment(graph, max_sg1);
+                        }
+                    }
+                    
+                    // Reconnect max_sg2 to min_vertex
+                    if (max_sg2 && max_sg2 != good_segment) {
+                        VertexPtr tmp_vtx = find_other_vertex(graph, max_sg2, vtx);
+                        if (tmp_vtx && tmp_vtx != min_vertex) {
+                            auto path_points = do_rough_path(cluster, min_vertex->wcpt().point, tmp_vtx->wcpt().point);
+                            if (path_points.size() >= 2) {
+                                std::vector<WCPoint> new_wcpts;
+                                for (const auto& p : path_points) {
+                                    WCPoint wcp;
+                                    wcp.point = p;
+                                    new_wcpts.push_back(wcp);
+                                }
+                                max_sg2->wcpts(new_wcpts);
+                                
+                                remove_segment(graph, max_sg2);
+                                add_segment(graph, max_sg2, min_vertex, tmp_vtx);
+                            }
+                        } else if (tmp_vtx == min_vertex) {
+                            remove_segment(graph, max_sg2);
+                        }
+                    }
+                    
+                    track_fitter.do_multi_tracking(true, true, true);
+                    
+                } else {
+                    // Create new vertex at split point
+                    
+                    // Find closest steiner point
+                    auto knn_results = cluster.kd_steiner_knn(1, max_point, "steiner_pc");
+                    if (!knn_results.empty()) {
+                        size_t idx = knn_results[0].first;
+                        Facade::geo_point_t vtx_new_point(x_coords[idx], y_coords[idx], z_coords[idx]);
+                        
+                        // Create new vertex
+                        auto vtx2 = make_vertex(graph);
+                        WCPoint new_wcp;
+                        new_wcp.point = vtx_new_point;
+                        vtx2->wcpt(new_wcp).cluster(&cluster);
+                        
+                        // Create segment between new vertex and original vertex
+                        auto path_points = do_rough_path(cluster, vtx_new_point, vtx->wcpt().point);
+                        if (path_points.size() >= 2) {
+                            auto sg3 = create_segment_for_cluster(cluster, dv, path_points, 0);
+                            if (sg3) {
+                                add_segment(graph, sg3, vtx2, vtx);
+                            }
+                        }
+                        
+                        // Reconnect max_sg1 to new vertex
+                        if (max_sg1) {
+                            VertexPtr tmp_vtx = find_other_vertex(graph, max_sg1, vtx);
+                            if (tmp_vtx) {
+                                auto path_points1 = do_rough_path(cluster, vtx_new_point, tmp_vtx->wcpt().point);
+                                if (path_points1.size() >= 2) {
+                                    std::vector<WCPoint> new_wcpts;
+                                    for (const auto& p : path_points1) {
+                                        WCPoint wcp;
+                                        wcp.point = p;
+                                        new_wcpts.push_back(wcp);
+                                    }
+                                    max_sg1->wcpts(new_wcpts);
+                                    
+                                    remove_segment(graph, max_sg1);
+                                    add_segment(graph, max_sg1, vtx2, tmp_vtx);
+                                }
+                            }
+                        }
+                        
+                        // Reconnect max_sg2 to new vertex
+                        if (max_sg2) {
+                            VertexPtr tmp_vtx = find_other_vertex(graph, max_sg2, vtx);
+                            if (tmp_vtx) {
+                                auto path_points2 = do_rough_path(cluster, vtx_new_point, tmp_vtx->wcpt().point);
+                                if (path_points2.size() >= 2) {
+                                    std::vector<WCPoint> new_wcpts;
+                                    for (const auto& p : path_points2) {
+                                        WCPoint wcp;
+                                        wcp.point = p;
+                                        new_wcpts.push_back(wcp);
+                                    }
+                                    max_sg2->wcpts(new_wcpts);
+                                    
+                                    remove_segment(graph, max_sg2);
+                                    add_segment(graph, max_sg2, vtx2, tmp_vtx);
+                                }
+                            }
+                        }
+                        
+                        track_fitter.do_multi_tracking(true, true, true);
+                    }
+                }
+                
+                flag_continue = true;
+            }
+            
+            if (flag_continue) break;
+        }
+    }
+}
+
+
 
 
 
