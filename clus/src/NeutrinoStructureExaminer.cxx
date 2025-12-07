@@ -1510,6 +1510,437 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
 }
 
 
+bool PatternAlgorithms::examine_vertices_4p(Graph&graph, VertexPtr v1, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    // Find the segment between v1 and v2
+    SegmentPtr sg1 = find_segment(graph, v1, v2);
+    if (!sg1) return true;
+    
+    bool flag = true;
+    
+    // Get cluster information
+    auto cluster = v1->cluster();
+    if (!cluster) return true;
+    
+    // Get transform and grouping
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster->get_scope_transform(cluster->get_default_scope()));
+    double cluster_t0 = cluster->get_cluster_t0();
+    auto grouping = cluster->grouping();
+    
+    if (!transform || !grouping) return true;
+    
+    // Get v1 and v2 positions
+    Facade::geo_point_t v1_point = v1->fit().valid() ? v1->fit().point : v1->wcpt().point;
+    Facade::geo_point_t v2_point = v2->fit().valid() ? v2->fit().point : v2->wcpt().point;
+    
+    // Check segments of v1 with respect to v2
+    if (!v1->descriptor_valid()) return true;
+    auto vd1 = v1->get_descriptor();
+    
+    auto [ebegin, eend] = boost::out_edges(vd1, graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg == sg1) continue;
+        
+        // Get segment points
+        const auto& pts = sg->wcpts();
+        if (pts.empty()) continue;
+        
+        // Find point on segment approximately 3cm from v1
+        Facade::geo_point_t min_point = pts.front().point;
+        double min_dis = 1e9;
+        
+        for (size_t i = 0; i < pts.size(); i++) {
+            double dis = std::fabs(ray_length(Ray{pts[i].point, v1_point}) - 3.0 * units::cm);
+            if (dis < min_dis) {
+                min_dis = dis;
+                min_point = pts[i].point;
+            }
+        }
+        
+        // Test connectivity from min_point to v2
+        double step_size = 0.3 * units::cm;
+        Facade::geo_point_t start_p = min_point;
+        Facade::geo_point_t end_p = v2_point;
+        
+        double distance = ray_length(Ray{start_p, end_p});
+        int ncount = std::round(distance / step_size);
+        int n_bad = 0;
+        
+        for (int i = 1; i < ncount; i++) {
+            Facade::geo_point_t test_p(
+                start_p.x() + (end_p.x() - start_p.x()) / ncount * i,
+                start_p.y() + (end_p.y() - start_p.y()) / ncount * i,
+                start_p.z() + (end_p.z() - start_p.z()) / ncount * i
+            );
+            
+            // Check if test point is in good region
+            auto test_wpid = dv->contained_by(test_p);
+            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                    n_bad++;
+                }
+            }
+        }
+        
+        // If any bad points found, return false
+        if (n_bad != 0) {
+            flag = false;
+            break;
+        }
+    }
+    
+    return flag;
+}
+
+bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_continue = false;
+    
+    // Drift direction (X direction)
+    Facade::geo_vector_t drift_dir_abs(1, 0, 0);
+    
+    // Get steiner point cloud for later use
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    
+    // Iterate through all segments in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        const auto& pts = sg->wcpts();
+        if (pts.size() < 2) continue;
+        
+        // Get vertices
+        auto pair_vertices = find_vertices(graph, sg);
+        VertexPtr v1 = pair_vertices.first;
+        VertexPtr v2 = pair_vertices.second;
+        if (!v1 || !v2) continue;
+        
+        // Calculate segment direction
+        Facade::geo_vector_t tmp_dir(
+            pts.front().point.x() - pts.back().point.x(),
+            pts.front().point.y() - pts.back().point.y(),
+            pts.front().point.z() - pts.back().point.z()
+        );
+        
+        // Calculate direct length between endpoints
+        double direct_length = ray_length(Ray{pts.front().point, pts.back().point});
+        // double track_length = segment_track_length(sg);
+        
+        // Calculate angle with drift direction (in degrees)
+        double tmp_dir_mag = tmp_dir.magnitude();
+        double angle = 90.0; // default perpendicular
+        if (tmp_dir_mag > 0) {
+            double cos_angle = drift_dir_abs.dot(tmp_dir) / tmp_dir_mag;
+            // Clamp to [-1, 1] to avoid numerical issues with acos
+            cos_angle = std::max(-1.0, std::min(1.0, cos_angle));
+            angle = std::acos(cos_angle) * 180.0 / M_PI;
+        }
+        
+        // Check conditions: short segment OR perpendicular to drift
+        if (direct_length < 2.0 * units::cm || 
+            (tmp_dir.magnitude() < 3.5 * units::cm && std::fabs(angle - 90.0) < 10)) {
+            
+            // Check v1 first
+            if (!v1->descriptor_valid() || !v2->descriptor_valid()) continue;
+            auto vd1 = v1->get_descriptor();
+            auto vd2 = v2->get_descriptor();
+            
+            if (boost::degree(vd1, graph) >= 2 && examine_vertices_4p(graph, v1, v2, track_fitter, dv)) {
+                // Merge v1's segments to v2
+                
+                // Get v2 position
+                Facade::geo_point_t vtx_new_point = v2->wcpt().point;
+                
+                // Collect segments connected to v1 (except sg)
+                std::vector<SegmentPtr> v1_segments;
+                auto [e1begin, e1end] = boost::out_edges(vd1, graph);
+                for (auto e1it = e1begin; e1it != e1end; ++e1it) {
+                    SegmentPtr sg1 = graph[*e1it].segment;
+                    if (sg1 && sg1 != sg) {
+                        v1_segments.push_back(sg1);
+                    }
+                }
+                
+                // Process each segment connected to v1
+                for (auto sg1 : v1_segments) {
+                    const auto& vec_wcps = sg1->wcpts();
+                    if (vec_wcps.empty()) continue;
+                    
+                    // Determine which end connects to v1
+                    bool flag_front = (ray_length(Ray{vec_wcps.front().point, v1->wcpt().point}) <
+                                      ray_length(Ray{vec_wcps.back().point, v1->wcpt().point}));
+                    
+                    // Get v1 position
+                    Facade::geo_point_t v1_point = v1->fit().valid() ? v1->fit().point : v1->wcpt().point;
+                    
+                    // Find point ~3cm from v1 on this segment
+                    WCPoint min_wcp = vec_wcps.front();
+                    double min_dis = 1e9;
+                    
+                    // Calculate max distance to determine dis_cut
+                    double max_dis = std::max(
+                        ray_length(Ray{vec_wcps.front().point, v1_point}),
+                        ray_length(Ray{vec_wcps.back().point, v1_point})
+                    );
+                    double dis_cut = 0;
+                    double default_dis_cut = 2.5 * units::cm;
+                    if (max_dis > 2 * default_dis_cut) dis_cut = default_dis_cut;
+                    
+                    for (size_t j = 0; j < vec_wcps.size(); j++) {
+                        double dis1 = ray_length(Ray{vec_wcps[j].point, v1_point});
+                        double dis = std::fabs(dis1 - 3.0 * units::cm);
+                        if (dis < min_dis && dis1 > dis_cut) {
+                            min_wcp = vec_wcps[j];
+                            min_dis = dis;
+                        }
+                    }
+                    
+                    // Build new path from v2 to min_wcp using Steiner graph
+                    std::list<WCPoint> new_list;
+                    new_list.push_back(v2->wcpt());
+                    
+                    // Add intermediate points
+                    double dis_step = 2.0 * units::cm;
+                    int ncount = std::round(ray_length(Ray{vtx_new_point, min_wcp.point}) / dis_step);
+                    if (ncount < 2) ncount = 2;
+                    
+                    for (int qx = 1; qx < ncount; qx++) {
+                        Facade::geo_point_t tmp_p(
+                            vtx_new_point.x() + (min_wcp.point.x() - vtx_new_point.x()) / ncount * qx,
+                            vtx_new_point.y() + (min_wcp.point.y() - vtx_new_point.y()) / ncount * qx,
+                            vtx_new_point.z() + (min_wcp.point.z() - vtx_new_point.z()) / ncount * qx
+                        );
+                        
+                        // Find closest steiner point
+                        auto knn_results = cluster.kd_steiner_knn(1, tmp_p, "steiner_pc");
+                        if (!knn_results.empty()) {
+                            size_t idx = knn_results[0].first;
+                            WCPoint tmp_wcp;
+                            tmp_wcp.point = Facade::geo_point_t(x_coords[idx], y_coords[idx], z_coords[idx]);
+                            
+                            double dist_to_steiner = ray_length(Ray{tmp_wcp.point, tmp_p});
+                            if (dist_to_steiner > 0.3 * units::cm) continue;
+                            
+                            // Check if not duplicate
+                            bool is_duplicate = (ray_length(Ray{tmp_wcp.point, new_list.back().point}) < 0.01 * units::cm);
+                            bool is_min_wcp = (ray_length(Ray{tmp_wcp.point, min_wcp.point}) < 0.01 * units::cm);
+                            
+                            if (!is_duplicate && !is_min_wcp) {
+                                new_list.push_back(tmp_wcp);
+                            }
+                        }
+                    }
+                    new_list.push_back(min_wcp);
+                    
+                    // Combine with rest of segment
+                    std::list<WCPoint> old_list(vec_wcps.begin(), vec_wcps.end());
+                    
+                    if (flag_front) {
+                        // Remove points up to min_wcp from front
+                        while (!old_list.empty() && 
+                               ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01 * units::cm) {
+                            old_list.pop_front();
+                        }
+                        if (!old_list.empty()) old_list.pop_front();
+                        
+                        // Prepend new path
+                        for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
+                            old_list.push_front(*it);
+                        }
+                    } else {
+                        // Remove points up to min_wcp from back
+                        while (!old_list.empty() && 
+                               ray_length(Ray{old_list.back().point, min_wcp.point}) > 0.01 * units::cm) {
+                            old_list.pop_back();
+                        }
+                        if (!old_list.empty()) old_list.pop_back();
+                        
+                        // Append new path
+                        for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
+                            old_list.push_back(*it);
+                        }
+                    }
+                    
+                    // Update segment with new points
+                    std::vector<WCPoint> new_wcpts(old_list.begin(), old_list.end());
+                    sg1->wcpts(new_wcpts);
+                    
+                    // Find other vertex and update connection
+                    VertexPtr v3 = find_other_vertex(graph, sg1, v1);
+                    if (v3) {
+                        remove_segment(graph, sg1);
+                        add_segment(graph, sg1, v2, v3);
+                    }
+                }
+                
+                // Remove v1 and sg
+                remove_vertex(graph, v1);
+                remove_segment(graph, sg);
+                
+                flag_continue = true;
+                std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
+                track_fitter.do_multi_tracking(true, true, true);
+                break;
+                
+            } else if (boost::degree(vd2, graph) >= 2 && examine_vertices_4p(graph, v2, v1, track_fitter, dv)) {
+                // Merge v2's segments to v1 (symmetric case)
+                
+                // Get v1 position
+                Facade::geo_point_t vtx_new_point = v1->wcpt().point;
+                
+                // Collect segments connected to v2 (except sg)
+                std::vector<SegmentPtr> v2_segments;
+                auto [e2begin, e2end] = boost::out_edges(vd2, graph);
+                for (auto e2it = e2begin; e2it != e2end; ++e2it) {
+                    SegmentPtr sg1 = graph[*e2it].segment;
+                    if (sg1 && sg1 != sg) {
+                        v2_segments.push_back(sg1);
+                    }
+                }
+                
+                // Process each segment connected to v2
+                for (auto sg1 : v2_segments) {
+                    const auto& vec_wcps = sg1->wcpts();
+                    if (vec_wcps.empty()) continue;
+                    
+                    // Determine which end connects to v2
+                    bool flag_front = (ray_length(Ray{vec_wcps.front().point, v2->wcpt().point}) <
+                                      ray_length(Ray{vec_wcps.back().point, v2->wcpt().point}));
+                    
+                    // Get v2 position
+                    Facade::geo_point_t v2_point = v2->fit().valid() ? v2->fit().point : v2->wcpt().point;
+                    
+                    // Find point ~3cm from v2 on this segment
+                    WCPoint min_wcp = vec_wcps.front();
+                    double min_dis = 1e9;
+                    
+                    // Calculate max distance to determine dis_cut
+                    double max_dis = std::max(
+                        ray_length(Ray{vec_wcps.front().point, v2_point}),
+                        ray_length(Ray{vec_wcps.back().point, v2_point})
+                    );
+                    double dis_cut = 0;
+                    double default_dis_cut = 2.5 * units::cm;
+                    if (max_dis > 2 * default_dis_cut) dis_cut = default_dis_cut;
+                    
+                    for (size_t j = 0; j < vec_wcps.size(); j++) {
+                        double dis1 = ray_length(Ray{vec_wcps[j].point, v2_point});
+                        double dis = std::fabs(dis1 - 3.0 * units::cm);
+                        if (dis < min_dis && dis1 > dis_cut) {
+                            min_wcp = vec_wcps[j];
+                            min_dis = dis;
+                        }
+                    }
+                    
+                    // Build new path from v1 to min_wcp using Steiner graph
+                    std::list<WCPoint> new_list;
+                    new_list.push_back(v1->wcpt());
+                    
+                    // Add intermediate points
+                    double dis_step = 2.0 * units::cm;
+                    int ncount = std::round(ray_length(Ray{vtx_new_point, min_wcp.point}) / dis_step);
+                    if (ncount < 2) ncount = 2;
+                    
+                    for (int qx = 1; qx < ncount; qx++) {
+                        Facade::geo_point_t tmp_p(
+                            vtx_new_point.x() + (min_wcp.point.x() - vtx_new_point.x()) / ncount * qx,
+                            vtx_new_point.y() + (min_wcp.point.y() - vtx_new_point.y()) / ncount * qx,
+                            vtx_new_point.z() + (min_wcp.point.z() - vtx_new_point.z()) / ncount * qx
+                        );
+                        
+                        // Find closest steiner point
+                        auto knn_results = cluster.kd_steiner_knn(1, tmp_p, "steiner_pc");
+                        if (!knn_results.empty()) {
+                            size_t idx = knn_results[0].first;
+                            WCPoint tmp_wcp;
+                            tmp_wcp.point = Facade::geo_point_t(x_coords[idx], y_coords[idx], z_coords[idx]);
+                            
+                            double dist_to_steiner = ray_length(Ray{tmp_wcp.point, tmp_p});
+                            if (dist_to_steiner > 0.3 * units::cm) continue;
+                            
+                            // Check if not duplicate
+                            bool is_duplicate = (ray_length(Ray{tmp_wcp.point, new_list.back().point}) < 0.01 * units::cm);
+                            bool is_min_wcp = (ray_length(Ray{tmp_wcp.point, min_wcp.point}) < 0.01 * units::cm);
+                            
+                            if (!is_duplicate && !is_min_wcp) {
+                                new_list.push_back(tmp_wcp);
+                            }
+                        }
+                    }
+                    new_list.push_back(min_wcp);
+                    
+                    // Combine with rest of segment
+                    std::list<WCPoint> old_list(vec_wcps.begin(), vec_wcps.end());
+                    
+                    if (flag_front) {
+                        // Remove points up to min_wcp from front
+                        while (!old_list.empty() && 
+                               ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01 * units::cm) {
+                            old_list.pop_front();
+                        }
+                        if (!old_list.empty()) old_list.pop_front();
+                        
+                        // Prepend new path
+                        for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
+                            old_list.push_front(*it);
+                        }
+                    } else {
+                        // Remove points up to min_wcp from back
+                        while (!old_list.empty() && 
+                               ray_length(Ray{old_list.back().point, min_wcp.point}) > 0.01 * units::cm) {
+                            old_list.pop_back();
+                        }
+                        if (!old_list.empty()) old_list.pop_back();
+                        
+                        // Append new path
+                        for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
+                            old_list.push_back(*it);
+                        }
+                    }
+                    
+                    // Update segment with new points
+                    std::vector<WCPoint> new_wcpts(old_list.begin(), old_list.end());
+                    sg1->wcpts(new_wcpts);
+                    
+                    // Find other vertex and update connection
+                    VertexPtr v3 = find_other_vertex(graph, sg1, v2);
+                    if (v3) {
+                        remove_segment(graph, sg1);
+                        add_segment(graph, sg1, v1, v3);
+                    }
+                }
+                
+                // Remove v2 and sg
+                remove_vertex(graph, v2);
+                remove_segment(graph, sg);
+                
+                flag_continue = true;
+                std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
+                track_fitter.do_multi_tracking(true, true, true);
+                break;
+            }
+        }
+        
+        if (flag_continue) break;
+    }
+    
+    return flag_continue;
+}
+
+
+
+
+
+
+
+
 
 
 
