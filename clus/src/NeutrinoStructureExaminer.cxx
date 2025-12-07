@@ -2201,6 +2201,64 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
     }
 }
 
+Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& cluster, Facade::geo_point_t& wcp){
+    // Determine which point cloud to use
+    std::string pc_name = "steiner_pc";
+    
+    // Get local direction using Hough transform
+    Facade::geo_vector_t dir1 = cluster.vhough_transform(wcp, 10.0 * units::cm);
+    dir1 = dir1 * (-1.0);  // Reverse direction
+    
+    // Drift direction
+    Facade::geo_vector_t drift_dir(1, 0, 0);
+    
+    // Calculate angle with drift direction (in degrees)
+    double dir1_mag = dir1.magnitude();
+    if (dir1_mag == 0) return wcp;
+    
+    double cos_angle = drift_dir.dot(dir1) / dir1_mag;
+    cos_angle = std::max(-1.0, std::min(1.0, cos_angle));  // Clamp to [-1, 1]
+    double angle = std::acos(cos_angle) * 180.0 / M_PI;
+    
+    // If angle is close to perpendicular to drift (90° ± 7.5°), return original point
+    if (std::fabs(angle - 90.0) < 7.5) {
+        return wcp;
+    }
+    
+    // Get nearby points within 10 cm radius
+    auto kd_results = cluster.kd_steiner_radius(10.0 * units::cm, wcp, pc_name);
+    
+    if (kd_results.empty()) {
+        return wcp;
+    }
+    
+    // Get point coordinates
+    const auto& pc = cluster.get_pc(pc_name);
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = pc.get(coords.at(2))->elements<double>();
+    
+    // Find point with maximum projection along dir1
+    double max_val = 0;
+    geo_point_t result = wcp;
+    
+    for (const auto& [idx, dist] : kd_results) {
+        Facade::geo_point_t pt(x_coords[idx], y_coords[idx], z_coords[idx]);
+        
+        // Calculate projection along dir1
+        double val = dir1.x() * (pt.x() - wcp.x()) + 
+                     dir1.y() * (pt.y() - wcp.y()) + 
+                     dir1.z() * (pt.z() - wcp.z());
+        
+        if (val > max_val) {
+            max_val = val;
+            result = pt;
+        }
+    }
+    
+    return result;
+}
 
 
 
