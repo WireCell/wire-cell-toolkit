@@ -5,6 +5,16 @@
 
 #include "WireCellSpng/HanaConfigurable.h"
 
+#include "WireCellUtil/NamedFactory.h"
+
+
+WIRECELL_FACTORY(SPNGTensorForwardTS,
+                 WireCell::SPNG::TensorForwardTS,
+                 WireCell::SPNG::ITensorForward,
+                 WireCell::IConfigurable,
+                 WireCell::INamed)
+
+
 using namespace WireCell::HanaJsonCPP;                         
 
 
