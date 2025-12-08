@@ -55,4 +55,28 @@ namespace WireCell::SPNG {
         if (m_sem) m_sem->release();
     }
 
+    // A per-C++ thread "stream" is needed to submit concurrent tasks to a GPU.
+    // If no stream is used, the default is used.
+    // Tasks are placed in the default stream queue but GPU may still execute those tasks concurrently.
+    // Using streams should be faster.
+    //
+    // torch::cuda::Stream stream;
+    // torch::cuda::StreamGuard guard(stream); 
+    // torch::cuda::Stream original_stream = torch::cuda::current_stream();
+    // if (use_custom) {
+    //         torch::cuda::set_stream(my_custom_stream);
+    // }
+    // if (use_custom) { // restore
+    //         torch::cuda::set_stream(original_stream);
+    // }
+    //
+    // But, even better would be to batch across C++ threads into a single
+    // kernel.  This would require thread safe queue in C++ to collect batches
+    // from inputs.  It would require to track association of batches to
+    // requester for return.  std::promise could help this.  It would require
+    // some kind of Nagle's theorem to wait some short time to collect batches.
+    // De-batching must take care that the output tensors are actually done.
+    // Finding the optimum Nagle delay is ... empirical.  I don't think it's
+    // worth it.
+
 }

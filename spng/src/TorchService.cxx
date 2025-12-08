@@ -5,9 +5,7 @@
 #include "WireCellSpng/TorchScript.h"
 #include "WireCellSpng/TensorTools.h"
 
-//do we rely on openMP...probably not..
-//#include <omp.h>
-#include <ATen/Parallel.h>
+#include "WireCellSpng/TorchScript.h"
 
 WIRECELL_FACTORY(SPNGTorchService, 
                  WireCell::SPNG::TorchService,
