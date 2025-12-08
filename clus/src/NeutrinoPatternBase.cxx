@@ -90,6 +90,33 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         return path_points;
 }
 
+std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path_reg_pc(const Facade::Cluster& cluster, Facade::geo_point_t& first_point, Facade::geo_point_t& last_point,  std::string graph_name){
+    // Find closest indices in the regular point cloud using kd_knn
+    auto first_knn_results = cluster.kd_knn(1, first_point);
+    auto last_knn_results = cluster.kd_knn(1, last_point);
+    
+    auto first_index = first_knn_results[0].first;  // Get the index from the first result
+    auto last_index = last_knn_results[0].first;   // Get the index from the first result
+    
+    // Use the specified graph to find the shortest path
+    const std::vector<size_t>& path_indices = 
+        cluster.graph_algorithms(graph_name).shortest_path(first_index, last_index);
+    
+    // Convert indices to points using the regular point cloud
+    std::vector<Facade::geo_point_t> path_points;
+    const auto& points = cluster.points();  // Returns array of coordinate arrays [x_coords, y_coords, z_coords]
+    const auto& x_coords = points[0];
+    const auto& y_coords = points[1];
+    const auto& z_coords = points[2];
+    
+    for (size_t idx : path_indices) {
+        path_points.emplace_back(x_coords[idx], y_coords[idx], z_coords[idx]);
+    }
+    
+    return path_points;
+}
+
+
 SegmentPtr PatternAlgorithms::create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, IDetectorVolumes::pointer dv, const std::vector<Facade::geo_point_t>& path_points, int dir){
      // Step 3: Prepare segment data
     std::vector<PR::WCPoint> wcpoints;
@@ -1078,4 +1105,42 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     track_fitter.do_multi_tracking(true, true, true);
     
     return true;
+}
+
+
+void PatternAlgorithms::init_point_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+    // Get two boundary points from the cluster (using regular point cloud)
+    auto boundary_wcps = cluster.get_two_boundary_wcps(false);
+    
+    // Find shortest path using the regular point cloud with "relaxed_pid" graph
+    auto path_points = do_rough_path_reg_pc(cluster, boundary_wcps.first, boundary_wcps.second, "relaxed_pid");
+    
+    // Check if path has enough points
+    if (path_points.size() <= 1) {
+        return;
+    }
+    
+    // Create vertices for the endpoints
+    VertexPtr v1 = make_vertex(graph);
+    v1->wcpt().point = boundary_wcps.first;
+    v1->cluster(&cluster);
+    
+    VertexPtr v2 = make_vertex(graph);
+    v2->wcpt().point = boundary_wcps.second;
+    v2->cluster(&cluster);
+    
+    // Create segment with the path points
+    auto sg1 = create_segment_for_cluster(cluster, dv, path_points);
+    if (!sg1) {
+        remove_vertex(graph, v1);
+        remove_vertex(graph, v2);
+        return;
+    }
+    
+    // Add segment to graph connecting the two vertices
+    add_segment(graph, sg1, v1, v2);
+    
+    // Perform multi-tracking to fit the segment
+    track_fitter.add_segment(sg1);
+    track_fitter.do_multi_tracking(true, true, true);
 }
