@@ -1012,3 +1012,70 @@ Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex
     return dir;
 }
 
+bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, int nrounds_find_other_tracks, bool flag_back_search){
+    // Check if steiner point cloud exists and has enough points
+    if (!cluster.has_pc("steiner_pc")) return false;
+    
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    if (steiner_pc.size() < 2) return false;
+    
+    // Initialize first segment
+    SegmentPtr sg1 = init_first_segment(graph, cluster, nullptr, track_fitter, dv, flag_back_search);
+    
+    if (!sg1) return false;
+    
+    // Store initial pair of vertices for main cluster
+    std::pair<VertexPtr, VertexPtr> main_cluster_initial_pair_vertices{nullptr, nullptr};
+    bool is_main_cluster = cluster.get_flag(Facade::Flags::main_cluster);
+    
+    if (is_main_cluster) {
+        main_cluster_initial_pair_vertices = find_vertices(graph, sg1);
+    }
+    
+    // Check if segment has more than one point
+    const auto& wcpts = sg1->wcpts();
+    if (wcpts.size() <= 1) {
+        return false;
+    }
+    
+    // Break tracks and examine structure
+    if (flag_break_track) {
+        std::vector<SegmentPtr> remaining_segments;
+        remaining_segments.push_back(sg1);
+        break_segments(graph, track_fitter, dv, remaining_segments);
+        
+        // Examine and improve structure
+        examine_structure(graph, cluster, track_fitter, dv);
+    } else {
+        // Just do multi-tracking
+        track_fitter.do_multi_tracking(true, true, true);
+    }
+    
+    // Find other segments
+    for (int i = 0; i < nrounds_find_other_tracks; i++) {
+        find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
+    }
+    
+    // For main cluster, merge tracks if angles are consistent
+    if (is_main_cluster) {
+        if (examine_structure_3(graph, cluster, track_fitter, dv)) {
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+    }
+    
+    // Examine the vertices
+    examine_vertices(graph, cluster, track_fitter, dv);
+    
+    // Examine partial identical segments
+    examine_partial_identical_segments(graph, cluster, track_fitter, dv);
+    
+    // Examine the two initial points for main cluster
+    if (is_main_cluster && main_cluster_initial_pair_vertices.first) {
+        examine_vertices_3(graph, cluster, main_cluster_initial_pair_vertices, track_fitter, dv);
+    }
+    
+    // Final multi-tracking
+    track_fitter.do_multi_tracking(true, true, true);
+    
+    return true;
+}
