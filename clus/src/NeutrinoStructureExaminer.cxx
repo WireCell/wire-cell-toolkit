@@ -2260,6 +2260,196 @@ Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& clus
     return result;
 }
 
+void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_cluster, std::pair<VertexPtr, VertexPtr> main_cluster_initial_pair_vertices, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    // Examine main_cluster_initial_pair_vertices to see if they need extension
+    std::vector<VertexPtr> temp_vertices;
+    if (main_cluster_initial_pair_vertices.first) temp_vertices.push_back(main_cluster_initial_pair_vertices.first);
+    if (main_cluster_initial_pair_vertices.second) temp_vertices.push_back(main_cluster_initial_pair_vertices.second);
+    
+    bool flag_refit = false;
+    
+    for (size_t i = 0; i < temp_vertices.size(); i++) {
+        VertexPtr vtx = temp_vertices[i];
+        
+        // Check if vertex is still in graph
+        if (!vtx->descriptor_valid()) continue;
+        auto vd = vtx->get_descriptor();
+        
+        // Only process vertices with exactly one connected segment
+        if (boost::degree(vd, graph) != 1) continue;
+        
+        // Get the single connected segment
+        SegmentPtr sg = nullptr;
+        auto [ebegin, eend] = boost::out_edges(vd, graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            sg = graph[*eit].segment;
+            break;
+        }
+        if (!sg) continue;
+        
+        const auto& wcps = sg->wcpts();
+        if (wcps.empty()) continue;
+        
+        // Determine which end of segment connects to vertex
+        bool flag_start = (ray_length(Ray{wcps.front().point, vtx->wcpt().point}) <
+                          ray_length(Ray{wcps.back().point, vtx->wcpt().point}));
+        
+        // Get the other end of the segment
+        WCPoint wcp2 = flag_start ? wcps.back() : wcps.front();
+        
+        // Try to extend the vertex using get_local_extension
+        auto wcp1_point = get_local_extension(main_cluster, vtx->wcpt().point);
+        
+        // Check if extension found a different point
+        bool same_as_vtx = (ray_length(Ray{wcp1_point, vtx->wcpt().point}) < 0.01 * units::cm);
+        bool same_as_wcp2 = (ray_length(Ray{wcp1_point, wcp2.point}) < 0.01 * units::cm);
+        
+        if (same_as_vtx || same_as_wcp2) continue;
+        
+        // Create new path from extended point to other end
+        std::vector<Facade::geo_point_t> path_points;
+        if (flag_start) {
+            path_points = do_rough_path(main_cluster, wcp1_point, wcp2.point);
+        } else {
+            path_points = do_rough_path(main_cluster, wcp2.point, wcp1_point);
+        }
+        
+        // Only update if new path is not too much longer than original
+        if (path_points.size() > 0 && path_points.size() < wcps.size() * 2) {
+            // Update vertex position
+            vtx->wcpt().point = wcp1_point;
+            
+            // Update segment path
+            std::vector<WCPoint> new_wcpts;
+            for (const auto& p : path_points) {
+                WCPoint wcp;
+                wcp.point = p;
+                new_wcpts.push_back(wcp);
+            }
+            sg->wcpts(new_wcpts);
+            
+            flag_refit = true;
+        }
+    }
+    
+    if (flag_refit) {
+        track_fitter.do_multi_tracking(true, true, true);
+    }
+    
+    // Find and remove redundant short segments
+    std::set<SegmentPtr> segments_to_be_removed;
+    
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &main_cluster) continue;
+        
+        auto pair_vertices = find_vertices(graph, sg);
+        if (!pair_vertices.first || !pair_vertices.second) continue;
+        
+        // Check if either vertex has only one connection
+        auto vd1 = pair_vertices.first->get_descriptor();
+        auto vd2 = pair_vertices.second->get_descriptor();
+        bool v1_single = (boost::degree(vd1, graph) == 1);
+        bool v2_single = (boost::degree(vd2, graph) == 1);
+        
+        if (!v1_single && !v2_single) continue;
+        
+        // Check if segment is short
+        double direct_length = segment_track_direct_length(sg);
+        if (direct_length >= 5.0 * units::cm) continue;
+        
+        // Check if all points on this segment are close to other segments in 2D
+        const auto& pts = sg->wcpts();
+        int num_unique = 0;
+        
+        for (size_t i = 0; i < pts.size(); i++) {
+            // Get APA and face for this point
+            auto wpid = dv->contained_by(pts[i].point);
+            if (wpid.apa() == -1 || wpid.face() == -1) continue;
+            
+            double min_u = 1e9;
+            double min_v = 1e9;
+            double min_w = 1e9;
+            
+            // Compare with all other segments
+            auto [e2begin, e2end] = boost::edges(graph);
+            for (auto e2it = e2begin; e2it != e2end; ++e2it) {
+                SegmentPtr sg1 = graph[*e2it].segment;
+                if (!sg1 || sg1 == sg) continue;
+                
+                auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(sg1, pts[i].point, wpid.apa(), wpid.face(), "fit");
+                
+                if (dist_u < min_u) min_u = dist_u;
+                if (dist_v < min_v) min_v = dist_v;
+                if (dist_w < min_w) min_w = dist_w;
+            }
+            
+            // If point is far from all other segments in any view, it's unique
+            if (min_u > 0.6 * units::cm || min_v > 0.6 * units::cm || min_w > 0.6 * units::cm) {
+                num_unique++;
+            }
+        }
+        
+        // If no unique points, mark for removal
+        if (num_unique == 0) {
+            segments_to_be_removed.insert(sg);
+        }
+    }
+    
+    // Collect vertices that will need examination after removal
+    std::set<VertexPtr> can_vertices;
+    
+    for (auto sg : segments_to_be_removed) {
+        auto pair_vertices = find_vertices(graph, sg);
+        
+        if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
+            auto vd1 = pair_vertices.first->get_descriptor();
+            if (boost::degree(vd1, graph) > 1) {
+                can_vertices.insert(pair_vertices.first);
+            }
+        }
+        
+        if (pair_vertices.second && pair_vertices.second->descriptor_valid()) {
+            auto vd2 = pair_vertices.second->get_descriptor();
+            if (boost::degree(vd2, graph) > 1) {
+                can_vertices.insert(pair_vertices.second);
+            }
+        }
+        
+        remove_segment(graph, sg);
+    }
+    
+    // Remove isolated vertices
+    bool flag_cont = true;
+    while (flag_cont) {
+        flag_cont = false;
+        
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            if (boost::degree(*vit, graph) == 0) {
+                VertexPtr vtx = graph[*vit].vertex;
+                if (vtx) {
+                    remove_vertex(graph, vtx);
+                    flag_cont = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Examine remaining vertices with examine_structure_4
+    for (auto vtx : can_vertices) {
+        if (vtx->descriptor_valid()) {
+            examine_structure_4(vtx, false, graph, main_cluster, track_fitter, dv);
+        }
+    }
+    
+    // Refit if segments were removed
+    if (segments_to_be_removed.size() > 0) {
+        track_fitter.do_multi_tracking(true, true, true);
+    }
+}
 
 
 
