@@ -21,7 +21,13 @@ local wc = import "wirecell.jsonnet";
         head: head.iports[hp],
     },
 
-    // make an edge by passing two pnode "type:name" labels and
+    // Make an edge given two ports: tport -> hport.
+    edge_ports(tport, hport):: {
+        tail: tport,
+        head: hport,
+    },
+
+    // Make an edge by passing two pnode "type:name" labels and
     // optional port numbers.
     edge_labels(tlabel, hlabel, tp=0, hp=0):: {
         tail: {
@@ -108,7 +114,6 @@ local wc = import "wirecell.jsonnet";
 
     },
 
-
     // Produce an abstract pnode from a sugraph of other pnodes.  The
     // resulting "uses" and "edges" are then resolved, aggregated,
     // flattened.  Unless explicitly given, all iports of innodes
@@ -146,6 +151,18 @@ local wc = import "wirecell.jsonnet";
     // typically useful to combine an array of "side-by-side" pnodes into a
     // single pnode.
     crossline(elements, name=""):: $.intern(innodes=elements, outnodes=elements, name=name),
+
+    // Return a pnode which is a source node made from given node's output port.
+    // This may be used to break up a crossline() pnode.
+    // The returned pnode will hold node in its 'uses' array.
+    oport_node(node, oport_index)::
+        $.intern(centernodes=[node], oports=[node.oports[oport_index]]),
+
+    // Return a pnode which is a sink node made from given node's input port.
+    // This may be used to break up a crossline() pnode.
+    // The returned pnode will hold node in its 'uses' array.
+    iport_node(node, iport_index)::
+        $.intern(centernodes=[node], iports=[node.iports[iport_index]]),
 
     // Connect N outputs upstream to N inputs of downstream.  Custom port
     // indices can be given for upstream and/or downstream node, otherwise all
