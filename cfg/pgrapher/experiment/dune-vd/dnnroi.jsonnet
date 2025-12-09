@@ -11,7 +11,7 @@ local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
 
-function (anode, ts, prefix="dnnroi", output_scale=1.0, nchunks=1) 
+function (anode, ts, prefix="dnnroi", output_scale=1.0, nchunks=1, sparcify=false) 
     local apaid = anode.data.ident;
     local prename = prefix + std.toString(apaid);
     local intags = ['loose_lf%d'%apaid, 'mp2_roi%d'%apaid,
@@ -30,6 +30,7 @@ function (anode, ts, prefix="dnnroi", output_scale=1.0, nchunks=1)
             output_scale: output_scale,
             forward: wc.tn(ts),
             nchunks: nchunks,
+            sparcify: sparcify,
         }
     }, nin=1, nout=1, uses=[ts, anode]);
     local dnnroi_v = pg.pnode({
@@ -45,6 +46,7 @@ function (anode, ts, prefix="dnnroi", output_scale=1.0, nchunks=1)
             output_scale: output_scale,
             forward: wc.tn(ts),
             nchunks: nchunks,
+            sparcify: sparcify,
         }
     }, nin=1, nout=1, uses=[ts, anode]);
     local dnnroi_w = pg.pnode({
