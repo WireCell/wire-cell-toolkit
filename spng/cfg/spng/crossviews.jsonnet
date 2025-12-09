@@ -25,10 +25,10 @@ local util = import "spng/util.jsonnet";
             } + control,
         }, nin=3, nout=1, uses=[tpc.anode]),
 
-    /// A 3->3 with fans and crossviews in the middle.
-    /// Connect a partial crossfan based on marking each view as crossed (1) or
-    /// not (0) in view_crossed.
-    crossfan(tpc, view_crossed=[1,1,0], extra_name="", control={})::
+
+
+    /// When at more than 1 is in view_crossed
+    crossfan_many(tpc, view_crossed=[1,1,0], extra_name="", control={})::
         local ncrosses = wc.sum(view_crossed);
         local fanouts = [       // 3
             fans.fanout(tpc.name+'crossfan_v'+std.toString(view_index),
@@ -41,7 +41,6 @@ local util = import "spng/util.jsonnet";
             for view_index in [0,1,2] ];
         // less than or equal to 3
         local crossviews_only = [c for c in crossviews if std.type(c) != "null"];
-        
         pg.intern(innodes=fanouts,
                   centernodes=crossviews_only,
                   oports=[
@@ -55,6 +54,17 @@ local util = import "spng/util.jsonnet";
                       for f in wc.enumerate(fanouts)
                       for c in wc.enumerate(crossviews_only)
                   ]),
+
+
+    /// A 3->ncrossed with fans and crossviews in the middle.
+    /// Connect a partial crossfan based on marking each view as crossed (1) or
+    /// not (0) in view_crossed.
+    crossfan(tpc, view_crossed=[1,1,0], extra_name="", control={})::
+        local ncrosses = wc.sum(view_crossed);
+        if ncrosses == 1        // special case, no explicit fanouts
+        then $.crossfan(tpc, [vi.index for vi in wc.enumerate(view_crossed) if vi.value == 1][0],
+                            extra_name=extra_name, control=control)
+        else $.crossfan_many(tpc, view_crossed, extra_name, control),
     
 
     /// Build a full cross views block producing a 3->3 subgraph with fully connected inner.

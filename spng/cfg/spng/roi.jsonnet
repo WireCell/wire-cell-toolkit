@@ -44,13 +44,18 @@ local util = import "util.jsonnet";
             },
         }, nin=1, nout=1, uses=[forward]);
         // gauss+roi in, signals out.  this provides the oport.
-        local rbl = pg.pnode({
-            type: 'SPNGRebaseline',
-            name: this_name,
+        local mul = pg.pnode({
+            type: 'SPNGReduce',
+            name: this_name+"roi",
             data: {
-                multiplicity:2
+                operation: 'mul',
             },
         }, nin=2, nout=1);
+        local rbl = pg.pnode({
+            type: 'SPNGRebaseliner',
+            name: this_name,
+            data: { }
+        }, nin=1, nout=1);
         {
             /// This pnode will hold all the nodes we made here, exposing only
             /// the rbl's oport.
@@ -62,14 +67,15 @@ local util = import "util.jsonnet";
                                    for mpind in wc.iota(nmps)
                                ] + [
                                    pg.edge(op, fwd),
-                                   pg.edge(fwd, rbl, 0, 1)
+                                   pg.edge(fwd, mul, 0, 1),
+                                   pg.edge(mul, rbl)
                                ]),
 
             /// A "sink" pnode that exposes the iport of the extract node
             crossviews: pg.intern(iports=[ex.iports[0]]),
 
-            /// A "sink" pnode that exposes the 0th iport of the rebaseline.
-            gauss: pg.intern(iports=rbl.iports),
+            /// A "sink" pnode that exposes the 0th iport of the multiply that applies ROI
+            gauss: pg.intern(iports=[mul.iports[0]]),
 
             /// A "sink" pnode that exposes the  0th iport of the stack op.
             dense: pg.intern(iports=[op.iports[0]]),
@@ -111,17 +117,23 @@ local util = import "util.jsonnet";
     /// Name must be unique to the view.
     connect_threshold(name, threshold, gauss)::
         // gauss+roi in, signals out.  this provides the oport.
-        local rbl = pg.pnode({
-            type: 'SPNGRebaseline',
+        local mul = pg.pnode({
+            type: 'SPNGReduce',
             name: name,
             data: {
-                multiplicity:2
+                operation: 'mul',
             },
         }, nin=2, nout=1);
-        pg.intern(centernodes=[threshold, gauss],
+        local rbl = pg.pnode({
+            type: 'SPNGRebaseliner',
+            name: name,
+            data: { }
+        }, nin=1, nout=1);
+        pg.intern(centernodes=[threshold, gauss, mul],
                   outnodes=[rbl],
                   edges=[
-                      pg.edge(gauss,     rbl, 0, 0),
-                      pg.edge(threshold, rbl, 0, 1)
+                      pg.edge(gauss,     mul, 0, 0),
+                      pg.edge(threshold, mul, 0, 1),
+                      pg.edge(mul, rbl)
                   ]),
 }

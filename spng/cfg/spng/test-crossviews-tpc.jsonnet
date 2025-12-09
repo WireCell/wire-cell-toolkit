@@ -79,6 +79,11 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
                                               ["wiener","gauss","dnnroi"],
                                               ["wiener","gauss"]]);
 
+    local ww = views.forkout_one(tpc.name+'ww', decon_fans.targets.wiener, 2);
+    local crossview_wiener = ww[0];
+    local full_wiener_fan_w = ww[1];
+
+
     // 0->3 produce per-view decond
     local decon_stage = pg.shuntlines([
         source,
@@ -90,9 +95,9 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     // 3->3 partial cross views.
     local crossviews = tpc_nodes.crossfan(view_crossed);
 
-    // 3->3 decon->thresholded initial ROIs.
+    // 3->2 decon->thresholded initial ROIs.
     local crossviews_stage = pg.shuntlines([
-        decon_fans.targets.wiener,
+        crossview_wiener,
         wiener_filter,
         wiener_rebin,
         threshold,

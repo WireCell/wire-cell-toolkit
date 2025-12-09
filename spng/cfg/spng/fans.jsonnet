@@ -117,4 +117,23 @@ local pg = import "pgraph.jsonnet";
 
 
 
+    /// Return two nodes: [orig, oport] where "orig" is effectively the input
+    /// node and "oport" is a node that is a replicated source of data from the
+    /// output port of "node" at the index oport_index.
+    forkout_oport(name, node, oport_index, type='Tensor')::
+        local fout = $.fanout(name+'forkout', type=type);
+        local copy = pg.intern(innodes=[node],
+                               centernodes=[fout],
+                               oports=[
+                                   if op.index == oport_index
+                                   then fout.oports[0]
+                                   else op.value
+                                   for op in wc.enumerate(node.oports)
+                               ],
+                               edges=[
+                                   pg.edge(node, fout, oport_index, 0)
+                               ]);
+        local out = pg.intern(oports=[fout.oports[1]]);
+        [copy, out],
+
 }
