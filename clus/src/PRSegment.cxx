@@ -34,25 +34,24 @@ namespace WireCell::Clus::PR {
         m_fits[i].flag_fix = flag;
     }
 
-    void Segment::set_fit_associate_vec(std::vector<WireCell::Point >& tmp_fit_pt_vec, std::vector<int>& tmp_fit_index, std::vector<bool>& tmp_fit_skip, const IDetectorVolumes::pointer& dv,const std::string& cloud_name){        
+    void Segment::set_fit_associate_vec(std::vector<PR::Fit >& tmp_fit_vec, const IDetectorVolumes::pointer& dv,const std::string& cloud_name){        
         // Store fit points in m_fits vector
-        m_fits.clear();
-        m_fits.reserve(tmp_fit_pt_vec.size());
-        
-        for (size_t i = 0; i < tmp_fit_pt_vec.size(); ++i) {
-            Fit fit;
-            // Convert WCP::Point to WireCell::Point
-            fit.point = WireCell::Point(tmp_fit_pt_vec[i].x(), tmp_fit_pt_vec[i].y(), tmp_fit_pt_vec[i].z());
-            if (i < tmp_fit_index.size()) {
-                fit.index = tmp_fit_index[i];
-            }
-            if (i < tmp_fit_skip.size()) {
-                if (tmp_fit_skip[i]) {
-                    fit.flag_fix = true;
-                }
-            }
-            m_fits.push_back(fit);
-        }
+        m_fits = tmp_fit_vec;
+
+        // for (size_t i = 0; i < tmp_fit_pt_vec.size(); ++i) {
+        //     Fit fit;
+        //     // Convert WCP::Point to WireCell::Point
+        //     fit.point = WireCell::Point(tmp_fit_pt_vec[i].x(), tmp_fit_pt_vec[i].y(), tmp_fit_pt_vec[i].z());
+        //     if (i < tmp_fit_index.size()) {
+        //         fit.index = tmp_fit_index[i];
+        //     }
+        //     if (i < tmp_fit_skip.size()) {
+        //         if (tmp_fit_skip[i]) {
+        //             fit.flag_fix = true;
+        //         }
+        //     }
+        //     m_fits.push_back(fit);
+        // }
         
         // Create dynamic point cloud with the fit points
         if (dv) {
