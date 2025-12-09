@@ -30,8 +30,8 @@ namespace WireCell::SPNG {
     /// Return Tensor::sizes() as a string
     std::string to_string(const torch::IntArrayRef& sizes);
 
-    /// Return torch::Tensor as string
-    std::string to_string(const torch::Tensor& tensor);
+    /// Return torch::Tensor as string.  If content is true, dump tensor elements.
+    std::string to_string(const torch::Tensor& tensor, bool content=false);
 
     // Map C++ types to torch::Dtype
     template <typename T, typename Enable=void>

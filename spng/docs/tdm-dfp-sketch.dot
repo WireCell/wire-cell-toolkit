@@ -65,14 +65,14 @@ digraph tdm {
     decon_u->dense_u->dense_ds_u->stack_u
     decon_v->dense_v->dense_ds_v->stack_v
 
-    stack_u->dnnroi_u->upsample_u->roi_thresh_u->applyroi_u
-    stack_v->dnnroi_v->roi_thresh_v->unbin_v->applyroi_v
-    wiener_w->threshold_full_w->applyroi_w
+    stack_u->dnnroi_u->upsample_u->roi_thresh_u->multiply_u
+    stack_v->dnnroi_v->roi_thresh_v->unbin_v->multiply_v
+    wiener_w->threshold_full_w->multiply_w
 
     adc_tensor_set->ft_repack
-    gauss_u->applyroi_u->signals_u->ft_repack
-    gauss_v->applyroi_v->signals_v->ft_repack
-    gauss_w->applyroi_w->signals_w->ft_repack
+    gauss_u->multiply_u->rebaseline_u->signals_u->ft_repack
+    gauss_v->multiply_v->rebaseline_v->signals_v->ft_repack
+    gauss_w->multiply_w->rebaseline_w->signals_w->ft_repack
 
     ft_repack->signal_tensor_set->tdm_to_frame->signal_frame
 

@@ -26,7 +26,7 @@ namespace WireCell::SPNG {
         return ss.str();        
     }
 
-    std::string to_string(const torch::Tensor& tensor)
+    std::string to_string(const torch::Tensor& tensor, bool content)
     {
         std::stringstream ss;
         /// Using this to show min/max is too restrictive, eg bool on cpu lacks abs().
@@ -34,6 +34,9 @@ namespace WireCell::SPNG {
         // ss << to_string(tensor.sizes()) << " dtype:" << tensor.dtype() << " vmm:["
         //    << torch::min(tabs).item() << ", " << torch::max(tabs).item() << "]";
         ss << to_string(tensor.sizes()) << " dtype:" << tensor.dtype();
+        if (content) {
+            ss << " " << tensor;
+        }
         return ss.str();
     }
 

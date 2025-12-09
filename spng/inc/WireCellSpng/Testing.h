@@ -10,6 +10,7 @@
 #include "WireCellSpng/Torch.h"
 #undef CHECK
 #include "WireCellUtil/doctest.h"
+#include "WireCellUtil/Logging.h"
 
 
 #endif
