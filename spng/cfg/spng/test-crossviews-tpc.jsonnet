@@ -71,6 +71,8 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     local sink = tio.pickle_tensor_set(output);
 
 
+    // The targets_list implicitly reflects the view_crossed array, so FIXME:
+    // parameterize its construction on view_crossed.
     local decon_fans = fans.fanout_select(tpc.name+"_decon_", N=3,
                                           targets_list=[
                                               ["wiener","gauss","dnnroi"],

@@ -2,7 +2,7 @@ digraph tdm {
 
     // graph [splines=ortho];
 
-    label="Conceptual sketch for TDM DFP graph assuming wrapped/jumperred (DUNE VD/HD) anodes.\nU/V are symmetric, W specially skips crossviews.\nInternal edges are all single-tensor.  Fanin/fanouts are left implicit.\nThe 'wiener' boxes filter to maximize signal/noise, 'dense' filters are eg loose LF.\nA choice between order of upsample and threshold is reflected in U/V asymmetry\nRetraining a DNNROI-like net can allow for than just MP2/MP3 boolean cross-views features."
+    label="Conceptual sketch for TDM DFP graph assuming wrapped/jumperred (DUNE VD/HD) anodes.\nU/V/W are treated symmetric.  W cross views could be skipped. Internal edges are all single-tensor.  Fanin/fanouts are left implicit.\nThe 'wiener' boxes filter to maximize signal/noise, 'dense' filters are eg loose LF.\nThe 'dnnroi' nodes are not yet TDM'ified. Retraining DNNROI allows for than just MP2/MP3 boolean cross-views features."
 
     node[shape=ellipse]
     adc_frame
@@ -14,14 +14,15 @@ digraph tdm {
     signal_tensor_set
     node[shape=box]
 
-    {rank=same dense_u->dense_v->crossviews_u->crossviews_v[style=invis]}
+    //{rank=same refilter_dense_u refilter_dense_v refilter_dense_w mp2_u mp3_u mp2_v mp3_v mp2_w mp3_w}
     {rank=same dense_ds_u->extract_u->dense_ds_v->extract_v->dense_ds_w->extract_w[style=invis]}
+    {rank=same crossviews_u crossviews_v crossviews_w}
     decon_u->decon_v->decon_w1->decon_w2 [style=invis]    
-    crossviews_u->crossviews_v[style=invis]
+    crossviews_u->crossviews_v->crossviews_w[style=invis]
     {rank=same mp2_u->mp3_u[style=invis]}
     {rank=same mp2_v->mp3_v[style=invis]}
     {rank=same mp2_w->mp3_w[style=invis]}
-    {rank=same gauss_u->roi_thresh_u->gauss_v->unbin_v->gauss_w[style=invis]}
+    {rank=same gauss_u->roi_thresh_u->gauss_v->roi_thresh_v->gauss_w->roi_thresh_w[style=invis]}
 
     subgraph cluster_decon {
         label="decon by related channel group.\nFinal output 3 both-face (u/v/w) tensors "
@@ -62,12 +63,19 @@ digraph tdm {
     extract_v->mp2_v->stack_v
     extract_v->mp3_v->stack_v
 
+    threshold_u->crossviews_w
+    threshold_v->crossviews_w
+    threshold_w->crossviews_w->extract_w
+    extract_w->mp2_w->stack_w
+    extract_w->mp3_w->stack_w
+
     decon_u->dense_u->dense_ds_u->stack_u
     decon_v->dense_v->dense_ds_v->stack_v
+    regroup_w->dense_w->dense_ds_w->stack_w
 
     stack_u->dnnroi_u->upsample_u->roi_thresh_u->applyroi_u
-    stack_v->dnnroi_v->roi_thresh_v->unbin_v->applyroi_v
-    wiener_w->threshold_full_w->applyroi_w
+    stack_v->dnnroi_v->upsample_v->roi_thresh_v->applyroi_v
+    stack_w->dnnroi_w->upsample_w->roi_thresh_w->applyroi_w
 
     adc_tensor_set->ft_repack
     gauss_u->applyroi_u->signals_u->ft_repack
