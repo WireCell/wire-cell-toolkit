@@ -155,13 +155,13 @@ local wc = import "wirecell.jsonnet";
     // Return a pnode which is a source node made from given node's output port.
     // This may be used to break up a crossline() pnode.
     // The returned pnode will hold node in its 'uses' array.
-    oport_node(node, oport_index)::
+    oport_node(node, oport_index=0)::
         $.intern(centernodes=[node], oports=[node.oports[oport_index]]),
 
     // Return a pnode which is a sink node made from given node's input port.
     // This may be used to break up a crossline() pnode.
     // The returned pnode will hold node in its 'uses' array.
-    iport_node(node, iport_index)::
+    iport_node(node, iport_index=0)::
         $.intern(centernodes=[node], iports=[node.iports[iport_index]]),
 
     // Connect N outputs upstream to N inputs of downstream.  Custom port
