@@ -60,6 +60,16 @@ function(tpc, control) {
         } + wc.object_with(control, ["verbosity", "device"])
     }, nin=1, nout=1) for view in views]),
 
+    // Node: [nview]tensor -> tensor [nview] rebin (interval domain downsample)
+    rebinner(name, factor=4, norm="interpolation", views=[0,1,2]):: pg.crossline([pg.pnode({
+        type:'SPNGRebinner',
+        name: tpc.name + name + "_rebin_v" + std.toString(view),
+        data: {
+            factor: factor,
+            norm: norm,
+        } + wc.object_with(control, ["verbosity", "device"])
+    }, nin=1, nout=1) for view in views]),
+
 
     // Node: [nview]tensor -> tensor[nview].  Apply a time filter.
     //

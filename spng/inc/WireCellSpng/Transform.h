@@ -18,6 +18,17 @@ namespace WireCell::SPNG {
             - scale :: Multiply the given "scalar" value to tensor values.
 
             - offset :: Add the given "scalar" value to tensor values.
+
+            - normalize :: Scale and offset data so that it is in the range [0,1].
+
+            - medsub :: Subtract the median value calculated along dimension given by dims[0].
+
+            - lowmedsub :: Same as medsub but will exclude any values from the
+              median that are larger than given by "scalar".
+
+            - threshold :: Convert to boolean with true for all pixels strictly
+              above the threshold given by "scalar".
+
         */
 
         /// 
@@ -27,7 +38,7 @@ namespace WireCell::SPNG {
         float scalar = 0;
 
         /// Specify a the indices for a number of dimensions aka axes.
-        std::vector<int> dims;
+        std::vector<int> dims = {};
 
     };
 

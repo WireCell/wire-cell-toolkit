@@ -72,6 +72,45 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
+            if (opcfg.operation == "normalize") {
+                m_ops.push_back([](const torch::Tensor& tensor) -> torch::Tensor {
+                    torch::Tensor vmin = tensor.min();
+                    torch::Tensor vmax = tensor.max();
+
+                    // Special case that all values are same
+                    if (vmax.item<float>() == vmin.item<float>()) {
+                        return torch::full_like(tensor, 0.5); 
+                    }
+
+                    return (tensor - vmin) / (vmax - vmin);
+                });
+                continue;
+            }
+            if (opcfg.operation == "medsub") {
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    torch::Tensor medians = std::get<0>(torch::median(tensor, dims[0], true));
+                    return tensor.sub(medians);
+                });
+                continue;
+            }
+            if (opcfg.operation == "lowmedsub") {
+                m_ops.push_back([dims, scalar](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto temp = tensor.clone();
+                    auto mask = temp.gt(scalar);
+                    temp.masked_fill_(mask, std::numeric_limits<float>::quiet_NaN());
+                    temp = std::get<0>(torch::nanmedian(temp, dims[0], /*keepdim=*/true));
+                    return tensor.sub(temp);
+                });
+                continue;
+            }
+            if (opcfg.operation == "treshold") {
+                m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor > scalar;
+                });
+                continue;
+            }
+
+
             raise<ValueError>("unknown operation: %s", opcfg.operation);
         }
 
