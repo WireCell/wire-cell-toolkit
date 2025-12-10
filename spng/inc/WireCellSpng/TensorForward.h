@@ -24,6 +24,8 @@ namespace WireCell::SPNG {
         /// The batch dimension.
         int batch_dimension = 0;
 
+        /// The expected number of non-batch dimensions.
+        int ndims = 3;
 
         // FIXME: add support for chunking, orthogonal to sequencing
         // bool chunk = false;
@@ -32,7 +34,7 @@ namespace WireCell::SPNG {
     };
 
 }
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TensorForwardConfig, forward);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TensorForwardConfig, forward, nbatch, batch_dimension);
 namespace WireCell::SPNG {
 
     /// A BARE torch tensor function that sends a BARE tensor through an ITensorForward.

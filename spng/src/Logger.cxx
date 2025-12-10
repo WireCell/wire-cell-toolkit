@@ -199,7 +199,7 @@ namespace WireCell::SPNG {
 
         // we need a mutable version to change during recursive calls to logit().
         m_verbosity = m_config.verbosity;
-        debug("logger with verbosity: {} ({})", m_verbosity, m_config.verbosity);
+        // debug("logger with verbosity: {} ({})", m_verbosity, m_config.verbosity);
 
     }
     WireCell::Configuration Logger::default_configuration() const

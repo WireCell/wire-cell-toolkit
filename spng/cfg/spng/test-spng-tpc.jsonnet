@@ -132,19 +132,20 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     ]);
 
     // FIXME: implement this
-    local forward={type:'SPNGTorchScriptForward', name:'', data:{filename:"foo.ts"}};
+    local forward={type:'SPNGTensorForwardTS', name:'', data:{ts_filename:"unet-l23-cosmic500-e50.ts"}};
 
     // 3 source pnodes producing "signal" tensors
     local view_signals=[
         roi.connect_dnnroi(tpc.name + "v" + std.toString(vi.value), forward,
                             pg.oport_node(crossviews_stage, vi.value),
                             pg.oport_node(gauss_filter_stage, vi.value),
-                            pg.oport_node(dnnroi_filter_stage, vi.index))
+                            pg.oport_node(dnnroi_filter_stage, vi.index),
+                            control=control)
         for vi in wc.enumerate(crossed_view_indices)
     ] + [
         // fixme: I don't want to hardwire "W" but rather go off threshold_view_indices.
         roi.connect_threshold(tpc.name + "v2", roi_w, 
-                              pg.oport_node(gauss_filter_stage, 2))
+                              pg.oport_node(gauss_filter_stage, 2), control=control)
     ];
     local signals=pg.crossline(view_signals);
 

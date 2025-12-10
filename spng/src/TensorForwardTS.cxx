@@ -4,6 +4,7 @@
 
 #include "WireCellSpng/HanaConfigurable.h"
 
+#include "WireCellUtil/Persist.h"
 #include "WireCellUtil/NamedFactory.h"
 
 
@@ -29,17 +30,15 @@ namespace WireCell::SPNG {
         WireCell::configure_bases<TensorForwardTS, ContextBase, Logger>(this, cfg);
         from_json(m_config, cfg);
 
-        try {
-            log->debug("Loading TorchScript model from: {} to device {}",
-                       m_config.ts_filename, to_string(device()));
-        
-            m_module = torch::jit::load(m_config.ts_filename, device());
+        auto path = Persist::resolve(m_config.ts_filename);
+        if (path.empty()) {
+            raise<ValueError>("failed to find Torch Script model file %s",
+                              m_config.ts_filename);
         }
-        catch (const c10::Error& e) {
-            log->critical("error loading model: \"{}\" to device \"{}\": {}",
-                          m_config.ts_filename, to_string(device()), e.what());
-            throw;
-        }
+        log->debug("Loading TorchScript model from: {} to device {}",
+                   path, to_string(device()));
+
+        m_module = torch::jit::load(path, device()); // may throw
     }
 
     WireCell::Configuration TensorForwardTS::default_configuration() const

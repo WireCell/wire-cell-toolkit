@@ -1,6 +1,15 @@
 #include "WireCellSpng/Transform.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 
+
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGTransform,
+                 WireCell::SPNG::Transform,
+                 WireCell::ITorchTensorFilter,
+                 WireCell::IConfigurable,
+                 WireCell::INamed)
+
 using namespace WireCell::HanaJsonCPP;                         
 
 namespace WireCell::SPNG {

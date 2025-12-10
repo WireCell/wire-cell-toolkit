@@ -27,12 +27,12 @@ local util = import "spng/util.jsonnet";
 
 
 
-    /// When at more than 1 is in view_crossed
+    /// 3->ncrossed for ncrossed > 1.
     crossfan_many(tpc, view_crossed=[1,1,0], extra_name="", control={})::
         local ncrosses = wc.sum(view_crossed);
         local fanouts = [       // 3
             fans.fanout(tpc.name+'crossfan_v'+std.toString(view_index),
-                        ncrosses+1-view_crossed[view_index], control=control)
+                        ncrosses, control=control)
             for view_index in [0,1,2] ];
         local crossviews = [    // 3, sparse
             if view_crossed[view_index] == 1
