@@ -16,6 +16,8 @@
 #include "WireCellIface/IFaninNode.h"
 #include "WireCellIface/IHydraNode.h"
 
+#include "WireCellIface/INamed.h" // to guess name
+
 #include "WireCellUtil/Type.h"
 
 #include <map>
@@ -55,8 +57,14 @@ namespace WireCell {
 
             virtual std::string ident()
             {
+                std::string name="";
+                auto inamed = std::dynamic_pointer_cast<INamed>(m_wcnode);
+                if (inamed) {
+                    name = " name:\"" + inamed->get_name() + "\"";
+                }
+
                 std::stringstream ss;
-                ss << "<Node "
+                ss << "<Node " << name
                    << " type:" << WireCell::type(*(m_wcnode.get())) << " cat:" << m_wcnode->category()
                    << " sig:" << demangle(m_wcnode->signature());
                 ss << " inputs:[";

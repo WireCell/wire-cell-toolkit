@@ -187,7 +187,13 @@ bool Graph::connected()
         okay = false;
         l->warn("disconnected node #{}: {}", instance, node->ident());
         for (const auto& p : bad) {
-            l->warn("\tport: {}", p.ident());
+            l->warn("\tempty: {}", p.ident());
+        }
+        for (const auto& p : node->input_ports()) {
+            l->warn("\tiport: {}", p.ident());
+        }
+        for (const auto& p : node->output_ports()) {
+            l->warn("\toport: {}", p.ident());
         }
     }
     return okay;
