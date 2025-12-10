@@ -21,6 +21,11 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TensorForwardTSConfig, ts_filename);
 namespace WireCell::SPNG {
     /// A "service" type component that sends a tensor though torch script.
     ///
+    /// This does barely nothing except send tensors through a TorchScript
+    /// model.  It does NOT perform any pre/post processing of tensors.
+    ///
+    /// See TensorForward for a DFP node that can use this or other 
+    /// ITensorForward implementations.
     struct TensorForwardTS : public Logger, public ContextBase,
                              public virtual IConfigurable,
                              public virtual ITensorForward
@@ -33,7 +38,7 @@ namespace WireCell::SPNG {
         virtual WireCell::Configuration default_configuration() const;
 
         // ITensorForward
-        virtual ITorchTensor::pointer forward(const ITorchTensor::pointer& input) const;
+        virtual torch::Tensor forward(const torch::Tensor& input) const;
 
     private:
         TensorForwardTSConfig m_config;

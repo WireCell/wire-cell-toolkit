@@ -97,7 +97,7 @@ local util = import "spng/util.jsonnet";
                 extraction: mps
             },
         }, nin=1, nout=nex);
-        local op = util.reduce_one("stack", dim=-3, multiplicity=ndense+nex, name=this_name);
+        local op = util.reduce_one("stack", dim=-3, multiplicity=ndense+nex, name=this_name+"_stack");
         pg.intern(outnodes=[op], // single output
                   centernodes=[ex],
                   iports=[      // ndense stack iports exposed followed by extract iports

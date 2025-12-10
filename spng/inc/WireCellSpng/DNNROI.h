@@ -14,17 +14,17 @@ namespace WireCell {
         struct DNNROIFindingCfg {
 
             // The APA to focus on
-            std::string apa{"AnodePlane"};
+            // std::string apa{"AnodePlane"};
 
             // The plane index number (in 0,1,2) to determine which
             // channels span the data.
            // int plane{-1};
-            std::string plane{"na"};
+            // std::string plane{"na"};
             // If true, sort the selected channels by their channel ID
             // value.  If false, the ordering given by the channel
             // placement (ordered according to the so called "wire
             // atachement number").
-            bool sort_chanids{false};
+            // bool sort_chanids{false};
 
             // DNN needs consistent scaling with trained model.  This is
             // multiplied to the input charge values.
@@ -46,14 +46,14 @@ namespace WireCell {
 
             // The first tick and number of ticks to consider from the
             // input traces.  See also chids.
-            int tick0{0};
-            int nticks{6000};
+            // int tick0{0};
+            // int nticks{6000};
 
             // Set the threshold on the ROI "likelihood" which is a
             // probability-like value.  It is tuned to balance efficiency and
             // noise reduction and strictly is best optimized for the given
             // model.
-            double mask_thresh{0.5};
+            // double mask_thresh{0.5};
 
             // The IForward service to use
             //Should be some variant of TorchService (AB)
@@ -62,30 +62,31 @@ namespace WireCell {
             // Tags of sets of traces to use as input.  These are
             // usually "loose_lfN", "mp2_roiN" and "mp3_roiN" with "N"
             // replaced by the anode number.
-            std::vector<std::string> intags;
+            // std::vector<std::string> intags;
 
-            std::string summary_tag{""};
+            // std::string summary_tag{""};
 
             // The tag used for the input decon charge.  This is
             // usually "decon_chargeN" with "N" replaced with the
             // anode number.
-            std::string decon_charge_tag{""};
+            // std::string decon_charge_tag{""};
 
             // The model downsamples/rebins in time by a number of ticks.
-            int tick_per_slice{10};
+            // int tick_per_slice{10};
 
             // An output file used for special debugging.
-            std::string debugfile{""};
+            // std::string debugfile{""};
 
 
             // The output trace tag, likely should be set to "dnnspN"
             // with "N" marking the anode number.
-            std::string outtag{""};
+            // std::string outtag{""};
 
+            // The number of chunks in to which the time dimension may be split.
             int nchunks{1};
 
             // if true, save the negative parts of the charge traces
-            bool save_negative_charge{false};
+            // bool save_negative_charge{false};
         };
 
         //ROI data has target plane and mp2 and mp3 planes

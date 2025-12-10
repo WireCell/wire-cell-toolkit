@@ -76,8 +76,8 @@ DNNROI::~DNNROI()
 void DNNROI::configure(const WireCell::Configuration& cfg)
 {
    //m_cfg.apa = get(cfg, "apa",m_cfg.apa);
-   m_cfg.plane = get(cfg, "plane", m_cfg.plane); 
-   log->debug("DNNROI: Configuring with plane: {}", m_cfg.plane);
+   // m_cfg.plane = get(cfg, "plane", m_cfg.plane); 
+   // log->debug("DNNROI: Configuring with plane: {}", m_cfg.plane);
    // Is it implemented already>
    /*
    auto apa = Factory::find_tn<IAnodePlane>(m_cfg.apa);
@@ -97,6 +97,7 @@ void DNNROI::configure(const WireCell::Configuration& cfg)
        std::sort(m_chlist.begin(), m_chlist.end());
    }
     */
+   m_cfg.nchunks = get(cfg, "nchunks", m_cfg.nchunks);
    m_cfg.input_scale = get(cfg, "input_scale", m_cfg.input_scale);
    m_cfg.input_offset = get(cfg, "input_offset", m_cfg.input_offset);
    m_cfg.output_scale = get(cfg, "output_scale", m_cfg.output_scale);
@@ -131,7 +132,7 @@ bool DNNROI::operator()(const input_pointer& in, output_pointer& out)
     out = nullptr;
     log->debug("Calling DNNROI operator()");
     if (!in) {
-        log->debug("DNNROI: EOS ");
+        log->debug("DNNROI:  ");
         return true;
     }
     log->debug("Running DNNROI");

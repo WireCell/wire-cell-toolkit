@@ -1,5 +1,6 @@
 #include "WireCellSpng/TensorForward.h"
 #include "WireCellSpng/HanaConfigurable.h"
+#include "WireCellSpng/SimpleTorchTensor.h"
 
 
 #include "WireCellUtil/NamedFactory.h"
@@ -29,7 +30,29 @@ namespace WireCell::SPNG {
         }
 
         logit(in, "forwarding");
-        out = m_forward->forward(in);
+
+        auto inten = in->tensor();
+        auto md = in->metadata();
+
+        torch::Tensor result;
+
+        const int64_t batch_dimension = m_config.batch_dimension;
+
+        std::vector<torch::Tensor> batches = {inten};
+        if (m_config.nbatch) { // per-batch forwarding
+            batches = torch::chunk(inten, batch_dimension, m_config.nbatch);
+        }
+
+        for (size_t bind = 0; bind<batches.size(); ++bind) {
+            auto one = m_forward->forward(batches[bind]);
+            batches.push_back(one);
+            // fixme: add inner loop on chunks of time.
+        }
+
+        result = torch::cat(batches, batch_dimension);
+
+        out = std::make_shared<SimpleTorchTensor>(result, md);
+
         logit(out, "forwarded");
         next_count();
         return true;

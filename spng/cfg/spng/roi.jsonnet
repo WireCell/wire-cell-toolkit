@@ -34,8 +34,19 @@ local util = import "util.jsonnet";
                 extraction: mps
             },
         }, nin=1, nout=nmps);
-        /// Stack dense + mps.   This will provide the iport for the "dense" pnode
-        local op = util.reduce_one("stack", dim=-3, multiplicity=nmps+1, name=this_name);
+        /// Stack dense + mps.  An iport will be exposed to connect to "dense".
+        /// FIXME: batching may be a problem.  dim:-3 stacks along the dimension
+        /// prior to (chan,tick) which would make (nbatch, 3, nchan, ntick).
+        /// But, what does DNNROI ingest expect?
+        local op = pg.pnode({
+            type:'SPNGReduce',
+            name: name+"_stack",
+            data: {
+                operation: "stack",
+                dim: -3,
+                multiplicity: nmps+1,
+            },
+        }, nin=nmps+1, nout=1),
         local fwd = pg.pnode({
             type: 'SPNGForward',
             name: this_name,
@@ -43,10 +54,25 @@ local util = import "util.jsonnet";
                 forward: wc.tn(forward),
             },
         }, nin=1, nout=1, uses=[forward]);
-        // gauss+roi in, signals out.  this provides the oport.
+        local thres = pg.pnode({
+            type: 'SPNGThreshold',
+            name: name+'_roi',
+            data: {
+                nominal: 0.5    // FIXME: a study is needed to best set this
+            }
+        }, nin=1, nout=1);
+        local rebin = pg.pnode({
+            type: "SPNGRebinner",
+            name: name,
+            data: {
+                norm: "maximum",
+                factor: -4,     // FIXME: must match upstream resampler.
+            },
+        }, nin=1, nout=1);
+        // ApplyROI: gauss+roi in, signals out.  this provides the oport.
         local mul = pg.pnode({
             type: 'SPNGReduce',
-            name: this_name+"roi",
+            name: this_name+"_applyroi",
             data: {
                 operation: 'mul',
             },

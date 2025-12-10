@@ -1,7 +1,6 @@
 #include "WireCellSpng/TensorForwardTS.h"
 #include "WireCellSpng/TorchScript.h"
 #include "WireCellSpng/Util.h"
-#include "WireCellSpng/SimpleTorchTensor.h"
 
 #include "WireCellSpng/HanaConfigurable.h"
 
@@ -51,16 +50,12 @@ namespace WireCell::SPNG {
         return cfg;
     }
 
-    ITorchTensor::pointer TensorForwardTS::forward(const ITorchTensor::pointer& input) const
+    torch::Tensor TensorForwardTS::forward(const torch::Tensor& input) const
     {
-        if (! input) {
-            return input;
-        }
         TorchSemaphore sem(context());
 
-        std::vector<torch::IValue> value = { to(input->tensor()) };
+        std::vector<torch::IValue> value = { input };
         auto result = m_module.forward(value);
-        return std::make_shared<SimpleTorchTensor>(result.toTensor(),
-                                                   input->metadata());        
+        return result.toTensor();
     }
 }
