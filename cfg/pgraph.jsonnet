@@ -437,7 +437,7 @@ local wc = import "wirecell.jsonnet";
     // "program" can add additional configuration.  Known programs currently
     // include only "wire-cell". which will look for a special "wire-cell"
     // object.  Pass empty string to turn exclude it.
-    main :: function(graph, app='Pgrapher', plugins = [], program="wire-cell")
+    main :: function(graph, app='Pgrapher', plugins = [], program="wire-cell", uses=[])
         // Here, "core" means: in WCT and restricted to WCT core dependencies.
         // No ROOT, Torch, HDF5, etc.  O.w., more the merrier in this list.
         local core_plugins = [ "WireCellSio", "WireCellAux", "WireCellApps",
@@ -464,5 +464,5 @@ local wc = import "wirecell.jsonnet";
                 }
             }],
         };
-        cmdline[program] + $.uses(graph) + [appcfg]
+        cmdline[program] + uses + $.uses(graph) + [appcfg]
 }
