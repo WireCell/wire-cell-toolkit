@@ -99,6 +99,7 @@ local util = import "util.jsonnet";
             name: this_name,
             data: {
                 forward: wc.tn(forward),
+                nbatch: 1,
             } + wc.object_with(control, ["verbosity", "device"]),
         }, nin=1, nout=1, uses=[forward]);
 

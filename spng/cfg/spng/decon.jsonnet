@@ -106,7 +106,7 @@ local pg = import "pgraph.jsonnet";
         local decon_time =
             if streaming
             then {cyclic: false, crop: 0, baseline: true/*, roll_mode: "decon"*/}
-            else {cyclic: false, crop: 0, baseline: true/*, roll_mode: "decon"*/},
+            else {cyclic: false, crop: -2, baseline: true/*, roll_mode: "decon"*/},
 
         local nothing = {padding: "none", dft: false},
         local just_filter = {padding: "none", dft: true},
