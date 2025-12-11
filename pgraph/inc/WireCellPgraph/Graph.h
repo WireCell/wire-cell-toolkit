@@ -75,7 +75,11 @@ namespace WireCell {
             std::unordered_map<Node*, std::vector<Node*> > m_edges_forward, m_edges_backward;
             Log::logptr_t l;
             Log::logptr_t l_timer;
-            std::unordered_map<Node*, double> m_nodes_timer;
+            struct TimerClocks {
+                double wall{0};
+                double core{0};
+            };
+            std::unordered_map<Node*, TimerClocks> m_nodes_timer;
             bool m_enable_em = false;
             ExecMon m_em;
         };

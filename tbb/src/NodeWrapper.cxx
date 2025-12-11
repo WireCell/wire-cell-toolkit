@@ -11,14 +11,16 @@ std::ostream& WireCellTbb::operator<<(std::ostream& os, const WireCellTbb::NodeI
     const double rttot = std::chrono::duration_cast<std::chrono::milliseconds>(info.runtime()).count();
     const size_t num = info.calls();
     double rtmean = 0;
+
     if (num) rtmean = rttot/num;
 
     os 
        << "calls=" << num << " "
        << "time=" << rttot << " "
        << "mean=" << rtmean << " "
-       << "max=" << rtmax << " [wall-ms]"
-       << " [" << tname << "] \"" << info.instance_name() << "\"";
+       << "max=" << rtmax << " [wall-ms] "
+       << "core=" << info.coretime() << " [s] " 
+       << "[" << tname << "] \"" << info.instance_name() << "\"";
 
     return os;
 }

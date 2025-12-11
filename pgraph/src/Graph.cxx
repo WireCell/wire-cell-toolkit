@@ -129,10 +129,6 @@ bool Graph::execute()
     auto nodes = sort_kahn();
     l->debug("executing with {} nodes", nodes.size());
 
-    for (Node* node : nodes) {
-        m_nodes_timer[node] = 0.0;
-    }
-
     while (true) {
         int count = 0;
         bool did_something = false;
@@ -140,11 +136,16 @@ bool Graph::execute()
         for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit, ++count) {
             Node* node = *nit;
 
-            auto start = std::clock();
+            auto core = std::clock();
+            auto wall = std::chrono::high_resolution_clock::now();
 
             bool ok = call_node(node);
 
-            m_nodes_timer[node] += (std::clock() - start) / (double) CLOCKS_PER_SEC;
+            m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
+
+            auto delta = std::chrono::high_resolution_clock::now() - wall;
+            const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
+            m_nodes_timer[node].wall += wall_ms / 1000.0;
 
             if (ok) {
                 if (m_enable_em) {
@@ -201,18 +202,22 @@ bool Graph::connected()
 
 void Graph::print_timers(bool include_execmon) const
 {
-    std::multimap<float, Node*> m;
-    double total_time = 0;
-    for (auto it : m_nodes_timer) {
-        m.emplace(it.second, it.first);
+    std::multimap<float, std::pair<Node*, TimerClocks>> m;
+    for (auto it : m_nodes_timer) { // to sort by wall time
+        m.emplace(it.second.wall, std::make_pair(it.first, it.second));
     }
+
+    double total_wall = 0;
+    double total_core = 0;
     for (auto it = m.rbegin(); it != m.rend(); ++it) {
-        Node* node = it->second;
-        l_timer->info("Timer: {} core-sec: ({}) \"{}\"",
-                      it->first, node->cpptype_name(), node->instance_name()); 
-        total_time += it->first;
+        auto [node, tc] = it->second;
+
+        l_timer->info("Timer: {:.3f} wall-sec, {:.3f} core-sec: ({}) \"{}\"",
+                      tc.wall, tc.core, node->cpptype_name(), node->instance_name()); 
+        total_wall += tc.wall;
+        total_core += tc.core;
     }
-    l_timer->info("Timer: Total node execution : {} core-sec", total_time);
+    l_timer->info("Timer: Total {:.3f} wall-sec, {:.3f} core-sec", total_wall, total_core);
 
     if (include_execmon) {
         l_timer->debug("ExecMon:\n{}", m_em.summary());

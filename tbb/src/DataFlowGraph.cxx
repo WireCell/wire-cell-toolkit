@@ -123,14 +123,22 @@ bool DataFlowGraph::run()
     m_graph.wait_for_all();
 
     if (m_summary) {
+        double coretot_s = 0;
+        double walltot_ms = 0;
+
         std::vector<WireCellTbb::Node> nodes(m_nodes.begin(), m_nodes.end());
         std::sort(nodes.begin(), nodes.end(),
                   [](const WireCellTbb::Node& a, const WireCellTbb::Node& b) {
                       return a->info().runtime() > b->info().runtime();
                   });
         for (const auto& node : nodes) {
+            const auto& info = node->info();
+
+            coretot_s += info.coretime();
+            walltot_ms += std::chrono::duration_cast<std::chrono::milliseconds>(info.runtime()).count();
+
             std::stringstream ss;
-            ss << node->info();
+            ss << info;
             if (m_summary < 2) {
                 log->debug(ss.str());
             }
@@ -138,6 +146,15 @@ bool DataFlowGraph::run()
                 log->info(ss.str());
             }
         }
+        if (m_summary < 2) {
+            log->debug("totals: wall={:.3f} s, core={:.3f} s, (counts include any EOS)",
+                       walltot_ms / 1000.0, coretot_s);
+        }
+        else {
+            log->info("totals: wall={:.3f} s, core={:.3f} s, (counts include any EOS)",
+                      walltot_ms / 1000.0, coretot_s);
+        }
+            
     }
 
     return true;
