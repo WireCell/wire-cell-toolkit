@@ -7,6 +7,8 @@
 
 #include "WireCellPgraph/Graph.h"
 
+#include "WireCellUtil/Type.h"
+
 #include <iostream>
 #include <sstream>
 
@@ -29,7 +31,14 @@ class IdNode : public Pgraph::Node {
     }
     int id() { return m_id; }
 
-    virtual std::string ident()
+    virtual std::string instance_name() const {
+        return m_name;
+    }
+    
+    virtual std::string cpptype_name() const {
+        return WireCell::type(*this);
+    }
+    virtual std::string ident() const
     {
         stringstream ss;
         ss << m_name << "[" << m_id << "]";

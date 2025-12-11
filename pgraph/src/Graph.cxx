@@ -206,13 +206,10 @@ void Graph::print_timers(bool include_execmon) const
     for (auto it : m_nodes_timer) {
         m.emplace(it.second, it.first);
     }
-    std::vector<Node*> ordered;
     for (auto it = m.rbegin(); it != m.rend(); ++it) {
-        ordered.push_back(it->second);
-        std::string iden = it->second->ident();
-        std::vector<std::string> tags;
-        boost::split(tags, iden, [](char c) { return c == ' '; });
-        l_timer->info("Timer: {} : {} core-sec", tags[2].substr(5), it->first);
+        Node* node = it->second;
+        l_timer->info("Timer: {} core-sec: ({}) \"{}\"",
+                      it->first, node->cpptype_name(), node->instance_name()); 
         total_time += it->first;
     }
     l_timer->info("Timer: Total node execution : {} core-sec", total_time);

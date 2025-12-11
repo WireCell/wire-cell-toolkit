@@ -1,7 +1,9 @@
-#include "WireCellUtil/Logging.h"
 #include "WireCellPgraph/Graph.h"
+
+#include "WireCellUtil/Logging.h"
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/Type.h"
 
 #include <boost/container_hash/hash.hpp>
 
@@ -28,7 +30,16 @@ class IdNode : public Pgraph::Node {
     }
     int id() { return m_id; }
 
-    virtual std::string ident()
+
+    virtual std::string instance_name() const {
+        return m_name;
+    }
+    
+    virtual std::string cpptype_name() const {
+        return WireCell::type(*this);
+    }
+
+    virtual std::string ident() const
     {
         std::stringstream ss;
         ss << m_name << "[" << m_id << "]";

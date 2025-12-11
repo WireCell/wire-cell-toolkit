@@ -55,17 +55,28 @@ namespace WireCell {
                 }
             }
 
-            virtual std::string ident()
-            {
-                std::string name="";
-                auto inamed = std::dynamic_pointer_cast<INamed>(m_wcnode);
+            virtual std::string instance_name() const {
+                auto inamed = std::dynamic_pointer_cast<const INamed>(m_wcnode);
                 if (inamed) {
-                    name = " name:\"" + inamed->get_name() + "\"";
+                    return inamed->get_name();
+                }
+                return "";
+            }
+
+            virtual std::string cpptype_name() const {
+                return WireCell::type(*(m_wcnode.get()));
+            }
+
+            virtual std::string ident() const {
+                std::string name = instance_name();
+                if (! name.empty()) {
+                    name = " name:" + name;
                 }
 
                 std::stringstream ss;
                 ss << "<Node " << name
-                   << " type:" << WireCell::type(*(m_wcnode.get())) << " cat:" << m_wcnode->category()
+                   << " type:" << cpptype_name()
+                   << " cat:" << m_wcnode->category()
                    << " sig:" << demangle(m_wcnode->signature());
                 ss << " inputs:[";
                 for (auto t : m_wcnode->input_types()) {
