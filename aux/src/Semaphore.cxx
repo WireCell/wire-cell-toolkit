@@ -49,3 +49,8 @@ void Aux::Semaphore::release() const
 {
     m_sem.release();
 }
+
+int Aux::Semaphore::get_count() const
+{
+    m_sem.get_count();
+}
