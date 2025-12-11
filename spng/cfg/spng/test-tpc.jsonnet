@@ -3,17 +3,28 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
-local fans = import "fans.jsonnet";
-local frame = import "frame.jsonnet";
-local decon = import "decon.jsonnet";
-local cv = import "crossviews.jsonnet";
-local dnnroi = import "dnnroi.jsonnet";
+local fans_mod = import "fans.jsonnet";
+local frame_mod = import "frame.jsonnet";
+local decon_mod = import "decon.jsonnet";
+local cv_mod = import "crossviews.jsonnet";
+// local dnnroi_mod = import "dnnroi.jsonnet";
+local controls_mod = import "control.jsonnet";
 
 local detconf = import "detconf.jsonnet";
 
 function(detname="pdhd", tpcid="tpc0", stage="decon_pack")
     local det = detconf[detname];
     local tpc = det.tpc[tpcid];
+
+    local controls = controls_mod(device='gpu', verbosity=2, semaphore=1);
+    local control = controls.config;
+
+    local fans = fans_mod(control);
+    local frame = frame_mod(control);
+    local decon = decon_mod(control);
+    local cv = cv_mod(control);
+    // local dnnroi = dnnroi_mod(control);
+
     local stages = {
         // 1 frame -> 1 frame tensor set + ngroup tensors
         input_data: frame.set_plus_groups(tpc),
@@ -54,9 +65,9 @@ function(detname="pdhd", tpcid="tpc0", stage="decon_pack")
         // Attach that to input of crossviews
         threshold_cv: pg.shuntline($.filter_threshold, $.crossfan),
 
-        dnnroi_prepare: dnnroi.prepare(tpc.name, filters.dnnroi, $.crossfan),
+        // dnnroi_prepare: dnnroi.prepare(tpc.name, filters.dnnroi, $.crossfan),
 
-        all: pg.components([$.frame_filters, $.threshold_cv, $.dnnroi_prepare]),
+        // all: pg.components([$.frame_filters, $.threshold_cv, $.dnnroi_prepare]),
 
     };
     local graph = stages[stage];

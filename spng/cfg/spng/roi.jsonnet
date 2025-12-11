@@ -2,9 +2,9 @@
 
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
-local fans = import "fans.jsonnet";
 local util = import "util.jsonnet";
 
+function(control={})
 {
     /// 3->1 overall, but returns an object with various sinks and one source
     /// that bracket a DNNROI-like ROI finding sugraph.
@@ -36,7 +36,7 @@ local util = import "util.jsonnet";
     ///
     /// The subgraph is very DNNROI specific and bakes in pre/post processing
     /// around the "forward" node.  It is assumed the source to be connected to
-    dnnroi_subgraph(name, forward, mps=["mp2", "mp3"], rebin=4, scale=1.0/4000.0, control={})::
+    dnnroi_subgraph(name, forward, mps=["mp2", "mp3"], rebin=4, scale=1.0/4000.0)::
         local this_name = name;
         local nmps = std.length(mps);
 
@@ -46,7 +46,7 @@ local util = import "util.jsonnet";
             name: this_name,
             data: {
                 extraction: mps
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=nmps);
 
         /// 1->1 rebin the "dense" image
@@ -56,7 +56,7 @@ local util = import "util.jsonnet";
             data: {
                 norm: "interpolation",
                 factor: rebin,
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1);
 
         /// nmps+1 -> 1
@@ -71,7 +71,7 @@ local util = import "util.jsonnet";
                 operation: "stack",
                 dim: -3,
                 multiplicity: nmps+1,
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=nmps+1, nout=1);
 
         /// 1 -> 1
@@ -90,7 +90,7 @@ local util = import "util.jsonnet";
                     /// the forward with a transpose.
                     { operation: "transpose", dims: [-2,-1] }
                 ]
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1);
 
         /// Do inference (eg, DNNROI) or other type of "forward"
@@ -100,7 +100,7 @@ local util = import "util.jsonnet";
             data: {
                 forward: wc.tn(forward),
                 nbatch: 1,
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1, uses=[forward]);
 
         local post = pg.pnode({
@@ -114,7 +114,7 @@ local util = import "util.jsonnet";
                     { operation: "transpose", dims: [-2,-1] },
                     // in principle could threshold here but see comments, next.
                 ],
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1);
 
         // Convert DNNROI output to Boolean mask.  Note, this can be done in a
@@ -126,7 +126,7 @@ local util = import "util.jsonnet";
             name: this_name+'_roi',
             data: {
                 nominal: 0.5    // FIXME: a study is needed to best set this
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1);
         // We use rebinner following threshold.  However, we may want to reverse
         // the order in which case we would use resample instead.  
@@ -136,7 +136,7 @@ local util = import "util.jsonnet";
             data: {
                 norm: "maximum",
                 factor: -rebin,     // FIXME: must match upstream resampler.
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1);
         // ApplyROI: gauss+roi in, signals out.  this provides the oport.
         local mul = pg.pnode({
@@ -144,12 +144,12 @@ local util = import "util.jsonnet";
             name: this_name+"_applyroi",
             data: {
                 operation: 'mul',
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=2, nout=1);
         local rbl = pg.pnode({
             type: 'SPNGRebaseliner',
             name: this_name,
-            data: wc.object_with(control, ["verbosity", "device"]),
+            data: control
         }, nin=1, nout=1);
         local pipe = pg.pipeline([rebinner, stack, pre, fwd, post, thresh, unbinner, mul, rbl]);
         {
@@ -191,8 +191,8 @@ local util = import "util.jsonnet";
     /// assumed the caller connects them in some way.
     connect_dnnroi(name, forward,
                     crossviews, gauss, dense, forward,
-                    mps=["mp2", "mp3"], control={})::
-        local guts = $.dnnroi_subgraph(name, forward, mps=mps, control=control);
+                    mps=["mp2", "mp3"])::
+        local guts = $.dnnroi_subgraph(name, forward, mps=mps);
         pg.intern(centernodes=[crossviews, dense, gauss,
                                guts.crossviews, guts.dense, guts.gauss],
                   outnodes=[guts.signals],
@@ -210,19 +210,19 @@ local util = import "util.jsonnet";
     /// For connection using a DNNROI-like "forward", see connect_forward().
     ///
     /// Name must be unique to the view.
-    connect_threshold(name, threshold, gauss, control={})::
+    connect_threshold(name, threshold, gauss)::
         // gauss+roi in, signals out.  this provides the oport.
         local mul = pg.pnode({
             type: 'SPNGReduce',
             name: name,
             data: {
                 operation: 'mul',
-            },
+            } + control,
         }, nin=2, nout=1);
         local rbl = pg.pnode({
             type: 'SPNGRebaseliner',
             name: name,
-            data: { }
+            data: { } + control
         }, nin=1, nout=1);
         pg.intern(centernodes=[threshold, gauss, mul],
                   outnodes=[rbl],

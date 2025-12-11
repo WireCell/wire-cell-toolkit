@@ -44,7 +44,10 @@ namespace WireCell::SPNG {
     }
 
     void TorchContext::enter() const { 
-        if (m_sem) m_sem->acquire(); 
+        if (m_sem) {
+            spdlog::debug("acquiring semaphore with {} left", m_sem->get_count());                          
+            m_sem->acquire();
+        }
 
         m_agm = torch::GradMode::is_enabled();
         torch::GradMode::set_enabled(false);
@@ -52,7 +55,10 @@ namespace WireCell::SPNG {
     void TorchContext::exit() const {
         torch::GradMode::set_enabled(m_agm);
 
-        if (m_sem) m_sem->release();
+        if (m_sem) {
+            m_sem->release();
+            spdlog::debug("released semaphore with {} left", m_sem->get_count());                          
+        }
     }
 
     // A per-C++ thread "stream" is needed to submit concurrent tasks to a GPU.

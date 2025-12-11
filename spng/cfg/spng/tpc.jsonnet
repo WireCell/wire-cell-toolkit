@@ -5,11 +5,11 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
-local fans = import "fans.jsonnet";
-local frame = import "frame.jsonnet";
-local decon = import "decon.jsonnet";
-local cv = import "crossviews.jsonnet";
-local dnnroi = import "dnnroi.jsonnet";
+local fans_mod = import "fans.jsonnet";
+local frame_mod = import "frame.jsonnet";
+local decon_mod = import "decon.jsonnet";
+local cv_mod = import "crossviews.jsonnet";
+// local dnnroi_mod = import "dnnroi.jsonnet";
 
 local tlas = import "tlas.jsonnet";
 
@@ -21,6 +21,12 @@ function(tpc, control) {
     tpc: tpc,
     anode: tpc.anode,
 
+    local cv = cv_mod(control),
+    local fans = fans_mod(control),
+    local frame = frame_mod(control),
+    local decon = decon_mod(control),
+    // local dnnroi = dnnroi_mod(control),
+
     /// We use notation:
     ///
     /// Node: [nin]InType -> OutType[nout]
@@ -30,16 +36,16 @@ function(tpc, control) {
 
     // Node: [1]IFrame -> set[1]: This converts an ADC IFrame into corresponding
     // TDM tensor set.
-    frame_to_tdm: frame.to_tdm(tpc, control=control),
+    frame_to_tdm: frame.to_tdm(tpc),
 
     // Node: [1]set -> set[2]: frame tensor set fanout eg to send one to output
     // of graph for merging with SPNG results.
-    frame_set_fanout: fans.fanout(tpc.name+"frame", control=control),
+    frame_set_fanout: fans.fanout(tpc.name+"frame"),
 
     // Node: [1]set -> tensor[ngroup]: frame tensor set -> per-group tensors.
     // This breaks up the ADC frame into individual ADC tensors grouped by
     // channel groups.
-    frame_set_unpack: frame.tensorset_unpacker(tpc, control=control),
+    frame_set_unpack: frame.tensorset_unpacker(tpc),
 
     // Node: [1]set -> tensor[ngroup]: directly connect without a fanout.
     frame_direct_unpack: pg.pipeline([$.frame_to_tdm, $.frame_set_unpack]),
@@ -48,7 +54,7 @@ function(tpc, control) {
     // merge any split groups to produce a subgraph with 3 per-view tensors of
     // decon signal.  Note, only FR*ER response channel filter is decon'ed.  Not
     // time filter nor "RC" response decon is included.
-    response_decon: decon.group_decon_view(tpc, control=control),
+    response_decon: decon.group_decon_view(tpc),
 
     // Node: [nview]tensor -> tensor [nview] downsample
     downsampler(name, downsample_factor=4, views=[0,1,2]):: pg.crossline([pg.pnode({
@@ -57,7 +63,7 @@ function(tpc, control) {
         data: {
             ratio: 1.0/downsample_factor,
             // fixme: do we need integral norm?
-        } + wc.object_with(control, ["verbosity", "device"])
+        } + control
     }, nin=1, nout=1) for view in views]),
 
     // Node: [nview]tensor -> tensor [nview] rebin (interval domain downsample)
@@ -67,7 +73,7 @@ function(tpc, control) {
         data: {
             factor: factor,
             norm: norm,
-        } + wc.object_with(control, ["verbosity", "device"])
+        } + control
     }, nin=1, nout=1) for view in views]),
 
 
@@ -82,7 +88,7 @@ function(tpc, control) {
     // - gauss :: provides final signals to which ROIs are applied.
     local filter_names = ["gauss", "wiener", "dnnroi"],
     time_filter(filter_name, views=[0,1,2])::
-        decon.time_filter_views(tpc, filter_name, views=views, control=control),
+        decon.time_filter_views(tpc, filter_name, views=views),
         
     local time_filters = {
         [filter_name]: $.time_filter(filter_name)
@@ -90,45 +96,42 @@ function(tpc, control) {
     },
 
     // Node: [nview]tensor -> tensor[nview] apply threshold to produce boolean tensor
-    threshold: cv.threshold_views(tpc, control=control),
+    threshold: cv.threshold_views(tpc),
 
     // Node: [nview]tensor->tensor[nview].  3 inputs are fanned to three
     // crossviews each of three inputs making a fully-connected net.
-    crossfan(view_crossed=[1,1,0]): cv.crossfan(tpc, view_crossed=view_crossed, control=control),
+    crossfan(view_crossed=[1,1,0]): cv.crossfan(tpc, view_crossed=view_crossed),
 
 
 
 
 
 
-    // Node: 2x3 -> 3.  Connect the dnnroi filters and output of crossviews
-    dnnroi_prepare: dnnroi.prepare(tpc.name, time_filters.dnnroi, $.crossfan, control=control),
+    // // Node: 2x3 -> 3.  Connect the dnnroi filters and output of crossviews
+    // dnnroi_prepare: dnnroi.prepare(tpc.name, time_filters.dnnroi, $.crossfan),
     
-    // Node: 3 -> 3.  Connect dnnroi pre with forward inference.
-    dnnroi_forward: dnnroi.forward(tpc.name, $.dnnroi_prepare, control=control),
+    // // Node: 3 -> 3.  Connect dnnroi pre with forward inference.
+    // dnnroi_forward: dnnroi.forward(tpc.name, $.dnnroi_prepare),
 
-    // Node: 2x3 -> 3.  Apply rois.
-    dnnroi_apply: dnnroi.apply(tpc.name, time_filters.gauss, $.dnnroi_forward, control=control),
+    // // Node: 2x3 -> 3.  Apply rois.
+    // dnnroi_apply: dnnroi.apply(tpc.name, time_filters.gauss, $.dnnroi_forward),
 
     // Node: nview->1 set.  Collect view tensors into a tensor set.
-    frame_set_repack: frame.tensorset_view_repacker(tpc.name, control=control),
+    frame_set_repack: frame.tensorset_view_repacker(tpc.name),
 
     // Node: 2->1.  Collect original tensor set and the repack with signals.
-    frame_set_fanin: fans.fanin(tpc.name+"fanin", type='TensorSet', control=control),
+    frame_set_fanin: fans.fanin(tpc.name+"fanin", type='TensorSet'),
 
     // Node: 1->1
-    frame_from_tdm: frame.from_tdm(tpc, control=control),
+    frame_from_tdm: frame.from_tdm(tpc),
 
 
     // Node: 2->2.  The "bypass" is a bit weird in that it seems to produce a cycle:
     // But, this is a mirage as bypass is a subgraph. See the function comments
     // for details and a drawing that shows the inner workings.
-    frame_bypass: frame.connect_bypass(frame.bypass(tpc.name+"bypass", control=control),
+    frame_bypass: frame.connect_bypass(frame.bypass(tpc.name+"bypass"),
                                        sources=[$.frame_to_tdm, $.frame_set_repack],
                                        targets=[$.frame_set_unpack, $.frame_from_tdm]),
-
-
-    // all: pg.components([$.frame_filters, $.threshold_cv, $.dnnroi_prepare]),
 
 
 

@@ -5,6 +5,7 @@
 
 #include "WireCellSpng/IFrameToTorchSet.h"
 #include "WireCellSpng/Logger.h"
+#include "WireCellSpng/ContextBase.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellUtil/Waveform.h" // for ChannelMasks
 
@@ -29,7 +30,8 @@ namespace WireCell::SPNG {
     /// elements of a summaries tensor.  It is possible to specify group
     /// channels not represented in a tagged traces collection and vice versa.
     ///
-    class FrameToTdm : public Logger,
+    class FrameToTdm : public ContextBase,
+                       public Logger,
                        public virtual IConfigurable,
                        public virtual IFrameToTorchSet {
     public:

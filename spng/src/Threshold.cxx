@@ -96,7 +96,7 @@ namespace WireCell::SPNG {
 
         TorchSemaphore sem(context());
 
-        auto tensor = in->tensor();
+        auto tensor = to(in->tensor());
         if (m_cfg.rms_nsigma == 0.0) {
             tensor = nominal_threshold(tensor);
         }

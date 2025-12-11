@@ -145,7 +145,7 @@ namespace WireCell::SPNG {
         const double sample_period = get<double>(md, "period", 1.0); // 1.0 is certainly wrong
         // fixme: I'm ignoring tbin.
 
-        auto tensor = in->tensor();
+        auto tensor = to(in->tensor());
         if (has_nan(tensor)) {
             log->critical("input tensor has NaNs {}", to_string(tensor));
             raise<ValueError>("input tensor has NaNs");
@@ -268,7 +268,7 @@ namespace WireCell::SPNG {
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }
 
-        auto kernel = m_kernel->spectrum(convolve_shape);
+        auto kernel = to(m_kernel->spectrum(convolve_shape));
         if (has_nan(kernel)) {
             log->critical("kernel has NaNs {}", to_string(kernel));
             raise<ValueError>("kernel has NaNs");

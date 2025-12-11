@@ -3,6 +3,8 @@
 #include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/HanaConfigurable.h"
+#include "WireCellSpng/TensorTools.h"
+
 #include "WireCellIface/IFaninNode.h"
 #include "WireCellIface/IFanoutNode.h"
 
@@ -20,6 +22,7 @@ namespace WireCell::SPNG {
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::FanConfig, multiplicity);
 
 namespace WireCell::SPNG {
+
 
     /** @brief Base class providing a fanin DFP node.
 
@@ -43,8 +46,8 @@ namespace WireCell::SPNG {
 
         // If you must call this default constructor, best to call Logger::init().
         FaninBase() = default;
-        FaninBase(const std::string& group_name)
-            : Logger(group_name) {
+        FaninBase(const std::string& type_name)
+            : Logger(type_name, "spng") {
         }
 
         FaninBase(const std::string& type_name,
@@ -92,10 +95,13 @@ namespace WireCell::SPNG {
             size_t neos = std::count(inv.begin(), inv.end(), nullptr);
             if (neos) {
                 fanin_eos();
+                this->next_count();
+                return true;
             }
-            else {
-                fanin_combine(inv, out);
-            }
+
+            auto device_inv = to_device(inv, device());
+            fanin_combine(device_inv, out);
+
             this->next_count();
             return true;
         }
@@ -173,10 +179,13 @@ namespace WireCell::SPNG {
             outv.resize(multiplicity, nullptr);
             if (! in) {
                 fanout_eos();
+            this->next_count();
+            return true;
             }
-            else {
-                fanout_separate(in, outv);
-            }
+
+            auto device_in = to_device(in, device());
+            fanout_separate(device_in, outv);
+
             this->next_count();
             return true;
         }

@@ -31,8 +31,9 @@ namespace WireCell::SPNG {
         }
 
         logit(in, "forwarding");
+        TorchSemaphore sem(this->context());
 
-        auto inten = in->tensor();
+        auto inten = to(in->tensor());
         auto md = in->metadata();
 
         const int ndims = inten.dim();
@@ -93,16 +94,14 @@ namespace WireCell::SPNG {
 
     void TensorForward::configure(const WireCell::Configuration& config)
     {
-        log->debug("configured with: {}", config);
-
         WireCell::configure_bases<TensorForward, ContextBase, Logger>(this, config);
         from_json(m_config, config);
         if (m_config.forward.empty()) {
             log->critical("no configured forward service in:{}", config);
             raise<ValueError>("TensorForward not given a forward service");
         }
-        log->debug("using forward service: \"{}\" nbatch={}",
-                   m_config.forward, m_config.nbatch);
+        log->debug("using forward service: \"{}\" nbatch={}, device={}",
+                   m_config.forward, m_config.nbatch, to_string(device()));
         m_forward = Factory::find_tn<ITensorForward>(m_config.forward);
         
     }
@@ -110,7 +109,6 @@ namespace WireCell::SPNG {
     WireCell::Configuration TensorForward::default_configuration() const
     {
         auto cfg = WireCell::default_configuration_bases<TensorForward, ContextBase, Logger>(this);
-        log->debug("default base config: {}", cfg);
         auto cfg2 = to_json(m_config);
         update(cfg, cfg2);
         return cfg;

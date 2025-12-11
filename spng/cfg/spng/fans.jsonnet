@@ -1,22 +1,23 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
+function(control={})
 {
-    fanin(name, multiplicity=2, type='Tensor', control={}):: pg.pnode({
+    fanin(name, multiplicity=2, type='Tensor'):: pg.pnode({
         type: "SPNGFanin"+type+'s',
         name: name,
-        data: { multiplicity: multiplicity } + wc.object_with(control, ["verbosity"]),
+        data: { multiplicity: multiplicity } + control
     }, nin=multiplicity, nout=1),
 
-    fanout(name, multiplicity=2, type='Tensor', control={}):: pg.pnode({
+    fanout(name, multiplicity=2, type='Tensor'):: pg.pnode({
         type: "SPNGFanout"+type+'s',
         name: name,
-        data: { multiplicity: multiplicity } + wc.object_with(control, ["verbosity"]),
+        data: { multiplicity: multiplicity } + control
     }, nin=1, nout=multiplicity),
 
     /// A fanout + shuntlines.  Fan out N oports of upstream node to N ports of
     /// each in list of downstream nodes.  
-    fanout_shuntline(upstream, downstreams, extra_name="", control={})::
+    fanout_shuntline(upstream, downstreams, extra_name="")::
         local Nu = std.length(upstream.oports);
         local Nd = std.length(downstreams);
         local fans = [pg.pnode({
@@ -24,7 +25,7 @@ local pg = import "pgraph.jsonnet";
             name: upstream.name + 'fan' + std.toString(ifan) + extra_name,
             data: {
                 multiplicity: Nd,
-            } + wc.object_with(control, ["verbosity"]),
+            } + control
         }, nin=1, nout=Nd) for ifan in wc.iota(Nu)];
         pg.intern(innodes=[upstream], outnodes=downstreams, centernodes=fans,
                   edges=[
@@ -42,11 +43,11 @@ local pg = import "pgraph.jsonnet";
     /// [sink, [sources]] where sink has N iports (no oports) and each of M
     /// sources have N oports (no iports).  You may then connect them to
     /// upstream/downstream, respectively.
-    fanout_cross(name, N, M, type='Tensor', control={})::
+    fanout_cross(name, N, M, type='Tensor')::
         local fans = [pg.pnode({
             type: "SPNGFanout"+type+"s",
             name: name + "f" + std.toString(num),
-            data: { multiplicity: M } + wc.object_with(control, ["verbosity"]),
+            data: { multiplicity: M } + control
         }, nin=1, nout=M) for num in wc.iota(N)];
         local sink = pg.intern(innodes=fans); // sets their iports
         local sources = [
@@ -84,14 +85,14 @@ local pg = import "pgraph.jsonnet";
     /// }
     // The "d" target's 2 ports connect to source port 0 and 1.
 
-    fanout_select(name, N, targets_list, type='Tensor', control={})::
+    fanout_select(name, N, targets_list, type='Tensor')::
         local tnames = std.set(std.flattenArrays(targets_list));
         local the_fans = [
             local M = std.length(targets_list[num]);
             pg.pnode({
                 type: "SPNGFanout"+type+"s",
                 name: name + "f" + std.toString(num),
-                data: { multiplicity: M} + wc.object_with(control, ["verbosity"]),
+                data: { multiplicity: M} + control
             }, nin=1, nout=M) for num in wc.iota(N)];
 
         local fan_port(fanind, group) =

@@ -153,7 +153,7 @@ namespace WireCell::SPNG {
 
         const int64_t taxis = 1;
         const int64_t tsize = shape[taxis];
-        return resize_tensor_tail(tmp, taxis, tsize);
+        return to(resize_tensor_tail(tmp, taxis, tsize));
     }
 
 

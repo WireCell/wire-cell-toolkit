@@ -51,7 +51,8 @@ namespace WireCell::SPNG {
 
     torch::Tensor TensorForwardTS::forward(const torch::Tensor& input) const
     {
-        TorchSemaphore sem(context());
+        /// Do NOT assert this in a service.  Do it in a node.
+        // TorchSemaphore sem(context());
 
         std::vector<torch::IValue> value = { input };
         auto result = m_module.forward(value);

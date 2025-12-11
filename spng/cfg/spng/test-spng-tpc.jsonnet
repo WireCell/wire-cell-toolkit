@@ -1,14 +1,13 @@
 // This covers SPNG from ADC input to signal output.
 
-local jobs = import "spng/jobs.jsonnet";
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local io = import "spng/io.jsonnet";
 local tio = import "spng/torchio.jsonnet";
-local fans = import "spng/fans.jsonnet";
-local frame = import "spng/frame.jsonnet";
-local cv = import "spng/crossviews.jsonnet";
-local roi = import "spng/roi.jsonnet";
+
+local fans_mod = import "spng/fans.jsonnet";
+local frame_mod = import "spng/frame.jsonnet";
+local roi_mod = import "spng/roi.jsonnet";
 local tpc_mod = import "spng/tpc.jsonnet";
 
 
@@ -31,16 +30,28 @@ local control_module = import "spng/control.jsonnet";
 function(input, output, tpcid=0, view_crossed=[1,1,0],
          wrap="tensors-%(tier)s-%(tpcid)d.pkl",
          dump="",
-         detname='pdhd', engine='Pgrapher', device='cpu', verbosity=0)
+         detname='pdhd',
+         // fixme: add seeds=[1,2,3,4]
+         engine='Pgrapher', device='cpu', verbosity=0, semaphore=1)
 
     // A list of view indices for views that have crossviews calculated for DNNROI type ROIs.
     local crossed_view_indices = [x.index for x in wc.enumerate(view_crossed) if x.value == 1];
     // A list of view indices for views where ROIs are calculated with simple thresholds.
     local threshold_view_indices = [x.index for x in wc.enumerate(view_crossed) if x.value == 0];
 
-    local control = control_module.bundle(device=device, verbosity=wc.intify(verbosity));
     local det = detector.subset(detconf[detname], [wc.intify(tpcid)]);
     local tpc = det.tpcs[0];
+
+    local controls = control_module(device=device,
+                                    verbosity=wc.intify(verbosity),
+                                    semaphore=wc.intify(semaphore));
+    local control = controls.config;
+
+    local tpc_nodes = tpc_mod(tpc, control);
+    local roi_nodes = roi_mod(control);
+    local fan_nodes = fans_mod(control);
+    local frame_nodes = frame_mod(control);
+
 
     local dump_views_maybe(tier, node) =
         local nodump = std.length(std.findSubstr(tier, dump)) == 0;
@@ -50,11 +61,10 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
             local name = tpc.name + '_' + tier;
             local filename = wrap % {tier: tier, tpcid: tpc.ident};
             local sink = tio.pickle_tensor_set(filename);
-            local tap = frame.sink_taps(name, std.length(node.oports), sink, control=control);
+            local tap = frame_nodes.sink_taps(name, std.length(node.oports), sink);
             pg.shuntline(node, tap);
             
             
-    local tpc_nodes = tpc_mod(tpc, control);
 
     local source = io.frame_array_source(input);
     // 1->4
@@ -64,7 +74,7 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
 
     // The targets_list implicitly reflects the view_crossed array, so FIXME:
     // parameterize its construction on view_crossed.
-    local decon_fans = fans.fanout_select(tpc.name+"_decon_", N=3,
+    local decon_fans = fan_nodes.fanout_select(tpc.name+"_decon_", N=3,
                                           targets_list=[
                                               ["wiener","gauss","dnnroi"],
                                               ["wiener","gauss","dnnroi"],
@@ -92,7 +102,7 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     // this edge so we can treat is special while letting it continue to be with
     // U/V wiener for crossviews.  This is dependent on view_crossed but here we
     // implicitly assume W is the special one.
-    local ww = fans.forkout_oport(tpc.name+'ww', wiener_filter, 2);
+    local ww = fan_nodes.forkout_oport(tpc.name+'ww', wiener_filter, 2);
     local crossview_wiener = pg.shuntline(decon_fans.targets.wiener, ww[0]);
     local threshold_wfull = pg.pnode({
         type: 'SPNGThreshold',
@@ -132,20 +142,25 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     ]);
 
     // FIXME: implement this
-    local forward={type:'SPNGTensorForwardTS', name:'', data:{ts_filename:"unet-l23-cosmic500-e50.ts"}};
+    local forward = {
+        type:'SPNGTensorForwardTS',
+        name:'',
+        data: {
+            ts_filename:"unet-l23-cosmic500-e50.ts"
+        } + control
+    };
 
     // 3 source pnodes producing "signal" tensors
     local view_signals=[
-        roi.connect_dnnroi(tpc.name + "v" + std.toString(vi.value), forward,
-                            pg.oport_node(crossviews_stage, vi.value),
-                            pg.oport_node(gauss_filter_stage, vi.value),
-                            pg.oport_node(dnnroi_filter_stage, vi.index),
-                            control=control)
+        roi_nodes.connect_dnnroi(tpc.name + "v" + std.toString(vi.value), forward,
+                                 pg.oport_node(crossviews_stage, vi.value),
+                                 pg.oport_node(gauss_filter_stage, vi.value),
+                                 pg.oport_node(dnnroi_filter_stage, vi.index))
         for vi in wc.enumerate(crossed_view_indices)
     ] + [
         // fixme: I don't want to hardwire "W" but rather go off threshold_view_indices.
-        roi.connect_threshold(tpc.name + "v2", roi_w, 
-                              pg.oport_node(gauss_filter_stage, 2), control=control)
+        roi_nodes.connect_threshold(tpc.name + "v2", roi_w, 
+                                    pg.oport_node(gauss_filter_stage, 2))
     ];
     local signals=pg.crossline(view_signals);
 
@@ -165,5 +180,5 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     // full frame tensor set and then feed to TdmToFrame
     
 
-    pg.main(graph, engine, plugins=["WireCellSpng"])
+    pg.main(graph, engine, plugins=["WireCellSpng"], uses=controls.uses)
 

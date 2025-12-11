@@ -15,9 +15,10 @@ namespace WireCell::SPNG {
 
     void ContextBase::configure(const WireCell::Configuration& cfg)
     {
+        // spdlog::debug("ContextBase: configured with: {}", cfg);
         auto devname = get<std::string>(cfg, "device", "cpu");
         auto semname = get<std::string>(cfg, "semaphore", "");
-        spdlog::debug("ContextBase: device:{} semaphore:{}", devname, semname);
+        // spdlog::debug("ContextBase: device:{} semaphore:{}", devname, semname);
         m_ctx.connect(devname, semname);
     }
     

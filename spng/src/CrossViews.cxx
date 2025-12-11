@@ -261,7 +261,7 @@ namespace WireCell::SPNG {
     
         // Initialize the output tensor (N_rows, N_channels) with zeros (our target)
         // We use kInt32 for the resulting bitmask.
-        torch::Tensor output = torch::zeros({N_rows, N_channels}, torch::kInt32);
+        torch::Tensor output = torch::zeros({N_rows, N_channels}, tensor_options(torch::kInt32));
     
         // --- 4. Perform Aggregation via torch::scatter_add_ ---
         // torch::scatter_add_(dim, index, src) performs:
@@ -278,7 +278,7 @@ namespace WireCell::SPNG {
             values_to_set          // The bit value to add (2^bit_position)
             );
 
-        return output;
+        return to(output);
     }
 
     torch::Tensor CrossViews::do_face(const FaceViews& face_info,
@@ -332,7 +332,8 @@ namespace WireCell::SPNG {
         // cross views true), 3 is mp3 (all three views true) and zero otherwise
         // (all three views false).  Shape: (nbatch, nwire, ntick)
         torch::Tensor cross_views_wires = torch::zeros({
-                nbatch, targ_info.nwires(), nticks}, torch::kInt32);
+                nbatch, targ_info.nwires(), nticks},
+            tensor_options(torch::kInt32));
         log->debug("do_face cross_views_wires: {}", to_string(cross_views_wires));
         // (nbatch, nwire, ntick)
 

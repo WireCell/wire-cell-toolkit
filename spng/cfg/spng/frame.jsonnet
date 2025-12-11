@@ -2,16 +2,17 @@
 
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
-local fans = import "fans.jsonnet";
+local fans_mod = import "fans.jsonnet";
 
 /// Make a configuration for a subgraph that converts from IFrame to TDM tensor set.
+function(control={})
 {
-
+    local fans = fans_mod(control),
 
     /// Make a FrameToTDM config object for a tpc with a single set of grouped
     /// views.  See the class documentation for details.  If more than one of
     /// these per tpc, use extra_name to distinguish.
-    to_tdm(tpc, tag="", extra_name="", control={}):: pg.pnode({
+    to_tdm(tpc, tag="", extra_name=""):: pg.pnode({
         type: 'SPNGFrameToTdm',
         name: tpc.name + extra_name,
         data: {
@@ -22,11 +23,11 @@ local fans = import "fans.jsonnet";
                     wpids: g.signed_wpids(tpc.ident),
                 }, for g in tpc.view_groups]
             }],                 // just one rule
-        } + wc.object_with(control, ["verbosity", "device"]),
+        } + control
     }, nin=1, nout=1, uses=[tpc.anode]),
 
     /// Convert a TDM frame tensor set back into IFrame
-    from_tdm(tpc, extra_name="", control={}):: pg.pnode({
+    from_tdm(tpc, extra_name=""):: pg.pnode({
         type: 'SPNGTdmToFrame',
         name: tpc.name + extra_name,
         data: {
@@ -38,7 +39,7 @@ local fans = import "fans.jsonnet";
                 // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
                 chids: { tag: "null" },
             }]
-        } + wc.object_with(control, ["verbosity", "device"]),
+        } + control
     }, nin=1, nout=1, uses=[]),
 
         
@@ -48,35 +49,34 @@ local fans = import "fans.jsonnet";
     tensorset_unpacker(tpc,
                        extra_name="", // appended to tpc.name
                        // How to locate each tensor, %d is interpolated as an index
-                       datapath_pattern="/frames/\\d+/tags/null/rules/0/groups/%d/traces",
-                       control={})::
+                       datapath_pattern="/frames/\\d+/tags/null/rules/0/groups/%d/traces")::
         local ngroups = std.length(tpc.view_groups);
         pg.pnode({
             type: 'SPNGTorchSetUnpacker',
             name: tpc.name + extra_name,
             data: {
                 selections: [{datapath:datapath_pattern % group} for group in wc.iota(ngroups) ],
-            } + wc.object_with(control, ["verbosity"]),
+            } + control
         }, nin=1, nout=ngroups),
 
     /// Repack tensors of a view.  FIXME: address asymmetry between unpacking
     /// groups and packing views.  For now, add "_view_" name to the function.
-    tensorset_view_repacker(name, multiplicity=3, control={}):: pg.pnode({
+    tensorset_view_repacker(name, multiplicity=3):: pg.pnode({
         type: 'SPNGTensorPacker',
         name: name,
         data: {
             multiplicity: multiplicity,
-        } + wc.object_with(control, ["verbosity"]),
+        } + control
     }, nin=multiplicity, nout=1),
 
 
     /// Currently the pattern is to make a frame tensor set, pass that to the
     /// end of the graph and also split out the individual group tensors.  This
     /// returns that IFrame -> set + n tensor subgraph.
-    set_plus_groups(tpc, control={})::
+    set_plus_groups(tpc)::
         local tdm = $.to_tdm(tpc);
-        local fanout = fans.fanout(tdm.name+"frame", control=control);
-        local up = $.tensorset_unpacker(tpc, control=control); // 1->4
+        local fanout = fans.fanout(tdm.name+"frame");
+        local up = $.tensorset_unpacker(tpc); // 1->4
         // 1->1+4
         pg.intern(innodes=[tdm],
                   outnodes=[fanout, up],
@@ -114,7 +114,7 @@ local fans = import "fans.jsonnet";
     ///
     /// The fan in/out indices are determine the bypass connection if order
     /// matters to the fans.
-    bypass(name, fanout_index=0, fanin_index=0, type='TensorSet', control={})::
+    bypass(name, fanout_index=0, fanin_index=0, type='TensorSet')::
         local expose_fanin_index = (fanin_index + 2)%2;
         local expose_fanout_index = (fanout_index + 2)%2;
         local fanout = pg.pnode({
@@ -122,14 +122,14 @@ local fans = import "fans.jsonnet";
             name: name,
             data: {
                 multiplicity: 2, // fixme: could be option
-            } + wc.object_with(control, ["verbosity"]), 
+            } + control
         }, nin=1, nout=2);
         local fanin = pg.pnode({
             type: "SPNGFanin" + type + "s",
             name: name,
             data: {
                 multiplicity: 2, // fixme: could be option
-            } + wc.object_with(control, ["verbosity"]),
+            } + control
         }, nin=2, nout=1);
         pg.intern(innodes=[fanout], outnodes=[fanin],
                   iports=[fanout.iports[0], fanin.iports[expose_fanin_index]],
@@ -149,10 +149,10 @@ local fans = import "fans.jsonnet";
     /// outputs of same and that taps each into the given tensor set sink.  The
     /// sink is interned.
     ///
-    sink_taps(name, multiplicity, sink, control={}, digitize=null)::
-        local fanouts = [fans.fanout(name + std.toString(index), control=control)
+    sink_taps(name, multiplicity, sink, digitize=null)::
+        local fanouts = [fans.fanout(name + std.toString(index))
                          for index in wc.iota(multiplicity)];
-        local packer = $.tensorset_view_repacker(name, multiplicity, control=control);
+        local packer = $.tensorset_view_repacker(name, multiplicity);
         pg.intern(innodes=fanouts, centernodes=[packer, sink],
                   oports=[fo.oports[0] for fo in fanouts], // fanout port 0 of each is out
                   edges=[

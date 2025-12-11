@@ -1,6 +1,8 @@
 #include "WireCellSpng/FrameToTdm.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
+#include "WireCellSpng/TensorTools.h"
+#include "WireCellSpng/Util.h"
 #include "WireCellAux/FrameTools.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Fmt.h"
@@ -26,11 +28,13 @@ namespace WireCell::SPNG {
     WireCell::Configuration FrameToTdm::default_configuration() const
     {
         Configuration cfg = this->Logger::default_configuration();
-        
+        Configuration cfg2 = this->ContextBase::default_configuration();
+        update(cfg, cfg2);
+
+        // And many more.  See comments in header and spng/docs/frametotdm.org.
         cfg["basepath"] = m_basepath.string();
         cfg["frame_relpath"] = m_frame_relpath.string();
 
-        // And many more.  See comments in header and spng/docs/frametotdm.org.
         return cfg;
     }
     
@@ -52,6 +56,7 @@ namespace WireCell::SPNG {
     void FrameToTdm::configure(const WireCell::Configuration& cfg)
     {
         this->Logger::configure(cfg);
+        this->ContextBase::configure(cfg);
 
         std::string anode_tn = cfg["anode"].asString();
         auto anode = Factory::find_tn<IAnodePlane>(anode_tn);
@@ -146,26 +151,31 @@ namespace WireCell::SPNG {
             return true;
         }
 
+        TorchSemaphore sem(context());
+
         auto frame = frame_itensor(inframe);
         const std::string parent = frame->metadata()["datapath"].asString();
 
-        auto tensors = std::make_shared<ITorchTensor::vector>();
-        tensors->push_back(frame);
+        
+        ITorchTensor::vector itensors;
+        itensors.push_back(frame);
 
         ITorchTensor::vector rules = rules_tensors(inframe, parent);
         if (rules.size()) {
-            tensors->insert(tensors->end(), rules.begin(), rules.end());
+            itensors.insert(itensors.end(), rules.begin(), rules.end());
         }
 
         ITorchTensor::vector chmasks = chmask_tensors(inframe, parent);
         if (chmasks.size()) {
-            tensors->insert(tensors->end(), chmasks.begin(), chmasks.end());
+            itensors.insert(itensors.end(), chmasks.begin(), chmasks.end());
         }
 
         Configuration empty;
-        outtens = std::make_shared<SimpleTorchTensorSet>(inframe->ident(), empty, tensors);
+        outtens = std::make_shared<SimpleTorchTensorSet>(inframe->ident(), empty,
+                                                         to_device(itensors, device()));
 
         logit(outtens, "output");
+        log->debug("my device is: {}", to_string(device()));
 
         next_count();
         return true;

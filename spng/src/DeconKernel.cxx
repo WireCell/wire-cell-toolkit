@@ -105,7 +105,7 @@ namespace WireCell::SPNG {
         // return num / den;
         // Instead, apply implicit filter to avoid divide-by-zero NaN.
         auto zeros = (den == 0);
-        return torch::where(zeros, torch::zeros_like(num), num / den);
+        return to(torch::where(zeros, torch::zeros_like(num), num / den));
     }
 
     torch::Tensor DeconKernel::spectrum(const std::vector<int64_t> & shape) const

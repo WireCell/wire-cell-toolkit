@@ -1,28 +1,27 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
+function(control={})
 {
     /// A kernel providing a Fourier-space filter.
     filter_kernel(name,         // unique name
                   axis_config,  // list of per-axis config objects
                   /// See DeconKernel for following options
-                  debug_filename="",
-                  control={})::
+                  debug_filename="")::
         {
             type: "SPNGFilterKernel",
             name: name,
             data: {
                 axis: axis_config,
                 debug_filename: debug_filename,
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control,
         },
 
     /// A kernel providing a response built from FR*ER
     response_kernel(tpc,
                     plane_index, // the index of the plane in the FR to use
                     extra_name="",
-                    debug_filename="",
-                    control={})::
+                    debug_filename="")::
         {
             type: "SPNGResponseKernel",
             name: tpc.name + "v" + std.toString(plane_index) + extra_name,
@@ -36,7 +35,7 @@ local pg = import "pgraph.jsonnet";
                 // Scale to units of ADC
                 scale: -1 / tpc.adc.lsb_voltage,
                 debug_filename: debug_filename
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control,
             uses: [tpc.fr, tpc.er],
         },
 
@@ -46,8 +45,7 @@ local pg = import "pgraph.jsonnet";
                  filt,          // a kernel providing the filter (numerator)
                  resp,          // a kernel providing the response (denominator)
                  /// See DeconKernel for following options:
-                 debug_filename="",
-                 control={})::
+                 debug_filename="")::
         {
             type: "SPNGDeconKernel",
             name: name,
@@ -55,7 +53,7 @@ local pg = import "pgraph.jsonnet";
                 filter: wc.tn(filt),
                 response: wc.tn(resp),
                 debug_filename: debug_filename,
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control,
             uses: [filt, resp]
         },
     
@@ -64,13 +62,13 @@ local pg = import "pgraph.jsonnet";
     /// is to be used for this group in all TPCs, the extra name can remain
     /// empty.  If unique decon kernels are needed for this group index across
     /// many TPCs, give a unique extra name.
-    tpc_group_decon_kernel(tpc, group_index, extra_name="", control={})::
+    tpc_group_decon_kernel(tpc, group_index, extra_name="")::
         local group = tpc.view_groups[group_index];
         local name = group.name + extra_name;
         local plane_index = group.view_index;
-        local fk = $.filter_kernel(name, [tpc.filters[plane_index].channel.decon,{kind:"none"}], control=control);
-        local rk = $.response_kernel(tpc, plane_index, extra_name=name, control=control);
-        $.decon_kernel(name, fk, rk, control=control),
+        local fk = $.filter_kernel(name, [tpc.filters[plane_index].channel.decon,{kind:"none"}]);
+        local rk = $.response_kernel(tpc, plane_index, extra_name=name);
+        $.decon_kernel(name, fk, rk),
 
 
     /// Configure node to convolve intput data with a given kernel
@@ -80,8 +78,7 @@ local pg = import "pgraph.jsonnet";
                     // See KernelConvolve for following options
                     tag="",
                     datapath_format="",
-                    debug_filename="",
-                    control={})::
+                    debug_filename="")::
         pg.pnode({
             type: "SPNGKernelConvolve",
             name: name,
@@ -92,7 +89,7 @@ local pg = import "pgraph.jsonnet";
                 datapath_format: datapath_format,
                 faster: true,       // use "faster DFT size"
                 debug_filename: debug_filename,
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=1, nout=1, uses=[kernel]),
 
     /// Determine how to convolve each axis based on channel connection and if
@@ -127,15 +124,15 @@ local pg = import "pgraph.jsonnet";
     /// Configuration for one FR*ER decon node for one group in a TPC.  The node
     /// will be named uniquely for that context.  If more than one decon in the
     /// same tpc+group, pass extra_name.
-    tpc_group_decon_frer(tpc, group_index, kernel, tag="", extra_name="", streaming=false, control={})::
+    tpc_group_decon_frer(tpc, group_index, kernel, tag="", extra_name="", streaming=false)::
         local group = tpc.view_groups[group_index];
         local name = tpc.name + group.name + extra_name;
         local co = $.convo_options(group.connection, streaming);
-        $.kernel_convolve(name, kernel, co.decon_resp, tag="", control=control),
+        $.kernel_convolve(name, kernel, co.decon_resp, tag=""),
 
     
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.
-    group_fanin(nodes, control={})::
+    group_fanin(nodes)::
         local n = std.length(nodes);
         local fanin = pg.pnode({
             type: 'SPNGReduce',
@@ -144,7 +141,7 @@ local pg = import "pgraph.jsonnet";
                 multiplicity: n,
                 operation: "cat",
                 dim: -2         // concatenate along channel dimension
-            } + wc.object_with(control, ["verbosity", "device"]),
+            } + control
         }, nin=n, nout=1);
         
         if n == 1
@@ -155,40 +152,39 @@ local pg = import "pgraph.jsonnet";
 
 
     /// Given array of nodes that span view groups, return array that span views
-    collect_groups_by_view(tpc, nodes, control={})::
+    collect_groups_by_view(tpc, nodes)::
         [$.group_fanin([
             nodes[gi.index]
             for gi in wc.enumerate(tpc.view_groups)
-            if gi.value.view_index == view_index], control=control)
+            if gi.value.view_index == view_index])
          for view_index in [0,1,2]],
 
     /// Produce an ngroup->nview subgraph doing FR*ER decon.
-    group_decon_view(tpc, control={})::
+    group_decon_view(tpc)::
         local groups = tpc.view_groups;
         local ngroups = std.length(groups);
-        //local response_kernels = [$.response_kernel(tpc, view_index, control=control) for view_index in [0,1,2]];
 
-        local decon_kernels = [$.tpc_group_decon_kernel(tpc, group_index, extra_name="", control=control)
+        local decon_kernels = [$.tpc_group_decon_kernel(tpc, group_index, extra_name="")
                                for group_index in wc.iota(ngroups)];
         local decon_frers = [$.tpc_group_decon_frer(tpc, it.index,
-                                                    decon_kernels[it.value.view_index], control=control)
+                                                    decon_kernels[it.value.view_index])
                              for it in wc.enumerate(groups)
                             ];
-        local view_frers = $.collect_groups_by_view(tpc, decon_frers, control=control);
+        local view_frers = $.collect_groups_by_view(tpc, decon_frers);
         pg.intern(innodes=decon_frers, outnodes=view_frers),
                              
     /// One filter along time dimension
-    time_filter_one(tpc, filter, view_index, extra_name="", streaming=false, control={})::
+    time_filter_one(tpc, filter, view_index, extra_name="", streaming=false)::
         local name = tpc.name + 'v' + std.toString(view_index) + extra_name;
-        local fk = $.filter_kernel(name, [{kind:"none"}, tpc.filters[view_index].time[filter]], control=control);
+        local fk = $.filter_kernel(name, [{kind:"none"}, tpc.filters[view_index].time[filter]]);
         local co = $.convo_options(0, streaming);
-        $.kernel_convolve(name, fk, co.filter_time, tag="", control=control),
+        $.kernel_convolve(name, fk, co.filter_time, tag=""),
 
 
     /// Apply a time filter across each of the views for a 3->3 subgraph.
-    time_filter_views(tpc, filter="gauss", views=[0,1,2], streaming=false, control={})::
+    time_filter_views(tpc, filter="gauss", views=[0,1,2], streaming=false)::
         local nodes = [
-            $.time_filter_one(tpc, filter, view_index, extra_name=filter, streaming=streaming, control=control)
+            $.time_filter_one(tpc, filter, view_index, extra_name=filter, streaming=streaming)
             for view_index in views];
         pg.crossline(nodes),
         

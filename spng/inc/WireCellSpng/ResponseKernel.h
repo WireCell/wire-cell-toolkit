@@ -122,9 +122,10 @@ namespace WireCell::SPNG {
         virtual WireCell::Configuration default_configuration() const;
         
         // Non interface methods.  Unconditionally and without cache, produce
-        // version of the response waveform at the given shape..
+        // version of the response waveform at the given shape.  This returns a
+        // tensor on the device.
         torch::Tensor pad_waveform(const std::vector<int64_t> & shape) const;
-        // Pad and apply fft2
+        // Pad and apply fft2. 
         torch::Tensor make_spectrum(const std::vector<int64_t> & shape) const;
 
         // return hash of a shape
