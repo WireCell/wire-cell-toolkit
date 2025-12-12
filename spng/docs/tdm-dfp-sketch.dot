@@ -10,7 +10,6 @@ digraph tdm {
     signal_frame
     mp2_u mp3_u
     mp2_v mp3_v
-    mp2_w mp3_w
     signal_tensor_set
     node[shape=box]
 
@@ -20,7 +19,6 @@ digraph tdm {
     crossviews_u->crossviews_v[style=invis]
     {rank=same mp2_u->mp3_u[style=invis]}
     {rank=same mp2_v->mp3_v[style=invis]}
-    {rank=same mp2_w->mp3_w[style=invis]}
     {rank=same gauss_u->roi_thresh_u->gauss_v->unbin_v->gauss_w[style=invis]}
 
     subgraph cluster_decon {

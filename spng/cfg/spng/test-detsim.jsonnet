@@ -1,14 +1,15 @@
 // This produces a final graph to input depos and output ADC waveforms.
 
 local scope = import "spng/scope.jsonnet";
-local jobs = import "spng/jobs.jsonnet";
+local jobs_mod = import "spng/jobs.jsonnet";
 local pg = import "pgraph.jsonnet";
 local io = import "spng/io.jsonnet";
 
 
+local detsim = import "spng/detsim.jsonnet";
 local detconf = import "spng/detconf.jsonnet";
 local detector = import "spng/detector.jsonnet";
-local control = import "spng/control.jsonnet";
+local control_mod = import "spng/control.jsonnet";
 
 /// Top-level arguments:
 ///
@@ -32,8 +33,11 @@ function(input, output="", detname='pdhd', tpcids=[], engine='Pgrapher', device=
     local sink = pg.crossline(sinks);
 
 
-    local ctrl = control.bundle(device=device, verbosity=verbosity);
-    local graph = jobs.depos_to_adc_frame(det, source, sink, ctrl);
-    pg.main(graph, engine)
+    local controls = control_mod(device=device, verbosity=verbosity);
+    local control = controls.config;
+
+    local jobs = jobs_mod(control);
+    local graph = jobs.depos_to_adc_frame(det, source, sink);
+    pg.main(graph, app=engine, plugins=["WireCellSpng"], uses=controls.uses)
 
     

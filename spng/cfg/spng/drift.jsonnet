@@ -26,9 +26,8 @@ function(det, control) {
                 time_offset: 0.0,     // fixme: need to expose this to user
                 fluctuate: true,      // fixme: this too
                 scale_factor: 1.0,    // fixme: and this
-                rng: wc.tn(control.rng),
+                rng: control.rng,
             },
-            uses: [control.rng],
         };
         pg.pnode({
             type: "DepoSetDrifter",

@@ -12,8 +12,8 @@ function(tpc, control) {
         name: tpc.name,
         data: {
             anode: wc.tn(tpc.anode),
-            dft: wc.tn(control.dft),
-            rng: wc.tn(control.rng),
+            dft: control.dft,
+            rng: control.rng,
 
             drift_speed: tpc.lar.drift_speed,
 
@@ -28,7 +28,7 @@ function(tpc, control) {
             start_time : tpc.ductor.start_time,
 
         },            
-    }, nin=1, nout=1, uses=[tpc.anode, control.dft, control.rng]+tpc.pirs),
+    }, nin=1, nout=1, uses=[tpc.anode]+tpc.pirs),
 
     // reframer
     reframer: pg.pnode({
@@ -46,8 +46,8 @@ function(tpc, control) {
         name: tpc.name,
         data: {
             anode: wc.tn(tpc.anode),
-            dft: wc.tn(control.dft),
-            rng: wc.tn(control.rng),
+            dft: control.dft,
+            rng: control.rng,
             nsamples: tpc.adc.readout_nticks,
             period: tpc.adc.tick,
             
@@ -55,20 +55,20 @@ function(tpc, control) {
             spectra_file : tpc.noise.empirical.spectra_file,
             chanstat: tpc.noise.empirical.chanstat,
         },
-        uses: [tpc.anode, control.dft, control.rng]
+        uses: [tpc.anode]
     },
 
     addnoise_empirical: pg.pnode({
         type: "AddNoise",
         name: tpc.name,
         data: {
-            dft: wc.tn(control.dft),
-            rng: wc.tn(control.rng),
+            dft: control.dft,
+            rng: control.rng,
             model: wc.tn($.empirical_model),
             nsamples: tpc.adc.readout_nticks,
             replacement_percentage: tpc.noise.empirical.replacement_percentage,
         }
-    }, nin=1, nout=1, uses=[control.dft, control.rng, $.empirical_model]),
+    }, nin=1, nout=1, uses=[$.empirical_model]),
 
     // fixme: add other noise models, each getting an attribute in tpc.noise.{}.
 
