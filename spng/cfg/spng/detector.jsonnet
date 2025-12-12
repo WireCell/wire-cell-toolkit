@@ -268,7 +268,7 @@ local known_detectors = import "detectors.jsonnet";
     /// Given semantic labels to various axis filters over the time dimension.
     /// These each should be defined with filter_axis().  See view_filters() for
     /// grouping these on a per-view basis.
-    time_filters(gauss, wiener, dnnroi):: {
+    time_filters(gauss, wiener , dnnroi):: {
         /// The filter for final output signals from SPNG.  This should preserve
         /// signal.
         gauss: gauss,
@@ -286,9 +286,11 @@ local known_detectors = import "detectors.jsonnet";
     },
 
     /// Collect the time and channel filters for one view.
-    view_filters(time_filters, channel_filters):: {
+    view_filters(time_filters, channel_filters, decon_roll=0):: {
         time: time_filters,
-        channel: channel_filters
+        channel: channel_filters,
+        // Amount to roll the FR*ER decon
+        decon_roll: decon_roll
     },
 
     /// Collect all the per-view filters in view index order

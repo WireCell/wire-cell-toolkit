@@ -135,7 +135,13 @@ def cmd_tonp(debug_filenames):
         print(f'writing {output}')
 
         fp = torch.load(debug_filename, map_location='cpu', weights_only=False)
-        tensors = torch.vstack(tuple(fp.values()))
+        tensors = list()
+        for name, arr in fp.items():
+            print(name, arr.shape, arr.dtype)
+            if len(arr.shape) > 2:
+                arr = torch.squeeze(arr)
+            tensors.append(arr)
+        tensors = torch.vstack(tuple(tensors))
         print(f'{tensors.shape=}')
         channels = torch.arange(tensors.shape[0]) # this makes huge assumptions!
         tickinfo = torch.tensor([0,500,0])

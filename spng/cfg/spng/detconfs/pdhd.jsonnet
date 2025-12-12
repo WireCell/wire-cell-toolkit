@@ -26,6 +26,10 @@ local response_duration = readout_time + response_time_offset;
 
 local response_start_time = tick0_time - response_time_offset;
 
+// How much to roll the response deconvolution. This essentially the ADC tick
+// where FR*ER goes to zero.
+local decon_roll = 128;
+
 local ductor = api.ductor(adc_tick, response_duration, response_start_time);
 
 
@@ -75,7 +79,9 @@ local pirs(anode) = [
 local noise = api.noise(empirical = api.empirical_noise(det.noise));
 
 // Same for all views?
-local gauss_filter = api.filter_function(scale=0.12 * wc.megahertz);
+local gauss_filter = api.filter_axis([
+    api.filter_function(scale=0.12 * wc.megahertz, power=2, kind="lowpass"),
+]);
 
 // by view
 local hf_tight = [
@@ -101,7 +107,9 @@ local wiener_filters = [
 ];
 
 // same for all views?
-local dnnroi_filter = api.filter_axis([lf_loose]);
+local dnnroi_filter = api.filter_function([
+    api.filter_axis([lf_loose])
+]);
     
 local channel_filters = [
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
@@ -116,7 +124,8 @@ local filters = [
     api.view_filters(time_filters=api.time_filters(gauss=gauss_filter,
                                                    wiener=wiener_filters[i],
                                                    dnnroi=dnnroi_filter),
-                     channel_filters=api.channel_filters(channel_filters[i]))
+                     channel_filters=api.channel_filters(channel_filters[i]),
+                     decon_roll = decon_roll)
     for i in [0,1,2]];
 
 // OSP defaults are 3/5 sigma for ind/col plus a nominal 1.0 (no units) 

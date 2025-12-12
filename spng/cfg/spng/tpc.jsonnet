@@ -24,7 +24,7 @@ function(tpc, control) {
     local cv = cv_mod(control),
     local fans = fans_mod(control),
     local frame = frame_mod(control),
-    local decon = decon_mod(control),
+    local decon = decon_mod(tpc, control),
     // local dnnroi = dnnroi_mod(control),
 
     /// We use notation:
@@ -54,7 +54,7 @@ function(tpc, control) {
     // merge any split groups to produce a subgraph with 3 per-view tensors of
     // decon signal.  Note, only FR*ER response channel filter is decon'ed.  Not
     // time filter nor "RC" response decon is included.
-    response_decon: decon.group_decon_view(tpc),
+    response_decon: decon.group_decon_view,
 
     // Node: [nview]tensor -> tensor [nview] downsample
     downsampler(name, downsample_factor=4, views=[0,1,2]):: pg.crossline([pg.pnode({
@@ -88,7 +88,7 @@ function(tpc, control) {
     // - gauss :: provides final signals to which ROIs are applied.
     local filter_names = ["gauss", "wiener", "dnnroi"],
     time_filter(filter_name, views=[0,1,2])::
-        decon.time_filter_views(tpc, filter_name, views=views),
+        decon.time_filter_views(filter_name, views=views),
         
     local time_filters = {
         [filter_name]: $.time_filter(filter_name)

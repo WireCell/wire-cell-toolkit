@@ -134,7 +134,7 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
         dnnroi_filter,
     ]);
 
-    local gauss_filter = dump_views_maybe("filterdgauss", tpc_nodes.time_filter("gauss", views=[0,1,2]));
+    local gauss_filter = dump_views_maybe("filtergauss", tpc_nodes.time_filter("gauss", views=[0,1,2]));
 
     local gauss_filter_stage = pg.shuntlines([
         decon_fans.targets.gauss,
@@ -162,7 +162,7 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
         roi_nodes.connect_threshold(tpc.name + "v2", roi_w, 
                                     pg.oport_node(gauss_filter_stage, 2))
     ];
-    local signals=pg.crossline(view_signals);
+    local signals=dump_views_maybe("signals", pg.crossline(view_signals));
 
     // until here which is 3->1
     local repack = tpc_nodes.frame_set_repack;

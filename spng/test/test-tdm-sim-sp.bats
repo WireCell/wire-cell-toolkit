@@ -51,15 +51,29 @@ bats_load_library wct-bats.sh
 
 }
 
-@test "spng sim crossviews" {
+@test "spng sim spng" {
     cd_tmp file
     local cfgdir=$(srcdir spng)/cfg
 
-    wire-cell -L debug -l stderr \
-                     -P $cfgdir \
-                     -A engine=Pgrapher \
-                     -A input=muon-anode%d.npz \
-                     -A output=muon-crossviews-anode%d.pkl \
-                     spng/test-crossviews.jsonnet
+    local cfg="$cfgdir/spng/test-spng-tpc.jsonnet"
 
+    for tpcid in 0 1 2 3
+    do
+        local log="test-spng-tpc${tpcid}.log"
+        local inf="muon-anode${tpcid}.npz"
+        local outf="muon-signals-anode${tpcid}.pkl"
+
+        run_idempotently -s "$cfg" \
+                         -t "$inf" \
+                         -t "$log" \
+                         -t "$outf" \
+                         -- \
+                         wire-cell -L debug  -l $log \
+                         "$cfg" \
+                         -A "tpcid=$tpcid"  \
+                         -A "input=$inf"  \
+                         -A "output=$outf" \
+                         -A device=cpu -A engine=Pgrapher
+
+    done
 }

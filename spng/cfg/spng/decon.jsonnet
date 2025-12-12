@@ -1,7 +1,7 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
-function(control={})
+function(tpc, control={})
 {
     /// A kernel providing a Fourier-space filter.
     filter_kernel(name,         // unique name
@@ -18,8 +18,7 @@ function(control={})
         },
 
     /// A kernel providing a response built from FR*ER
-    response_kernel(tpc,
-                    plane_index, // the index of the plane in the FR to use
+    response_kernel(plane_index, // the index of the plane in the FR to use
                     extra_name="",
                     debug_filename="")::
         {
@@ -62,12 +61,12 @@ function(control={})
     /// is to be used for this group in all TPCs, the extra name can remain
     /// empty.  If unique decon kernels are needed for this group index across
     /// many TPCs, give a unique extra name.
-    tpc_group_decon_kernel(tpc, group_index, extra_name="")::
+    tpc_group_decon_kernel(group_index, extra_name="")::
         local group = tpc.view_groups[group_index];
         local name = group.name + extra_name;
         local plane_index = group.view_index;
         local fk = $.filter_kernel(name, [tpc.filters[plane_index].channel.decon,{kind:"none"}]);
-        local rk = $.response_kernel(tpc, plane_index, extra_name=name);
+        local rk = $.response_kernel(plane_index, extra_name=name);
         $.decon_kernel(name, fk, rk),
 
 
@@ -92,18 +91,29 @@ function(control={})
             } + control
         }, nin=1, nout=1, uses=[kernel]),
 
-    /// Determine how to convolve each axis based on channel connection and if
-    /// streaming mode is used and for each kind of convolution.
-    convo_options(connection, streaming=false):: {
+    /// Determine how to convolve each axis based on channel connection
+    convo_options(connection, view_index):: {
         local decon_channel = [
             {cyclic: false, crop: -2},  // one plane
             {cyclic: false, crop: -2},  // two concatenated planes
             {cyclic: true,  crop:  0}, // two wrapped planes
         ][connection],
-        local decon_time =
-            if streaming
-            then {cyclic: false, crop: 0, baseline: true/*, roll_mode: "decon"*/}
-            else {cyclic: false, crop: -2, baseline: true/*, roll_mode: "decon"*/},
+        local decon_time = {
+            cyclic: false,
+            // For isolated readout, we want to crop to input size.  For future
+            // streaming, or debugging, particularly to determin a good "roll"
+            // number, set this temporarily to 0.
+            crop: 0,
+            baseline: true,
+            // The amount to roll in time after decon.  Most simply, this would
+            // be the size of the FR*ER kernel.  However, the peak in that
+            // kernel is away from sample 0 and thus shifts the content.  A
+            // better roll number is one that moves the flat part of the decon
+            // (that arises due to deconvolving zero padding) to be in the
+            // cropped region.  This amount is basically the number of ticks
+            // where FR*ER is non-zero.
+            roll: tpc.filters[view_index].decon_roll,
+        },
 
         local nothing = {padding: "none", dft: false},
         local just_filter = {padding: "none", dft: true},
@@ -124,10 +134,10 @@ function(control={})
     /// Configuration for one FR*ER decon node for one group in a TPC.  The node
     /// will be named uniquely for that context.  If more than one decon in the
     /// same tpc+group, pass extra_name.
-    tpc_group_decon_frer(tpc, group_index, kernel, tag="", extra_name="", streaming=false)::
+    tpc_group_decon_frer(group_index, kernel, tag="", extra_name="")::
         local group = tpc.view_groups[group_index];
         local name = tpc.name + group.name + extra_name;
-        local co = $.convo_options(group.connection, streaming);
+        local co = $.convo_options(group.connection, group.view_index);
         $.kernel_convolve(name, kernel, co.decon_resp, tag=""),
 
     
@@ -152,7 +162,7 @@ function(control={})
 
 
     /// Given array of nodes that span view groups, return array that span views
-    collect_groups_by_view(tpc, nodes)::
+    collect_groups_by_view(nodes)::
         [$.group_fanin([
             nodes[gi.index]
             for gi in wc.enumerate(tpc.view_groups)
@@ -160,31 +170,31 @@ function(control={})
          for view_index in [0,1,2]],
 
     /// Produce an ngroup->nview subgraph doing FR*ER decon.
-    group_decon_view(tpc)::
+    group_decon_view:
         local groups = tpc.view_groups;
         local ngroups = std.length(groups);
 
-        local decon_kernels = [$.tpc_group_decon_kernel(tpc, group_index, extra_name="")
+        local decon_kernels = [$.tpc_group_decon_kernel(group_index, extra_name="")
                                for group_index in wc.iota(ngroups)];
-        local decon_frers = [$.tpc_group_decon_frer(tpc, it.index,
+        local decon_frers = [$.tpc_group_decon_frer(it.index,
                                                     decon_kernels[it.value.view_index])
                              for it in wc.enumerate(groups)
                             ];
-        local view_frers = $.collect_groups_by_view(tpc, decon_frers);
+        local view_frers = $.collect_groups_by_view(decon_frers);
         pg.intern(innodes=decon_frers, outnodes=view_frers),
                              
     /// One filter along time dimension
-    time_filter_one(tpc, filter, view_index, extra_name="", streaming=false)::
+    time_filter_one(filter, view_index, extra_name="")::
         local name = tpc.name + 'v' + std.toString(view_index) + extra_name;
         local fk = $.filter_kernel(name, [{kind:"none"}, tpc.filters[view_index].time[filter]]);
-        local co = $.convo_options(0, streaming);
+        local co = $.convo_options(0, view_index);
         $.kernel_convolve(name, fk, co.filter_time, tag=""),
 
 
     /// Apply a time filter across each of the views for a 3->3 subgraph.
-    time_filter_views(tpc, filter="gauss", views=[0,1,2], streaming=false)::
+    time_filter_views(filter="gauss", views=[0,1,2])::
         local nodes = [
-            $.time_filter_one(tpc, filter, view_index, extra_name=filter, streaming=streaming)
+            $.time_filter_one(filter, view_index, extra_name=filter)
             for view_index in views];
         pg.crossline(nodes),
         
