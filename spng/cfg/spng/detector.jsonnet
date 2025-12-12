@@ -267,8 +267,9 @@ local known_detectors = import "detectors.jsonnet";
 
     /// Given semantic labels to various axis filters over the time dimension.
     /// These each should be defined with filter_axis().  See view_filters() for
-    /// grouping these on a per-view basis.
-    time_filters(gauss, wiener , dnnroi):: {
+    /// grouping these on a per-view basis.  The "options" override the time
+    /// axis KernelConvolve options.  Likely a detector should define roll and crop.
+    time_filters(gauss, wiener , dnnroi, options={}):: {
         /// The filter for final output signals from SPNG.  This should preserve
         /// signal.
         gauss: gauss,
@@ -277,6 +278,8 @@ local known_detectors = import "detectors.jsonnet";
         wiener: wiener,         
         // The filter used to provide the non-MP2/MP3 image input to DNNROI. 
         dnnroi: dnnroi,
+
+        options: options,
     },
     
     /// There is just one semantically distinct channel filter per view which is
@@ -286,11 +289,9 @@ local known_detectors = import "detectors.jsonnet";
     },
 
     /// Collect the time and channel filters for one view.
-    view_filters(time_filters, channel_filters, decon_roll=0):: {
+    view_filters(time_filters, channel_filters):: {
         time: time_filters,
         channel: channel_filters,
-        // Amount to roll the FR*ER decon
-        decon_roll: decon_roll
     },
 
     /// Collect all the per-view filters in view index order

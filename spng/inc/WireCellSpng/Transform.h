@@ -29,6 +29,8 @@ namespace WireCell::SPNG {
             - threshold :: Convert to boolean with true for all pixels strictly
               above the threshold given by "scalar".
 
+            - slice :: Apply a slice() along the dimension given by dims[0] from
+              start index in dims[1] to end index in dims[2].
         */
 
         /// 
@@ -37,7 +39,7 @@ namespace WireCell::SPNG {
         /// A scalar value used in some operations
         float scalar = 0;
 
-        /// Specify a the indices for a number of dimensions aka axes.
+        /// Specify which dimension(s) to operate on.
         std::vector<int> dims = {};
 
     };
@@ -54,6 +56,10 @@ namespace WireCell::SPNG {
     using TransformOperation = std::function<torch::Tensor(const torch::Tensor&)>;
  
     // Apply transform operations to input tensor.
+    //
+    // This node is basically a bag of torch functions to allow a large variety
+    // of transforms to be programmed in the configuration without having to
+    // make dedicated DFP nodes.
     struct Transform : public ITorchTensorFilter, 
                        public Logger,
                        public ContextBase,

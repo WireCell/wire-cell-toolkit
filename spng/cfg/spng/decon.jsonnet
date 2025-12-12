@@ -92,42 +92,42 @@ function(tpc, control={})
         }, nin=1, nout=1, uses=[kernel]),
 
     /// Determine how to convolve each axis based on channel connection
-    convo_options(connection, view_index):: {
-        local decon_channel = [
-            {cyclic: false, crop: -2},  // one plane
-            {cyclic: false, crop: -2},  // two concatenated planes
-            {cyclic: true,  crop:  0}, // two wrapped planes
-        ][connection],
-        local decon_time = {
-            cyclic: false,
-            // For isolated readout, we want to crop to input size.  For future
-            // streaming, or debugging, particularly to determin a good "roll"
-            // number, set this temporarily to 0.
-            crop: 0,
-            baseline: true,
-            // The amount to roll in time after decon.  Most simply, this would
-            // be the size of the FR*ER kernel.  However, the peak in that
-            // kernel is away from sample 0 and thus shifts the content.  A
-            // better roll number is one that moves the flat part of the decon
-            // (that arises due to deconvolving zero padding) to be in the
-            // cropped region.  This amount is basically the number of ticks
-            // where FR*ER is non-zero.
-            roll: tpc.filters[view_index].decon_roll,
-        },
+    // convo_options(connection, view_index):: {
+    //     local decon_channel = [
+    //         {cyclic: false, crop: -2},  // one plane
+    //         {cyclic: false, crop: -2},  // two concatenated planes
+    //         {cyclic: true,  crop:  0}, // two wrapped planes
+    //     ][connection],
+    //     local decon_time = {
+    //         cyclic: false,
+    //         // For isolated readout, we want to crop to input size.  For future
+    //         // streaming, or debugging, particularly to determin a good "roll"
+    //         // number, set this temporarily to 0.
+    //         crop: 0,
+    //         baseline: true,
+    //         // The amount to roll in time after decon.  Most simply, this would
+    //         // be the size of the FR*ER kernel.  However, the peak in that
+    //         // kernel is away from sample 0 and thus shifts the content.  A
+    //         // better roll number is one that moves the flat part of the decon
+    //         // (that arises due to deconvolving zero padding) to be in the
+    //         // cropped region.  This amount is basically the number of ticks
+    //         // where FR*ER is non-zero.
+    //         roll: 0,
+    //     },
 
-        local nothing = {padding: "none", dft: false},
-        local just_filter = {padding: "none", dft: true},
+    //     local nothing = {padding: "none", dft: false},
+    //     local just_filter = {padding: "none", dft: true},
 
-        // For FR*ER deconvolution, regardless of filters.
-        decon_resp: [decon_channel, decon_time],
-        // For follow-on of a time filter, eg "gauss".
-        filter_time: [nothing, just_filter],
-        // For future RC decon
-        decon_time: [nothing, decon_time],
+    //     // For FR*ER deconvolution, regardless of filters.
+    //     decon_resp: [decon_channel, decon_time],
+    //     // For follow-on of a time filter, eg "gauss".
+    //     filter_time: [nothing, just_filter],
+    //     // For future RC decon
+    //     decon_time: [nothing, decon_time],
 
-        nothing: nothing,
-        just_filter: just_filter,
-    },
+    //     nothing: nothing,
+    //     just_filter: just_filter,
+    // },
 
 
 
@@ -137,8 +137,19 @@ function(tpc, control={})
     tpc_group_decon_frer(group_index, kernel, tag="", extra_name="")::
         local group = tpc.view_groups[group_index];
         local name = tpc.name + group.name + extra_name;
-        local co = $.convo_options(group.connection, group.view_index);
-        $.kernel_convolve(name, kernel, co.decon_resp, tag=""),
+        //local co = $.convo_options(group.connection, group.view_index);
+        local co_channel = [
+            {cyclic: false, crop: -2},  // one plane
+            {cyclic: false, crop: -2},  // two concatenated planes
+            {cyclic: true,  crop:  0}, // two wrapped planes
+        ][group.connection];
+        local co_time = {
+            cyclic: false, // time should always be linear
+            crop: 0,       // don't crop yet, leave padding for filters
+            baseline: true,
+            roll: 0,
+        };
+        $.kernel_convolve(name, kernel, [co_channel, co_time], tag=""),
 
     
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.
@@ -187,8 +198,10 @@ function(tpc, control={})
     time_filter_one(filter, view_index, extra_name="")::
         local name = tpc.name + 'v' + std.toString(view_index) + extra_name;
         local fk = $.filter_kernel(name, [{kind:"none"}, tpc.filters[view_index].time[filter]]);
-        local co = $.convo_options(0, view_index);
-        $.kernel_convolve(name, fk, co.filter_time, tag=""),
+        // local co = $.convo_options(0, view_index);
+        local co_channel = {padding: "none", dft: false};
+        local co_time = {padding: "none", dft: true} + tpc.filters[view_index].time.options;
+        $.kernel_convolve(name, fk, [co_channel, co_time], tag=""),
 
 
     /// Apply a time filter across each of the views for a 3->3 subgraph.

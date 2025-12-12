@@ -107,9 +107,11 @@ local wiener_filters = [
 ];
 
 // same for all views?
-local dnnroi_filter = api.filter_function([
-    api.filter_axis([lf_loose])
-]);
+local dnnroi_filters = [
+    api.filter_axis([hf_tight[0], lf_loose]),
+    api.filter_axis([hf_tight[1], lf_loose]),
+    api.filter_axis([hf_tight[2]])
+];
     
 local channel_filters = [
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
@@ -123,9 +125,12 @@ local channel_filters = [
 local filters = [
     api.view_filters(time_filters=api.time_filters(gauss=gauss_filter,
                                                    wiener=wiener_filters[i],
-                                                   dnnroi=dnnroi_filter),
-                     channel_filters=api.channel_filters(channel_filters[i]),
-                     decon_roll = decon_roll)
+                                                   dnnroi=dnnroi_filters[i],
+                                                   options={
+                                                       roll: decon_roll,
+                                                       crop: adc.readout_nticks,
+                                                   }),
+                     channel_filters=api.channel_filters(channel_filters[i]))
     for i in [0,1,2]];
 
 // OSP defaults are 3/5 sigma for ind/col plus a nominal 1.0 (no units) 

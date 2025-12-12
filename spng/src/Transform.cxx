@@ -29,11 +29,16 @@ namespace WireCell::SPNG {
             return true;
         }
 
+        logit(in, "input");
+
         torch::Tensor tensor = in->tensor();
         for (auto op : m_ops) {
             tensor = op(tensor);
         }
         out = std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
+
+        logit(out, "output");
+
         next_count();
         return true;
     }
@@ -115,6 +120,16 @@ namespace WireCell::SPNG {
             if (opcfg.operation == "treshold") {
                 m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
                     return tensor > scalar;
+                });
+                continue;
+            }
+            if (opcfg.operation == "slice") {
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    if (dims.size() != 3) {
+                        raise<ValueError>("slice transform requires 3 values in dims config, got %d",
+                                          dims.size());
+                    }
+                    return tensor.slice(dims[0], dims[1], dims[2]);
                 });
                 continue;
             }
