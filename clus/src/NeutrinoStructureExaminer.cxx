@@ -2452,10 +2452,172 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
 }
 
 
-
-
-
-
+        
+bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_vertex, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+    // Merge two segments if a direct connection is better
+    bool flag_update = false;
+    bool flag_continue = true;
+    
+    // Get transform and grouping from track_fitter
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    auto grouping = cluster.grouping();
+    
+    if (!transform || !grouping) {
+        return false;
+    }
+    
+    while (flag_continue) {
+        flag_continue = false;
+        
+        // Iterate through all vertices in the graph
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            VertexPtr vtx = graph[*vit].vertex;
+            
+            // Skip if vertex doesn't belong to this cluster
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            
+            // Skip the main vertex
+            if (vtx == main_vertex) continue;
+            
+            // Only consider vertices with exactly 2 connections
+            auto vd = vtx->get_descriptor();
+            if (boost::degree(vd, graph) != 2) continue;
+            
+            // Get the two segments connected to this vertex
+            auto edge_range = boost::out_edges(vd, graph);
+            auto eit = edge_range.first;
+            SegmentPtr sg1 = graph[*eit].segment;
+            ++eit;
+            SegmentPtr sg2 = graph[*eit].segment;
+            
+            if (!sg1 || !sg2) continue;
+            
+            // Check if segments have identical endpoints (same start and end points)
+            const auto& wcpts1 = sg1->wcpts();
+            const auto& wcpts2 = sg2->wcpts();
+            
+            if (wcpts1.size() < 2 || wcpts2.size() < 2) continue;
+            
+            // Check if segments are identical (same endpoints)
+            double dist_front_front = ray_length(Ray{wcpts1.front().point, wcpts2.front().point});
+            double dist_back_back = ray_length(Ray{wcpts1.back().point, wcpts2.back().point});
+            double dist_front_back = ray_length(Ray{wcpts1.front().point, wcpts2.back().point});
+            double dist_back_front = ray_length(Ray{wcpts1.back().point, wcpts2.front().point});
+            
+            if ((dist_front_front < 0.1*units::cm && dist_back_back < 0.1*units::cm) ||
+                (dist_front_back < 0.1*units::cm && dist_back_front < 0.1*units::cm)) {
+                // Segments are identical, delete one
+                remove_segment(graph, sg2);
+                flag_update = true;
+                flag_continue = true;
+                break;
+            }
+            
+            // Get segment lengths
+            // double length1 = segment_track_length(sg1);
+            // double length2 = segment_track_length(sg2);
+            
+            // Get the other vertices
+            VertexPtr vtx1 = find_other_vertex(graph, sg1, vtx);
+            VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
+            
+            if (!vtx1 || !vtx2) continue;
+            
+            // Get start and end points (use fit if available, otherwise wcpt)
+            Facade::geo_point_t start_p = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+            Facade::geo_point_t end_p = vtx2->fit().valid() ? vtx2->fit().point : vtx2->wcpt().point;
+            
+            // Check the straight line path
+            double step_size = 0.6 * units::cm;
+            double distance = ray_length(Ray{start_p, end_p});
+            int ncount = std::round(distance / step_size);
+            
+            std::vector<Facade::geo_point_t> new_pts;
+            bool flag_replace = true;
+            int n_bad = 0;
+            
+            // Test points along the straight line
+            for (int i = 1; i < ncount; i++) {
+                Facade::geo_point_t test_p(
+                    start_p.x() + (end_p.x() - start_p.x()) / ncount * i,
+                    start_p.y() + (end_p.y() - start_p.y()) / ncount * i,
+                    start_p.z() + (end_p.z() - start_p.z()) / ncount * i
+                );
+                new_pts.push_back(test_p);
+                
+                // Check if this point is good
+                auto test_wpid = dv->contained_by(test_p);
+                if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                    auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                        n_bad++;
+                    }
+                }
+                
+                if (n_bad > 1) {
+                    flag_replace = false;
+                    break;
+                }
+            }
+            
+            // If the straight line is better, replace the two segments with one new segment
+            if (flag_replace) {
+                // Build list of points for the new segment using steiner point cloud
+                std::list<Facade::geo_point_t> wcps_list;
+                
+                // Add start point
+                wcps_list.push_back(vtx1->wcpt().point);
+                
+                // Add intermediate points by finding closest points in steiner point cloud
+                for (size_t i = 0; i < new_pts.size(); i++) {
+                    auto [idx, closest_pt] = cluster.get_closest_wcpoint(new_pts[i]);
+                    
+                    // Only add if different from the last point
+                    if (wcps_list.empty() || ray_length(Ray{wcps_list.back(), closest_pt}) > 0.01*units::cm) {
+                        wcps_list.push_back(closest_pt);
+                    }
+                }
+                
+                // Add end point if different from last point
+                if (wcps_list.empty() || ray_length(Ray{wcps_list.back(), vtx2->wcpt().point}) > 0.01*units::cm) {
+                    wcps_list.push_back(vtx2->wcpt().point);
+                }
+                
+                // Convert list to vector
+                std::vector<Facade::geo_point_t> path_points(wcps_list.begin(), wcps_list.end());
+                
+                if (path_points.size() > 1) {
+                    // Create new segment
+                    SegmentPtr sg3 = create_segment_for_cluster(cluster, dv, path_points);
+                    if (sg3) {
+                        // Add new segment to graph
+                        add_segment(graph, sg3, vtx1, vtx2);
+                        
+                        // Delete old segments
+                        remove_segment(graph, sg1);
+                        remove_segment(graph, sg2);
+                        
+                        // Delete the middle vertex
+                        remove_vertex(graph, vtx);
+                        
+                        flag_update = true;
+                        flag_continue = true;
+                        break;
+                    }
+                }
+            }
+        }
+    } // while continue
+    
+    if (flag_update) {
+        track_fitter.do_multi_tracking(true, true, true);
+    }
+    
+    return flag_update;
+}
 
 
 
