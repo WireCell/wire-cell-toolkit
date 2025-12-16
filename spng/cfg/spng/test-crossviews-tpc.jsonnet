@@ -1,6 +1,5 @@
 // This produces a final graph to input depos and output crossview tensors
 
-local jobs = import "spng/jobs.jsonnet";
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local io = import "spng/io.jsonnet";
