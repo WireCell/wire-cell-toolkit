@@ -2565,48 +2565,11 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             
             // If the straight line is better, replace the two segments with one new segment
             if (flag_replace) {
-                // Build list of points for the new segment using steiner point cloud
-                std::list<Facade::geo_point_t> wcps_list;
-                
-                // Add start point
-                wcps_list.push_back(vtx1->wcpt().point);
-                
-                // Add intermediate points by finding closest points in steiner point cloud
-                for (size_t i = 0; i < new_pts.size(); i++) {
-                    auto [idx, closest_pt] = cluster.get_closest_wcpoint(new_pts[i]);
-                    
-                    // Only add if different from the last point
-                    if (wcps_list.empty() || ray_length(Ray{wcps_list.back(), closest_pt}) > 0.01*units::cm) {
-                        wcps_list.push_back(closest_pt);
-                    }
-                }
-                
-                // Add end point if different from last point
-                if (wcps_list.empty() || ray_length(Ray{wcps_list.back(), vtx2->wcpt().point}) > 0.01*units::cm) {
-                    wcps_list.push_back(vtx2->wcpt().point);
-                }
-                
-                // Convert list to vector
-                std::vector<Facade::geo_point_t> path_points(wcps_list.begin(), wcps_list.end());
-                
-                if (path_points.size() > 1) {
-                    // Create new segment
-                    SegmentPtr sg3 = create_segment_for_cluster(cluster, dv, path_points);
-                    if (sg3) {
-                        // Add new segment to graph
-                        add_segment(graph, sg3, vtx1, vtx2);
-                        
-                        // Delete old segments
-                        remove_segment(graph, sg1);
-                        remove_segment(graph, sg2);
-                        
-                        // Delete the middle vertex
-                        remove_vertex(graph, vtx);
-                        
-                        flag_update = true;
-                        flag_continue = true;
-                        break;
-                    }
+                // Use helper function to merge the two segments
+                if (merge_two_segments_into_one(graph, sg1, vtx, sg2, dv)) {
+                    flag_update = true;
+                    flag_continue = true;
+                    break;
                 }
             }
         }
@@ -3015,123 +2978,11 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                 // Perform the merge
                 if (flag_update) {
                     std::cout << "Cluster: " << cluster.ident() << " Final stage merge vertex to main vertex " 
-                            //   << vtx1->ident() << " " << vtx1_point << " " << main_vertex->ident() 
+                            //   << vtx1->ident() << " " << vtx1_point << " into " << main_vertex->ident() 
                               << " " << main_vtx_point << std::endl;
                     
-                    // Collect segments to reconnect
-                    std::vector<SegmentPtr> segments_to_reconnect;
-                    auto [vtx1_ebegin2, vtx1_eend2] = boost::out_edges(vtx1_vd, graph);
-                    for (auto vtx1_eit = vtx1_ebegin2; vtx1_eit != vtx1_eend2; ++vtx1_eit) {
-                        SegmentPtr sg1 = graph[*vtx1_eit].segment;
-                        if (sg1 && sg1 != sg) {
-                            segments_to_reconnect.push_back(sg1);
-                        }
-                    }
-                    
-                    // Process each segment to reconnect
-                    for (auto sg1 : segments_to_reconnect) {
-                        WCPoint vtx_new_wcp = main_vertex->wcpt();
-                        std::vector<WCPoint> vec_wcps = sg1->wcpts();
-                        
-                        if (vec_wcps.empty()) continue;
-                        
-                        // Determine orientation
-                        bool flag_front = (ray_length(Ray{vec_wcps.front().point, vtx1_point}) < 0.01*units::cm);
-                        
-                        // Find point at ~3cm from vtx1
-                        WCPoint min_wcp = vec_wcps.front();
-                        double min_dis = 1e9;
-                        
-                        for (size_t j = 0; j < vec_wcps.size(); j++) {
-                            double dis1 = ray_length(Ray{vec_wcps.at(j).point, vtx1_point});
-                            double dis = std::fabs(dis1 - 3.0*units::cm);
-                            if (dis < min_dis) {
-                                min_wcp = vec_wcps.at(j);
-                                min_dis = dis;
-                            }
-                        }
-                        
-                        // Build shortest path from main_vertex to min_wcp
-                        std::list<WCPoint> new_list;
-                        new_list.push_back(vtx_new_wcp);
-                        
-                        // Add intermediate points using steiner point cloud
-                        {
-                            double dis_step = 1.0*units::cm;
-                            int ncount = std::round(ray_length(Ray{vtx_new_wcp.point, min_wcp.point}) / dis_step);
-                            if (ncount < 2) ncount = 2;
-                            
-                            for (int qx = 1; qx < ncount; qx++) {
-                                WireCell::Point tmp_p(
-                                    vtx_new_wcp.point.x() + (min_wcp.point.x() - vtx_new_wcp.point.x()) / ncount * qx,
-                                    vtx_new_wcp.point.y() + (min_wcp.point.y() - vtx_new_wcp.point.y()) / ncount * qx,
-                                    vtx_new_wcp.point.z() + (min_wcp.point.z() - vtx_new_wcp.point.z()) / ncount * qx
-                                );
-                                
-                                auto [tmp_idx, tmp_wcp_pt] = cluster.get_closest_wcpoint(tmp_p);
-                                WCPoint tmp_wcp;
-                                tmp_wcp.point = tmp_wcp_pt;
-                                
-                                // Check distance
-                                if (ray_length(Ray{tmp_wcp.point, tmp_p}) > 0.3*units::cm) continue;
-                                
-                                // Check if different from last point and min_wcp
-                                if (ray_length(Ray{tmp_wcp.point, new_list.back().point}) > 0.01*units::cm && 
-                                    ray_length(Ray{tmp_wcp.point, min_wcp.point}) > 0.01*units::cm) {
-                                    new_list.push_back(tmp_wcp);
-                                }
-                            }
-                        }
-                        new_list.push_back(min_wcp);
-                        
-                        // Merge with existing wcpts
-                        std::list<WCPoint> old_list;
-                        std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
-                        
-                        if (flag_front) {
-                            // Remove points up to min_wcp from front
-                            while (old_list.size() > 0 && ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01*units::cm) {
-                                old_list.pop_front();
-                            }
-                            if (old_list.size() > 0) old_list.pop_front();
-                            
-                            // Add new_list to front in reverse
-                            for (auto it = new_list.rbegin(); it != new_list.rend(); it++) {
-                                old_list.push_front(*it);
-                            }
-                        } else {
-                            // Remove points up to min_wcp from back
-                            while (old_list.size() > 0 && ray_length(Ray{old_list.back().point, min_wcp.point}) > 0.01*units::cm) {
-                                old_list.pop_back();
-                            }
-                            if (old_list.size() > 0) old_list.pop_back();
-                            
-                            // Add new_list to back in reverse
-                            for (auto it = new_list.rbegin(); it != new_list.rend(); it++) {
-                                old_list.push_back(*it);
-                            }
-                        }
-                        
-                        // Update segment wcpts
-                        std::vector<WCPoint> new_wcpts;
-                        new_wcpts.reserve(old_list.size());
-                        std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
-                        sg1->wcpts(new_wcpts);
-                        
-                        // Reconnect segment
-                        VertexPtr tt_vtx = find_other_vertex(graph, sg1, vtx1);
-                        if (tt_vtx && tt_vtx != main_vertex) {
-                            remove_segment(graph, sg1);
-                            add_segment(graph, sg1, main_vertex, tt_vtx);
-                        } else {
-                            // Self-loop case
-                            remove_segment(graph, sg1);
-                        }
-                    }
-                    
-                    // Delete vtx1 and sg
-                    remove_vertex(graph, vtx1);
-                    remove_segment(graph, sg);
+                    // Use helper function to merge vtx1 into main_vertex
+                    merge_vertex_into_another(graph, vtx1, main_vertex, dv);
                     
                     break;
                 }
