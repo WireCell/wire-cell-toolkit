@@ -2619,7 +2619,823 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
     return flag_update;
 }
 
+bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_vertex, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_update = false;
+    
+    // Check if main_vertex has exactly 2 connected segments
+    if (!main_vertex->descriptor_valid()) return flag_update;
+    auto vd = main_vertex->get_descriptor();
+    if (boost::degree(vd, graph) != 2) return flag_update;
+    
+    // Get the two segments connected to main_vertex
+    auto edge_range = boost::out_edges(vd, graph);
+    auto eit = edge_range.first;
+    SegmentPtr sg1 = graph[*eit].segment;
+    ++eit;
+    SegmentPtr sg2 = graph[*eit].segment;
+    
+    if (!sg1 || !sg2) return flag_update;
+    
+    // Get main vertex position
+    WireCell::Point main_vtx_point = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+    
+    // Calculate direction vectors for both segments
+    WireCell::Vector dir1 = segment_cal_dir_3vector(sg1, main_vtx_point, 15*units::cm);
+    WireCell::Vector dir2 = segment_cal_dir_3vector(sg2, main_vtx_point, 15*units::cm);
+    
+    // Calculate angle between directions (in degrees)
+    double angle = (3.1415926 - std::acos(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()))) / 3.1415926 * 180.0;
+    
+    // Get segment lengths
+    double length1 = segment_track_length(sg1);
+    double length2 = segment_track_length(sg2);
+    
+    // Only proceed if segments are nearly collinear (angle > 175 degrees)
+    if (angle > 175) {
+        // Get transform and grouping for point validation
+        const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+            cluster.get_scope_transform(cluster.get_default_scope()));
+        // double cluster_t0 = cluster.get_cluster_t0();
+        auto grouping = cluster.grouping();
+        
+        if (!transform || !grouping) return flag_update;
+        
+        if (length1 < 6*units::cm && length1 < length2) {
+            // sg1 is short - merge it into sg2
+            VertexPtr vtx = find_other_vertex(graph, sg1, main_vertex);
+            if (!vtx) return flag_update;
+            
+            const auto& vec_wcps = sg2->wcpts();
+            const auto& vec_wcps1 = sg1->wcpts();
+            
+            if (vec_wcps.empty() || vec_wcps1.empty()) return flag_update;
+            
+            // Determine which end of sg2 connects to main_vertex
+            bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_vtx_point}) < 0.01*units::cm);
+            
+            // Determine which end of sg1 connects to main_vertex
+            bool flag_front1 = (ray_length(Ray{vec_wcps1.front().point, main_vtx_point}) < 0.01*units::cm);
+            
+            // Create a list to merge the wcpts
+            std::list<WCPoint> old_list;
+            std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
+            
+            // Merge sg1 points into sg2 based on orientation
+            if (flag_front && flag_front1) {
+                // Both connect at front - add sg1 in order to front of old_list
+                for (auto it1 = vec_wcps1.begin(); it1 != vec_wcps1.end(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.front().point}) > 0.01*units::cm) {
+                        old_list.push_front(*it1);
+                    }
+                }
+            } else if (flag_front && (!flag_front1)) {
+                // sg2 front connects, sg1 back connects - add sg1 in reverse to front of old_list
+                for (auto it1 = vec_wcps1.rbegin(); it1 != vec_wcps1.rend(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.front().point}) > 0.01*units::cm) {
+                        old_list.push_front(*it1);
+                    }
+                }
+            } else if ((!flag_front) && flag_front1) {
+                // sg2 back connects, sg1 front connects - add sg1 in order to back of old_list
+                for (auto it1 = vec_wcps1.begin(); it1 != vec_wcps1.end(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.back().point}) > 0.01*units::cm) {
+                        old_list.push_back(*it1);
+                    }
+                }
+            } else if ((!flag_front) && (!flag_front1)) {
+                // Both connect at back - add sg1 in reverse to back of old_list
+                for (auto it1 = vec_wcps1.rbegin(); it1 != vec_wcps1.rend(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.back().point}) > 0.01*units::cm) {
+                        old_list.push_back(*it1);
+                    }
+                }
+            }
+            
+            // Update sg2's wcpts with merged list
+            std::vector<WCPoint> new_wcpts;
+            new_wcpts.reserve(old_list.size());
+            std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
+            sg2->wcpts(new_wcpts);
+            
+            // Update main_vertex to vtx's position
+            WCPoint vtx_wcp = vtx->wcpt();
+            main_vertex->wcpt(vtx_wcp);
+            if (vtx->fit().valid()) {
+                main_vertex->fit(vtx->fit());
+            }
+            
+            // Reconnect all segments from vtx to main_vertex (except sg1)
+            std::vector<SegmentPtr> vtx_segments;
+            if (vtx->descriptor_valid()) {
+                auto vtx_vd = vtx->get_descriptor();
+                auto [vtx_ebegin, vtx_eend] = boost::out_edges(vtx_vd, graph);
+                for (auto vtx_eit = vtx_ebegin; vtx_eit != vtx_eend; ++vtx_eit) {
+                    SegmentPtr seg = graph[*vtx_eit].segment;
+                    if (seg && seg != sg1) {
+                        vtx_segments.push_back(seg);
+                    }
+                }
+            }
+            
+            for (auto seg : vtx_segments) {
+                VertexPtr other_vtx = find_other_vertex(graph, seg, vtx);
+                if (other_vtx && other_vtx != main_vertex) {
+                    remove_segment(graph, seg);
+                    add_segment(graph, seg, main_vertex, other_vtx);
+                }
+            }
+            
+            // Delete sg1 and vtx
+            remove_segment(graph, sg1);
+            remove_vertex(graph, vtx);
+            
+            flag_update = true;
+            
+        } else if (length2 < 6*units::cm && length2 < length1) {
+            // sg2 is short - merge it into sg1
+            VertexPtr vtx = find_other_vertex(graph, sg2, main_vertex);
+            if (!vtx) return flag_update;
+            
+            const auto& vec_wcps = sg1->wcpts();
+            const auto& vec_wcps1 = sg2->wcpts();
+            
+            if (vec_wcps.empty() || vec_wcps1.empty()) return flag_update;
+            
+            // Determine which end of sg1 connects to main_vertex
+            bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_vtx_point}) < 0.01*units::cm);
+            
+            // Determine which end of sg2 connects to main_vertex
+            bool flag_front1 = (ray_length(Ray{vec_wcps1.front().point, main_vtx_point}) < 0.01*units::cm);
+            
+            // Create a list to merge the wcpts
+            std::list<WCPoint> old_list;
+            std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
+            
+            // Merge sg2 points into sg1 based on orientation
+            if (flag_front && flag_front1) {
+                // Both connect at front - add sg2 in order to front of old_list
+                for (auto it1 = vec_wcps1.begin(); it1 != vec_wcps1.end(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.front().point}) > 0.01*units::cm) {
+                        old_list.push_front(*it1);
+                    }
+                }
+            } else if (flag_front && (!flag_front1)) {
+                // sg1 front connects, sg2 back connects - add sg2 in reverse to front of old_list
+                for (auto it1 = vec_wcps1.rbegin(); it1 != vec_wcps1.rend(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.front().point}) > 0.01*units::cm) {
+                        old_list.push_front(*it1);
+                    }
+                }
+            } else if ((!flag_front) && flag_front1) {
+                // sg1 back connects, sg2 front connects - add sg2 in order to back of old_list
+                for (auto it1 = vec_wcps1.begin(); it1 != vec_wcps1.end(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.back().point}) > 0.01*units::cm) {
+                        old_list.push_back(*it1);
+                    }
+                }
+            } else if ((!flag_front) && (!flag_front1)) {
+                // Both connect at back - add sg2 in reverse to back of old_list
+                for (auto it1 = vec_wcps1.rbegin(); it1 != vec_wcps1.rend(); it1++) {
+                    if (ray_length(Ray{(*it1).point, old_list.back().point}) > 0.01*units::cm) {
+                        old_list.push_back(*it1);
+                    }
+                }
+            }
+            
+            // Update sg1's wcpts with merged list
+            std::vector<WCPoint> new_wcpts;
+            new_wcpts.reserve(old_list.size());
+            std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
+            sg1->wcpts(new_wcpts);
+            
+            // Update main_vertex to vtx's position
+            WCPoint vtx_wcp = vtx->wcpt();
+            main_vertex->wcpt(vtx_wcp);
+            if (vtx->fit().valid()) {
+                main_vertex->fit(vtx->fit());
+            }
+            
+            // Reconnect all segments from vtx to main_vertex (except sg2)
+            std::vector<SegmentPtr> vtx_segments;
+            if (vtx->descriptor_valid()) {
+                auto vtx_vd = vtx->get_descriptor();
+                auto [vtx_ebegin, vtx_eend] = boost::out_edges(vtx_vd, graph);
+                for (auto vtx_eit = vtx_ebegin; vtx_eit != vtx_eend; ++vtx_eit) {
+                    SegmentPtr seg = graph[*vtx_eit].segment;
+                    if (seg && seg != sg2) {
+                        vtx_segments.push_back(seg);
+                    }
+                }
+            }
+            
+            for (auto seg : vtx_segments) {
+                VertexPtr other_vtx = find_other_vertex(graph, seg, vtx);
+                if (other_vtx && other_vtx != main_vertex) {
+                    remove_segment(graph, seg);
+                    add_segment(graph, seg, main_vertex, other_vtx);
+                }
+            }
+            
+            // Delete sg2 and vtx
+            remove_segment(graph, sg2);
+            remove_vertex(graph, vtx);
+            
+            flag_update = true;
+        }
+        
+        // If we updated, redo multi-tracking
+        if (flag_update) {
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+    }
+    
+    return flag_update;
+}
 
+bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_vertex, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+    bool flag_updated = false;
+    
+    if (!main_vertex || !main_vertex->descriptor_valid()) return flag_updated;
+    
+    // Get transform and grouping for point validation
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    auto grouping = cluster.grouping();
+    
+    if (!transform || !grouping) return flag_updated;
+    
+    // Continue looping until no more updates
+    bool flag_continue = true;
+    while (flag_continue) {
+        flag_continue = false;
+        bool flag_update = false;
+        
+        auto main_vd = main_vertex->get_descriptor();
+        
+        // Loop over all segments connected to main_vertex
+        auto [ebegin, eend] = boost::out_edges(main_vd, graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg) continue;
+            
+            // Find the other vertex of this segment
+            VertexPtr vtx1 = find_other_vertex(graph, sg, main_vertex);
+            if (!vtx1 || !vtx1->descriptor_valid()) continue;
+            
+            // Skip if either vertex has only 1 connection
+            auto vtx1_vd = vtx1->get_descriptor();
+            if (boost::degree(vtx1_vd, graph) == 1 || boost::degree(main_vd, graph) == 1) continue;
+            
+            // Check distance between vertices
+            WireCell::Point main_vtx_point = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+            WireCell::Point vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+            
+            double dis = ray_length(Ray{main_vtx_point, vtx1_point});
+            
+            if (dis < 2.0*units::cm) {
+                // Check if vtx1 can be merged into main_vertex
+                flag_update = true;
+                
+                // Check all segments connected to vtx1 (except sg)
+                auto [vtx1_ebegin, vtx1_eend] = boost::out_edges(vtx1_vd, graph);
+                for (auto vtx1_eit = vtx1_ebegin; vtx1_eit != vtx1_eend; ++vtx1_eit) {
+                    SegmentPtr sg1 = graph[*vtx1_eit].segment;
+                    if (!sg1 || sg1 == sg) continue;
+                    
+                    const auto& pts = sg1->wcpts();
+                    if (pts.empty()) continue;
+                    
+                    // Determine which end of sg connects to vtx1
+                    const auto& sg_wcpts = sg->wcpts();
+                    if (sg_wcpts.empty()) continue;
+                    
+                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, vtx1_point}) < 0.01*units::cm);
+                    
+                    // Find point at ~3cm from vtx1
+                    WireCell::Point min_point = pts.front().point;
+                    double min_dis = 1e9;
+                    int min_index = 0;
+                    
+                    for (size_t i = 0; i < pts.size(); i++) {
+                        double dis = std::fabs(ray_length(Ray{pts.at(i).point, vtx1_point}) - 3*units::cm);
+                        if (dis < min_dis) {
+                            min_dis = dis;
+                            min_point = pts.at(i).point;
+                            min_index = i;
+                        }
+                    }
+                    
+                    // Check connectivity from min_point to vtx1
+                    bool flag_connect = true;
+                    if (flag_start) {
+                        for (int i = min_index; i >= 0; i--) {
+                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                    flag_connect = false;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        for (size_t i = min_index; i < pts.size(); i++) {
+                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                    flag_connect = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check path from min_point to main_vertex
+                    if (flag_connect) {
+                        double step_size = 0.3 * units::cm;
+                        WireCell::Point start_p = min_point;
+                        WireCell::Point end_p = main_vtx_point;
+                        int ncount = std::round(ray_length(Ray{start_p, end_p}) / step_size);
+                        int n_bad = 0;
+                        
+                        for (int i = 1; i < ncount; i++) {
+                            WireCell::Point test_p(
+                                start_p.x() + (end_p.x() - start_p.x()) / ncount * i,
+                                start_p.y() + (end_p.y() - start_p.y()) / ncount * i,
+                                start_p.z() + (end_p.z() - start_p.z()) / ncount * i
+                            );
+                            
+                            auto test_wpid = dv->contained_by(test_p);
+                            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                                auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                    n_bad++;
+                                }
+                            }
+                        }
+                        if (n_bad > 0) flag_update = false;
+                    }
+                }
+                
+                // Check if sg is solid in all three views (if vtx1 has only 2 connections)
+                if ((!flag_update) && boost::degree(vtx1_vd, graph) == 2) {
+                    const auto& tmp_pts = sg->wcpts();
+                    for (size_t i = 0; i < tmp_pts.size(); i++) {
+                        WireCell::Point test_p = tmp_pts.at(i).point;
+                        
+                        auto test_wpid = dv->contained_by(test_p);
+                        if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                            auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                flag_update = true;
+                            }
+                        }
+                        
+                        // Check midpoint
+                        if (i + 1 != tmp_pts.size()) {
+                            WireCell::Point mid_p(
+                                test_p.x() + (tmp_pts.at(i+1).point.x() - test_p.x()) / 2.,
+                                test_p.y() + (tmp_pts.at(i+1).point.y() - test_p.y()) / 2.,
+                                test_p.z() + (tmp_pts.at(i+1).point.z() - test_p.z()) / 2.
+                            );
+                            
+                            auto mid_wpid = dv->contained_by(mid_p);
+                            if (mid_wpid.face() != -1 && mid_wpid.apa() != -1) {
+                                auto mid_p_raw = transform->backward(mid_p, cluster_t0, mid_wpid.face(), mid_wpid.apa());
+                                if (!grouping->is_good_point(mid_p_raw, mid_wpid.apa(), mid_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                    flag_update = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Perform the merge
+                if (flag_update) {
+                    std::cout << "Cluster: " << cluster.ident() << " Final stage merge vertex to main vertex " 
+                            //   << vtx1->ident() << " " << vtx1_point << " " << main_vertex->ident() 
+                              << " " << main_vtx_point << std::endl;
+                    
+                    // Collect segments to reconnect
+                    std::vector<SegmentPtr> segments_to_reconnect;
+                    auto [vtx1_ebegin2, vtx1_eend2] = boost::out_edges(vtx1_vd, graph);
+                    for (auto vtx1_eit = vtx1_ebegin2; vtx1_eit != vtx1_eend2; ++vtx1_eit) {
+                        SegmentPtr sg1 = graph[*vtx1_eit].segment;
+                        if (sg1 && sg1 != sg) {
+                            segments_to_reconnect.push_back(sg1);
+                        }
+                    }
+                    
+                    // Process each segment to reconnect
+                    for (auto sg1 : segments_to_reconnect) {
+                        WCPoint vtx_new_wcp = main_vertex->wcpt();
+                        std::vector<WCPoint> vec_wcps = sg1->wcpts();
+                        
+                        if (vec_wcps.empty()) continue;
+                        
+                        // Determine orientation
+                        bool flag_front = (ray_length(Ray{vec_wcps.front().point, vtx1_point}) < 0.01*units::cm);
+                        
+                        // Find point at ~3cm from vtx1
+                        WCPoint min_wcp = vec_wcps.front();
+                        double min_dis = 1e9;
+                        
+                        for (size_t j = 0; j < vec_wcps.size(); j++) {
+                            double dis1 = ray_length(Ray{vec_wcps.at(j).point, vtx1_point});
+                            double dis = std::fabs(dis1 - 3.0*units::cm);
+                            if (dis < min_dis) {
+                                min_wcp = vec_wcps.at(j);
+                                min_dis = dis;
+                            }
+                        }
+                        
+                        // Build shortest path from main_vertex to min_wcp
+                        std::list<WCPoint> new_list;
+                        new_list.push_back(vtx_new_wcp);
+                        
+                        // Add intermediate points using steiner point cloud
+                        {
+                            double dis_step = 1.0*units::cm;
+                            int ncount = std::round(ray_length(Ray{vtx_new_wcp.point, min_wcp.point}) / dis_step);
+                            if (ncount < 2) ncount = 2;
+                            
+                            for (int qx = 1; qx < ncount; qx++) {
+                                WireCell::Point tmp_p(
+                                    vtx_new_wcp.point.x() + (min_wcp.point.x() - vtx_new_wcp.point.x()) / ncount * qx,
+                                    vtx_new_wcp.point.y() + (min_wcp.point.y() - vtx_new_wcp.point.y()) / ncount * qx,
+                                    vtx_new_wcp.point.z() + (min_wcp.point.z() - vtx_new_wcp.point.z()) / ncount * qx
+                                );
+                                
+                                auto [tmp_idx, tmp_wcp_pt] = cluster.get_closest_wcpoint(tmp_p);
+                                WCPoint tmp_wcp;
+                                tmp_wcp.point = tmp_wcp_pt;
+                                
+                                // Check distance
+                                if (ray_length(Ray{tmp_wcp.point, tmp_p}) > 0.3*units::cm) continue;
+                                
+                                // Check if different from last point and min_wcp
+                                if (ray_length(Ray{tmp_wcp.point, new_list.back().point}) > 0.01*units::cm && 
+                                    ray_length(Ray{tmp_wcp.point, min_wcp.point}) > 0.01*units::cm) {
+                                    new_list.push_back(tmp_wcp);
+                                }
+                            }
+                        }
+                        new_list.push_back(min_wcp);
+                        
+                        // Merge with existing wcpts
+                        std::list<WCPoint> old_list;
+                        std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
+                        
+                        if (flag_front) {
+                            // Remove points up to min_wcp from front
+                            while (old_list.size() > 0 && ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01*units::cm) {
+                                old_list.pop_front();
+                            }
+                            if (old_list.size() > 0) old_list.pop_front();
+                            
+                            // Add new_list to front in reverse
+                            for (auto it = new_list.rbegin(); it != new_list.rend(); it++) {
+                                old_list.push_front(*it);
+                            }
+                        } else {
+                            // Remove points up to min_wcp from back
+                            while (old_list.size() > 0 && ray_length(Ray{old_list.back().point, min_wcp.point}) > 0.01*units::cm) {
+                                old_list.pop_back();
+                            }
+                            if (old_list.size() > 0) old_list.pop_back();
+                            
+                            // Add new_list to back in reverse
+                            for (auto it = new_list.rbegin(); it != new_list.rend(); it++) {
+                                old_list.push_back(*it);
+                            }
+                        }
+                        
+                        // Update segment wcpts
+                        std::vector<WCPoint> new_wcpts;
+                        new_wcpts.reserve(old_list.size());
+                        std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
+                        sg1->wcpts(new_wcpts);
+                        
+                        // Reconnect segment
+                        VertexPtr tt_vtx = find_other_vertex(graph, sg1, vtx1);
+                        if (tt_vtx && tt_vtx != main_vertex) {
+                            remove_segment(graph, sg1);
+                            add_segment(graph, sg1, main_vertex, tt_vtx);
+                        } else {
+                            // Self-loop case
+                            remove_segment(graph, sg1);
+                        }
+                    }
+                    
+                    // Delete vtx1 and sg
+                    remove_vertex(graph, vtx1);
+                    remove_segment(graph, sg);
+                    
+                    break;
+                }
+            }
+        }
+        
+        // If updated, redo tracking and continue loop
+        if (flag_update) {
+            flag_continue = true;
+            flag_updated = true;
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+    }
+    
+    return flag_updated;
+}
 
+bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_vertex, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+    bool flag_updated = false;
+    
+    if (!main_vertex || !main_vertex->descriptor_valid()) return flag_updated;
+    
+    // Get transform and grouping for point validation
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    auto grouping = cluster.grouping();
+    
+    if (!transform || !grouping) return flag_updated;
+    
+    // Continue looping until no more updates
+    bool flag_continue = true;
+    while (flag_continue) {
+        flag_continue = false;
+        bool flag_update = false;
+        
+        auto main_vd = main_vertex->get_descriptor();
+        
+        // Loop over all segments connected to main_vertex
+        auto [ebegin, eend] = boost::out_edges(main_vd, graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg) continue;
+            
+            // Find the other vertex of this segment
+            VertexPtr vtx1 = find_other_vertex(graph, sg, main_vertex);
+            if (!vtx1 || !vtx1->descriptor_valid()) continue;
+            
+            // Skip if vtx1 has only 1 connection
+            auto vtx1_vd = vtx1->get_descriptor();
+            if (boost::degree(vtx1_vd, graph) == 1) continue;
+            
+            // Check distance between vertices
+            WireCell::Point main_vtx_point = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+            WireCell::Point vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+            
+            double dis = ray_length(Ray{main_vtx_point, vtx1_point});
+            
+            if (dis < 2.5*units::cm) {
+                // Check if main_vertex can be merged into vtx1
+                flag_update = true;
+                
+                // Check all segments connected to main_vertex (except sg)
+                auto [main_ebegin, main_eend] = boost::out_edges(main_vd, graph);
+                for (auto main_eit = main_ebegin; main_eit != main_eend; ++main_eit) {
+                    SegmentPtr sg1 = graph[*main_eit].segment;
+                    if (!sg1 || sg1 == sg) continue;
+                    
+                    const auto& pts = sg1->wcpts();
+                    if (pts.empty()) continue;
+                    
+                    // Determine which end of sg connects to main_vertex
+                    const auto& sg_wcpts = sg->wcpts();
+                    if (sg_wcpts.empty()) continue;
+                    
+                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, main_vtx_point}) < 0.01*units::cm);
+                    
+                    // Find point at ~3cm from main_vertex
+                    WireCell::Point min_point = pts.front().point;
+                    double min_dis = 1e9;
+                    int min_index = 0;
+                    
+                    for (size_t i = 0; i < pts.size(); i++) {
+                        double dis = std::fabs(ray_length(Ray{pts.at(i).point, main_vtx_point}) - 3*units::cm);
+                        if (dis < min_dis) {
+                            min_dis = dis;
+                            min_point = pts.at(i).point;
+                            min_index = i;
+                        }
+                    }
+                    
+                    // Check connectivity from min_point to main_vertex
+                    bool flag_connect = true;
+                    if (flag_start) {
+                        for (int i = min_index; i >= 0; i--) {
+                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                    flag_connect = false;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        for (size_t i = min_index; i < pts.size(); i++) {
+                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                    flag_connect = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check path from min_point to vtx1
+                    if (flag_connect) {
+                        double step_size = 0.3 * units::cm;
+                        WireCell::Point start_p = min_point;
+                        WireCell::Point end_p = vtx1_point;
+                        int ncount = std::round(ray_length(Ray{start_p, end_p}) / step_size);
+                        int n_bad = 0;
+                        
+                        for (int i = 1; i < ncount; i++) {
+                            WireCell::Point test_p(
+                                start_p.x() + (end_p.x() - start_p.x()) / ncount * i,
+                                start_p.y() + (end_p.y() - start_p.y()) / ncount * i,
+                                start_p.z() + (end_p.z() - start_p.z()) / ncount * i
+                            );
+                            
+                            auto test_wpid = dv->contained_by(test_p);
+                            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                                auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.3*units::cm, 0, 0)) {
+                                    n_bad++;
+                                }
+                            }
+                        }
+                        if (n_bad > 0) flag_update = false;
+                    }
+                }
+                
+                // Perform the merge
+                if (flag_update) {
+                    std::cout << "Cluster: " << cluster.ident() << " Final stage merge main_vertex " 
+                            //   << main_vertex->ident() << " " << main_vtx_point << " " << vtx1->ident() 
+                              << " " << vtx1_point << std::endl;
+                    
+                    // Collect segments to update
+                    std::vector<SegmentPtr> segments_to_update;
+                    auto [main_ebegin2, main_eend2] = boost::out_edges(main_vd, graph);
+                    for (auto main_eit = main_ebegin2; main_eit != main_eend2; ++main_eit) {
+                        SegmentPtr sg1 = graph[*main_eit].segment;
+                        if (sg1 && sg1 != sg) {
+                            segments_to_update.push_back(sg1);
+                        }
+                    }
+                    
+                    // Process each segment connected to main_vertex (except sg)
+                    for (auto sg1 : segments_to_update) {
+                        WCPoint vtx_new_wcp = vtx1->wcpt();
+                        std::vector<WCPoint> vec_wcps = sg1->wcpts();
+                        
+                        if (vec_wcps.empty()) continue;
+                        
+                        // Determine orientation
+                        bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_vtx_point}) < 0.01*units::cm);
+                        
+                        // Find point at ~3cm from main_vertex
+                        WCPoint min_wcp = vec_wcps.front();
+                        double min_dis = 1e9;
+                        
+                        for (size_t j = 0; j < vec_wcps.size(); j++) {
+                            double dis1 = ray_length(Ray{vec_wcps.at(j).point, main_vtx_point});
+                            double dis = std::fabs(dis1 - 3.0*units::cm);
+                            if (dis < min_dis) {
+                                min_wcp = vec_wcps.at(j);
+                                min_dis = dis;
+                            }
+                        }
+                        
+                        // Build shortest path from vtx1 to min_wcp
+                        std::list<WCPoint> new_list;
+                        new_list.push_back(vtx_new_wcp);
+                        
+                        // Add intermediate points using steiner point cloud
+                        {
+                            double dis_step = 1.0*units::cm;
+                            int ncount = std::round(ray_length(Ray{vtx_new_wcp.point, min_wcp.point}) / dis_step);
+                            if (ncount < 2) ncount = 2;
+                            
+                            for (int qx = 1; qx < ncount; qx++) {
+                                WireCell::Point tmp_p(
+                                    vtx_new_wcp.point.x() + (min_wcp.point.x() - vtx_new_wcp.point.x()) / ncount * qx,
+                                    vtx_new_wcp.point.y() + (min_wcp.point.y() - vtx_new_wcp.point.y()) / ncount * qx,
+                                    vtx_new_wcp.point.z() + (min_wcp.point.z() - vtx_new_wcp.point.z()) / ncount * qx
+                                );
+                                
+                                auto [tmp_idx, tmp_wcp_pt] = cluster.get_closest_wcpoint(tmp_p);
+                                WCPoint tmp_wcp;
+                                tmp_wcp.point = tmp_wcp_pt;
+                                
+                                // Check distance
+                                if (ray_length(Ray{tmp_wcp.point, tmp_p}) > 0.3*units::cm) continue;
+                                
+                                // Check if different from last point and min_wcp
+                                if (ray_length(Ray{tmp_wcp.point, new_list.back().point}) > 0.01*units::cm && 
+                                    ray_length(Ray{tmp_wcp.point, min_wcp.point}) > 0.01*units::cm) {
+                                    new_list.push_back(tmp_wcp);
+                                }
+                            }
+                        }
+                        new_list.push_back(min_wcp);
+                        
+                        // Merge with existing wcpts
+                        std::list<WCPoint> old_list;
+                        std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
+                        
+                        if (flag_front) {
+                            // Remove points up to min_wcp from front
+                            while (old_list.size() > 0 && ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01*units::cm) {
+                                old_list.pop_front();
+                            }
+                            if (old_list.size() > 0) old_list.pop_front();
+                            
+                            // Add new_list to front in reverse
+                            for (auto it = new_list.rbegin(); it != new_list.rend(); it++) {
+                                old_list.push_front(*it);
+                            }
+                        } else {
+                            // Remove points up to min_wcp from back
+                            while (old_list.size() > 0 && ray_length(Ray{old_list.back().point, min_wcp.point}) > 0.01*units::cm) {
+                                old_list.pop_back();
+                            }
+                            if (old_list.size() > 0) old_list.pop_back();
+                            
+                            // Add new_list to back in reverse
+                            for (auto it = new_list.rbegin(); it != new_list.rend(); it++) {
+                                old_list.push_back(*it);
+                            }
+                        }
+                        
+                        // Update segment wcpts
+                        std::vector<WCPoint> new_wcpts;
+                        new_wcpts.reserve(old_list.size());
+                        std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
+                        sg1->wcpts(new_wcpts);
+                    }
+                    
+                    // Update main_vertex to vtx1's position
+                    main_vertex->wcpt(vtx1->wcpt());
+                    if (vtx1->fit().valid()) {
+                        main_vertex->fit(vtx1->fit());
+                    }
+                    
+                    // Reconnect segments from vtx1 to main_vertex (except sg)
+                    std::vector<SegmentPtr> vtx1_segments;
+                    auto [vtx1_ebegin2, vtx1_eend2] = boost::out_edges(vtx1_vd, graph);
+                    for (auto vtx1_eit = vtx1_ebegin2; vtx1_eit != vtx1_eend2; ++vtx1_eit) {
+                        SegmentPtr sg1 = graph[*vtx1_eit].segment;
+                        if (sg1 && sg1 != sg) {
+                            vtx1_segments.push_back(sg1);
+                        }
+                    }
+                    
+                    for (auto sg1 : vtx1_segments) {
+                        VertexPtr tt_vtx = find_other_vertex(graph, sg1, vtx1);
+                        if (tt_vtx && tt_vtx != main_vertex) {
+                            remove_segment(graph, sg1);
+                            add_segment(graph, sg1, main_vertex, tt_vtx);
+                        } else {
+                            // Self-loop case
+                            remove_segment(graph, sg1);
+                        }
+                    }
+                    
+                    // Delete vtx1 and sg
+                    remove_vertex(graph, vtx1);
+                    remove_segment(graph, sg);
+                    
+                    break;
+                }
+            }
+        }
+        
+        // If updated, redo tracking and continue loop
+        if (flag_update) {
+            flag_continue = true;
+            flag_updated = true;
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+    }
+    
+    return flag_updated;
+}
+   
 
+bool PatternAlgorithms::examine_structure_final(Graph& graph, VertexPtr main_vertex, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+    examine_structure_final_1(graph, main_vertex, cluster, track_fitter, dv);
+    examine_structure_final_1p(graph, main_vertex, cluster, track_fitter, dv);
+    examine_structure_final_2(graph, main_vertex, cluster, track_fitter, dv);
+    examine_structure_final_3(graph, main_vertex, cluster, track_fitter, dv);
+    return true;
+}
 
