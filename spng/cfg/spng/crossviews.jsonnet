@@ -1,9 +1,9 @@
 local wc = import "wirecell.jsonnet";
-local pg = import "pgraph.jsonnet";
+local real_pg = import "pgraph.jsonnet";
 local util = import "spng/util.jsonnet";
 local fans_mod = import "spng/fans.jsonnet";
 
-function(control={})
+function(control={}, pg)
 {
     local fans = fans_mod(control),
 
@@ -49,7 +49,7 @@ function(control={})
                   oports=[
                       if view_crossed[view_index] == 1
                       then crossviews[view_index].oports[0]
-                      else fanouts[view_index].oports[ncrosses]
+                      //else fanouts[view_index].oports[ncrosses]
                       for view_index in [0,1,2]
                   ],
                   edges=[

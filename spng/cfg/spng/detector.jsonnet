@@ -400,7 +400,12 @@ local known_detectors = import "detectors.jsonnet";
         adc=null, fr=null, er=null, rcs=[],
         pirs=null, noise=null,
         view_groups=null, filters=null,
-        crossview_thresholds=null)::
+        crossview_thresholds=null,
+        // FIXME: temporary! function called on tcp to produce a full original
+        // signal processing subgraph.  FIXME: factor this out so that a
+        // detector only provides static info not dependent on "tpc" nor
+        // "control" info.
+        osp_subgraph=null)::
         {
             // the AnodePlane config object
             anode: anode,
@@ -441,6 +446,12 @@ local known_detectors = import "detectors.jsonnet";
             // all faces
             faces: std.set(wc.flatten([vg.face_idents for vg in view_groups])),
 
+            // FIXME: WARNING: temporary construct.  Unlike the rest of this
+            // object, this attribute is a ready-to-connect subgraph that does
+            // Original Signal Processing (OSP) on one anode and may include
+            // OmnibusSigproc and potentially also DNNROIFinding nodes.  
+            _osp_subgraph:: osp_subgraph,
+            osp_subgraph: self._osp_subgraph(self)
         },
 
 

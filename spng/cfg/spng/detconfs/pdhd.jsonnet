@@ -1,9 +1,10 @@
 local wc = import "wirecell.jsonnet";
 local api = import "../detector.jsonnet";
 local detectors = import "detectors.jsonnet";
-
 local detname = "pdhd";
 local det = detectors[detname];  // me
+
+local osp = import "pdhd/osp.jsonnet";
 
 // Caution, PDHD hardware tick is 512ns but we use 500ns internally.  This
 // assumes any real DAQ data is resampled.  Changing to 512ns REQUIRES a change
@@ -143,7 +144,8 @@ local tpcs = [
     api.tpc(anode, lar=lar, ductor=ductor, adc=adc, fr=fr, er=er_spng,
             pirs=pirs(anode), noise=noise,
             view_groups=view_groups, filters=filters,
-            crossview_thresholds=cvts)
+            crossview_thresholds=cvts,
+            osp_subgraph=osp)
     for anode in anodes ];
 
 api.detector("pdhd", tpcs)

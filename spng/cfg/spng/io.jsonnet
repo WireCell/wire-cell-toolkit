@@ -8,7 +8,7 @@
 //
 
 local fileio = import "fileio.jsonnet";
-local torchio = import "torchio.jsonnet";
+local torchio = import "spng/torchio.jsonnet";
 local pg = import "pgraph.jsonnet";
 
 {

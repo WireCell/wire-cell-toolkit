@@ -3,7 +3,7 @@
 // Pnodes with one TPC context.  See view.jsonnet for per-view context.
 //
 local wc = import "wirecell.jsonnet";
-local pg = import "pgraph.jsonnet";
+local real_pg = import "pgraph.jsonnet";
 
 local fans_mod = import "fans.jsonnet";
 local frame_mod = import "frame.jsonnet";
@@ -13,15 +13,17 @@ local cv_mod = import "crossviews.jsonnet";
 
 local tlas = import "tlas.jsonnet";
 
+
+
 /// Return an object with various TDM nodes and subgraphs for one tpc
 ///
-function(tpc, control) {
+function(tpc, control, pg) {
 
     // Pull these out to help debug dumping.
     tpc: tpc,
     anode: tpc.anode,
 
-    local cv = cv_mod(control),
+    local cv = cv_mod(control, pg=pg),
     local fans = fans_mod(control),
     local frame = frame_mod(control),
     local decon = decon_mod(tpc, control),

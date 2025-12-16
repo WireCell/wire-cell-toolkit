@@ -1,10 +1,10 @@
 // Construct ROI related subgraphs including running dnnroi
 
 local wc = import "wirecell.jsonnet";
-local pg = import "pgraph.jsonnet";
+local real_pg = import "pgraph.jsonnet";
 local util = import "util.jsonnet";
 
-function(control={})
+function(control, pg)
 {
     /// 3->1 overall, but returns an object with various sinks and one source
     /// that bracket a DNNROI-like ROI finding sugraph.
@@ -59,6 +59,22 @@ function(control={})
             } + control
         }, nin=1, nout=1);
 
+        /// DNNROI traditionally scales all three images down by the arbitrary
+        /// value of 4000.  This seems weird to do to "boolean" mp3/mp2 image
+        /// but in reality DNNROI tasks OSP to define these images NOT as
+        /// boolean but with pixel values 0 or 4000.  Instead of this silliness,
+        /// we keep mp2/mp3 as boolean but we still must scale down the "dense"
+        /// input by the magic 4000.
+        local scaler = pg.pnode({
+            type:'SPNGTransform',
+            name: this_name+'_scale',
+            data: {
+                operations: [
+                    { operation: "scale", scalar: scale },
+                ],                
+            } + control,
+        }, nin=1, nout=1);
+
         /// nmps+1 -> 1
         /// Stack dense + mps.  An iport will be exposed to connect to "dense".
         /// FIXME: batching may be a problem.  dim:-3 stacks along the dimension
@@ -74,20 +90,13 @@ function(control={})
             } + control
         }, nin=nmps+1, nout=1);
 
-        /// 1 -> 1
-        /// DNNROI scales all three images by 4000.0.
+        /// 1 -> 1.  DNNROI model requires (ntick,nchan) while WCT convention is
+        /// (nchan,ntick) so we must bookend the forward with a transpose.
         local pre = pg.pnode({
             type: 'SPNGTransform',
             name: this_name+'_pre',
             data: {
                 operations: [
-                    /// DNNROI traditionally scales all three images down by
-                    /// this seemingly arbitrary value.  The "normalize"
-                    /// operation might be more portable?
-                    { operation: "scale", scalar: scale },
-                    /// DNNROI traditionally works in (ntick,nchan) for last two
-                    /// dims while WCT works in (nchan,ntick) so we must bookend
-                    /// the forward with a transpose.
                     { operation: "transpose", dims: [-2,-1] }
                 ]
             } + control
@@ -151,7 +160,7 @@ function(control={})
             name: this_name,
             data: control
         }, nin=1, nout=1);
-        local pipe = pg.pipeline([rebinner, stack, pre, fwd, post, thresh, unbinner, mul, rbl]);
+        local pipe = pg.pipeline([rebinner, scaler, stack, pre, fwd, post, thresh, unbinner, mul, rbl]);
         {
             /// This pnode will hold all the nodes we made here, exposing only
             /// the final output.
@@ -172,8 +181,11 @@ function(control={})
 
             /// A "sink" pnode that exposes the  0th iport of the stack op.
             dense: pg.intern(innodes=[rebinner],
-                             centernodes=[stack],
-                             edges=[pg.edge(rebinner, stack)]),
+                             centernodes=[scaler, stack],
+                             edges=[
+                                 pg.edge(rebinner, scaler),
+                                 pg.edge(scaler, stack)
+                             ]),
         },
     
     /// A 1-port source of signal tensors.

@@ -45,7 +45,7 @@ namespace WireCell::SPNG {
 
     void TorchContext::enter() const { 
         if (m_sem) {
-            spdlog::debug("acquiring semaphore with {} left", m_sem->get_count());                          
+            // spdlog::debug("acquiring semaphore with {} left", m_sem->get_count());                          
             m_sem->acquire();
         }
 
@@ -57,7 +57,7 @@ namespace WireCell::SPNG {
 
         if (m_sem) {
             m_sem->release();
-            spdlog::debug("released semaphore with {} left", m_sem->get_count());                          
+            // spdlog::debug("released semaphore with {} left", m_sem->get_count());                          
         }
     }
 

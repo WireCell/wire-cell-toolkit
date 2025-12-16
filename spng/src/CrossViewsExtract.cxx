@@ -27,7 +27,6 @@ namespace WireCell::SPNG {
     void CrossViewsExtract::fanout_separate(const input_pointer& in, output_vector& outv)
     {
         logit(in, "cross views extract");
-        Configuration md = in->metadata();
         auto ten = in->tensor();
         const size_t nout = outv.size();
         if (nout != m_ops.size()) {
@@ -36,6 +35,10 @@ namespace WireCell::SPNG {
         }
 
         for (size_t ind=0; ind<nout; ++ind) {
+            // Fixme: TDM MD handling still needs thought
+            auto md = in->metadata();
+            md["datapath"] = md["datapath"].asString() + "/Transform/" + get_name() + m_config.extraction[ind];
+            
             auto op = m_ops[ind];
             auto out = op(ten);
             outv[ind] = std::make_shared<SimpleTorchTensor>(out, md);

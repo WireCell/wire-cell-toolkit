@@ -134,8 +134,8 @@ namespace WireCell::SPNG {
 
         // If you must call this default constructor, best to call Logger::init().
         FanoutBase() = default;
-        FanoutBase(const std::string& group_name)
-            : Logger(group_name) {
+        FanoutBase(const std::string& type_name)
+            : Logger(type_name, "spng") {
         }
 
         FanoutBase(const std::string& type_name,

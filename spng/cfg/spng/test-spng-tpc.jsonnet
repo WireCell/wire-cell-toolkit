@@ -17,6 +17,16 @@ local detector = import "spng/detector.jsonnet";
 local control_module = import "spng/control.jsonnet";
 
 
+
+// An experiment to inject a generic wrapper.
+local wrapped_pnode(class_wrappers)=
+    function(inode, nin=0, nout=0, uses=[], name=null) // pnode
+        //local itype=std.trace('inode.type=%s'%inode.type, inode.type);
+        local itype=inode.type;
+        local w = std.get(class_wrappers, itype, function(inode, pnode) pnode);
+        w(inode, pg.pnode(inode, nin=nin, nout=nout, uses=uses, name=name));
+
+
 /// Top-level arguments:
 ///
 /// input :: name of input file
@@ -25,10 +35,8 @@ local control_module = import "spng/control.jsonnet";
 ///
 /// view_crossed :: which views should be subject to crossviews
 ///
-/// wrap :: if given, it provides a filename pattern with "%(tier)s" and "%(tpcid)d".
 /// dump :: if given, a list of tiers to dump.  See pipeline definition below for labels
 function(input, output, tpcid=0, view_crossed=[1,1,0],
-         wrap="tensors-%(tier)s-%(tpcid)d.pkl",
          dump="",
          detname='pdhd',
          // fixme: add seeds=[1,2,3,4]
@@ -39,32 +47,54 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     // A list of view indices for views where ROIs are calculated with simple thresholds.
     local threshold_view_indices = [x.index for x in wc.enumerate(view_crossed) if x.value == 0];
 
-    local det = detector.subset(detconf[detname], [wc.intify(tpcid)]);
-    local tpc = det.tpcs[0];
+    local tpcid_num = wc.intify(tpcid);
+
+    local det = detector.subset(detconf[detname], [tpcid_num]);
+    local tpc = det.tpcs[tpcid_num];
 
     local controls = control_module(device=device,
                                     verbosity=wc.intify(verbosity),
                                     semaphore=wc.intify(semaphore));
     local control = controls.config;
 
-    local tpc_nodes = tpc_mod(tpc, control);
-    local roi_nodes = roi_mod(control);
-    local fan_nodes = fans_mod(control);
     local frame_nodes = frame_mod(control);
 
-
-    local dump_views_maybe(tier, node) =
+    local dump_views_maybe(tier, pnode) =
+        local wrap="tensors-%(tier)s-%(tpcid)s.pkl";
         local nodump = std.length(std.findSubstr(tier, dump)) == 0;
-        if nodump || wrap == ""
-        then node
+        if nodump
+        then pnode
         else
-            local name = tpc.name + '_' + tier;
-            local filename = wrap % {tier: tier, tpcid: tpc.ident};
+            local name = 'wrap_tpc' + std.toString(tpcid) + '_' + tier;
+            local filename = wrap % {tier: tier, tpcid: std.toString(tpcid)};
             local sink = tio.pickle_tensor_set(filename);
-            local tap = frame_nodes.sink_taps(name, std.length(node.oports), sink);
-            pg.shuntline(node, tap);
+            local tap = frame_nodes.sink_taps(name, std.length(pnode.oports), sink);
+            pg.shuntline(pnode, tap);
             
+
+    local dump_inode_maybe(tier, inode, pnode) =
+        local wrap="tensors-%(tier)s-%(tpcid)s-%(itype)s-%(iname)s.pkl";
+        local nodump = std.length(std.findSubstr(tier, dump)) == 0;
+        if nodump
+        then pnode
+        else
+            local name = tier + '_' + inode.type + '_' + inode.name;
+            local filename = wrap % {tier: tier, tpcid: std.toString(tpcid), itype:inode.type, iname:inode.name};
+            local sink = tio.pickle_tensor_set(filename);
+            local tap = frame_nodes.sink_taps(name, std.length(pnode.oports), sink);
+            pg.shuntline(pnode, tap);
+
+    local pnode_wrappers = {
+        SPNGCrossViews: function(inode, pnode) dump_inode_maybe("crossviews", inode, pnode),
+        SPNGCrossViewsExtract: function(inode, pnode) dump_inode_maybe("mps", inode, pnode),
+        SPNGTensorForward: function(inode, pnode) dump_inode_maybe("dnnroi", inode, pnode),
+    };
+    local wpg = pg + { pnode:: wrapped_pnode(pnode_wrappers) };
             
+
+    local tpc_nodes = tpc_mod(tpc, control, pg=wpg);
+    local roi_nodes = roi_mod(control, pg=wpg);
+    local fan_nodes = fans_mod(control);
 
     local source = io.frame_array_source(input);
     // 1->4
@@ -181,4 +211,5 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     
 
     pg.main(graph, engine, plugins=["WireCellSpng"], uses=controls.uses)
+
 

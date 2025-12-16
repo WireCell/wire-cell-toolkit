@@ -34,6 +34,9 @@ namespace WireCell::SPNG {
         }
 
         auto md = in->metadata();
+        // Fixme: TDM MD handling still needs thought
+        md["datapath"] = md["datapath"].asString() + "/Resampler/" + get_name();
+
         auto tensor = in->tensor();
 
         tensor = resample_interval(tensor, 1.0, 1.0/m_config.ratio, m_config.dim, m_norm);
