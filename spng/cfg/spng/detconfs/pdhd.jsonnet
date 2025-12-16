@@ -32,7 +32,17 @@ local response_start_time = tick0_time - response_time_offset;
 local decon_roll = 128;
 
 local ductor = api.ductor(adc_tick, response_duration, response_start_time);
-
+local splat = api.splat(
+    smear_long= [
+        2.691862363980221,
+        2.6750200122535057,
+        2.7137567141154055
+    ],
+    smear_tran = [
+        0.7377218875719689,
+        0.7157764520393882,
+        0.13980698710556544
+    ]);
 
 local adc = api.adc(tick=adc_tick,
                     resolution=14, 
@@ -141,7 +151,7 @@ local cvts = api.crossview_thresholds(cvt_ind, cvt_ind, cvt_col);
 
 // All TPCs are identical except for their anodes
 local tpcs = [
-    api.tpc(anode, lar=lar, ductor=ductor, adc=adc, fr=fr, er=er_spng,
+    api.tpc(anode, lar=lar, ductor=ductor, splat=splat, adc=adc, fr=fr, er=er_spng,
             pirs=pirs(anode), noise=noise,
             view_groups=view_groups, filters=filters,
             crossview_thresholds=cvts,

@@ -31,9 +31,9 @@ function(tpc, control) {
     }, nin=1, nout=1, uses=[tpc.anode]+tpc.pirs),
 
     // reframer
-    reframer: pg.pnode({
+    reframer(extra_name=""):: pg.pnode({
         type: "Reframer",
-        name: tpc.name,
+        name: tpc.name + extra_name,
         data: {
             anode: wc.tn(tpc.anode),
             nticks: tpc.adc.readout_nticks,
@@ -83,6 +83,22 @@ function(tpc, control) {
             resolution: tpc.adc.resolution,
         },
     }, nin=1, nout=1, uses=[tpc.anode]),
+
+    splat: pg.pnode({
+        type: "DepoFluxSplat",
+        name: tpc.name,
+        data: {
+            anode: wc.tn(tpc.anode),
+            field_response: wc.tn(tpc.fr),
+            sparse: true,
+            window_start: tpc.ductor.start_time,
+            window_duration: tpc.ductor.readout_duration,
+            tick: tpc.adc.tick,
+            reference_time: 0.0,
+            // Run wirecell-gen morse-* to find these numbers that match the extra
+            // spread the sigproc induces.
+        } + tpc.splat,
+    }, nin=1, nout=1, uses=[tpc.anode, tpc.fr]),
 }
 
 

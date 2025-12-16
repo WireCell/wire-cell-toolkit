@@ -90,3 +90,4 @@ data
 *.pkl
 *.csv
 .fuse*
+.aider*

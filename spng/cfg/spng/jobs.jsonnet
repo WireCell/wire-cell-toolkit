@@ -5,6 +5,7 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local detsim = import "detsim.jsonnet";
+local deposplat = import "deposplat.jsonnet";
 local frame_mod = import "frame.jsonnet";
 
 function(control={})
@@ -15,9 +16,14 @@ function(control={})
     /// expected to have one input port per tpc.
     depos_to_adc_frame(det, depos_source, adc_sink)::
         local sim = detsim(det, control);
-        local nout = std.length(sim.oports);
         local head = pg.pipeline([depos_source, sim]);
         pg.shuntline(head, adc_sink),
+
+    depos_to_splat_frame(det, depos_source, splat_sink)::
+        local splat = deposplat(det, control);
+        local head = pg.pipeline([depos_source, splat]);
+        pg.shuntline(head, splat_sink),
+        
 
     /// Connect ADC frame source to ADC tensorset sink as frame to TDM tensor
     /// converters in between.  Source and sink expected to have per-TPC ports.

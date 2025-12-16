@@ -56,6 +56,14 @@ local known_detectors = import "detectors.jsonnet";
         tick: tick, readout_duration: readout_duration, start_time: start_time
     },
 
+    // Run wirecell-gen morse-* to find these numbers that match the extra
+    // spread the sigproc induces.  Each "smear" should either be an array of
+    // per-plane values or a single number applied equally to each plane.
+    splat(smear_long, smear_tran):: {
+        smear_long: smear_long,
+        smear_tran: smear_tran,
+    },
+
     /// Describe an ADC
     adc(tick=$.default_adc_period, // sampling period
         resolution=14,          // number of bits 
@@ -397,6 +405,7 @@ local known_detectors = import "detectors.jsonnet";
     tpc(anode=null,
         lar=null,
         ductor=null,
+        splat=null,
         adc=null, fr=null, er=null, rcs=[],
         pirs=null, noise=null,
         view_groups=null, filters=null,
@@ -415,6 +424,9 @@ local known_detectors = import "detectors.jsonnet";
 
             // Induction parameters
             ductor: ductor,
+
+            // Splat parameters
+            splat: splat,
 
             // ADC related parameters
             adc:adc,
