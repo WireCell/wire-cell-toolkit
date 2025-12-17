@@ -117,6 +117,20 @@ namespace WireCell::Clus::PR {
 
         void set_fit_associate_vec(std::vector<PR::Fit >& tmp_fit_vec, const IDetectorVolumes::pointer& dv,const std::string& cloud_name="fit");
         
+        // Global indices management for point clouds
+        void set_global_indices(const std::string& cloud_name, std::vector<size_t> indices) {
+            m_pc_global_indices[cloud_name] = std::move(indices);
+        }
+        
+        const std::vector<size_t>& global_indices(const std::string& cloud_name) const {
+            static const std::vector<size_t> empty_vec;
+            auto it = m_pc_global_indices.find(cloud_name);
+            return (it != m_pc_global_indices.end()) ? it->second : empty_vec;
+        }
+        
+        bool has_global_indices(const std::string& cloud_name) const {
+            return m_pc_global_indices.find(cloud_name) != m_pc_global_indices.end();
+        }
         
     private:
 
@@ -127,6 +141,9 @@ namespace WireCell::Clus::PR {
         bool m_dir_weak{false};
 
         std::shared_ptr<Aux::ParticleInfo> m_particle_info{nullptr};
+        
+        // Mapping from local DPC index to global cluster point index
+        std::map<std::string, std::vector<size_t>> m_pc_global_indices;
 
 
 

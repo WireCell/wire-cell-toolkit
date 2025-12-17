@@ -12,7 +12,8 @@ namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
                                 const std::vector<geo_point_t>& path_points,
                                 const IDetectorVolumes::pointer& dv,
-                                const std::string& cloud_name)
+                                const std::string& cloud_name,
+                                const std::vector<size_t>& global_indices)
     {
         if (!segment || !segment->cluster()) {
             raise<RuntimeError>("create_segment_point_cloud: invalid segment or missing cluster");
@@ -52,6 +53,11 @@ namespace WireCell::Clus::PR {
         
         // Associate with segment
         segment->dpcloud(cloud_name, dpc);
+        
+        // Store global indices if provided
+        if (!global_indices.empty()) {
+            segment->set_global_indices(cloud_name, global_indices);
+        }
     }
 
     void create_segment_fit_point_cloud(SegmentPtr segment,
@@ -1620,6 +1626,7 @@ namespace WireCell::Clus::PR {
             const auto& graph = clus->find_graph("basic_pid");
 
             std::map<SegmentPtr, std::vector<geo_point_t>> map_segment_points;
+            std::map<SegmentPtr, std::vector<size_t>> map_segment_global_indices;
             std::map<int, std::pair<SegmentPtr, double>> map_pindex_segment;
             //std::cout << "Cluster has " << npoints << " points and " << segs.size() << " segments." << std::endl;
             //std::cout << "Number of vertices in the graph: " << boost::num_vertices(graph) << std::endl;
@@ -1751,7 +1758,7 @@ namespace WireCell::Clus::PR {
                 
                     // change the point's clustering ...
                     if (!flag_change){
-                        map_segment_points[main_sg].push_back(gp);
+                        map_segment_global_indices[main_sg].push_back(i);
                     }
                 }
             }
@@ -1760,7 +1767,9 @@ namespace WireCell::Clus::PR {
             // convert points to geo_point_t format
             // add points to segments ... 
             for (const auto& [seg, geo_points] : map_segment_points) {
-                create_segment_point_cloud(seg, geo_points, dv, cloud_name);
+                const auto& global_indices = map_segment_global_indices[seg];
+                create_segment_point_cloud(seg, geo_points, dv, cloud_name, global_indices);
+                // create_segment_point_cloud(seg, geo_points, dv, cloud_name);
             }
         }
     }

@@ -74,7 +74,8 @@ namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
                                     const std::vector<geo_point_t>& path_points,
                                     const IDetectorVolumes::pointer& dv,
-                                    const std::string& cloud_name = "main");
+                                    const std::string& cloud_name = "main",
+                                    const std::vector<size_t>& global_indices = {});
 
     void create_segment_fit_point_cloud(SegmentPtr segment,
                                     const IDetectorVolumes::pointer& dv,
