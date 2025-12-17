@@ -22,7 +22,7 @@ function(input, output='test-osp-tpc-%(tier)s.npz',
 
     local source = io.frame_array_source(input);
 
-    local sp = tpc.osp_subgraph.sp;
+    local sp = tpc.osp_subgraphs.sp;
     local sp_tags = [
         "loose_lf" + std.toString(tpcid),
         "mp2_roi" + std.toString(tpcid),
@@ -30,7 +30,7 @@ function(input, output='test-osp-tpc-%(tier)s.npz',
         "decon_charge" + std.toString(tpcid)];
         
     local sptap = fio.tap('FrameFanout', io.frame_array_sink(output % "osp", tags=sp_tags));
-    local roi = tpc.osp_subgraph.dnnroi;
+    local roi = tpc.osp_subgraphs.dnnroi;
 
     local sink = io.frame_array_sink(output % "sig");
 

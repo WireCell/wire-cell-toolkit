@@ -9,8 +9,8 @@ local pg = import "pgraph.jsonnet";
 local drift = import "drift.jsonnet";
 local sim = import "sim.jsonnet";
 
-function(det, control={})
-    local drifter = drift(det, control).drifter;
+function(det, control={}, extra_name="")
+    // local drifter = drift(det, control).drifter;
     local the_sims = [sim(tpc, control) for tpc in det.tpcs];
     local pipes = [pg.pipeline([
         the_sim.depo_transform,
@@ -19,9 +19,6 @@ function(det, control={})
         the_sim.digitizer
     ]) for the_sim in the_sims];
 
-    local dr = if std.length(pipes) == 1
-               then pipes[0]
-               else pg.fan.fanout('DepoSetFanout', pipes);
-
-
-    pg.pipeline([drifter, dr])
+    if std.length(pipes) == 1
+    then pipes[0]
+    else pg.fan.fanout('DepoSetFanout', pipes, name=det.name+"_detsim_"+extra_name)

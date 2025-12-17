@@ -1,5 +1,5 @@
 local wc = import "wirecell.jsonnet";
-local real_pg = import "pgrapher.jsonnet";
+local real_pg = import "pgraph.jsonnet";
 
 // Fixme: should we be passing these in like we do with "pg"?
 local fans_mod = import "spng/fans.jsonnet";

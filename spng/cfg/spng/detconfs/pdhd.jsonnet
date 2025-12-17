@@ -155,7 +155,7 @@ local tpcs = [
             pirs=pirs(anode), noise=noise,
             view_groups=view_groups, filters=filters,
             crossview_thresholds=cvts,
-            osp_subgraph=osp)
+            osp_subgraphs=osp)
     for anode in anodes ];
 
 api.detector("pdhd", tpcs)

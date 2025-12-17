@@ -38,11 +38,20 @@ function(control={})
                       for id in wc.iota(Nd)
                   ]),
 
-    /// An N-by-M fanout has N iports and N*M oports organized into M nodes with
-    /// N outputs, each of which corresponds to the N iports.  This returns
-    /// [sink, [sources]] where sink has N iports (no oports) and each of M
-    /// sources have N oports (no iports).  You may then connect them to
-    /// upstream/downstream, respectively.
+    /// Forward N ports M ways.
+    ///
+    /// It returns a list like:
+    ///
+    /// [N-sink, [N-source]*M]
+    ///
+    ///
+    /// Each of N iports of the N-sink should be connected to upstream.
+    ///
+    /// Each of the N iports to each of the M N-sources should be connected to
+    /// downstream.
+    ///
+    /// N is typically number of detector views in a TPC or number of TPCs in a
+    /// detector.  M is whatever fanout number you want from each.
     fanout_cross(name, N, M, type='Tensor')::
         local fans = [pg.pnode({
             type: "SPNGFanout"+type+"s",
@@ -59,6 +68,31 @@ function(control={})
             for mnum in wc.iota(M)
         ];
         [sink, sources],
+
+    /// An N-by-M fanout like fanout_cross() but caller provides function
+    /// ifunc to generate an inode that is the fanout for one num in N.  It is
+    /// called:
+    ///
+    ///   ifunc(num, M) -> inode
+    ///
+    /// with num in half-open range [0,N) and M being the multiplicity that
+    /// may be required to configure the returned inode.  The pnode is made with
+    /// the result.
+    ///
+    /// Return [sink, [source, source, ...]]
+    fanout_cross_gen(N, M, ifunc)::
+        local the_fans = [pg.pnode(ifunc(num, M), nin=1, nout=M) for num in wc.iota(N)];
+        local sink = pg.intern(innodes=the_fans); // sets their iports
+        local sources = [
+            pg.intern(centernodes=the_fans, // fixme, even give this?
+                      oports=[
+                          the_fans[fnum].oports[mnum]
+                          for fnum in wc.iota(N)
+                      ])
+            for mnum in wc.iota(M)
+        ];
+        [sink, sources],
+
 
 
     /// Fanout N source ports according to targets.
@@ -84,7 +118,6 @@ function(control={})
     ///   }
     /// }
     // The "d" target's 2 ports connect to source port 0 and 1.
-
     fanout_select(name, N, targets_list, type='Tensor')::
         local tnames = std.set(std.flattenArrays(targets_list));
         local the_fans = [
@@ -116,6 +149,35 @@ function(control={})
 
         },
 
+    /// Like fanout_select but produce the fanouts with a generator function
+    /// ifunc.
+    fanout_select_gen(name, N, targets_list, ifunc)::
+        local tnames = std.set(std.flattenArrays(targets_list));
+        local the_fans = [
+            local M = std.length(targets_list[num]);
+            pg.pnode(ifunc(num, M), nin=1, nout=M)
+            for num in wc.iota(N)];
+
+        local fan_port(fanind, group) =
+                  wc.index_of(targets_list[fanind], group);
+
+        local group_fan_index = {
+            [name]:[x.index for x in wc.enumerate(targets_list) if std.member(x.value, name)]
+            for name in tnames
+        };
+
+        local tobj = {
+            [group]: pg.intern(oports=[
+                the_fans[fanind].oports[fan_port(fanind, group)]
+                for fanind in wc.iota(N) if std.member(targets_list[fanind], group)])
+            for group in tnames
+        };
+
+        {
+            sink: pg.crossline(the_fans),
+            targets: tobj,
+
+        },
 
 
     /// Return two nodes: [orig, oport] where "orig" is effectively the input

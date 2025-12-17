@@ -76,6 +76,12 @@ for MP2/MP3 we form vectors on the full =(Ncells,3)= basis in the following way.
 10. Contract from *wire basis* to *channel basis*.  This also requires an OR.
 11. Contract *channel basis* vectors over the two faces.
 
+* A note on the contraction
+
+Going from cell basis to wire to channel and then to each face represents a
+rather large loss of information.  At the same time, the information at on cell
+basis has redundancies.  It is possible that keeping information at the cell (or
+wire) basis may be beneficial for some novel downstream use.  
 
 * Code needed.
 
