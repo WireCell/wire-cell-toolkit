@@ -1,0 +1,156 @@
+#+title: Cell Basis
+
+* Intro
+
+SPNG [[https://github.com/WireCell/spng/issues/9][issue #9]] resulted in =CrossViews= and =CrossViewsExtract= to produce MP2/MP3
+images for input to DNNROI.  As fast as it is, it is one of the slower nodes
+when the graph runs on the GPU.  An alternative approach may be faster still.
+This document is meant to provide an outline for its implementation.
+
+* Bases
+
+We define three vector bases giving different representations of tomographic
+information in a single time slice:
+
+- wire :: The *wire basis* is defined for each anode face.  Vectors in this basis
+  are of size =Nwires=.  Order of the elements follow the WCT-canonical order of
+  increasing pitch.
+
+- channel :: The *channel basis* spans all (one or two) anode faces.  Vectors in
+  this basis are size =Nchans=.  Order of elements follow the WCT-canonical order
+  of "wire-attachement number" (WAN).  This counts channels in a wire-basis
+  order using their "segment zero" wires on each face and concatenates the two
+  faces across no more than one "edge" between faces (eg, across CRU jumpers or
+  across one of the two wrapped edges of APAs).  So far, LArSoft's convention on
+  channel ID assignment for DUNE happens to allow the *channel basis* to span a
+  contiguous range of channel ID values.  In general, LArSoft convention can not
+  be assured but the WAN number ordering is universal up to a choice of origin
+  plane.
+
+- cell :: The *cell basis* spans a list of "index trios".  This 3-tuple spans the
+  three views.  Each index in a trio corresponds to a wire index in the *wire
+  basis* in a corresponding view.  Together, the trio identify three wires with
+  pair-wise crossings that are mutually close.  We call a trio a "cell" as it
+  represents a region in the 2D transverse plane near their mutual center.  The
+  order of cells is arbitrary and determined by construction.
+
+* Cell basis construction
+
+A reference algorithm for *cell basis* construction is given.  It is described as
+progressing from U to V to W views.  This order of progression is an arbitrary
+choice and a different choice may be more optimal in some way depending on the
+wire crossing pattern.
+
+1. Form =(NwireU, 2, 3)= tensor of 3D U-wire endpoints.
+
+2. Use Ray Grid Coordinates to find =(NwireU, 2)= the pair of V-wire bounds indices for each endpoint.
+
+3. Expand each pair of the =N= pairs of bounds indices into a closed list of indices that span this range.  See suggestion below on this step.
+
+4. Expand the corresponding U-wire index by repeating it for each in the V-wire range of indices.
+
+5. Append both to a growing =Uindex= and =Vindex= tensor
+
+7. Plug final =Uindex= and =Vindex= into Ray Grid Coordinates to get a corresponding =Windex= tensor
+
+8. Stack =Uindex=, =Vindex= and =Windex= to form =(N,3)= *cell basis tensor*.
+
+Steps 2 and 3 can be accomplished by a simple loop over =NwireU=.  This may be
+acceptable as the construction need be done once and in principle can be saved
+to file.  Some amount of vectorizing can be done as outlined in a section below.
+
+* Cell basis values
+
+It may be useful to form 1D vectors of length =Ncells= (eg charge per cell) but
+for MP2/MP3 we form vectors on the full =(Ncells,3)= basis in the following way.
+
+1. Iterate on faces
+2. Form =w2cU= for U-view etc for V and W in the face.  These are in the 1D wire-basis tensor and give the channel index for each wire.
+3. For a given measurement vector =MchanU= in the U-view channel basis, ~MwireU = MchanU[w2cU]~ projects it to the wire basis (again, =MwireU= is for one face).
+4. Apply a threshold scalar value =TU= to determine if the wire is in an ROI: ~RwireU = MwireU > TU~.  Threshold is, eg, based on a given number of RMS sigma with ~MchanU~ being Wiener-filtered decon.
+5. Use the first column of the Cell Basis tensor =C= (still for one face) to expand: =RcellU = RwireU[C[:,0]]=
+6. Repeat to get =RcellV= and =RcellW= tensors.
+7. The element-wise =and(RcellU,RcellV,RcellW)= gives MP3 values in the cell basis.
+8. The element-wise =and(not(RcellU),RcellV,RcellW)= gives U-MP2 values in the cell basis, etc for V-MP2
+9. Contract from *cell basis* to *wire basis*.  This requires a reduction algorithm as multiple cells contribute to the same wire.  For MPn, the Boolean OR should be applied.  That is, any cell of value 1 should make its wires value 1.
+10. Contract from *wire basis* to *channel basis*.  This also requires an OR.
+11. Contract *channel basis* vectors over the two faces.
+
+
+* Code needed.
+
+- [ ] Cell basis construction
+- [ ] functions to project and contract across the bases.
+
+
+* Optimization
+
+** Vectorize U and V part of Cell basis
+
+Here is an example the produces the =Uindex= ("row IDs") and =Vindex= ("values") in
+a vectorized way.  It's from Gemini 2.5 flash but tested to work.
+
+#+begin_src c++
+#include <torch/torch.h>
+#include <iostream>
+
+struct ExpandedRanges {
+    torch::Tensor values;
+    torch::Tensor row_ids;
+};
+
+ExpandedRanges expand_ranges_with_ids(torch::Tensor ranges) {
+    auto starts = ranges.select(1, 0);
+    auto ends = ranges.select(1, 1);
+    
+    // 1. Calculate lengths (N)
+    auto lengths = ends - starts + 1;
+    auto total_length = lengths.sum().item<int64_t>();
+    
+    // 2. Generate Row IDs (Vectorized)
+    // This creates [0, 0, 0, 1, 1, 1] if lengths are [3, 3]
+    auto row_ids = torch::repeat_interleave(
+        torch::arange(ranges.size(0), ranges.options()), 
+        lengths
+    );
+
+    // 3. Generate Values using the Delta Method
+    auto range_offsets = torch::cumsum(lengths, 0) - lengths;
+    
+    // We start with a tensor of 1s (the default increment)
+    auto deltas = torch::ones({total_length}, ranges.options());
+    
+    // Fix the starting point of the very first range
+    deltas.index_put_({0}, starts[0]);
+
+    // Fix the "jumps" at the start of every subsequent range
+    if (ranges.size(0) > 1) {
+        // Jump = Current Start - Previous End
+        auto current_starts = starts.slice(0, 1);
+        auto previous_ends = ends.slice(0, 0, -1);
+        auto jump_values = current_starts - previous_ends;
+        
+        auto jump_indices = range_offsets.slice(0, 1);
+        deltas.index_put_({jump_indices}, jump_values);
+    }
+    
+    auto values = torch::cumsum(deltas, 0);
+    
+    return {values, row_ids};
+}
+
+int main() {
+    // Input: [1, 3] and [10, 12]
+    torch::Tensor ranges = torch::tensor({{1, 3}, {10, 12}}, torch::kLong);
+    
+    auto result = expand_ranges_with_ids(ranges);
+    
+    std::cout << "Values:\n" << result.values << std::endl;
+    // Expected: [1, 2, 3, 10, 11, 12]
+    
+    std::cout << "Row IDs:\n" << result.row_ids << std::endl;
+    // Expected: [0, 0, 0, 1, 1, 1]
+    
+    return 0;
+}
+#+end_src
