@@ -80,6 +80,7 @@ namespace WireCell::Clus::PR {
 
         // EM shower related
         void clustering_points(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associated_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
+        void separate_track_shower(Graph&graph, Facade::Cluster& cluster);
 
         // vertex related functions 
         bool search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::set<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range = 1.5*units::cm);

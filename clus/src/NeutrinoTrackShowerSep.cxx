@@ -21,3 +21,22 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
         clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d);
     }
 }
+
+void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& cluster) {
+    // Iterate through all edges (segments) in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        
+        // Skip if segment is null or doesn't belong to this cluster
+        if (!seg || seg->cluster() != &cluster) continue;
+        
+        // First check if segment is a shower topology
+        segment_is_shower_topology(seg);
+        
+        // If not shower topology, check if it's a shower trajectory
+        if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
+            segment_is_shower_trajectory(seg);
+        }
+    }
+}
