@@ -1188,6 +1188,9 @@ void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Faca
         }
     }
     
+    // Invalidate cache before updating arrays
+    cluster.invalidate_segment_data();
+    
     // Add the arrays to the cluster's default point cloud as named arrays
     auto& local_pcs = cluster.local_pcs();
     
@@ -1195,6 +1198,10 @@ void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Faca
     // The default point cloud should already exist, but we need to add arrays to it
     // We'll add to the root node's local_pcs
     auto& default_pc = local_pcs["3d"];  // The default 3D point cloud
+    
+    // Erase old arrays if they exist (allows re-adding)
+    default_pc.erase("point_segment_id");
+    default_pc.erase("point_flag_shower");
     
     // Add the arrays
     using namespace WireCell::PointCloud;

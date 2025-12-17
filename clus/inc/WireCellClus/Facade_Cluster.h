@@ -280,6 +280,30 @@ namespace WireCell::Clus::Facade {
             double charge_cut = 4000.0,
             bool disable_dead_mix_cell = true) const;
 
+        /// Get segment IDs for all points (computed from graph analysis)
+        /// @return Vector of segment IDs, -1 for unassigned points
+        std::vector<int> segment_ids() const;
+        
+        /// Get shower flags for all points (computed from graph analysis)
+        /// @return Vector of flags, 1=shower, 0=track
+        std::vector<int> shower_flags() const;
+        
+        /// Get segment ID for a specific point
+        /// @param point_index Global point index in cluster
+        /// @return Segment ID or -1 if unassigned
+        int segment_id(size_t point_index) const;
+        
+        /// Get shower flag for a specific point
+        /// @param point_index Global point index in cluster
+        /// @return 1 if shower, 0 if track
+        int shower_flag(size_t point_index) const;
+        
+        /// Invalidate cached segment data (IDs and shower flags)
+        /// Call this before re-computing segment information
+        void invalidate_segment_data() {
+            cache().invalidate_segment_data();
+        }
+
 
 
         // Return vector is size 3 holding vectors of size npoints providing k-d tree coordinate points.
