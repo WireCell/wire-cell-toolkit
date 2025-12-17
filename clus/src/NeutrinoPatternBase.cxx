@@ -1144,3 +1144,60 @@ void PatternAlgorithms::init_point_segment(Graph& graph, Facade::Cluster& cluste
     track_fitter.add_segment(sg1);
     track_fitter.do_multi_tracking(true, true, true);
 }
+
+void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Facade::Cluster& cluster,  const std::string& cloud_name){
+    // Get the number of points in the cluster
+    const size_t npoints = cluster.npoints();
+    
+    // Initialize arrays for segment ID and shower flag (-1 means no segment assigned)
+    std::vector<int> point_segment_id(npoints, -1);
+    std::vector<int> point_flag_shower(npoints, 0);
+    
+    // Iterate through all edges (segments) in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        
+        // Skip if segment is null or doesn't belong to this cluster
+        if (!seg || seg->cluster() != &cluster) continue;
+        
+        // Get the edge index as the segment ID
+        const auto& edge_bundle = graph[*eit];
+        int segment_id = static_cast<int>(edge_bundle.index);
+        
+        seg->set_id(segment_id);
+
+        // Check if segment is a shower (either shower trajectory or shower topology)
+        bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                        seg->flags_any(SegmentFlags::kShowerTopology);
+        
+        // Get the local-to-global index mapping for this segment's point cloud
+        if (seg->has_global_indices(cloud_name)) {
+            const auto& global_indices = seg->global_indices(cloud_name);
+            
+            // Map each local point to the global cluster point
+            for (size_t local_idx = 0; local_idx < global_indices.size(); ++local_idx) {
+                size_t global_idx = global_indices[local_idx];
+                
+                // Validate global index
+                if (global_idx < npoints) {
+                    point_segment_id[global_idx] = segment_id;
+                    point_flag_shower[global_idx] = is_shower ? 1 : 0;
+                }
+            }
+        }
+    }
+    
+    // Add the arrays to the cluster's default point cloud as named arrays
+    auto& local_pcs = cluster.local_pcs();
+    
+    // Get or create the default point cloud
+    // The default point cloud should already exist, but we need to add arrays to it
+    // We'll add to the root node's local_pcs
+    auto& default_pc = local_pcs["3d"];  // The default 3D point cloud
+    
+    // Add the arrays
+    using namespace WireCell::PointCloud;
+    default_pc.add("point_segment_id", Array(point_segment_id));
+    default_pc.add("point_flag_shower", Array(point_flag_shower));
+}

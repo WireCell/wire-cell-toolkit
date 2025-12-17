@@ -131,8 +131,14 @@ namespace WireCell::Clus::PR {
         bool has_global_indices(const std::string& cloud_name) const {
             return m_pc_global_indices.find(cloud_name) != m_pc_global_indices.end();
         }
+
+        // Add public accessor:
+        int id() const { return m_id; }
+        void set_id(int id) { m_id = id; }
         
     private:
+        // Add to PRSegment.h private section:
+        int m_id{-1};
 
         std::vector<WCPoint> m_wcpts;
         std::vector<Fit> m_fits;
