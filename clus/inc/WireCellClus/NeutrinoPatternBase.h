@@ -83,6 +83,8 @@ namespace WireCell::Clus::PR {
         void separate_track_shower(Graph&graph, Facade::Cluster& cluster);
         // Direction
         void determine_direction(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        std::pair<int, double> calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower = true); 
+        void examine_good_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data);
 
 
         // vertex related functions 

@@ -97,3 +97,163 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
     }
 }
 
+std::pair<int, double> PatternAlgorithms::calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower) {
+    int number_showers = 0;
+    double acc_length = 0;
+    
+    std::set<VertexPtr> used_vertices;
+    std::set<SegmentPtr> used_segments;
+    
+    std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
+    segments_to_be_examined.push_back(std::make_pair(vertex, segment));
+    used_vertices.insert(vertex);
+    
+    while(segments_to_be_examined.size() > 0) {
+        std::vector<std::pair<VertexPtr, SegmentPtr>> temp_segments;
+        for (auto it = segments_to_be_examined.begin(); it != segments_to_be_examined.end(); it++) {
+            VertexPtr prev_vtx = it->first;
+            SegmentPtr current_sg = it->second;
+            
+            if (used_segments.find(current_sg) != used_segments.end()) continue; // looked at it before
+            
+            // Check if segment is a shower (has kShowerTrajectory or kShowerTopology flags)
+            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                           current_sg->flags_any(SegmentFlags::kShowerTopology);
+            
+            if (is_shower || (!flag_count_shower)) {
+                number_showers++;
+                acc_length += segment_track_length(current_sg);
+            }
+            used_segments.insert(current_sg);
+            
+            VertexPtr curr_vertex = find_other_vertex(graph, current_sg, prev_vtx);
+            if (used_vertices.find(curr_vertex) != used_vertices.end()) continue;
+            
+            // Get all segments connected to curr_vertex
+            if (curr_vertex && curr_vertex->descriptor_valid()) {
+                auto vd = curr_vertex->get_descriptor();
+                auto edge_range = boost::out_edges(vd, graph);
+                for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                    SegmentPtr seg = graph[*eit].segment;
+                    if (seg) {
+                        temp_segments.push_back(std::make_pair(curr_vertex, seg));
+                    }
+                }
+            }
+            used_vertices.insert(curr_vertex);
+        }
+        segments_to_be_examined = temp_segments;
+    }
+    
+    return std::make_pair(number_showers, acc_length);
+} 
+
+void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data) {
+    // Iterate through all edges (segments) in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        
+        // Skip if segment is null or doesn't belong to this cluster
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        // Skip if segment is a shower
+        if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+        
+        // Skip if no direction or weak direction
+        if (sg->dirsign() == 0 || sg->dir_weak()) continue;
+        
+        // Get the two vertices of this segment
+        auto [vertex1, vertex2] = find_vertices(graph, sg);
+        if (!vertex1 || !vertex2) continue;
+        
+        // Determine start and end vertices based on segment direction
+        VertexPtr start_vertex = nullptr, end_vertex = nullptr;
+        const auto& wcpts = sg->wcpts();
+        if (wcpts.size() < 2) continue;
+        
+        auto front_pt = wcpts.front().point;
+        auto back_pt = wcpts.back().point;
+        
+        if (sg->dirsign() == 1) {
+            // Direction is forward (from front to back)
+            double dis1_front = ray_length(Ray{vertex1->wcpt().point, front_pt});
+            double dis1_back = ray_length(Ray{vertex1->wcpt().point, back_pt});
+            if (dis1_front < dis1_back) {
+                start_vertex = vertex1;
+                end_vertex = vertex2;
+            } else {
+                start_vertex = vertex2;
+                end_vertex = vertex1;
+            }
+        } else if (sg->dirsign() == -1) {
+            // Direction is backward (from back to front)
+            double dis1_front = ray_length(Ray{vertex1->wcpt().point, front_pt});
+            double dis1_back = ray_length(Ray{vertex1->wcpt().point, back_pt});
+            if (dis1_front < dis1_back) {
+                start_vertex = vertex2;
+                end_vertex = vertex1;
+            } else {
+                start_vertex = vertex1;
+                end_vertex = vertex2;
+            }
+        }
+        
+        if (!start_vertex || !end_vertex) continue;
+        
+        // Calculate number of daughter showers
+        auto result_pair = calculate_num_daughter_showers(graph, start_vertex, sg);
+        int num_daughter_showers = result_pair.first;
+        double length_daughter_showers = result_pair.second;
+        
+        // Calculate maximum angle between this segment and others at end_vertex
+        double max_angle = 0;
+        WireCell::Point end_pt = end_vertex->fit().valid() ? end_vertex->fit().point : end_vertex->wcpt().point;
+        WireCell::Vector dir1 = segment_cal_dir_3vector(sg, end_pt, 15*units::cm);
+        WireCell::Vector drift_dir(1, 0, 0);
+        double min_para_angle = 1e9;
+        
+        // Get all segments connected to end_vertex
+        if (end_vertex->descriptor_valid()) {
+            auto vd = end_vertex->get_descriptor();
+            auto edge_range = boost::out_edges(vd, graph);
+            for (auto eit2 = edge_range.first; eit2 != edge_range.second; ++eit2) {
+                SegmentPtr sg1 = graph[*eit2].segment;
+                if (!sg1 || sg1 == sg) continue;
+                
+                WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, end_pt, 15*units::cm);
+                double angle = std::acos(std::min(1.0, std::max(-1.0, dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude())))) / 3.1415926 * 180.0;
+                if (angle > max_angle) max_angle = angle;
+                
+                angle = std::fabs(std::acos(std::min(1.0, std::max(-1.0, drift_dir.dot(dir2) / (drift_dir.magnitude() * dir2.magnitude())))) / 3.1415926 * 180.0 - 90.0);
+                if (angle < min_para_angle) min_para_angle = angle;
+            }
+        }
+        
+        // Check if this track should be reclassified as an electron shower
+        double drift_angle = std::fabs(std::acos(std::min(1.0, std::max(-1.0, drift_dir.dot(dir1) / (drift_dir.magnitude() * dir1.magnitude())))) / 3.1415926 * 180.0 - 90.0);
+        double length = segment_track_length(sg);
+        
+        if ((num_daughter_showers >= 4 || (length_daughter_showers > 50*units::cm && num_daughter_showers >= 2)) &&
+            (max_angle > 155 || (drift_angle < 15 && min_para_angle < 15 && min_para_angle + drift_angle < 25)) &&
+            length < 15*units::cm) {
+            
+            // Reclassify as electron (PDG 11)
+            auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                11,                                              // electron PDG
+                particle_data->get_particle_mass(11),           // electron mass
+                particle_data->pdg_to_name(11),                 // "e-"
+                WireCell::D4Vector<double>(0, 0, 0, 0)         // zero 4-momentum (will be recalculated)
+            );
+            sg->particle_info(pinfo);
+            
+            // Reset direction and mark as weak
+            sg->dirsign(0);
+            sg->dir_weak(true);
+        }
+        
+        // Debug output (commented out)
+        // std::cout << sg->get_id() << " " << sg->particle_type() << " " << num_daughter_showers << " " 
+        //           << length/units::cm << " " << max_angle << " " << min_para_angle << " " << drift_angle << std::endl;
+    }
+}
