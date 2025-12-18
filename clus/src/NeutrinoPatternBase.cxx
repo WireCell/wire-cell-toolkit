@@ -1208,3 +1208,69 @@ void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Faca
     default_pc.add("point_segment_id", Array(point_segment_id));
     default_pc.add("point_flag_shower", Array(point_flag_shower));
 }
+
+
+void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, VertexPtr vertex){
+    // Iterate through all segments in the graph
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        
+        // Skip if segment is null or doesn't belong to this cluster
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        // If a specific vertex is provided, check if segment is connected to it
+        if (vertex != nullptr) {
+            auto [v1, v2] = find_vertices(graph, sg);
+            if (v1 != vertex && v2 != vertex) continue;
+        }
+        
+        // Determine if segment is "in" or "out" relative to the specific vertex
+        int in_vertex = 0; // 0: no direction, -1: in, 1: out
+        
+        if (vertex != nullptr) {
+            const auto& wcpts = sg->wcpts();
+            if (wcpts.size() < 2) continue;
+            
+            WireCell::Point vtx_point = vertex->wcpt().point;
+            auto front_pt = wcpts.front().point;
+            auto back_pt = wcpts.back().point;
+            
+            double dis_front = ray_length(Ray{vtx_point, front_pt});
+            double dis_back = ray_length(Ray{vtx_point, back_pt});
+            
+            bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+            
+            // Check if segment points into or out of the vertex
+            if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                in_vertex = -1; // pointing into vertex
+            } else if ((flag_start && sg->dirsign() == 1) || (!flag_start && sg->dirsign() == -1)) {
+                in_vertex = 1; // pointing out of vertex
+            }
+        }
+        
+        // Get segment properties
+        int seg_id = sg->id();
+        double length = segment_track_length(sg) / units::cm;
+        int flag_dir = sg->dirsign();
+        int particle_type = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
+        double particle_mass = sg->has_particle_info() ? sg->particle_info()->mass() / units::MeV : 0;
+        double kinetic_energy = sg->has_particle_info() ? (sg->particle_info()->energy() - sg->particle_info()->mass()) / units::MeV : 0;
+        bool is_dir_weak = sg->dir_weak();
+        
+        // Determine segment type and print
+        if (sg->flags_any(SegmentFlags::kShowerTopology)) {
+            std::cout << seg_id << " " << length << " S_topo " << flag_dir << " " 
+                      << particle_type << " " << particle_mass << " " << kinetic_energy << " " 
+                      << is_dir_weak << " " << in_vertex << std::endl;
+        } else if (sg->flags_any(SegmentFlags::kShowerTrajectory)) {
+            std::cout << seg_id << " " << length << " S_traj " << flag_dir << " " 
+                      << particle_type << " " << particle_mass << " " << kinetic_energy << " " 
+                      << is_dir_weak << " " << in_vertex << std::endl;
+        } else {
+            std::cout << seg_id << " " << length << " Track  " << flag_dir << " " 
+                      << particle_type << " " << particle_mass << " " << kinetic_energy << " " 
+                      << is_dir_weak << " " << in_vertex << std::endl;
+        }
+    }
+}

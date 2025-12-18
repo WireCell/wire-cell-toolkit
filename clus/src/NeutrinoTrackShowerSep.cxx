@@ -639,3 +639,741 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
     }
 }
 
+void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    WireCell::Vector drift_dir(1, 0, 0);
+    bool flag_update = true;
+    
+    while(flag_update) {
+        flag_update = false;
+        
+        // Iterate through all edges (segments) in the graph
+        auto [ebegin, eend] = boost::edges(graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            
+            // Skip if segment is null or doesn't belong to this cluster
+            if (!sg || !sg->cluster() || sg->cluster() != &cluster) continue;
+            
+            // Skip showers
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                           sg->flags_any(SegmentFlags::kShowerTopology);
+            if (is_shower) continue;
+            
+            double length = segment_track_length(sg);
+            
+            // Check if segment has no direction, weak direction, or is a proton
+            int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
+            if (sg->dirsign() == 0 || sg->dir_weak() || std::abs(pdg) == 2212) {
+                
+                auto two_vertices = find_vertices(graph, sg);
+                if (!two_vertices.first || !two_vertices.second) continue;
+                
+                int nshowers[2] = {0, 0};
+                int n_in[2] = {0, 0};
+                int nmuons[2] = {0, 0};
+                int nprotons[2] = {0, 0};
+                
+                // Get vertex descriptors
+                if (!two_vertices.first->descriptor_valid() || !two_vertices.second->descriptor_valid()) continue;
+                auto vd1 = two_vertices.first->get_descriptor();
+                auto vd2 = two_vertices.second->get_descriptor();
+                
+                WireCell::Point vtx1_pt = two_vertices.first->wcpt().point;
+                WireCell::Point vtx2_pt = two_vertices.second->wcpt().point;
+                
+                // Count segments at first vertex
+                auto edge_range1 = boost::out_edges(vd1, graph);
+                for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
+                    SegmentPtr sg1 = graph[*e_it].segment;
+                    if (!sg1) continue;
+                    
+                    const auto& wcpts = sg1->wcpts();
+                    if (wcpts.size() < 2) continue;
+                    
+                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                     sg1->flags_any(SegmentFlags::kShowerTopology);
+                    if (is_shower1) nshowers[0]++;
+                    
+                    auto front_pt = wcpts.front().point;
+                    auto back_pt = wcpts.back().point;
+                    double dis_front = ray_length(Ray{vtx1_pt, front_pt});
+                    double dis_back = ray_length(Ray{vtx1_pt, back_pt});
+                    bool flag_start = (dis_front < dis_back);
+                    
+                    if ((flag_start && sg1->dirsign() == -1) || (!flag_start && sg1->dirsign() == 1)) {
+                        n_in[0]++;
+                    }
+                    
+                    int pdg1 = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
+                    if (std::abs(pdg1) == 13) nmuons[0]++;
+                    if (std::abs(pdg1) == 2212) nprotons[0]++;
+                }
+                
+                // Count segments at second vertex
+                auto edge_range2 = boost::out_edges(vd2, graph);
+                for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
+                    SegmentPtr sg1 = graph[*e_it].segment;
+                    if (!sg1) continue;
+                    
+                    const auto& wcpts = sg1->wcpts();
+                    if (wcpts.size() < 2) continue;
+                    
+                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                     sg1->flags_any(SegmentFlags::kShowerTopology);
+                    if (is_shower1) nshowers[1]++;
+                    
+                    auto front_pt = wcpts.front().point;
+                    auto back_pt = wcpts.back().point;
+                    double dis_front = ray_length(Ray{vtx2_pt, front_pt});
+                    double dis_back = ray_length(Ray{vtx2_pt, back_pt});
+                    bool flag_start = (dis_front < dis_back);
+                    
+                    if ((flag_start && sg1->dirsign() == -1) || (!flag_start && sg1->dirsign() == 1)) {
+                        n_in[1]++;
+                    }
+                    
+                    int pdg1 = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
+                    if (std::abs(pdg1) == 13) nmuons[1]++;
+                    if (std::abs(pdg1) == 2212) nprotons[1]++;
+                }
+                
+                int nvtx1_segs = boost::degree(vd1, graph);
+                int nvtx2_segs = boost::degree(vd2, graph);
+                
+                // Case A: Many showers and very short track
+                if ((nshowers[0] + nshowers[1] > 2 && length < 5*units::cm) ||
+                    (nshowers[0]+1 == nvtx1_segs && nshowers[1]+1 == nvtx2_segs && 
+                     nshowers[0] > 0 && nshowers[1] > 0 && length < 5*units::cm)) {
+                    
+                    int pdg_code = 11;
+                    auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                    if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                        four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                    }
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                        pdg_code,
+                        particle_data->get_particle_mass(pdg_code),
+                        particle_data->pdg_to_name(pdg_code),
+                        four_momentum
+                    );
+                    sg->particle_info(pinfo);
+                    flag_update = true;
+                }
+                // Case C & D: First/second vertex all showers except current segment (proton)
+                else if (nshowers[0]+1 == nvtx1_segs && nshowers[0] >= 2 && pdg == 2212) {
+                    WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx1_pt, 5*units::cm);
+                    double min_angle = 180;
+                    
+                    for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
+                        SegmentPtr sg2 = graph[*e_it].segment;
+                        if (!sg2 || sg2 == sg) continue;
+                        WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx1_pt, 5*units::cm);
+                        double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
+                        if (angle < min_angle) min_angle = angle;
+                    }
+                    
+                    double dQ_dx_rms = segment_rms_dQ_dx(sg);
+                    
+                    if ((dQ_dx_rms > 1.0 * (43e3/units::cm) && min_angle < 40) ||
+                        (dQ_dx_rms > 0.75 * (43e3/units::cm) && min_angle < 30) ||
+                        (dQ_dx_rms > 0.4 * (43e3/units::cm) && min_angle < 15)) {
+                        
+                        const auto& wcpts = sg->wcpts();
+                        auto front_pt = wcpts.front().point;
+                        auto back_pt = wcpts.back().point;
+                        double dis_front = ray_length(Ray{vtx1_pt, front_pt});
+                        double dis_back = ray_length(Ray{vtx1_pt, back_pt});
+                        bool flag_start = (dis_front < dis_back);
+                        
+                        if (flag_start)
+                            sg->dirsign(-1);
+                        else
+                            sg->dirsign(1);
+                        
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        }
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                        flag_update = true;
+                    }
+                }
+                else if (nshowers[1]+1 == nvtx2_segs && nshowers[1] >= 2 && pdg == 2212) {
+                    WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx2_pt, 5*units::cm);
+                    double min_angle = 180;
+                    
+                    for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
+                        SegmentPtr sg2 = graph[*e_it].segment;
+                        if (!sg2 || sg2 == sg) continue;
+                        WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx2_pt, 5*units::cm);
+                        double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
+                        if (angle < min_angle) min_angle = angle;
+                    }
+                    
+                    double dQ_dx_rms = segment_rms_dQ_dx(sg);
+                    
+                    if ((dQ_dx_rms > 1.0 * (43e3/units::cm) && min_angle < 40) ||
+                        (dQ_dx_rms > 0.75 * (43e3/units::cm) && min_angle < 30) ||
+                        (dQ_dx_rms > 0.4 * (43e3/units::cm) && min_angle < 15)) {
+                        
+                        const auto& wcpts = sg->wcpts();
+                        auto front_pt = wcpts.front().point;
+                        auto back_pt = wcpts.back().point;
+                        double dis_front = ray_length(Ray{vtx2_pt, front_pt});
+                        double dis_back = ray_length(Ray{vtx2_pt, back_pt});
+                        bool flag_start = (dis_front < dis_back);
+                        
+                        if (flag_start)
+                            sg->dirsign(-1);
+                        else
+                            sg->dirsign(1);
+                        
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        }
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                        flag_update = true;
+                    }
+                }
+                // Case E: Muon with specific topology conditions
+                else if (std::abs(pdg) == 13 &&
+                         ((nprotons[0] >= 0 && nmuons[0] >= 1 && nshowers[1]+1 == nvtx2_segs && nshowers[1] >= 2) ||
+                          (nprotons[1] >= 0 && nmuons[1] >= 1 && nshowers[0]+1 == nvtx1_segs && nshowers[0] >= 2) ||
+                          (((nprotons[0] >= 0 && nmuons[0] >= 1 && nshowers[1]+1 == nvtx2_segs && nshowers[1] >= 1) ||
+                           (nprotons[1] >= 0 && nmuons[1] >= 1 && nshowers[0]+1 == nvtx1_segs && nshowers[0] >= 1)) &&
+                          (sg->dirsign() == 0 || sg->dir_weak())))) {
+                    
+                    double direct_length = segment_track_direct_length(sg);
+                    
+                    if ((direct_length < 34*units::cm && direct_length < 0.93 * length) ||
+                        (length < 5*units::cm && ((nprotons[0] + nshowers[0] == 0 && nshowers[1] >= 2) ||
+                                                   (nprotons[1] + nshowers[1] == 0 && nshowers[0] >= 2)))) {
+                        
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        }
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                        flag_update = true;
+                    }
+                    // Case F: Check daughter showers
+                    else if ((((nshowers[0]+nshowers[1] >= 2) && (nprotons[0]+nmuons[0]+nshowers[0] == 1 || nprotons[1]+nmuons[1]+nshowers[1] == 1)) ||
+                              ((nshowers[0]+nshowers[1] >= 1) && (nprotons[0]+nmuons[0]+nshowers[0] > 1 || nprotons[1]+nmuons[1]+nshowers[1] > 1))) &&
+                             length < 40*units::cm) {
+                        
+                        int num_s1 = 0, num_s2 = 0;
+                        double length_s1 = 0, length_s2 = 0;
+                        double max_angle1 = 0, max_angle2 = 0;
+                        
+                        WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx1_pt, 15*units::cm);
+                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
+                            SegmentPtr sg1 = graph[*e_it].segment;
+                            if (!sg1 || sg1 == sg) continue;
+                            
+                            WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
+                            bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                             sg1->flags_any(SegmentFlags::kShowerTopology);
+                            if (is_shower1) {
+                                double angle = dir1.angle(dir2) / 3.14159265 * 180.0;
+                                if (max_angle1 < angle) max_angle1 = angle;
+                                
+                                auto pair_result = calculate_num_daughter_showers(graph, two_vertices.first, sg1);
+                                num_s1 += pair_result.first;
+                                length_s1 += pair_result.second;
+                            }
+                        }
+                        
+                        dir1 = segment_cal_dir_3vector(sg, vtx2_pt, 10*units::cm);
+                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
+                            SegmentPtr sg1 = graph[*e_it].segment;
+                            if (!sg1 || sg1 == sg) continue;
+                            
+                            WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
+                            bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                             sg1->flags_any(SegmentFlags::kShowerTopology);
+                            if (is_shower1) {
+                                double angle = dir1.angle(dir2) / 3.14159265 * 180.0;
+                                if (max_angle2 < angle) max_angle2 = angle;
+                                
+                                auto pair_result = calculate_num_daughter_showers(graph, two_vertices.second, sg1);
+                                num_s2 += pair_result.first;
+                                length_s2 += pair_result.second;
+                            }
+                        }
+                        
+                        if (((num_s1 >= 4 || (length_s1 > 50*units::cm && num_s1 >= 2)) && max_angle1 > 150) ||
+                            ((num_s2 >= 4 || length_s2 > 50*units::cm) && max_angle2 > 150) ||
+                            (length < 6*units::cm && ((num_s1 >= 4 && length_s1 > 20*units::cm) ||
+                                                      (num_s2 >= 4 && length_s2 > 20*units::cm)))) {
+                            
+                            int pdg_code = 11;
+                            auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                            if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                                four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                            }
+                            auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                                pdg_code,
+                                particle_data->get_particle_mass(pdg_code),
+                                particle_data->pdg_to_name(pdg_code),
+                                four_momentum
+                            );
+                            sg->particle_info(pinfo);
+                            flag_update = true;
+                        }
+                    }
+                }
+                // Case G: Muon with specific vertex connectivity
+                else if (std::abs(pdg) == 13 && (sg->dirsign() == 0 || sg->dir_weak()) &&
+                         ((nmuons[0]+nprotons[0]+nshowers[0] == 1) || (nmuons[1]+nprotons[1]+nshowers[1] == 1)) &&
+                         (nshowers[0] + nshowers[1] > 0 || segment_median_dQ_dx(sg) < 1.3*43e3/units::cm)) {
+                    
+                    bool flag_change = false;
+                    
+                    if (nvtx1_segs == 2) {
+                        SegmentPtr tmp_sg = nullptr;
+                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
+                            SegmentPtr candidate = graph[*e_it].segment;
+                            if (candidate && candidate != sg) {
+                                tmp_sg = candidate;
+                                break;
+                            }
+                        }
+                        if (tmp_sg) {
+                            int tmp_pdg = tmp_sg->has_particle_info() ? tmp_sg->particle_info()->pdg() : 0;
+                            if (tmp_pdg == 13 && segment_track_length(tmp_sg) > 4*length && length < 8*units::cm) {
+                                flag_change = true;
+                            }
+                        }
+                    } else if (nvtx2_segs == 2) {
+                        SegmentPtr tmp_sg = nullptr;
+                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
+                            SegmentPtr candidate = graph[*e_it].segment;
+                            if (candidate && candidate != sg) {
+                                tmp_sg = candidate;
+                                break;
+                            }
+                        }
+                        if (tmp_sg) {
+                            int tmp_pdg = tmp_sg->has_particle_info() ? tmp_sg->particle_info()->pdg() : 0;
+                            if (tmp_pdg == 13 && segment_track_length(tmp_sg) > 4*length && length < 8*units::cm) {
+                                flag_change = true;
+                            }
+                        }
+                    }
+                    
+                    if (flag_change) {
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        }
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                        flag_update = true;
+                    }
+                }
+                
+                // Case B: Setting direction for segments between shower vertices
+                if (((nshowers[0]+1 == nvtx1_segs) || nshowers[0] > 0) &&
+                    ((nshowers[1]+1 == nvtx2_segs) || nshowers[1] > 0) &&
+                    (nshowers[0] + nshowers[1] > 2) &&
+                    ((nshowers[0]+1 == nvtx1_segs && nshowers[0] > 0) ||
+                     (nshowers[1]+1 == nvtx2_segs && nshowers[1] > 0))) {
+                    
+                    if ((length < 25*units::cm && pdg != 11) || sg->dirsign() == 0) {
+                        const auto& wcpts = sg->wcpts();
+                        auto front_pt = wcpts.front().point;
+                        auto back_pt = wcpts.back().point;
+                        double dis_front = ray_length(Ray{vtx1_pt, front_pt});
+                        double dis_back = ray_length(Ray{vtx1_pt, back_pt});
+                        bool flag_start = (dis_front < dis_back);
+                        
+                        if (flag_start) {
+                            if (nshowers[1] == 0) {
+                                sg->dirsign(-1);
+                            } else if (nshowers[0] == 0) {
+                                sg->dirsign(1);
+                            }
+                        } else {
+                            if (nshowers[1] == 0) {
+                                sg->dirsign(1);
+                            } else if (nshowers[0] == 0) {
+                                sg->dirsign(-1);
+                            }
+                        }
+                        sg->dir_weak(true);
+                        
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        }
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                        flag_update = true;
+                    }
+                }
+                // Case H: No particle type, short length, high dQ/dx, has showers
+                else if (pdg == 0 && length < 12*units::cm && 
+                         (nshowers[0] + nshowers[1] > 0) && 
+                         segment_median_dQ_dx(sg)/(43e3/units::cm) > 1.2) {
+                    
+                    bool flag_change = false;
+                    
+                    auto pair_result1 = calculate_num_daughter_showers(graph, two_vertices.second, sg);
+                    auto pair_result2 = calculate_num_daughter_showers(graph, two_vertices.first, sg);
+                    
+                    if (pair_result1.first > 2) {
+                        WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx1_pt, 10*units::cm);
+                        double min_angle = 180;
+                        double para_angle = 90;
+                        
+                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
+                            SegmentPtr sg2 = graph[*e_it].segment;
+                            if (!sg2 || sg2 == sg) continue;
+                            bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                             sg2->flags_any(SegmentFlags::kShowerTopology);
+                            if (!is_shower2) continue;
+                            
+                            WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx1_pt, 10*units::cm);
+                            double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
+                            if (angle < min_angle) {
+                                min_angle = angle;
+                                para_angle = std::abs(v2.angle(drift_dir) / 3.14159265 * 180.0 - 90);
+                            }
+                        }
+                        
+                        if (min_angle < 25 || 
+                            (std::abs(v1.angle(drift_dir) / 3.14159265 * 180.0 - 90) < 10 && 
+                             para_angle < 30 && min_angle < 45)) {
+                            flag_change = true;
+                        }
+                    }
+                    
+                    if (!flag_change && pair_result2.first > 2) {
+                        WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx2_pt, 10*units::cm);
+                        double min_angle = 180;
+                        double para_angle = 90;
+                        
+                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
+                            SegmentPtr sg2 = graph[*e_it].segment;
+                            if (!sg2 || sg2 == sg) continue;
+                            bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                             sg2->flags_any(SegmentFlags::kShowerTopology);
+                            if (!is_shower2) continue;
+                            
+                            WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx2_pt, 10*units::cm);
+                            double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
+                            if (angle < min_angle) {
+                                min_angle = angle;
+                                para_angle = std::abs(v2.angle(drift_dir) / 3.14159265 * 180.0 - 90);
+                            }
+                        }
+                        
+                        if (min_angle < 25 || 
+                            (std::abs(v1.angle(drift_dir) / 3.14159265 * 180.0 - 90) < 10 && 
+                             para_angle < 10 && min_angle < 45)) {
+                            flag_change = true;
+                        }
+                    }
+                    
+                    if (flag_change) {
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        }
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                        flag_update = true;
+                    }
+                }
+                
+            } // end if no direction or weak or proton
+        } // loop over all segments
+    } // while flag_update
+}
+
+void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    bool flag_update = true;
+    std::set<VertexPtr> used_vertices;
+    std::set<SegmentPtr> used_segments;
+    
+    while(flag_update) {
+        flag_update = false;
+        
+        // Iterate through all vertices in the graph
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            VertexPtr vtx = graph[*vit].vertex;
+            
+            // Skip if vertex is null or doesn't belong to this cluster
+            if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
+            
+            // Skip if vertex has only 1 segment
+            if (!vtx->descriptor_valid()) continue;
+            auto vd = vtx->get_descriptor();
+            if (boost::degree(vd, graph) <= 1) continue;
+            
+            // Skip if already processed
+            if (used_vertices.find(vtx) != used_vertices.end()) continue;
+            
+            int n_in = 0;
+            int n_in_shower = 0;
+            std::vector<SegmentPtr> in_tracks;
+            
+            // Get vertex position
+            WireCell::Point vtx_point = vtx->wcpt().point;
+            
+            // Iterate through all segments connected to this vertex
+            auto edge_range = boost::out_edges(vd, graph);
+            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (!sg) continue;
+                
+                // Determine if this vertex is at the front or back of the segment
+                const auto& wcpts = sg->wcpts();
+                if (wcpts.size() < 2) continue;
+                
+                auto front_pt = wcpts.front().point;
+                auto back_pt = wcpts.back().point;
+                
+                double dis_front = ray_length(Ray{vtx_point, front_pt});
+                double dis_back = ray_length(Ray{vtx_point, back_pt});
+                
+                bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+                
+                // Check if this is an "incoming" segment (pointing into vertex)
+                if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                    n_in++;
+                    
+                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                   sg->flags_any(SegmentFlags::kShowerTopology);
+                    if (is_shower) {
+                        n_in_shower++;
+                    } else {
+                        in_tracks.push_back(sg);
+                    }
+                }
+            }
+            
+            // If there are multiple incoming segments and not all are showers
+            if (n_in > 1 && n_in != n_in_shower) {
+                // Reclassify all incoming tracks as electrons
+                for (auto it1 = in_tracks.begin(); it1 != in_tracks.end(); it1++) {
+                    SegmentPtr sg1 = *it1;
+                    
+                    int pdg_code = 11;
+                    auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                    
+                    // Recalculate 4-momentum if segment has valid energy
+                    if (sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
+                        four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                    }
+                    
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                        pdg_code,
+                        particle_data->get_particle_mass(pdg_code),
+                        particle_data->pdg_to_name(pdg_code),
+                        four_momentum
+                    );
+                    sg1->particle_info(pinfo);
+                    flag_update = true;
+                }
+            }
+            
+            used_vertices.insert(vtx);
+        } // loop over all vertices
+    } // while flag_update
+}
+
+void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, IDetectorVolumes::pointer dv){
+    std::set<SegmentPtr> shower_set;
+    std::set<SegmentPtr> no_dir_track_set;
+    
+    // Collect shower segments and no-direction track segments
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                        sg->flags_any(SegmentFlags::kShowerTopology);
+        
+        if (is_shower) {
+            shower_set.insert(sg);
+        } else {
+            if (sg->dirsign() == 0) {
+                no_dir_track_set.insert(sg);
+            }
+        }
+    }
+    
+    // Process each no-direction track segment
+    for (auto it = no_dir_track_set.begin(); it != no_dir_track_set.end(); it++) {
+        SegmentPtr sg = *it;
+        bool flag_change = true;
+        
+        const auto& pts = sg->wcpts();
+        
+        // Check each point in the segment
+        for (size_t i = 0; i < pts.size(); i++) {
+            WireCell::Point test_p = pts.at(i).point;
+            
+            // Get apa and face for this point
+            auto test_wpid = dv->contained_by(test_p);
+            if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
+                flag_change = false;
+                break;
+            }
+            
+            int apa = test_wpid.apa();
+            int face = test_wpid.face();
+            
+            double min_u_dis = 1e9;
+            double min_v_dis = 1e9;
+            double min_w_dis = 1e9;
+            
+            // Find minimum 2D distances to all shower segments
+            for (auto it1 = shower_set.begin(); it1 != shower_set.end(); it1++) {
+                auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(*it1, test_p, apa, face, "fit");
+                
+                if (dist_u < min_u_dis) min_u_dis = dist_u;
+                if (dist_v < min_v_dis) min_v_dis = dist_v;
+                if (dist_w < min_w_dis) min_w_dis = dist_w;
+            }
+            
+            // If any distance exceeds threshold, don't reclassify
+            if (min_u_dis > 0.6*units::cm || min_v_dis > 0.6*units::cm || min_w_dis > 0.6*units::cm) {
+                flag_change = false;
+                break;
+            }
+        }
+        
+        // Reclassify segment as electron if all points are close to showers
+        if (flag_change) {
+            int pdg_code = 11;
+            auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                pdg_code,
+                particle_data->get_particle_mass(pdg_code),
+                particle_data->pdg_to_name(pdg_code),
+                WireCell::D4Vector<double>(0, 0, 0, 0)
+            );
+            sg->particle_info(pinfo);
+        }
+    }
+}
+
+bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
+    bool flag_return = true;
+    
+    // Iterate through all vertices in the graph
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        
+        // Skip if vertex is null or doesn't belong to this cluster
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        // Skip vertices with only 1 segment
+        if (!vtx->descriptor_valid()) continue;
+        auto vd = vtx->get_descriptor();
+        if (boost::degree(vd, graph) <= 1) continue;
+        
+        int n_in = 0;
+        int n_in_shower = 0;
+        int n_out_tracks = 0;
+        
+        // Get vertex position
+        WireCell::Point vtx_point = vtx->wcpt().point;
+        
+        // Iterate through all segments connected to this vertex
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg) continue;
+            
+            // Determine if this vertex is at the front or back of the segment
+            const auto& wcpts = sg->wcpts();
+            if (wcpts.size() < 2) continue;
+            
+            auto front_pt = wcpts.front().point;
+            auto back_pt = wcpts.back().point;
+            
+            double dis_front = ray_length(Ray{vtx_point, front_pt});
+            double dis_back = ray_length(Ray{vtx_point, back_pt});
+            
+            bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+            
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                           sg->flags_any(SegmentFlags::kShowerTopology);
+            
+            // Check if this is an "incoming" segment (pointing into vertex)
+            if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                n_in++;
+                if (is_shower) {
+                    n_in_shower++;
+                }
+            }
+            
+            // Check if this is an "outgoing" track (pointing away from vertex)
+            if ((flag_start && sg->dirsign() == 1) || (!flag_start && sg->dirsign() == -1)) {
+                if (!is_shower) {
+                    n_out_tracks++;
+                }
+            }
+        }
+        
+        // Check for violations
+        if (n_in > 1 && n_in != n_in_shower) {
+            std::cout << "Wrong: Multiple (" << n_in << ") particles into a vertex!" << std::endl;
+            print_segs_info(graph, cluster, vtx);
+            flag_return = false;
+        }
+        
+        if (n_in_shower > 0 && n_out_tracks > 0) {
+            std::cout << "Wrong: " << n_in_shower << " showers in and " << n_out_tracks << " tracks out!" << std::endl;
+            print_segs_info(graph, cluster, vtx);
+            flag_return = false;
+        }
+    }
+    
+    return flag_return;
+}
