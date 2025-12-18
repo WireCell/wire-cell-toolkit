@@ -387,3 +387,255 @@ void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Clust
         }
     }
 }
+
+void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_strong_check){
+    bool flag_update = true;
+    std::set<VertexPtr> used_vertices;
+    std::set<SegmentPtr> used_segments;
+    
+    while(flag_update) {
+        flag_update = false;
+        
+        // Iterate through all vertices in the graph
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            VertexPtr vtx = graph[*vit].vertex;
+            
+            // Skip if vertex is null or doesn't belong to this cluster
+            if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
+            
+            // Check how many segments are connected to this vertex
+            if (!vtx->descriptor_valid()) continue;
+            auto vd = vtx->get_descriptor();
+            if (boost::degree(vd, graph) <= 1) continue;
+            
+            // Skip if already processed
+            if (used_vertices.find(vtx) != used_vertices.end()) continue;
+            
+            int n_in = 0;
+            std::map<SegmentPtr, bool> map_sg_dir; // segment -> flag_start
+            
+            // Get vertex position
+            WireCell::Point vtx_point = vtx->wcpt().point;
+            
+            // Iterate through all segments connected to this vertex
+            auto edge_range = boost::out_edges(vd, graph);
+            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (!sg) continue;
+                
+                // Skip if segment already processed
+                if (used_segments.find(sg) != used_segments.end()) continue;
+                
+                // Determine if this vertex is at the front or back of the segment
+                const auto& wcpts = sg->wcpts();
+                if (wcpts.size() < 2) continue;
+                
+                auto front_pt = wcpts.front().point;
+                auto back_pt = wcpts.back().point;
+                
+                double dis_front = ray_length(Ray{vtx_point, front_pt});
+                double dis_back = ray_length(Ray{vtx_point, back_pt});
+                
+                bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+                
+                // Check if this is an "incoming" segment (pointing into vertex)
+                if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                    if (flag_strong_check) {
+                        // Only count if direction is strong
+                        if (!sg->dir_weak()) n_in++;
+                    } else {
+                        n_in++;
+                    }
+                }
+                
+                // Collect segments with no or weak direction
+                if (sg->dirsign() == 0 || sg->dir_weak()) {
+                    map_sg_dir[sg] = flag_start;
+                }
+            }
+            
+            // If no segments to change direction, mark vertex as used
+            if (map_sg_dir.size() == 0) {
+                used_vertices.insert(vtx);
+            }
+            
+            // If there are incoming segments, set all weak/no-direction segments to point out
+            if (n_in > 0) {
+                for (auto it1 = map_sg_dir.begin(); it1 != map_sg_dir.end(); it1++) {
+                    SegmentPtr sg = it1->first;
+                    bool flag_start = it1->second;
+                    
+                    // Set direction to point away from vertex
+                    if (flag_start) {
+                        sg->dirsign(1);  // at front, point forward
+                    } else {
+                        sg->dirsign(-1); // at back, point backward
+                    }
+                    
+                    // Recalculate 4-momentum if particle info exists
+                    if (sg->has_particle_info()) {
+                        int pdg_code = sg->particle_info()->pdg();
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        
+                        // Update particle info with new 4-momentum
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg->particle_info(pinfo);
+                    }
+                    
+                    sg->dir_weak(true);
+                    used_segments.insert(sg);
+                    flag_update = true;
+                }
+                used_vertices.insert(vtx);
+            }
+        }
+    }
+}
+
+void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_strong_check){
+    bool flag_update = true;
+    std::set<VertexPtr> used_vertices;
+    std::set<SegmentPtr> used_segments;
+    
+    while(flag_update) {
+        flag_update = false;
+        
+        // Iterate through all vertices in the graph
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            VertexPtr vtx = graph[*vit].vertex;
+            
+            // Skip if vertex is null or doesn't belong to this cluster
+            if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
+            
+            // Check how many segments are connected to this vertex
+            if (!vtx->descriptor_valid()) continue;
+            auto vd = vtx->get_descriptor();
+            if (boost::degree(vd, graph) <= 1) continue;
+            
+            // Skip if already processed
+            if (used_vertices.find(vtx) != used_vertices.end()) continue;
+            
+            // int n_in = 0;
+            int n_in_shower = 0;
+            std::vector<SegmentPtr> out_tracks;
+            std::map<SegmentPtr, bool> map_no_dir_segments; // segment -> flag_start
+            
+            // Get vertex position
+            WireCell::Point vtx_point = vtx->wcpt().point;
+            
+            // Iterate through all segments connected to this vertex
+            auto edge_range = boost::out_edges(vd, graph);
+            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (!sg) continue;
+                
+                // Determine if this vertex is at the front or back of the segment
+                const auto& wcpts = sg->wcpts();
+                if (wcpts.size() < 2) continue;
+                
+                auto front_pt = wcpts.front().point;
+                auto back_pt = wcpts.back().point;
+                
+                double dis_front = ray_length(Ray{vtx_point, front_pt});
+                double dis_back = ray_length(Ray{vtx_point, back_pt});
+                
+                bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+                
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                               sg->flags_any(SegmentFlags::kShowerTopology);
+                
+                // Check if this is an "incoming" segment (pointing into vertex)
+                if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                    // n_in++;
+                    if (is_shower) {
+                        n_in_shower++;
+                    }
+                }
+                // Check if this is an "outgoing" segment (pointing away from vertex)
+                else if ((flag_start && sg->dirsign() == 1) || (!flag_start && sg->dirsign() == -1)) {
+                    if (!is_shower) {
+                        // Check if it's weak or has no particle type
+                        bool no_particle_type = !sg->has_particle_info() || sg->particle_info()->pdg() == 0;
+                        if (sg->dir_weak() || (no_particle_type && !flag_strong_check)) {
+                            out_tracks.push_back(sg);
+                        }
+                    }
+                }
+                // Segment with no direction
+                else if (sg->dirsign() == 0) {
+                    map_no_dir_segments[sg] = flag_start;
+                }
+            }
+            
+            // If there are incoming showers and outgoing tracks or no-direction segments
+            if (n_in_shower > 0 && (out_tracks.size() > 0 || map_no_dir_segments.size() > 0)) {
+                // Reclassify outgoing tracks as electrons
+                for (auto it1 = out_tracks.begin(); it1 != out_tracks.end(); it1++) {
+                    SegmentPtr sg1 = *it1;
+                    
+                    // Set as electron (PDG 11)
+                    int pdg_code = 11;
+                    auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                    
+                    // Recalculate 4-momentum if segment has valid energy
+                    if (sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
+                        four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                    }
+                    
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                        pdg_code,
+                        particle_data->get_particle_mass(pdg_code),
+                        particle_data->pdg_to_name(pdg_code),
+                        four_momentum
+                    );
+                    sg1->particle_info(pinfo);
+                    sg1->dirsign(0);
+                    
+                    flag_update = true;
+                }
+                
+                // Process no-direction segments
+                for (auto it1 = map_no_dir_segments.begin(); it1 != map_no_dir_segments.end(); it1++) {
+                    SegmentPtr sg1 = it1->first;
+                    if (used_segments.find(sg1) != used_segments.end()) continue;
+                    
+                    // If it's not already a shower, set as electron
+                    bool is_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                   sg1->flags_any(SegmentFlags::kShowerTopology);
+                    
+                    if (!is_shower) {
+                        int pdg_code = 11;
+                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
+                        
+                        // Recalculate 4-momentum if segment has valid energy
+                        if (sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
+                            four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                        }
+                        
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg1->particle_info(pinfo);
+                    }
+                    
+                    sg1->dir_weak(true);
+                    used_segments.insert(sg1);
+                    flag_update = true;
+                }
+            }
+            
+            used_vertices.insert(vtx);
+        }
+    }
+}
+

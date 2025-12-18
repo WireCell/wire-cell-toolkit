@@ -88,6 +88,8 @@ namespace WireCell::Clus::PR {
         // about fix maps
         void fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluster& cluster);
         void fix_maps_shower_in_track_out(Graph& graph, Facade::Cluster& cluster);
+        void improve_maps_one_in(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_strong_check = true);
+        void improve_maps_shower_in_track_out(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_strong_check = true);
 
 
         // vertex related functions 
