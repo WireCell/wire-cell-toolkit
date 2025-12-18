@@ -257,3 +257,133 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
         //           << length/units::cm << " " << max_angle << " " << min_para_angle << " " << drift_angle << std::endl;
     }
 }
+
+void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluster& cluster){
+    // Iterate through all vertices in the graph
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        
+        // Skip if vertex is null or doesn't belong to this cluster
+        if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
+        
+        // Check how many segments are connected to this vertex
+        if (!vtx->descriptor_valid()) continue;
+        auto vd = vtx->get_descriptor();
+        if (boost::degree(vd, graph) <= 1) continue;
+        
+        int n_in = 0;
+        int n_in_shower = 0;
+        std::vector<SegmentPtr> in_tracks;
+        
+        // Get vertex position
+        WireCell::Point vtx_point = vtx->wcpt().point;
+        
+        // Iterate through all segments connected to this vertex
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg) continue;
+            
+            // Determine if this vertex is at the front or back of the segment
+            const auto& wcpts = sg->wcpts();
+            if (wcpts.size() < 2) continue;
+            
+            auto front_pt = wcpts.front().point;
+            auto back_pt = wcpts.back().point;
+            
+            double dis_front = ray_length(Ray{vtx_point, front_pt});
+            double dis_back = ray_length(Ray{vtx_point, back_pt});
+            
+            bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+            
+            // Check if this segment is pointing "in" to the vertex
+            // "in" means: (at front and direction is -1) OR (at back and direction is 1)
+            if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                n_in++;
+                
+                // Check if it's a shower
+                if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) {
+                    n_in_shower++;
+                } else {
+                    in_tracks.push_back(sg);
+                }
+            }
+        }
+        
+        // If there are multiple incoming tracks (not all showers), reset their directions
+        if (n_in > 1 && n_in != n_in_shower) {
+            for (auto it1 = in_tracks.begin(); it1 != in_tracks.end(); it1++) {
+                (*it1)->dirsign(0);
+                (*it1)->dir_weak(true);
+            }
+        }
+    }
+}
+
+void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Cluster& cluster){
+    // Iterate through all vertices in the graph
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        
+        // Skip if vertex is null or doesn't belong to this cluster
+        if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
+        
+        // Check how many segments are connected to this vertex
+        if (!vtx->descriptor_valid()) continue;
+        auto vd = vtx->get_descriptor();
+        if (boost::degree(vd, graph) <= 1) continue;
+        
+        std::vector<SegmentPtr> in_showers;
+        bool flag_turn_shower_dir = false;
+        
+        // Get vertex position
+        WireCell::Point vtx_point = vtx->wcpt().point;
+        
+        // Iterate through all segments connected to this vertex
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg) continue;
+            
+            // Determine if this vertex is at the front or back of the segment
+            const auto& wcpts = sg->wcpts();
+            if (wcpts.size() < 2) continue;
+            
+            auto front_pt = wcpts.front().point;
+            auto back_pt = wcpts.back().point;
+            
+            double dis_front = ray_length(Ray{vtx_point, front_pt});
+            double dis_back = ray_length(Ray{vtx_point, back_pt});
+            
+            bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
+            
+            // Check if segment is a shower
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                           sg->flags_any(SegmentFlags::kShowerTopology);
+            
+            // Check if this is an "incoming" segment (pointing into vertex)
+            if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
+                if (is_shower) {
+                    in_showers.push_back(sg);
+                }
+            }
+            // Check if this is an "outgoing" segment (pointing away from vertex)
+            else if ((flag_start && sg->dirsign() == 1) || (!flag_start && sg->dirsign() == -1)) {
+                // If it's an outgoing non-shower track with strong direction
+                if (!is_shower && !sg->dir_weak()) {
+                    flag_turn_shower_dir = true;
+                }
+            }
+        }
+        
+        // If there's a strong outgoing track and incoming showers, flip shower directions
+        if (flag_turn_shower_dir) {
+            for (auto it1 = in_showers.begin(); it1 != in_showers.end(); it1++) {
+                (*it1)->dirsign((*it1)->dirsign() * (-1));
+                (*it1)->dir_weak(true);
+            }
+        }
+    }
+}
