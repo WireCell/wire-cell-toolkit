@@ -326,6 +326,76 @@ must be processed and a valid output produced.  Typically, this means the output
 likewise is in some ways "empty".
 
 
+* Performance
+
+Some Jsonnet forms can contribute to drastically large Jsonnet compilation
+times.  The main cause is that Jsonnet tends to reevaluate forms that are
+repeatedly used.  The Go version does a much better job of internally caching
+objects than the C++ version, and WCT has moved to use it by default.  However,
+surprisingly long compilation times can still be encountered.  Here are some
+recommendations to avoid introducing problems.
+
+** Avoid computational complexity
+
+Be cautious of producing a function that scales poorly with the size of its
+input.  This is a general precaution but as Jsonnet is a /purely functional/
+programming language with a somewhat limited standard library it can be
+particularly easy to solve a problem with a bad algorithm.  It may be fast in
+testing and only show a problem as the configuration grows.
+
+One particular example is that an early implementation of the =unique_list()=
+function provided by =wirecell.jsonnet= used a /linear scan accumulator/.  Each
+element of the input list was compared to every element in a growing output list
+to decide if the new element should be included in the output.  Worse, this
+function is used deeply in forming the final set of edges and nodes for a DFP
+graph.  Its quadratic complexity did not cause problems... until it did.  The
+simple but flawed algorithm was initially chosen in part because of the lack of
+simple way to implement it with a hash (there is no +std.hash()+ function).  Its
+current implementation makes use of the implicit hashing of Jsonnet object keys
+and an explicit tracking or original order followed by a sort to reestablish that
+order.  Close to a 10x speedup was achieved. 
+
+
+** Use =local= to hold expensive forms
+
+Besides the direct syntactic use of =local=, it also represents a potential point
+of caching a result during Jsonnet parsing.
+
+#+begin_src jsonnet
+  {
+      // avoid this
+      bad: expensive_calculation(data),
+
+      // prefer this
+      local good = expensive_calculation(data),
+      good: good
+  }
+#+end_src
+
+** Micro optimizations
+
+In the past, a formatted string that is deeply nested has been found to be a
+significant source of compilation time.
+
+#+begin_src jsonnet
+  {
+      called_frequently(data):: {
+          bad: "bad_%d" % data.id,
+          better: "better_" + std.toString(data.id),
+      }
+  }
+#+end_src
+
+** Profiling Jsonnet compilation
+
+Unfortunately, no tools exist to perform this directly.  If that statement is
+outdated, PLEASE notify me (bv at bnl dot gov).  What is left for the intrepid
+optimizer is to apply time tested techniques.
+
+- divide-and-conquer :: Select ever smaller portions of a form for compilation.  When you remove something and the compilation speeds up, you know what you removed holds forms that may be optimized.
+
+- debug-printing :: Sprinkle your Jsonnet to wrap a =form= with =std.trace(message, form)= and observe the printed =message=.  Piping the stderr through =ts= is one easy way to get times for each printed trace.  Look for unexpectedly duplicated or numerous trace lines with suspicion.
+
 * Meta :noexport:
 
 

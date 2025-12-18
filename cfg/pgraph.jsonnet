@@ -27,6 +27,10 @@ local wc = import "wirecell.jsonnet";
         head: hport,
     },
 
+    /// Return a unique set of edges, no necessarily preserving order.
+    unique_edges(edges)::
+        wc.unique_list(edges),
+
     // Make an edge by passing two pnode "type:name" labels and
     // optional port numbers.
     edge_labels(tlabel, hlabel, tp=0, hp=0):: {
@@ -86,14 +90,16 @@ local wc = import "wirecell.jsonnet";
     prune_array(arr) :: [ x for x in arr if $.isSomething(x) ],
 
     // Helper recursively find all objects in "uses" array, removing
-    // the array asit goes.  Return catenation of list "l" and all "uses" found.
+    // the array as it goes.  Return catenation of list "l" and all "uses" found.
     popuses(l, obj):: if std.objectHas(obj, 'uses')
     then l + std.foldl($.popuses, obj.uses, []) + [$.prune_key(obj, 'uses')]
     else l + [obj],
 
     // Return all "uses" objects.  Note, the returned list may need to
     // be passed to wc.unique_list().
-    resolve_uses(seq):: $.strip_pnodes(std.foldl($.popuses, seq, [])),
+    resolve_uses(seq)::
+        local uses = std.foldl($.popuses, seq, []);
+        $.strip_pnodes(uses),
     
     // Make a pnode from an inode and provide input and output ports.
     // A unique name can be provided for the resulting pnode or the
@@ -101,17 +107,32 @@ local wc = import "wirecell.jsonnet";
     // Any other WCT component objects which are referenced by this
     // one should be passed in "uses" (or, as a special inode.uses).
     // See intern() for general purpose aggregation of a subgraph.
+    //
     pnode(inode, nin=0, nout=0, uses=[], name=null):: {
-        type: "Pnode",
-        name: $.prune_array([name, inode.name, ""])[0],
+        // This function is is a "hot spot" in Jsonnet compilation so make a
+        // 'local' for all variables to give a little speedup.
+        local inode_type = inode.type,
+        local inode_name = $.prune_array([name, inode.name, ""])[0],
+        local inode_tn = inode_type + ":" + inode_name,
+
+        // Pnodes all have the same type in order to erase the variety of inode
+        // types.
+        type: "Pnode", 
+        name: inode_name, 
         edges: [],
+
         // Lift the port multiplicity into data so we can better draw the graph.
         // This relies on C++ components being liberal with extra config data!
-        uses: uses + [inode + { _pnode: {nin:nin, nout:nout} }],
-        // uses: uses + [inode],
-        iports: [$.port(inode, n) for n in std.range(0,nin)][:nin],
-        oports: [$.port(inode, n) for n in std.range(0,nout)][:nout],
+        local the_uses = uses + [inode + { _pnode: {nin:nin, nout:nout} }],
+        uses: the_uses,
 
+        // The pnode takes the iports of the inodes unless told otherwise.
+        local the_iports = [$.port(inode, n) for n in std.range(0,nin)][:nin],
+        iports: the_iports, 
+
+        // Etc for oports
+        local the_oports = [$.port(inode, n) for n in std.range(0,nout)][:nout],
+        oports: the_oports, 
     },
 
     // Produce an abstract pnode from a sugraph of other pnodes.  The
@@ -119,13 +140,24 @@ local wc = import "wirecell.jsonnet";
     // flattened.  Unless explicitly given, all iports of innodes
     // become iports of the new pnode, etc for output.
     intern(innodes=[], outnodes=[], centernodes=[], edges=[], iports=[], oports=[], name=""):: {
+        // This function, like pnode() is also a "hot spot".  Make everything a
+        // local for minor speedup.
         local nodes = innodes+outnodes+centernodes,
+
+        // An aggregate is also a generically typed Pnode, like atomic pnode()
         type: "Pnode",
         name: name,
+
+        // Hold the nodes, edges and ports from what we aggregate.
         uses: nodes,
-        edges: $.prune_array(edges + std.flattenArrays([n.edges for n in nodes])),
-        iports: if std.length(iports) == 0 then std.flattenArrays([n.iports for n in innodes]) else iports,
-        oports: if std.length(oports) == 0 then std.flattenArrays([n.oports for n in outnodes]) else oports,
+        // uses: $.resolve_uses(nodes),
+        local the_edges = $.prune_array(edges + std.flattenArrays([n.edges for n in nodes])),
+
+        edges: the_edges,
+        local the_iports = if std.length(iports) == 0 then std.flattenArrays([n.iports for n in innodes]) else iports,
+        iports: the_iports,
+        local the_oports = if std.length(oports) == 0 then std.flattenArrays([n.oports for n in outnodes]) else oports,
+        oports: the_oports, 
     },
 
     // Produce an abstract pnode by arranging other pnode elements
@@ -286,7 +318,10 @@ local wc = import "wirecell.jsonnet";
     // Call this to return the edges from a graph (a pnode).  It takes
     // care to remove any duplicates which can be slow so do NOT call
     // this except when getting a final list of edges.
-    edges(graph) :: wc.unique_list(graph.edges),
+    edges(graph) ::
+        //std.trace("edges.unique_list", wc.unique_list(graph.edges)),
+        // graph.edges,
+        $.unique_edges(graph.edges),
 
     // Call this to return the final "uses" list which can be used as
     // part of the final wire cell configuration sequence.  It
@@ -294,8 +329,15 @@ local wc = import "wirecell.jsonnet";
     // unique list.  Do NOT call this except at high level as it's
     // somewhat expensive and need not be called on intermediate uses
     // lists.
-    uses(graph) :: wc.unique_list(self.resolve_uses(graph.uses)),
-    
+    uses(graph) ::
+        // local graph_uses = std.trace("uses.graph_uses", graph.uses);
+        // local resolved = std.trace("uses.resolve_uses", self.resolve_uses(graph_uses));
+        // local ulist = std.trace("uses.unique_list", wc.unique_list(resolved));
+        // ulist,
+        //graph.uses,
+        //self.resolve_uses(graph.uses),
+        wc.unique_list(self.resolve_uses(graph.uses)),
+        // std.set(self.resolve_uses(graph.uses)),
 
     // Some utility functions to build fan-out/in subgraphs.
     fan:: {
@@ -451,7 +493,8 @@ local wc = import "wirecell.jsonnet";
         local appcfg = {
             type: app,
             data: {
-                edges: $.edges(graph)
+                local edges = $.edges(graph),
+                edges: edges
             },
         };
         local cmdline = {
@@ -464,5 +507,6 @@ local wc = import "wirecell.jsonnet";
                 }
             }],
         };
-        cmdline[program] + uses + $.uses(graph) + [appcfg]
+        local graph_uses = $.uses(graph);
+        cmdline[program] + uses + graph_uses + [appcfg]
 }
