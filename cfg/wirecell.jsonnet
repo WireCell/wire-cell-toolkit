@@ -377,40 +377,16 @@
 
     /// Return a new list where only the first occurrence of any object is kept.
     ///
-    /// Caution, this function grows in complexity quickly.
-    // unique_helper(l, x):: if std.count(l,x) == 0 then l + [x] else l,
-    // unique_list(l):: std.foldl($.unique_helper, l, []),
-
+    /// This function is a hot spot!  It is O(N log N) due to the implicit sort
+    /// on elements in set() and the explicit sort on index to restore original
+    /// order.  The toString() may also be somewhat expensive.  A hash based
+    /// storage object would allow removing the sorts and achieve O(N) but
+    /// currently Jsonnet lacks a hash function.
     unique_list(seq)::
-        local index = std.mapWithIndex(function (ind, obj) {ind:ind, obj:obj}, seq);
-        local ulist = std.set(index, function (ent) std.toString(ent.obj));
+        local indexed = std.mapWithIndex(function (ind, obj) {ind:ind, obj:obj}, seq);
+        local ulist = std.set(indexed, function (ent) std.toString(ent.obj));
         local ordered = std.sort(ulist, function(ent) ent.ind);
         [ent.obj for ent in ordered],
-
-
-    // Return set of unique objects.  This may not preserve order.
-    unique_objects(objects)::
-        std.set(objects, function(item) std.toString(item)),
-
-    // Return unique array keeping order
-    unique_objects_ordered(objects)::
-        std.foldl(
-            function(acc, item)
-                local result = acc[0];
-                local seen = acc[1];
-                local key = std.toString(item);
-
-                // If the key is already in the 'seen' set, return the accumulator unchanged.
-                if std.objectHas(seen, key) then
-                    acc
-                else
-                    // If new, update both the result array and the seen set.
-                    [
-                        result + [item], // New result: append the item
-                        seen { [key]: null } // New seen: add the key
-                    ],
-                objects,
-                [[], {}])[0],      // initial
 
     // Return an array.  If l is array, return it.  If string, split it, if object return field names
     listify(l, d=',') ::

@@ -7,7 +7,7 @@ local ordered_uniq(seq) =
     [ent.obj for ent in ordered];
 
 
-local fodder = [{c:"c"}, {a: "a"}, {a: "a"}, {a: "b"}, {a:"a"}, {b: "b"}];
+local fodder = [{c:"c"}, {a: "a"}, {a: "a"}, {a: "b"}, {a:"a"}, {b: "b"}, {c:"c"}];
 {
     ul: wc.unique_list(fodder),
     ou: ordered_uniq(fodder),
