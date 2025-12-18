@@ -1377,3 +1377,321 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
     
     return flag_return;
 }
+
+void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data){
+    int n_good_tracks = 0, n_tracks = 0, n_showers = 0;
+    double length_good_tracks = 0, length_tracks = 0, length_showers = 0;
+    double tracks_score = 0;
+    SegmentPtr good_track = nullptr;
+    
+    double maximal_length = 0;
+    SegmentPtr maximal_length_track = nullptr;
+    
+    // Count segments and their properties
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        double length = segment_track_length(sg);
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                        sg->flags_any(SegmentFlags::kShowerTopology);
+        
+        if (is_shower) {
+            n_showers++;
+            length_showers += length;
+        } else {
+            if (sg->dirsign() != 0 && !sg->dir_weak()) {
+                good_track = sg;
+                n_good_tracks++;
+                length_good_tracks += length;
+            } else {
+                n_tracks++;
+                length_tracks += length;
+                if (length > maximal_length) {
+                    maximal_length = length;
+                    maximal_length_track = sg;
+                }
+                if (sg->particle_score() != 100) tracks_score += sg->particle_score();
+            }
+        }
+    }
+    
+    if (n_good_tracks + n_tracks + n_showers == 1) return;
+    
+    // If there is only one good track
+    if (n_good_tracks == 1 && (length_good_tracks < 0.15 * (length_showers + length_tracks)) && length_good_tracks < 10*units::cm) {
+        auto pair_vertices = find_vertices(graph, good_track);
+        
+        int num_s1 = 0, num_s2 = 0;
+        double length_s1 = 0, length_s2 = 0;
+        
+        auto pair_result1 = calculate_num_daughter_showers(graph, pair_vertices.first, good_track);
+        auto pair_result2 = calculate_num_daughter_showers(graph, pair_vertices.second, good_track);
+        num_s1 = pair_result1.first;
+        length_s1 = pair_result1.second;
+        num_s2 = pair_result2.first;
+        length_s2 = pair_result2.second;
+        
+        if (num_s1 > 0 && length_s1 > length_good_tracks) {
+            double max_angle = 0;
+            WireCell::Point vtx2_pt = pair_vertices.second->fit().valid() ? pair_vertices.second->fit().point : pair_vertices.second->wcpt().point;
+            WireCell::Vector dir1 = segment_cal_dir_3vector(good_track, vtx2_pt, 15*units::cm);
+            
+            if (pair_vertices.second->descriptor_valid()) {
+                auto vd2 = pair_vertices.second->get_descriptor();
+                auto edge_range = boost::out_edges(vd2, graph);
+                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                    SegmentPtr sg1 = graph[*e_it].segment;
+                    if (!sg1 || sg1 == good_track) continue;
+                    
+                    WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
+                    double angle = dir1.angle(dir2) / 3.14159265 * 180.0;
+                    if (max_angle < angle) max_angle = angle;
+                }
+            }
+            
+            if (max_angle > 165 || (max_angle > 150 && length_good_tracks < 3.0*units::cm && length_good_tracks < 0.1 * length_showers)) {
+                n_good_tracks = 0;
+                length_tracks += length_good_tracks;
+            }
+        }
+        
+        if (num_s2 > 0 && length_s2 > length_good_tracks && n_good_tracks > 0) {
+            double max_angle = 0;
+            WireCell::Point vtx1_pt = pair_vertices.first->fit().valid() ? pair_vertices.first->fit().point : pair_vertices.first->wcpt().point;
+            WireCell::Vector dir1 = segment_cal_dir_3vector(good_track, vtx1_pt, 15*units::cm);
+            
+            if (pair_vertices.first->descriptor_valid()) {
+                auto vd1 = pair_vertices.first->get_descriptor();
+                auto edge_range = boost::out_edges(vd1, graph);
+                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                    SegmentPtr sg1 = graph[*e_it].segment;
+                    if (!sg1 || sg1 == good_track) continue;
+                    
+                    WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
+                    double angle = dir1.angle(dir2) / 3.14159265 * 180.0;
+                    if (max_angle < angle) max_angle = angle;
+                }
+            }
+            
+            if (max_angle > 165) {
+                n_good_tracks = 0;
+                length_tracks += length_good_tracks;
+            }
+        }
+        
+        // Check vertex connectivity and beam angle
+        if (pair_vertices.first && pair_vertices.second) {
+            int nvtx1_segs = 0, nvtx2_segs = 0;
+            if (pair_vertices.first->descriptor_valid()) {
+                nvtx1_segs = boost::degree(pair_vertices.first->get_descriptor(), graph);
+            }
+            if (pair_vertices.second->descriptor_valid()) {
+                nvtx2_segs = boost::degree(pair_vertices.second->get_descriptor(), graph);
+            }
+            
+            if (nvtx1_segs == 1 && nvtx2_segs > 1) {
+                double max_length = 0;
+                SegmentPtr max_segment = nullptr;
+                
+                if (pair_vertices.second->descriptor_valid()) {
+                    auto vd2 = pair_vertices.second->get_descriptor();
+                    auto edge_range = boost::out_edges(vd2, graph);
+                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                        SegmentPtr sg = graph[*e_it].segment;
+                        if (!sg) continue;
+                        
+                        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                       sg->flags_any(SegmentFlags::kShowerTopology);
+                        if (is_shower) {
+                            double length = segment_track_length(sg);
+                            if (length > max_length) {
+                                max_length = length;
+                                max_segment = sg;
+                            }
+                        }
+                    }
+                }
+                
+                if (max_segment != nullptr && max_length > 5*units::cm) {
+                    WireCell::Point vtx2_pt = pair_vertices.second->fit().valid() ? pair_vertices.second->fit().point : pair_vertices.second->wcpt().point;
+                    WireCell::Vector dir = segment_cal_dir_3vector(max_segment, vtx2_pt, 15*units::cm);
+                    WireCell::Vector beam_dir(0, 0, 1);
+                    if (beam_dir.angle(dir) / 3.14159265 * 180.0 > 90) {
+                        n_good_tracks = 0;
+                        length_tracks += length_good_tracks;
+                    }
+                }
+            } else if (nvtx1_segs > 1 && nvtx2_segs == 1) {
+                double max_length = 0;
+                SegmentPtr max_segment = nullptr;
+                
+                if (pair_vertices.first->descriptor_valid()) {
+                    auto vd1 = pair_vertices.first->get_descriptor();
+                    auto edge_range = boost::out_edges(vd1, graph);
+                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                        SegmentPtr sg = graph[*e_it].segment;
+                        if (!sg) continue;
+                        
+                        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                       sg->flags_any(SegmentFlags::kShowerTopology);
+                        if (is_shower) {
+                            double length = segment_track_length(sg);
+                            if (length > max_length) {
+                                max_length = length;
+                                max_segment = sg;
+                            }
+                        }
+                    }
+                }
+                
+                if (max_segment != nullptr && max_length > 5*units::cm) {
+                    WireCell::Point vtx1_pt = pair_vertices.first->fit().valid() ? pair_vertices.first->fit().point : pair_vertices.first->wcpt().point;
+                    WireCell::Vector dir = segment_cal_dir_3vector(max_segment, vtx1_pt, 15*units::cm);
+                    WireCell::Vector beam_dir(0, 0, 1);
+                    if (beam_dir.angle(dir) / 3.14159265 * 180.0 > 90) {
+                        n_good_tracks = 0;
+                        length_tracks += length_good_tracks;
+                    }
+                }
+            }
+        }
+    } else if (n_good_tracks == 0 && (n_tracks == 2 && length_tracks <= 35*units::cm)) {
+        if (maximal_length_track != nullptr) {
+            auto pair_vertices = find_vertices(graph, maximal_length_track);
+            
+            if (pair_vertices.first && pair_vertices.second) {
+                int nvtx1_segs = 0, nvtx2_segs = 0;
+                if (pair_vertices.first->descriptor_valid()) {
+                    nvtx1_segs = boost::degree(pair_vertices.first->get_descriptor(), graph);
+                }
+                if (pair_vertices.second->descriptor_valid()) {
+                    nvtx2_segs = boost::degree(pair_vertices.second->get_descriptor(), graph);
+                }
+                
+                if (nvtx1_segs < nvtx2_segs) {
+                    WireCell::Point vtx2_pt = pair_vertices.second->fit().valid() ? pair_vertices.second->fit().point : pair_vertices.second->wcpt().point;
+                    WireCell::Vector dir = segment_cal_dir_3vector(maximal_length_track, vtx2_pt, 15*units::cm);
+                    WireCell::Vector beam_dir(0, 0, 1);
+                    if (beam_dir.angle(dir) / 3.14159265 * 180.0 > 100) {
+                        n_tracks--;
+                        length_tracks -= maximal_length;
+                        n_showers++;
+                        length_showers += maximal_length;
+                    }
+                } else if (nvtx1_segs > nvtx2_segs) {
+                    WireCell::Point vtx1_pt = pair_vertices.first->fit().valid() ? pair_vertices.first->fit().point : pair_vertices.first->wcpt().point;
+                    WireCell::Vector dir = segment_cal_dir_3vector(maximal_length_track, vtx1_pt, 15*units::cm);
+                    WireCell::Vector beam_dir(0, 0, 1);
+                    if (beam_dir.angle(dir) / 3.14159265 * 180.0 > 90) {
+                        n_tracks--;
+                        length_tracks -= maximal_length;
+                        n_showers++;
+                        length_showers += maximal_length;
+                    }
+                }
+            }
+        }
+    }
+    
+    bool flag_change_showers = false;
+
+    // Check main_cluster status
+    bool is_main_cluster = cluster.get_flag(Facade::Flags::main_cluster);
+    
+    if (n_good_tracks == 0) {
+        if (length_tracks < 1.0/3.0 * length_showers || (length_tracks < 2.0/3.0 * length_showers && n_tracks == 1)) {
+            if ((length_showers + length_tracks) < 40*units::cm) {
+                flag_change_showers = true;
+            } else if (length_tracks < 0.18 * length_showers && ((length_showers + length_tracks) < 60*units::cm || length_tracks < 12*units::cm)) {
+                flag_change_showers = true;
+            } else if (length_tracks < 0.25 * length_showers && ((tracks_score == 0 && length_tracks < 30*units::cm) || length_tracks < 10*units::cm)) {
+                flag_change_showers = true;
+            } else if (n_tracks == 1 && tracks_score == 0 && length_tracks < 15*units::cm && length_tracks < 1.0/3.0 * length_showers) {
+                flag_change_showers = true;
+            }
+        } else if ((length_tracks < 35*units::cm && length_tracks + length_showers < 50*units::cm && length_showers < 15*units::cm) && 
+          (!is_main_cluster || 
+                (is_main_cluster && 
+                 (length_showers > 0.5*length_tracks ||
+                  (length_showers > 0.3*length_tracks && n_showers >= 2) ||
+                  (n_showers == 1 && n_tracks == 1 && length_showers > length_tracks * 0.3) ||
+                  tracks_score == 0)))) {
+                flag_change_showers = true;
+                if (length_showers == 0 && n_tracks <= 2 && (is_main_cluster || length_tracks > 15*units::cm)) {
+                    flag_change_showers = false;
+                }
+        } else if (length_tracks < 35*units::cm && length_tracks + length_showers < 50*units::cm && length_showers < 15*units::cm) {
+            
+            // Check if all non-shower segments are connected to shower segments
+            if (flag_change_showers) {
+                for (auto eit = ebegin; eit != eend; ++eit) {
+                    SegmentPtr sg = graph[*eit].segment;
+                    if (!sg || sg->cluster() != &cluster) continue;
+                    
+                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                   sg->flags_any(SegmentFlags::kShowerTopology);
+                    
+                    if (!is_shower) {
+                        auto pair_vertices = find_vertices(graph, sg);
+                        bool flag_shower = false;
+                        
+                        if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
+                            auto vd1 = pair_vertices.first->get_descriptor();
+                            auto edge_range = boost::out_edges(vd1, graph);
+                            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                                SegmentPtr sg1 = graph[*e_it].segment;
+                                if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                           sg1->flags_any(SegmentFlags::kShowerTopology))) {
+                                    flag_shower = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!flag_shower && pair_vertices.second && pair_vertices.second->descriptor_valid()) {
+                            auto vd2 = pair_vertices.second->get_descriptor();
+                            auto edge_range = boost::out_edges(vd2, graph);
+                            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                                SegmentPtr sg1 = graph[*e_it].segment;
+                                if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                           sg1->flags_any(SegmentFlags::kShowerTopology))) {
+                                    flag_shower = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!flag_shower) {
+                            flag_change_showers = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    if (flag_change_showers) {
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg || sg->cluster() != &cluster) continue;
+            
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                           sg->flags_any(SegmentFlags::kShowerTopology);
+            
+            if (!is_shower) {
+                int pdg_code = 11;
+                double electron_mass = particle_data->get_particle_mass(pdg_code);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    pdg_code,
+                    electron_mass,
+                    particle_data->pdg_to_name(pdg_code),
+                    WireCell::D4Vector<double>(0, 0, 0, 0)
+                );
+                sg->particle_info(pinfo);
+            }
+        }
+    }
+}

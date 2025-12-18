@@ -67,6 +67,8 @@ namespace WireCell::Clus::PR {
         // Getters
         const std::shared_ptr<Aux::ParticleInfo>& particle_info() const { return m_particle_info; }
         std::shared_ptr<Aux::ParticleInfo>& particle_info() { return m_particle_info; }
+        double particle_score() const { return m_particle_score; }
+        void particle_score(double score) { m_particle_score = score; }
 
         // Chainable setter
         Segment& particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo) {
@@ -147,6 +149,7 @@ namespace WireCell::Clus::PR {
         bool m_dir_weak{false};
 
         std::shared_ptr<Aux::ParticleInfo> m_particle_info{nullptr};
+        double m_particle_score{100};
         
         // Mapping from local DPC index to global cluster point index
         std::map<std::string, std::vector<size_t>> m_pc_global_indices;

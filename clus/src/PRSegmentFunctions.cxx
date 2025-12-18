@@ -1291,7 +1291,7 @@ namespace WireCell::Clus::PR {
         // Decision logic
         int flag_dir = 0;
         int particle_type = 0;
-        double particle_score = 0.0;
+        double particle_score = 100.0;
         
         if (flag_forward == 1 && flag_backward == 0) {
             flag_dir = 1;
@@ -1335,7 +1335,7 @@ namespace WireCell::Clus::PR {
         segment->dirsign(flag_dir);
 
         // Reset before return - failure case
-        return std::make_tuple(false, 0, 0, 0.0);
+        return std::make_tuple(false, 0, 0, 100.0);
     }
 
     // 4-momentum: E, px, py, pz, 
@@ -1406,7 +1406,7 @@ namespace WireCell::Clus::PR {
         }
         
         int pdg_code = 0;
-        double particle_score = 0.0;
+        double particle_score = 100.0;
         
         if (npoints >= 2) { // reasonably long
             bool tmp_flag_pid = false;
@@ -1524,6 +1524,7 @@ namespace WireCell::Clus::PR {
             
             // Store particle info in segment
             segment->particle_info(pinfo);
+            segment->particle_score(particle_score);
         }
                 
         if (flag_print) {
@@ -1552,7 +1553,7 @@ namespace WireCell::Clus::PR {
         
         // hack for now ...
         int pdg_code = 11; // electron
-        double particle_score = 0.0;
+        double particle_score = 100.0;
         
         if (start_n == 1 && end_n > 1){
             segment->dirsign(-1);
@@ -1590,6 +1591,7 @@ namespace WireCell::Clus::PR {
                 
         // Store particle info in segment
         segment->particle_info(pinfo);
+        segment->particle_score(particle_score);
 
         if (flag_print) {
             // Match WCPPID output format: id, length, "S_traj", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
