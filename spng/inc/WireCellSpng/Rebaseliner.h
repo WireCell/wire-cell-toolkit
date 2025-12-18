@@ -15,10 +15,12 @@ namespace WireCell::SPNG {
         // The threshold to detect that a sample is inside a region of interest.
         float threshold=0;
 
+        // Set the tensor metadata attribute named 'tag' if not empty.
+        std::string tag = "";
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::RebaselinerConfig, dim, threshold);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::RebaselinerConfig, dim, threshold, tag);
 
 namespace WireCell::SPNG {
 

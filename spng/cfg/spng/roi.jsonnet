@@ -158,7 +158,7 @@ function(control, pg)
         local rbl = pg.pnode({
             type: 'SPNGRebaseliner',
             name: this_name,
-            data: control
+            data: {tag: "signal"} + control
         }, nin=1, nout=1);
         local pipe = pg.pipeline([rebinner, scaler, stack, pre, fwd, post, thresh, unbinner, mul, rbl]);
         {

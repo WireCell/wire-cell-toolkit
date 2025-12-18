@@ -11,7 +11,7 @@ function(det, control) {
     // operates at whole-detector level that these stages can not of a
     // single_tpc scope.
     xregions: 
-        wc.unique_objects(std.prune(std.flattenArrays([tpc.anode.data.faces for tpc in det.tpcs ]))),
+        wc.unique_list(std.prune(std.flattenArrays([tpc.anode.data.faces for tpc in det.tpcs ]))),
 
 
     /// Create a per-depo drifter.  Pretty much never use this bare.

@@ -160,6 +160,9 @@ namespace WireCell::SPNG {
     ITrace::vector TdmToFrame::get_traces(const ITorchTensor::vector& traces_itensors,
                                           const std::vector<int>& chids) const
     {
+        log->debug("have {} traces itensors and {} chids",
+                   traces_itensors.size(), chids.size());
+
         ITrace::vector all_traces;
 
         size_t chid_index = 0;
@@ -178,7 +181,7 @@ namespace WireCell::SPNG {
             }
         }
         if (all_traces.size() != chids.size()) {
-            log->critical("trace / channel count mismatch: {} != {}", all_traces.size(), chids.size());
+            log->critical("trace / channel count mismatch: {} != {}, inconsistent selection criteria?", all_traces.size(), chids.size());
             raise<ValueError>("trace / channel count mismatch: %d != %d", all_traces.size(), chids.size());
         }
         return all_traces;

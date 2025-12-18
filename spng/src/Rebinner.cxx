@@ -35,7 +35,8 @@ namespace WireCell::SPNG {
 
         auto md = in->metadata();
         // Fixme: TDM MD handling still needs thought
-        md["datapath"] = md["datapath"].asString() + "/Rebinner/" + get_name();
+        // md["datapath"] = md["datapath"].asString() + "/Rebinner/" + get_name();
+
         auto tensor = in->tensor();
 
         tensor = m_rebin_func(tensor);

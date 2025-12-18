@@ -140,8 +140,8 @@ namespace WireCell::SPNG {
         }
         // FIXME: how to propagate MD in TDM still needs thought. 
         //md = TDM::derive_metadata(md, in->metadata(), m_cfg.datapath_format);
-        std::string datapath = in->metadata()["datapath"].asString();
-        md["datapath"] = datapath + "/KernelConvolve/" + get_name();
+        // std::string datapath = in->metadata()["datapath"].asString();
+        // md["datapath"] = datapath + "/KernelConvolve/" + get_name();
         
         // We will update time as we head-pad or do a roll.
         double time = get<double>(md, "time", 0.0);

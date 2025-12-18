@@ -35,7 +35,7 @@ namespace WireCell::SPNG {
 
         auto inten = to(in->tensor());
         auto md = in->metadata();
-        md["datapath"] = md["datapath"].asString() + "/TensorForward/" + get_name();
+        // md["datapath"] = md["datapath"].asString() + "/TensorForward/" + get_name();
 
         const int ndims = inten.dim();
         const int64_t batch_dimension = m_config.batch_dimension;

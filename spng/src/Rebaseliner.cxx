@@ -28,6 +28,10 @@ namespace WireCell::SPNG {
         }
 
         auto md = in->metadata();
+        if (! m_config.tag.empty()) {
+            md["tag"] = m_config.tag;
+        }
+
         auto tensor = in->tensor();
 
         tensor = rebaseline(tensor, m_config.dim, m_config.threshold);

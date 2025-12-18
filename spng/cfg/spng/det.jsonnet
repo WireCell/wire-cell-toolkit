@@ -61,6 +61,10 @@ function(det, control)
     depos_to_osp:
         pg.shuntlines([$.drifter, $.inducer, $.osp]),
 
+    // [1]IDepoSet -> IFrame[ntpcs].  Depos input to drift and sim and SP to produce "osp" signal frames.
+    depos_to_spng:
+        pg.shuntlines([$.drifter, $.inducer, $.spng]),
+
     // [1]IDepoSet->IFrame[3, ntpcs].  Produces an object with these attributes:
     //
     // - depo_sink :: A sink with one IDepoSet iport.

@@ -86,7 +86,7 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
 
     local source = io.frame_array_source(input);
     local spng = spng_mod(tpc, control, view_crossed, wpg);
-    local sink = tio.pickle_tensor_set(output);
+    local sink = io.frame_array_sink(output);
 
     local graph = pg.pipeline([
         source,

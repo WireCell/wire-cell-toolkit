@@ -3,12 +3,11 @@ local real_pg = import "pgraph.jsonnet";
 
 // Fixme: should we be passing these in like we do with "pg"?
 local fans_mod = import "spng/fans.jsonnet";
-local frame_mod = import "spng/frame.jsonnet";
 local roi_mod = import "spng/roi.jsonnet";
 local tpc_mod = import "spng/tpc.jsonnet";
 
 
-/// Return a 1->1 node consuming ADC tensor from one anode and producing a signal tensor.
+/// Return a 1->1 node consuming ADC IFrame from one anode and producing a signal IFrame.
 function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
 
     // A list of view indices for views that have crossviews calculated for DNNROI type ROIs.
@@ -16,15 +15,21 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
     // A list of view indices for views where ROIs are calculated with simple thresholds.
     local threshold_view_indices = [x.index for x in wc.enumerate(view_crossed) if x.value == 0];
 
-
-    local frame_nodes = frame_mod(control);
-
     local tpc_nodes = tpc_mod(tpc, control, pg=pg);
     local roi_nodes = roi_mod(control, pg=pg);
     local fan_nodes = fans_mod(control);
 
-    // 1->4
-    local unpack = tpc_nodes.frame_direct_unpack;
+    // This node seems to introduce some magic but it is a mirage.  See
+    // tpc.jsonnet comments for clarification.  For here, see "unpack" and
+    // "repack".
+    local bypass = tpc_nodes.frame_bypass;
+
+    // 1[TensorSet]->[Tensor]4 ngroups of tensors.  Its input is implicitly
+    // connected in the bypass.  Later we meet repack which is the bookend to
+    // unpack.
+    local unpack = tpc_nodes.frame_set_unpack;
+
+
     // 4->3
     local decon = tpc_nodes.response_decon;
 
@@ -118,7 +123,8 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
     ];
     local signals = pg.crossline(view_signals);
 
-    // until here which is 3->1
+    // [3]Tensor -> TensorSet[1].  This is the bookend to unpack.  Its output is
+    // implicitly connected inside the bypass.
     local repack = tpc_nodes.frame_set_repack;
 
 
@@ -127,9 +133,9 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
         repack,
     ]);
     //pg.components([decon_stage, crossviews_stage, end_stage])
-    pg.intern(innodes=[decon_stage], outnodes=[end_stage], centernodes=[crossviews_stage])
-
-    
+    pg.intern(innodes=[tpc_nodes.frame_to_tdm],
+              outnodes=[tpc_nodes.frame_from_tdm],
+              centernodes=[bypass, decon_stage, crossviews_stage, end_stage])
 
 
  

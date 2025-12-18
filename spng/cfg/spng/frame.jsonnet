@@ -5,7 +5,7 @@ local pg = import "pgraph.jsonnet";
 local fans_mod = import "fans.jsonnet";
 
 /// Make a configuration for a subgraph that converts from IFrame to TDM tensor set.
-function(control={})
+function(control)
 {
     local fans = fans_mod(control),
 
@@ -35,7 +35,7 @@ function(control={})
             // chmasks: ...
             tagged_traces: [ {
                 // eg datapath of /frames/0/tags/gauss/groups/0/traces
-                traces: { tag: "gauss" },
+                traces: { tag: "signal" },
                 // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
                 chids: { tag: "null" },
             }]
@@ -85,9 +85,9 @@ function(control={})
                   edges=[pg.edge(tdm, fanout),
                          pg.edge(fanout, up, 1, 0)]),
         
-    /// A "bypass" is a 2->2 node bridges a 1->2 fanout to a 2->1 fanin.  One
-    /// finger of the fans are connected (the bypass) and the other fingers are
-    /// left open
+    /// A "bypass" is a 2->2 node.  It bridges a 1->2 fanout to a 2->1 fanin.
+    /// One finger of the fans are connected (the bypass) and the other fingers
+    /// are left open.
     ///
     /// The input on iport=0 goes to the fanout and is immediately available on
     /// oport=0.  That is, port zeros act like a pass-through.  The fanout_index
@@ -115,8 +115,8 @@ function(control={})
     /// The fan in/out indices are determine the bypass connection if order
     /// matters to the fans.
     bypass(name, fanout_index=0, fanin_index=0, type='TensorSet')::
-        local expose_fanin_index = (fanin_index + 2)%2;
-        local expose_fanout_index = (fanout_index + 2)%2;
+        local expose_fanin_index = (fanin_index + 1)%2;
+        local expose_fanout_index = (fanout_index + 1)%2;
         local fanout = pg.pnode({
             type: "SPNGFanout" + type + "s",
             name: name,

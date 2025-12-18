@@ -158,7 +158,8 @@ namespace WireCell::SPNG {
 
         if (m_verbosity == 1) return;
 
-        // fixme: some level 2 verbosity?
+        // level 2.
+        log->debug("metadata: {}", md);
 
     }
 

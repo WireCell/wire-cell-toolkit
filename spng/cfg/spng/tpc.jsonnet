@@ -47,7 +47,7 @@ function(tpc, control, pg) {
     // Node: [1]set -> tensor[ngroup]: frame tensor set -> per-group tensors.
     // This breaks up the ADC frame into individual ADC tensors grouped by
     // channel groups.
-    frame_set_unpack: frame.tensorset_unpacker(tpc),
+    frame_set_unpack: frame.tensorset_unpacker(tpc, extra_name="spng"),
 
     // Node: [1]set -> tensor[ngroup]: directly connect without a fanout.
     frame_direct_unpack: pg.pipeline([$.frame_to_tdm, $.frame_set_unpack]),
@@ -128,10 +128,28 @@ function(tpc, control, pg) {
     frame_from_tdm: frame.from_tdm(tpc),
 
 
-    // Node: 2->2.  The "bypass" is a bit weird in that it seems to produce a cycle:
-    // But, this is a mirage as bypass is a subgraph. See the function comments
-    // for details and a drawing that shows the inner workings.
-    frame_bypass: frame.connect_bypass(frame.bypass(tpc.name+"bypass"),
+    // The "connected bypass" here is a bit weird given "bypass" itself is a bit
+    // weird.  See frame.bypass for a very detailed comments to understand the
+    // topology of the subgraph.
+    //
+    // The bypass's job is to bracket a graph with fanout on input and fanin on
+    // output in order to allow data to go along one fan finger and bypass some
+    // subgraph connecting the other finger.
+    //
+    // Here we connect the available ports of the basic bypass with nodes.
+    //
+    // The returned pnode is conceptually closed and caller should instead
+    // connect to these nodes:
+    //
+    // Connect IFrame source to .frame_to_tdm.
+    // Connect IFrame sink to .frame_from_tdm.
+    //
+    // Connect .frame_set_unpack to a 4-group sink.
+    // Connect .frame_set_repack to a 3-view source.
+    //
+    // Note, the frame tensor set from the IFrame is sent along fan finger 0 so
+    // that it is first in the final fanin as required by TDM.
+    frame_bypass: frame.connect_bypass(frame.bypass(tpc.name+"bypass", 0, 0),
                                        sources=[$.frame_to_tdm, $.frame_set_repack],
                                        targets=[$.frame_set_unpack, $.frame_from_tdm]),
 

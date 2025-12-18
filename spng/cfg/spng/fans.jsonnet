@@ -1,7 +1,7 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
-function(control={})
+function(control)
 {
     fanin(name, multiplicity=2, type='Tensor'):: pg.pnode({
         type: "SPNGFanin"+type+'s',
@@ -81,7 +81,7 @@ function(control={})
     ///
     /// Return [sink, [source, source, ...]]
     fanout_cross_gen(N, M, ifunc)::
-        local the_fans = [pg.pnode(ifunc(num, M), nin=1, nout=M) for num in wc.iota(N)];
+        local the_fans = [pg.pnode(ifunc(num, M)+{data:control}, nin=1, nout=M) for num in wc.iota(N)];
         local sink = pg.intern(innodes=the_fans); // sets their iports
         local sources = [
             pg.intern(centernodes=the_fans, // fixme, even give this?
@@ -155,7 +155,7 @@ function(control={})
         local tnames = std.set(std.flattenArrays(targets_list));
         local the_fans = [
             local M = std.length(targets_list[num]);
-            pg.pnode(ifunc(num, M), nin=1, nout=M)
+            pg.pnode(ifunc(num, M)+{data:control}, nin=1, nout=M)
             for num in wc.iota(N)];
 
         local fan_port(fanind, group) =

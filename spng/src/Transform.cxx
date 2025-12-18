@@ -37,7 +37,7 @@ namespace WireCell::SPNG {
         }
         // Fixme: TDM MD handling still needs thought
         auto md = in->metadata();
-        md["datapath"] = md["datapath"].asString() + "/Transform/" + get_name();
+        // md["datapath"] = md["datapath"].asString() + "/Transform/" + get_name();
 
         out = std::make_shared<SimpleTorchTensor>(tensor, md);
 
