@@ -1695,3 +1695,41 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
         }
     }
 }
+
+void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, IDetectorVolumes::pointer dv){
+    // Examine good tracks first
+    examine_good_tracks(graph, cluster, particle_data);
+    
+    // If multiple tracks in, make them undetermined
+    fix_maps_multiple_tracks_in(graph, cluster);
+    
+    // If one shower in and a good track out, reverse the shower
+    fix_maps_shower_in_track_out(graph, cluster);
+    
+    // If there is one good track in, turn everything else to out
+    improve_maps_one_in(graph, cluster, particle_data, recomb_model);
+    
+    // If one shower in and a track out, change the track to shower
+    improve_maps_shower_in_track_out(graph, cluster, particle_data, recomb_model);
+    
+    // Help to change tracks around shower to showers
+    improve_maps_no_dir_tracks(graph, cluster, particle_data, recomb_model);
+    
+    // If one shower in and a track out, change the track to shower (no reverse flag)
+    improve_maps_shower_in_track_out(graph, cluster, particle_data, recomb_model, false);
+    
+    // If multiple tracks in, change track to shower
+    improve_maps_multiple_tracks_in(graph, cluster, particle_data, recomb_model);
+    
+    // If one shower in and a good track out, reverse the shower
+    fix_maps_shower_in_track_out(graph, cluster);
+    
+    // Judgement for no-direction tracks close to showers
+    judge_no_dir_tracks_close_to_showers(graph, cluster, particle_data, dv);
+    
+    // Examine maps for physics violations
+    examine_maps(graph, cluster);
+    
+    // Examine all showers comprehensively
+    examine_all_showers(graph, cluster, particle_data);
+}
