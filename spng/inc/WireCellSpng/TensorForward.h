@@ -1,8 +1,6 @@
 #pragma once
 
-#include "WireCellSpng/Logger.h"
-#include "WireCellSpng/ContextBase.h"
-#include "WireCellSpng/ITorchTensorFilter.h"
+#include "WireCellSpng/TensorFilter.h"
 #include "WireCellSpng/ITensorForward.h"
 
 #include "WireCellIface/IConfigurable.h"
@@ -43,16 +41,14 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TensorForwardConfig, forward, nbatch, nd
 namespace WireCell::SPNG {
 
     /// A BARE torch tensor function that sends a BARE tensor through an ITensorForward.
-    struct TensorForward : public ContextBase,
-                           public Logger,
-                           public ITorchTensorFilter,
+    struct TensorForward : public TensorFilter,
                            virtual public IConfigurable
     {
         TensorForward();
         virtual ~TensorForward() = default;
 
-        /// ITorchTensorFilter
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        /// Tensorfilter
+        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
 
         // IConfigurable - see KernelConvolveConfig for configuration documentation.
         virtual void configure(const WireCell::Configuration& config);

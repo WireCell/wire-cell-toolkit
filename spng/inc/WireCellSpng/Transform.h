@@ -30,6 +30,10 @@ namespace WireCell::SPNG {
 
             - slice :: Apply a slice() along the dimension given by dims[0] from
               start index in dims[1] to end index in dims[2].
+
+            - squeeze :: Apply squeeze() to the tensor on each dimension in dims.
+
+            - unsqueeze :: Apply unsqueeze() to the tensor on each dimension in dims.
         */
 
         /// 

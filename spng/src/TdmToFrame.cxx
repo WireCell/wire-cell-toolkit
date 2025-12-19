@@ -168,6 +168,7 @@ namespace WireCell::SPNG {
         size_t chid_index = 0;
         for (const auto& traces_itensor : traces_itensors) {
             auto traces_tensor = traces_itensor->tensor().to(torch::kCPU);
+            log->debug("converting traces: {}", to_string(traces_tensor));
             const size_t ntraces = traces_tensor.size(0);
 
             auto traces_metadata = traces_itensor->metadata();

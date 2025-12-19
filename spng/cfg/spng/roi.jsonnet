@@ -122,6 +122,12 @@ function(control, pg)
                     /// the forward with a transpose.
                     { operation: "transpose", dims: [-2,-1] },
                     // in principle could threshold here but see comments, next.
+
+                    // We have to force nbatch=1 on TensorForward because DNNROI
+                    // expects a batch dim.  But we don't actually want it on
+                    // output so remove it now.  Also, DNNROI keeps the "feature
+                    // dimension".
+                    { operation: "squeeze", dims: [1, 0] },
                 ],
             } + control
         }, nin=1, nout=1);
@@ -134,7 +140,9 @@ function(control, pg)
             type: 'SPNGThreshold',
             name: this_name+'_roi',
             data: {
-                nominal: 0.5    // FIXME: a study is needed to best set this
+                nominal: 0.5,   // FIXME: a study is needed to best set this
+                tag: "roi",
+                datapath_format: "/traces/Threshold/" + this_name+'_roi'
             } + control
         }, nin=1, nout=1);
         // We use rebinner following threshold.  However, we may want to reverse
@@ -145,6 +153,8 @@ function(control, pg)
             data: {
                 norm: "maximum",
                 factor: -rebin,     // FIXME: must match upstream resampler.
+                tag: "roi",
+                datapath_format: "/traces/Rebinner/" + this_name+'_unbin'
             } + control
         }, nin=1, nout=1);
         // ApplyROI: gauss+roi in, signals out.  this provides the oport.
@@ -158,7 +168,10 @@ function(control, pg)
         local rbl = pg.pnode({
             type: 'SPNGRebaseliner',
             name: this_name,
-            data: {tag: "signal"} + control
+            data: {
+                tag: "signal",
+                datapath_format: "/traces/Rebaseliner/" + this_name
+            } + control
         }, nin=1, nout=1);
         local pipe = pg.pipeline([rebinner, scaler, stack, pre, fwd, post, thresh, unbinner, mul, rbl]);
         {
@@ -234,7 +247,10 @@ function(control, pg)
         local rbl = pg.pnode({
             type: 'SPNGRebaseliner',
             name: name,
-            data: { } + control
+            data: {
+                tag: "signal",
+                datapath_format: "/traces/Rebaseliner/" + name
+            } + control
         }, nin=1, nout=1);
         pg.intern(centernodes=[threshold, gauss, mul],
                   outnodes=[rbl],

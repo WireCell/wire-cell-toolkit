@@ -120,6 +120,27 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
+            if (opcfg.operation == "squeeze" ){
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto ten = tensor;
+                    for (const auto dim : dims) {
+                        ten = ten.squeeze(dim);
+                    }
+                    return ten;
+                });
+                continue;
+            }
+            if (opcfg.operation == "unsqueeze" ){
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto ten = tensor;
+                    for (const auto dim : dims) {
+                        ten = ten.unsqueeze(dim);
+                    }
+                    return ten;
+                });
+                continue;
+            }
+                    
 
 
             raise<ValueError>("unknown operation: %s", opcfg.operation);

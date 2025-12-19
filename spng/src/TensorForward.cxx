@@ -18,24 +18,14 @@ using namespace WireCell::HanaJsonCPP;
 namespace WireCell::SPNG {
 
     TensorForward::TensorForward()
-        : Logger("TensorForward", "spng")
+        : TensorFilter("TensorForward", "spng")
     {
     }
 
-    bool TensorForward::operator()(const input_pointer& in, output_pointer& out)
+    ITorchTensor::pointer TensorForward::filter_tensor(const ITorchTensor::pointer& in)
     {
-        if (!in) {
-            logit("EOS");
-            next_count();
-            return true;
-        }
-
-        logit(in, "forwarding");
-        TorchSemaphore sem(this->context());
-
         auto inten = to(in->tensor());
         auto md = in->metadata();
-        // md["datapath"] = md["datapath"].asString() + "/TensorForward/" + get_name();
 
         const int ndims = inten.dim();
         const int64_t batch_dimension = m_config.batch_dimension;
@@ -86,16 +76,12 @@ namespace WireCell::SPNG {
             result = result.squeeze(batch_dimension);
         }
 
-        out = std::make_shared<SimpleTorchTensor>(result, md);
-
-        logit(out, "forwarded");
-        next_count();
-        return true;
+        return std::make_shared<SimpleTorchTensor>(result, md);
     }
 
     void TensorForward::configure(const WireCell::Configuration& config)
     {
-        WireCell::configure_bases<TensorForward, ContextBase, Logger>(this, config);
+        this->TensorFilter::configure(config);
         from_json(m_config, config);
         if (m_config.forward.empty()) {
             log->critical("no configured forward service in:{}", config);
@@ -109,7 +95,7 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration TensorForward::default_configuration() const
     {
-        auto cfg = WireCell::default_configuration_bases<TensorForward, ContextBase, Logger>(this);
+        auto cfg = this->TensorFilter::default_configuration();
         auto cfg2 = to_json(m_config);
         update(cfg, cfg2);
         return cfg;

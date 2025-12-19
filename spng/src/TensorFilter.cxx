@@ -25,8 +25,6 @@ namespace WireCell::SPNG {
 
     bool TensorFilter::operator()(const input_pointer& in, output_pointer& out)
     {
-        m_to_save.clear();
-
         out = nullptr;
         if (! in) {
             logit("EOS");
@@ -38,6 +36,7 @@ namespace WireCell::SPNG {
 
         TorchSemaphore sem(context());
 
+        m_to_save.clear();
         out = filter_tensor(in);
 
         auto md = TDM::derive_metadata(in->metadata(), out->metadata(), m_config.datapath_format, m_config.tag);
