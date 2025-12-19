@@ -6,10 +6,14 @@ namespace WireCell::SPNG::TDM {
 
     Configuration derive_metadata(Configuration md,
                                   Configuration from,
-                                  const std::string& datapath_format)
+                                  const std::string& datapath_format,
+                                  const std::string& tag)
     {
         auto df = from["datapath"];
         md = update(from, md);  // want md to take precedence
+        if (! tag.empty()) {
+            md["tag"] = tag;
+        }
         if (! df.isNull()) {
             md["derived_from"] = df;
         }
@@ -19,9 +23,11 @@ namespace WireCell::SPNG::TDM {
         return md;
     }
 
+
     Configuration derive_metadata(Configuration md,
                                   const std::vector<Configuration>& froms,
-                                  const std::string& datapath_format)
+                                  const std::string& datapath_format,
+                                  const std::string& tag)
     {
         Configuration dmd;
         Configuration dfs;
@@ -33,6 +39,9 @@ namespace WireCell::SPNG::TDM {
             update(dmd, one);
         }
         md = update(dmd, md);
+        if (! tag.empty()) {
+            md["tag"] = tag;
+        }
         if (dfs.size()) {
             md["derived_from"] = dfs;
         }

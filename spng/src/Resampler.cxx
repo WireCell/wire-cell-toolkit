@@ -14,44 +14,27 @@ WIRECELL_FACTORY(SPNGResampler,
 namespace WireCell::SPNG {
 
     Resampler::Resampler()
-        : Logger("Resampler", "spng") {}
+        : TensorFilter("Resampler", "spng") {}
 
 
-    bool Resampler::operator()(const input_pointer& in, output_pointer& out)
+    ITorchTensor::pointer Resampler::filter_tensor(const ITorchTensor::pointer& in)
     {
-
-        out = nullptr;
-        if (!in) {
-            logit("EOS");
-            next_count();
-            return true;
-        }
         if (m_config.ratio == 1.0) {
-            out = in;
             logit(in, "pass through");
-            next_count();
-            return true;
+            return in;
         }
-
-        auto md = in->metadata();
-        // Fixme: TDM MD handling still needs thought
-        // md["datapath"] = md["datapath"].asString() + "/Resampler/" + get_name();
 
         auto tensor = in->tensor();
 
         tensor = resample_interval(tensor, 1.0, 1.0/m_config.ratio, m_config.dim, m_norm);
 
-        out = std::make_shared<SimpleTorchTensor>(tensor, md);
-        logit(out, "resampled");
-        next_count();
-        return true;
+        return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
 
 
     void Resampler::configure(const WireCell::Configuration& config)
     {
-        // log->debug("config: {}", config);
-        WireCell::configure_bases<Resampler, ContextBase, Logger>(this, config);
+        this->TensorFilter::configure(config);
         HanaJsonCPP::from_json(m_config, config);
 
         m_norm = LMN::norm(m_config.norm);
@@ -69,7 +52,7 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration Resampler::default_configuration() const
     {
-        auto cfg = WireCell::default_configuration_bases<Resampler, ContextBase, Logger>(this);
+        auto cfg = this->TensorFilter::default_configuration();
         auto cfg2 = HanaJsonCPP::to_json(m_config);
         update(cfg, cfg2);
         return cfg;

@@ -15,43 +15,26 @@ WIRECELL_FACTORY(SPNGRebinner,
 namespace WireCell::SPNG {
 
     Rebinner::Rebinner()
-        : Logger("Rebinner", "spng") {}
+        : TensorFilter("Rebinner", "spng") {}
 
-
-    bool Rebinner::operator()(const input_pointer& in, output_pointer& out)
+    ITorchTensor::pointer Rebinner::filter_tensor(const ITorchTensor::pointer& in)
     {
-        out = nullptr;
-        if (!in) {
-            logit("EOS");
-            next_count();
-            return true;
-        }
         if (std::abs(m_config.factor) == 1) {
-            out = in;
             logit(in, "pass through");
-            next_count();
-            return true;
+            return in;
         }
-
-        auto md = in->metadata();
-        // Fixme: TDM MD handling still needs thought
-        // md["datapath"] = md["datapath"].asString() + "/Rebinner/" + get_name();
 
         auto tensor = in->tensor();
 
         tensor = m_rebin_func(tensor);
 
-        out = std::make_shared<SimpleTorchTensor>(tensor, md);
-        logit(out, "rebinned");
-        next_count();
-        return true;
+        return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
 
 
     void Rebinner::configure(const WireCell::Configuration& config)
     {
-        // log->debug("config: {}", config);
-        WireCell::configure_bases<Rebinner, ContextBase, Logger>(this, config);
+        this->TensorFilter::configure(config);
         HanaJsonCPP::from_json(m_config, config);
 
         if (m_config.factor == 0) {
@@ -79,7 +62,7 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration Rebinner::default_configuration() const
     {
-        auto cfg = WireCell::default_configuration_bases<Rebinner, ContextBase, Logger>(this);
+        auto cfg = this->TensorFilter::default_configuration();
         auto cfg2 = HanaJsonCPP::to_json(m_config);
         update(cfg, cfg2);
         return cfg;

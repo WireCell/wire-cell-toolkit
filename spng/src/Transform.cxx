@@ -16,40 +16,23 @@ namespace WireCell::SPNG {
 
 
     Transform::Transform()
-        : Logger("Transform", "spng")
+        : TensorFilter("Transform", "spng")
     {
     }
 
-    bool Transform::operator()(const input_pointer& in, output_pointer& out)
+    ITorchTensor::pointer Transform::filter_tensor(const ITorchTensor::pointer& in)
     {
-        out = nullptr;
-        if (!in) {
-            logit("EOS");
-            next_count();
-            return true;
-        }
-
-        logit(in, "input");
-
         torch::Tensor tensor = in->tensor();
         for (auto op : m_ops) {
             tensor = op(tensor);
         }
-        // Fixme: TDM MD handling still needs thought
-        auto md = in->metadata();
-        // md["datapath"] = md["datapath"].asString() + "/Transform/" + get_name();
 
-        out = std::make_shared<SimpleTorchTensor>(tensor, md);
-
-        logit(out, "output");
-
-        next_count();
-        return true;
+        return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
 
     void Transform::configure(const WireCell::Configuration& jconfig)
     {
-        WireCell::configure_bases<Transform, ContextBase, Logger>(this, jconfig);
+        this->TensorFilter::configure(jconfig);
         from_json(m_config, jconfig);
 
         m_ops.clear();
@@ -146,7 +129,7 @@ namespace WireCell::SPNG {
 
     WireCell::Configuration Transform::default_configuration() const
     {
-        auto cfg = WireCell::default_configuration_bases<Transform, ContextBase, Logger>(this);
+        auto cfg = this->TensorFilter::default_configuration();
         auto cfg2 = to_json(m_config);
         update(cfg, cfg2);
         return cfg;

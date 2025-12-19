@@ -6,10 +6,8 @@
 
 #pragma once
 
-#include "WireCellSpng/Logger.h"
-#include "WireCellSpng/ContextBase.h"
+#include "WireCellSpng/TensorFilter.h"
 #include "WireCellSpng/TorchLMN.h"
-#include "WireCellSpng/ITorchTensorFilter.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
 #include "WireCellIface/IConfigurable.h"
@@ -45,16 +43,14 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ResamplerConfig,
 
 namespace WireCell::SPNG {
 
-    struct Resampler : public ContextBase,
-                       public Logger,
-                       public ITorchTensorFilter,
+    struct Resampler : public TensorFilter,
                        virtual public IConfigurable {
 
         Resampler();
         virtual ~Resampler() = default ;
 
-        /// ITorchTensorFilter
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        /// TensorFilter
+        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
 
         // IConfigurable - see KernelConvolveConfig for configuration documentation.
         virtual void configure(const WireCell::Configuration& config);

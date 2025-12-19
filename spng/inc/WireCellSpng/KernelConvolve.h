@@ -1,8 +1,7 @@
-#ifndef WIRECELL_SPNG_KERNELCONVOVLE
-#define WIRECELL_SPNG_KERNELCONVOVLE
+#pragma once
 
-#include "WireCellSpng/Logger.h"
-#include "WireCellSpng/ContextBase.h"
+
+#include "WireCellSpng/TensorFilter.h"
 #include "WireCellSpng/TorchLMN.h"
 #include "WireCellSpng/ITorchTensorFilter.h"
 #include "WireCellSpng/ITorchSpectrum.h"
@@ -103,27 +102,11 @@ namespace WireCell::SPNG {
         /// Optional, default is false.  If true, seek a "faster fft size" for
         /// dimensions that are not cyclically convolved.  
         bool faster=false;
-
-        /// Set the "tag" metadata attribute on the produced tensor.
-        std::string tag="";
-
-        /// Apply a format string to the metadata to produce a datapath for the
-        /// output tensor.  If not provided (default) the produced tensor will
-        /// retain the same datapath as the input tensor.  If provided, the
-        /// input datapath is stored as the "derived_from" attribute.
-        std::string datapath_format="";
-
-        // fixme: tag and datapath_format should be uplifted to a base class
-        // handling config and application.
-
-        /// If set, save some debug output to the named file.  File is produced
-        /// by torch::pickle_save().
-        std::string debug_filename = "";
     };
 }
 
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::KernelConvolveConfig,
-                        kernel, axis, faster, tag, datapath_format, debug_filename);
+                        kernel, axis, faster);
 
 namespace WireCell::SPNG {
     /** Apply a convolution of a kernel and 2D input tensors.
@@ -141,9 +124,7 @@ namespace WireCell::SPNG {
      * If batched, the first dimension must be the batch dimension.  The last
      * two dimensions are of shape (nchannels, nticks).
      */
-    class KernelConvolve : public ContextBase,
-                           public Logger,
-                           public ITorchTensorFilter,
+    class KernelConvolve : public TensorFilter,
                            virtual public IConfigurable {
 
     public:
@@ -152,8 +133,8 @@ namespace WireCell::SPNG {
         KernelConvolve(const KernelConvolveConfig& cfg);
         virtual ~KernelConvolve() = default;
 
-        /// ITorchTensorFilter
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        /// Tensorfilter
+        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
 
         // IConfigurable - see KernelConvolveConfig for configuration documentation.
         virtual void configure(const WireCell::Configuration& config);
@@ -166,7 +147,7 @@ namespace WireCell::SPNG {
 
         torch::Tensor convolve(torch::Tensor tensor, torch::Tensor kernel);
 
-        KernelConvolveConfig m_cfg;
+        KernelConvolveConfig m_config;
         ITorchSpectrum::pointer m_kernel;
         FasterDftSize m_faster;
 
@@ -175,4 +156,4 @@ namespace WireCell::SPNG {
     };
 }
 
-#endif
+

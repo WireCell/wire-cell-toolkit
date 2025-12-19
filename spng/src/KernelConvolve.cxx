@@ -22,40 +22,42 @@ using namespace WireCell::HanaJsonCPP;
 namespace WireCell::SPNG {
 
     KernelConvolve::KernelConvolve()
-        : Logger("KernelConvolve", "spng")
+        : TensorFilter("KernelConvolve", "spng")
     {}
 
     KernelConvolve::KernelConvolve(const KernelConvolveConfig& cfg)
-        : Logger("KernelConvolve", "spng")
-        , m_cfg(cfg)
+        : TensorFilter("KernelConvolve", "spng")
+        , m_config(cfg)
     {
         configme();
     }
 
     WireCell::Configuration KernelConvolve::default_configuration() const
     {
-        auto cfg = WireCell::default_configuration_bases<KernelConvolve, ContextBase, Logger>(this);
-        auto cfg2 = to_json(m_cfg);
+        // auto cfg = WireCell::default_configuration_bases<KernelConvolve, ContextBase, Logger>(this);
+        auto cfg = this->TensorFilter::default_configuration();
+        auto cfg2 = to_json(m_config);
         update(cfg, cfg2);
         return cfg;
     }
 
     void KernelConvolve::configure(const WireCell::Configuration& config)
     {
-        WireCell::configure_bases<KernelConvolve, ContextBase, Logger>(this, config);
-        from_json(m_cfg, config);
+        // WireCell::configure_bases<KernelConvolve, ContextBase, Logger>(this, config);
+        this->TensorFilter::configure(config);
+        from_json(m_config, config);
         configme();
     }
 
     torch::Tensor KernelConvolve::convolve(torch::Tensor tensor, torch::Tensor kernel)
     {
         // 2D
-        if (m_cfg.axis[0].dft && m_cfg.axis[1].dft) {
+        if (m_config.axis[0].dft && m_config.axis[1].dft) {
             return torch::real(torch::fft::ifft2(torch::fft::fft2(tensor) * kernel));
         }
 
         int64_t dim = 0;
-        if (m_cfg.axis[1].dft) {
+        if (m_config.axis[1].dft) {
             dim = 1;
         };
         log->debug("convolve 1d along axis dim {}", dim);
@@ -68,10 +70,10 @@ namespace WireCell::SPNG {
 
     void KernelConvolve::configme()
     {
-        if (m_cfg.kernel.empty()) {
+        if (m_config.kernel.empty()) {
             raise<ValueError>("the 'kernel' parameter is required");
         }
-        m_kernel = Factory::find_tn<ITorchSpectrum>(m_cfg.kernel);
+        m_kernel = Factory::find_tn<ITorchSpectrum>(m_config.kernel);
 
         // sanity check the kernel
         auto kshape = m_kernel->shape();
@@ -84,7 +86,7 @@ namespace WireCell::SPNG {
             raise<ValueError>("convolution requires 2D kernel, got (%d)", ndims);
         }
 
-        const size_t naxes = m_cfg.axis.size();
+        const size_t naxes = m_config.axis.size();
         if (naxes != 2) {
             raise<ValueError>("convolution requires 2D axes, got (%d)", naxes);
         }
@@ -97,7 +99,7 @@ namespace WireCell::SPNG {
         m_crop.resize(2, 0);
 
         for (size_t dim=0; dim<naxes; ++dim) {
-            auto& acfg = m_cfg.axis[dim];
+            auto& acfg = m_config.axis[dim];
 
             if (!String::has({"head","tail","none"}, acfg.padding)) {
                 raise<ValueError>("unsupported padding mode: \"%s\" for axis %d", acfg.padding, dim);
@@ -116,37 +118,21 @@ namespace WireCell::SPNG {
                        dim, m_roll[dim], m_crop[dim], kshape[dim], acfg.dft);
 
         }
-        log->debug("using tag: {} and datapath format: {}", m_cfg.tag, m_cfg.datapath_format);
+
     }
 
-    bool KernelConvolve::operator()(const input_pointer& in, output_pointer& out)
+    ITorchTensor::pointer KernelConvolve::filter_tensor(const ITorchTensor::pointer& in)
     {
-        out = nullptr;
-        if (!in) {
-            logit("EOS");
-            next_count();
-            return true;
-        }
-
-        logit(in, "input");
-
-        TorchSemaphore sem(context());
-
-        // Fixme: uplift tag/datapath_format config and application to a base
-        // class.
-        Configuration md;
-        if (m_cfg.tag.size()) {
-            md["tag"] = m_cfg.tag;
-        }
-        // FIXME: how to propagate MD in TDM still needs thought. 
-        //md = TDM::derive_metadata(md, in->metadata(), m_cfg.datapath_format);
-        // std::string datapath = in->metadata()["datapath"].asString();
-        // md["datapath"] = datapath + "/KernelConvolve/" + get_name();
-        
         // We will update time as we head-pad or do a roll.
+        auto md = in->metadata();
         double time = get<double>(md, "time", 0.0);
-        const double sample_period = get<double>(md, "period", 1.0); // 1.0 is certainly wrong
-        // fixme: I'm ignoring tbin.
+        const double sample_period = get<double>(md, "period", 0.0);
+        if (sample_period == 0.0) {
+            log->critical("input tensor metadata has no 'period'.  cfg: {}", md);
+            raise<ValueError>("input tensor metadata has no 'period'.");
+        }
+
+        // fixme: md["tbin"] should not be ignored....
 
         auto tensor = to(in->tensor());
         if (has_nan(tensor)) {
@@ -154,6 +140,7 @@ namespace WireCell::SPNG {
             raise<ValueError>("input tensor has NaNs");
         }
 
+        ITorchTensor::pointer out;
         // An upstream source may provide an empty tensor due to no activity
         // (specifically sim which makes neither signal nor noise).  Better that
         // a branch/merge protect us from this case but we try to act in good
@@ -165,7 +152,7 @@ namespace WireCell::SPNG {
             logit(out, "empty");
             next_count();
             // fixme: should still do output derivation
-            return true;
+            return out;
         }
 
         // Assure the tensor is batched.  Everything that touches "tensor" must
@@ -183,24 +170,12 @@ namespace WireCell::SPNG {
             raise<ValueError>("illegal number of input tensor dimensions");
         }
 
-        // For saving out debug tensors
-        using tensor_map = torch::Dict<std::string, torch::Tensor>;
-        tensor_map to_save;
-        auto maybe_save = [&](torch::Tensor ten, std::string name) {
-            if (m_cfg.debug_filename.size()) {
-                if (!batched) {
-                    ten = ten.squeeze(0);
-                }
-                to_save.insert(name, ten);
-            }
-        };
-
         // Consider non batch dimensions!
         std::vector<int64_t> basic_shape(2);
         std::vector<int64_t> convolve_shape(2);
         auto kernel_shape = m_kernel->shape();
         for (size_t dim=0; dim<2; ++dim) {
-            const auto& acfg = m_cfg.axis[dim];
+            const auto& acfg = m_config.axis[dim];
             const size_t batched_dim = dim+1;
             const auto dim_size = tensor_shape[batched_dim];
 
@@ -234,7 +209,7 @@ namespace WireCell::SPNG {
 
             // Achieve linear convolution.
             convolve_shape[dim] = basic_shape[dim] = linear_shape(dim_size, kernel_shape[dim]);
-            if (!m_cfg.faster) {
+            if (!m_config.faster) {
                 log->debug("shape: dim={} linear size: {}->{}", dim, dim_size, convolve_shape[dim]);
                 continue;
             }
@@ -247,7 +222,7 @@ namespace WireCell::SPNG {
 
         /// Do the actual padding of input tensor
         for (size_t dim=0; dim<2; ++dim) {
-            const auto& acfg = m_cfg.axis[dim];
+            const auto& acfg = m_config.axis[dim];
             const size_t batched_dim = dim+1;
             const auto dim_size = tensor_shape[batched_dim];
             if (dim_size == convolve_shape[dim]) {
@@ -290,7 +265,7 @@ namespace WireCell::SPNG {
             const size_t batched_dim = dim + 1; // the dimension in the batched tensor
 
             const int crop = m_crop[dim];
-            log->debug("axis before: dim={} crop={} tensor={} dft={}", dim, crop, to_string(tensor), m_cfg.axis[dim].dft);
+            log->debug("axis before: dim={} crop={} tensor={} dft={}", dim, crop, to_string(tensor), m_config.axis[dim].dft);
 
             if (m_roll[dim]) {
                 tensor = torch::roll(tensor, m_roll[dim], batched_dim);
@@ -313,26 +288,28 @@ namespace WireCell::SPNG {
                 tensor = resize_tensor_tail(tensor, batched_dim, dim_size);
             }
             // else, crop==0 and no crop
-            log->debug("axis after: dim={} crop={} tensor={} dft={}", dim, crop, to_string(tensor), m_cfg.axis[dim].dft);
+            log->debug("axis after: dim={} crop={} tensor={} dft={}", dim, crop, to_string(tensor), m_config.axis[dim].dft);
         }
 
         if (! batched) {
             tensor = tensor.squeeze(0);
         }
 
-        if (m_cfg.debug_filename.size()) {
-            std::string filename = fmt::format(m_cfg.debug_filename, fmt::arg("ident", get_count()));
-            auto data = torch::pickle_save(to_save);
-            std::ofstream output_file(filename, std::ios::binary);
-            output_file.write(data.data(), data.size());
-        }
+        // if (m_config.debug_filename.size()) {
+        //     std::string filename = fmt::format(m_config.debug_filename, fmt::arg("ident", get_count()));
+        //     auto data = torch::pickle_save(to_save);
+        //     std::ofstream output_file(filename, std::ios::binary);
+        //     output_file.write(data.data(), data.size());
+        // }
 
         md["time"] = time;
         out = std::make_shared<SimpleTorchTensor>(tensor, md);
 
-        logit(out, "output");
-        next_count();
-        return true;
+        // logit(out, "output");
+        // next_count();
+        // return true;
+        return out;
     }
+    
 
 }

@@ -1,9 +1,6 @@
-#ifndef WIRECELL_SPNG_THRESHOLD
-#define WIRECELL_SPNG_THRESHOLD
+#pragma once
 
-#include "WireCellSpng/Logger.h"
-#include "WireCellSpng/ContextBase.h"
-#include "WireCellSpng/ITorchTensorFilter.h"
+#include "WireCellSpng/TensorFilter.h"
 
 #include "WireCellIface/IConfigurable.h"
 
@@ -54,16 +51,14 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::ThresholdConfig, nominal, rms_nsigma, rm
 
 namespace WireCell::SPNG {
 
-    struct Threshold : public ContextBase,
-                       public Logger,
-                       public ITorchTensorFilter,
+    struct Threshold : public TensorFilter,
                        virtual public IConfigurable {
         Threshold();
         Threshold(const ThresholdConfig& cfg);
         virtual ~Threshold() = default;
 
-        /// ITorchTensorFilter
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        /// TensorFilter
+        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
 
         // IConfigurable - see ThresholdConfig for configuration documentation.
         virtual void configure(const WireCell::Configuration& config);
@@ -77,8 +72,8 @@ namespace WireCell::SPNG {
 
 
     private:
-        ThresholdConfig m_cfg;
+        ThresholdConfig m_config;
     };
 
 }
-#endif
+

@@ -13,13 +13,23 @@ namespace WireCell::SPNG::TDM {
     /// @param md A metadata object for an ITorchTensor under construction.
     /// @param from A metadata object for a given ITorchTensor from which the under-construction tensor is derived.
     /// @param datapath_format A string with "{fmt} style {params}" to form the "datapath" entry.
+    /// @param tag A string that is set on the "tag" metatdata item.
+    ///
     /// @return A metadata object fit for including in the under-construction ITorchTensor.
     ///
     /// The output metadata object will include a "derived_from" attribute of
     /// value string holding the "datapath" attribute of from, if provided.
+    ///
+    /// The "tag" is intended to identify the tensor as to its "kind" or "data
+    /// tier".  For example, one may tag a traces tensor as "gauss" vs "wiener"
+    /// to distinguish that fact that different filters have been applied.  A
+    /// tag is most relevant when individual tensors are brought together such
+    /// as in an ITorchPacker and later need to be distinguished in the
+    /// resulting set, for example when the set is input to a TdmToFrame.
     Configuration derive_metadata(Configuration md,
                                   Configuration from,
-                                  const std::string& datapath_format = "");
+                                  const std::string& datapath_format = "",
+                                  const std::string& tag="");
 
 
     /// An multi-derived metadata object.
@@ -31,7 +41,8 @@ namespace WireCell::SPNG::TDM {
     /// The "derived_from" will be an array of datapath strings.
     Configuration derive_metadata(Configuration md,
                                   const std::vector<Configuration>& from,
-                                  const std::string& datapath_format = "");
+                                  const std::string& datapath_format = "",
+                                  const std::string& tag ="");
 
 
     /**

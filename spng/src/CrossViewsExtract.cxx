@@ -37,7 +37,7 @@ namespace WireCell::SPNG {
         for (size_t ind=0; ind<nout; ++ind) {
             // Fixme: TDM MD handling still needs thought
             auto md = in->metadata();
-            md["datapath"] = md["datapath"].asString() + "/Transform/" + get_name() + m_config.extraction[ind];
+            // md["datapath"] = md["datapath"].asString() + "/CrossViewsExctrat/" + get_name() + m_config.extraction[ind];
             
             auto op = m_ops[ind];
             auto out = op(ten);

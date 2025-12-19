@@ -11,9 +11,7 @@
 
 #pragma once
 
-#include "WireCellSpng/Logger.h"
-#include "WireCellSpng/ContextBase.h"
-#include "WireCellSpng/ITorchTensorFilter.h"
+#include "WireCellSpng/TensorFilter.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
 #include "WireCellIface/IConfigurable.h"
@@ -58,18 +56,15 @@ BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::RebinnerConfig, dim, factor, norm);
 
 namespace WireCell::SPNG {
 
-    struct Rebinner : public ContextBase,
-                      public Logger,
-                      public ITorchTensorFilter,
+    struct Rebinner : public TensorFilter,
                       virtual public IConfigurable {
 
         Rebinner();
         virtual ~Rebinner() = default ;
 
-        /// ITorchTensorFilter
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        /// Tensorfilter
+        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
 
-        // IConfigurable - see KernelConvolveConfig for configuration documentation.
         virtual void configure(const WireCell::Configuration& config);
         virtual WireCell::Configuration default_configuration() const;
         

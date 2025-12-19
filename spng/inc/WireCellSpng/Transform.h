@@ -1,7 +1,6 @@
 #pragma once
 
-#include "WireCellSpng/Logger.h"
-#include "WireCellSpng/ContextBase.h"
+#include "WireCellSpng/TensorFilter.h"
 #include "WireCellSpng/HanaConfigurable.h"
 #include "WireCellSpng/ITorchTensorFilter.h"
 
@@ -60,15 +59,14 @@ namespace WireCell::SPNG {
     // This node is basically a bag of torch functions to allow a large variety
     // of transforms to be programmed in the configuration without having to
     // make dedicated DFP nodes.
-    struct Transform : public ITorchTensorFilter, 
-                       public Logger,
-                       public ContextBase,
+    struct Transform : public TensorFilter, 
                        public virtual IConfigurable
     {
         Transform();
         virtual ~Transform() = default;
 
-        virtual bool operator()(const input_pointer& in, output_pointer& out);
+        /// TensorFilter
+        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
 
         virtual void configure(const WireCell::Configuration& jconfig);
         virtual WireCell::Configuration default_configuration() const;
