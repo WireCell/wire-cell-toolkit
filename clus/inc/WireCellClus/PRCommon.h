@@ -95,18 +95,18 @@ namespace WireCell::Clus::PR {
     // multi APA/face detectors?
     struct WCPoint {
         WireCell::Point point;   // 3D point 
-        int uvw[3] = {-1,-1,-1}; // wire indices
-        int index{-1};           // point index in some container
+        // int uvw[3] = {-1,-1,-1}; // wire indices
+        // int index{-1};           // point index in some container
 
         // FIXME: WCP had this, does WCT need it?
         // blob* b;
 
         
         // Return true if the point information has been filled.
-        bool valid() const {
-            if (index < 0) return false;
-            return true;
-        }
+        // bool valid() const {
+        //     if (index < 0) return false;
+        //     return true;
+        // }
     };
     using WCPointVector = std::vector<WCPoint>;
 

@@ -94,6 +94,17 @@ local wc = import "wirecell.jsonnet";
             } + dv_cfg + pcts_cfg
         },
 
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
+            type: "TaggerCheckNeutrino",
+            name: prefix + name,
+            data: {
+                grouping: "live",           // Which grouping to process
+                trackfitting_config_file: trackfitting_config_file, 
+                particle_dataset: particle_dataset,
+                recombination_model: recombination_model,
+            } + dv_cfg + pcts_cfg
+        },
+
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",
             name: prefix+name,

@@ -829,6 +829,60 @@ WirePlaneId Cluster::wire_plane_id(size_t point_index) const {
     return WirePlaneId(wpids[point_index]);
 }
 
+std::vector<int> Cluster::segment_ids() const {
+    auto& seg_ids = cache().point_segment_ids;
+    if (seg_ids.empty()) {
+        auto& lpcs = const_cast<Cluster*>(this)->local_pcs();
+        auto it = lpcs.find("3d");
+        if (it != lpcs.end()) {
+            auto arr = it->second.get("point_segment_id");
+            if (arr) {
+                auto span = arr->elements<int>();
+                seg_ids.assign(span.begin(), span.end());
+            }
+        }
+        if (seg_ids.empty()) {
+            seg_ids.resize(npoints(), -1);
+        }
+    }
+    return seg_ids;
+}
+
+std::vector<int> Cluster::shower_flags() const {
+    auto& flags = cache().point_shower_flags;
+    if (flags.empty()) {
+        auto& lpcs = const_cast<Cluster*>(this)->local_pcs();
+        auto it = lpcs.find("3d");
+        if (it != lpcs.end()) {
+            auto arr = it->second.get("point_flag_shower");
+            if (arr) {
+                auto span = arr->elements<int>();
+                flags.assign(span.begin(), span.end());
+            }
+        }
+        if (flags.empty()) {
+            flags.resize(npoints(), 0);
+        }
+    }
+    return flags;
+}
+
+int Cluster::segment_id(size_t point_index) const {
+    const auto& seg_ids = segment_ids();
+    if (point_index < seg_ids.size()) {
+        return seg_ids[point_index];
+    }
+    return -1;
+}
+
+int Cluster::shower_flag(size_t point_index) const {
+    const auto& flags = shower_flags();
+    if (point_index < flags.size()) {
+        return flags[point_index];
+    }
+    return 0;
+}
+
 int Cluster::wire_index(size_t point_index, int plane) const {
     auto& cache_ref = cache();
     
