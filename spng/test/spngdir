@@ -1,11 +1,318 @@
 #!/usr/bin/env -S snakemake --cores all --snakefile
 # -*- snakemake -*-
 
-# This is a variant of the "spdir" workflow that adds an additional SP subgraph
-# with sigproc components replaced with spng components and includes comparing
-# between them.  It retains the "dir" name as the data content starts as depos
-# from ideal MIP tracks at fixed directions relative to the wire plane normal.
+# Suggested running:
 #
-# It also differs in that wire-cell jobs do not rely on the "omnijob.jsonnet"
-# file but instead use the new omni object scheme.
+# $ ./spng/test/spngdir --config detector=pdhd --directory=pdhd-spngdir [rule-name]
+#
+# To make graphviz of the snakemake dag
+#
+# $ ./spng/test/spngdir [options] --dag dot [rule-name] | dot -Tpdf -o foo.pdf
+#
+# This script requires snakemake.  Recommended installation method:
+#
+# $ uv tool install snakemake
+# $ snakemake --version
+# 9.14.5
+#
+# This script requires wire-cell-python.  Recommended installation method:
+#
+# $ uv tool install git+https://github.com/wirecell/wire-cell-python
+# $ wcpy
+# Usage: wcpy [OPTIONS] COMMAND [ARGS]...
+# ... etc ...
+
+# FYI, this is variant of test/scripts/spdir.  Some of the changes:
+#
+# - Delete uvcgan.
+# - Add spng to OSP as two kinds of SP
+# - Only one FR
+# - Use spngdir.jsonnet for wire-cell jobs.
+# - One wire-cell per track direction outputs splat+osp+spng, no ADC.
+# - Use "wcpy" instead of old style "wirecell-*" Python programs 
+
+# Provide hard-wired configuration defaults.  User may over ride them with a
+# config file or CLI config parameters.
+for k,v in dict(
+        # The canonical detector name.  Future may accept a list.
+        detector="pdhd",
+        # Matched arrays for track angles.  
+        # Angle from Y axis to track direction
+        # theta_y_deg=( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
+        theta_y_deg=( 45, 45 ),
+        # Angle from X axis to projection of track into X-Z plane
+        # theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 ),
+        theta_xz_deg=( 30, 60 ),
+        # The plane numbers.  Probably universal.
+        planes = [0,1,2],
+        # Optional, override the default jsonnet.
+        wire_cell_config = workflow.basedir + "/spngdir.jsonnet",
+).items():
+    config.setdefault(k,v)
+
+import json
+
+
+# Break out some config into simple vars
+detector = config['detector']
+thetas = list(zip(config['theta_xz_deg'], config['theta_y_deg']))
+txz = config['theta_xz_deg']
+ty =  config['theta_y_deg']
+nang = len(ty)
+# Track directions are measured w.r.t. a wire plane so we have per-plane jobs.
+planes = config['planes']
+# All the known data tiers. (all using plural names)
+known_tiers = ["depos", "signals", "metrics", "mplots", "plots"]
+# The kinds of signal tier
+sig_kinds = ["splat", "osp", "spng"]
+# The config for wire-cell
+wire_cell_config = config['wire_cell_config']
+
+def debug(*args, **kwds):
+    # return # MAKE QUIET
+    import sys
+    sys.stderr.write(*args, **kwds)
+    sys.stderr.write('\n')
+
+class FailsafeDict(dict):
+    def __getitem__(self, item):
+        try:
+            return super().__getitem__(item)
+        except KeyError:
+            return "{" + str(item) + "}"
+
+def fname(tier=None, ext='npz', **kwds):
+    '''
+    Generate standard file name that encodes path-dependent processing.
+
+    This will generate a file name based on the tier and some wildcard variables.
+
+    A special (non)tier of "outpat" produces the fname with the tier as
+    "%(tier)s" for providing as "outpat" TLA to spngdir.jsonnet.
+    '''
+    if tier not in known_tiers + ["outpat"]:
+        raise ValueError(f"unknown {tier=}")
+
+    # Always start with detector name.
+    parts = ['{detector}']
+
+    # tier based part
+    if tier in ('outpat',):     
+        # Special for Jsonnet TLA.  Note "%(tier)s" in Jsonnet is what we call here "sig_kind".
+        parts += ['signals', '%(tier)s']
+    else:                       # explicit tier satisfied by wildcard.
+        parts.append('{tier}')
+        if tier in ('signals', 'metrics'): # qualified tiers
+            parts.append('{sig_kind}')
+
+    # Suffix
+    post='p{plane}-txz{txz}deg-ty{ty}deg.{ext}'
+    if tier in ('plots',):
+        post='{coords}coords.{ext}'
+    parts.append(post)
+
+    pattern = '-'.join(parts)
+
+    dat = FailsafeDict(kwds, tier=tier, ext=ext)
+    ret = pattern.format_map(dat)
+    debug(f'fname({tier=},{ext=},{kwds=})\n\t{ret}')
+
+    return ret
+
+def expand_thetas(**kwds):
+    return [fname(txz=txz,ty=ty,**kwds) for txz,ty in thetas]
+
+def expand_detector(**kwds):
+    debug(f'expand_detector({kwds=})')
+    got = expand(expand_thetas(**kwds), plane=planes, detector=[config['detector']], allow_missing=True)
+    return got
+
+def expand_nodetector(**kwds):
+    return expand(expand_thetas(**kwds), plane=planes, detector=['{detector}'])
+
+
+def tracking_params(w):
+    '''
+    Make detector-specific args for detlinegen.
+
+    This is to get the depos into TPC ID 0.
+    '''
+    # MB wires are near X=0 and volume extends to +2548mm.
+    if w.detector == "uboone":
+        return "--offset '1*m,0*m,0*m'"
+    if w.detector == "pdsp":
+        return "--offset '-1*m,0*m,0*m'"
+    if w.detector == "pdhd":
+        return "--offset '0*m,0*m,0*m'"
+    return ""
+
+rule tracking:
+    output:
+        depos=fname(tier='depos'),
+        meta=fname(tier='depos', ext='json'),
+    params:
+        offset=tracking_params
+    shell: '''
+    wcpy gen detlinegen \
+    {params.offset} \
+    --detector={wildcards.detector} \
+    --plane={wildcards.plane} \
+    --angle-coords=wire-plane \
+    --theta_xz="{wildcards.txz}*deg" \
+    --theta_y="{wildcards.ty}*deg" \
+    --output_depos {output.depos} \
+    --output_meta {output.meta}
+    '''
+
+rule all_depos:
+    input:
+        expand_detector(tier='depos')
+
+
+# The snake says, sim+splat+oSp+Spng
+#
+# This runs the only wire-cell job in this workflow.
+rule ssss:
+    input:
+        cfg=wire_cell_config,
+        depos=fname(tier='depos')
+    output:
+        splat=fname('signals', sig_kind="splat"),
+        osp=fname('signals', sig_kind="osp"),
+        spng=fname('signals', sig_kind="spng"),
+        log=fname('depos', ext='log')
+    params:
+        outpat=fname('outpat')
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A input={input.depos} \
+    -A "outpat={params.outpat}" \
+    -A detname={wildcards.detector} \
+    -A engine=Pgrapher -A device=cpu -A verbosity=0
+    '''
+
+# A prototypical DAG for the ssss job.  Bogus file names are used as
+# documentation placeholders.
+#
+# FIXME: when running from a Spack view with wcpy from uv there is some
+# dependency mismatch related to python graphviz pango.  The LD_LIBRARY_PATH=""
+# effectively kills use of the Spack view and uses only what Python finds
+# directly.
+rule ssss_dag:
+    input:
+        wire_cell_config,
+    output:
+        '{detector}-ssss-dag.pdf'
+    shell: '''
+    LD_LIBRARY_PATH="" \
+    wcpy pgraph dotify \
+    -A input="input.npz" \
+    -A detname={wildcards.detector} \
+    -A engine=Pgrapher -A device=cpu -A verbosity=0 \
+    --no-services --no-params \
+    --graph-options rankdir=TB \
+    {input} {output}
+    '''
+
+
+rule all_signals:
+    input:
+        expand(expand_detector(tier='signals'), sig_kind=sig_kinds)
+
+
+rule metrics:
+    input: 
+        splat=fname('signals', sig_kind="splat"),
+        signals=fname('signals', sig_kind='{sig_kind}'),
+        depos=fname(tier='depos', ext='json')
+    output:
+        metrics=fname(tier='metrics', ext='json')
+    shell: '''
+    LD_LIBRARY_PATH="" \
+    wcpy test ssss-metrics \
+      --output {output.metrics} \
+      --params {input.depos} \
+      {input.splat} {input.signals}
+    '''
+
+rule all_metrics:
+    input:
+        expand(expand_detector(tier='metrics', ext='json'), sig_kind=['osp','spng'])
+    
+
+# def plots_args(w):
+#     'Generate additional args for plots command'
+#     fr = dict(lo='q1D', hi='2D')
+#     simfr = fr[w.simfr]
+#     spfr = fr[w.spfr]
+#     gen = 'sim'
+#     if w.gen == 'tgt':
+#         gen = 'gan'
+#     args = f"--title '{w.detector.upper()} {gen}:{simfr} SP:{spfr}'"
+#     if w.coords == "global":
+#         args += ' --coordinate-plane=2'
+#     return args
+        
+# rule plots:
+#     input:
+#         metrics=expand_detector(tier='metrics', ext='json')
+#     output:
+#         metrics=fname(tier='plots', ext='pdf')
+#     params:
+#         args=plots_args
+#     wildcard_constraints:
+#         simfr='lo|hi',
+#         gen='sim|tgt'
+#     shell: '''
+#     wirecell-test plot-metrics {params.args} -o {output} {input}
+#     '''
+
+
+# rule all_plots:
+#     input:
+#         expand(fname(detector=config['detector'], tier='plots', ext='pdf'),
+#                gen=gens, simfr=['lo','hi'], spfr=['lo','hi'], coords=['wire','global'])
+# rule all_plots_gan:
+#     input:
+#         expand(fname(detector=config['detector'], tier='plots', ext='pdf'),
+#                gen=['tgt'], simfr=['lo','hi'], spfr=['lo','hi'], coords=['wire','global'])
+        
+
+# rule metric_plots:
+#     input:
+#         splat =fname(tier='splat'),
+#         signals=fname(tier='signals')
+#     output:
+#         plots=fname(tier='mplots', ext='pdf')
+#     shell: '''
+#     wirecell-test plot-ssss --output {output.plots} {input.splat} {input.signals}
+#     '''
+
+
+# rule all_mplots:
+#     input:
+#         expand(expand_detector(tier='mplots', ext='pdf'), gen=gens, simfr=['lo','hi'], spfr=['lo','hi'])
+
+# rule all_mplots_gan:
+#     input:
+#         expand(expand_detector(tier='mplots', ext='pdf'), gen=['tgt'], simfr=['lo','hi'], spfr=['lo','hi'])
+
+# rule all:
+#     input:
+#         rules.all_mplots.input, rules.all_plots.input
+
+
+# rule all_gan:
+#     input:
+#         rules.all_mplots_gan.input, rules.all_plots_gan.input
+
+rule all_dags:
+    input:
+        expand(rules.ssss_dag.output, detector=[config['detector']]),
+        # expand(rules.simulate_dag.output, detector=[config['detector']]),
+        # expand(rules.sigproc_dag.output, detector=[config['detector']])
+        
+
+
+
 

@@ -84,9 +84,9 @@ function(det, control)
             }
         },nin=1, nout=2);
 
-        local fanout_inode(view_index, M) = {
+        local fanout_inode(index, M) = {
             type: "FrameFanout",
-            name: det.name + '_v' + std.toString(view_index),
+            name: det.name + '_adc_out' + std.toString(index),
             data: {
                 multiplicity: M
             }

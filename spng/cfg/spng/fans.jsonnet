@@ -81,7 +81,10 @@ function(control)
     ///
     /// Return [sink, [source, source, ...]]
     fanout_cross_gen(N, M, ifunc)::
-        local the_fans = [pg.pnode(ifunc(num, M)+{data:control}, nin=1, nout=M) for num in wc.iota(N)];
+        local the_fans = [
+            local inode = ifunc(num, M);
+            pg.pnode(inode + {data:inode.data + control}, nin=1, nout=M)
+            for num in wc.iota(N)];
         local sink = pg.intern(innodes=the_fans); // sets their iports
         local sources = [
             pg.intern(centernodes=the_fans, // fixme, even give this?

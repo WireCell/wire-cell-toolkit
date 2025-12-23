@@ -1,36 +1,61 @@
-// This configures jobs run the by spngdir Snakemake workflow.
-//
-
-
 local wc = import "wirecell.jsonnet";
-local omnimap = import "omni/all.jsonnet";
+local pg = import 'pgraph.jsonnet';
+local det_mod = import "spng/det.jsonnet";
+local io = import "spng/io.jsonnet";
 
-// Return a task object for possible tasks in an anode context.
+local control_mod = import "spng/control.jsonnet";
+
+local detconf = import "spng/detconf.jsonnet";
+
+// This is a variant of test-det.jsonnet that locks in using the "kitchen sink" graph and hooks up I/O.
 //
-// Each task consists of one or more objects from omni method calls and
-// conceptually represents a 1-to-1 functional node/subgraph.
+// The TLAs:
 //
-local tasks_factory(anode, omni) = {
-    tasks : {
-        // depo to frame
-        splat: omni.splat(anode),
-        
-        
-    }
+// @param input The name of a file in WCT "depo file" format, usually .npz.
+// @param outpat The output file name pattern with format variables.
+// @param detname The name of a supported detector, default "pdhd".
+// @param engine The name of the graph execution engine, default Pgrapher or TbbFlow.
+// @param device The name of the device for SPNG nodes, default "cpu" or "gpu", "gpu1", etc. 
+//
+// The only required TLA is "input".  
+//
+// The outpat must include these format variables:
+// - %(tier)s will be filled with the output type: splat, osp, spng
+//
+// Note, this hard-wires use of TPC ID 0.  Input depos should be arranged to
+// populate this TPC.
+//
+function(input,
+         outpat="test-det-%(tier)s.npz",
+         detname='pdhd',
+         engine='Pgrapher',
+         device='cpu',
+         verbosity=0)
 
-}
+    local tpcids = [0];
+
+    local controls = control_mod(device=device, verbosity=wc.intify(verbosity));
+    local det = detconf.get(detname, tpcids);
+
+    // make source node
+    local source = io.depo_source(input);
+
+    // Sink a node that has one oport per TPC across the det.
+    local sink_det(src, tier) = pg.shuntline(src,  pg.crossline(
+        [io.frame_array_sink(outpat % {tier: tier})
+         for tpc in det.tpcs]));
 
 
-// Return a file source by interpreting the stage.
-local source(omni, stage, input) = 
-    if std.member(["drift","splat","sim"], stage)
-    then omni.depo_file_source(input)
-    else omni.frame_file_source(input);
+    local guts = det_mod(det, controls.config).kitchen_sink;
 
+    local head = pg.pipeline([source, guts.depo_sink]);
+    local splat = sink_det(guts.splat_source, "splat");
+    local osp = sink_det(guts.osp_source, "osp");
+    local spng = sink_det(guts.spng_source, "spng");
 
+    local graph = pg.components([head, splat, osp, spng]);
 
-function(name, input, output, tasks):
-    local omni = omnimap[name];
-    local stages = wc.listify(tasks);
-    .... continue .....
-map stage over anodes.
+    pg.main(graph, app=engine,
+            plugins=["WireCellSpng", "WireCellSigProc", "WireCellGen", "WireCellPytorch"],
+            uses=controls.uses)
+

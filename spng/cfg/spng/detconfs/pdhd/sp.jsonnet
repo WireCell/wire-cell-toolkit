@@ -63,7 +63,7 @@ function(tpc)
             // shrink_roi_tag: 'shrink_roi%d' % anode.data.ident,
             shrink_roi_tag: "",
             // extend_roi_tag: 'extend_roi%d' % anode.data.ident,
-            sparse: true,
+            sparse: false,
             save_negtive_charge: false,
 
             use_multi_plane_protection: true,

@@ -20,8 +20,9 @@ local detconf = import "spng/detconf.jsonnet";
 function(input, output="test-det-%(tier)s-tpc%(tpcid)d.npz",
          input_type="depo",
          job="depos_to_adc",
-         detname='pdhd', tpcids=[], engine='Pgrapher', device='cpu', verbosity=0)
+         detname='pdhd', tpcs="", engine='Pgrapher', device='cpu', verbosity=0)
 
+    local tpcids = wc.intlistify(tpcs);
     local controls = control_mod(device=device, verbosity=wc.intify(verbosity));
     local det = detconf.get(detname, tpcids);
 
