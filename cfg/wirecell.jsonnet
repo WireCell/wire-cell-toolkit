@@ -404,6 +404,16 @@
         then std.parseInt(number)
         else std.ceil(number),
 
+    // Try hard to return a list of integer values given various types of stuff.
+    intlistify(stuff)::
+        if std.type(stuff) == "array"
+        then [self.intify(x) for x in stuff]
+        else if std.type(stuff) == "number"
+        then [stuff]
+        else if std.length(stuff) == 0 // assume stuff is string
+        then []
+        else [self.intify(x) for x in self.listify(stuff) if std.length(x) > 0],
+
     // Return an object that has no more keys than in the given keys.  If obj
     // does not have the key it is omitted.
     object_with(obj, keys):: {[k]:obj[k] for k in keys if std.objectHas(obj, k)},
