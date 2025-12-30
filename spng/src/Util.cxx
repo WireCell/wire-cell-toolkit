@@ -141,6 +141,21 @@ namespace WireCell::SPNG {
         return resize_tensor(in, axis, middle_index(in.size(axis)), size);
     }
 
+    std::string tensor_shape_string(const at::Tensor& t) {
+        std::ostringstream oss;
+        oss << "[";
+        for (size_t i = 0; i < t.sizes().size(); ++i) {
+            oss << t.sizes()[i];
+            if (i != t.sizes().size() - 1)
+                oss << ", ";
+        }
+        oss << "]";
+        return oss.str();
+    }
+
+    void write_torch_to_npy(const torch::Tensor &ten, const std::string &filename){
+        torch::save(ten,filename);
+    }
 
 
 }
