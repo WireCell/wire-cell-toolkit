@@ -5,7 +5,9 @@
 #include "WireCellSpng/TorchScript.h"
 #include "WireCellSpng/TensorTools.h"
 
-#include "WireCellSpng/TorchScript.h"
+//do we rely on openMP...probably not..
+//#include <omp.h>
+#include <ATen/Parallel.h>
 
 WIRECELL_FACTORY(SPNGTorchService, 
                  WireCell::SPNG::TorchService,
@@ -102,7 +104,7 @@ void SPNG::TorchService::configure(const WireCell::Configuration& cfg)
     }
 }
 
-
+/*
 ITorchTensorSet::pointer SPNG::TorchService::forward(const ITorchTensorSet::pointer& in) const
 {
 
@@ -145,4 +147,52 @@ ITorchTensorSet::pointer SPNG::TorchService::forward(const ITorchTensorSet::poin
 
     ITorchTensorSet::pointer ret = SPNG::to_itensor({oival});
     return ret;
+}
+*/
+//Use the torch::Tensor version of forward
+torch::Tensor SPNG::TorchService::forward(const torch::Tensor& input) const
+{
+    log->debug("TorchService::forward (tensor version) function entered");
+
+    if (!input.defined()) {
+        log->critical("TorchService::forward received an undefined input tensor");
+        THROW(ValueError() << errmsg{"TorchService::forward received an undefined input tensor"});
+    }
+
+    torch::Tensor output;
+
+    // Use NoGradGuard for inference (saves memory and improves performance)
+    torch::NoGradGuard no_grad;
+
+    try {
+        log->debug("TorchService::forward running model on device {} with input shape: {} and type: {}", m_device.str(), tensor_shape_string(input), input.device().str());
+
+        // Convert tensor to IValue vector for TorchScript module
+        //if input is not float type, convert it to float32
+        //print what is the input type
+        log->debug("TorchService::forward input tensor type: {}", input.dtype().name());
+        std::vector<torch::IValue> inputs;
+        if (input.scalar_type() != torch::kFloat32) {
+            log->debug("TorchService::forward converting input tensor to float32");
+            inputs.push_back(input.to(torch::kFloat32));
+        }
+        else{
+            inputs.push_back(input);
+        }
+        
+        
+        //print if inputs is a CUDADoubleType or CUDAFloatType
+
+        torch::IValue output_ival = m_module.forward(inputs);
+        output = output_ival.toTensor();
+        
+        //log->debug("TorchService::forward model execution completed successfully with output shape: {}", tensor_shape_string(output));
+    }
+    catch (const c10::Error& err) {
+        log->critical("PyTorch C10 error running model on device {}: {}", m_device.str(), err.what());
+        THROW(ValueError() << errmsg{"PyTorch C10 error running model on device"} <<
+                            errmsg{" " + std::string(err.what())});
+    }
+
+    return output;
 }
