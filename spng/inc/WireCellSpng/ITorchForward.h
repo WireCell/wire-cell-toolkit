@@ -11,7 +11,7 @@ namespace WireCell::SPNG{
     public:
       virtual ~ITorchForward(){};
 
-      virtual ITorchTensorSet::pointer forward(const ITorchTensorSet::pointer& input) const = 0;
+      virtual torch::Tensor forward(const torch::Tensor& input) const = 0;
   };
 }  // namespace WireCell
 
