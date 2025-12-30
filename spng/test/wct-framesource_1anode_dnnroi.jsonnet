@@ -1,10 +1,9 @@
 function(
   input_file='tensor_frames.npz',
   output_path='spng%s.tar',     // MUST give %s for gpu and NOT for cpu.
-  device='gpu',
+  device='cpu',
   do_spng=true,
   ts_model_file="/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
-  device='gpu',
   do_sim=false,
 ) {# usage: wire-cell -l stdout wct-sim-check.jsonnet
 
@@ -134,14 +133,7 @@ local toolkit_pipe = g.pipeline([
 ]),
 
 
-// local simple_pipes = [
-//   g.pipeline([
-//                nf_pipes[n],
-//                selectors[n],
-//              ],
-//              'parallel_pipe_%d' % n)
-//   for n in std.range(0, std.length(tools.anodes) - 1)
-// ],
+
 
 local fanout_apa_rules =
 [
