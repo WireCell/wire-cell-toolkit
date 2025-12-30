@@ -39,8 +39,8 @@ public:
     TestInterface();
     virtual ~TestInterface();
     //~TestInterface();
-    virtual WireCell::ITorchTensorSet::pointer forward(const WireCell::ITorchTensorSet::pointer& input) const override;
-    virtual void configure(const WireCell::Configuration& cfg) override;
+    virtual torch::Tensor forward(const torch::Tensor& input) const;
+    virtual void configure(const WireCell::Configuration& cfg);
     virtual void dummyMethod() override;
 
 private:
@@ -65,10 +65,10 @@ void TestInterface::dummyMethod() {
     std::cout << "Dummy method called" << std::endl;
 }
 
-WireCell::ITorchTensorSet::pointer TestInterface::forward(const WireCell::ITorchTensorSet::pointer& input) const
+torch::Tensor TestInterface::forward(const torch::Tensor& input) const
 {
     // Perform the forward pass using the TorchScript model
-    auto ret = std::make_shared<WireCell::SPNG::SimpleTorchTensorSet>(0);
+    auto ret = input.clone();
     return ret;
 }
 
