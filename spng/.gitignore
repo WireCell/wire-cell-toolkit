@@ -3,3 +3,6 @@
 .waf*
 *~
 build
+*.tar
+*.npz
+*.pt
