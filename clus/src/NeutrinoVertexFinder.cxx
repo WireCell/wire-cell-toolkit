@@ -965,3 +965,537 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
         return std::make_pair(nullptr, nullptr);
     }
 }
+
+bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_final){
+    if (!vertex || !vertex->cluster()) return false;
+    
+    Facade::Cluster& cluster = *vertex->cluster();
+    
+    // Calculate cluster statistics
+    double max_vtx_length = 0;
+    double min_vtx_length = 1e9;
+    int num_total_segments = 0;
+    bool flag_only_showers = true;
+    
+    // Examine vertex segments to determine characteristics
+    if (vertex->descriptor_valid()) {
+        auto vd = vertex->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr seg = graph[*e_it].segment;
+            if (!seg) continue;
+            
+            double length = segment_track_length(seg);
+            if (length > max_vtx_length) max_vtx_length = length;
+            if (length < min_vtx_length) min_vtx_length = length;
+        }
+    }
+    
+    // Check all vertices in the cluster
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        auto results = examine_main_vertex_candidate(graph, vtx);
+        bool flag_in = std::get<0>(results);
+        int ntracks = std::get<1>(results);
+        // int nshowers = std::get<2>(results);
+        
+        if (!flag_in && ntracks > 0) {
+            flag_only_showers = false;
+        }
+    }
+    
+    // Count total segments in cluster
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        if (seg && seg->cluster() == &cluster) {
+            num_total_segments++;
+        }
+    }
+    
+    // Determine if only showers based on topology
+    if (vertex->descriptor_valid()) {
+        auto vd = vertex->get_descriptor();
+        int num_vertex_segments = 0;
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            if (graph[*e_it].segment) num_vertex_segments++;
+        }
+        
+        if ((num_vertex_segments == 2 && (max_vtx_length > 30*units::cm || min_vtx_length > 15*units::cm)) ||
+            (num_vertex_segments > 2 && num_total_segments > 4) ||
+            (num_vertex_segments > 3)) {
+            flag_only_showers = false;
+        }
+    }
+    
+    // Beam direction (along z-axis)
+    Facade::geo_vector_t drift_dir(1, 0, 0);
+    
+    // Track used vertices and segments
+    std::set<VertexPtr> used_vertices;
+    std::set<SegmentPtr> used_segments;
+    
+    // Start propagation from the main vertex
+    std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
+    if (vertex->descriptor_valid()) {
+        auto vd = vertex->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr seg = graph[*e_it].segment;
+            if (seg) {
+                segments_to_be_examined.push_back(std::make_pair(vertex, seg));
+            }
+        }
+    }
+    used_vertices.insert(vertex);
+    
+    // Propagate through the graph setting directions and particle types
+    while (!segments_to_be_examined.empty()) {
+        std::vector<std::pair<VertexPtr, SegmentPtr>> temp_segments;
+        
+        for (const auto& [prev_vtx, current_sg] : segments_to_be_examined) {
+            if (!prev_vtx->descriptor_valid()) continue;
+            
+            // Check for incoming showers
+            bool flag_shower_in = false;
+            std::vector<SegmentPtr> in_showers;
+            
+            auto prev_vd = prev_vtx->get_descriptor();
+            auto prev_edge_range = boost::out_edges(prev_vd, graph);
+            for (auto e_it = prev_edge_range.first; e_it != prev_edge_range.second; ++e_it) {
+                SegmentPtr sg = graph[*e_it].segment;
+                if (!sg) continue;
+                
+                const auto& wcps = sg->wcpts();
+                if (wcps.empty()) continue;
+                
+                bool flag_start = (ray_length(Ray{wcps.front().point, prev_vtx->wcpt().point}) <
+                                  ray_length(Ray{wcps.back().point, prev_vtx->wcpt().point}));
+                
+                int dir_sign = sg->dirsign();
+                if ((flag_start && dir_sign == -1) || (!flag_start && dir_sign == 1)) {
+                    if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) {
+                        flag_shower_in = true;
+                        in_showers.push_back(sg);
+                        break;
+                    }
+                }
+            }
+            
+            if (used_segments.find(current_sg) != used_segments.end()) continue;
+            
+            double length = segment_track_length(current_sg);
+            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                            current_sg->flags_any(SegmentFlags::kShowerTopology);
+            
+            // Determine segment direction
+            if (current_sg->dirsign() == 0 || current_sg->dir_weak() || is_shower || flag_final) {
+                const auto& wcps = current_sg->wcpts();
+                if (!wcps.empty()) {
+                    bool flag_start = (ray_length(Ray{wcps.front().point, prev_vtx->wcpt().point}) <
+                                      ray_length(Ray{wcps.back().point, prev_vtx->wcpt().point}));
+                    
+                    // Set direction
+                    if (flag_start) {
+                        current_sg->dirsign(1);
+                    } else {
+                        current_sg->dirsign(-1);
+                    }
+                    
+                    // Determine particle type
+                    if (flag_shower_in && current_sg->dirsign() == 0 && !is_shower) {
+                        segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                    } else if (flag_shower_in && length < 2.0*units::cm && !is_shower) {
+                        segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                    } else if (flag_shower_in && current_sg->has_particle_info() && 
+                              (std::abs(current_sg->particle_info()->pdg()) == 13 || current_sg->particle_info()->pdg() == 0)) {
+                        segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                    } else {
+                        auto pair_result = calculate_num_daughter_showers(graph, prev_vtx, current_sg);
+                        auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
+                        int num_daughter_showers = pair_result.first;
+                        double length_daughter_showers = pair_result.second;
+                        
+                        // Check if should be electron based on daughter showers
+                        int current_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
+                        if (current_pdg != 11 && 
+                            (num_daughter_showers >= 4 || 
+                             (length_daughter_showers > 50*units::cm && num_daughter_showers >= 2)) &&
+                            pair_result.second > pair_result1.second - length - pair_result.second) {
+                            
+                            // Check angles with connected segments
+                            bool flag_change = false;
+                            VertexPtr next_vertex = find_other_vertex(graph, current_sg, prev_vtx);
+                            if (next_vertex && next_vertex->descriptor_valid()) {
+                                Facade::geo_vector_t tmp_dir1 = segment_cal_dir_3vector(current_sg, next_vertex->wcpt().point, 15*units::cm);
+                                
+                                auto next_vd = next_vertex->get_descriptor();
+                                auto next_edge_range = boost::out_edges(next_vd, graph);
+                                for (auto ne_it = next_edge_range.first; ne_it != next_edge_range.second; ++ne_it) {
+                                    SegmentPtr other_sg = graph[*ne_it].segment;
+                                    if (!other_sg || other_sg == current_sg) continue;
+                                    
+                                    Facade::geo_vector_t tmp_dir2 = segment_cal_dir_3vector(other_sg, next_vertex->wcpt().point, 15*units::cm);
+                                    
+                                    if (tmp_dir1.magnitude() > 0 && tmp_dir2.magnitude() > 0) {
+                                        double angle = std::acos(std::clamp(tmp_dir1.dot(tmp_dir2) / 
+                                                      (tmp_dir1.magnitude() * tmp_dir2.magnitude()), -1.0, 1.0)) 
+                                                      * 180.0 / M_PI;
+                                        double angle_drift1 = std::acos(std::clamp(drift_dir.dot(tmp_dir1) / 
+                                                             (drift_dir.magnitude() * tmp_dir1.magnitude()), -1.0, 1.0)) 
+                                                             * 180.0 / M_PI;
+                                        double angle_drift2 = std::acos(std::clamp(drift_dir.dot(tmp_dir2) / 
+                                                             (drift_dir.magnitude() * tmp_dir2.magnitude()), -1.0, 1.0)) 
+                                                             * 180.0 / M_PI;
+                                        double other_length = segment_track_length(other_sg);
+                                        
+                                        if (angle > 155 ||
+                                            (angle > 135 && std::abs(angle_drift1 - 90) < 10 && std::abs(angle_drift2 - 90) < 10) ||
+                                            (angle > 135 && other_length < 6*units::cm)) {
+                                            flag_change = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if (flag_change) {
+                                segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                            }
+                        } else if (current_pdg == 11 && num_daughter_showers <= 2 && !flag_shower_in && 
+                                  !current_sg->flags_any(SegmentFlags::kShowerTopology) && 
+                                  !current_sg->flags_any(SegmentFlags::kShowerTrajectory) && 
+                                  length > 10*units::cm && !flag_only_showers) {
+                            
+                            double direct_length = segment_track_direct_length(current_sg);
+                            if (direct_length >= 34*units::cm || 
+                                (direct_length < 34*units::cm && direct_length > 0.93 * length)) {
+                                segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                            }
+                        } else if (current_pdg == 11 && current_sg->flags_any(SegmentFlags::kShowerTrajectory) && 
+                                  num_daughter_showers == 1 && !flag_only_showers) {
+                            auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
+                            if (pair_result1.second > 3*length && pair_result1.second - length > 12*units::cm) {
+                                current_sg->unset_flags(SegmentFlags::kShowerTrajectory);
+                                segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                            }
+                        }
+                    }
+                    
+                    // Default particle type assignment for undetermined particles from main vertex
+                    if (vertex == main_vertex) {
+                        int current_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
+                        if (current_pdg == 0 && !is_shower) {
+                            if (flag_only_showers) {
+                                segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                            } else {
+                                double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
+                                if (dqdx_ratio > 1.4) {
+                                    segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
+                                } else {
+                                    segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                }
+                            }
+                        }
+                    }
+                    
+                    current_sg->dir_weak(true);
+                }
+            } else if (current_sg->dirsign() != 0 && !current_sg->dir_weak()) {
+                // Strong direction already set
+                auto pair_result = calculate_num_daughter_showers(graph, prev_vtx, current_sg);
+                int num_daughter_showers = pair_result.first;
+                
+                int current_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
+                if (current_pdg == 2212 && flag_shower_in && num_daughter_showers == 0) {
+                    for (auto in_shower : in_showers) {
+                        double dqdx_ratio = segment_median_dQ_dx(in_shower) / (43e3 / units::cm);
+                        if (dqdx_ratio > 1.3) {
+                            segment_cal_4mom(in_shower, 2212, particle_data, recomb_model);
+                        } else {
+                            segment_cal_4mom(in_shower, 211, particle_data, recomb_model);
+                        }
+                        in_shower->unset_flags(SegmentFlags::kShowerTrajectory);
+                        in_shower->unset_flags(SegmentFlags::kShowerTopology);
+                    }
+                }
+            }
+            
+            used_segments.insert(current_sg);
+            
+            // Find next vertex and add its segments to examination list
+            VertexPtr curr_vertex = find_other_vertex(graph, current_sg, prev_vtx);
+            if (!curr_vertex || used_vertices.find(curr_vertex) != used_vertices.end()) continue;
+            
+            if (curr_vertex->descriptor_valid()) {
+                auto curr_vd = curr_vertex->get_descriptor();
+                auto curr_edge_range = boost::out_edges(curr_vd, graph);
+                for (auto ce_it = curr_edge_range.first; ce_it != curr_edge_range.second; ++ce_it) {
+                    SegmentPtr seg = graph[*ce_it].segment;
+                    if (seg) {
+                        temp_segments.push_back(std::make_pair(curr_vertex, seg));
+                    }
+                }
+            }
+            used_vertices.insert(curr_vertex);
+        }
+        segments_to_be_examined = temp_segments;
+    }
+    
+    // Find long muon candidates
+    bool flag_fill_long_muon = true;
+    for (auto seg : segments_in_long_muon) {
+        if (seg->cluster() == &cluster) {
+            flag_fill_long_muon = false;
+            break;
+        }
+    }
+    
+    if (flag_fill_long_muon && vertex->descriptor_valid()) {
+        auto vd = vertex->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr sg = graph[*e_it].segment;
+            if (!sg) continue;
+            
+            double dqdx_ratio = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            if (dqdx_ratio > 1.3) continue;
+            
+            VertexPtr vtx = find_other_vertex(graph, sg, vertex);
+            if (!vtx) continue;
+            
+            std::vector<SegmentPtr> acc_segments;
+            std::vector<VertexPtr> acc_vertices;
+            acc_segments.push_back(sg);
+            acc_vertices.push_back(vtx);
+            
+            auto results = find_cont_muon_segment(graph, sg, vtx);
+            while (results.first != nullptr) {
+                acc_segments.push_back(results.first);
+                acc_vertices.push_back(results.second);
+                results = find_cont_muon_segment(graph, results.first, results.second);
+            }
+            
+            double total_length = 0, max_length = 0;
+            for (auto acc_seg : acc_segments) {
+                double length = segment_track_length(acc_seg);
+                total_length += length;
+                if (length > max_length) max_length = length;
+            }
+            
+            if (total_length > 45*units::cm && max_length > 35*units::cm && acc_segments.size() > 1) {
+                for (auto acc_seg : acc_segments) {
+                    segment_cal_4mom(acc_seg, 13, particle_data, recomb_model);
+                    acc_seg->unset_flags(SegmentFlags::kShowerTrajectory);
+                    acc_seg->unset_flags(SegmentFlags::kShowerTopology);
+                    segments_in_long_muon.insert(acc_seg);
+                }
+                for (auto acc_vtx : acc_vertices) {
+                    vertices_in_long_muon.insert(acc_vtx);
+                }
+            }
+        }
+    }
+    
+    // Find muon candidate and make others pions
+    if (vertex->descriptor_valid()) {
+        SegmentPtr muon_sg = nullptr;
+        double muon_length = 0;
+        std::vector<SegmentPtr> pion_sgs;
+        
+        auto vd = vertex->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr sg = graph[*e_it].segment;
+            if (!sg) continue;
+            
+            int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
+            if (std::abs(pdg) == 13) {
+                if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) continue;
+                
+                VertexPtr other_vertex = find_other_vertex(graph, sg, vertex);
+                if (!other_vertex || !other_vertex->descriptor_valid()) continue;
+                
+                int n_proton = 0;
+                auto other_vd = other_vertex->get_descriptor();
+                auto other_edge_range = boost::out_edges(other_vd, graph);
+                for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
+                    SegmentPtr other_sg = graph[*oe_it].segment;
+                    if (other_sg && other_sg->has_particle_info() && 
+                        std::abs(other_sg->particle_info()->pdg()) == 2212) {
+                        n_proton++;
+                    }
+                }
+                
+                double sg_length = segment_track_length(sg);
+                if (sg_length > muon_length && n_proton == 0) {
+                    muon_length = sg_length;
+                    muon_sg = sg;
+                }
+                pion_sgs.push_back(sg);
+            } else if (pdg == 0) {
+                VertexPtr other_vertex = find_other_vertex(graph, sg, vertex);
+                if (!other_vertex || !other_vertex->descriptor_valid()) continue;
+                
+                int n_proton = 0;
+                auto other_vd = other_vertex->get_descriptor();
+                auto other_edge_range = boost::out_edges(other_vd, graph);
+                for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
+                    SegmentPtr other_sg = graph[*oe_it].segment;
+                    if (other_sg && other_sg->has_particle_info() && 
+                        std::abs(other_sg->particle_info()->pdg()) == 2212) {
+                        n_proton++;
+                    }
+                }
+                
+                if (n_proton > 0) {
+                    double dqdx_ratio = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+                    if (dqdx_ratio > 1.3) {
+                        segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                    } else {
+                        segment_cal_4mom(sg, 211, particle_data, recomb_model);
+                    }
+                }
+            }
+        }
+        
+        // Convert non-muon candidates to pions
+        for (auto pion_sg : pion_sgs) {
+            if (pion_sg == muon_sg) continue;
+            segment_cal_4mom(pion_sg, 211, particle_data, recomb_model);
+        }
+    }
+    
+    // Find Michel electrons
+    auto [ebegin2, eend2] = boost::edges(graph);
+    for (auto eit = ebegin2; eit != eend2; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        // Check if segment has particle info with mass but no 4-momentum yet, and is not shower topology
+        bool has_4mom = sg->has_particle_info();
+        if (has_4mom && sg->particle_info()->mass() > 0 && 
+            !sg->flags_any(SegmentFlags::kShowerTopology)) {
+            
+            if (!sg->dir_weak()) {
+                // Strong direction - calculate 4-momentum
+                int pdg = sg->particle_info()->pdg();
+                segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+            } else {
+                // Weak direction - need to check endpoint conditions
+                // Find the two vertices of this segment
+                VertexPtr start_v = nullptr, end_v = nullptr;
+                
+                auto [vbegin, vend] = boost::vertices(graph);
+                for (auto vit = vbegin; vit != vend; ++vit) {
+                    VertexPtr vtx = graph[*vit].vertex;
+                    if (!vtx || !vtx->descriptor_valid()) continue;
+                    
+                    // Check if this vertex is connected to our segment
+                    auto vtx_vd = vtx->get_descriptor();
+                    auto vtx_edge_range = boost::out_edges(vtx_vd, graph);
+                    for (auto ve_it = vtx_edge_range.first; ve_it != vtx_edge_range.second; ++ve_it) {
+                        if (graph[*ve_it].segment == sg) {
+                            // This vertex is connected to our segment
+                            const auto& wcps = sg->wcpts();
+                            if (!wcps.empty()) {
+                                if (ray_length(Ray{wcps.front().point, vtx->wcpt().point}) < 0.01*units::cm) {
+                                    start_v = vtx;
+                                } else if (ray_length(Ray{wcps.back().point, vtx->wcpt().point}) < 0.01*units::cm) {
+                                    end_v = vtx;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if (start_v && end_v) break;
+                }
+                
+                if (!start_v || !end_v) continue;
+                
+                int dir_sign = sg->dirsign();
+                auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+                
+                // Count segments at start and end vertices
+                int num_segs_start = 0, num_segs_end = 0;
+                if (start_v->descriptor_valid()) {
+                    auto start_vd = start_v->get_descriptor();
+                    auto start_edge_range = boost::out_edges(start_vd, graph);
+                    for (auto se_it = start_edge_range.first; se_it != start_edge_range.second; ++se_it) {
+                        if (graph[*se_it].segment) num_segs_start++;
+                    }
+                }
+                if (end_v->descriptor_valid()) {
+                    auto end_vd = end_v->get_descriptor();
+                    auto end_edge_range = boost::out_edges(end_vd, graph);
+                    for (auto ee_it = end_edge_range.first; ee_it != end_edge_range.second; ++ee_it) {
+                        if (graph[*ee_it].segment) num_segs_end++;
+                    }
+                }
+                
+                // Check if endpoint is in fiducial volume or is Michel electron candidate
+                WireCell::Point end_pt = end_v->fit().valid() ? end_v->fit().point : end_v->wcpt().point;
+                WireCell::Point start_pt = start_v->fit().valid() ? start_v->fit().point : start_v->wcpt().point;
+                
+                bool should_calc = false;
+                
+                // Case 1: Direction is outward and endpoint is isolated in fiducial volume
+                if (dir_sign == 1 && num_segs_end == 1 && fiducial_utils && 
+                    fiducial_utils->inside_fiducial_volume(end_pt)) {
+                    should_calc = true;
+                } else if (dir_sign == -1 && num_segs_start == 1 && fiducial_utils && 
+                          fiducial_utils->inside_fiducial_volume(start_pt)) {
+                    should_calc = true;
+                }
+                // Case 2: Check for Michel electron topology at end vertex (2 segments, one is shower)
+                else if (num_segs_end == 2 && end_v->descriptor_valid()) {
+                    bool flag_Michel = false;
+                    auto end_vd = end_v->get_descriptor();
+                    auto end_edge_range = boost::out_edges(end_vd, graph);
+                    for (auto ee_it = end_edge_range.first; ee_it != end_edge_range.second; ++ee_it) {
+                        SegmentPtr other_sg = graph[*ee_it].segment;
+                        if (!other_sg || other_sg == sg) continue;
+                        // Check if other segment is a shower (kShowerTrajectory flag or electron PDG)
+                        if (other_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                            (other_sg->has_particle_info() && std::abs(other_sg->particle_info()->pdg()) == 11)) {
+                            flag_Michel = true;
+                            break;
+                        }
+                    }
+                    if (flag_Michel) should_calc = true;
+                }
+                // Case 3: Check for Michel electron topology at start vertex (2 segments, one is shower)
+                else if (num_segs_start == 2 && start_v->descriptor_valid()) {
+                    bool flag_Michel = false;
+                    auto start_vd = start_v->get_descriptor();
+                    auto start_edge_range = boost::out_edges(start_vd, graph);
+                    for (auto se_it = start_edge_range.first; se_it != start_edge_range.second; ++se_it) {
+                        SegmentPtr other_sg = graph[*se_it].segment;
+                        if (!other_sg || other_sg == sg) continue;
+                        // Check if other segment is a shower (kShowerTrajectory flag or electron PDG)
+                        if (other_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                            (other_sg->has_particle_info() && std::abs(other_sg->particle_info()->pdg()) == 11)) {
+                            flag_Michel = true;
+                            break;
+                        }
+                    }
+                    if (flag_Michel) should_calc = true;
+                }
+                
+                if (should_calc) {
+                    int pdg = sg->particle_info()->pdg();
+                    segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                }
+            }
+        }
+    }
+    
+    return examine_maps(graph, cluster);
+}
+
