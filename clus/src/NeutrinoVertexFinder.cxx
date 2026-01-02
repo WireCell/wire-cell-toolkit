@@ -1,6 +1,7 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/FiducialUtils.h"
+#include "WireCellClus/MyFCN.h"
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -1708,4 +1709,69 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
     }
     
     return flag_updated;
+}
+
+
+bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, VertexPtr main_vertex, std::set<SegmentPtr>& sg_set, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    // Allow to move 1.5 cm - create MyFCN object with constraint parameters
+    MyFCN fcn(vertex, true, 0.43*units::cm, 1.5*units::cm, 0.9*units::cm, 6*units::cm);
+    
+    // Add all segments to the fitting
+    for (auto it = sg_set.begin(); it != sg_set.end(); it++) {
+        fcn.AddSegment(*it);
+    }
+    
+    // If this is the main vertex, enforce two track fit
+    if (vertex == main_vertex) fcn.set_enforce_two_track_fit(true);
+    
+    // Perform vertex fitting
+    std::pair<bool, Facade::geo_point_t> results = fcn.FitVertex();
+    
+    // Get grouping for charge calculation
+    auto grouping = cluster.grouping();
+    if (!grouping) {
+        if (results.first)
+            fcn.UpdateInfo(results.second, cluster, track_fitter, dv);
+        return results.first;
+    }
+    
+    // Get transform for coordinate conversion
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    // double cluster_t0 = cluster.get_cluster_t0();
+    
+    // Get old and new vertex positions
+    Facade::geo_point_t old_pos = vertex->fit().point;
+    Facade::geo_point_t new_pos = results.second;
+    
+    // Get APA/face for old and new positions
+    auto old_wpid = dv->contained_by(old_pos);
+    auto new_wpid = dv->contained_by(new_pos);
+    
+    // Calculate average charge at old and new positions
+    double old_charge = 0;
+    double new_charge = 0;
+    
+    if (old_wpid.apa() != -1 && old_wpid.face() != -1) {
+        old_charge = grouping->get_ave_3d_charge(old_pos, old_wpid.apa(), old_wpid.face(), 0.6*units::cm);
+    }
+    
+    if (new_wpid.apa() != -1 && new_wpid.face() != -1) {
+        new_charge = grouping->get_ave_3d_charge(new_pos, new_wpid.apa(), new_wpid.face(), 0.6*units::cm);
+    }
+    
+    // Check charge conditions - if new position has much lower charge, keep old position
+    if (new_charge < 5000 && new_charge < 0.4*old_charge) {
+        results.second = old_pos;
+    } else if (new_charge < 8000 && new_charge < 0.6*old_charge) {
+        // Reduce the strength - keep old position
+        results.second = old_pos;
+        new_charge = old_charge;
+    }
+    
+    // Update vertex and segment information with fitted position
+    if (results.first)
+        fcn.UpdateInfo(results.second, cluster, track_fitter, dv);
+    
+    return results.first;
 }
