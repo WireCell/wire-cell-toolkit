@@ -3,7 +3,6 @@
 
 #include <Eigen/Dense>
 #include <Eigen/IterativeLinearSolvers>
-
 #include <iostream>
 #include <cmath>
 
@@ -281,3 +280,192 @@ std::pair<bool, WireCell::Clus::Facade::geo_point_t> MyFCN::FitVertex()
     return std::make_pair(fit_flag, fit_pos);
 }
 
+void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double default_dis_cut){
+    
+    // Get PC transform and cluster parameters
+    auto pcts = track_fitter.get_pc_transforms();
+    const auto transform = pcts->pc_transform(temp_cluster.get_scope_transform(temp_cluster.get_default_scope()));
+    double cluster_t0 = temp_cluster.get_cluster_t0();
+    
+    // Get APA/face for the fit position
+    auto test_wpid = dv->contained_by(fit_pos);
+    if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
+        std::cout << "Warning: fit_pos not contained in detector volume" << std::endl;
+        return;
+    }
+    int apa = test_wpid.apa();
+    int face = test_wpid.face();
+    
+    // Get geometry parameters from TrackFitting
+    const auto& wpid_offsets = track_fitter.get_wpid_offsets();
+    const auto& wpid_slopes = track_fitter.get_wpid_slopes();
+    
+    WirePlaneId wpid(kAllLayers, face, apa);
+    auto offset_it = wpid_offsets.find(wpid);
+    auto slope_it = wpid_slopes.find(wpid);
+    
+    if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
+        std::cout << "Warning: geometry parameters not found for APA " << apa << " Face " << face << std::endl;
+        return;
+    }
+    
+    auto offset_t = std::get<0>(offset_it->second);
+    auto offset_u = std::get<1>(offset_it->second);
+    auto offset_v = std::get<2>(offset_it->second);
+    auto offset_w = std::get<3>(offset_it->second);
+    auto slope_x = std::get<0>(slope_it->second);
+    auto slope_yu = std::get<1>(slope_it->second).first;
+    auto slope_zu = std::get<1>(slope_it->second).second;
+    auto slope_yv = std::get<2>(slope_it->second).first;
+    auto slope_zv = std::get<2>(slope_it->second).second;
+    auto slope_yw = std::get<3>(slope_it->second).first;
+    auto slope_zw = std::get<3>(slope_it->second).second;
+    
+    // Transform to raw coordinates for wire plane calculations
+    auto fit_pos_raw = transform->backward(fit_pos, cluster_t0, face, apa);
+    auto vtx_pos_raw = transform->backward(vtx->fit().point, cluster_t0, face, apa);
+    
+    // Print update information if vertex moved significantly
+    if ((fit_pos - vtx->fit().point).magnitude() > 0.01 * units::cm) {
+        std::cout << "Cluster: ";
+        if (vtx->cluster()) {
+            std::cout << vtx->cluster()->get_cluster_id();
+        } else {
+            std::cout << "unknown";
+        }
+        std::cout << " Update Vertex: ("
+                  << offset_u + (slope_yu * fit_pos_raw.y() + slope_zu * fit_pos_raw.z()) << ", "
+                  << offset_v + (slope_yv * fit_pos_raw.y() + slope_zv * fit_pos_raw.z()) << ", "
+                  << offset_w + (slope_yw * fit_pos_raw.y() + slope_zw * fit_pos_raw.z()) << ", "
+                  << offset_t + slope_x * fit_pos_raw.x() << ") <- ("
+                  << offset_u + (slope_yu * vtx_pos_raw.y() + slope_zu * vtx_pos_raw.z()) << ", "
+                  << offset_v + (slope_yv * vtx_pos_raw.y() + slope_zv * vtx_pos_raw.z()) << ", "
+                  << offset_w + (slope_yw * vtx_pos_raw.y() + slope_zw * vtx_pos_raw.z()) << ", "
+                  << offset_t + slope_x * vtx_pos_raw.x() << ")" << std::endl;
+    }
+    
+    // Get steiner point cloud from cluster
+    if (!temp_cluster.has_pc("steiner_pc") || temp_cluster.get_pc("steiner_pc").size() == 0) {
+        std::cout << "Warning: steiner_pc not found in cluster" << std::endl;
+        return;
+    }
+    const auto& steiner_pc = temp_cluster.get_pc("steiner_pc");
+    const auto& coords = temp_cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    
+    // Find closest steiner point to new fit position
+    auto vtx_knn_results = temp_cluster.kd_steiner_knn(1, fit_pos, "steiner_pc");
+    size_t vtx_new_idx = vtx_knn_results[0].first;
+    Facade::geo_point_t vtx_new_pt(x_coords[vtx_new_idx], y_coords[vtx_new_idx], z_coords[vtx_new_idx]);
+    
+    // Update each segment connected to this vertex
+    for (size_t i = 0; i != segments.size(); i++) {
+        auto& seg_wcpts = segments.at(i)->wcpts();
+        if (seg_wcpts.empty()) continue;
+        
+        // Determine if vertex is at front or back of segment
+        bool flag_front = false;
+        double dis_front = (seg_wcpts.front().point - vtx->fit().point).magnitude();
+        double dis_back = (seg_wcpts.back().point - vtx->fit().point).magnitude();
+        flag_front = (dis_front < dis_back);
+        
+        // Find closest wcpt to the PCA center, excluding points too close to vertex
+        double max_dis = std::max(dis_front, dis_back);
+        double dis_cut = (max_dis > 2 * default_dis_cut) ? default_dis_cut : 0;
+        
+        size_t min_idx = 0;
+        double min_dis = 1e9;
+        for (size_t j = 0; j != seg_wcpts.size(); j++) {
+            double dis_to_center = (seg_wcpts.at(j).point - vec_centers.at(i)).magnitude();
+            double dis_to_vtx = (seg_wcpts.at(j).point - vtx->fit().point).magnitude();
+            if (dis_to_center < min_dis && dis_to_vtx > dis_cut) {
+                min_idx = j;
+                min_dis = dis_to_center;
+            }
+        }
+        
+        auto& min_wcp = seg_wcpts.at(min_idx);
+        
+        // Create new path from new vertex position to closest point using steiner graph
+        std::list<WCPoint> new_list;
+        new_list.push_back(WCPoint{vtx_new_pt});
+        
+        // Interpolate intermediate points
+        double dis_step = 2.0 * units::cm;
+        double total_dis = (vtx_new_pt - min_wcp.point).magnitude();
+        int ncount = std::round(total_dis / dis_step);
+        if (ncount < 2) ncount = 2;
+        
+        // double cumulative_ray_length = 0.0;
+        for (int qx = 1; qx < ncount; qx++) {
+            Facade::geo_point_t tmp_p(
+                vtx_new_pt.x() + (min_wcp.point.x() - vtx_new_pt.x()) / ncount * qx,
+                vtx_new_pt.y() + (min_wcp.point.y() - vtx_new_pt.y()) / ncount * qx,
+                vtx_new_pt.z() + (min_wcp.point.z() - vtx_new_pt.z()) / ncount * qx
+            );
+            auto tmp_knn_results = temp_cluster.kd_steiner_knn(1, tmp_p, "steiner_pc");
+            size_t tmp_idx = tmp_knn_results[0].first;
+            Facade::geo_point_t tmp_pt(x_coords[tmp_idx], y_coords[tmp_idx], z_coords[tmp_idx]);
+            
+            // Skip if too far from target point or duplicate
+            if ((tmp_pt - tmp_p).magnitude() > 0.3 * units::cm) continue;
+            double dis_to_last = (tmp_pt - new_list.back().point).magnitude();
+            if (dis_to_last > 0.01 * units::cm && (tmp_pt - min_wcp.point).magnitude() > 0.01 * units::cm) {
+                // cumulative_ray_length += dis_to_last;
+                new_list.push_back(WCPoint{tmp_pt});
+            }
+        }
+        // cumulative_ray_length += (min_wcp.point - new_list.back().point).magnitude();
+        new_list.push_back(WCPoint{min_wcp.point});
+        
+        // Replace segment path
+        std::list<WCPoint> old_list(seg_wcpts.begin(), seg_wcpts.end());
+        
+        if (flag_front) {
+            // Remove old path from front to min_wcp
+            while (!old_list.empty() && (old_list.front().point - min_wcp.point).magnitude() > 0.01 * units::cm) {
+                old_list.pop_front();
+            }
+            if (!old_list.empty()) old_list.pop_front();
+            
+            // Prepend new path
+            for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
+                old_list.push_front(*it);
+            }
+        } else {
+            // Remove old path from back to min_wcp
+            while (!old_list.empty() && (old_list.back().point - min_wcp.point).magnitude() > 0.01 * units::cm) {
+                old_list.pop_back();
+            }
+            if (!old_list.empty()) old_list.pop_back();
+            
+            // Append new path
+            for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
+                old_list.push_back(*it);
+            }
+        }
+        
+        // Update segment wcpts
+        seg_wcpts.clear();
+        seg_wcpts.reserve(old_list.size());
+        std::copy(old_list.begin(), old_list.end(), std::back_inserter(seg_wcpts));
+        
+        // Clear fit data - will need to be recalculated
+        segments.at(i)->clear_fit(dv);
+    }
+    
+    // Update vertex with new fit position and wire coordinates
+    auto& vtx_fit = vtx->fit();
+    vtx_fit.point = fit_pos;
+    vtx_fit.pu = offset_u + (slope_yu * fit_pos_raw.y() + slope_zu * fit_pos_raw.z());
+    vtx_fit.pv = offset_v + (slope_yv * fit_pos_raw.y() + slope_zv * fit_pos_raw.z());
+    vtx_fit.pw = offset_w + (slope_yw * fit_pos_raw.y() + slope_zw * fit_pos_raw.z());
+    vtx_fit.pt = offset_t + slope_x * fit_pos_raw.x();
+    vtx_fit.paf = std::make_pair(apa, face);
+    vtx_fit.flag_fix = true;
+    
+    // Update vertex wcpt
+    vtx->wcpt().point = vtx_new_pt;
+}

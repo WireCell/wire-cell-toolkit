@@ -430,6 +430,18 @@ namespace WireCell::Clus {
         std::vector<std::pair<int,int>> get_paf() const {return paf;}
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
+        /**
+         * Get geometry information for wire plane offsets
+         * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)
+         */
+        const std::map<WirePlaneId, std::tuple<double, double, double, double>>& get_wpid_offsets() const { return wpid_offsets; }
+
+        /**
+         * Get geometry information for wire plane slopes
+         * @return Map of WirePlaneId to tuple (slope_t, slope_yu_zu, slope_yv_zv, slope_yw_zw)
+         */
+        const std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double>>>& get_wpid_slopes() const { return wpid_slopes; }
+
     private:
          // Core parameters - centralized storage
         Parameters m_params;

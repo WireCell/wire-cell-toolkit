@@ -4,6 +4,8 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellClus/TrackFitting.h"
+
 
 #include <vector>
 #include <tuple>
@@ -47,7 +49,8 @@ namespace WireCell::Clus::PR {
         /// @param temp_cluster The cluster being processed
         /// @param default_dis_cut Default distance cut
         void UpdateInfo(Facade::geo_point_t fit_pos, 
-                       Facade::Cluster* temp_cluster, 
+                       Facade::Cluster& temp_cluster,
+                       TrackFitting& track_fitter, IDetectorVolumes::pointer dv, 
                        double default_dis_cut = 4.0*units::cm);
         
         /// Get segment information at index i
