@@ -2196,3 +2196,154 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         }
     }
 }
+
+void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_print){
+
+    // Find the main vertex - check if we have only showers
+    bool flag_save_only_showers = true;
+    for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+        VertexPtr vtx = graph[v].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        auto results = examine_main_vertex_candidate(graph, vtx);
+        bool flag_in = std::get<0>(results);
+        int ntracks = std::get<1>(results);
+        // int nshowers = std::get<2>(results);
+        
+        if (!flag_in) {
+            if (ntracks > 0) {
+                flag_save_only_showers = false;
+                break;
+            }
+        }
+    }
+    
+    // Improve vertex if not only showers
+    if (!flag_save_only_showers) {
+        improve_vertex(graph, cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, track_fitter, dv, particle_data, recomb_model, false);
+        // Fix maps with shower in and track out
+        fix_maps_shower_in_track_out(graph, cluster);
+    }
+    
+    // Build map of vertex candidates and their track/shower counts
+    std::map<VertexPtr, std::pair<int, int>> map_vertex_track_shower;
+    std::vector<VertexPtr> main_vertex_candidates;
+    
+    for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+        VertexPtr vtx = graph[v].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        auto results = examine_main_vertex_candidate(graph, vtx);
+        bool flag_in = std::get<0>(results);
+        int ntracks = std::get<1>(results);
+        int nshowers = std::get<2>(results);
+        
+        if (!flag_in) {
+            map_vertex_track_shower[vtx] = std::make_pair(ntracks, nshowers);
+        }
+    }
+    
+    // Select main vertex candidates based on topology
+    if (flag_save_only_showers) {
+        // For all showers case, add vertices with 1 segment first
+        for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+            VertexPtr vtx = graph[v].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            
+            int num_segs = 0;
+            if (vtx->descriptor_valid()) {
+                auto vd = vtx->get_descriptor();
+                auto edge_range = boost::out_edges(vd, graph);
+                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                    if (graph[*e_it].segment) num_segs++;
+                }
+            }
+            
+            if (num_segs == 1) {
+                main_vertex_candidates.push_back(vtx);
+            }
+        }
+        
+        // Add remaining candidates
+        for (auto it = map_vertex_track_shower.begin(); it != map_vertex_track_shower.end(); it++) {
+            if (std::find(main_vertex_candidates.begin(), main_vertex_candidates.end(), it->first) == main_vertex_candidates.end()) {
+                main_vertex_candidates.push_back(it->first);
+            }
+        }
+    } else {
+        // For mixed case, only add vertices with tracks
+        for (auto it = map_vertex_track_shower.begin(); it != map_vertex_track_shower.end(); it++) {
+            if (it->second.first > 0) {
+                main_vertex_candidates.push_back(it->first);
+            }
+        }
+    }
+    
+    // Determine main vertex based on candidates
+    if (flag_save_only_showers) {
+        if (main_vertex_candidates.size() > 0) {
+            if (flag_print) {
+                std::cout << "Determining the main vertex with all showers: " << main_vertex_candidates.size() 
+                         << " in cluster " << cluster.get_cluster_id() << std::endl;
+            }
+            main_vertex = compare_main_vertices_all_showers(graph, cluster, main_vertex_candidates, track_fitter, dv, particle_data, recomb_model);
+        } else {
+            return;
+        }
+    } else {
+        if (flag_print) {
+            for (auto vtx : main_vertex_candidates) {
+                std::cout << "Candidate main vertex " << vtx->fit().point << " connecting to: ";
+                
+                if (vtx->descriptor_valid()) {
+                    auto vd = vtx->get_descriptor();
+                    auto edge_range = boost::out_edges(vd, graph);
+                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                        SegmentPtr sg = graph[*e_it].segment;
+                        if (sg) {
+                            std::cout << sg->id() << ", ";
+                        }
+                    }
+                }
+                std::cout << " in cluster " << cluster.get_cluster_id() << std::endl;
+            }
+        }
+        
+        if (main_vertex_candidates.size() == 1) {
+            main_vertex = main_vertex_candidates.front();
+        } else if (main_vertex_candidates.size() > 1) {
+            main_vertex = compare_main_vertices(graph, cluster, main_vertex_candidates);
+        } else {
+            return;
+        }
+    }
+    
+    // Examine structure for non-shower cases
+    if (!flag_save_only_showers) {
+        examine_structure_final(graph, main_vertex, cluster, track_fitter, dv);
+    }
+    
+    // Examine directions
+    bool flag_check = examine_direction(graph, main_vertex, main_vertex, vertices_in_long_muon, segments_in_long_muon, particle_data, recomb_model, false);
+    if (!flag_check) {
+        std::cout << "Wrong: inconsistency for track directions in cluster " << cluster.get_cluster_id() << std::endl;
+    }
+    
+    if (flag_print) {
+        std::cout << "Main Vertex " << main_vertex->fit().point << " connecting to: ";
+        
+        if (main_vertex->descriptor_valid()) {
+            auto vd = main_vertex->get_descriptor();
+            auto edge_range = boost::out_edges(vd, graph);
+            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                SegmentPtr sg = graph[*e_it].segment;
+                if (sg) {
+                    std::cout << sg->id() << ", ";
+                }
+            }
+        }
+        std::cout << std::endl;
+        
+        print_segs_info(graph, cluster, main_vertex);
+    }
+}
