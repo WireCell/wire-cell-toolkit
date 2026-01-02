@@ -1,5 +1,6 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/FiducialUtils.h"
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -434,7 +435,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     clustering_points_segments({tmp_sg}, dv, "associate_points", 0.5*units::cm, 3.0);
     
     // Determine shower direction
-    bool has_direction = segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points");
+    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points");
     
     double tmp_sg_length = segment_track_length(tmp_sg);
     int tmp_sg_dir = tmp_sg->dirsign();
@@ -466,4 +467,501 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     // Local graph and temporary elements automatically cleaned up when going out of scope
     
     return temp_main_vertex;
+}
+
+float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
+    // Assume temp_vertex is true neutrino vertex, calculate conflicts in the system
+    float num_conflicts = 0;
+    
+    // Map segment to its direction (start vertex -> end vertex)
+    std::map<SegmentPtr, std::pair<VertexPtr, VertexPtr>> map_seg_dir;
+    std::set<VertexPtr> used_vertices;
+    
+    if (!vertex || !vertex->descriptor_valid()) return num_conflicts;
+    
+    // Start from the assumed neutrino vertex
+    std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
+    auto vd = vertex->get_descriptor();
+    auto edge_range = boost::out_edges(vd, graph);
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        SegmentPtr seg = graph[*e_it].segment;
+        if (seg) {
+            segments_to_be_examined.push_back(std::make_pair(vertex, seg));
+        }
+    }
+    used_vertices.insert(vertex);
+    
+    // Propagate through the graph and build direction map
+    while (!segments_to_be_examined.empty()) {
+        std::vector<std::pair<VertexPtr, SegmentPtr>> temp_segments;
+        
+        for (const auto& [prev_vtx, current_sg] : segments_to_be_examined) {
+            // Skip if already examined
+            if (map_seg_dir.find(current_sg) != map_seg_dir.end()) continue;
+            
+            // Find the other vertex of this segment
+            VertexPtr curr_vertex = find_other_vertex(graph, current_sg, prev_vtx);
+            if (!curr_vertex) continue;
+            
+            // Record the direction: prev_vtx -> curr_vertex
+            map_seg_dir[current_sg] = std::make_pair(prev_vtx, curr_vertex);
+            
+            // Skip if we've already processed this vertex
+            if (used_vertices.find(curr_vertex) != used_vertices.end()) continue;
+            
+            // Add all segments connected to curr_vertex for examination
+            if (curr_vertex->descriptor_valid()) {
+                auto curr_vd = curr_vertex->get_descriptor();
+                auto curr_edge_range = boost::out_edges(curr_vd, graph);
+                for (auto e_it = curr_edge_range.first; e_it != curr_edge_range.second; ++e_it) {
+                    SegmentPtr seg = graph[*e_it].segment;
+                    if (seg) {
+                        temp_segments.push_back(std::make_pair(curr_vertex, seg));
+                    }
+                }
+            }
+            used_vertices.insert(curr_vertex);
+        }
+        segments_to_be_examined = temp_segments;
+    }
+    
+    // Check segments for direction conflicts
+    for (const auto& [sg, vtx_pair] : map_seg_dir) {
+        VertexPtr start_vtx = vtx_pair.first;
+        
+        // Determine which end of segment connects to start_vtx
+        const auto& wcps = sg->wcpts();
+        if (wcps.empty()) continue;
+        
+        bool flag_start = (ray_length(Ray{wcps.front().point, start_vtx->wcpt().point}) <
+                          ray_length(Ray{wcps.back().point, start_vtx->wcpt().point}));
+        
+        // Check if segment has direction and is long enough to matter
+        int dir_sign = sg->dirsign();
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                        sg->flags_any(SegmentFlags::kShowerTopology);
+        double sg_length = segment_track_length(sg);
+        
+        if (dir_sign != 0 && ((is_shower && sg_length > 5*units::cm) || !is_shower)) {
+            // Check if direction conflicts with topology
+            if ((flag_start && dir_sign == -1) || (!flag_start && dir_sign == 1)) {
+                if (!sg->dir_weak()) {
+                    num_conflicts += 1.0;
+                } else {
+                    num_conflicts += 0.5;
+                }
+            }
+        }
+    }
+    
+    // Beam direction (along z-axis)
+    Facade::geo_vector_t dir_beam(0, 0, 1);
+    
+    // Check vertices for topology conflicts
+    for (VertexPtr vtx : used_vertices) {
+        if (!vtx->descriptor_valid()) continue;
+        
+        auto vtx_vd = vtx->get_descriptor();
+        auto vtx_edge_range = boost::out_edges(vtx_vd, graph);
+        
+        // Count number of segments
+        int num_segments = 0;
+        for (auto e_it = vtx_edge_range.first; e_it != vtx_edge_range.second; ++e_it) {
+            if (graph[*e_it].segment) num_segments++;
+        }
+        if (num_segments <= 1) continue;
+        
+        int n_in = 0;
+        int n_in_shower = 0;
+        int n_out_tracks = 0;
+        int n_out_showers = 0;
+        
+        std::map<SegmentPtr, Facade::geo_vector_t> map_in_segment_dirs;
+        std::map<SegmentPtr, Facade::geo_vector_t> map_out_segment_dirs;
+        
+        // Analyze each segment connected to this vertex
+        for (auto e_it = vtx_edge_range.first; e_it != vtx_edge_range.second; ++e_it) {
+            SegmentPtr sg = graph[*e_it].segment;
+            if (!sg || map_seg_dir.find(sg) == map_seg_dir.end()) continue;
+            
+            VertexPtr start_vtx = map_seg_dir[sg].first;
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                            sg->flags_any(SegmentFlags::kShowerTopology);
+            // bool is_shower_traj = sg->flags_any(SegmentFlags::kShowerTrajectory);
+            
+            if (vtx != start_vtx) {
+                // Segment is incoming to this vertex
+                n_in++;
+                if (is_shower) n_in_shower++;
+                map_in_segment_dirs[sg] = segment_cal_dir_3vector(sg, vtx->wcpt().point, 10*units::cm);
+            } else {
+                // Segment is outgoing from this vertex
+                if (!is_shower) {
+                    n_out_tracks++;
+                } else {
+                    n_out_showers++;
+                }
+                map_out_segment_dirs[sg] = segment_cal_dir_3vector(sg, vtx->wcpt().point, 10*units::cm);
+            }
+        }
+        
+        // Check angles between incoming and outgoing segments
+        if (!map_in_segment_dirs.empty() && !map_out_segment_dirs.empty()) {
+            double max_angle = -1;
+            SegmentPtr sg1 = nullptr;
+            SegmentPtr sg2 = nullptr;
+            
+            for (const auto& [in_sg, in_dir] : map_in_segment_dirs) {
+                for (const auto& [out_sg, out_dir] : map_out_segment_dirs) {
+                    double angle = std::acos(std::clamp(in_dir.dot(out_dir) / 
+                                   (in_dir.magnitude() * out_dir.magnitude()), -1.0, 1.0)) 
+                                   * 180.0 / M_PI;
+                    if (angle > max_angle) {
+                        max_angle = angle;
+                        sg1 = in_sg;
+                        sg2 = out_sg;
+                    }
+                }
+            }
+            
+            if (sg1 && sg2) {
+                bool flag_check = true;
+                bool is_sg2_shower_traj = sg2->flags_any(SegmentFlags::kShowerTrajectory);
+                bool is_sg1_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                    sg1->flags_any(SegmentFlags::kShowerTopology);
+                bool is_sg2_shower = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                    sg2->flags_any(SegmentFlags::kShowerTopology);
+                
+                // Skip check for shower trajectories or both showers
+                if (is_sg2_shower_traj || (is_sg1_shower && is_sg2_shower)) {
+                    flag_check = false;
+                }
+                
+                double angle_beam = std::acos(std::clamp(map_in_segment_dirs[sg1].dot(dir_beam) / 
+                                    map_in_segment_dirs[sg1].magnitude(), -1.0, 1.0)) 
+                                    * 180.0 / M_PI;
+                
+                if (max_angle >= 0 && flag_check) {
+                    if (max_angle < 35) {
+                        num_conflicts += 5.0;
+                    } else if (max_angle < 70) {
+                        num_conflicts += 3.0;
+                    } else if (max_angle < 85) {
+                        num_conflicts += 1.0;
+                    } else if (max_angle < 110) {
+                        num_conflicts += 0.25;
+                    }
+                    
+                    // Additional penalty for backward-going particles
+                    if (angle_beam < 60 && max_angle < 110) {
+                        num_conflicts += 1.0;
+                    } else if (angle_beam < 45 && max_angle < 70) {
+                        num_conflicts += 3.0;
+                    }
+                }
+            }
+        }
+        
+        // Penalize multiple incoming particles
+        if (n_in > 1) {
+            if (n_in != n_in_shower) {
+                num_conflicts += (n_in - 1);
+            } else {
+                num_conflicts += (n_in - 1) / 2.0;
+            }
+        }
+        
+        // Penalize showers in with tracks out (suspicious topology)
+        if (n_in_shower > 0 && n_out_tracks > 0) {
+            num_conflicts += std::min(n_in_shower, n_out_tracks);
+        }
+        (void)n_out_showers; // to avoid unused variable warning
+    }
+    
+    return num_conflicts;
+}
+
+VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates){
+    if (vertex_candidates.empty()) return nullptr;
+    
+    std::map<VertexPtr, double> map_vertex_num;
+    for (auto vtx : vertex_candidates) {
+        map_vertex_num[vtx] = 0;
+    }
+    
+    // Find the longest muon candidate
+    SegmentPtr max_length_muon = nullptr;
+    double max_length = 0;
+    
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        // Skip showers
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                        sg->flags_any(SegmentFlags::kShowerTopology);
+        if (is_shower) continue;
+        
+        // Skip protons
+        if (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 2212) continue;
+        
+        double length = segment_track_length(sg);
+        if (length > max_length) {
+            max_length = length;
+            max_length_muon = sg;
+        }
+    }
+    
+    // Analyze proton topology for each vertex candidate
+    for (auto vtx : vertex_candidates) {
+        if (!vtx->descriptor_valid()) continue;
+        
+        int n_proton_in = 0;
+        int n_proton_out = 0;
+        
+        auto vd = vtx->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr sg = graph[*e_it].segment;
+            if (!sg) continue;
+            
+            bool is_proton = sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 2212;
+            if (!is_proton) continue;
+            
+            int dir_sign = sg->dirsign();
+            bool is_weak = sg->dir_weak();
+            
+            if ((is_weak || dir_sign == 0)) {
+                VertexPtr other_vertex = find_other_vertex(graph, sg, vtx);
+                if (!other_vertex || !other_vertex->descriptor_valid()) continue;
+                
+                auto other_vd = other_vertex->get_descriptor();
+                auto other_edge_range = boost::out_edges(other_vd, graph);
+                
+                int num_segs = 0;
+                for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
+                    if (graph[*oe_it].segment) num_segs++;
+                }
+                
+                if (num_segs > 1) {
+                    for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
+                        SegmentPtr other_sg = graph[*oe_it].segment;
+                        if (!other_sg) continue;
+                        
+                        const auto& wcps = other_sg->wcpts();
+                        if (wcps.empty()) continue;
+                        
+                        bool flag_start = (ray_length(Ray{wcps.front().point, other_vertex->wcpt().point}) <
+                                          ray_length(Ray{wcps.back().point, other_vertex->wcpt().point}));
+                        
+                        int other_dir = other_sg->dirsign();
+                        bool other_weak = other_sg->dir_weak();
+                        bool is_other_proton = other_sg->has_particle_info() && 
+                                              std::abs(other_sg->particle_info()->pdg()) == 2212;
+                        
+                        if (!other_weak && is_other_proton) {
+                            if ((flag_start && other_dir == 1) || (!flag_start && other_dir == -1)) {
+                                n_proton_out++;
+                            }
+                            if ((flag_start && other_dir == -1) || (!flag_start && other_dir == 1)) {
+                                n_proton_in++;
+                            }
+                        }
+                        
+                        if ((other_weak || other_dir == 0) && is_other_proton) {
+                            n_proton_in++;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Score proton topology
+        if (n_proton_in > n_proton_out) {
+            map_vertex_num[vtx] -= (n_proton_in - n_proton_out) / 4.0;
+        } else {
+            map_vertex_num[vtx] -= (n_proton_in - n_proton_out) / 4.0 - (n_proton_in + n_proton_out) / 8.0;
+        }
+    }
+    
+    // Score based on z position (prefer forward/upstream vertices)
+    double min_z = 1e9;
+    for (auto vtx : vertex_candidates) {
+        if (vtx->wcpt().point.z() < min_z) min_z = vtx->wcpt().point.z();
+    }
+    
+    for (auto vtx : vertex_candidates) {
+        if (!vtx->descriptor_valid()) continue;
+        
+        // Position penalty
+        map_vertex_num[vtx] -= (vtx->wcpt().point.z() - min_z) / (200 * units::cm);
+        
+        // Score based on connected segments
+        auto vd = vtx->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr sg = graph[*e_it].segment;
+            if (!sg) continue;
+            
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                            sg->flags_any(SegmentFlags::kShowerTopology);
+            // bool is_shower_traj = sg->flags_any(SegmentFlags::kShowerTrajectory);
+            
+            if (is_shower) {
+                map_vertex_num[vtx] += 1.0 / 4.0 / 2.0; // number of showers
+                
+                auto pair_results = calculate_num_daughter_showers(graph, vtx, sg);
+                if (pair_results.second > 45 * units::cm) {
+                    map_vertex_num[vtx] += 1.0 / 4.0 / 2.0;
+                }
+            } else {
+                map_vertex_num[vtx] += 1.0 / 4.0; // number of tracks
+            }
+            
+            int dir_sign = sg->dirsign();
+            bool is_weak = sg->dir_weak();
+            bool is_proton = sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 2212;
+            
+            if (is_proton && dir_sign != 0 && !is_weak) {
+                map_vertex_num[vtx] += 1.0 / 4.0; // has a clear proton
+            } else if (dir_sign != 0 && !is_shower) {
+                map_vertex_num[vtx] += 1.0 / 4.0 / 2.0; // has direction with track
+            }
+            
+            if (max_length > 35 * units::cm && sg == max_length_muon) {
+                map_vertex_num[vtx] += 1.0 / 4.0 / 2.0; // long muon adds weight
+            }
+        }
+    }
+    
+    // Score based on fiducial volume (removed offset_x in WCP, need to validate)
+    auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+    if (fiducial_utils) {
+        for (auto vtx : vertex_candidates) {
+            if (fiducial_utils->inside_fiducial_volume(vtx->wcpt().point)) {
+                map_vertex_num[vtx] += 0.5; // good - inside fiducial volume
+            }
+        }
+    }
+    
+    // Score based on topology conflicts
+    for (auto vtx : vertex_candidates) {
+        double num_conflicts = calc_conflict_maps(graph, vtx);
+        map_vertex_num[vtx] -= num_conflicts / 4.0;
+    }
+    
+    // Find the vertex with maximum score
+    double max_val = -1e9;
+    VertexPtr max_vertex = nullptr;
+    
+    for (auto vtx : vertex_candidates) {
+        if (map_vertex_num[vtx] > max_val) {
+            max_val = map_vertex_num[vtx];
+            max_vertex = vtx;
+        }
+    }
+    
+    return max_vertex;
+}
+
+
+std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx){
+    SegmentPtr sg1 = nullptr;
+    VertexPtr vtx1 = nullptr;
+    
+    double max_length = 0;
+    double max_angle = 0;
+    double max_ratio = 0;
+    
+    bool flag_cont = false;
+    
+    double max_ratio1 = 0;
+    double max_ratio1_length = 0;
+    
+    double sg_length = segment_track_length(sg);
+    
+    // Get vertex point
+    WireCell::Point vtx_point = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+    
+    if (!vtx->descriptor_valid()) {
+        return std::make_pair(sg1, vtx1);
+    }
+    
+    // Iterate through all segments connected to this vertex
+    auto vd = vtx->get_descriptor();
+    auto edge_range = boost::out_edges(vd, graph);
+    
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        SegmentPtr sg2 = graph[*e_it].segment;
+        if (!sg2 || sg2 == sg) continue;
+        
+        // Find the other vertex of sg2
+        VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
+        if (!vtx2) continue;
+        
+        // Calculate direction vectors at 15cm from vertex
+        Facade::geo_vector_t dir1 = segment_cal_dir_3vector(sg, vtx_point, 15*units::cm);
+        Facade::geo_vector_t dir2 = segment_cal_dir_3vector(sg2, vtx_point, 15*units::cm);
+        
+        if (dir1.magnitude() == 0 || dir2.magnitude() == 0) continue;
+        
+        double length = segment_track_length(sg2);
+        
+        // Calculate angle (180° - angle between directions)
+        double cos_angle = std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0);
+        double angle = (M_PI - std::acos(cos_angle)) / M_PI * 180.0;
+        
+        // Calculate dQ/dx ratio
+        double ratio = segment_median_dQ_dx(sg2) / (43e3 / units::cm);
+        
+        // For longer segments, also check angle at 50cm
+        double angle1 = angle;
+        if (length > 50*units::cm) {
+            Facade::geo_vector_t dir3 = segment_cal_dir_3vector(sg, vtx_point, 50*units::cm);
+            Facade::geo_vector_t dir4 = segment_cal_dir_3vector(sg2, vtx_point, 50*units::cm);
+            
+            if (dir3.magnitude() > 0 && dir4.magnitude() > 0) {
+                double cos_angle1 = std::clamp(dir3.dot(dir4) / (dir3.magnitude() * dir4.magnitude()), -1.0, 1.0);
+                angle1 = (M_PI - std::acos(cos_angle1)) / M_PI * 180.0;
+            }
+        }
+        
+        // Check if this segment qualifies as a continuation
+        bool angle_ok = (angle < 10.0 || angle1 < 10.0 || 
+                        (sg_length < 6*units::cm && (angle < 15.0 || angle1 < 15.0)));
+        bool ratio_ok = (ratio < 1.3 || flag_ignore_dQ_dx);
+        
+        if (angle_ok && ratio_ok) {
+            flag_cont = true;
+            
+            // Select segment with maximum projected length
+            double projected_length = length * std::cos(angle / 180.0 * M_PI);
+            if (projected_length > max_length) {
+                max_length = projected_length;
+                max_angle = angle;
+                max_ratio = ratio;
+                sg1 = sg2;
+                vtx1 = vtx2;
+            }
+        } else {
+            // Track maximum dQ/dx ratio among non-qualifying segments
+            if (ratio > max_ratio1) {
+                max_ratio1 = ratio;
+                max_ratio1_length = length;
+            }
+        }
+    }
+
+    (void)max_angle;
+    (void)max_ratio;
+    (void)max_ratio1_length;
+    
+    if (flag_cont) {
+        return std::make_pair(sg1, vtx1);
+    } else {
+        return std::make_pair(nullptr, nullptr);
+    }
 }
