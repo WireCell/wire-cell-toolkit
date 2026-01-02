@@ -112,6 +112,8 @@ namespace WireCell::Clus::PR {
 
         // reset fit properties ...
         void reset_fit_prop(); 
+        void clear_fit(const IDetectorVolumes::pointer& dv, const std::string& cloud_name="fit");
+
         int fit_index(int i);
         void fit_index(int i, int idx);
         bool fit_flag_skip(int i);
@@ -133,6 +135,9 @@ namespace WireCell::Clus::PR {
         bool has_global_indices(const std::string& cloud_name) const {
             return m_pc_global_indices.find(cloud_name) != m_pc_global_indices.end();
         }
+
+        bool reset_global_indices();
+        bool reset_global_indices(const std::string& cloud_name);
 
         // Add public accessor:
         int id() const { return m_id; }

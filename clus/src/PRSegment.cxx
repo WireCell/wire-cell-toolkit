@@ -60,6 +60,60 @@ namespace WireCell::Clus::PR {
         
     }
 
+    bool Segment::reset_global_indices(){
+        if (m_pc_global_indices.empty()) {
+            return false;
+        }
+        m_pc_global_indices.clear();
+        return true;
+    }
+    
+    bool Segment::reset_global_indices(const std::string& cloud_name){
+        auto it = m_pc_global_indices.find(cloud_name);
+        if (it == m_pc_global_indices.end()) {
+            return false;
+        }
+        m_pc_global_indices.erase(it);
+        return true;
+    }
+
+    void Segment::clear_fit(const IDetectorVolumes::pointer& dv, const std::string& cloud_name){
+        // Unset the kFit flag
+        unset_flags(SegmentFlags::kFit);
+        
+        // Reset fit vector to match wcpts size and copy point data
+        m_fits.clear();
+        m_fits.resize(m_wcpts.size());
+        for (size_t i = 0; i != m_wcpts.size(); i++) {
+            m_fits.at(i).point = m_wcpts.at(i).point;
+            // Reset other Fit fields to default values
+            m_fits.at(i).dQ = -1;
+            m_fits.at(i).dx = 0;
+            m_fits.at(i).pu = -1;
+            m_fits.at(i).pv = -1;
+            m_fits.at(i).pw = -1;
+            m_fits.at(i).pt = 0;
+            m_fits.at(i).reduced_chi2 = -1;
+            m_fits.at(i).index = -1;
+            m_fits.at(i).range = -1;
+            m_fits.at(i).flag_fix = false;
+        }
+        
+        // Reset direction and particle information
+        m_dirsign = 0;
+        m_dir_weak = false;
+        m_particle_score = 100;
+        m_particle_info = nullptr;
+        
+        // Recreate the dynamic point cloud for fit points
+        if (dv) {
+            create_segment_fit_point_cloud(shared_from_this(), dv, cloud_name);
+        }
+        
+        reset_global_indices();
+    }
+
+
   
 
 
