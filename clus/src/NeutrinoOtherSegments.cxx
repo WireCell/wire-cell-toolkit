@@ -235,7 +235,35 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         }
         
         if (!candidates_special_A.empty()) {
-            special_A = candidates_special_A.front();
+            if (candidates_special_A.size() > 1 && ncounts[i] > 6) {
+                // Use PCA to find the best connection point
+                std::vector<Facade::geo_point_t> tmp_points;
+                for (int j = 0; j < ncounts[i]; j++) {
+                    Facade::geo_point_t tmp_p(x_coords[sep_clusters[i][j]], 
+                                             y_coords[sep_clusters[i][j]], 
+                                             z_coords[sep_clusters[i][j]]);
+                    tmp_points.push_back(tmp_p);
+                }
+                
+                auto results_pca = calc_PCA_main_axis(tmp_points);
+                double max_val = 0;
+                
+                for (size_t j = 0; j < candidates_special_A.size(); j++) {
+                    size_t idx = candidates_special_A[j];
+                    double val = std::abs(
+                        (x_coords[idx] - results_pca.first.x()) * results_pca.second.x() +
+                        (y_coords[idx] - results_pca.first.y()) * results_pca.second.y() +
+                        (z_coords[idx] - results_pca.first.z()) * results_pca.second.z()
+                    );
+                    
+                    if (val > max_val) {
+                        max_val = val;
+                        special_A = idx;
+                    }
+                }
+            } else {
+                special_A = candidates_special_A.front();
+            }
         }
         
         // Find furthest point (special_B)

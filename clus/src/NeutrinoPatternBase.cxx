@@ -1,5 +1,6 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include <Eigen/Dense>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -1273,4 +1274,59 @@ void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, 
                       << is_dir_weak << " " << in_vertex << std::endl;
         }
     }
+}
+
+
+std::pair<Facade::geo_point_t, Facade::geo_vector_t> PatternAlgorithms::calc_PCA_main_axis(std::vector<Facade::geo_point_t>& points){
+    Facade::geo_point_t center(0, 0, 0);
+    int nsum = 0;
+    
+    // Calculate the center point
+    for (size_t i = 0; i < points.size(); i++) {
+        center += points[i];
+        nsum++;
+    }
+    
+    Facade::geo_vector_t PCA_main_axis(0, 0, 0);
+    
+    // Need at least 3 points for PCA
+    if (nsum < 3) {
+        center.set(0, 0, 0);
+        return std::make_pair(center, PCA_main_axis);
+    }
+    
+    center /= nsum;
+    
+    // Build covariance matrix
+    Eigen::MatrixXd cov_matrix(3, 3);
+    
+    for (int i = 0; i != 3; i++) {
+        for (int j = i; j != 3; j++) {
+            cov_matrix(i, j) = 0;
+            for (size_t k = 0; k < points.size(); k++) {
+                cov_matrix(i, j) += (points[k][i] - center[i]) * (points[k][j] - center[j]);
+            }
+        }
+    }
+    
+    // Fill in symmetric part
+    cov_matrix(1, 0) = cov_matrix(0, 1);
+    cov_matrix(2, 0) = cov_matrix(0, 2);
+    cov_matrix(2, 1) = cov_matrix(1, 2);
+    
+    // Compute eigenvalues and eigenvectors
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(cov_matrix);
+    auto eigen_vectors = eigenSolver.eigenvectors();
+    
+    // Get the principal component (largest eigenvalue, which is index 2 in ascending order)
+    int i = 2;  // Eigen returns eigenvalues in ascending order, so index 2 is the largest
+    double norm = sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + 
+                      eigen_vectors(1, i) * eigen_vectors(1, i) + 
+                      eigen_vectors(2, i) * eigen_vectors(2, i));
+    
+    PCA_main_axis.set(eigen_vectors(0, i) / norm, 
+                     eigen_vectors(1, i) / norm, 
+                     eigen_vectors(2, i) / norm);
+    
+    return std::make_pair(center, PCA_main_axis);
 }

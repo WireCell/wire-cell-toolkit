@@ -208,3 +208,262 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
     return false;
 }
 
+std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Graph& graph, VertexPtr vertex){
+    bool flag_in = false;
+    int ntracks = 0;
+    int nshowers = 0;
+    SegmentPtr shower_cand = nullptr;
+    SegmentPtr track_cand = nullptr;
+    
+    // Get all segments connected to this vertex
+    if (!vertex || !vertex->descriptor_valid()) {
+        return std::make_tuple(flag_in, ntracks, nshowers);
+    }
+    
+    auto vd = vertex->get_descriptor();
+    auto edge_range = boost::out_edges(vd, graph);
+    
+    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg) continue;
+        
+        // Check if segment is a shower (has kShowerTrajectory or kShowerTopology flags)
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                        sg->flags_any(SegmentFlags::kShowerTopology);
+        
+        if (is_shower) {
+            nshowers++;
+            shower_cand = sg;
+        } else {
+            ntracks++;
+            track_cand = sg;
+        }
+        
+        // Determine which end of segment connects to vertex
+        const auto& wcps = sg->wcpts();
+        if (wcps.empty()) continue;
+        
+        bool flag_start = (ray_length(Ray{wcps.front().point, vertex->wcpt().point}) <
+                          ray_length(Ray{wcps.back().point, vertex->wcpt().point}));
+        
+        // Check if segment is pointing IN to the vertex (strong direction)
+        int dir_sign = sg->dirsign();
+        bool is_dir_weak = sg->dir_weak();
+        
+        if (flag_start && dir_sign == -1 && !is_dir_weak) {
+            flag_in = true;
+            break;
+        } else if (!flag_start && dir_sign == 1 && !is_dir_weak) {
+            flag_in = true;
+            break;
+        }
+    }
+    
+    // Check Michel electron case: 2 segments (1 track + 1 shower)
+    int num_segments = 0;
+    auto edge_range2 = boost::out_edges(vd, graph);
+    for (auto eit = edge_range2.first; eit != edge_range2.second; ++eit) {
+        if (graph[*eit].segment) num_segments++;
+    }
+    
+    if (num_segments == 2 && ntracks == 1 && nshowers == 1 && track_cand && shower_cand) {
+        // Calculate the number of daughter showers
+        auto pair_result = calculate_num_daughter_showers(graph, vertex, shower_cand);
+        
+        if (pair_result.first <= 3 && pair_result.second < 30 * units::cm) {
+            const auto& track_wcps = track_cand->wcpts();
+            if (!track_wcps.empty()) {
+                bool flag_start = (ray_length(Ray{track_wcps.front().point, vertex->wcpt().point}) <
+                                  ray_length(Ray{track_wcps.back().point, vertex->wcpt().point}));
+                
+                int track_dir = track_cand->dirsign();
+                if ((flag_start && track_dir == -1) || (!flag_start && track_dir == 1)) {
+                    flag_in = true;
+                }
+            }
+        }
+    }
+    
+    return std::make_tuple(flag_in, ntracks, nshowers);
+}
+
+VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    if (vertex_candidates.empty()) return nullptr;
+    
+    VertexPtr temp_main_vertex = vertex_candidates.front();
+    
+    // Collect all points from segments and vertices in the cluster
+    std::vector<Facade::geo_point_t> pts;
+    
+    // Collect points from segments
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        const auto& wcpts = sg->wcpts();
+        if (wcpts.size() <= 2) continue;
+        
+        for (size_t i = 1; i + 1 < wcpts.size(); i++) {
+            pts.push_back(wcpts[i].point);
+        }
+    }
+    
+    // Collect points from vertices
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        pts.push_back(vtx->wcpt().point);
+    }
+    
+    if (pts.size() <= 3) {
+        return temp_main_vertex;
+    }
+    
+    // Calculate PCA main axis
+    auto pair_result = calc_PCA_main_axis(pts);
+    Facade::geo_vector_t dir = pair_result.second;
+    Facade::geo_point_t center = pair_result.first;
+    
+    // Find min and max vertices along the main axis
+    double min_val = 1e9, max_val = -1e9;
+    VertexPtr min_vtx = nullptr, max_vtx = nullptr;
+    
+    for (auto vtx : vertex_candidates) {
+        double val = (vtx->wcpt().point.x() - center.x()) * dir.x() + 
+                    (vtx->wcpt().point.y() - center.y()) * dir.y() + 
+                    (vtx->wcpt().point.z() - center.z()) * dir.z();
+        
+        // Adjust for single short segment vertices
+        if (vtx->descriptor_valid()) {
+            auto vd = vtx->get_descriptor();
+            auto edge_range = boost::out_edges(vd, graph);
+            int num_segs = 0;
+            double seg_length = 0;
+            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                if (graph[*e_it].segment) {
+                    num_segs++;
+                    seg_length = segment_track_length(graph[*e_it].segment);
+                }
+            }
+            
+            if (num_segs == 1 && seg_length < 1 * units::cm) {
+                if (val > 0) val -= 0.5 * units::cm;
+                else if (val < 0) val += 0.5 * units::cm;
+            }
+        }
+        
+        if (val > max_val) {
+            max_val = val;
+            max_vtx = vtx;
+        }
+        if (val < min_val) {
+            min_val = val;
+            min_vtx = vtx;
+        }
+    }
+    
+    if (!min_vtx || !max_vtx || min_vtx == max_vtx) {
+        return temp_main_vertex;
+    }
+    
+    // Check if steiner point cloud exists
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    if (steiner_pc.size() < 3) {
+        // Pick forward vertex based on z coordinate
+        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+            temp_main_vertex = max_vtx;
+        } else {
+            temp_main_vertex = min_vtx;
+        }
+        return temp_main_vertex;
+    }
+    
+    // Find path between min and max vertices using steiner graph
+    auto path_points = do_rough_path(cluster, max_vtx->wcpt().point, min_vtx->wcpt().point);
+    
+    if (path_points.size() <= 2) {
+        // Pick forward vertex based on z coordinate
+        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+            temp_main_vertex = max_vtx;
+        } else {
+            temp_main_vertex = min_vtx;
+        }
+        return temp_main_vertex;
+    }
+    
+    // Create temporary local graph for fitting
+    auto local_graph = std::make_shared<PR::Graph>();
+    
+    // Create temporary vertices
+    auto tmp_v1 = make_vertex(*local_graph);
+    tmp_v1->wcpt().point = path_points.front();
+    tmp_v1->cluster(&cluster);
+    
+    auto tmp_v2 = make_vertex(*local_graph);
+    tmp_v2->wcpt().point = path_points.back();
+    tmp_v2->cluster(&cluster);
+    
+    // Create temporary segment
+    auto tmp_sg = create_segment_for_cluster(cluster, dv, path_points);
+    if (!tmp_sg) {
+        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+            temp_main_vertex = max_vtx;
+        } else {
+            temp_main_vertex = min_vtx;
+        }
+        return temp_main_vertex;
+    }
+    
+    // Add segment to local graph
+    add_segment(*local_graph, tmp_sg, tmp_v1, tmp_v2);
+    
+    // Create local fitter with same configuration as input fitter
+    TrackFitting local_fitter(TrackFitting::FittingType::Multiple);
+    local_fitter.set_parameters(track_fitter.get_parameters());
+    local_fitter.add_graph(local_graph);
+    
+    // Do fitting on local graph
+    local_fitter.do_multi_tracking(true, true, false);
+    
+    // Create fit point cloud
+    create_segment_fit_point_cloud(tmp_sg, dv, "fit");
+    
+    // Associate points from cluster to segment
+    clustering_points_segments({tmp_sg}, dv, "associate_points", 0.5*units::cm, 3.0);
+    
+    // Determine shower direction
+    bool has_direction = segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points");
+    
+    double tmp_sg_length = segment_track_length(tmp_sg);
+    int tmp_sg_dir = tmp_sg->dirsign();
+    
+    // Decide which vertex should be the main vertex based on direction
+    if (tmp_sg_dir == 1) {
+        temp_main_vertex = max_vtx;
+    } else if (tmp_sg_dir == -1) {
+        temp_main_vertex = min_vtx;
+    } else {
+        // No clear direction, pick forward vertex
+        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+            temp_main_vertex = max_vtx;
+        } else {
+            temp_main_vertex = min_vtx;
+        }
+    }
+    
+    // For large showers, always pick forward vertex
+    if (tmp_sg_length > 80 * units::cm && 
+        std::abs(max_vtx->wcpt().point.z() - min_vtx->wcpt().point.z()) > 40 * units::cm) {
+        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+            temp_main_vertex = max_vtx;
+        } else {
+            temp_main_vertex = min_vtx;
+        }
+    }
+    
+    // Local graph and temporary elements automatically cleaned up when going out of scope
+    
+    return temp_main_vertex;
+}
