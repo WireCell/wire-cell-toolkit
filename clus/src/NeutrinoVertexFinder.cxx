@@ -1775,3 +1775,424 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
     
     return results.first;
 }
+
+
+void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
+    
+    std::set<VertexPtr> fitted_vertices;
+    std::set<SegmentPtr> existing_segments;
+    
+    // Check if all segments are showers, no need to fit vertex with only two legs
+    bool flag_skip_two_legs = false;
+    {
+        int ntracks = 0;
+        for (auto it = boost::edges(graph).first; it != boost::edges(graph).second; ++it) {
+            SegmentPtr sg = graph[*it].segment;
+            if (!sg || sg->cluster() != &cluster) continue;
+            existing_segments.insert(sg);
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+            if (!is_shower) ntracks++;
+        }
+        if (ntracks == 0)
+            flag_skip_two_legs = true; // all showers
+    }
+    
+    bool flag_found_vertex_activities = false;
+    
+    // Search for vertex activities
+    if (flag_search_vertex_activity) {
+        if (examine_structure_4(main_vertex, flag_final_vertex, graph, cluster, track_fitter, dv)) {
+            flag_found_vertex_activities = true;
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+    }
+    
+    bool flag_update_fit = false;
+    
+    // Find and fit vertices
+    for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+        VertexPtr vtx = graph[v].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        // Get segments connected to this vertex
+        std::set<SegmentPtr> vertex_segments;
+        for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+            SegmentPtr sg = graph[*it].segment;
+            if (sg && sg->cluster() == &cluster) {
+                vertex_segments.insert(sg);
+            }
+        }
+        
+        if (vertex_segments.size() <= 2 && vtx != main_vertex) continue;
+        
+        int ntracks = 0, nshowers = 0;
+        int n_long_muons = 0;
+        for (auto sg : vertex_segments) {
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+            if (is_shower) nshowers++;
+            else ntracks++;
+            if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) n_long_muons++;
+        }
+        
+        if (ntracks == 0 && vtx != main_vertex) continue;
+        if (flag_skip_two_legs && vertex_segments.size() <= 2) continue;
+        
+        auto wcp_save = vtx->wcpt();
+        
+        bool flag_update = fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
+        if (flag_update) fitted_vertices.insert(vtx);
+        if (flag_update) {
+            flag_update_fit = true;
+            
+            double tmp_dis = std::sqrt(std::pow(wcp_save.point.x() - vtx->wcpt().point.x(), 2) + 
+                                      std::pow(wcp_save.point.y() - vtx->wcpt().point.y(), 2) + 
+                                      std::pow(wcp_save.point.z() - vtx->wcpt().point.z(), 2));
+            
+            if (tmp_dis > 0.5*units::cm) { // if the vertex moved far, refit
+                track_fitter.do_multi_tracking(true, true, true);
+                fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
+            }
+        }
+
+        (void)nshowers;
+        (void)n_long_muons;
+    }
+    
+    if (flag_update_fit) {
+        // Do the overall fit again
+        track_fitter.do_multi_tracking(true, true, true);
+        
+        bool flag_keep_main_vertex = false;
+        Facade::geo_point_t main_vtx_pt;
+        if (main_vertex != nullptr) {
+            main_vtx_pt = main_vertex->fit().point;
+            flag_keep_main_vertex = true;
+        }
+        
+        examine_vertices(graph, cluster, track_fitter, dv);
+        
+        if (flag_keep_main_vertex) {
+            // Check if main_vertex still exists in graph
+            bool found_main_vertex = false;
+            for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                if (graph[v].vertex == main_vertex) {
+                    found_main_vertex = true;
+                    break;
+                }
+            }
+            
+            if (!found_main_vertex) {
+                double min_dis = 1e9;
+                for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                    VertexPtr vtx = graph[v].vertex;
+                    if (!vtx || vtx->cluster() != &cluster) continue;
+                    double dis = std::sqrt(std::pow(vtx->fit().point.x() - main_vtx_pt.x(), 2) + 
+                                          std::pow(vtx->fit().point.y() - main_vtx_pt.y(), 2) + 
+                                          std::pow(vtx->fit().point.z() - main_vtx_pt.z(), 2));
+                    if (dis < min_dis) {
+                        min_dis = dis;
+                        main_vertex = vtx;
+                    }
+                }
+            }
+        }
+    }
+    
+    std::vector<VertexPtr> refit_vertices;
+    flag_update_fit = false;
+    
+    if (flag_search_vertex_activity) {
+        // Search for vertex activities again
+        if (!flag_found_vertex_activities) {
+            if (examine_structure_4(main_vertex, flag_final_vertex, graph, cluster, track_fitter, dv)) {
+                flag_found_vertex_activities = true;
+                
+                // Get segments connected to main_vertex
+                std::set<SegmentPtr> main_vertex_segments;
+                for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                    if (graph[v].vertex == main_vertex) {
+                        for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+                            SegmentPtr sg = graph[*it].segment;
+                            if (sg && sg->cluster() == &cluster) {
+                                main_vertex_segments.insert(sg);
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                if (main_vertex_segments.size() == 3) refit_vertices.push_back(main_vertex);
+                flag_update_fit = true;
+            }
+        }
+        
+        for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+            VertexPtr vtx = graph[v].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            
+            // Get segments connected to this vertex
+            std::set<SegmentPtr> vertex_segments;
+            for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+                SegmentPtr sg = graph[*it].segment;
+                if (sg && sg->cluster() == &cluster) {
+                    vertex_segments.insert(sg);
+                }
+            }
+            
+            if (vertex_segments.size() <= 2 && vtx != main_vertex) continue;
+            
+            int ntracks = 0, nshowers = 0;
+            for (auto sg : vertex_segments) {
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+                if (is_shower) nshowers++;
+                else ntracks++;
+            }
+            
+            if (ntracks == 0 && vtx != main_vertex) continue;
+            if (vertices_in_long_muon.find(vtx) != vertices_in_long_muon.end()) continue;
+            if (vtx == main_vertex && flag_found_vertex_activities) continue;
+            if (flag_skip_two_legs && vertex_segments.size() <= 2) continue;
+            
+            double search_range = 1.5*units::cm;
+            if (vertex_segments.size() == 1) search_range = 3.0*units::cm;
+            
+            bool flag_update = search_for_vertex_activities(graph, vtx, vertex_segments, cluster, track_fitter, dv, search_range);
+            
+            if (flag_update) {
+                // Get updated segments
+                vertex_segments.clear();
+                for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+                    SegmentPtr sg = graph[*it].segment;
+                    if (sg && sg->cluster() == &cluster) {
+                        vertex_segments.insert(sg);
+                    }
+                }
+                if (vertex_segments.size() == 3) refit_vertices.push_back(vtx);
+                flag_update_fit = true;
+            }
+            (void)nshowers;
+        }
+        
+        if (flag_update_fit) {
+            // Do the overall fit again
+            track_fitter.do_multi_tracking(true, true, true);
+            flag_update_fit = false;
+            
+            // Redo the fit
+            for (auto vtx : refit_vertices) {
+                std::set<SegmentPtr> vertex_segments;
+                for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                    if (graph[v].vertex == vtx) {
+                        for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+                            SegmentPtr sg = graph[*it].segment;
+                            if (sg && sg->cluster() == &cluster) {
+                                vertex_segments.insert(sg);
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                bool flag_update = fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
+                if (flag_update) fitted_vertices.insert(vtx);
+                if (flag_update) flag_update_fit = true;
+            }
+            if (flag_update_fit) track_fitter.do_multi_tracking(true, true, true);
+        }
+        
+        // Eliminate short tracks
+        if (eliminate_short_vertex_activities(graph, cluster, main_vertex, existing_segments, track_fitter, dv)) {
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+        
+        // Determine directions for segments
+        for (auto it = boost::edges(graph).first; it != boost::edges(graph).second; ++it) {
+            SegmentPtr sg1 = graph[*it].segment;
+            if (!sg1 || sg1->cluster() != &cluster) continue;
+            
+            if (!sg1->particle_info()) {
+                segment_is_shower_topology(sg1);
+                
+                VertexPtr start_v = nullptr, end_v = nullptr;
+                auto source_v = boost::source(*it, graph);
+                auto target_v = boost::target(*it, graph);
+                
+                auto& wcpts = sg1->wcpts();
+                if (!wcpts.empty()) {
+                    if ((graph[source_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01*units::cm) {
+                        start_v = graph[source_v].vertex;
+                        end_v = graph[target_v].vertex;
+                    } else {
+                        end_v = graph[source_v].vertex;
+                        start_v = graph[target_v].vertex;
+                    }
+                }
+                
+                if (start_v && end_v) {
+                    int start_n = boost::out_degree(source_v, graph);
+                    int end_n = boost::out_degree(target_v, graph);
+                    
+                    if (segment_is_shower_trajectory(sg1)) {
+                        // Trajectory shower
+                        segment_determine_shower_direction_trajectory(sg1, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                    } else {
+                        segment_determine_dir_track(sg1, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                    }
+                }
+            }
+        }
+    } else { // flag_search_vertex_activity
+        for (auto vtx : fitted_vertices) {
+            // Find vertex descriptor
+            for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                if (graph[v].vertex != vtx) continue;
+                
+                for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+                    SegmentPtr sg = graph[*it].segment;
+                    if (!sg || sg->cluster() != &cluster) continue;
+                    
+                    if (!sg->particle_info()) segment_is_shower_topology(sg);
+                    
+                    VertexPtr start_v = nullptr, end_v = nullptr;
+                    auto source_v = boost::source(*it, graph);
+                    auto target_v = boost::target(*it, graph);
+                    
+                    auto& wcpts = sg->wcpts();
+                    if (!wcpts.empty()) {
+                        if ((graph[source_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01*units::cm) {
+                            start_v = graph[source_v].vertex;
+                            end_v = graph[target_v].vertex;
+                        } else {
+                            end_v = graph[source_v].vertex;
+                            start_v = graph[target_v].vertex;
+                        }
+                    }
+                    
+                    bool flag_print = false;
+                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+                    if (start_v && end_v && !is_shower) {
+                        // Track
+                        int start_n = boost::out_degree(source_v, graph);
+                        int end_n = boost::out_degree(target_v, graph);
+                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Handle special cases for main_vertex segments
+    if (main_vertex != nullptr && main_vertex->cluster() == &cluster) {
+        // Find main_vertex descriptor
+        for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+            if (graph[v].vertex != main_vertex) continue;
+            
+            for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
+                SegmentPtr sg = graph[*it].segment;
+                if (!sg || sg->cluster() != &cluster) continue;
+                
+                std::pair<int, double> pair_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
+                
+                double medium_dQdx = segment_median_dQ_dx(sg);
+                if ((pair_result.first <= 2 || (medium_dQdx/(43e3/units::cm) > 1.6 && pair_result.first <= 3)) && segment_is_shower_trajectory(sg)) {
+                    if (!segment_is_shower_trajectory(sg, 1.0*units::cm, 43000/units::cm)) {
+                        VertexPtr start_v = nullptr, end_v = nullptr;
+                        auto source_v = boost::source(*it, graph);
+                        auto target_v = boost::target(*it, graph);
+                        
+                        auto& wcpts = sg->wcpts();
+                        if (!wcpts.empty()) {
+                            if ((graph[source_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01*units::cm) {
+                                start_v = graph[source_v].vertex;
+                                end_v = graph[target_v].vertex;
+                            } else {
+                                end_v = graph[source_v].vertex;
+                                start_v = graph[target_v].vertex;
+                            }
+                        }
+                        
+                        if (start_v && end_v) {
+                            int start_n = boost::out_degree(source_v, graph);
+                            int end_n = boost::out_degree(target_v, graph);
+                            segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        }
+                    }
+                }
+                
+                // Examine topology case
+                if (pair_result.first == 1 && segment_is_shower_topology(sg, false)) {
+                    int dir_save = sg->dirsign();
+                    
+                    VertexPtr start_v = nullptr, end_v = nullptr;
+                    auto source_v = boost::source(*it, graph);
+                    auto target_v = boost::target(*it, graph);
+                    
+                    auto& wcpts = sg->wcpts();
+                    if (!wcpts.empty()) {
+                        if ((graph[source_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01*units::cm) {
+                            start_v = graph[source_v].vertex;
+                            end_v = graph[target_v].vertex;
+                        } else {
+                            end_v = graph[source_v].vertex;
+                            start_v = graph[target_v].vertex;
+                        }
+                    }
+                    
+                    if (start_v && end_v) {
+                        sg->unset_flags(SegmentFlags::kShowerTopology);
+                        int start_n = boost::out_degree(source_v, graph);
+                        int end_n = boost::out_degree(target_v, graph);
+                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        
+                        if ((sg->particle_info() && sg->particle_info()->pdg() == 2212 && sg->particle_score() < 0.09) ||
+                            (sg->particle_info() && sg->particle_info()->pdg() == 13 && sg->particle_score() < 0.06)) {
+                            sg->unset_flags(SegmentFlags::kShowerTopology);
+                        } else {
+                            sg->set_flags(SegmentFlags::kShowerTopology);
+                            if (!sg->particle_info()) {
+                                sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                            }
+                            sg->particle_info()->set_pdg(11);
+                            sg->particle_score(100);
+                            sg->dirsign(dir_save);
+                            sg->particle_info()->set_mass(particle_data->get_particle_mass(11));
+                        }
+                    }
+                }
+                
+                if (flag_skip_two_legs && existing_segments.find(sg) == existing_segments.end()) {
+                    VertexPtr start_v = nullptr, end_v = nullptr;
+                    auto source_v = boost::source(*it, graph);
+                    auto target_v = boost::target(*it, graph);
+                    
+                    auto& wcpts = sg->wcpts();
+                    if (!wcpts.empty()) {
+                        if ((graph[source_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01*units::cm) {
+                            start_v = graph[source_v].vertex;
+                            end_v = graph[target_v].vertex;
+                        } else {
+                            end_v = graph[source_v].vertex;
+                            start_v = graph[target_v].vertex;
+                        }
+                    }
+                    
+                    if (start_v && end_v) {
+                        int start_n = boost::out_degree(source_v, graph);
+                        int end_n = boost::out_degree(target_v, graph);
+                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        
+                        if ((!sg->particle_info() || sg->dir_weak()) && medium_dQdx/(43e3/units::cm) < 1.3) {
+                            if (!sg->particle_info()) {
+                                sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                            }
+                            sg->particle_info()->set_pdg(11);
+                            sg->particle_score(100);
+                            sg->particle_info()->set_mass(particle_data->get_particle_mass(11));
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+}
