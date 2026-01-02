@@ -1499,3 +1499,213 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     return examine_maps(graph, cluster);
 }
 
+bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<SegmentPtr>& existing_segments, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag_updated = false;
+    bool flag_continue = true;
+        
+    while (flag_continue) {
+        flag_continue = false;
+        std::set<SegmentPtr> to_be_removed_segments;
+        std::set<VertexPtr> to_be_removed_vertices;
+        
+        // Iterate through all edges (segments) in the graph
+        auto [ebegin, eend] = boost::edges(graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg || sg->cluster() != &cluster) continue;
+            if (existing_segments.find(sg) != existing_segments.end()) continue;
+            
+            // Get the two vertices of this segment
+            auto [vbegin, vend] = boost::vertices(graph);
+            VertexPtr v1 = nullptr, v2 = nullptr;
+            
+            // Find vertices connected to this segment
+            for (auto vit = vbegin; vit != vend; ++vit) {
+                VertexPtr vtx = graph[*vit].vertex;
+                if (!vtx || !vtx->descriptor_valid()) continue;
+                
+                auto vtx_vd = vtx->get_descriptor();
+                auto vtx_edge_range = boost::out_edges(vtx_vd, graph);
+                for (auto ve_it = vtx_edge_range.first; ve_it != vtx_edge_range.second; ++ve_it) {
+                    if (graph[*ve_it].segment == sg) {
+                        if (!v1) v1 = vtx;
+                        else if (!v2 && vtx != v1) v2 = vtx;
+                        break;
+                    }
+                }
+                if (v1 && v2) break;
+            }
+            
+            if (!v1 || !v2) continue;
+            
+            // Count segments at each vertex
+            int num_segs_v1 = 0, num_segs_v2 = 0;
+            if (v1->descriptor_valid()) {
+                auto v1d = v1->get_descriptor();
+                auto v1_edge_range = boost::out_edges(v1d, graph);
+                for (auto ve_it = v1_edge_range.first; ve_it != v1_edge_range.second; ++ve_it) {
+                    if (graph[*ve_it].segment) num_segs_v1++;
+                }
+            }
+            if (v2->descriptor_valid()) {
+                auto v2d = v2->get_descriptor();
+                auto v2_edge_range = boost::out_edges(v2d, graph);
+                for (auto ve_it = v2_edge_range.first; ve_it != v2_edge_range.second; ++ve_it) {
+                    if (graph[*ve_it].segment) num_segs_v2++;
+                }
+            }
+            
+            double length = segment_track_direct_length(sg);
+            
+            // Check Case 1: v1 has 1 segment, v2 has >=3 segments
+            if (num_segs_v1 == 1 && num_segs_v2 >= 3) {
+                if (length < 0.36*units::cm) {
+                    to_be_removed_segments.insert(sg);
+                    to_be_removed_vertices.insert(v1);
+                    flag_continue = true;
+                    break;
+                } else if (length < 0.5*units::cm && num_segs_v2 > 3) {
+                    to_be_removed_segments.insert(sg);
+                    to_be_removed_vertices.insert(v1);
+                    flag_continue = true;
+                    break;
+                }
+            }
+            // Check Case 2: v2 has 1 segment, v1 has >=3 segments
+            else if (num_segs_v2 == 1 && num_segs_v1 >= 3) {
+                if (length < 0.36*units::cm) {
+                    to_be_removed_segments.insert(sg);
+                    to_be_removed_vertices.insert(v2);
+                    flag_continue = true;
+                    break;
+                } else if (length < 0.5*units::cm && num_segs_v1 > 3) {
+                    to_be_removed_segments.insert(sg);
+                    to_be_removed_vertices.insert(v2);
+                    flag_continue = true;
+                    break;
+                }
+            }
+            
+            // Check Case 3: Very short segments (< 0.1 cm) or segments connected to main_vertex
+            if (!flag_continue) {
+                if ((v1 == main_vertex && num_segs_v1 > 1) || (v2 == main_vertex && num_segs_v2 > 1)) {
+                    if (length < 0.1*units::cm) {
+                        to_be_removed_segments.insert(sg);
+                        to_be_removed_vertices.insert(v2);
+                        flag_continue = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Check Case 4: Isolated vertex close to another segment
+            if (!flag_continue) {
+                WireCell::Point v1_pt = v1->fit().valid() ? v1->fit().point : v1->wcpt().point;
+                WireCell::Point v2_pt = v2->fit().valid() ? v2->fit().point : v2->wcpt().point;
+                // auto v1_wpid = dv->contained_by(v1_pt);
+                // auto v2_wpid = dv->contained_by(v2_pt);
+                
+                if (num_segs_v1 == 1 && num_segs_v2 > 1 && v2->descriptor_valid()) {
+                    auto v2d = v2->get_descriptor();
+                    auto v2_edge_range = boost::out_edges(v2d, graph);
+                    for (auto ve_it = v2_edge_range.first; ve_it != v2_edge_range.second; ++ve_it) {
+                        SegmentPtr sg1 = graph[*ve_it].segment;
+                        if (!sg1 || sg1 == sg) continue;
+                        
+                        auto [dis, closest_pt] = segment_get_closest_point(sg1, v1_pt, "fit");
+                        double seg_length = segment_track_length(sg);
+                        
+                        if (dis < 0.36*units::cm) {
+                            to_be_removed_segments.insert(sg);
+                            to_be_removed_vertices.insert(v1);
+                            flag_continue = true;
+                            break;
+                        } else if ((v2 == main_vertex && dis < 0.45*units::cm && seg_length < 0.45*units::cm)) {
+                            to_be_removed_segments.insert(sg);
+                            to_be_removed_vertices.insert(v1);
+                            flag_continue = true;
+                            break;
+                        }
+                    }
+                } else if (num_segs_v2 == 1 && num_segs_v1 > 1 && v1->descriptor_valid()) {
+                    auto v1d = v1->get_descriptor();
+                    auto v1_edge_range = boost::out_edges(v1d, graph);
+                    for (auto ve_it = v1_edge_range.first; ve_it != v1_edge_range.second; ++ve_it) {
+                        SegmentPtr sg1 = graph[*ve_it].segment;
+                        if (!sg1 || sg1 == sg) continue;
+                        
+                        auto [dis, closest_pt] = segment_get_closest_point(sg1, v2_pt, "fit");
+                        double seg_length = segment_track_length(sg);
+                        
+                        if (dis < 0.36*units::cm) {
+                            to_be_removed_segments.insert(sg);
+                            to_be_removed_vertices.insert(v2);
+                            flag_continue = true;
+                            break;
+                        } else if ((v1 == main_vertex && dis < 0.45*units::cm && seg_length < 0.45*units::cm)) {
+                            to_be_removed_segments.insert(sg);
+                            to_be_removed_vertices.insert(v2);
+                            flag_continue = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Check Case 5: Segment not in existing_segments and all points close to existing segments
+            if (!flag_continue && existing_segments.find(sg) == existing_segments.end() && length > 0.45*units::cm) {
+                const auto& wcpts = sg->wcpts();
+                int n_good = 0;
+                
+                for (size_t i = 0; i < wcpts.size(); i++) {
+                    WireCell::Point pt = wcpts[i].point;
+                    auto wpid = dv->contained_by(pt);
+                    if (wpid.face() == -1 || wpid.apa() == -1) continue;
+                    
+                    double dis_u = 1e9, dis_v = 1e9, dis_w = 1e9;
+                    
+                    for (auto existing_sg : existing_segments) {
+                        // Check if segment exists in graph
+                        bool seg_exists = false;
+                        auto [ebegin2, eend2] = boost::edges(graph);
+                        for (auto eit2 = ebegin2; eit2 != eend2; ++eit2) {
+                            if (graph[*eit2].segment == existing_sg) {
+                                seg_exists = true;
+                                break;
+                            }
+                        }
+                        if (!seg_exists) continue;
+                        
+                        auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(existing_sg, pt, wpid.apa(), wpid.face(), "fit");
+                        if (dist_u < dis_u) dis_u = dist_u;
+                        if (dist_v < dis_v) dis_v = dist_v;
+                        if (dist_w < dis_w) dis_w = dist_w;
+                    }
+                    
+                    if ((dis_u > 0.45*units::cm || dis_v > 0.45*units::cm || dis_w > 0.45*units::cm)) {
+                        n_good++;
+                    }
+                }
+                
+                if (n_good == 0) {
+                    to_be_removed_segments.insert(sg);
+                    if (num_segs_v1 == 1) to_be_removed_vertices.insert(v1);
+                    if (num_segs_v2 == 1) to_be_removed_vertices.insert(v2);
+                }
+            }
+            
+            if (flag_continue) break;
+        }
+        
+        // Remove segments and vertices
+        for (auto sg : to_be_removed_segments) {
+            flag_updated = true;
+            remove_segment(graph, sg);
+        }
+        for (auto vtx : to_be_removed_vertices) {
+            remove_vertex(graph, vtx);
+        }
+    }
+    
+    return flag_updated;
+}
