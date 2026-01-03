@@ -2218,8 +2218,8 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         }
     }
     
-    // Improve vertex if not only showers
-    if (!flag_save_only_showers) {
+    // Improve vertex if not only showers and cluster is main cluster
+    if (!flag_save_only_showers && cluster.get_flag(Facade::Flags::main_cluster)) {
         improve_vertex(graph, cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, track_fitter, dv, particle_data, recomb_model, false);
         // Fix maps with shower in and track out
         fix_maps_shower_in_track_out(graph, cluster);
@@ -2291,6 +2291,9 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             return;
         }
     } else {
+        // Examine main vertex candidates to filter and identify back-to-back tracks
+        examine_main_vertices(graph, main_vertex_candidates, particle_data, recomb_model);
+        
         if (flag_print) {
             for (auto vtx : main_vertex_candidates) {
                 std::cout << "Candidate main vertex " << vtx->fit().point << " connecting to: ";
@@ -2346,4 +2349,284 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         
         print_segs_info(graph, cluster, main_vertex);
     }
+}
+
+void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, SegmentPtr segment, int particle_type, double mass, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    // Find the other vertex of this segment
+    VertexPtr other_vtx = find_other_vertex(graph, segment, vertex);
+    if (!other_vtx) return;
+    
+    // Get vertex point
+    WireCell::Point other_vtx_pt = other_vtx->fit().valid() ? other_vtx->fit().point : other_vtx->wcpt().point;
+    
+    // Calculate direction from the other vertex
+    Facade::geo_vector_t dir1 = segment_cal_dir_3vector(segment, other_vtx_pt, 15*units::cm);
+    
+    // Check if other vertex has valid descriptor
+    if (!other_vtx->descriptor_valid()) return;
+    
+    // Iterate through all segments connected to the other vertex
+    auto other_vd = other_vtx->get_descriptor();
+    auto edge_range = boost::out_edges(other_vd, graph);
+    
+    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        SegmentPtr sg1 = graph[*e_it].segment;
+        if (!sg1 || sg1 == segment) continue;
+        
+        // Skip if already the same particle type
+        int current_pdg = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
+        if (current_pdg == particle_type) continue;
+        
+        // Skip if shower trajectory or has strong direction
+        if (sg1->flags_any(SegmentFlags::kShowerTrajectory)) continue;
+        if (!sg1->dir_weak() && sg1->dirsign() != 0) continue;
+        
+        // Check shower topology case: long segments with no direction
+        if (sg1->flags_any(SegmentFlags::kShowerTopology) && 
+            sg1->dirsign() == 0 && 
+            segment_track_length(sg1) > 40*units::cm) {
+            
+            // Calculate direction at 40cm
+            Facade::geo_vector_t dir2 = segment_cal_dir_3vector(sg1, other_vtx_pt, 40*units::cm);
+            
+            if (dir1.magnitude() > 0 && dir2.magnitude() > 0) {
+                double cos_angle = std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0);
+                double angle = std::acos(cos_angle) / M_PI * 180.0;
+                
+                if (angle > 170) {
+                    // Change particle type and mass
+                    if (!sg1->particle_info()) {
+                        sg1->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                    }
+                    sg1->particle_info()->set_pdg(particle_type);
+                    sg1->particle_info()->set_mass(mass);
+                    sg1->unset_flags(SegmentFlags::kShowerTopology);
+                    
+                    // Recursively propagate changes
+                    change_daughter_type(graph, other_vtx, sg1, particle_type, mass, particle_data, recomb_model);
+                    VertexPtr sg1_other_vtx = find_other_vertex(graph, sg1, other_vtx);
+                    if (sg1_other_vtx) {
+                        change_daughter_type(graph, sg1_other_vtx, sg1, particle_type, mass, particle_data, recomb_model);
+                    }
+                }
+            }
+            continue;
+        } else if (sg1->flags_any(SegmentFlags::kShowerTopology) && 
+                   sg1->dirsign() == 0 && 
+                   segment_track_length(sg1) <= 40*units::cm) {
+            continue;
+        }
+        
+        // Check general case: segments longer than 10cm
+        if (segment_track_length(sg1) > 10*units::cm) {
+            // Calculate direction at 15cm
+            Facade::geo_vector_t dir2 = segment_cal_dir_3vector(sg1, other_vtx_pt, 15*units::cm);
+            
+            if (dir1.magnitude() > 0 && dir2.magnitude() > 0) {
+                double cos_angle = std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0);
+                double angle = std::acos(cos_angle) / M_PI * 180.0;
+                
+                if (angle > 165) {
+                    // Change particle type and mass
+                    if (!sg1->particle_info()) {
+                        sg1->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                    }
+                    sg1->particle_info()->set_pdg(particle_type);
+                    sg1->particle_info()->set_mass(mass);
+                    
+                    // Recursively propagate changes
+                    change_daughter_type(graph, other_vtx, sg1, particle_type, mass, particle_data, recomb_model);
+                    VertexPtr sg1_other_vtx = find_other_vertex(graph, sg1, other_vtx);
+                    if (sg1_other_vtx) {
+                        change_daughter_type(graph, sg1_other_vtx, sg1, particle_type, mass, particle_data, recomb_model);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void PatternAlgorithms::examine_main_vertices(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    if (vertices.size() == 1) return;
+    
+    double max_length = 0;
+    std::set<VertexPtr> tmp_vertices;
+    
+    for (auto vtx : vertices) {
+        if (!vtx || !vtx->descriptor_valid()) continue;
+        
+        // Count segments connected to this vertex
+        int num_segs = 0;
+        auto vd = vtx->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            if (graph[*e_it].segment) num_segs++;
+        }
+        
+        // If only 1 segment, add to tmp_vertices
+        if (num_segs == 1) {
+            tmp_vertices.insert(vtx);
+        } else {
+            // Check pairs of segments for back-to-back tracks
+            std::set<SegmentPtr> used_segments;
+            WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            
+            // Collect all segments and check pairs
+            std::vector<SegmentPtr> vertex_segments;
+            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                SegmentPtr sg = graph[*e_it].segment;
+                if (sg) vertex_segments.push_back(sg);
+            }
+            
+            for (size_t i = 0; i < vertex_segments.size(); i++) {
+                SegmentPtr sg1 = vertex_segments[i];
+                double length1 = segment_track_length(sg1);
+                if (length1 < 10*units::cm) continue;
+                
+                Facade::geo_vector_t dir1 = segment_cal_dir_3vector(sg1, vtx_pt, 15*units::cm);
+                Facade::geo_vector_t dir3 = segment_cal_dir_3vector(sg1, vtx_pt, 30*units::cm);
+                
+                if (length1 > max_length) max_length = length1;
+                
+                for (size_t j = i + 1; j < vertex_segments.size(); j++) {
+                    SegmentPtr sg2 = vertex_segments[j];
+                    double length2 = segment_track_length(sg2);
+                    if (length2 < 10*units::cm) continue;
+                    
+                    Facade::geo_vector_t dir2 = segment_cal_dir_3vector(sg2, vtx_pt, 15*units::cm);
+                    Facade::geo_vector_t dir4 = segment_cal_dir_3vector(sg2, vtx_pt, 30*units::cm);
+                    
+                    double angle1 = 0, angle2 = 0;
+                    if (dir1.magnitude() > 0 && dir2.magnitude() > 0) {
+                        double cos_angle = std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0);
+                        angle1 = std::acos(cos_angle) / M_PI * 180.0;
+                    }
+                    if (dir3.magnitude() > 0 && dir4.magnitude() > 0) {
+                        double cos_angle = std::clamp(dir3.dot(dir4) / (dir3.magnitude() * dir4.magnitude()), -1.0, 1.0);
+                        angle2 = std::acos(cos_angle) / M_PI * 180.0;
+                    }
+                    
+                    int pdg1 = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
+                    int pdg2 = sg2->has_particle_info() ? sg2->particle_info()->pdg() : 0;
+                    
+                    // Check for back-to-back muon tracks
+                    if ((angle1 > 165 || angle2 > 165) && 
+                        (pdg1 == 13 || pdg2 == 13) && 
+                        (length1 > 30*units::cm || length2 > 30*units::cm)) {
+                        used_segments.insert(sg1);
+                        used_segments.insert(sg2);
+                    }
+                    // Check for back-to-back proton tracks
+                    else if ((angle1 > 170 || angle2 > 170) &&
+                            ((pdg1 == 2212 && (pdg2 == 0 || pdg2 == 2212)) ||
+                             (pdg2 == 2212 && (pdg1 == 0 || pdg1 == 2212))) &&
+                            (length1 > 20*units::cm && length2 > 20*units::cm)) {
+                        used_segments.insert(sg1);
+                        used_segments.insert(sg2);
+                    }
+                }
+            }
+            
+            // If we found back-to-back tracks, check remaining segments
+            if (used_segments.size() > 0) {
+                bool flag_skip = true;
+                
+                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                    SegmentPtr sg1 = graph[*e_it].segment;
+                    if (!sg1) continue;
+                    if (used_segments.find(sg1) != used_segments.end()) continue;
+                    
+                    double length = segment_track_length(sg1);
+                    bool is_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                    sg1->flags_any(SegmentFlags::kShowerTopology);
+                    
+                    if (is_shower) {
+                        // Check shower significance
+                        auto pair_result = calculate_num_daughter_showers(graph, vtx, sg1, false);
+                        if (pair_result.second > 35*units::cm) {
+                            flag_skip = false;
+                            break;
+                        }
+                    } else {
+                        // Check track significance
+                        if (!sg1->dir_weak() && length > 6*units::cm) {
+                            flag_skip = false;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!flag_skip) {
+                    tmp_vertices.insert(vtx);
+                } else {
+                    // Change particle types to muons for back-to-back tracks
+                    double muon_mass = particle_data->get_particle_mass(13);
+                    
+                    for (auto sg1 : used_segments) {
+                        // Skip shower trajectory
+                        if (sg1->flags_any(SegmentFlags::kShowerTrajectory)) continue;
+                        
+                        // Handle shower topology
+                        if (sg1->flags_any(SegmentFlags::kShowerTopology)) {
+                            if (segment_track_length(sg1) > 40*units::cm && sg1->dirsign() == 0) {
+                                if (!sg1->particle_info()) {
+                                    sg1->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                                }
+                                sg1->particle_info()->set_pdg(13);
+                                sg1->particle_info()->set_mass(muon_mass);
+                                sg1->unset_flags(SegmentFlags::kShowerTopology);
+                                
+                                change_daughter_type(graph, vtx, sg1, 13, muon_mass, particle_data, recomb_model);
+                                VertexPtr other_vtx = find_other_vertex(graph, sg1, vtx);
+                                if (other_vtx) {
+                                    change_daughter_type(graph, other_vtx, sg1, 13, muon_mass, particle_data, recomb_model);
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
+                        // Handle non-muon particles
+                        else {
+                            int current_pdg = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
+                            if (current_pdg != 13) {
+                                if (!sg1->particle_info()) {
+                                    sg1->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                                }
+                                sg1->particle_info()->set_pdg(13);
+                                sg1->particle_info()->set_mass(muon_mass);
+                                
+                                change_daughter_type(graph, vtx, sg1, 13, muon_mass, particle_data, recomb_model);
+                                VertexPtr other_vtx = find_other_vertex(graph, sg1, vtx);
+                                if (other_vtx) {
+                                    change_daughter_type(graph, other_vtx, sg1, 13, muon_mass, particle_data, recomb_model);
+                                }
+                            }
+                        }
+                        
+                        // Find continuation muon segments and add final vertex
+                        std::vector<VertexPtr> acc_vertices;
+                        auto results = find_cont_muon_segment(graph, sg1, vtx);
+                        while (results.first != nullptr) {
+                            acc_vertices.push_back(results.second);
+                            results = find_cont_muon_segment(graph, results.first, results.second);
+                        }
+                        
+                        if (acc_vertices.size() > 0 && acc_vertices.back() != nullptr) {
+                            tmp_vertices.insert(acc_vertices.back());
+                        }
+                    }
+                }
+            } else {
+                // No back-to-back tracks found, keep this vertex
+                tmp_vertices.insert(vtx);
+            }
+        }
+    }
+    
+    // Update vertices collection
+    if (tmp_vertices.size() == 0) return;
+    
+    vertices.clear();
+    vertices.resize(tmp_vertices.size());
+    std::copy(tmp_vertices.begin(), tmp_vertices.end(), vertices.begin());
 }

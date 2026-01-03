@@ -1330,3 +1330,267 @@ std::pair<Facade::geo_point_t, Facade::geo_vector_t> PatternAlgorithms::calc_PCA
     
     return std::make_pair(center, PCA_main_axis);
 }
+
+
+Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::Cluster& cluster, const Facade::geo_point_t& orig_p, double dis_cut){
+    Facade::geo_point_t ave_p(0, 0, 0);
+    int num = 0;
+    
+    // Iterate through all segments in the graph that belong to this cluster
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        
+        // Get points from this segment (skip first and last points as in original)
+        const auto& wcpts = sg->wcpts();
+        for (size_t i = 1; i + 1 < wcpts.size(); i++) {
+            const WireCell::Point& pt = wcpts[i].point;
+            double dis = std::sqrt(std::pow(pt.x() - orig_p.x(), 2) + 
+                                  std::pow(pt.y() - orig_p.y(), 2) + 
+                                  std::pow(pt.z() - orig_p.z(), 2));
+            
+            if (dis < dis_cut) {
+                ave_p.set(ave_p.x() + pt.x(), ave_p.y() + pt.y(), ave_p.z() + pt.z());
+                num++;
+            }
+        }
+    }
+    
+    // Iterate through all vertices in the graph that belong to this cluster
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (!vtx || vtx->cluster() != &cluster) continue;
+        
+        // Get vertex position (prefer fit point if available)
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        
+        double dis = std::sqrt(std::pow(vtx_pt.x() - orig_p.x(), 2) + 
+                              std::pow(vtx_pt.y() - orig_p.y(), 2) + 
+                              std::pow(vtx_pt.z() - orig_p.z(), 2));
+        
+        if (dis < dis_cut) {
+            ave_p.set(ave_p.x() + vtx_pt.x(), ave_p.y() + vtx_pt.y(), ave_p.z() + vtx_pt.z());
+            num++;
+        }
+    }
+    
+    // Calculate direction vector
+    Facade::geo_vector_t dir(0, 0, 0);
+    
+    if (num > 0) {
+        // Calculate average position
+        ave_p.set(ave_p.x() / num, ave_p.y() / num, ave_p.z() / num);
+        
+        // Calculate direction from origin to average
+        dir.set(ave_p.x() - orig_p.x(), ave_p.y() - orig_p.y(), ave_p.z() - orig_p.z());
+        
+        // Normalize to unit vector
+        double magnitude = std::sqrt(dir.x() * dir.x() + dir.y() * dir.y() + dir.z() * dir.z());
+        if (magnitude > 0) {
+            dir.set(dir.x() / magnitude, dir.y() / magnitude, dir.z() / magnitude);
+        }
+    }
+    
+    return dir;
+}
+
+
+   Facade::Cluster* PatternAlgorithms::swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+       // Remove main_cluster flag from old main cluster (set to 0 to unset)
+       old_main_cluster.set_flag(Facade::Flags::main_cluster, 0);
+       
+       // Add old main cluster to other_clusters
+       other_clusters.push_back(&old_main_cluster);
+       
+       // Set main_cluster flag on new main cluster
+       new_main_cluster.set_flag(Facade::Flags::main_cluster);
+       
+       // Remove new_main_cluster from other_clusters
+       auto it = std::find_if(other_clusters.begin(), other_clusters.end(), 
+                             [&new_main_cluster](Facade::Cluster* c) {
+                                 return c == &new_main_cluster;
+                             });
+       
+       if (it != other_clusters.end()) {
+           other_clusters.erase(it);
+       }
+       
+       return &new_main_cluster;
+    }
+
+    void PatternAlgorithms::examine_main_vertices(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+        if (!main_cluster) return;
+        
+        // Calculate cluster length cut
+        double main_cluster_length = main_cluster->get_length();
+        double cluster_length_cut = std::min(main_cluster_length * 0.6, 6.0 * units::cm);
+        
+        // First pass: remove short clusters without strong tracks
+        std::vector<Facade::Cluster*> clusters_to_be_removed;
+        
+        for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+            if (!cluster || !vertex) continue;
+            
+            double length = cluster->get_length();
+            
+            if (length < cluster_length_cut) {
+                bool flag_removed = true;
+                
+                // Check segments connected to this vertex
+                if (vertex->descriptor_valid()) {
+                    auto vd = vertex->get_descriptor();
+                    auto edge_range = boost::out_edges(vd, graph);
+                    
+                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                        SegmentPtr seg = graph[*e_it].segment;
+                        if (!seg) continue;
+                        
+                        bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                        seg->flags_any(SegmentFlags::kShowerTopology);
+                        int dirsign = seg->dirsign();
+                        bool is_dir_weak = seg->dir_weak();
+                        double median_dqdx = segment_median_dQ_dx(seg) / (43e3 / units::cm);
+                        
+                        // Keep if: not shower AND has direction AND (strong direction OR high dQ/dx)
+                        if (!is_shower && dirsign != 0 && (!is_dir_weak || median_dqdx > 2.0)) {
+                            flag_removed = false;
+                            break;
+                        }
+                    }
+                }
+                
+                // Additional check for very short clusters
+                if (!flag_removed) {
+                    if (length < 5 * units::cm) {
+                        WireCell::Point vtx_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+                        auto knn = main_cluster->kd_steiner_knn(1, vtx_pt, "steiner_pc");
+                        if (!knn.empty()) {
+                            double closest_dis = std::sqrt(knn[0].second);
+                            if (closest_dis > 100 * units::cm) {
+                                flag_removed = true;
+                            }
+                        }
+                    }
+                }
+                
+                if (flag_removed) {
+                    clusters_to_be_removed.push_back(cluster);
+                }
+            } else {
+                // For longer clusters, check if very far from main cluster
+                WireCell::Point vtx_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+                auto knn = main_cluster->kd_steiner_knn(1, vtx_pt, "steiner_pc");
+                if (!knn.empty()) {
+                    double closest_dis = std::sqrt(knn[0].second);
+                    if (closest_dis > 200 * units::cm) {
+                        clusters_to_be_removed.push_back(cluster);
+                    }
+                }
+            }
+        }
+        
+        // Remove flagged clusters
+        for (auto cluster : clusters_to_be_removed) {
+            map_cluster_main_vertices.erase(cluster);
+        }
+        clusters_to_be_removed.clear();
+        
+        // Second pass: additional cuts if main cluster has a main vertex
+        if (map_cluster_main_vertices.find(main_cluster) != map_cluster_main_vertices.end()) {
+            // Check which clusters have only showers
+            std::map<int, bool> map_cluster_id_shower;
+            for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+                if (cluster) {
+                    map_cluster_id_shower[cluster->get_cluster_id()] = true;
+                }
+            }
+            
+            // Check all segments to see if any cluster has non-shower segments
+            auto [ebegin, eend] = boost::edges(graph);
+            for (auto eit = ebegin; eit != eend; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (!sg) continue;
+                
+                int cluster_id = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;
+                if (map_cluster_id_shower.find(cluster_id) == map_cluster_id_shower.end()) continue;
+                
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                sg->flags_any(SegmentFlags::kShowerTopology);
+                if (!is_shower) {
+                    map_cluster_id_shower[cluster_id] = false;
+                }
+            }
+            
+            bool flag_main_vertex_all_showers = map_cluster_id_shower[main_cluster->get_cluster_id()];
+            
+            if (flag_main_vertex_all_showers) {
+                // Calculate direction from main cluster's main vertex
+                VertexPtr main_vtx = map_cluster_main_vertices[main_cluster];
+                WireCell::Point main_vtx_pt = main_vtx->fit().valid() ? main_vtx->fit().point : main_vtx->wcpt().point;
+                Facade::geo_vector_t dir_main = calc_dir_cluster(graph, *main_cluster, main_vtx_pt, 15 * units::cm);
+                
+                for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+                    if (cluster == main_cluster || !vertex) continue;
+                    
+                    WireCell::Point vtx_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+                    
+                    // Get closest distance to main cluster
+                    auto knn = main_cluster->kd_steiner_knn(1, vtx_pt, "steiner_pc");
+                    double closest_dis = knn.empty() ? 1e9 : std::sqrt(knn[0].second);
+                    
+                    // Calculate direction vector from main vertex to this vertex
+                    Facade::geo_vector_t dir1(vtx_pt.x() - main_vtx_pt.x(),
+                                             vtx_pt.y() - main_vtx_pt.y(),
+                                             vtx_pt.z() - main_vtx_pt.z());
+                    
+                    double angle = 0;
+                    if (dir_main.magnitude() > 0 && dir1.magnitude() > 0) {
+                        double cos_angle = std::clamp(dir_main.dot(dir1) / (dir_main.magnitude() * dir1.magnitude()), -1.0, 1.0);
+                        angle = std::acos(cos_angle) / M_PI * 180.0;
+                    }
+                    
+                    double cluster_length = cluster->get_length();
+                    
+                    if (angle < 10) {
+                        // Cluster in same direction as main - check if small and close
+                        if ((cluster_length < 15 * units::cm && closest_dis < 40 * units::cm) ||
+                            (cluster_length < 7 * units::cm && closest_dis < 60 * units::cm)) {
+                            clusters_to_be_removed.push_back(cluster);
+                        }
+                    } else if (angle > 160) {
+                        // Cluster in opposite direction - check for main cluster swap
+                        if (map_cluster_id_shower[cluster->get_cluster_id()] && 
+                            cluster_length > 10 * units::cm && 
+                            cluster_length > 0.5 * main_cluster_length) {
+                            
+                            // Calculate direction from this cluster
+                            Facade::geo_vector_t dir2 = calc_dir_cluster(graph, *cluster, vtx_pt, 15 * units::cm);
+                            
+                            // Get closest distance between point clouds
+                            auto closest_result = main_cluster->get_closest_points(*cluster);
+                            double closest_dis_pc = std::get<2>(closest_result);
+                            
+                            double angle2 = 0;
+                            if (dir2.magnitude() > 0 && dir_main.magnitude() > 0) {
+                                double cos_angle2 = std::clamp(dir2.dot(dir_main) / (dir2.magnitude() * dir_main.magnitude()), -1.0, 1.0);
+                                angle2 = std::acos(cos_angle2) / M_PI * 180.0;
+                            }
+                            
+                            if (closest_dis_pc < 10 * units::cm && angle2 < 25) {
+                                // Swap main cluster
+                                main_cluster = swap_main_cluster(*cluster, *main_cluster, other_clusters);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Remove flagged clusters
+            for (auto cluster : clusters_to_be_removed) {
+                map_cluster_main_vertices.erase(cluster);
+            }
+            clusters_to_be_removed.clear();
+        }
+    }
