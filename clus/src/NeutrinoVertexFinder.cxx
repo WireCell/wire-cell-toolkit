@@ -2630,3 +2630,294 @@ void PatternAlgorithms::examine_main_vertices(Graph& graph, std::vector<VertexPt
     vertices.resize(tmp_vertices.size());
     std::copy(tmp_vertices.begin(), tmp_vertices.end(), vertices.begin());
 }
+
+
+VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vector<VertexPtr>& vertex_candidates, Facade::Cluster& main_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    if (vertex_candidates.empty()) return nullptr;
+    
+    bool flag_print = false;
+    
+    // Initialize scoring map
+    std::map<VertexPtr, double> map_vertex_num;
+    for (auto vtx : vertex_candidates) {
+        map_vertex_num[vtx] = 0;
+    }
+    
+    // Score based on z position (prefer earlier/upstream vertices)
+    double min_z = 1e9;
+    for (auto vtx : vertex_candidates) {
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        if (vtx_pt.z() < min_z) min_z = vtx_pt.z();
+    }
+    
+    for (auto vtx : vertex_candidates) {
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        map_vertex_num[vtx] -= (vtx_pt.z() - min_z) / (200 * units::cm);
+        
+        // Score based on segments connected to this vertex
+        if (vtx->descriptor_valid()) {
+            auto vd = vtx->get_descriptor();
+            auto edge_range = boost::out_edges(vd, graph);
+            
+            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                SegmentPtr sg = graph[*e_it].segment;
+                if (!sg) continue;
+                
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                sg->flags_any(SegmentFlags::kShowerTopology);
+                
+                if (is_shower) {
+                    map_vertex_num[vtx] += 1.0 / 4.0 / 2.0;  // showers count less
+                } else {
+                    map_vertex_num[vtx] += 1.0 / 4.0;  // tracks
+                }
+                
+                // Bonus for clear protons or tracks with direction
+                int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
+                int dirsign = sg->dirsign();
+                bool is_dir_weak = sg->dir_weak();
+                
+                if (pdg == 2212 && dirsign != 0 && !is_dir_weak) {
+                    map_vertex_num[vtx] += 1.0 / 4.0;  // clear proton
+                } else if (dirsign != 0 && !is_shower) {
+                    map_vertex_num[vtx] += 1.0 / 4.0 / 2.0;  // track with direction
+                }
+            }
+        }
+        
+        // Bonus if vertex is in main cluster
+        if (vtx->cluster() == &main_cluster) {
+            map_vertex_num[vtx] += 0.25;
+        }
+        
+        if (flag_print) {
+            std::cout << "A: " << map_vertex_num[vtx] << " " << (vtx_pt.z() - min_z) / (200 * units::cm) << std::endl;
+        }
+    }
+    
+    // Score based on fiducial volume
+    auto grouping = main_cluster.grouping();
+    auto fiducial_utils = grouping ? grouping->get_fiducialutils() : nullptr;
+    
+    for (auto vtx : vertex_candidates) {
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        
+        bool in_fv = fiducial_utils && fiducial_utils->inside_fiducial_volume(vtx_pt);
+        if (in_fv || vtx->cluster() == &main_cluster) {
+            map_vertex_num[vtx] += 0.5;
+        }
+        
+        if (flag_print) {
+            std::cout << "B: " << map_vertex_num[vtx] << " " << in_fv << std::endl;
+        }
+    }
+    
+    // Calculate direction for each vertex
+    std::map<VertexPtr, Facade::geo_vector_t> map_vertex_dir;
+    for (auto vtx : vertex_candidates) {
+        map_vertex_dir[vtx] = vertex_get_dir(vtx, graph, 5 * units::cm);
+    }
+    
+    // Score based on whether other vertices point toward this vertex
+    for (auto vtx : vertex_candidates) {
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        double delta = 0;
+        
+        for (auto vtx1 : vertex_candidates) {
+            if (vtx1 == vtx) continue;
+            
+            WireCell::Point vtx1_pt = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+            
+            // Direction from vtx to vtx1
+            Facade::geo_vector_t dir(vtx1_pt.x() - vtx_pt.x(),
+                                     vtx1_pt.y() - vtx_pt.y(),
+                                     vtx1_pt.z() - vtx_pt.z());
+            
+            Facade::geo_vector_t dir1 = map_vertex_dir[vtx1];
+            
+            if (dir.magnitude() > 0 && dir1.magnitude() > 0) {
+                double cos_angle = std::clamp(dir.dot(dir1) / (dir.magnitude() * dir1.magnitude()), -1.0, 1.0);
+                double angle = std::acos(cos_angle) / M_PI * 180.0;
+                
+                if (angle < 15) {
+                    map_vertex_num[vtx] += 0.25;
+                    delta++;
+                } else if (angle < 30) {
+                    map_vertex_num[vtx] += 0.25 / 2.0;
+                    delta++;
+                }
+            }
+        }
+        
+        // Penalize isolated vertices not in main cluster
+        if (delta == 0) {
+            double total_length = 0;
+            int num_tracks = 0;
+            
+            auto [ebegin, eend] = boost::edges(graph);
+            for (auto eit = ebegin; eit != eend; ++eit) {
+                SegmentPtr seg = graph[*eit].segment;
+                if (!seg || seg->cluster() != vtx->cluster()) continue;
+                
+                total_length += segment_track_length(seg);
+                num_tracks++;
+            }
+            
+            if (vtx->cluster() != &main_cluster && total_length < 6 * units::cm) {
+                map_vertex_num[vtx] -= 0.25 * num_tracks;
+            }
+        }
+        
+        if (flag_print) {
+            std::cout << "E: " << map_vertex_num[vtx] << std::endl;
+        }
+    }
+    
+    // Find vertex with maximum score
+    double max_val = -1e9;
+    VertexPtr max_vertex = nullptr;
+    
+    for (auto vtx : vertex_candidates) {
+        if (map_vertex_num[vtx] > max_val) {
+            max_val = map_vertex_num[vtx];
+            max_vertex = vtx;
+        }
+    }
+    
+    return max_vertex;
+}
+
+Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    if (!main_cluster) return main_cluster;
+    
+    bool flag_all_showers = false;
+    bool flag_print = true;
+    
+    VertexPtr temp_main_vertex = nullptr;
+    
+    // Check if main cluster has a main vertex
+    if (map_cluster_main_vertices.find(main_cluster) != map_cluster_main_vertices.end()) {
+        temp_main_vertex = map_cluster_main_vertices[main_cluster];
+        int n_showers = 0;
+        int n_total = 0;
+        
+        // Count showers connected to this vertex
+        if (temp_main_vertex && temp_main_vertex->descriptor_valid()) {
+            auto vd = temp_main_vertex->get_descriptor();
+            auto edge_range = boost::out_edges(vd, graph);
+            
+            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                SegmentPtr seg = graph[*e_it].segment;
+                if (!seg) continue;
+                
+                n_total++;
+                bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                                seg->flags_any(SegmentFlags::kShowerTopology);
+                if (is_shower) n_showers++;
+            }
+        }
+        
+        if (n_total > 0 && n_showers == n_total) {
+            flag_all_showers = true;
+        }
+    } else {
+        flag_all_showers = true;
+    }
+    
+    // If all showers, consider switching main cluster
+    if (flag_all_showers) {
+        // Collect all vertex candidates
+        std::vector<VertexPtr> vertex_candidates;
+        for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+            if (vertex) {
+                vertex_candidates.push_back(vertex);
+            }
+        }
+        
+        if (flag_print) {
+            for (auto vtx : vertex_candidates) {
+                WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                int cluster_id = vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1;
+                std::cout << "Candidate main vertex " << cluster_id << " " << vtx_pt << " connecting to: ";
+                
+                if (vtx->descriptor_valid()) {
+                    auto vd = vtx->get_descriptor();
+                    auto edge_range = boost::out_edges(vd, graph);
+                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                        SegmentPtr seg = graph[*e_it].segment;
+                        if (seg) {
+                            std::cout << seg->id() << ", ";
+                        }
+                    }
+                }
+                std::cout << std::endl;
+            }
+        }
+        
+        // Compare all vertex candidates to find the best one
+        VertexPtr temp_main_vertex_1 = nullptr;
+        if (!vertex_candidates.empty()) {
+            temp_main_vertex_1 = compare_main_vertices_global(graph, vertex_candidates, *main_cluster, track_fitter, dv);
+        }
+        
+        // Check if we should switch
+        if (temp_main_vertex_1 && temp_main_vertex_1 != temp_main_vertex) {
+            if (temp_main_vertex) {
+                int old_id = temp_main_vertex->cluster() ? temp_main_vertex->cluster()->get_cluster_id() : -1;
+                int new_id = temp_main_vertex_1->cluster() ? temp_main_vertex_1->cluster()->get_cluster_id() : -1;
+                std::cout << "Switch Main Cluster " << old_id << " to " << new_id << std::endl;
+            } else {
+                int new_id = temp_main_vertex_1->cluster() ? temp_main_vertex_1->cluster()->get_cluster_id() : -1;
+                std::cout << "Switch Main Cluster to " << new_id << std::endl;
+            }
+            
+            // Find which cluster this vertex belongs to and swap
+            for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+                if (vertex == temp_main_vertex_1 && cluster != main_cluster) {
+                    main_cluster = swap_main_cluster(*cluster, *main_cluster, other_clusters);
+                    break;
+                }
+            }
+        }
+    }
+    
+    return main_cluster;
+}
+
+Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+    if (!temp_main_vertex || !max_length_cluster || !main_cluster) return main_cluster;
+    
+    bool flag_switch = false;
+    
+    // Count showers connected to this vertex
+    int n_showers = 0;
+    int n_total = 0;
+    
+    if (temp_main_vertex->descriptor_valid()) {
+        auto vd = temp_main_vertex->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr seg = graph[*e_it].segment;
+            if (!seg) continue;
+            
+            n_total++;
+            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                            seg->flags_any(SegmentFlags::kShowerTopology);
+            if (is_shower) n_showers++;
+        }
+    }
+    
+    // If all segments are showers, consider switching
+    if (n_total > 0 && n_showers == n_total) {
+        flag_switch = true;
+    }
+    
+    if (flag_switch) {
+        std::cout << "Switch Main Cluster " << main_cluster->get_cluster_id() 
+                  << " to " << max_length_cluster->get_cluster_id() << std::endl;
+        main_cluster = swap_main_cluster(*max_length_cluster, *main_cluster, other_clusters);
+    }
+    
+    return main_cluster;
+}
