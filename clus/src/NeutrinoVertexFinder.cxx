@@ -2292,7 +2292,7 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         }
     } else {
         // Examine main vertex candidates to filter and identify back-to-back tracks
-        examine_main_vertices(graph, main_vertex_candidates, particle_data, recomb_model);
+        examine_main_vertices_local(graph, main_vertex_candidates, particle_data, recomb_model);
         
         if (flag_print) {
             for (auto vtx : main_vertex_candidates) {
@@ -2446,7 +2446,7 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
     }
 }
 
-void PatternAlgorithms::examine_main_vertices(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     if (vertices.size() == 1) return;
     
     double max_length = 0;
@@ -2920,4 +2920,124 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     }
     
     return main_cluster;
+}
+
+VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model ){
+    if (!main_cluster) return nullptr;
+    
+    // Find cluster with maximum length
+    Facade::Cluster* max_length_cluster = nullptr;
+    double max_length = 0;
+    
+    // Check all clusters in the map
+    for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+        if (!cluster) continue;
+        double length = cluster->get_length();
+        if (length > max_length) {
+            max_length = length;
+            max_length_cluster = cluster;
+        }
+    }
+    
+    // Also check main cluster if not in map
+    if (map_cluster_main_vertices.find(main_cluster) == map_cluster_main_vertices.end()) {
+        double main_length = main_cluster->get_length();
+        if (main_length > max_length) {
+            max_length = main_length;
+            max_length_cluster = main_cluster;
+        }
+    }
+    
+    // Check all other clusters
+    for (auto cluster : other_clusters) {
+        if (!cluster) continue;
+        double length = cluster->get_length();
+        if (length > max_length) {
+            max_length = length;
+            max_length_cluster = cluster;
+        }
+    }
+    
+    // Examine main vertices first
+    examine_main_vertices(graph, map_cluster_main_vertices, main_cluster, other_clusters);
+    
+    // Check for main cluster switch
+    // For now, using simplified version (similar to frozen chain in original)
+    if (max_length_cluster && main_cluster) {
+        double main_length = main_cluster->get_length();
+        if (max_length > main_length * 0.8) {
+            VertexPtr temp_main_vertex = map_cluster_main_vertices.find(main_cluster) != map_cluster_main_vertices.end() 
+                                         ? map_cluster_main_vertices[main_cluster] : nullptr;
+            if (temp_main_vertex) {
+                main_cluster = check_switch_main_cluster_2(graph, temp_main_vertex, max_length_cluster, main_cluster, 
+                                                           other_clusters);
+            }
+        }
+    }
+    
+    // Get the main vertex
+    VertexPtr main_vertex = nullptr;
+    if (map_cluster_main_vertices.find(main_cluster) != map_cluster_main_vertices.end()) {
+        main_vertex = map_cluster_main_vertices[main_cluster];
+    }
+    
+    if (!main_vertex) return nullptr;
+    
+    // Examine tracks connected to main vertex - look for short high dQ/dx proton candidates
+    if (main_vertex->descriptor_valid()) {
+        auto vd = main_vertex->get_descriptor();
+        auto edge_range = boost::out_edges(vd, graph);
+        
+        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+            SegmentPtr sg = graph[*e_it].segment;
+            if (!sg) continue;
+            
+            auto pair_results = calculate_num_daughter_showers(graph, main_vertex, sg, false);
+            double length = segment_track_length(sg);
+            double median_dqdx = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            
+            // Short segment with only 1 daughter and high dQ/dx -> likely proton
+            if (pair_results.first == 1 && length < 1.5 * units::cm && median_dqdx > 1.6) {
+                if (!sg->particle_info()) {
+                    sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
+                }
+                sg->particle_info()->set_pdg(2212);  // proton
+                sg->particle_info()->set_mass(particle_data->get_particle_mass(2212));
+                
+                // Calculate 4-momentum
+                segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+            }
+        }
+    }
+    
+    // Clean up long muons - remove segments/vertices not in main cluster
+    {
+        std::set<SegmentPtr> tmp_segments;
+        std::set<VertexPtr> tmp_vertices;
+        
+        // Find segments not in main cluster
+        for (auto seg : segments_in_long_muon) {
+            if (seg && seg->cluster() != main_cluster) {
+                tmp_segments.insert(seg);
+            }
+        }
+        
+        // Find vertices not in main cluster
+        for (auto vtx : vertices_in_long_muon) {
+            if (vtx && vtx->cluster() != main_cluster) {
+                tmp_vertices.insert(vtx);
+            }
+        }
+        
+        // Remove them from the long muon sets
+        for (auto seg : tmp_segments) {
+            segments_in_long_muon.erase(seg);
+        }
+        
+        for (auto vtx : tmp_vertices) {
+            vertices_in_long_muon.erase(vtx);
+        }
+    }
+    
+    return main_vertex;
 }
