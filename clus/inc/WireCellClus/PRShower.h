@@ -157,7 +157,11 @@ namespace WireCell::Clus::PR {
         // get the information from the shower
         void fill_sets(std::set<VertexPtr>& used_vertices, std::set<SegmentPtr>& used_segments, bool flag_exclude_start_segment = true);
         void fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main = true);
-        
+        TrajectoryView& fill_maps();
+
+        std::pair<std::set<VertexPtr>, std::set<SegmentPtr>> get_connected_pieces(SegmentPtr seg);
+
+        std::pair<SegmentPtr, VertexPtr> get_last_segment_vertex_long_muon(std::set<SegmentPtr>& segments_in_muons);
 
     private:
 

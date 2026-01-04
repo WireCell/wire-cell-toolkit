@@ -389,5 +389,126 @@ namespace WireCell::Clus::PR {
         }
     }
 
+    TrajectoryView& Shower::fill_maps() {
+        return *this;
+    }
+
+    std::pair<std::set<VertexPtr>, std::set<SegmentPtr>> Shower::get_connected_pieces(SegmentPtr seg){
+        std::set<SegmentPtr> used_segments;
+        std::set<VertexPtr> used_vertices;
+        
+        // Check if the segment is valid and in the view
+        if (!seg || !seg->descriptor_valid() || !this->has_edge(seg->get_descriptor())) {
+            return std::make_pair(used_vertices, used_segments);
+        }
+        
+        std::vector<SegmentPtr> new_segments;
+        std::vector<VertexPtr> new_vertices;
+        
+        // Start with the given segment
+        new_segments.push_back(seg);
+        used_segments.insert(seg);
+        
+        // Worklist algorithm: explore connected segments and vertices in the view
+        while (!new_vertices.empty() || !new_segments.empty()) {
+            // Process new vertices - find all segments connected to them in the view
+            if (!new_vertices.empty()) {
+                VertexPtr vtx = new_vertices.back();
+                new_vertices.pop_back();
+                
+                // Find all segments connected to this vertex in the full graph, then check if in view
+                if (vtx->descriptor_valid()) {
+                    auto vdesc = vtx->get_descriptor();
+                    for (auto edesc : boost::make_iterator_range(boost::out_edges(vdesc, m_full_graph))) {
+                        // Check if this edge is in the view
+                        if (this->has_edge(edesc)) {
+                            SegmentPtr seg1 = m_full_graph[edesc].segment;
+                            if (seg1 && used_segments.find(seg1) == used_segments.end()) {
+                                new_segments.push_back(seg1);
+                                used_segments.insert(seg1);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Process new segments - find all vertices connected to them in the view
+            if (!new_segments.empty()) {
+                SegmentPtr seg1 = new_segments.back();
+                new_segments.pop_back();
+                
+                // Find vertices connected to this segment in the full graph
+                auto vertices = find_vertices(m_full_graph, seg1);
+                
+                // Check if vertices are in the view and not yet visited
+                if (vertices.first && this->has_node(vertices.first->get_descriptor()) 
+                    && used_vertices.find(vertices.first) == used_vertices.end()) {
+                    new_vertices.push_back(vertices.first);
+                    used_vertices.insert(vertices.first);
+                }
+                if (vertices.second && this->has_node(vertices.second->get_descriptor()) 
+                    && used_vertices.find(vertices.second) == used_vertices.end()) {
+                    new_vertices.push_back(vertices.second);
+                    used_vertices.insert(vertices.second);
+                }
+            }
+        }
+        
+        return std::make_pair(used_vertices, used_segments);
+    }
+
+    std::pair<SegmentPtr, VertexPtr> Shower::get_last_segment_vertex_long_muon(std::set<SegmentPtr>& segments_in_muons) {
+        VertexPtr s_vtx = m_start_vertex;
+        SegmentPtr s_seg = m_start_segment;
+        
+        if (!s_vtx || !s_seg) {
+            return std::make_pair(s_seg, s_vtx);
+        }
+        
+        std::set<SegmentPtr> used_segments;
+        used_segments.insert(s_seg);
+        
+        bool flag_continue = true;
+        while (flag_continue) {
+            flag_continue = false;
+            
+            // If current vertex is start_vertex, continue
+            if (s_vtx == m_start_vertex) {
+                flag_continue = true;
+            } else {
+                // Look for a new segment connected to s_vtx that is in segments_in_muons and not used
+                if (s_vtx->descriptor_valid()) {
+                    auto vdesc = s_vtx->get_descriptor();
+                    // Iterate over segments connected to this vertex in the full graph, then check if in view
+                    for (auto edesc : boost::make_iterator_range(boost::out_edges(vdesc, m_full_graph))) {
+                        // Check if this edge is in the view
+                        if (this->has_edge(edesc)) {
+                            SegmentPtr sg = m_full_graph[edesc].segment;
+                            if (sg && segments_in_muons.find(sg) != segments_in_muons.end() 
+                                && used_segments.find(sg) == used_segments.end()) {
+                                s_seg = sg;
+                                used_segments.insert(s_seg);
+                                flag_continue = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If we found a new segment, find the other vertex connected to it
+            if (flag_continue) {
+                auto vertices = find_vertices(m_full_graph, s_seg);
+                if (vertices.first && vertices.first != s_vtx) {
+                    s_vtx = vertices.first;
+                } else if (vertices.second && vertices.second != s_vtx) {
+                    s_vtx = vertices.second;
+                }
+            }
+        }
+        
+        return std::make_pair(s_seg, s_vtx);
+    }
+
 
 }
