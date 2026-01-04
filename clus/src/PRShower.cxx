@@ -328,5 +328,66 @@ namespace WireCell::Clus::PR {
         }
     }
 
+    void Shower::fill_sets(std::set<VertexPtr>& used_vertices, std::set<SegmentPtr>& used_segments, bool flag_exclude_start_segment){
+        // Fill used_vertices with all vertices in this shower's view
+        for (auto vdesc : this->nodes()) {
+            VertexPtr vtx = m_full_graph[vdesc].vertex;
+            if (vtx) {
+                used_vertices.insert(vtx);
+            }
+        }
+        
+        // Fill used_segments with all segments in this shower's view
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (seg) {
+                // Skip start_segment if flag is set
+                if (flag_exclude_start_segment && seg == m_start_segment) {
+                    continue;
+                }
+                used_segments.insert(seg);
+            }
+        }
+    }
+
+    void Shower::fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main){
+        // Get the main cluster ID if flag_main is true
+        const Facade::Cluster* main_cluster = nullptr;
+        if (flag_main && m_start_segment && m_start_segment->cluster()) {
+            main_cluster = m_start_segment->cluster();
+        }
+        
+        // Fill points from all segments in the shower's view
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (seg) {
+                // Skip if flag_main is set and segment is not in the main cluster
+                if (flag_main && main_cluster && seg->cluster() != main_cluster) {
+                    continue;
+                }
+                
+                // Get segment fit points and add all except first and last
+                const auto& fits = seg->fits();
+                for (size_t i = 1; i + 1 < fits.size(); i++) {
+                    points.push_back(fits[i].point);
+                }
+            }
+        }
+        
+        // Fill points from all vertices in the shower's view
+        for (auto vdesc : this->nodes()) {
+            VertexPtr vtx = m_full_graph[vdesc].vertex;
+            if (vtx) {
+                // Skip if flag_main is set and vertex is not in the main cluster
+                if (flag_main && main_cluster && vtx->cluster() != main_cluster) {
+                    continue;
+                }
+                
+                // Add the vertex fit point
+                points.push_back(vtx->fit().point);
+            }
+        }
+    }
+
 
 }

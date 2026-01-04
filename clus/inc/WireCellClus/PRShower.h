@@ -153,6 +153,10 @@ namespace WireCell::Clus::PR {
         void add_shower(Shower& temp_shower, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
         void complete_structure_with_start_segment(std::set<SegmentPtr>& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
 
+
+        // get the information from the shower
+        void fill_sets(std::set<VertexPtr>& used_vertices, std::set<SegmentPtr>& used_segments, bool flag_exclude_start_segment = true);
+        void fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main = true);
         
 
     private:
