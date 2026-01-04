@@ -62,6 +62,7 @@ namespace WireCell::Clus::PR {
     public:
 
         Shower(Graph& graph);
+        
         virtual ~Shower();
 
         // The bag of attributes is directly exposed to user.
@@ -96,17 +97,67 @@ namespace WireCell::Clus::PR {
             the underlying graph, this function is a no-op and the stored
             start_vertex is nullified.
         */
-        Shower& start_vertex(VertexPtr vtx);
+        Shower& set_start_vertex(VertexPtr vtx, int type);
+        std::pair<VertexPtr, int> get_start_vertex_and_type() {
+            return std::make_pair(m_start_vertex, data.start_connection_type);
+        }
 
         /** Chainable setter of start segment.
 
             This has the same semantics and caveats as the chainable setter:
             `start_vertex(VertexPtr)`.
         */
-        Shower& start_segment(SegmentPtr seg);
+        Shower& set_start_segment(SegmentPtr seg, bool flag_include_vertices = false, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+
+        Shower& set_start_point( WireCell::Point pt ) {
+            data.start_point = pt;
+            return *this;
+        }
+        WireCell::Point get_start_point() const {
+            return data.start_point;
+        }
+        WireCell::Point get_end_point() const {
+            return data.end_point;
+        }
+
+        void add_segment(SegmentPtr seg, bool flag_include_vertices = false, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+
+        // particle type
+        int get_particle_type(){return data.particle_type;};
+        void set_particle_type(int val){data.particle_type = val;};
+
+        // access flags
+        void set_flag_kinematics(bool val);
+        bool get_flag_kinematics();
+        bool get_flag_shower();
+
+        // return kinematic energy estimation
+        double get_kine_range(){return data.kenergy_range;};
+        double get_kine_dQdx(){return data.kenergy_dQdx;};
+        void set_kine_charge(double val){data.kenergy_charge = val;};
+        double get_kine_charge(){return data.kenergy_charge;};
+        double get_kine_best(){return data.kenergy_best;};
+
+        // return initial direction ...
+        WireCell::Vector& get_init_dir(){return data.init_dir;};
+
+        // Get point cloud by name (convenience wrapper around dpcloud)
+        std::shared_ptr<Facade::DynamicPointCloud> get_pcloud(const std::string& cloud_name = "fit") {
+            return this->dpcloud(cloud_name);
+        }
+        std::shared_ptr<const Facade::DynamicPointCloud> get_pcloud(const std::string& cloud_name = "associate_points") const {
+            return this->dpcloud(cloud_name);
+        }
+
+        // Add all segments and vertices from another shower to this one
+        void add_shower(Shower& temp_shower, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+        void complete_structure_with_start_segment(std::set<SegmentPtr>& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+
+        
 
     private:
 
+        Graph& m_full_graph;
         VertexPtr m_start_vertex;
         SegmentPtr m_start_segment;
 
