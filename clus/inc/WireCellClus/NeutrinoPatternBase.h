@@ -1,6 +1,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/TrackFitting.h"
+#include "WireCellClus/PRShower.h"
 
 namespace WireCell::Clus::PR {
     class PatternAlgorithms{
@@ -131,6 +132,12 @@ namespace WireCell::Clus::PR {
 
         // print information
         void print_segs_info(Graph& graph, Facade::Cluster& cluster, VertexPtr vertex= nullptr);
+
+        // shower related functions
+        void update_shower_maps(std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters);
+
+        
+
 
 
 

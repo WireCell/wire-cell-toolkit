@@ -189,5 +189,7 @@ namespace WireCell::Clus::PR {
 
     };
 
+    using ShowerPtr = std::shared_ptr<Shower>;
+
 }
 #endif
