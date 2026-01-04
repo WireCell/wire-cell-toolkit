@@ -7,6 +7,9 @@
 #include "WireCellUtil/Flagged.h"
 #include "WireCellUtil/Point.h"
 
+#include "WireCellIface/IRecombinationModel.h"
+#include "WireCellClus/ParticleDataSet.h"
+
 namespace WireCell::Clus::PR {
 
     /** The "flags" that may be set on a shower.
@@ -162,6 +165,21 @@ namespace WireCell::Clus::PR {
         std::pair<std::set<VertexPtr>, std::set<SegmentPtr>> get_connected_pieces(SegmentPtr seg);
 
         std::pair<SegmentPtr, VertexPtr> get_last_segment_vertex_long_muon(std::set<SegmentPtr>& segments_in_muons);
+
+        // some simple get functions
+        int get_num_main_segments();
+        int get_num_segments();
+
+        double get_total_length();
+        double get_total_length(Facade::Cluster* cluster);
+        double get_total_track_length();
+
+        std::vector<double> get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit = 20);
+
+        // calculate the kinematics
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void calculate_kinematics_long_muon(std::set<SegmentPtr>& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
 
     private:
 

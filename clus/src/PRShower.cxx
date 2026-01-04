@@ -1,5 +1,7 @@
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/PRGraph.h"
+#include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/PRShowerFunctions.h"
 #include "WireCellClus/DynamicPointCloud.h"
 namespace WireCell::Clus::PR {
 
@@ -510,5 +512,626 @@ namespace WireCell::Clus::PR {
         return std::make_pair(s_seg, s_vtx);
     }
 
+    int Shower::get_num_main_segments() {
+        int num = 0;
+        
+        // If no start segment, return 0
+        if (!m_start_segment) {
+            return 0;
+        }
+        
+        // Get the start segment's cluster
+        auto start_cluster = m_start_segment->cluster();
+        if (!start_cluster) {
+            return 0;
+        }
+        
+        // Get the view graph to access segments
+        const auto& view = this->view_graph();
+        
+        // Iterate through all segments in the shower
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = view[edesc].segment;
+            if (!seg) continue;
+            
+            // Check if this segment's cluster matches the start segment's cluster
+            if (seg->cluster() == start_cluster) {
+                num++;
+            }
+        }
+        
+        return num;
+    }
+
+    int Shower::get_num_segments() {
+        return this->edges().size();
+    }
+
+    double Shower::get_total_length(){
+        double total_length = 0;
+        
+        // Get the view graph to access segments
+        const auto& view = this->view_graph();
+        
+        // Iterate through all segments in the shower
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = view[edesc].segment;
+            if (!seg) continue;
+            
+            // Add segment length
+            total_length += segment_track_length(seg);
+        }
+        
+        return total_length;
+    }
+    double Shower::get_total_length(Facade::Cluster* cluster){
+        double total_length = 0;
+        
+        if (!cluster) {
+            return 0;
+        }
+        
+        // Get the view graph to access segments
+        const auto& view = this->view_graph();
+        
+        // Iterate through all segments in the shower
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = view[edesc].segment;
+            if (!seg) continue;
+            
+            // Check if segment's cluster matches the input cluster
+            if (seg->cluster() == cluster) {
+                total_length += segment_track_length(seg);
+            }
+        }
+        
+        return total_length;
+    }
+    double Shower::get_total_track_length(){
+        double total_length = 0;
+        
+        // Get the view graph to access segments
+        const auto& view = this->view_graph();
+        
+        // Iterate through all segments in the shower
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = view[edesc].segment;
+            if (!seg) continue;
+            
+            // Only count segments that are NOT shower segments
+            // Check if segment has shower flags (kShowerTrajectory or kShowerTopology)
+            if (!seg->flags_any(SegmentFlags::kShowerTrajectory) && 
+                !seg->flags_any(SegmentFlags::kShowerTopology)) {
+                total_length += segment_track_length(seg);
+            }
+        }
+        
+        return total_length;
+    }
+
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+        double track_length = 0;
+        double shower_length = 0;
+        
+        // Only process if there's more than one segment
+        if (this->edges().size() <= 1) {
+            return;
+        }
+        
+        // Get the view graph to access segments
+        const auto& view = this->view_graph();
+        
+        // Iterate through all segments in the shower
+        for (auto edesc : this->edges()) {
+            SegmentPtr seg = view[edesc].segment;
+            if (!seg) continue;
+            
+            double length = segment_track_length(seg);
+            
+            // Check if segment is a shower segment OR not a proton (PDG 2212)
+            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                           seg->flags_any(SegmentFlags::kShowerTopology);
+            
+            bool is_not_proton = true;
+            if (seg->has_particle_info()) {
+                int pdg = seg->particle_info()->pdg();
+                is_not_proton = (std::abs(pdg) != 2212);
+            }
+            
+            if (is_shower || is_not_proton) {
+                shower_length += length;
+            } else {
+                track_length += length;
+            }
+        }
+        
+        // If shower_length dominates, update start_segment to electron
+        if (shower_length > track_length && m_start_segment) {
+            // Calculate 4-momentum for electron (PDG = 11)
+            auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model);
+            
+            // Create ParticleInfo for electron
+            auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                11,                                          // electron PDG
+                particle_data->get_particle_mass(11),       // electron mass
+                particle_data->pdg_to_name(11),             // "electron"
+                four_momentum                                // 4-momentum
+            );
+            
+            // Store particle info in start_segment
+            m_start_segment->particle_info(pinfo);
+        }
+    }
+
+    std::vector<double> Shower::get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit /*=20*/){
+        std::vector<double> vec_dQ_dx;
+        const double MIP_dQdx = 43e3 / units::cm;
+        
+        if (!vertex || !segment) {
+            return vec_dQ_dx;
+        }
+        
+        // Get dQ and dx from segment's fits
+        const auto& fits = segment->fits();
+        if (fits.empty()) {
+            return vec_dQ_dx;
+        }
+        
+        // Determine direction based on vertex position relative to segment
+        // Check if vertex is at the front of the segment
+        bool vertex_at_front = false;
+        if (!segment->wcpts().empty()) {
+            double d1 = WireCell::ray_length(WireCell::Ray{vertex->wcpt().point, segment->wcpts().front().point});
+            double d2 = WireCell::ray_length(WireCell::Ray{vertex->wcpt().point, segment->wcpts().back().point});
+            vertex_at_front = (d1 < d2);
+        }
+        
+        // Fill vec_dQ_dx based on direction
+        if (vertex_at_front) {
+            for (size_t i = 0; i < fits.size(); i++) {
+                double dQ_dx_normalized = fits[i].dQ / (fits[i].dx + 1e-9) / MIP_dQdx;
+                vec_dQ_dx.push_back(dQ_dx_normalized);
+                if (vec_dQ_dx.size() >= (size_t)limit) break;
+            }
+        } else {
+            for (int i = (int)fits.size() - 1; i >= 0; i--) {
+                double dQ_dx_normalized = fits[i].dQ / (fits[i].dx + 1e-9) / MIP_dQdx;
+                vec_dQ_dx.push_back(dQ_dx_normalized);
+                if (vec_dQ_dx.size() >= (size_t)limit) break;
+            }
+        }
+        
+        // If this is the start_segment and we don't have enough points, continue to next segments
+        if (segment == m_start_segment && vec_dQ_dx.size() < (size_t)limit) {
+            VertexPtr curr_vertex = vertex;
+            SegmentPtr curr_segment = segment;
+            int count = 0;
+            
+            while (vec_dQ_dx.size() < (size_t)limit && count < 3) {
+                // Find next vertex (the other end of current segment)
+                VertexPtr next_vertex = find_other_vertex(m_full_graph, curr_segment, curr_vertex);
+                if (!next_vertex) break;
+                
+                // Direction from current vertex to next vertex
+                WireCell::Vector dir1 = curr_vertex->fit().point - next_vertex->fit().point;
+                
+                // Find the next segment with largest angle
+                SegmentPtr next_segment = nullptr;
+                WireCell::Vector dir2;
+                double max_angle = 0;
+                
+                auto next_vdesc = next_vertex->get_descriptor();
+                for (auto edesc : boost::make_iterator_range(boost::out_edges(next_vdesc, m_full_graph))) {
+                    if (!has_edge(edesc)) continue;  // Only consider edges in this view
+                    
+                    SegmentPtr seg = m_full_graph[edesc].segment;
+                    if (seg == curr_segment) continue;
+                    
+                    WireCell::Vector tmp_dir = segment_cal_dir_3vector(seg, next_vertex->fit().point, 10 * units::cm);
+                    double angle = std::acos(std::clamp(dir1.dot(tmp_dir) / (dir1.magnitude() * tmp_dir.magnitude() + 1e-9), -1.0, 1.0)) * 180.0 / M_PI;
+                    
+                    if (angle > max_angle) {
+                        max_angle = angle;
+                        next_segment = seg;
+                        dir2 = tmp_dir;
+                    }
+                }
+                
+                if (!next_segment) break;
+                
+                // Check if there are other segments that would make this "bad"
+                bool flag_bad = false;
+                for (auto edesc : boost::make_iterator_range(boost::out_edges(next_vdesc, m_full_graph))) {
+                    if (!has_edge(edesc)) continue;
+                    
+                    SegmentPtr seg = m_full_graph[edesc].segment;
+                    if (seg == curr_segment || seg == next_segment) continue;
+                    
+                    double seg_length = segment_track_length(seg);
+                    if (seg_length > 3 * units::cm) {
+                        WireCell::Vector tmp_dir = segment_cal_dir_3vector(seg, next_vertex->fit().point, 10 * units::cm);
+                        double angle = std::acos(std::clamp(dir2.dot(tmp_dir) / (dir2.magnitude() * tmp_dir.magnitude() + 1e-9), -1.0, 1.0)) * 180.0 / M_PI;
+                        if (angle < 25) {
+                            flag_bad = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (flag_bad) break;
+                
+                // Remove last element and add points from next segment
+                if (!vec_dQ_dx.empty()) {
+                    vec_dQ_dx.pop_back();
+                }
+                
+                const auto& next_fits = next_segment->fits();
+                if (next_fits.empty()) break;
+                
+                // Determine direction for next segment
+                bool next_vertex_at_front = false;
+                if (!next_segment->wcpts().empty()) {
+                    double d1 = WireCell::ray_length(WireCell::Ray{next_vertex->wcpt().point, next_segment->wcpts().front().point});
+                    double d2 = WireCell::ray_length(WireCell::Ray{next_vertex->wcpt().point, next_segment->wcpts().back().point});
+                    next_vertex_at_front = (d1 < d2);
+                }
+                
+                // Add dQ/dx from next segment
+                if (next_vertex_at_front) {
+                    for (size_t i = 0; i < next_fits.size(); i++) {
+                        double dQ_dx_normalized = next_fits[i].dQ / (next_fits[i].dx + 1e-9) / MIP_dQdx;
+                        vec_dQ_dx.push_back(dQ_dx_normalized);
+                        if (vec_dQ_dx.size() >= (size_t)limit) break;
+                    }
+                } else {
+                    for (int i = (int)next_fits.size() - 1; i >= 0; i--) {
+                        double dQ_dx_normalized = next_fits[i].dQ / (next_fits[i].dx + 1e-9) / MIP_dQdx;
+                        vec_dQ_dx.push_back(dQ_dx_normalized);
+                        if (vec_dQ_dx.size() >= (size_t)limit) break;
+                    }
+                }
+                
+                if (vec_dQ_dx.size() >= (size_t)limit) break;
+                
+                // Prepare for next iteration
+                curr_vertex = next_vertex;
+                curr_segment = next_segment;
+                count++;
+            }
+        }
+        
+        return vec_dQ_dx;
+    }
+
+    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+        int nsegments = this->edges().size();
+        
+        if (nsegments == 1) {
+            // Single segment case
+            if (!m_start_segment) return;
+            
+            // Set particle type from start segment
+            if (m_start_segment->has_particle_info()) {
+                data.particle_type = m_start_segment->particle_info()->pdg();
+            }
+            
+            // Check if shower
+            bool flag_shower = m_start_segment->flags_any(SegmentFlags::kShowerTrajectory) || 
+                             m_start_segment->flags_any(SegmentFlags::kShowerTopology);
+            
+            // Calculate energies
+            double seg_length = segment_track_length(m_start_segment);
+            data.kenergy_range = cal_kine_range(seg_length, data.particle_type, particle_data);
+            data.kenergy_dQdx = segment_cal_kine_dQdx(m_start_segment, recomb_model);
+            
+            // Calculate kenergy_best
+            if (data.start_connection_type == 1) {
+                data.kenergy_best = (seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range;
+            } else {
+                if (flag_shower) {
+                    data.kenergy_best = 0;
+                } else {
+                    data.kenergy_best = (seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range;
+                }
+            }
+            
+            // Calculate start_point and end_point
+            const auto& fits = m_start_segment->fits();
+            if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
+                if (!fits.empty()) {
+                    if (m_start_segment->dirsign() == 1) {
+                        data.start_point = fits.front().point;
+                        data.end_point = fits.back().point;
+                    } else if (m_start_segment->dirsign() == -1) {
+                        data.start_point = fits.back().point;
+                        data.end_point = fits.front().point;
+                    }
+                }
+            } else {
+                if (m_start_vertex) {
+                    data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
+                    
+                    // Find farthest vertex
+                    double max_dis = 0;
+                    const auto& view = this->view_graph();
+                    for (auto vdesc : this->nodes()) {
+                        VertexPtr vtx = view[vdesc].vertex;
+                        if (!vtx) continue;
+                        double dis = (data.start_point - vtx->fit().point).magnitude();
+                        if (dis > max_dis) {
+                            max_dis = dis;
+                            data.end_point = vtx->fit().point;
+                        }
+                    }
+                }
+            }
+            
+            // Calculate init_dir
+            if (data.start_connection_type == 1) {
+                data.init_dir = segment_cal_dir_3vector(m_start_segment);
+            } else if (data.start_connection_type == 2 || data.start_connection_type == 3) {
+                if (m_start_vertex) {
+                    data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
+                }
+            }
+            
+        } else {
+            // Multiple segments case
+            if (!m_start_segment) return;
+            
+            // Get number of connected segments
+            auto [segs, verts] = get_connected_pieces(m_start_segment);
+            int nconnected_segs = segs.size();
+            
+            // Set particle type
+            if (m_start_segment->has_particle_info()) {
+                data.particle_type = m_start_segment->particle_info()->pdg();
+            }
+            
+            bool flag_shower = m_start_segment->flags_any(SegmentFlags::kShowerTrajectory) || 
+                             m_start_segment->flags_any(SegmentFlags::kShowerTopology);
+            
+            if (nsegments == nconnected_segs) {
+                // Single track (all connected)
+                
+                // Calculate start_point
+                const auto& fits = m_start_segment->fits();
+                if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
+                    if (!fits.empty()) {
+                        if (m_start_segment->dirsign() == 1) {
+                            data.start_point = fits.front().point;
+                        } else if (m_start_segment->dirsign() == -1) {
+                            data.start_point = fits.back().point;
+                        }
+                    }
+                } else {
+                    if (m_start_vertex) {
+                        data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
+                    }
+                }
+                
+                // Calculate init_dir
+                double seg_length = segment_track_length(m_start_segment);
+                if (data.start_connection_type == 1) {
+                    if (seg_length > 8 * units::cm) {
+                        data.init_dir = segment_cal_dir_3vector(m_start_segment);
+                    } else if (m_start_vertex) {
+                        data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
+                    }
+                } else if (data.start_connection_type == 2 || data.start_connection_type == 3) {
+                    if (m_start_vertex) {
+                        data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
+                    }
+                }
+                
+                // Find farthest vertex for end_point
+                double max_dis = 0;
+                const auto& view = this->view_graph();
+                for (auto vdesc : this->nodes()) {
+                    VertexPtr vtx = view[vdesc].vertex;
+                    if (!vtx) continue;
+                    double dis = (data.start_point - vtx->fit().point).magnitude();
+                    if (dis > max_dis) {
+                        max_dis = dis;
+                        data.end_point = vtx->fit().point;
+                    }
+                }
+                
+                // Collect all dQ and dx from all segments
+                double total_length = 0;
+                std::vector<double> vec_dQ, vec_dx;
+                for (auto edesc : this->edges()) {
+                    SegmentPtr seg = view[edesc].segment;
+                    if (!seg) continue;
+                    
+                    total_length += segment_track_length(seg);
+                    
+                    const auto& seg_fits = seg->fits();
+                    for (const auto& fit : seg_fits) {
+                        vec_dQ.push_back(fit.dQ);
+                        vec_dx.push_back(fit.dx);
+                    }
+                }
+                
+                // Calculate energies
+                data.kenergy_range = cal_kine_range(total_length, data.particle_type, particle_data);
+                data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
+                
+                // Calculate kenergy_best
+                if (data.start_connection_type == 1) {
+                    data.kenergy_best = (seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range;
+                } else {
+                    if (flag_shower) {
+                        data.kenergy_best = 0;
+                    } else {
+                        data.kenergy_best = (seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range;
+                    }
+                }
+                
+            } else {
+                // Multiple tracks (not all connected)
+                
+                // Calculate start_point
+                const auto& fits = m_start_segment->fits();
+                if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
+                    if (!fits.empty()) {
+                        if (m_start_segment->dirsign() == 1) {
+                            data.start_point = fits.front().point;
+                        } else if (m_start_segment->dirsign() == -1) {
+                            data.start_point = fits.back().point;
+                        }
+                    }
+                } else {
+                    if (m_start_vertex) {
+                        data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
+                    }
+                }
+                
+                // Calculate init_dir
+                double seg_length = segment_track_length(m_start_segment);
+                if (data.start_connection_type == 1) {
+                    if (seg_length > 8 * units::cm) {
+                        data.init_dir = segment_cal_dir_3vector(m_start_segment);
+                    } else if (m_start_vertex) {
+                        data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
+                    }
+                } else if (data.start_connection_type == 2 || data.start_connection_type == 3) {
+                    if (m_start_vertex) {
+                        data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
+                    }
+                }
+                
+                // Find farthest vertex for end_point
+                double max_dis = 0;
+                const auto& view = this->view_graph();
+                for (auto vdesc : this->nodes()) {
+                    VertexPtr vtx = view[vdesc].vertex;
+                    if (!vtx) continue;
+                    double dis = (data.start_point - vtx->fit().point).magnitude();
+                    if (dis > max_dis) {
+                        max_dis = dis;
+                        data.end_point = vtx->fit().point;
+                    }
+                }
+                
+                // Collect all dQ and dx from all segments
+                std::vector<double> vec_dQ, vec_dx;
+                for (auto edesc : this->edges()) {
+                    SegmentPtr seg = view[edesc].segment;
+                    if (!seg) continue;
+                    
+                    const auto& seg_fits = seg->fits();
+                    for (const auto& fit : seg_fits) {
+                        vec_dQ.push_back(fit.dQ);
+                        vec_dx.push_back(fit.dx);
+                    }
+                }
+                
+                // Calculate energies
+                data.kenergy_range = 0;
+                data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
+                data.kenergy_best = 0;
+            }
+        }
+    }
+
+    void Shower::calculate_kinematics_long_muon(std::set<SegmentPtr>& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+        // Get particle type from start segment
+        int particle_type = abs(m_start_segment->particle_info()->pdg());
+        double particle_mass = m_start_segment->particle_info()->mass();
+        
+        unset_flags(ShowerFlags::kKinematics);
+        
+        // Calculate total length ONLY from segments in segments_in_muons
+        double total_length = 0;
+        for (auto edesc : this->edges()) {
+            if (!has_edge(edesc)) continue;
+            auto seg = view_graph()[edesc].segment;
+            if (segments_in_muons.find(seg) != segments_in_muons.end()) {
+                total_length += segment_track_length(seg);
+            }
+        }
+        
+        // Collect dQ and dx from ALL segments
+        std::vector<double> vec_dQ;
+        std::vector<double> vec_dx;
+        
+        for (auto edesc : this->edges()) {
+            if (!has_edge(edesc)) continue;
+            auto seg = view_graph()[edesc].segment;
+            
+            std::vector<double> seg_dQ;
+            std::vector<double> seg_dx;
+            
+             const auto& seg_fits = seg->fits();
+            for (const auto& fit : seg_fits) {
+                vec_dQ.push_back(fit.dQ);
+                vec_dx.push_back(fit.dx);
+            }
+            
+            vec_dQ.insert(vec_dQ.end(), seg_dQ.begin(), seg_dQ.end());
+            vec_dx.insert(vec_dx.end(), seg_dx.begin(), seg_dx.end());
+        }
+        
+        // Calculate kinetic energies
+        data.kenergy_range = cal_kine_range(total_length, particle_type, particle_data);
+        data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
+        
+        // For long muon, use dQdx as best energy
+        data.kenergy_best = data.kenergy_dQdx;
+        
+        // Calculate initial direction from start segment
+        data.init_dir = segment_cal_dir_3vector(m_start_segment);
+        
+        // Set start point based on direction
+        auto& fits = m_start_segment->fits();
+        int dirsign_val = m_start_segment->dirsign();
+        if (dirsign_val == 1) {
+            data.start_point = fits.front().point;
+        } else {
+            data.start_point = fits.back().point;
+        }
+        
+        // Find farthest vertex that has at least one segment in segments_in_muons
+        double max_dis = 0;
+        VertexPtr farthest_vertex = nullptr;
+        
+        for (auto vdesc : this->nodes()) {
+            if (!has_node(vdesc)) continue;
+            auto vtx = view_graph()[vdesc].vertex;
+            
+            // Check if this vertex has at least one segment in segments_in_muons
+            bool flag_contain = false;
+            for (auto out_edge : boost::make_iterator_range(boost::out_edges(vdesc, m_full_graph))) {
+                if (!has_edge(out_edge)) continue;
+                auto seg = view_graph()[out_edge].segment;
+                if (segments_in_muons.find(seg) != segments_in_muons.end()) {
+                    flag_contain = true;
+                    break;
+                }
+            }
+            
+            if (flag_contain) {
+                double dis = (vtx->fit().point - data.start_point).magnitude();
+                if (dis > max_dis) {
+                    max_dis = dis;
+                    farthest_vertex = vtx;
+                }
+            }
+        }
+        
+        // Set end point to the farthest vertex
+        if (farthest_vertex) {
+            data.end_point = farthest_vertex->fit().point;
+        } else {
+            // Fallback: use the other end of start segment
+            auto& fits = m_start_segment->fits();
+            if (m_start_segment->dirsign() == 1) {
+                data.end_point = fits.back().point;
+            } else {
+                data.end_point = fits.front().point;
+            }
+        }
+    }
 
 }
