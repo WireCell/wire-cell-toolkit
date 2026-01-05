@@ -1,0 +1,49 @@
+#+title: TorchScript
+
+* Python to C++ Transition
+
+TorchScript is a way to create serializable and optimizable models from PyTorch code. A model saved in Python can be loaded in C++ without a Python dependency.
+
+Constraints: Once a model is scripted or traced, it is immutable in terms of its graph structure. Not all Python libraries (like NumPy or custom objects) are supported; code must be "clean" PyTorch.
+Python (Exporting)
+
+You can use Tracing (good for fixed graphs) or Scripting (good for complex logic with loops/conditionals).
+
+#+begin_src python
+import torch
+
+class MyModule(torch.nn.Module):
+    def __init__(self):
+        super(MyModule, self).__init__()
+        self.lin = torch.nn.Linear(3, 1)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+model = MyModule()
+# Tracing: provides a sample input to map the execution path
+example_input = torch.rand(1, 3)
+traced_script_module = torch.jit.trace(model, example_input)
+traced_script_module.save("model.pt")
+#+end_src
+
+C++ (Loading)
+
+To run the model in C++, you use the =torch::jit module=.
+
+#+begin_src cpp
+#include <torch/script.h> // One-stop header
+
+// Load the model
+torch::jit::script::Module module;
+module = torch::jit::load("model.pt");
+
+// Create a vector of inputs
+std::vector<torch::jit::IValue> inputs;
+inputs.push_back(torch::ones({1, 3}));
+
+// Execute the model and get output
+at::Tensor output = module.forward(inputs).toTensor();
+#+end_src
+
+SPNG: See =TensorForwardTS=.

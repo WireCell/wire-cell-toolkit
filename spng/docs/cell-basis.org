@@ -12,9 +12,9 @@ This document is meant to provide an outline for its implementation.
 We define three vector bases giving different representations of tomographic
 information in a single time slice:
 
-- wire :: The *wire basis* is defined for each anode face.  Vectors in this basis
-  are of size =Nwires=.  Order of the elements follow the WCT-canonical order of
-  increasing pitch.
+- wire :: The *wire basis* is defined for one wire plane of one anode face.
+  Vectors in this basis are of size =Nwires=.  Order of the elements follow the
+  WCT-canonical order of increasing pitch.
 
 - channel :: The *channel basis* spans all (one or two) anode faces.  Vectors in
   this basis are size =Nchans=.  Order of elements follow the WCT-canonical order
@@ -27,12 +27,19 @@ information in a single time slice:
   be assured but the WAN number ordering is universal up to a choice of origin
   plane.
 
-- cell :: The *cell basis* spans a list of "index trios".  This 3-tuple spans the
-  three views.  Each index in a trio corresponds to a wire index in the *wire
-  basis* in a corresponding view.  Together, the trio identify three wires with
-  pair-wise crossings that are mutually close.  We call a trio a "cell" as it
-  represents a region in the 2D transverse plane near their mutual center.  The
-  order of cells is arbitrary and determined by construction.
+- cell :: The *cell basis* are defined for one anode face and spans a list of
+  "index trios".  Each element on this 3-tuple is an index in a corresponding
+  *wire basis*.  Together, the trio identify three wires with three pair-wise wire
+  crossings that are mutually close.  We call a trio a "cell" as it represents a
+  region in the 2D transverse plane near their mutual center.  The order of
+  cells is arbitrary and determined by construction.
+
+The bases are not individually equivalent.  Two wire bases map to one channel
+basis for a common wire plane.  Three wire bases each for a distinct wire plane
+and a common face map to one cell basis.  One cell basis maps through three wire
+basis to a channel basis.  Wire and channel bases are defined by simple ordering
+while the cell basis must be constructed using geometric wire-crossing
+information.
 
 * Cell basis construction
 
@@ -41,9 +48,18 @@ progressing from U to V to W views.  This order of progression is an arbitrary
 choice and a different choice may be more optimal in some way depending on the
 wire crossing pattern.
 
-1. Form =(NwireU, 2, 3)= tensor of 3D U-wire endpoints.
+1. Form tensor =wire_endpoints= of shape =(NwireU, 2, 3)= holding the two 3D U-wire
+   endpoints.  Keep wires in pitch order.
 
-2. Use Ray Grid Coordinates to find =(NwireU, 2)= the pair of V-wire bounds indices for each endpoint.
+2. Use =RayGrid::Coordinates::point_pitches()= to find tensor =wire_vrange= of shape
+   =(NwireU, 2)= holding the pair of V-view wire indices closest to endpoints.
+
+   - Note: we really want V-view indices for V-view wires crossing each U-view
+     while =point_pitches()= can return indices beyond the end points.  Also,
+     =point_pitches()= calculates pitches in all three views.  We really want a
+     =point_pitches_view(points, view, round_method)= where =round_method= gives
+     "round", "ceil", "floor".  We'd then want to "ceil" for the lower endpoints
+     and "floor" for the upper.
 
 3. Expand each pair of the =N= pairs of bounds indices into a closed list of indices that span this range.  See suggestion below on this step.
 
@@ -51,9 +67,9 @@ wire crossing pattern.
 
 5. Append both to a growing =Uindex= and =Vindex= tensor
 
-7. Plug final =Uindex= and =Vindex= into Ray Grid Coordinates to get a corresponding =Windex= tensor
+6. Plug final =Uindex= and =Vindex= into Ray Grid Coordinates to get a corresponding =Windex= tensor
 
-8. Stack =Uindex=, =Vindex= and =Windex= to form =(N,3)= *cell basis tensor*.
+7. Stack =Uindex=, =Vindex= and =Windex= to form =(N,3)= *cell basis tensor*.
 
 Steps 2 and 3 can be accomplished by a simple loop over =NwireU=.  This may be
 acceptable as the construction need be done once and in principle can be saved

@@ -69,7 +69,7 @@ sig_kinds = ["splat", "osp", "spng"]
 wire_cell_config = config['wire_cell_config']
 
 def debug(*args, **kwds):
-    # return # MAKE QUIET
+    return # MAKE QUIET
     import sys
     sys.stderr.write(*args, **kwds)
     sys.stderr.write('\n')
@@ -278,15 +278,15 @@ rule all_mplots:
     input:
         expand(expand_detector(tier='mplots', ext='pdf'), sig_kind=['osp','spng'])
 
-rule all:
-    input:
-        rules.all_mplots.input, rules.all_plots.input
-
 rule all_dags:
     input:
         expand(rules.ssss_dag.output, detector=[config['detector']]),
         # expand(rules.simulate_dag.output, detector=[config['detector']]),
         # expand(rules.sigproc_dag.output, detector=[config['detector']])
+rule all:
+    input:
+        rules.all_mplots.input, rules.all_plots.input, rules.all_dags.input
+
         
 
 

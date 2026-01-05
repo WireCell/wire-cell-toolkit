@@ -3,6 +3,14 @@
 
 namespace WireCell::SPNG {
 
+    torch::Tensor to_spng_2d(const Point& pt)
+    {
+        torch::Tensor ret = torch::tensor({2}, torch::kDouble);
+        ret.index_put_({0}, pt.z());
+        ret.index_put_({1}, pt.y());
+        return ret;
+    }
+
     torch::Tensor to_spng_views(const WireCell::RayGrid::Coordinates& og,
                                 std::vector<int64_t> og_layer_indices)
     {

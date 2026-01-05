@@ -17,4 +17,9 @@ namespace WireCell::SPNG {
     torch::Tensor to_spng_views(const WireCell::RayGrid::Coordinates& og,
                                 std::vector<int64_t> og_layer_indices);
 
+    /// Convert 3D {x,y,z} point to SPNG RG 2D {z,y} point.
+    torch::Tensor to_spng_2d(const Point& pt);
+
+
 }
+

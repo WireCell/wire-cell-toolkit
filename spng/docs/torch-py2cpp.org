@@ -1,0 +1,288 @@
+#+TITLE: PyTorch vs. LibTorch Operations Reference
+
+This gives some (mostly llm generated) quick guidance on python/c++ equivalence with torch.  See also =WireCellSpng/Util.h= for some =std::= to =torch::= relationships.
+
+* Memory Management
+
+In Python, the garbage collector handles tensor lifetimes. In C++, LibTorch uses Intrusive Reference Counting (similar to =std::shared_ptr=). This means:
+
+- Returning a tensor from a function is cheap (it just copies the pointer).
+
+- If you need a deep copy of the data, you must explicitly call =.clone()=.
+
+* Slicing and indexing
+
+Slicing extracts a view of a tensor based on a range
+of indices. In LibTorch, the index method is the primary gateway for complex
+slicing, using a syntax very similar to Python's colon notation.
+
+Constraints: Usually returns a view (no copy) unless the indexing is "fancy" (non-contiguous indices).
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Select all rows, first two columns
+sub_tensor = tensor[:, :2]
+
+# Range with step: index 1 to 10 with step 2
+stepped = tensor[1:10:2]
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+
+using namespace torch::indexing;
+
+// Select all rows, first two columns
+auto sub_tensor = tensor.index({Slice(), Slice(None, 2)});
+
+// Range with step: index 1 to 10 with step 2
+auto stepped = tensor.index({Slice(1, 10, 2)});
+
+#+END_SRC
+
+Variants: index_select, narrow, select.
+
+* Accessing Sub-tensors (Rows, Columns, and Blocks)
+
+Extracting specific structural components of a 2D or 3D tensor.
+
+Constraints: These typically return views. Changing the sub-tensor will change the original tensor.
+
+Python (PyTorch)
+
+#+begin_src python
+# Get a specific row
+row = tensor[1, :]
+
+# Get a specific column
+col = tensor[:, 2]
+
+# Get a 2x2 block from top-left
+block = tensor[0:2, 0:2]
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+using namespace torch::indexing;
+
+// Get a specific row
+auto row = tensor.index({1, Slice()});
+
+// Get a specific column
+auto col = tensor.index({Slice(), 2});
+
+// Get a 2x2 block from top-left
+auto block = tensor.index({Slice(0, 2), Slice(0, 2)});
+#+end_src
+
+Variants: select(dim, index), slice(dim, start, end, step).
+
+* Setting and getting
+
+Setting and Getting Atomic Elements Accessing or modifying a single scalar value
+at a specific coordinate. In C++, while =.index()= works, for high-performance
+loops, Accessors or =.item<T>()= are preferred.
+
+Constraints: =.item()= and =.index()= involve overhead; for performance in C++, use =accessor<float, 2>()=.
+
+Python (PyTorch):
+#+BEGIN_SRC python
+# Get value
+val = tensor[0, 1].item()
+
+# Set value (In-place)
+tensor[0, 1] = 5.5
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+  // Get value
+  float val = tensor.index({0, 1}).item<float>();
+
+  // Set value (In-place)
+  tensor.index_put_({0, 1}, 5.5);
+
+  // Fast access (C++ only)
+  auto accessor = tensor.accessor<float, 2>();
+  accessor[0][1] = 5.5; 
+#+END_SRC
+
+* Squeeze and Unsqueeze
+
+Squeeze removes dimensions of size 1, while unsqueeze inserts a dimension of size 1 at a specified position.
+
+
+Constraints: Returns a view; the underlying data is shared.
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Remove all dims of size 1
+y = tensor.squeeze()
+
+# Add dim at index 0
+y = tensor.unsqueeze(0)
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+  // Remove all dims of size 1
+  auto y = tensor.squeeze();
+
+  // Add dim at index 0
+  auto y = tensor.unsqueeze(0);
+#+END_SRC
+
+* Permute and Transpose
+
+Changes the order of dimensions. transpose swaps two dimensions, while permute reorders all of them.
+
+Constraints: Returns a view. The resulting tensor is often non-contiguous in memory.
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Swap dims 0 and 1
+y = tensor.transpose(0, 1)
+
+# Reorder dims (H, W, C) -> (C, H, W)
+y = tensor.permute(2, 0, 1)
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+  // Swap dims 0 and 1 
+  auto y = tensor.transpose(0, 1); 
+
+  // Reorder dims 
+  auto y = tensor.permute({2, 0, 1});
+#+END_SRC
+
+Reshape and view
+
+View Both operations change the shape of the tensor without changing its data.
+
+Constraints: view requires the tensor to be contiguous. reshape will return a view if possible, but will copy data if the tensor is non-contiguous.
+
+Python (PyTorch): 
+
+#+BEGIN_SRC python
+  # Change shape to (2, 5)
+  y = tensor.view(2, 5)
+  y = tensor.reshape(-1, 10) 
+#+END_SRC
+
+C++ (LibTorch): 
+#+BEGIN_SRC cpp 
+  // Change shape to (2, 5) 
+  auto y = tensor.view({2, 5}); 
+  auto y = tensor.reshape({-1, 10}); 
+#+END_SRC
+
+* Concatenation and Stacking
+
+Joining multiple tensors along an existing dimension (cat) or a new one (stack).
+
+Constraints: Always causes a copy of the data into a new memory block.
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Join along dim 0
+
+z = torch.cat([t1, t2], dim=0)
+# Stack into new dim
+
+z = torch.stack([t1, t2], dim=0)
+#+END_SRC
+
+C++ (LibTorch): 
+
+#+BEGIN_SRC cpp
+ // Join along dim 0
+ auto z = torch::cat({t1, t2}, 0);
+ // Stack into new dim
+ auto z = torch::stack({t1, t2}, 0); 
+#+END_SRC
+
+* Gradients and Autograd
+
+This involves enabling or disabling gradient tracking and accessing the calculated gradients after a backward pass. In C++, we use a RAII-style guard (NoGradGuard) instead of Python's with statement.
+
+Constraints: Disabling gradients reduces memory consumption and speeds up computations during inference.
+Python (PyTorch)
+
+#+begin_src python
+# Enable gradient tracking
+x = torch.randn(3, 3, requires_grad=True)
+
+# Context manager to disable gradients
+with torch.no_grad():
+    y = x * 2
+
+# Backward pass
+loss.backward()
+
+# Access gradient
+print(x.grad)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Enable gradient tracking
+auto x = torch::randn({3, 3}, torch::requires_grad());
+
+// RAII guard to disable gradients
+{
+  torch::NoGradGuard no_grad;
+  auto y = x * 2;
+}
+
+// Backward pass
+loss.backward();
+
+// Access gradient
+std::cout << x.grad() << std::endl;
+#+end_src
+Related Operations: detach(), is_grad_enabled(), set_grad_enabled(bool).
+
+SPNG: See =ContextBase= and =TorchContext=.
+
+* Transform and map operations
+
+Applying functions across tensor elements. While PyTorch encourages vectorized operations, sometimes custom element-wise transformations are necessary.
+
+Constraints: =.map_()= is an in-place operation. Custom C++ transforms are significantly faster when using the =Tensor.apply_= method with a lambda.
+
+Python (PyTorch)
+
+#+begin_src python
+  # Element-wise absolute value
+  y = torch.abs(tensor)
+
+  # In-place fill
+  tensor.fill_(0.5)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+  // Element-wise absolute value
+  auto y = torch::abs(tensor);
+
+  // In-place fill
+  tensor.fill_(0.5);
+
+  // Custom element-wise transform (C++ specific)
+  tensor.for_each([](float& val) {
+      val = std::sin(val);
+  });
+#+end_src
+
