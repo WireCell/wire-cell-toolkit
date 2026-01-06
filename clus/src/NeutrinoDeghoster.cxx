@@ -10,6 +10,12 @@ namespace {
                    const std::pair<Facade::Cluster*, double>& b) {
         return (a.second > b.second);
     }
+    
+    // Helper function to sort segments by length in descending order
+    bool sortbysec1(const std::pair<SegmentPtr, double>& a,
+                    const std::pair<SegmentPtr, double>& b) {
+        return (a.second > b.second);
+    }
 }
 
 void PatternAlgorithms::order_clusters(Graph& graph, std::vector<Facade::Cluster*>& ordered_clusters, std::map<Facade::Cluster*, std::vector<SegmentPtr> >& map_cluster_to_segments, std::map<Facade::Cluster*, double>& map_cluster_total_length){
@@ -313,3 +319,248 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
     }
 }
 
+void PatternAlgorithms::order_segments(std::vector<SegmentPtr>& ordered_segments, std::vector<SegmentPtr>& segments){
+    // Clear output container
+    ordered_segments.clear();
+    
+    // Create vector of pairs (segment, length)
+    std::vector<std::pair<SegmentPtr, double>> temp_pair_vec;
+    for (auto seg : segments) {
+        double length = segment_track_length(seg);
+        temp_pair_vec.push_back(std::make_pair(seg, length));
+    }
+    
+    // Sort by length in descending order
+    std::sort(temp_pair_vec.begin(), temp_pair_vec.end(), sortbysec1);
+    
+    // Fill ordered_segments with sorted results
+    for (auto it = temp_pair_vec.begin(); it != temp_pair_vec.end(); ++it) {
+        ordered_segments.push_back(it->first);
+    }
+}
+
+void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+    // Order clusters by total segment length
+    std::map<Facade::Cluster*, std::vector<SegmentPtr>> map_cluster_to_segments;
+    std::map<Facade::Cluster*, double> map_cluster_total_length;
+    std::vector<Facade::Cluster*> ordered_clusters;
+    order_clusters(graph, ordered_clusters, map_cluster_to_segments, map_cluster_total_length);
+    
+    if (ordered_clusters.empty()) return;
+    
+    // Get first cluster's grouping to access wpids
+    auto* first_grouping = ordered_clusters[0]->grouping();
+    if (!first_grouping) return;
+    
+    // Build wpid_params
+    const auto& wpids = first_grouping->wpids();
+    std::map<WirePlaneId, std::tuple<Facade::geo_point_t, double, double, double>> wpid_params;
+    std::map<WirePlaneId, std::pair<Facade::geo_point_t, double>> wpid_U_dir, wpid_V_dir, wpid_W_dir;
+    std::set<int> apas;
+    Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+    
+    // Create global point clouds
+    auto global_point_cloud = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+    auto global_steiner_point_cloud = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+    auto global_skeleton_cloud = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+    
+    // Add points from clusters not in ordered list
+    for (auto cluster : all_clusters) {
+        if (map_cluster_total_length.find(cluster) == map_cluster_total_length.end()) {
+            global_point_cloud->add_points(Facade::make_points_cluster(cluster, wpid_params, true));
+        }
+    }
+    
+    if (global_point_cloud->get_points().size() == 0) return;
+    
+    double dis_cut = 1.2 * units::cm;
+    
+    // Process ordered clusters
+    for (size_t i = 0; i < ordered_clusters.size(); i++) {
+        Facade::Cluster* cluster = ordered_clusters[i];
+        
+        // Order segments within this cluster
+        auto it_cluster = map_cluster_to_segments.find(cluster);
+        if (it_cluster == map_cluster_to_segments.end()) continue;
+        
+        std::vector<SegmentPtr> ordered_segments;
+        order_segments(ordered_segments, it_cluster->second);
+        
+        // Process each segment
+        for (auto seg : ordered_segments) {
+            bool flag_add_seg = true;
+            
+            // Get segment properties
+            double medium_dQ_dx = segment_median_dQ_dx(seg);
+            double length = segment_track_length(seg);
+            
+            // Get vertices
+            auto edesc = seg->get_descriptor();
+            auto source_vdesc = boost::source(edesc, graph);
+            auto target_vdesc = boost::target(edesc, graph);
+            VertexPtr v1 = graph[source_vdesc].vertex;
+            VertexPtr v2 = graph[target_vdesc].vertex;
+            
+            // Count connections at each vertex
+            int start_n = boost::out_degree(source_vdesc, graph);
+            int end_n = boost::out_degree(target_vdesc, graph);
+            
+            // Check if this is a terminal segment with low dQ/dx
+            if ((start_n == 1 || end_n == 1) && medium_dQ_dx < 1.1 * 43e3 / units::cm && length > 3.6 * units::cm) {
+                int num_dead[3] = {0, 0, 0};
+                int num_unique[3] = {0, 0, 0};
+                int num_total_points = 0;
+                
+                // Check each fit point
+                for (const auto& fit : seg->fits()) {
+                    Facade::geo_point_t test_point = fit.point;
+                    num_total_points++;
+                    
+                    WirePlaneId test_wpid = dv->contained_by(test_point);
+                    int apa = test_wpid.apa();
+                    int face = test_wpid.face();
+                    
+                    // Get point in raw coordinates
+                    auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+                    double cluster_t0 = cluster->get_cluster_t0();
+                    Facade::geo_point_t p_raw = transform->backward(test_point, cluster_t0, face, apa);
+                    
+                    // Check U plane
+                    bool flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0);
+                    if (!flag_dead) {
+                        bool flag_in = false;
+                        
+                        auto results = global_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
+                        if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                        
+                        if (global_steiner_point_cloud->get_points().size() != 0) {
+                            results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
+                            if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                        }
+                        
+                        if (global_skeleton_cloud->get_points().size() != 0) {
+                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
+                            if (std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
+                        }
+                        
+                        if (!flag_in) num_unique[0]++;
+                    } else {
+                        num_dead[0]++;
+                    }
+                    
+                    // Check V plane
+                    flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1);
+                    if (!flag_dead) {
+                        bool flag_in = false;
+                        
+                        auto results = global_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
+                        if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                        
+                        if (global_steiner_point_cloud->get_points().size() != 0) {
+                            results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
+                            if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                        }
+                        
+                        if (global_skeleton_cloud->get_points().size() != 0) {
+                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
+                            if (std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
+                        }
+                        
+                        if (!flag_in) num_unique[1]++;
+                    } else {
+                        num_dead[1]++;
+                    }
+                    
+                    // Check W plane
+                    flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2);
+                    if (!flag_dead) {
+                        bool flag_in = false;
+                        
+                        auto results = global_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
+                        if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                        
+                        if (global_steiner_point_cloud->get_points().size() != 0) {
+                            results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
+                            if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                        }
+                        
+                        if (global_skeleton_cloud->get_points().size() != 0) {
+                            results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
+                            if (std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
+                        }
+                        
+                        if (!flag_in) num_unique[2]++;
+                    } else {
+                        num_dead[2]++;
+                    }
+                }
+                
+                // If all points overlap with existing clouds, mark for removal
+                if (num_unique[0] + num_unique[1] + num_unique[2] == 0) {
+                    flag_add_seg = false;
+                }
+
+                (void) num_total_points; // num_total_points is not used further
+            }
+            
+            if (flag_add_seg) {
+                // Add segment fits to skeleton cloud
+                std::vector<std::pair<Facade::geo_point_t, WirePlaneId>> point_plane_pairs;
+                for (const auto& fit : seg->fits()) {
+                    WirePlaneId wpid = dv->contained_by(fit.point);
+                    point_plane_pairs.emplace_back(fit.point, wpid);
+                }
+                global_skeleton_cloud->add_points(Facade::make_points_direct(cluster, dv, wpid_params, point_plane_pairs, true));
+            } else {
+                // Protect main vertex - don't remove segment if it's the only one connected to the main vertex
+                if (map_cluster_main_vertices.find(cluster) != map_cluster_main_vertices.end()) {
+                    VertexPtr main_vtx = map_cluster_main_vertices[cluster];
+                    
+                    // Check if this segment is connected to the main vertex
+                    auto edesc = seg->get_descriptor();
+                    auto source_vdesc = boost::source(edesc, graph);
+                    auto target_vdesc = boost::target(edesc, graph);
+                    VertexPtr v1 = graph[source_vdesc].vertex;
+                    VertexPtr v2 = graph[target_vdesc].vertex;
+                    
+                    // If segment connects to main vertex and it's the only segment at that vertex, keep it
+                    if ((v1 == main_vtx && boost::out_degree(source_vdesc, graph) == 1) ||
+                        (v2 == main_vtx && boost::out_degree(target_vdesc, graph) == 1)) {
+                        flag_add_seg = true;
+                    }
+                }
+                
+                if (flag_add_seg) {
+                    // Keep the segment to protect main vertex
+                    std::vector<std::pair<Facade::geo_point_t, WirePlaneId>> point_plane_pairs;
+                    for (const auto& fit : seg->fits()) {
+                        WirePlaneId wpid = dv->contained_by(fit.point);
+                        point_plane_pairs.emplace_back(fit.point, wpid);
+                    }
+                    global_skeleton_cloud->add_points(Facade::make_points_direct(cluster, dv, wpid_params, point_plane_pairs, true));
+                } else {
+                    // Remove segment
+                    remove_segment(graph, seg);
+                }
+            }
+        }
+        
+        // Add cluster points to global clouds after processing its segments
+        global_point_cloud->add_points(Facade::make_points_cluster(cluster, wpid_params, true));
+        global_steiner_point_cloud->add_points(Facade::make_points_cluster_steiner(cluster, wpid_params, true));
+    }
+    
+    // Clean up orphaned vertices
+    std::vector<VertexPtr> tmp_vertices;
+    auto [vbegin, vend] = boost::vertices(graph);
+    for (auto vit = vbegin; vit != vend; ++vit) {
+        VertexPtr vtx = graph[*vit].vertex;
+        if (vtx && boost::out_degree(*vit, graph) == 0) {
+            tmp_vertices.push_back(vtx);
+        }
+    }
+    
+    for (auto vtx : tmp_vertices) {
+        remove_vertex(graph, vtx);
+    }
+}
