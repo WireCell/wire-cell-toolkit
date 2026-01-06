@@ -26,6 +26,10 @@ namespace WireCell::SPNG::Ragged {
         auto lengths = ends - starts;
         auto total_length = lengths.sum().item<int64_t>();
     
+        if (total_length == 0) {
+            return torch::empty({0}, ranges.options());
+        }
+
         auto range_offsets = torch::cumsum(lengths, 0) - lengths;
     
         auto deltas = torch::ones({total_length}, ranges.options());
@@ -38,8 +42,25 @@ namespace WireCell::SPNG::Ragged {
             auto previous_ends = ends.slice(0, 0, -1);
             auto jump_values = current_starts - previous_ends;
             
-            auto jump_indices = range_offsets.slice(0, 1);
-            deltas.index_put_({jump_indices}, jump_values);
+            // The required delta is jump_values + 1, because V[i] = V[i-1] + delta[i].
+            // V[i] = starts[k], V[i-1] = ends[k-1] - 1.
+            // delta[i] = starts[k] - (ends[k-1] - 1) = (starts[k] - ends[k-1]) + 1
+            auto required_deltas = jump_values + 1;
+            
+            auto jump_indices_all = range_offsets.slice(0, 1);
+
+            // Filter indices that are within bounds [0, total_length - 1]
+            // Indices equal to total_length correspond to the start of an empty range 
+            // that follows the last element, and must be excluded.
+            auto total_length_tensor = torch::tensor({total_length}, ranges.options());
+            auto mask = jump_indices_all < total_length_tensor;
+            
+            auto jump_indices = jump_indices_all.masked_select(mask);
+            auto filtered_required_deltas = required_deltas.masked_select(mask);
+
+            if (jump_indices.size(0) > 0) {
+                deltas.index_put_({jump_indices}, filtered_required_deltas);
+            }
         }
     
         return torch::cumsum(deltas, 0);
