@@ -51,17 +51,20 @@ wire crossing pattern.
 1. Form tensor =wire_endpoints= of shape =(NwireU, 2, 3)= holding the two 3D U-wire
    endpoints.  Keep wires in pitch order.
 
-2. Use =RayGrid::Coordinates::point_pitches()= to find tensor =wire_vrange= of shape
-   =(NwireU, 2)= holding the pair of V-view wire indices closest to endpoints.
+2. Use =RayGrid::Coordinates::point_indices_view()= to get indices of the two
+   V-wires that cross each U-wire just before the U-wire endpoints.
 
-   - Note: we really want V-view indices for V-view wires crossing each U-view
-     while =point_pitches()= can return indices beyond the end points.  Also,
-     =point_pitches()= calculates pitches in all three views.  We really want a
-     =point_pitches_view(points, view, round_method)= where =round_method= gives
-     "round", "ceil", "floor".  We'd then want to "ceil" for the lower endpoints
-     and "floor" for the upper.
+   - This function is called with ~view=3~ to pick up V-view (0/1 is horiz/vert
+     views).
 
-3. Expand each pair of the =N= pairs of bounds indices into a closed list of indices that span this range.  See suggestion below on this step.
+   - For the V-wire with the low V-index to physically cross a U-wire, we must
+     round its pitch via "ceil" and for the high V-index we must "floor".  In
+     general it is not trivial to predict which endpoint is on the low or high
+     V-index end.  Find V-view indices for both endpoints with "floor", from
+     them determine which is the low end and add 1 to these low indices.
+
+3. Expand each pair of the =N= pairs of bounds indices into a closed list of
+   indices that span this range.  See suggestion below on this step.
 
 4. Expand the corresponding U-wire index by repeating it for each in the V-wire range of indices.
 

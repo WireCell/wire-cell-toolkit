@@ -10,7 +10,7 @@ In Python, the garbage collector handles tensor lifetimes. In C++, LibTorch uses
 
 - If you need a deep copy of the data, you must explicitly call =.clone()=.
 
-* Slicing and indexing
+* Indexing, slicing and selecting
 
 Slicing extracts a view of a tensor based on a range
 of indices. In LibTorch, the index method is the primary gateway for complex
@@ -42,7 +42,48 @@ auto stepped = tensor.index({Slice(1, 10, 2)});
 
 #+END_SRC
 
-Variants: index_select, narrow, select.
+=select()= is a more explicit alternative to basic slicing. For example, selecting index 2 on dimension 0 of a 3D tensor (D,H,W) results in a 2D tensor (H,W).
+
+Constraints:
+
+- View :: =select()= returns a view of the original tensor. No data is copied; modifications to the selection will affect the original tensor.
+
+- Dimensionality :: The resulting tensor has one fewer dimension than the original.
+
+Python (PyTorch)
+
+#+begin_src python
+# Select the 3rd row (index 2) of a 2D tensor
+# Equivalent to tensor[2, :]
+row = tensor.select(dim=0, index=2)
+
+# Select the 1st channel of a (C, H, W) image tensor
+# Equivalent to tensor[0, :, :]
+channel = tensor.select(0, 0)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Select the 3rd row (index 2) of a 2D tensor
+// Arguments: (dimension, index)
+auto row = tensor.select(0, 2);
+
+// Select the 1st channel of a (C, H, W) image tensor
+auto channel = tensor.select(0, 0);
+#+end_src
+
+Related Operations and Variants
+
+- =index_select(dim, index_tensor)= :: Unlike select(), which takes a single integer, index_select takes a 1D tensor of indices. This allows you to pick multiple, non-contiguous slices (e.g., rows 0, 2, and 5). Note that index_select usually results in a copy, not a view.
+
+- =unfold()= :: Extracts multiple overlapping slices at once (useful for sliding window operations).
+
+- =unbind(dim)= :: Removes a dimension and returns a tuple/vector of all slices along that dimension.
+
+
+
+
 
 * Accessing Sub-tensors (Rows, Columns, and Blocks)
 
@@ -285,4 +326,233 @@ C++ (LibTorch)
       val = std::sin(val);
   });
 #+end_src
+
+* Ranges
+
+Both arange and linspace are factory functions used to create 1D tensors with sequences of numbers. While they look similar, the key difference lies in how they determine the "gap" between numbers.
+
+** =arange=
+
+=arange()= (Array Range) generates values starting from a start point, up to (but excluding) an end point, incrementing by a specific step.
+
+Constraints:
+
+- Exclusive :: The end value is typically not included.
+
+- Floating Point Risk :: Using =arange= with floating-point steps can lead to inconsistent results due to precision errors (sometimes the end value might be included or excluded unexpectedly).
+
+Python (PyTorch)
+
+#+begin_src python
+# Values from 0 to 4 (step defaults to 1)
+a = torch.arange(5)
+
+# Values from 1 to 2.5 with step 0.5
+# Output: tensor([1.0, 1.5, 2.0])
+b = torch.arange(1, 2.5, 0.5)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Values from 0 to 4
+auto a = torch::arange(5);
+
+// Values from 1 to 2.5 with step 0.5
+// Note: Arguments are (start, end, step)
+auto b = torch::arange(1, 2.5, 0.5);
+#+end_src
+
+Related Operations: =torch.range= (deprecated in Python, as it is inclusive), =torch.logspace=, =torch.linspace=.
+
+** =linspace=
+
+=linspace()= (Linear Space) generates a specific number of steps (points) evenly spaced between a start and end point.
+
+Constraints:
+
+- Inclusive :: Unlike arange, the end value is always included by default.
+
+- Copy :: Creates a new tensor in memory.
+
+- Precision :: Generally safer than =arange= for floating-point sequences because it calculates the step size based on the total number of points requested.
+
+Python (PyTorch)
+
+#+begin_src python
+# 5 points between 3 and 10
+# Output: tensor([ 3.00,  4.75,  6.50,  8.25, 10.00])
+a = torch.linspace(3, 10, steps=5)
+
+# 100 points (default) between 0 and 1
+b = torch.linspace(0, 1)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// 5 points between 3 and 10
+// Arguments: (start, end, steps)
+auto a = torch::linspace(3, 10, 5);
+
+// In C++, the 'steps' argument is required (no default 100)
+auto b = torch::linspace(0, 1, 100);
+#+end_src
+
+** Comparison table
+
+| Feature       | =arange()=                      | =linspace()=                     |
+|---------------+---------------------------------+----------------------------------|
+| Primary Input | step size                       | Total number of steps            |
+| End Point     | Exclusive: =[start, end)=         | Inclusive: =[start, end]=          |
+| Best Use Case | Integer sequences / Counters    | Floating-point ranges / Graphing |
+| Safety        | Prone to float precision issues | High precision for float ranges  |
+|---------------+---------------------------------+----------------------------------|
+
+* Clamping
+
+The clamp operation (also known as "clipping" in other libraries) takes every element x in a tensor and applies the following logic:
+f(x)=min(max(x,min_val),max_val)
+
+Constraints:
+
+    Out-of-place: clamp returns a new tensor.
+
+    In-place: clamp_ (with an underscore) modifies the tensor in memory without a copy.
+
+    Partial clamping: You can provide only a minimum (clamping the lower bound) or only a maximum (clamping the upper bound).
+
+Python (PyTorch)
+
+#+begin_src python
+# Out-of-place: Clamping between 0 and 1
+y = tensor.clamp(min=0.0, max=1.0)
+
+# In-place: Modifying the original tensor
+tensor.clamp_(min=-0.5, max=0.5)
+
+# Only clamp the lower bound (values < 0 become 0)
+lower_only = tensor.clamp(min=0.0)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src c++
+// Out-of-place: Clamping between 0 and 1
+auto y = tensor.clamp(0.0, 1.0);
+
+// In-place: Modifying the original tensor
+tensor.clamp_( -0.5, 0.5);
+
+// Only clamp the lower bound
+// Use c10::nullopt or {} to skip a bound in C++
+auto lower_only = tensor.clamp(0.0, c10::nullopt);
+#+end_src
+
+Related Operations and Variants
+
+- =torch.clip= :: This is an alias for clamp, introduced to provide naming consistency for users coming from NumPy.
+
+- =torch.where= :: Useful if you want to clamp values to different limits based on a condition rather than global scalar values.
+
+- =torch.threshold= :: Commonly used in activation functions (like ReLU); it replaces values below a threshold with a specific value.
+
+* Device and dtype
+
+** Direct Specification in Factory Functions
+
+When creating a tensor from scratch (e.g., =zeros()=, =ones()=, =rand()=, =arange()=), you specify the properties at the moment of allocation.
+
+- Constraints :: In C++, factory functions use a =TensorOptions= object. This is more verbose than Python’s keyword arguments but follows a clear "builder" pattern.
+
+Python (PyTorch)
+
+#+begin_src python
+# Create a float16 tensor on the first GPU
+x = torch.zeros((3, 3), dtype=torch.float16, device="cuda:0")
+
+# Create an int32 tensor on CPU
+y = torch.ones((2, 2), dtype=torch.int32, device="cpu")
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Create a float16 tensor on the first GPU
+auto x = torch::zeros({3, 3}, 
+    torch::TensorOptions().dtype(torch::kFloat16).device(torch::kCUDA, 0));
+
+// Create an int32 tensor on CPU
+auto y = torch::ones({2, 2}, 
+    torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU));
+#+end_src
+
+** Setting/Changing Type and Device on Existing Tensors
+
+If a tensor already exists, you can move it between devices or change its precision.
+
+Constraints: These operations generally return a copy if the device or dtype changes. If the target device and dtype are the same as the source, PyTorch usually returns the original tensor (no-op).
+Python (PyTorch)
+
+#+begin_src python
+# Move to GPU
+x_gpu = x.to("cuda")
+
+# Change dtype
+x_float = x.to(torch.float32)
+
+# Combined move and change
+x_final = x.to(device="cuda", dtype=torch.float64)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Move to GPU
+auto x_gpu = x.to(torch::kCUDA);
+
+// Change dtype
+auto x_float = x.to(torch::kFloat32);
+
+// Combined move and change
+auto x_final = x.to(torch::kCUDA, torch::kFloat64);
+#+end_src
+
+** The device and dtype Rules for Existing Tensors
+
+Often you want a new tensor to automatically match the properties of an existing one (e.g., when creating a mask or a temporary buffer).
+
+Constraints: Using device=tensor.device is the safest way to ensure code works on both CPU and multi-GPU setups without hardcoding IDs.
+
+Python (PyTorch)
+
+#+begin_src python
+# Create a new tensor with the same properties as 'x'
+mask = torch.ones_like(x)
+
+# Manually matching properties
+new_t = torch.randn(x.shape, device=x.device, dtype=x.dtype)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Create a new tensor with the same properties as 'x'
+auto mask = torch::ones_like(x);
+
+// Manually matching properties using options()
+auto new_t = torch::randn(x.sizes(), x.options());
+#+end_src
+
+** Common Type Mappings
+
+| Feature      | Python                        | C++                               |
+|--------------+-------------------------------+-----------------------------------|
+| 32-bit Float | =torch.float32= or =torch.float=  | =torch::kFloat32= or =torch::kFloat=  |
+| 64-bit Float | =torch.float64= or =torch.double= | =torch::kFloat64= or =torch::kDouble= |
+| 32-bit Int   | =torch.int32= or =torch.int=      | =torch::kInt32= or =torch::kInt=      |
+| 64-bit Int   | =torch.int64= or =torch.long=     | =torch::kInt64= or =torch::kLong=     |
+| Boolean      | =torch.bool=                    | =torch::kBool=                      |
+|--------------+-------------------------------+-----------------------------------|
+
 

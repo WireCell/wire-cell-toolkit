@@ -173,7 +173,7 @@ namespace WireCell::SPNG::RayGrid {
          * @param ray1 A scalar tensor or of shape (nbatch,) giving ray indices for first ray.
          * @param view2 A scalar tensor or of shape (nbatch,) giving view indices for second ray.
          * @param ray2 A scalar tensor or of shape (nbatch,) giving ray indices for second ray.
-         * @param view3 A scalar tensor or of shape (nboatch,) representing the third view index.
+         * @param view3 A scalar tensor or of shape (nbatch,) representing the third view index.
          * @return A tensor representing the pitch location.
          */
         torch::Tensor pitch_location(torch::Tensor view1, torch::Tensor ray1,
@@ -181,14 +181,19 @@ namespace WireCell::SPNG::RayGrid {
                                      torch::Tensor view3) const;
 
         /**
-         * @brief Returns the index of the closest ray at a location in the view that
-         * is less than or equal to the given pitch.
+         * @brief Returns the index of the ray near the given pitch coordinate.
          *
          * @param pitch A tensor representing the pitch value(s).
          * @param view A scalar tensor representing the view index.
+         * @param rounding The rounding method.
          * @return A tensor of long integer values representing the pitch index.
+         *
+         * The default rounding method is "kFloor" which will give the nearest
+         * index for the ray that is below the pitch location.  Use "kCeil" to
+         * get the index above the pitch location or "kRound" for nearest.
          */
-        torch::Tensor pitch_index(const torch::Tensor& pitch, const torch::Tensor& view) const;
+        torch::Tensor pitch_index(const torch::Tensor& pitch, const torch::Tensor& view,
+                                  Rounding rounding = Rounding::kFloor) const;
 
 
         /**

@@ -271,11 +271,24 @@ namespace WireCell::SPNG::RayGrid {
             ray2.to(b_val.dtype()).to(b_val.device()) * a_val_12 +
             ray1.to(b_val.dtype()).to(b_val.device()) * a_val_21;    }
 
-    torch::Tensor Coordinates::pitch_index(const torch::Tensor& pitch_val, const torch::Tensor& view_idx) const {
+    torch::Tensor Coordinates::pitch_index(const torch::Tensor& pitch_val,
+                                           const torch::Tensor& view_idx,
+                                           Rounding rd) const {
         // return torch.floor(pitch/self.pitch_mag[view]).to(torch.long)
         torch::Tensor view_idx_long = view_idx.to(torch::kLong);
         torch::Tensor mag_at_view = pitch_mag.index({view_idx_long});
-        return torch::floor(pitch_val / mag_at_view).to(torch::kLong);
+        torch::Tensor indices = pitch_val / mag_at_view;
+
+        if (rd == Rounding::kCeil) {
+            indices = torch::ceil(indices);
+        }
+        else if (rd == Rounding::kRound) {
+            indices = torch::round(indices);
+        }
+        else {
+            indices = torch::floor(indices);
+        }
+        return indices.to(torch::kLong);
     }
 
     void Coordinates::init(const torch::Tensor& pitches_user)
