@@ -452,6 +452,83 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
     return dpc_points;
 }
 
+std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_steiner(const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap){
+    if (!cluster) {
+        SPDLOG_WARN("make_points_cluster_steiner: null cluster return empty points");
+        return {};
+    }
+
+    // Check if steiner point cloud exists
+    if (!cluster->has_pc("steiner_pc")) {
+        SPDLOG_WARN("make_points_cluster_steiner: cluster has no steiner_pc");
+        return {};
+    }
+
+    const auto& steiner_pc = cluster->get_pc("steiner_pc");
+    const auto& coords = cluster->get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    const auto& wpid_array = steiner_pc.get("wpid")->elements<WirePlaneId>();
+    
+    const size_t num_points = x_coords.size();
+    std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+    dpc_points.reserve(num_points);
+
+    // Cache commonly referenced WPIDs and their params to avoid map lookups
+    std::unordered_map<int, std::tuple<geo_point_t, double, double, double>> cached_params;
+    
+    for (size_t ipt = 0; ipt < num_points; ++ipt) {
+        geo_point_t pt(x_coords[ipt], y_coords[ipt], z_coords[ipt]);
+        const auto wpid = wpid_array[ipt];
+        int wpid_ident = wpid.ident();
+        
+        // Check cache first, then populate if needed
+        auto param_it = cached_params.find(wpid_ident);
+        if (param_it == cached_params.end()) {
+            auto wpid_it = wpid_params.find(wpid);
+            if (wpid_it == wpid_params.end()) {
+                raise<RuntimeError>("make_points_cluster_steiner: missing wpid params for wpid %s", wpid.name());
+            }
+            param_it = cached_params.emplace(wpid_ident, wpid_it->second).first;
+        }
+        
+        const auto &[drift_dir, angle_u, angle_v, angle_w] = param_it->second;
+        const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+
+        DynamicPointCloud::DPCPoint point;
+        point.x = pt.x();
+        point.y = pt.y();
+        point.z = pt.z();
+        point.wpid = wpid.ident();
+        point.cluster = cluster;
+        point.blob = nullptr;  // Steiner points don't have blob associations
+        
+        // Pre-allocate vectors with correct size
+        point.x_2d.resize(3);
+        point.y_2d.resize(3);
+        point.wpid_2d.resize(3);
+        
+        if (flag_wrap){
+            fill_wrap_points(cluster, pt, wpid, point.x_2d, point.y_2d, point.wpid_2d);
+        }else{
+            for (size_t pindex = 0; pindex < 3; ++pindex) {
+                point.x_2d[pindex].push_back(point.x);
+                point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
+                point.wpid_2d[pindex].push_back(wpid.ident());
+            }
+        }
+
+        // Steiner points don't have wire indices, use bogus values
+        point.wind = wind_bogus;
+        point.dist_cut = dist_cut_bogus;
+
+        dpc_points.push_back(std::move(point));
+    }
+
+    return dpc_points;
+}
+
 
 std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const Cluster *cluster, const IDetectorVolumes::pointer dv, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, std::vector<std::pair<geo_point_t,WirePlaneId>>& points_info, bool flag_wrap){
      std::vector<DynamicPointCloud::DPCPoint> dpc_points;

@@ -1038,7 +1038,7 @@ namespace WireCell::Clus::PR {
     void Shower::calculate_kinematics_long_muon(std::set<SegmentPtr>& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
         // Get particle type from start segment
         int particle_type = abs(m_start_segment->particle_info()->pdg());
-        double particle_mass = m_start_segment->particle_info()->mass();
+        // double particle_mass = m_start_segment->particle_info()->mass();
         
         unset_flags(ShowerFlags::kKinematics);
         

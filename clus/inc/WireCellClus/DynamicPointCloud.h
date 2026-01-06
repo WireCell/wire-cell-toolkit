@@ -89,6 +89,10 @@ namespace WireCell::Clus::Facade {
     make_points_cluster(const Cluster *cluster,
                         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false);
 
+    std::vector<DynamicPointCloud::DPCPoint>
+    make_points_cluster_steiner(const Cluster *cluster,
+                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false);
+
     std::vector<DynamicPointCloud::DPCPoint> make_points_cluster_skeleton(
         const Cluster *cluster, const IDetectorVolumes::pointer dv,
         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
