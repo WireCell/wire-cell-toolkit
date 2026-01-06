@@ -9,7 +9,7 @@ namespace WireCell::SPNG::CellBasis {
     torch::Tensor wire_endpoints(const IWire::vector& wires_vec)
     {
         int64_t nwires = wires_vec.size();
-        torch::Tensor wires_ten = torch::tensor({nwires, 2, 2}, torch::kDouble);
+        torch::Tensor wires_ten = torch::zeros({nwires, 2, 2}, torch::kDouble);
         for (int64_t index=0; index<nwires; ++index) {
             const auto& ray = wires_vec[index]->ray();
             wires_ten.index_put_({index,0,0},  ray.first.z());
@@ -67,6 +67,12 @@ namespace WireCell::SPNG::CellBasis {
             uhi_in_v = utails_in_v;
         }        
         auto uinv_ranges = torch::stack({ulo_in_v, uhi_in_v}, 1);
+        const int64_t NwiresV = iplanes[1]->wires().size();
+
+        // Note, these values represent half-open ranges so we allow NwiresV as
+        // a value.  But it is possible to get a u-in-v that is even more
+        // outside the physical range.
+        uinv_ranges.clamp_(0, NwiresV);
 
         /// The U column of the cell basis tensor
         torch::Tensor cell_u = Ragged::range_index_expansion(uinv_ranges);
@@ -83,6 +89,8 @@ namespace WireCell::SPNG::CellBasis {
 
         // In principle, U/V crossings can have a nearest W-view index that is not physical.
         const int64_t NwiresW = iplanes[2]->wires().size();
+
+        // These are indices, so must be in the physical range.  
         cell_w.clamp_(0, NwiresW-1);
         
         return torch::stack({cell_u, cell_v, cell_w}, 1);

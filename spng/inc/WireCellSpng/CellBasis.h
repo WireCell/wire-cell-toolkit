@@ -13,7 +13,8 @@ namespace WireCell::SPNG::CellBasis {
 
     
     /// Get wire endpoints as (nwires, 2-endpoints, 2-dimensions) tensor
-    /// suitable for RayGrid.
+    /// suitable for RayGrid.  Besides packing to tensor, a coordinate mapping
+    /// is applied to the input points to get final dim columns: (X,Y,Z)->(Z,Y).
     torch::Tensor wire_endpoints(const IWire::vector& wires_vec);
     
 }

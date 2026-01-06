@@ -32,14 +32,17 @@ C++ (LibTorch):
 
 #+BEGIN_SRC cpp
 
-using namespace torch::indexing;
+  using namespace torch::indexing;
 
-// Select all rows, first two columns
-auto sub_tensor = tensor.index({Slice(), Slice(None, 2)});
+  // Select all rows, first two columns
+  auto sub_tensor = tensor.index({Slice(), Slice(None, 2)});
 
-// Range with step: index 1 to 10 with step 2
-auto stepped = tensor.index({Slice(1, 10, 2)});
+  // Range with step: index 1 to 10 with step 2
+  auto stepped = tensor.index({Slice(1, 10, 2)});
 
+  // Preconstruct the indexing
+  std::initializer_list<TensorIndex> sub_index = {Slice(), Slice(None, 2)};
+  auto sub_tensor_same = tensor.index(sub_index);
 #+END_SRC
 
 =select()= is a more explicit alternative to basic slicing. For example, selecting index 2 on dimension 0 of a 3D tensor (D,H,W) results in a 2D tensor (H,W).
@@ -191,6 +194,9 @@ Python (PyTorch):
 # Swap dims 0 and 1
 y = tensor.transpose(0, 1)
 
+# shorthand
+y = tensor.T
+
 # Reorder dims (H, W, C) -> (C, H, W)
 y = tensor.permute(2, 0, 1)
 #+END_SRC
@@ -200,6 +206,9 @@ C++ (LibTorch):
 #+BEGIN_SRC cpp
   // Swap dims 0 and 1 
   auto y = tensor.transpose(0, 1); 
+
+  // shorthand
+  auto y = tensor.t();
 
   // Reorder dims 
   auto y = tensor.permute({2, 0, 1});
