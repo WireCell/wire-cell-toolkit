@@ -564,3 +564,39 @@ void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*
         remove_vertex(graph, vtx);
     }
 }
+
+
+void PatternAlgorithms::deghosting(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
+    // Call deghost_clusters
+    deghost_clusters(graph, all_clusters, track_fitter, dv);
+    
+    // Call deghost_segments
+    deghost_segments(graph, map_cluster_main_vertices, all_clusters, track_fitter, dv);
+    
+    // Clean up map_cluster_main_vertices by removing clusters whose main vertices no longer have any segments
+    std::set<Facade::Cluster*> temp_clusters;
+    for (auto it = map_cluster_main_vertices.begin(); it != map_cluster_main_vertices.end(); it++) {
+        Facade::Cluster* cluster = it->first;
+        VertexPtr vertex = it->second;
+        
+        // Check if this vertex still has segments connected to it by checking the graph
+        auto [vbegin, vend] = boost::vertices(graph);
+        bool vertex_has_connections = false;
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            if (graph[*vit].vertex == vertex) {
+                if (boost::out_degree(*vit, graph) > 0) {
+                    vertex_has_connections = true;
+                }
+                break;
+            }
+        }
+        if (!vertex_has_connections) {
+            temp_clusters.insert(cluster);
+        }
+    }
+    
+    // Remove the clusters that no longer have valid main vertices
+    for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
+        map_cluster_main_vertices.erase(*it);
+    }
+}
