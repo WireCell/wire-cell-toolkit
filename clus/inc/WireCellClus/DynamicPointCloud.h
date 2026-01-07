@@ -56,6 +56,8 @@ namespace WireCell::Clus::Facade {
         const std::unordered_map<size_t, size_t> &kd2d_l2g(const int plane, const int face, const int apa) const;
         const std::unordered_map<size_t, std::vector<size_t>> &kd2d_g2l(const int plane, const int face, const int apa) const;
 
+        geo_point_t get_center_point_radius(const geo_point_t &p_test, const double radius) const;
+
         /// @brief: kd2d().radius(radius)
         /// @return: [dist, Cluster, global point_index]
         std::vector<std::tuple<double, const Cluster *, size_t>> get_2d_points_info(const geo_point_t &p,
@@ -66,6 +68,7 @@ namespace WireCell::Clus::Facade {
         /// @brief: dist, Cluster, global point_index
         std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info(const geo_point_t &p, const int plane,
                                                                               const int face, const int apa) const;
+        
 
         std::pair<double, double> hough_transform(const geo_point_t &origin, const double dis) const;
         geo_point_t vhough_transform(const geo_point_t &origin, const double dis) const;

@@ -479,9 +479,26 @@ namespace WireCell::Clus::PR {
 
             
         if (seg->has_particle_info()) {
-            // Copy particle info if it exists
-            segment_cal_4mom(seg1, seg->particle_info()->pdg(), particle_data, recomb_model);
-            segment_cal_4mom(seg2, seg->particle_info()->pdg(), particle_data, recomb_model);
+            // Copy particle info with 4-momentum for seg1
+            int pdg = seg->particle_info()->pdg();
+            auto four_momentum1 = segment_cal_4mom(seg1, pdg, particle_data, recomb_model);
+            auto pinfo1 = std::make_shared<Aux::ParticleInfo>(
+                pdg,
+                particle_data->get_particle_mass(pdg),
+                particle_data->pdg_to_name(pdg),
+                four_momentum1
+            );
+            seg1->particle_info(pinfo1);
+            
+            // Copy particle info with 4-momentum for seg2
+            auto four_momentum2 = segment_cal_4mom(seg2, pdg, particle_data, recomb_model);
+            auto pinfo2 = std::make_shared<Aux::ParticleInfo>(
+                pdg,
+                particle_data->get_particle_mass(pdg),
+                particle_data->pdg_to_name(pdg),
+                four_momentum2
+            );
+            seg2->particle_info(pinfo2);
         }
 
         // Copy dynamic point clouds if they exist

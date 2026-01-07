@@ -1109,12 +1109,18 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     
                     // Determine particle type
                     if (flag_shower_in && current_sg->dirsign() == 0 && !is_shower) {
-                        segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                        current_sg->particle_info(pinfo);
                     } else if (flag_shower_in && length < 2.0*units::cm && !is_shower) {
-                        segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                        current_sg->particle_info(pinfo);
                     } else if (flag_shower_in && current_sg->has_particle_info() && 
                               (std::abs(current_sg->particle_info()->pdg()) == 13 || current_sg->particle_info()->pdg() == 0)) {
-                        segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                        current_sg->particle_info(pinfo);
                     } else {
                         auto pair_result = calculate_num_daughter_showers(graph, prev_vtx, current_sg);
                         auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
@@ -1165,7 +1171,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             }
                             
                             if (flag_change) {
-                                segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                                auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                                current_sg->particle_info(pinfo);
                             }
                         } else if (current_pdg == 11 && num_daughter_showers <= 2 && !flag_shower_in && 
                                   !current_sg->flags_any(SegmentFlags::kShowerTopology) && 
@@ -1175,14 +1183,18 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             double direct_length = segment_track_direct_length(current_sg);
                             if (direct_length >= 34*units::cm || 
                                 (direct_length < 34*units::cm && direct_length > 0.93 * length)) {
-                                segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
+                                current_sg->particle_info(pinfo);
                             }
                         } else if (current_pdg == 11 && current_sg->flags_any(SegmentFlags::kShowerTrajectory) && 
                                   num_daughter_showers == 1 && !flag_only_showers) {
                             auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
                             if (pair_result1.second > 3*length && pair_result1.second - length > 12*units::cm) {
                                 current_sg->unset_flags(SegmentFlags::kShowerTrajectory);
-                                segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
+                                current_sg->particle_info(pinfo);
                             }
                         }
                     }
@@ -1192,13 +1204,19 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                         int current_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
                         if (current_pdg == 0 && !is_shower) {
                             if (flag_only_showers) {
-                                segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                                auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                                current_sg->particle_info(pinfo);
                             } else {
                                 double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
                                 if (dqdx_ratio > 1.4) {
-                                    segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
+                                    auto four_momentum = segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
+                                    auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
+                                    current_sg->particle_info(pinfo);
                                 } else {
-                                    segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                    auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                    auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
+                                    current_sg->particle_info(pinfo);
                                 }
                             }
                         }
@@ -1216,9 +1234,13 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     for (auto in_shower : in_showers) {
                         double dqdx_ratio = segment_median_dQ_dx(in_shower) / (43e3 / units::cm);
                         if (dqdx_ratio > 1.3) {
-                            segment_cal_4mom(in_shower, 2212, particle_data, recomb_model);
+                            auto four_momentum = segment_cal_4mom(in_shower, 2212, particle_data, recomb_model);
+                            auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
+                            in_shower->particle_info(pinfo);
                         } else {
-                            segment_cal_4mom(in_shower, 211, particle_data, recomb_model);
+                            auto four_momentum = segment_cal_4mom(in_shower, 211, particle_data, recomb_model);
+                            auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
+                            in_shower->particle_info(pinfo);
                         }
                         in_shower->unset_flags(SegmentFlags::kShowerTrajectory);
                         in_shower->unset_flags(SegmentFlags::kShowerTopology);
@@ -1291,7 +1313,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             
             if (total_length > 45*units::cm && max_length > 35*units::cm && acc_segments.size() > 1) {
                 for (auto acc_seg : acc_segments) {
-                    segment_cal_4mom(acc_seg, 13, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(acc_seg, 13, particle_data, recomb_model);
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
+                    acc_seg->particle_info(pinfo);
                     acc_seg->unset_flags(SegmentFlags::kShowerTrajectory);
                     acc_seg->unset_flags(SegmentFlags::kShowerTopology);
                     segments_in_long_muon.insert(acc_seg);
@@ -1358,9 +1382,13 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 if (n_proton > 0) {
                     double dqdx_ratio = segment_median_dQ_dx(sg) / (43e3 / units::cm);
                     if (dqdx_ratio > 1.3) {
-                        segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
+                        sg->particle_info(pinfo);
                     } else {
-                        segment_cal_4mom(sg, 211, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, 211, particle_data, recomb_model);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
+                        sg->particle_info(pinfo);
                     }
                 }
             }
@@ -1369,7 +1397,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         // Convert non-muon candidates to pions
         for (auto pion_sg : pion_sgs) {
             if (pion_sg == muon_sg) continue;
-            segment_cal_4mom(pion_sg, 211, particle_data, recomb_model);
+            auto four_momentum = segment_cal_4mom(pion_sg, 211, particle_data, recomb_model);
+            auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
+            pion_sg->particle_info(pinfo);
         }
     }
     
@@ -1387,7 +1417,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             if (!sg->dir_weak()) {
                 // Strong direction - calculate 4-momentum
                 int pdg = sg->particle_info()->pdg();
-                segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(pdg, particle_data->get_particle_mass(pdg), particle_data->pdg_to_name(pdg), four_momentum);
+                sg->particle_info(pinfo);
             } else {
                 // Weak direction - need to check endpoint conditions
                 // Find the two vertices of this segment
@@ -1491,7 +1523,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 
                 if (should_calc) {
                     int pdg = sg->particle_info()->pdg();
-                    segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(pdg, particle_data->get_particle_mass(pdg), particle_data->pdg_to_name(pdg), four_momentum);
+                    sg->particle_info(pinfo);
                 }
             }
         }
@@ -3005,7 +3039,9 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::ma
                 sg->particle_info()->set_mass(particle_data->get_particle_mass(2212));
                 
                 // Calculate 4-momentum
-                segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
+                sg->particle_info(pinfo);
             }
         }
     }

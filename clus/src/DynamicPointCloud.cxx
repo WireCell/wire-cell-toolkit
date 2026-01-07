@@ -186,6 +186,32 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     }
 }
 
+geo_point_t DynamicPointCloud::get_center_point_radius(const geo_point_t &p_test, const double radius) const{
+    auto &kd3d = this->kd3d();
+    
+    // Create query point
+    std::vector<double> query = {p_test.x(), p_test.y(), p_test.z()};
+    
+    // Perform radius search (NFKDVec uses squared distance)
+    auto results = kd3d.radius(radius * radius, query);
+    
+    // Calculate center point
+    geo_point_t center(0, 0, 0);
+    int ncount = 0;
+    
+    for (const auto &[idx, _] : results) {
+        const auto &pt = m_points[idx];
+        center.set(center.x() + pt.x, center.y() + pt.y, center.z() + pt.z);
+        ncount++;
+    }
+    
+    if (ncount > 0) {
+        center.set(center.x() / ncount, center.y() / ncount, center.z() / ncount);
+    }
+    
+    return center;
+}
+
 
 
 
