@@ -358,6 +358,12 @@ namespace WireCell::Clus {
         std::map<int, IAnodePlane::pointer> get_all_anodes() const;
 
         /**
+         * Get the grouping associated with this TrackFitting instance
+         * @return Pointer to Grouping, or nullptr if not set
+         */
+        Facade::Grouping* grouping() const { return m_grouping; }
+
+        /**
          * Get channel number for a specific wire location
          * Uses hybrid caching for optimal performance
          * @param apa APA number
