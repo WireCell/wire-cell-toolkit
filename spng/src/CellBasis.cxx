@@ -1,6 +1,7 @@
 #include "WireCellSpng/CellBasis.h"
 #include "WireCellSpng/RayGridOG.h"
 #include "WireCellSpng/Ragged.h"
+#include "WireCellSpng/Util.h"
 
 using namespace torch::indexing;
 
@@ -96,5 +97,89 @@ namespace WireCell::SPNG::CellBasis {
         return torch::stack({cell_u, cell_v, cell_w}, 1);
     }
 
+
+    IChannel::vector wan_ordered_channels(IAnodePlane::pointer anode, std::vector<int> wpid_nums)
+    {
+        IChannel::vector all_chids;
+
+        for (int wpid_num : wpid_nums) {
+
+            WirePlaneId wpid(std::abs(wpid_num));
+            auto face = anode->face(wpid.face());
+            auto plane = face->planes()[wpid.index()];
+
+            IChannel::vector chids;
+            for (const auto& ich : plane->channels()) {
+                chids.push_back(ich);
+            }
+            if (wpid_num < 0) {
+                std::reverse(chids.begin(), chids.end());
+            }
+            all_chids.insert(all_chids.end(), chids.begin(), chids.end());
+        }
+        return all_chids;
+    }
+    
+    std::vector<size_t> nwires_wpid(IAnodePlane::pointer anode, const std::vector<int>& wpid_nums)
+    {
+        std::vector<size_t> sizes;
+        for (int wpid_num : wpid_nums) {
+            WirePlaneId wpid(std::abs(wpid_num));
+            auto face = anode->face(wpid.face());
+            auto plane = face->planes()[wpid.index()];
+            sizes.push_back(plane->wires().size());
+        }
+        return sizes;
+    }
+
+    IChannel::vector wire_channels(IWire::vector wires, const IChannel::vector& chans)
+    {
+        std::unordered_map<int, size_t> ich2ind;
+        const size_t nchans = chans.size();
+        for (size_t cind=0; cind<nchans; ++cind) {
+            ich2ind[chans[cind]->ident()] = cind;
+        }
+
+        const size_t nwires = wires.size();
+        IChannel::vector out(nwires, nullptr);
+
+        for (size_t wind=0; wind<nwires; ++wind) {
+            auto wire = wires[wind];
+            size_t cind = ich2ind[wire->channel()];
+            out[wind] = chans[cind];
+        }
+        return out;
+    }
+
+    torch::Tensor wire_channel_index(IWire::vector wires, const IChannel::vector& chans)
+    {
+        std::unordered_map<int, size_t> ich2ind;
+        const size_t nchans = chans.size();
+        for (size_t cind=0; cind<nchans; ++cind) {
+            ich2ind[chans[cind]->ident()] = cind;
+        }
+
+        const size_t nwires = wires.size();
+        std::vector<int64_t> out(nwires, -1);
+
+        for (size_t wind=0; wind<nwires; ++wind) {
+            auto wire = wires[wind];
+            auto it = ich2ind.find(wire->channel());
+            if (it != ich2ind.end()) {
+                out[wind] = it->second;
+            }
+        }
+        return to_tensor(out);
+    }
+
+    torch::Tensor channel_idents(const IChannel::vector& chans)
+    {
+        const size_t nchans = chans.size();
+        std::vector<int> chids(nchans);
+        for (size_t ind=0; ind<nchans; ++ind) {
+            chids[ind] = chans[ind]->ident();
+        }
+        return to_tensor(chids);
+    }
 
 }
