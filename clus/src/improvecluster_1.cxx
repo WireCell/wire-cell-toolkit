@@ -362,7 +362,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     for (const auto& [start, end]: dead_uchs_range) {
         for (int ch = start; ch < end; ++ch) {
             for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 0);
+                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 0);  // this should be wire index ... , so a mismatch between MicroBooNE and other detectors, need to be fixed at some points ...
                 std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
                 const auto& skd = cluster.kd2d(apa, face, 0);
                 auto ret_matches = skd.knn(1, query_point);
@@ -374,7 +374,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     for (const auto& [start, end]: dead_vchs_range) {
         for (int ch = start; ch < end; ++ch) {
             for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 1);
+                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 1);    // this should be wire index ...
                 std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
                 const auto& skd = cluster.kd2d(apa, face, 1);
                 auto ret_matches = skd.knn(1, query_point);
@@ -385,7 +385,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     for (const auto& [start, end]: dead_wchs_range) {
         for (int ch = start; ch < end; ++ch) {
             for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 2);
+                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 2);   // this should be wire index ...
                 std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
                 const auto& skd = cluster.kd2d(apa, face, 2);
                 auto ret_matches = skd.knn(1, query_point);
@@ -403,7 +403,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     for (const auto& [time_ch, charge_info] : map_u_tcc) {
         int time_slice = time_ch.first;
         int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 0);
+        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 0);     // this should be wire index ...
         std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
         const auto& skd = cluster.kd2d(apa, face, 0);
         auto ret_matches = skd.knn(1, query_point);
@@ -415,7 +415,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     for (const auto& [time_ch, charge_info] : map_v_tcc) {
         int time_slice = time_ch.first;
         int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 1);
+        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 1);   // this should be wire index ...
         std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
         const auto& skd = cluster.kd2d(apa, face, 1);
         auto ret_matches = skd.knn(1, query_point);
@@ -427,7 +427,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     for (const auto& [time_ch, charge_info] : map_w_tcc) {
         int time_slice = time_ch.first;
         int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 2);
+        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 2);    // this should be wire index ...
         std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
         const auto& skd = cluster.kd2d(apa, face, 2);
         auto ret_matches = skd.knn(1, query_point);
