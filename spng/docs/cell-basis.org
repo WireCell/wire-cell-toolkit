@@ -5,7 +5,8 @@
 SPNG [[https://github.com/WireCell/spng/issues/9][issue #9]] resulted in =CrossViews= and =CrossViewsExtract= to produce MP2/MP3
 images for input to DNNROI.  As fast as it is, it is one of the slower nodes
 when the graph runs on the GPU.  An alternative approach may be faster still.
-This document is meant to provide an outline for its implementation.
+This document is meant to provide an outline for its implementation using the
+concept of a "cell basis".
 
 * Bases
 
@@ -51,131 +52,139 @@ wire crossing pattern.
 1. Form tensor =wire_endpoints= of shape =(NwireU, 2, 3)= holding the two 3D U-wire
    endpoints.  Keep wires in pitch order.
 
-2. Use =RayGrid::Coordinates::point_indices_view()= to get indices of the two
-   V-wires that cross each U-wire just before the U-wire endpoints.
+2. Find the "footprint" of each U-wire in the V-view wire indices as a pair of
+   low-side and high-side V-wire indices.
 
-   - This function is called with ~view=3~ to pick up V-view (0/1 is horiz/vert
-     views).
+3. Expand each U-wire V-footprint into an explicit range of V-wire indices to make ~Vindex~.
 
-   - For the V-wire with the low V-index to physically cross a U-wire, we must
-     round its pitch via "ceil" and for the high V-index we must "floor".  In
-     general it is not trivial to predict which endpoint is on the low or high
-     V-index end.  Find V-view indices for both endpoints with "floor", from
-     them determine which is the low end and add 1 to these low indices.
+4. Expand each U-wire index by repeating it as many V-wire indices in its footprint to make ~Uindex~.
 
-3. Expand each pair of the =N= pairs of bounds indices into a closed list of
-   indices that span this range.  See suggestion below on this step.
+5. Plug the =Uindex= and =Vindex= tensors into Ray Grid Coordinates to get a
+   corresponding =Windex= tensor.
 
-4. Expand the corresponding U-wire index by repeating it for each in the V-wire range of indices.
+6. Stack =Uindex=, =Vindex= and =Windex= to form =(N,3)= *cell basis tensor*.
 
-5. Append both to a growing =Uindex= and =Vindex= tensor
+Note, steps 2, 3 and 4 represent a ragged-array problem.  See resulting
+=cell_basis()= implementation for a vectorized solution.
 
-6. Plug final =Uindex= and =Vindex= into Ray Grid Coordinates to get a corresponding =Windex= tensor
+* Using a cell basis tensor
 
-7. Stack =Uindex=, =Vindex= and =Windex= to form =(N,3)= *cell basis tensor*.
+The cell basis tensor, as constructed above, holds wire indices relevant to each
+wire plane in each tensor column.  Each row represents one "cell".  It is
+straight-forward to construct other values on the cell basis given the initial
+wire-index cell basis tensor.
 
-Steps 2 and 3 can be accomplished by a simple loop over =NwireU=.  This may be
-acceptable as the construction need be done once and in principle can be saved
-to file.  Some amount of vectorizing can be done as outlined in a section below.
+** Channel-index cell basis tensor
 
-* Cell basis values
-
-It may be useful to form 1D vectors of length =Ncells= (eg charge per cell) but
-for MP2/MP3 we form vectors on the full =(Ncells,3)= basis in the following way.
-
-1. Iterate on faces
-2. Form =w2cU= for U-view etc for V and W in the face.  These are in the 1D wire-basis tensor and give the channel index for each wire.
-3. For a given measurement vector =MchanU= in the U-view channel basis, ~MwireU = MchanU[w2cU]~ projects it to the wire basis (again, =MwireU= is for one face).
-4. Apply a threshold scalar value =TU= to determine if the wire is in an ROI: ~RwireU = MwireU > TU~.  Threshold is, eg, based on a given number of RMS sigma with ~MchanU~ being Wiener-filtered decon.
-5. Use the first column of the Cell Basis tensor =C= (still for one face) to expand: =RcellU = RwireU[C[:,0]]=
-6. Repeat to get =RcellV= and =RcellW= tensors.
-7. The element-wise =and(RcellU,RcellV,RcellW)= gives MP3 values in the cell basis.
-8. The element-wise =and(not(RcellU),RcellV,RcellW)= gives U-MP2 values in the cell basis, etc for V-MP2
-9. Contract from *cell basis* to *wire basis*.  This requires a reduction algorithm as multiple cells contribute to the same wire.  For MPn, the Boolean OR should be applied.  That is, any cell of value 1 should make its wires value 1.
-10. Contract from *wire basis* to *channel basis*.  This also requires an OR.
-11. Contract *channel basis* vectors over the two faces.
-
-* A note on the contraction
-
-Going from cell basis to wire to channel and then to each face represents a
-rather large loss of information.  At the same time, the information at on cell
-basis has redundancies.  It is possible that keeping information at the cell (or
-wire) basis may be beneficial for some novel downstream use.  
-
-* Code needed.
-
-- [ ] Cell basis construction
-- [ ] functions to project and contract across the bases.
-
-
-* Optimization
-
-** Vectorize U and V part of Cell basis
-
-Here is an example the produces the =Uindex= ("row IDs") and =Vindex= ("values") in
-a vectorized way.  It's from Gemini 2.5 flash but tested to work.
+Given three tensors spanning the wires of each plane that hold channel index
+numbers, one can get the channel indices for each cell as
 
 #+begin_src c++
-#include <torch/torch.h>
-#include <iostream>
-
-struct ExpandedRanges {
-    torch::Tensor values;
-    torch::Tensor row_ids;
-};
-
-ExpandedRanges expand_ranges_with_ids(torch::Tensor ranges) {
-    auto starts = ranges.select(1, 0);
-    auto ends = ranges.select(1, 1);
-    
-    // 1. Calculate lengths (N)
-    auto lengths = ends - starts + 1;
-    auto total_length = lengths.sum().item<int64_t>();
-    
-    // 2. Generate Row IDs (Vectorized)
-    // This creates [0, 0, 0, 1, 1, 1] if lengths are [3, 3]
-    auto row_ids = torch::repeat_interleave(
-        torch::arange(ranges.size(0), ranges.options()), 
-        lengths
-    );
-
-    // 3. Generate Values using the Delta Method
-    auto range_offsets = torch::cumsum(lengths, 0) - lengths;
-    
-    // We start with a tensor of 1s (the default increment)
-    auto deltas = torch::ones({total_length}, ranges.options());
-    
-    // Fix the starting point of the very first range
-    deltas.index_put_({0}, starts[0]);
-
-    // Fix the "jumps" at the start of every subsequent range
-    if (ranges.size(0) > 1) {
-        // Jump = Current Start - Previous End
-        auto current_starts = starts.slice(0, 1);
-        auto previous_ends = ends.slice(0, 0, -1);
-        auto jump_values = current_starts - previous_ends;
-        
-        auto jump_indices = range_offsets.slice(0, 1);
-        deltas.index_put_({jump_indices}, jump_values);
-    }
-    
-    auto values = torch::cumsum(deltas, 0);
-    
-    return {values, row_ids};
-}
-
-int main() {
-    // Input: [1, 3] and [10, 12]
-    torch::Tensor ranges = torch::tensor({{1, 3}, {10, 12}}, torch::kLong);
-    
-    auto result = expand_ranges_with_ids(ranges);
-    
-    std::cout << "Values:\n" << result.values << std::endl;
-    // Expected: [1, 2, 3, 10, 11, 12]
-    
-    std::cout << "Row IDs:\n" << result.row_ids << std::endl;
-    // Expected: [0, 0, 0, 1, 1, 1]
-    
-    return 0;
-}
+  std::vector<torch::Tensor> wire_to_channel_indices = ...;
+  auto cell_channels = CellBasis::index(cell_wires, wire_to_channel_indices);
 #+end_src
+
+Where each tensor in the vector spans the number of wires in the corresponding
+plane.  In general, multiple wires correspond to the same channel.  Depending on
+the detector design, this should still leave channel-cell trios unique in the
+basis.  
+
+The =Aux::WireTools= and ~SPNG::CellBasis~ namespaces provide functions to construct the mapping.
+
+#+begin_src c++
+  // Define order of inter-face and intra-face channels.  Also defines the plane.
+  const std::vector<int>& wpid_nums = {wipd0.ident(), wpid1.ident()};
+
+  // Get channels in WAN order governed by wpid_nums
+  IChannel::vector channels = WireTools::wan_ordered_channels(anode, wpid_nums);
+
+  // Get the wires for one face.  This is in WIP order.
+  IWire::vector wires_face0 = anode->faces()[0]->wires();
+
+  // Get channels in wire order.  Note, this may have duplicate channels eg in the
+  // case of wrapped APA wires.
+  IChannel::vector wc_face0 = wire_channels(wires_face0, channels);
+
+  // Get a indexing map to convert to channels.
+  torch::Tensor wc_map = wire_channel_index(wires_face0, wc_face0);
+
+  // etc for face 1
+  // etc for other planes
+
+#+end_src
+
+The =wc_map= can then be passed to =CellBasis::index()= to convert an wire index
+cell basis tensor to a channel index one.
+
+Likewise, you can produce a cell basis tensor holding non-index values such as
+measured charge in channel by using a vector of tensors mapping channel index to
+channel charge content.
+
+Applying a threshold to the values of that charge cell basis tensor gives
+channel level ROIs and then applying Boolean operators you can construct MP2/MP3
+values.  For example, MP3 on the channel basis is formed by a logical AND across
+the three columns.  This results in a Boolean =(Ncell,1)= tensor.  This single
+tensor can be interpreted as providing each of the U, V and W columns in order
+to map MP3 values back to U, V and W channels.  You can then use the original
+channel index cell basis tensor to index a column of a 2D frame array, setting
+ROI values.
+
+But, first, given the many-wire to one-channel mapping, each column may have
+channels represented more than once.  And, because channels span both faces
+while wires span only one, some channels will not be represented.
+
+To handle this redundancy and omission a boolean operation must be defined to
+resolve the redundancy (eg Boolean OR) and a default value (eg False) must be
+defined to set on unrepresented channels.  A "scatter" operation with logical
+reduction using an "add trick" can then be applied.
+
+#+begin_src c++
+// Assuming:
+// torch::Tensor index; // 1D, kLong, values in [0, N-1]
+// torch::Tensor data;  // 1D, kBool, same size as index
+// int64_t N;           // The target range size (total number of channels)
+
+// 1. Initialize result tensor with zeros (false)
+// We use kInt8 or kInt32 for the reduction, as kBool doesn't support sum reduction
+auto result_int = torch::zeros({N}, torch::kInt32);
+
+// 2. Convert Boolean data to integers for summation
+// true -> 1, false -> 0
+auto data_int = data.to(torch::kInt32);
+
+// 3. Scatter Addition
+// For every i, result_int[index[i]] += data_int[i]
+// accumulate=true is key: it ensures duplicate indices are summed
+result_int.index_put_({index}, data_int, /*accumulate=*/true);
+
+// 4. Convert back to Boolean
+// Any value > 0 was effectively (true OR true OR ...)
+auto result = result_int > 0;
+#+end_src
+
+The equivalent for Boolean AND:
+
+#+begin_src cpp
+
+// 1. Count total occurrences of each index
+auto total_counts = torch::zeros({N}, torch::kInt32);
+auto ones = torch::ones_like(index, torch::kInt32);
+total_counts.index_put_({index}, ones, /*accumulate=*/true);
+
+// 2. Count 'true' occurrences for each index
+auto true_counts = torch::zeros({N}, torch::kInt32);
+true_counts.index_put_({index}, data.to(torch::kInt32), /*accumulate=*/true);
+
+// 3. Boolean AND condition: 
+// The index must have appeared at least once, and all appearances were 'true'
+auto result = (true_counts == total_counts) & (total_counts > 0);
+#+end_src
+
+After producing a final result in the full channel basis, this would be repeated
+for cells on the other face and the two results combined (eg, another Boolean
+OR).
+
+Likewise, an MP2 cell basis tensor can be formed for, say, U, by the Boolean
+operation (NOT U) AND V AND W applied to the columns of the thresholded charge
+cell tensor.  As MP2 targets one plane, then the resulting 1 column tensor is
+interpreted only as providing U plane channel ROI information.

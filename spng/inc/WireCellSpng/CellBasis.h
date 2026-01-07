@@ -1,7 +1,7 @@
 #pragma once
 
 #include "WireCellSpng/RayGrid.h"
-#include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IAnodeFace.h"
 
 namespace WireCell::SPNG::CellBasis {
 
@@ -17,50 +17,31 @@ namespace WireCell::SPNG::CellBasis {
     /// is applied to the input points to get final dim columns: (X,Y,Z)->(Z,Y).
     torch::Tensor wire_endpoints(const IWire::vector& wires_vec);
     
-    /// @brief Enumerate channel IDENT numbers (chids) in channel INDEX (WAN) order.
-    ///
-    /// This returns channels in wire-attachment number (WAN, aka
-    /// IChannel::index()) order for the given WirePlaneId (WPID) numbers.  The
-    /// WPID number may be signed and a negative WPID number is given to reverse
-    /// the "natural" order as provided by IWirePlane::channels().
-    ///
-    /// @param anode A pointer to IAnodePlane.
-    /// @param wpid_nums A vector of SIGNED WirePlaneId number.
-    /// @return Vector of IChannel::pointer
-    ///
-    /// A WPID number (absolute value) can be produced with WirePlaneId::ident()
-    /// or in Jsonnet with wirecell.WirePlaneId().  The "apa" number is ignored
-    /// as the anode is given explicitly.
-    ///
-    /// Note, the intended use is to return channels in a common plane that are
-    /// ordered "around/across" two-faced anodes.  However, caller is free to
-    /// call with wpid_nums that span different planes.
-    IChannel::vector wan_ordered_channels(IAnodePlane::pointer anode, const std::vector<int>& wpid_nums);
-    // fixme: this is generic and should go into aux
-
-    /// Return the ordered number of wires in the given wpids.
-    ///
-    /// This is useful in order to partition range that spans multiple faces or planes.
-    std::vector<size_t> nwires_wpid(IAnodePlane::pointer anode, const std::vector<int>& wpid_nums);
-    // fixme: this is generic and should go into aux
-
-    /// @brief Return subset of given channels corresponding to and ordered by
-    /// the wires.
-    ///
-    /// @param wires The ordered wires to consider.
-    /// @param chans The ordered channels to consider.
-    /// @return Vector of channels of same length as the vector of wires.
-    ///
-    /// If a wire's channel is not provided, a nullptr entry will be produced for that wire.
-    ///
-    /// See nwires_wpid() for the ingredients to partition your wires into per face blocks.
-    IChannel::vector wire_channels(IWire::vector wires, const IChannel::vector& chans);
-    // fixme: this is generic and should go into aux
-
     /// Return a 1D tensor holding channel IDs
     torch::Tensor channel_idents(const IChannel::vector& chans);
 
     /// Return a 1D tensor holding the index into chans for each in wires.
     torch::Tensor wire_channel_index(IWire::vector wires, const IChannel::vector& chans);
+
+    /// Use a cell basis index tensor to index a set of data tensors.
+    ///
+    /// @param basis A cell basis tensor holding indices.
+    /// @param data A vector of tensors indexed by the indices.
+    ///
+    /// This works by indexing each vector in indices with the corresponding
+    /// column in basis.
+    ///
+    /// Each data tensor must span the indices of the corresponding column.
+    ///
+    /// Examples:
+    ///
+    /// The basis tensor holds the wire indices for each plane in a cell and the
+    /// data tensor holds channel indices for each wire.  The function returns a
+    /// new basis tensor holding the channel indices for each cell.
+    ///
+    /// The basis tensor holds channel indices for each cell and the data
+    /// tensors hold charge for each channel.  The result is a basis tensor
+    /// holding a trio of charge for each cell.
+    torch::Tensor index(torch::Tensor basis, std::vector<torch::Tensor>& data);
 
 }

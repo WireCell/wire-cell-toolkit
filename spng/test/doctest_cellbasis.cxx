@@ -4,6 +4,7 @@
 #include "WireCellSpng/Util.h"
 
 #include "WireCellAux/Testing.h"
+#include "WireCellAux/WireTools.h"
 
 
 #include "WireCellIface/IWirePlane.h"
@@ -22,6 +23,7 @@
 
 using namespace WireCell;
 using namespace WireCell::SPNG;
+using namespace WireCell::Aux;
 using namespace torch::indexing;
 
 #ifndef M_PI
@@ -154,69 +156,8 @@ DOCTEST_TEST_SUITE("CellBasis") {
         }
     }
 
-    DOCTEST_TEST_CASE("wan_ordered_channels and nwires_wpid") {
-        spdlog::info("Testing CellBasis::wan_ordered_channels and nwires_wpid");
-
-        auto anode = get_anode();
-        
-        const int nplanes = 3;
-        for (int iplane_index = 0; iplane_index < nplanes; ++iplane_index) {
-        
-            std::vector<int> wpid_nums;
-            size_t nwires_expected = 0;
-            size_t nchans_expected = 0;
-            std::vector<size_t> nwires_per_face_expected;
-            for (auto iface : anode->faces()) {
-                auto iplane = iface->planes()[iplane_index];
-                DOCTEST_REQUIRE(iplane);
-                const auto& iwires = iplane->wires();
-
-                auto wpid = iwires[0]->planeid();
-                int wpid_num = wpid.ident();
-                DOCTEST_REQUIRE(wpid_num > 0);
-                wpid_nums.push_back(wpid_num);
-                nwires_expected += iwires.size();
-                nwires_per_face_expected.push_back(iwires.size());
-
-                nchans_expected += iplane->channels().size();
-            }                
-
-            DOCTEST_REQUIRE( wpid_nums.size() > 0 );
-            DOCTEST_REQUIRE( nwires_expected > 0 );
-            DOCTEST_REQUIRE( nchans_expected > 0 );
-
-            auto chans_by_wan = CellBasis::wan_ordered_channels(anode, wpid_nums);
-
-            DOCTEST_REQUIRE( nchans_expected == chans_by_wan.size() );
-            DOCTEST_REQUIRE( nwires_per_face_expected == CellBasis::nwires_wpid(anode, wpid_nums));
-
-        }
-    }
-
-    DOCTEST_TEST_CASE("channel_idents") {
-        spdlog::info("Testing CellBasis::channel_idents");
-        auto anode = get_anode();
-
-        auto face0 = anode->face(0);
-        auto plane0 = face0->plane(0);
-        
-        IChannel::vector chans;
-        for (const auto& ich : plane0->channels()) {
-            chans.push_back(ich);
-        }
-        
-        torch::Tensor idents_ten = CellBasis::channel_idents(chans);
-        
-        DOCTEST_CHECK(idents_ten.sizes().vec() == std::vector<int64_t>{(int64_t)chans.size()});
-        DOCTEST_CHECK(idents_ten.dtype() == torch::kInt);
-        
-        for (size_t i=0; i<chans.size(); ++i) {
-            DOCTEST_CHECK(idents_ten[i].item<int>() == chans[i]->ident());
-        }
-    }
-
     DOCTEST_TEST_CASE("wire_channels and wire_channel_index") {
-        spdlog::info("Testing CellBasis::wire_channels and wire_channel_index");
+        spdlog::info("Testing WireTools::wire_channels and wire_channel_index");
         auto anode = get_anode();
 
         const int nplanes = 3;
@@ -238,7 +179,7 @@ DOCTEST_TEST_SUITE("CellBasis") {
             }
 
             
-            IChannel::vector wc_all = CellBasis::wire_channels(all_wires, all_chans);
+            IChannel::vector wc_all = WireTools::wire_channels(all_wires, all_chans);
             torch::Tensor wci_all = CellBasis::wire_channel_index(all_wires, all_chans);
         
             DOCTEST_CHECK(wc_all.size() == all_wires.size());
@@ -262,7 +203,7 @@ DOCTEST_TEST_SUITE("CellBasis") {
                 subset_chans.insert(subset_chans.end(), all_chans.begin() + 1, all_chans.end());
             }
         
-            IChannel::vector wc_subset = CellBasis::wire_channels(all_wires, subset_chans);
+            IChannel::vector wc_subset = WireTools::wire_channels(all_wires, subset_chans);
             torch::Tensor wci_subset = CellBasis::wire_channel_index(all_wires, subset_chans);
 
             DOCTEST_CHECK(wc_subset.size() == all_wires.size());
@@ -295,5 +236,95 @@ DOCTEST_TEST_SUITE("CellBasis") {
             DOCTEST_CHECK(nwires_no_channel <= max_segments[iplane_index]);
         }
     }
-}
 
+    DOCTEST_TEST_CASE("channel_idents") {
+        spdlog::info("Testing WireTools::channel_idents");
+        auto anode = get_anode();
+
+        auto face0 = anode->face(0);
+        auto plane0 = face0->plane(0);
+        
+        IChannel::vector chans;
+        for (const auto& ich : plane0->channels()) {
+            chans.push_back(ich);
+        }
+        
+        torch::Tensor idents_ten = CellBasis::channel_idents(chans);
+        
+        DOCTEST_CHECK(idents_ten.sizes().vec() == std::vector<int64_t>{(int64_t)chans.size()});
+        DOCTEST_CHECK(idents_ten.dtype() == torch::kInt);
+        
+        for (size_t i=0; i<chans.size(); ++i) {
+            DOCTEST_CHECK(idents_ten[i].item<int>() == chans[i]->ident());
+        }
+    }
+
+    DOCTEST_TEST_CASE("index") {
+        spdlog::info("Testing CellBasis::index");
+
+        // 1. Define basis tensor (N_cells, N_planes)
+        // 4 cells, 2 planes
+        torch::Tensor basis = torch::tensor({{0, 1},
+                                             {1, 0},
+                                             {2, 1},
+                                             {0, 2}}, torch::kLong);
+        
+        // 2. Define data tensors (indexed by basis columns)
+        // Data for plane 0 (size 3, indices 0, 1, 2 used)
+        torch::Tensor data0 = torch::tensor({10, 11, 12}, torch::kInt);
+        // Data for plane 1 (size 3, indices 0, 1, 2 used)
+        torch::Tensor data1 = torch::tensor({20, 21, 22}, torch::kInt);
+
+        std::vector<torch::Tensor> data = {data0, data1};
+
+        // 3. Call CellBasis::index
+        torch::Tensor result = CellBasis::index(basis, data);
+
+        // 4. Verify shape and content
+        DOCTEST_CHECK(result.sizes().vec() == std::vector<int64_t>{2, 4});
+        DOCTEST_CHECK(result.dtype() == torch::kInt);
+
+        // Expected result:
+        // Plane 0: [10, 11, 12, 10]
+        // Plane 1: [21, 20, 21, 22]
+        
+        torch::Tensor expected = torch::tensor({{10, 11, 12, 10},
+                                                {21, 20, 21, 22}}, torch::kInt);
+
+        DOCTEST_CHECK(torch::equal(result, expected));
+
+        // Test case 2: Different data types and sizes
+        
+        // 3 planes, 3 cells
+        basis = torch::tensor({{5, 0, 10},
+                               {6, 1, 11},
+                               {5, 0, 10}}, torch::kLong);
+
+        // Data 0 (size 7, indices 5, 6 used) - kDouble
+        torch::Tensor data0_d = torch::arange(7, torch::kDouble); // [0.0, 1.0, ..., 6.0]
+        // Data 1 (size 2, indices 0, 1 used) - kFloat
+        torch::Tensor data1_f = torch::tensor({100.0f, 101.0f}, torch::kFloat);
+        // Data 2 (size 12, indices 10, 11 used) - kLong
+        torch::Tensor data2_l = torch::arange(12, torch::kLong) * 100; // [0, 100, ..., 1100]
+
+        data = {data0_d, data1_f, data2_l};
+        result = CellBasis::index(basis, data);
+
+        // Expected result shape: (3, 3)
+        DOCTEST_CHECK(result.sizes().vec() == std::vector<int64_t>{3, 3});
+        
+        // Result dtype should be the promotion of kDouble, kFloat, kLong, which is kDouble
+        DOCTEST_CHECK(result.dtype() == torch::kDouble); 
+
+        // Expected content:
+        // Plane 0 (indices 5, 6, 5): [5.0, 6.0, 5.0]
+        // Plane 1 (indices 0, 1, 0): [100.0, 101.0, 100.0]
+        // Plane 2 (indices 10, 11, 10): [1000.0, 1100.0, 1000.0]
+
+        expected = torch::tensor({{5.0, 6.0, 5.0},
+                                  {100.0, 101.0, 100.0},
+                                  {1000.0, 1100.0, 1000.0}}, torch::kDouble);
+
+        DOCTEST_CHECK(torch::allclose(result, expected));
+    }
+}

@@ -12,6 +12,127 @@ In Python, the garbage collector handles tensor lifetimes. In C++, LibTorch uses
 
 * Indexing, slicing and selecting
 
+* Simple indexing
+
+You can pass multiple tensors to index into multiple dimensions simultaneously. This is often called "Coordinate Indexing."
+
+Python (PyTorch)
+
+#+begin_src python
+# Select elements at (0,0) and (1,1)
+rows = torch.tensor([0, 1])
+cols = torch.tensor([0, 1])
+result = data[rows, cols]
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+auto rows = torch::tensor({0, 1}, torch::kLong);
+auto cols = torch::tensor({0, 1}, torch::kLong);
+
+// Note: Pass both tensors in the initializer list
+auto result = data.index({rows, cols});
+#+end_src
+
+
+** Indexing tensors with integer tensors
+
+When you index a tensor A with another tensor B containing integers, you are essentially performing a "lookup" where the output contains the elements of A at the positions specified by B.
+
+Constraints:
+
+    Copy vs. View: Unlike basic slicing, indexing with a tensor typically results in a copy of the data, not a view. This is because the selected elements are often not stored contiguously in memory.
+
+    Dimensions: If you pass a 1D tensor of indices to a 2D tensor, it selects those specific rows.
+
+    In-place: In Python, you can use tensor[indices] = values. In C++, you must use .index_put_().
+
+Python (PyTorch)
+
+#+begin_src python
+# Source tensor
+data = torch.tensor([[10, 20], [30, 40], [50, 60]])
+
+# Index tensor (select row 0 and row 2)
+indices = torch.tensor([0, 2])
+
+# Perform indexing
+result = data[indices] 
+# Output: tensor([[10, 20], [50, 60]])
+
+# In-place update
+data[indices] = torch.tensor([[1, 2], [3, 4]])
+#+end_src
+
+C++ (LibTorch)
+
+In C++, you pass the index tensor inside the {} initializer list of the .index() method.
+
+#+begin_src cpp
+// Source tensor
+auto data = torch::tensor({{10, 20}, {30, 40}, {50, 60}});
+
+// Index tensor
+auto indices = torch::tensor({0, 2}, torch::kLong);
+
+// Perform indexing
+auto result = data.index({indices});
+
+// In-place update
+data.index_put_({indices}, torch::tensor({{1, 2}, {3, 4}}));
+#+end_src
+
+Multiple index tensors can be passed.  If you pass two tensors, indices_dim0 and indices_dim1, to a 2D tensor, LibTorch pairs them up. The result will contain: output[i] = source[indices_dim0[i], indices_dim1[i]]
+
+Constraints:
+
+- Shapes :: The index tensors must have the same shape, or be broadcastable to the same shape.
+
+- Dtype :: The index tensors must be of type torch::kLong (Int64).
+
+- Copying :: This operation returns a copy of the data, not a view, because the elements being accessed are typically not contiguous in memory.
+
+Python (PyTorch)
+
+#+begin_src python
+data = torch.tensor([[10, 11], 
+                     [20, 21]])
+
+rows = torch.tensor([0, 1])
+cols = torch.tensor([1, 0])
+
+# Selects (0,1) and (1,0)
+result = data[rows, cols] 
+# Output: tensor([11, 20])
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+auto data = torch::tensor({{10, 11}, 
+                           {20, 21}});
+
+auto rows = torch::tensor({0, 1}, torch::kLong);
+auto cols = torch::tensor({1, 0}, torch::kLong);
+
+// Pass a list of tensors
+auto result = data.index({rows, cols}); 
+// Output: [11, 20]
+#+end_src
+
+Comparison of Passing Multiple Indices
+
+| Scenario         | Python       | C++                       | Resulting selection          |
+|------------------+--------------+---------------------------+------------------------------------|
+| Single Tensor    | =data[idx_t]=  | =data.index({idx_t}=        | along Dim 0                |
+| Two Tensors      | =data[t1, t2]= | =data.index({t1, t2})=      | coordinates =(t1i​,t2i​)=       |
+| Tensor + Slice   | =data[t1, :]=  | =data.index({t1, Slice()})= | specific rows, all cols     |
+| Tensor + Integer | =data[t1, 0]=  | =data.index({t1, 0})=       | column 0 for specific rows  |
+
+
+** Index with slices
+
 Slicing extracts a view of a tensor based on a range
 of indices. In LibTorch, the index method is the primary gateway for complex
 slicing, using a syntax very similar to Python's colon notation.
@@ -44,6 +165,8 @@ C++ (LibTorch):
   std::initializer_list<TensorIndex> sub_index = {Slice(), Slice(None, 2)};
   auto sub_tensor_same = tensor.index(sub_index);
 #+END_SRC
+
+** Selecting
 
 =select()= is a more explicit alternative to basic slicing. For example, selecting index 2 on dimension 0 of a 3D tensor (D,H,W) results in a 2D tensor (H,W).
 
@@ -83,9 +206,6 @@ Related Operations and Variants
 - =unfold()= :: Extracts multiple overlapping slices at once (useful for sliding window operations).
 
 - =unbind(dim)= :: Removes a dimension and returns a tuple/vector of all slices along that dimension.
-
-
-
 
 
 * Accessing Sub-tensors (Rows, Columns, and Blocks)
