@@ -98,7 +98,7 @@ namespace WireCell::SPNG::CellBasis {
     }
 
 
-    IChannel::vector wan_ordered_channels(IAnodePlane::pointer anode, std::vector<int> wpid_nums)
+    IChannel::vector wan_ordered_channels(IAnodePlane::pointer anode, const std::vector<int>& wpid_nums)
     {
         IChannel::vector all_chids;
 
@@ -145,8 +145,11 @@ namespace WireCell::SPNG::CellBasis {
 
         for (size_t wind=0; wind<nwires; ++wind) {
             auto wire = wires[wind];
-            size_t cind = ich2ind[wire->channel()];
-            out[wind] = chans[cind];
+            auto it = ich2ind.find(wire->channel());
+            if (it != ich2ind.end()) {
+                size_t cind = it->second;
+                out[wind] = chans[cind];
+            }
         }
         return out;
     }

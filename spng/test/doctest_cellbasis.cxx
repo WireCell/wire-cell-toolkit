@@ -9,6 +9,8 @@
 #include "WireCellIface/IWirePlane.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IWire.h"
+#include "WireCellIface/IChannel.h"
 
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Point.h"
@@ -16,6 +18,7 @@
 
 #include <cmath>
 #include <memory>
+#include <algorithm> // For std::reverse check
 
 using namespace WireCell;
 using namespace WireCell::SPNG;
@@ -151,25 +154,146 @@ DOCTEST_TEST_SUITE("CellBasis") {
         }
     }
 
+    DOCTEST_TEST_CASE("wan_ordered_channels and nwires_wpid") {
+        spdlog::info("Testing CellBasis::wan_ordered_channels and nwires_wpid");
 
-    // // Expected calculations (15 cells total)
-    
-    // // U indices
-    // auto expected_u = torch::tensor({0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2}, torch::kLong);
-    
-    // // V indices (U0: [-2, 2], U1: [-2, 2], U2: [-3, 1])
-    // auto expected_v = torch::tensor({-2, -1, 0, 1, 2, -2, -1, 0, 1, 2, -3, -2, -1, 0, 1}, torch::kLong);
-    
-    // // W indices (i_w = (i_u - i_v) / 1.732, rounded, clamped [0, 4])
-    // // Raw rounded W indices: {1, 1, 0, -1, -1, 2, 1, 1, 0, -1, 3, 2, 2, 1, 1}
-    // // Clamped [0, 4]
-    // auto expected_w = torch::tensor({1, 1, 0, 0, 0, 2, 1, 1, 0, 0, 3, 2, 2, 1, 1}, torch::kLong);
-    
-    // torch::Tensor expected_basis = torch::stack({expected_u, expected_v, expected_w}, 1);
+        auto anode = get_anode();
+        
+        const int nplanes = 3;
+        for (int iplane_index = 0; iplane_index < nplanes; ++iplane_index) {
+        
+            std::vector<int> wpid_nums;
+            size_t nwires_expected = 0;
+            size_t nchans_expected = 0;
+            std::vector<size_t> nwires_per_face_expected;
+            for (auto iface : anode->faces()) {
+                auto iplane = iface->planes()[iplane_index];
+                DOCTEST_REQUIRE(iplane);
+                const auto& iwires = iplane->wires();
 
-    // DOCTEST_CHECK(basis.sizes().vec() == std::vector<int64_t>{15, 3});
-    // DOCTEST_CHECK(basis.dtype() == torch::kLong);
-    
-    // DOCTEST_CHECK(basis.equal(expected_basis));
+                auto wpid = iwires[0]->planeid();
+                int wpid_num = wpid.ident();
+                DOCTEST_REQUIRE(wpid_num > 0);
+                wpid_nums.push_back(wpid_num);
+                nwires_expected += iwires.size();
+                nwires_per_face_expected.push_back(iwires.size());
+
+                nchans_expected += iplane->channels().size();
+            }                
+
+            DOCTEST_REQUIRE( wpid_nums.size() > 0 );
+            DOCTEST_REQUIRE( nwires_expected > 0 );
+            DOCTEST_REQUIRE( nchans_expected > 0 );
+
+            auto chans_by_wan = CellBasis::wan_ordered_channels(anode, wpid_nums);
+
+            DOCTEST_REQUIRE( nchans_expected == chans_by_wan.size() );
+            DOCTEST_REQUIRE( nwires_per_face_expected == CellBasis::nwires_wpid(anode, wpid_nums));
+
+        }
+    }
+
+    DOCTEST_TEST_CASE("channel_idents") {
+        spdlog::info("Testing CellBasis::channel_idents");
+        auto anode = get_anode();
+
+        auto face0 = anode->face(0);
+        auto plane0 = face0->plane(0);
+        
+        IChannel::vector chans;
+        for (const auto& ich : plane0->channels()) {
+            chans.push_back(ich);
+        }
+        
+        torch::Tensor idents_ten = CellBasis::channel_idents(chans);
+        
+        DOCTEST_CHECK(idents_ten.sizes().vec() == std::vector<int64_t>{(int64_t)chans.size()});
+        DOCTEST_CHECK(idents_ten.dtype() == torch::kInt);
+        
+        for (size_t i=0; i<chans.size(); ++i) {
+            DOCTEST_CHECK(idents_ten[i].item<int>() == chans[i]->ident());
+        }
+    }
+
+    DOCTEST_TEST_CASE("wire_channels and wire_channel_index") {
+        spdlog::info("Testing CellBasis::wire_channels and wire_channel_index");
+        auto anode = get_anode();
+
+        const int nplanes = 3;
+        std::vector<int> max_segments = {3,3,1};
+        for (int iplane_index = 0; iplane_index < nplanes; ++iplane_index) {
+        
+            IChannel::vector all_chans;
+            IWire::vector all_wires;
+
+            for (auto iface : anode->faces()) {
+                auto iplane = iface->planes()[iplane_index];
+                DOCTEST_REQUIRE(iplane);
+
+                const auto& iwires = iplane->wires();
+                all_wires.insert(all_wires.end(), iwires.begin(), iwires.end());
+
+                const auto& ichans = iplane->channels();
+                all_chans.insert(all_chans.end(), ichans.begin(), ichans.end());
+            }
+
+            
+            IChannel::vector wc_all = CellBasis::wire_channels(all_wires, all_chans);
+            torch::Tensor wci_all = CellBasis::wire_channel_index(all_wires, all_chans);
+        
+            DOCTEST_CHECK(wc_all.size() == all_wires.size());
+            DOCTEST_CHECK(wci_all.size(0) == (int64_t)all_wires.size());
+            DOCTEST_CHECK(wci_all.dtype() == torch::kLong);
+        
+            for (size_t i=0; i<all_wires.size(); ++i) {
+                // Check wire_channels result
+                DOCTEST_CHECK(wc_all[i] != nullptr);
+                DOCTEST_CHECK(wc_all[i]->ident() == all_wires[i]->channel());
+            
+                // Check wire_channel_index result
+                int64_t index = wci_all[i].item<int64_t>();
+                DOCTEST_CHECK(index >= 0);
+                DOCTEST_CHECK(all_chans[index]->ident() == all_wires[i]->channel());
+            }
+
+            // 2. Test with a subset of channels (e.g., skip the first one)
+            IChannel::vector subset_chans;
+            if (all_chans.size() > 1) {
+                subset_chans.insert(subset_chans.end(), all_chans.begin() + 1, all_chans.end());
+            }
+        
+            IChannel::vector wc_subset = CellBasis::wire_channels(all_wires, subset_chans);
+            torch::Tensor wci_subset = CellBasis::wire_channel_index(all_wires, subset_chans);
+
+            DOCTEST_CHECK(wc_subset.size() == all_wires.size());
+            DOCTEST_CHECK(wci_subset.size(0) == (int64_t)all_wires.size());
+
+            // Multiple wires may be on the omitted channel
+            int nwires_no_channel=0;
+            for (size_t i=0; i<all_wires.size(); ++i) {
+                auto ich = wc_subset[i];
+
+                if (ich == nullptr) {
+                    ++nwires_no_channel;
+                    continue;
+                }
+
+
+                DOCTEST_REQUIRE(ich != nullptr);
+                DOCTEST_CHECK(ich->ident() == all_wires[i]->channel());
+            
+                int64_t index = wci_subset[i].item<int64_t>();
+                DOCTEST_CHECK(index >= 0);
+                DOCTEST_CHECK(subset_chans[index]->ident() == all_wires[i]->channel());
+            
+            }
+
+            // We got rid of one channel so we must have at least one wire that
+            // lacks a channel but no more than the max number of wire segments
+            // a channel may have in the plane.
+            DOCTEST_CHECK(nwires_no_channel > 0);
+            DOCTEST_CHECK(nwires_no_channel <= max_segments[iplane_index]);
+        }
+    }
 }
 
