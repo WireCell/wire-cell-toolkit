@@ -151,7 +151,7 @@ namespace WireCell::Clus {
         std::shared_ptr<PR::Graph> get_graph() const { return m_graph; }
         void clear_graph();
 
-
+        void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
 
         // collect charge
         void prepare_data();

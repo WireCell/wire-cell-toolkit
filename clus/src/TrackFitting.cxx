@@ -264,6 +264,12 @@ void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
     std::cout << "TrackFitting: Added graph with " << segments_set.size() << " segments." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
 }
 
+void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
+    m_clusters.insert(cluster.get());
+    for (auto& blob: cluster->children()){
+        m_blobs.insert(blob);
+    }
+}
 
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
