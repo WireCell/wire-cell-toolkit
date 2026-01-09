@@ -58,6 +58,8 @@ function(tpc, control, pg) {
     // time filter nor "RC" response decon is included.
     response_decon: decon.group_decon_view,
 
+    response_decon_simple: decon.group_decon_simple,
+
     // Node: [nview]tensor -> tensor [nview] downsample
     downsampler(name, downsample_factor=4, views=[0,1,2]):: pg.crossline([pg.pnode({
         type:'SPNGResampler',
@@ -120,6 +122,8 @@ function(tpc, control, pg) {
 
     // Node: nview->1 set.  Collect view tensors into a tensor set.
     frame_set_repack: frame.tensorset_view_repacker(tpc.name),
+    frame_set_repack_1: frame.tensorset_view_repacker(tpc.name, multiplicity=1),
+
 
     // Node: 2->1.  Collect original tensor set and the repack with signals.
     frame_set_fanin: fans.fanin(tpc.name+"fanin", type='TensorSet'),
