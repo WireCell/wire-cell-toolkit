@@ -740,6 +740,64 @@ void TrackFitting::prepare_data() {
     // }
 }
 
+void TrackFitting::collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires){
+    
+    // Clear output maps
+    charge_2d_u.clear();
+    charge_2d_v.clear();
+    charge_2d_w.clear();
+    map_apa_ch_plane_wires.clear();
+    
+    // Track which (apa, channel) pairs we've already processed for geometry map
+    // This avoids redundant lookups since geometry doesn't depend on time
+    std::set<std::pair<int, int>> processed_apa_channel;
+    
+    // Step 1: Iterate through m_charge_data once to:
+    //   a) Divide charges into U/V/W maps based on plane
+    //   b) Collect unique (apa, channel) pairs for geometry processing
+    for (const auto& [coord_key, charge_measurement] : m_charge_data) {
+        int apa = coord_key.apa;
+        int channel = coord_key.channel;
+        
+        // Mark this (apa, channel) for geometry processing
+        auto apa_ch_pair = std::make_pair(apa, channel);
+        processed_apa_channel.insert(apa_ch_pair);
+        
+        // Get wire information for this channel to determine plane
+        auto wire_info = get_wires_for_channel(apa, channel);
+        
+        // Classify charge data by plane and store in appropriate map
+        // A channel can map to multiple wires (wrapped wires), but they should be on same plane
+        for (const auto& [face, plane, wire] : wire_info) {
+            // Store in appropriate plane map based on plane index
+            // Assuming plane: 0=U, 1=V, 2=W
+            if (plane == 0) {
+                charge_2d_u[coord_key] = charge_measurement;
+            } else if (plane == 1) {
+                charge_2d_v[coord_key] = charge_measurement;
+            } else if (plane == 2) {
+                charge_2d_w[coord_key] = charge_measurement;
+            }
+            
+            // Only need to categorize once per channel
+            break;
+        }
+    }
+    
+    // Step 2: Build geometry map efficiently - only process unique (apa, channel) pairs
+    // This is time-independent, so we only need to do this once per channel
+    for (const auto& apa_ch_pair : processed_apa_channel) {
+        int apa = apa_ch_pair.first;
+        int channel = apa_ch_pair.second;
+        
+        // Get all wires for this channel (handles wrapped wires)
+        auto wire_info = get_wires_for_channel(apa, channel);
+        
+        // Store in map: (apa, channel) -> vector of (face, plane, wire)
+        map_apa_ch_plane_wires[apa_ch_pair] = wire_info;
+    }
+}
+
 void TrackFitting::fill_global_rb_map() {
     // Clear the global readout map first
     if (global_rb_map.size() != 0 ) return;

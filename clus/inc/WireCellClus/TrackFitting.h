@@ -382,6 +382,8 @@ namespace WireCell::Clus {
          */
         std::vector<std::tuple<int, int, int>> get_wires_for_channel(int apa, int channel_number) const;
 
+        // map_apa_ch_plane_wires: (apa,channel) -> vector of (face, plane, wire)
+        void collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires);
         /**
          * Clear all caches (useful for memory management)
          */
