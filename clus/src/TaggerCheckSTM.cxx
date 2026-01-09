@@ -125,114 +125,367 @@ public:
         // Process each main cluster
         size_t stm_count = 0;
 
-        // // validation check ... temporary ...
-        // {
-        //     auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
+        // validation check ... temporary ...
+        {
+            auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
 
-        //     const auto& steiner_pc = main_cluster->get_pc("steiner_pc");
-        //     const auto& coords = main_cluster->get_default_scope().coords;
-        //     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-        //     const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-        //     const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+            const auto& steiner_pc = main_cluster->get_pc("steiner_pc");
+            const auto& coords = main_cluster->get_default_scope().coords;
+            const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+            const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+            const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
 
-        //  // Add the two boundary points as additional extreme point groups
-        //     geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
-        //                                 y_coords[boundary_indices.first], 
-        //                                 z_coords[boundary_indices.first]);
-        //     geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
-        //                                 y_coords[boundary_indices.second], 
-        //                                 z_coords[boundary_indices.second]);
-        //     geo_point_t first_wcp = boundary_point_first;
-        //     geo_point_t last_wcp = boundary_point_second;
+         // Add the two boundary points as additional extreme point groups
+            geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
+                                        y_coords[boundary_indices.first], 
+                                        z_coords[boundary_indices.first]);
+            geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
+                                        y_coords[boundary_indices.second], 
+                                        z_coords[boundary_indices.second]);
+            geo_point_t first_wcp = boundary_point_first;
+            geo_point_t last_wcp = boundary_point_second;
 
-        //     std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
-        //     last_wcp = geo_point_t(215.532, -95.1674, 211.193);
+            std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
+            // last_wcp = geo_point_t(215.532, -95.1674, 211.193);
 
-        //     auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
+            auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
 
-        //     // Create segment for tracking
-        //     auto segment = create_segment_for_cluster(*main_cluster, path_points);
+            // Create segment for tracking
+            auto segment = create_segment_for_cluster(*main_cluster, path_points);
 
-        //     // geo_point_t test_p(10,10,10);
-        //     // const auto& fit_seg_dpc = segment->dpcloud("main");
-        //     // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
-        //     // double closest_3d_distance = sqrt(closest_result[0].second);
-        //     // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
-        //     // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
-        //     // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
-        //     // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
-        //     // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
+            // Create a PR::Graph with two vertices connected by this segment
+            // This is needed for break_segment to work properly
+            auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
+            auto vtx1 = WireCell::Clus::PR::make_vertex(*pr_graph);
+            auto vtx2 = WireCell::Clus::PR::make_vertex(*pr_graph);
+            vtx1->wcpt().point = first_wcp;
+            vtx2->wcpt().point = last_wcp;
+            WireCell::Clus::PR::add_segment(*pr_graph, segment, vtx1, vtx2);
 
-        //     m_track_fitter.add_segment(segment);
-        //     m_track_fitter.do_single_tracking(segment, true, true, false, true);
-        //     // Extract fit results from the segment
-        //     const auto& fits = segment->fits();
+                 // Hack: Override segment wcpts with specific data
+            {
+                std::vector<WireCell::Clus::PR::WCPoint> new_wcpts;
+                new_wcpts.push_back({WireCell::Point(219.539*units::cm, -86.9317*units::cm, 209.05*units::cm)});
+                new_wcpts.push_back({WireCell::Point(219.319*units::cm, -87.3647*units::cm, 209.2*units::cm)});
+                new_wcpts.push_back({WireCell::Point(219.099*units::cm, -87.8843*units::cm, 209.5*units::cm)});
+                new_wcpts.push_back({WireCell::Point(218.879*units::cm, -88.2307*units::cm, 209.5*units::cm)});
+                new_wcpts.push_back({WireCell::Point(218.659*units::cm, -88.5771*units::cm, 209.5*units::cm)});
+                new_wcpts.push_back({WireCell::Point(218.438*units::cm, -88.9235*units::cm, 209.5*units::cm)});
+                new_wcpts.push_back({WireCell::Point(218.218*units::cm, -89.4431*units::cm, 209.8*units::cm)});
+                new_wcpts.push_back({WireCell::Point(218.218*units::cm, -89.7896*units::cm, 209.8*units::cm)});
+                new_wcpts.push_back({WireCell::Point(217.998*units::cm, -90.136*units::cm, 209.8*units::cm)});
+                new_wcpts.push_back({WireCell::Point(217.778*units::cm, -90.6556*units::cm, 210.1*units::cm)});
+                new_wcpts.push_back({WireCell::Point(217.778*units::cm, -91.002*units::cm, 210.1*units::cm)});
+                new_wcpts.push_back({WireCell::Point(217.337*units::cm, -91.3484*units::cm, 210.1*units::cm)});
+                new_wcpts.push_back({WireCell::Point(217.117*units::cm, -91.868*units::cm, 210.4*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.897*units::cm, -92.2144*units::cm, 210.4*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.897*units::cm, -92.5608*units::cm, 210.4*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.677*units::cm, -92.9073*units::cm, 210.4*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.457*units::cm, -92.8206*units::cm, 210.55*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.457*units::cm, -93.3402*units::cm, 210.85*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.236*units::cm, -93.6867*units::cm, 210.85*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.016*units::cm, -94.0331*units::cm, 210.85*units::cm)});
+                new_wcpts.push_back({WireCell::Point(216.016*units::cm, -94.3795*units::cm, 210.85*units::cm)});
+                new_wcpts.push_back({WireCell::Point(215.796*units::cm, -94.8991*units::cm, 211.15*units::cm)});
+                new_wcpts.push_back({WireCell::Point(215.576*units::cm, -95.2455*units::cm, 211.15*units::cm)});
+                new_wcpts.push_back({WireCell::Point(215.356*units::cm, -95.1589*units::cm, 211.3*units::cm)});
+                new_wcpts.push_back({WireCell::Point(215.356*units::cm, -95.5053*units::cm, 211.3*units::cm)});
+                new_wcpts.push_back({WireCell::Point(215.356*units::cm, -95.8517*units::cm, 211.3*units::cm)});
+                new_wcpts.push_back({WireCell::Point(215.135*units::cm, -96.1982*units::cm, 211.3*units::cm)});
+                new_wcpts.push_back({WireCell::Point(214.915*units::cm, -96.1982*units::cm, 211.3*units::cm)});
+                new_wcpts.push_back({WireCell::Point(214.695*units::cm, -96.7178*units::cm, 211.6*units::cm)});
+                new_wcpts.push_back({WireCell::Point(214.695*units::cm, -97.0642*units::cm, 211.6*units::cm)});
+                new_wcpts.push_back({WireCell::Point(214.475*units::cm, -97.4106*units::cm, 211.6*units::cm)});
+                new_wcpts.push_back({WireCell::Point(214.255*units::cm, -97.757*units::cm, 211.6*units::cm)});
+                new_wcpts.push_back({WireCell::Point(214.034*units::cm, -98.2766*units::cm, 211.9*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.814*units::cm, -98.623*units::cm, 211.9*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.594*units::cm, -98.7096*units::cm, 211.75*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.594*units::cm, -99.2292*units::cm, 212.05*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.374*units::cm, -99.4025*units::cm, 212.05*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.374*units::cm, -99.7489*units::cm, 212.05*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.154*units::cm, -99.8355*units::cm, 212.2*units::cm)});
+                new_wcpts.push_back({WireCell::Point(213.154*units::cm, -100.182*units::cm, 212.2*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.933*units::cm, -100.442*units::cm, 212.35*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.713*units::cm, -100.528*units::cm, 212.2*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.493*units::cm, -101.048*units::cm, 212.5*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.493*units::cm, -101.221*units::cm, 212.8*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.053*units::cm, -101.481*units::cm, 212.95*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.053*units::cm, -101.827*units::cm, 212.95*units::cm)});
+                new_wcpts.push_back({WireCell::Point(212.053*units::cm, -103.213*units::cm, 212.95*units::cm)});
+                segment->wcpts(new_wcpts);
+                std::cout << "Hacked segment wcpts with " << new_wcpts.size() << " points" << std::endl;
+            }
+
+
+            // // geo_point_t test_p(10,10,10);
+            // // const auto& fit_seg_dpc = segment->dpcloud("main");
+            // // auto closest_result = fit_seg_dpc->kd3d().knn(1, test_p);    
+            // // double closest_3d_distance = sqrt(closest_result[0].second);
+            // // auto closest_2d_u = fit_seg_dpc->get_closest_2d_point_info(test_p, 0, 0, 0);
+            // // auto closest_2d_v = fit_seg_dpc->get_closest_2d_point_info(test_p, 1, 0, 0);
+            // // auto closest_2d_w = fit_seg_dpc->get_closest_2d_point_info(test_p, 2, 0, 0);
+            // // std::cout << closest_3d_distance << " " <<  std::get<0>(closest_2d_u) << " " << std::get<0>(closest_2d_v) << " " << std::get<0>(closest_2d_w) << std::endl;
+            // // std::cout << std::get<2>(closest_2d_u) << " " << std::get<2>(closest_2d_v) << " " << std::get<2>(closest_2d_w) << std::endl;
+
+            m_track_fitter.add_segment(segment);
+            m_track_fitter.do_single_tracking(segment, true, true, false, true);
+            // // Extract fit results from the segment
+            // const auto& fits = segment->fits();
+            // std::vector<double> vec_dQ, vec_dx;
+            // // Print position, dQ, and dx for each fit point
+            // std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            // for (size_t i = 0; i < fits.size(); ++i) {
+            //     const auto& fit = fits[i];
+            //     // std::cout << "  Point " << i << ": position=(" 
+            //     //          << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+            //     //          << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            //     vec_dQ.push_back(fit.dQ);
+            //     vec_dx.push_back(fit.dx);
+            // }
+            // // std::cout << std::endl;
+            // const auto& wcpts = segment->wcpts();
+            // std::cout << "Segment WCPoints (" << wcpts.size() << "):" << std::endl;
+            // for (size_t i = 0; i < wcpts.size(); ++i) {
+            //     const auto& wcp = wcpts[i];
+            //     std::cout << "  [" << i << "]: (" 
+            //               << wcp.point.x()/units::cm << ", "
+            //               << wcp.point.y()/units::cm << ", "
+            //               << wcp.point.z()/units::cm << ") cm" << std::endl;
+            // }
+
+
+            // // test point cloud fit
+            // create_segment_fit_point_cloud(segment, m_dv, "fit");
             
-        //     // Print position, dQ, and dx for each fit point
-        //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
-        //     for (size_t i = 0; i < fits.size(); ++i) {
-        //         const auto& fit = fits[i];
-        //         std::cout << "  Point " << i << ": position=(" 
-        //                  << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
-        //                  << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
-        //     }
-        //     std::cout << std::endl;
+            // // Now access it directly from the segment
+            // auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
 
-        //     std::cout << "After search other tracks" << std::endl;
-        //     std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
-        //     fitted_segments.push_back(segment);
-        //     search_other_tracks(*main_cluster, fitted_segments);
-
-        //     std::cout << fitted_segments.size() << std::endl;
-        //     // {
-        //     //     // Extract fit results from the segment
-        //     //     const auto& fits = fitted_segments.back()->fits();
+            // if (fit_dpcloud) {
+            //     const auto& points = fit_dpcloud->get_points();
                 
-        //     //     // Print position, dQ, and dx for each fit point
-        //     //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
-        //     //     for (size_t i = 0; i < fits.size(); ++i) {
-        //     //         const auto& fit = fits[i];
-        //     //         std::cout << "  Point " << i << ": position=(" 
-        //     //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
-        //     //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
-        //     //     }
-        //     //     std::cout << std::endl;   
-        //     // }
-        //     bool flag_other_tracks = check_other_tracks(*main_cluster, fitted_segments);
-        //     std::cout << "Check other Tracks: " << flag_other_tracks << std::endl;
+            //     std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
+            //     // for (size_t i = 0; i < points.size(); ++i) {
+            //     //     std::cout << "  Point " << i << ": (" 
+            //     //             << points[i].x/units::cm << ", "
+            //     //             << points[i].y/units::cm << ", "
+            //     //             << points[i].z/units::cm << ") cm" << std::endl;
+            //     // }
+                
+            //     // // You can also verify against the segment's fit data
+            //     // const auto& fits = segment->fits();
+            //     // std::cout << "\nVerification:" << std::endl;
+            //     // std::cout << "  Point cloud size: " << points.size() << std::endl;
+            //     // std::cout << "  Segment fits size: " << fits.size() << std::endl;
+                
+            //     // if (points.size() == fits.size()) {
+            //     //     std::cout << "  ✓ Sizes match!" << std::endl;
+            //     // }
+            // } else {
+            //     std::cout << "Fit point cloud not found on segment!" << std::endl;
+            // }
 
-        //     bool flag_other_clusters = check_other_clusters(*main_cluster, main_to_associated[main_cluster]);
-        //     std::cout << "Check other Clusters: " << flag_other_clusters << std::endl;
+            // std::cout << "Direct Length: " << segment_track_direct_length(segment) / units::cm << " cm; " <<  segment_track_direct_length(segment, 0, 10) / units::cm << " cm" << " " << segment_track_direct_length(segment, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
 
-        //     geo_point_t mid_point(0,0,0);
-        //     auto adjusted_path_points = adjust_rough_path(*main_cluster, mid_point);
-        //     std::cout << "Adjust path " << mid_point << std::endl;
+            // std::cout << "Segment Length: " << segment_track_length(segment) / units::cm << " cm; " << segment_track_length(segment,0, 0, 10) / units::cm << " cm" << " " << segment_track_length(segment,0, -1, -1, WireCell::Vector(1,0,0)) / units::cm << " cm" << std::endl;
+            // std::cout << "Max deviation: " << segment_track_max_deviation(segment) / units::cm << " cm; " <<  segment_track_max_deviation(segment, 0, 10) / units::cm << " cm"  << std::endl;
+            // std::cout << "dQ_dx: " << segment_rms_dQ_dx(segment) << " " << segment_median_dQ_dx(segment) << " " << segment_median_dQ_dx(segment,0,10) << std::endl;
 
-        //     int kink_num = find_first_kink(segment);
-        //     std::cout << "Kink " << kink_num << std::endl;
+            // auto kink_results = segment_search_kink(segment, first_wcp, "fit");
+            // std::cout <<"Kink search: " << std::get<0>(kink_results) << " " << std::get<1>(kink_results) << " " << std::get<2>(kink_results) << " " << std::get<3>(kink_results) <<std::endl;
+            // std::cout <<"Shower Trajectory: " << segment_is_shower_trajectory(segment) << std::endl;
+            // std::cout <<"3D Vector: " << segment->dirsign() << " " << segment_cal_dir_3vector(segment) << " " << segment_cal_dir_3vector(segment, last_wcp, 10*units::cm) << " " << segment_cal_dir_3vector(segment, -1, 10, 1) << std::endl;
 
-        //     bool flag_proton = detect_proton(segment, kink_num, fitted_segments);
-        //     std::cout << "Proton " << flag_proton << std::endl;
+            // // vec_dQ.clear();
+            // // vec_dx.clear();
 
-        //     bool flag_eval_stm = eval_stm(segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
-        //     std::cout << "eval_stm " << flag_eval_stm << std::endl; 
+            // // vec_dQ.push_back(35750.7); vec_dx.push_back(0.591606 * units::cm);
+            // // vec_dQ.push_back(32381.5); vec_dx.push_back(0.532785 * units::cm);
+            // // vec_dQ.push_back(30075.9); vec_dx.push_back(0.482393 * units::cm);
+            // // vec_dQ.push_back(32805.1); vec_dx.push_back(0.49908  * units::cm);
+            // // vec_dQ.push_back(46702.9); vec_dx.push_back(0.664835 * units::cm);
+            // // vec_dQ.push_back(58132.3); vec_dx.push_back(0.779598 * units::cm);
+            // // vec_dQ.push_back(58407.1); vec_dx.push_back(0.759001 * units::cm);
+            // // vec_dQ.push_back(55774.6); vec_dx.push_back(0.767953 * units::cm);
+            // // vec_dQ.push_back(51256.7); vec_dx.push_back(0.746227 * units::cm);
+            // // vec_dQ.push_back(42653.3); vec_dx.push_back(0.607304 * units::cm);
+            // // vec_dQ.push_back(47765.7); vec_dx.push_back(0.644757 * units::cm);
+            // // vec_dQ.push_back(55210.0); vec_dx.push_back(0.726355 * units::cm);
+            // // vec_dQ.push_back(44971.7); vec_dx.push_back(0.624519 * units::cm);
+            // // vec_dQ.push_back(35688.0); vec_dx.push_back(0.541333 * units::cm);
+            // // vec_dQ.push_back(37316.4); vec_dx.push_back(0.613396 * units::cm);
+            // // vec_dQ.push_back(37136.7); vec_dx.push_back(0.643779 * units::cm);
+            // // vec_dQ.push_back(33273.7); vec_dx.push_back(0.544746 * units::cm);
+            // // vec_dQ.push_back(32636.5); vec_dx.push_back(0.546531 * units::cm);
+            // // vec_dQ.push_back(35736.8); vec_dx.push_back(0.634489 * units::cm);
+            // // vec_dQ.push_back(35515.5); vec_dx.push_back(0.620087 * units::cm);
+            // // vec_dQ.push_back(36371.2); vec_dx.push_back(0.657168 * units::cm);
+            // // vec_dQ.push_back(37250.7); vec_dx.push_back(0.78021  * units::cm);
+            // // vec_dQ.push_back(29661.0); vec_dx.push_back(0.648785 * units::cm);
+            // // vec_dQ.push_back(27046.6); vec_dx.push_back(0.578585 * units::cm);
+            // // vec_dQ.push_back(28468.3); vec_dx.push_back(0.611002 * units::cm);
+            // // vec_dQ.push_back(33398.8); vec_dx.push_back(0.685772 * units::cm);
+            // // vec_dQ.push_back(42891.4); vec_dx.push_back(0.714633 * units::cm);
+            // // vec_dQ.push_back(44924.0); vec_dx.push_back(0.628143 * units::cm);
+
+            // std::cout <<"Kine dQ_dx: " << segment_cal_kine_dQdx(segment, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_dQdx(vec_dQ, vec_dx, m_recomb_model) << " " << WireCell::Clus::PR::cal_kine_range(segment_track_length(segment), 13, particle_data()) << std::endl;
+
+            // std::vector<double> L, dQ_dx;
+            // for (size_t i = 0; i < vec_dQ.size(); ++i) {
+            //     if (i==0){
+            //       L.push_back(0.);
+            //     }else{
+            //       L.push_back(L.back() + vec_dx.at(i));
+            //     }
+            //     dQ_dx.push_back(vec_dQ.at(i)/vec_dx.at(i)); // convert to per cm
+            // }
+            // auto pid_results = WireCell::Clus::PR::do_track_comp(L, dQ_dx, 35*units::cm, 0*units::cm, particle_data());
+            // std::cout << "Particle ID results: " << pid_results.at(0) << " " << pid_results.at(1) << " " << pid_results.at(2) << " " << pid_results.at(3) << std::endl;
+            // auto results = segment_do_track_pid(segment, L, dQ_dx, particle_data());
+            // std::cout << std::get<0>(results) << " " << std::get<1>(results) << " " << std::get<2>(results) << " " << std::get<3>(results) << std::endl;
+            // std::cout << "4-momentum: " << segment_cal_4mom(segment, 22, particle_data(), m_recomb_model) << " " <<             segment->dirsign() << std::endl;
+
+            // segment_determine_dir_track(segment, 1, 1, particle_data(), m_recomb_model, 43000/units::cm, true) ;
+            // segment_determine_shower_direction_trajectory(segment, 1,1 , particle_data(), m_recomb_model, 43000/units::cm, true); 
+
+       
+            
+            // // hack ...
+            // std::set<std::shared_ptr<PR::Segment>> segs;
+            // segs.insert(segment);
+            // clustering_points_segments(segs, m_dv, "associate_points");
+            // std::cout << segment_is_shower_topology(segment) << " " << segment_determine_shower_direction(segment, particle_data(), m_recomb_model) << std::endl;
+
+
+            Point break_p(215.7*units::cm, -94.9437*units::cm, 211.109*units::cm);
+
+            auto break_results = break_segment(*pr_graph, segment, break_p, particle_data(), m_recomb_model, m_dv);
+            bool break_success = std::get<0>(break_results);
+            if (break_success){
+                std::cout << "Break segment successful." << std::endl;
+                auto seg1 = std::get<1>(break_results).first;
+                auto seg2 = std::get<1>(break_results).second;
+                auto vtx_break = std::get<2>(break_results);
+                std::cout << " Segment 1 fits size: " << seg1->fits().size() << std::endl;
+                std::cout << " Segment 2 fits size: " << seg2->fits().size() << std::endl;
+                std::cout << " Break vertex position: " << vtx_break->fit().point << " " << vtx_break->wcpt().point << std::endl;
+
+            //     std::set<std::shared_ptr<PR::Segment>> segs;
+            //     segs.insert(seg1);
+            //     segs.insert(seg2);
+            //     clustering_points_segments(segs, m_dv, "associate_points");
+
+            //     auto associate_dpcloud_seg1 = seg1->dpcloud("associate_points");  // Get the DynamicPointCloud
+            //     auto associate_dpcloud_seg2 = seg2->dpcloud("associate_points");  // Get the DynamicPointCloud
+
+            //     std::cout << "Fit point cloud has " << associate_dpcloud_seg1->get_points().size() << " " << associate_dpcloud_seg2->get_points().size() <<  " points: " << seg1->cluster()->npoints() << std::endl;
+            // // if (associate_dpcloud) {
+            // //     const auto& points = associate_dpcloud->get_points();
+            // //     std::cout << "Fit point cloud has " << points.size() << " points: " << segment->cluster()->npoints() << std::endl;
+            // // }
+            //     std::cout << segment_is_shower_topology(seg1) << " " << segment_determine_shower_direction(seg1, particle_data(), m_recomb_model) << std::endl;
+            //     std::cout << segment_is_shower_topology(seg2) << " " << segment_determine_shower_direction(seg2, particle_data(), m_recomb_model) << std::endl;
+
+            }
+
+
+            m_track_fitter.add_graph(pr_graph);
+            m_track_fitter.do_multi_tracking(true, true, false);
+
+
+
+
+            // std::cout << "After search other tracks" << std::endl;
+            // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+            // fitted_segments.push_back(segment);
+            // search_other_tracks(*main_cluster, fitted_segments);
+
+            // std::cout << fitted_segments.size() << std::endl;
+            // // {
+            // //     // Extract fit results from the segment
+            // //     const auto& fits = fitted_segments.back()->fits();
+                
+            // //     // Print position, dQ, and dx for each fit point
+            // //     std::cout << "Fit results for " << fits.size() << " points:" << std::endl;
+            // //     for (size_t i = 0; i < fits.size(); ++i) {
+            // //         const auto& fit = fits[i];
+            // //         std::cout << "  Point " << i << ": position=(" 
+            // //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+            // //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm << std::endl;
+            // //     }
+            // //     std::cout << std::endl;   
+            // // }
+            // bool flag_other_tracks = check_other_tracks(*main_cluster, fitted_segments);
+            // std::cout << "Check other Tracks: " << flag_other_tracks << std::endl;
+
+            // bool flag_other_clusters = check_other_clusters(*main_cluster, main_to_associated[main_cluster]);
+            // std::cout << "Check other Clusters: " << flag_other_clusters << std::endl;
+
+            // geo_point_t mid_point(0,0,0);
+            // auto adjusted_path_points = adjust_rough_path(*main_cluster, mid_point);
+            // std::cout << "Adjust path " << mid_point << std::endl;
+
+            // int kink_num = find_first_kink(segment);
+            // std::cout << "Kink " << kink_num << std::endl;
+
+            // bool flag_proton = detect_proton(segment, kink_num, fitted_segments);
+            // std::cout << "Proton " << flag_proton << std::endl;
+
+            // bool flag_eval_stm = eval_stm(segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
+            // std::cout << "eval_stm " << flag_eval_stm << std::endl; 
+
+        }
+
+        // bool flag_stm = check_stm_conditions(*main_cluster, main_to_associated[main_cluster] );
+        // std::cout << "STM tagger: " << " " << flag_stm << std::endl;
+        // if (flag_stm) {
+        //     main_cluster->set_flag(Flags::STM);
+        //     stm_count++;
+        // }
+        
+        // (void)stm_count;
+
+        // // hack ... 
+        // {
+        //     auto segs = m_track_fitter.get_segments();
+        //     // std::cout << "Xin: " << segs.size() << std::endl;
+        //     clustering_points_segments(segs,m_dv);
+
+        //     // Get the last segment from the set
+        //     if (!segs.empty()) {
+        //         auto segment = *segs.rbegin();  // Get last element from set
+                
+        //         // test point cloud fit
+        //         create_segment_fit_point_cloud(segment, m_dv, "fit");
+                
+        //         // Now access it directly from the segment
+        //         auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
+
+        //         // if (fit_dpcloud) {
+        //         //     const auto& points = fit_dpcloud->get_points();
+                    
+        //         //     std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
+        //         //     for (size_t i = 0; i < points.size(); ++i) {
+        //         //         std::cout << "  Point " << i << ": (" 
+        //         //                 << points[i].x/units::cm << ", "
+        //         //                 << points[i].y/units::cm << ", "
+        //         //                 << points[i].z/units::cm << ") cm" << std::endl;
+        //         //     }
+                    
+        //         //     // You can also verify against the segment's fit data
+        //         //     const auto& fits = segment->fits();
+        //         //     std::cout << "\nVerification:" << std::endl;
+        //         //     std::cout << "  Point cloud size: " << points.size() << std::endl;
+        //         //     std::cout << "  Segment fits size: " << fits.size() << std::endl;
+                    
+        //         //     if (points.size() == fits.size()) {
+        //         //         std::cout << "  ✓ Sizes match!" << std::endl;
+        //         //     }
+        //         // } else {
+        //         //     std::cout << "Fit point cloud not found on segment!" << std::endl;
+        //         // }
+        //     }
 
         // }
-
-        bool flag_stm = check_stm_conditions(*main_cluster, main_to_associated[main_cluster] );
-        std::cout << "STM tagger: " << " " << flag_stm << std::endl;
-        if (flag_stm) {
-            main_cluster->set_flag(Flags::STM);
-            stm_count++;
-        }
-        
-        (void)stm_count;
-
-        // hack ... 
-        {
-            auto segs = m_track_fitter.get_segments();
-            clustering_points_segments(segs,m_dv);
-        }
 
     }
 

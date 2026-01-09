@@ -229,6 +229,8 @@ void TrackFitting::clear_segments(){
 }
 
 void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
+    if (m_graph == graph) return;
+    
     m_graph = graph;
 
     if (!m_graph){
@@ -262,6 +264,12 @@ void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
     std::cout << "TrackFitting: Added graph with " << segments_set.size() << " segments." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
 }
 
+void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
+    m_clusters.insert(cluster.get());
+    for (auto& blob: cluster->children()){
+        m_blobs.insert(blob);
+    }
+}
 
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
@@ -732,6 +740,64 @@ void TrackFitting::prepare_data() {
     // }
 }
 
+void TrackFitting::collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires){
+    
+    // Clear output maps
+    charge_2d_u.clear();
+    charge_2d_v.clear();
+    charge_2d_w.clear();
+    map_apa_ch_plane_wires.clear();
+    
+    // Track which (apa, channel) pairs we've already processed for geometry map
+    // This avoids redundant lookups since geometry doesn't depend on time
+    std::set<std::pair<int, int>> processed_apa_channel;
+    
+    // Step 1: Iterate through m_charge_data once to:
+    //   a) Divide charges into U/V/W maps based on plane
+    //   b) Collect unique (apa, channel) pairs for geometry processing
+    for (const auto& [coord_key, charge_measurement] : m_charge_data) {
+        int apa = coord_key.apa;
+        int channel = coord_key.channel;
+        
+        // Mark this (apa, channel) for geometry processing
+        auto apa_ch_pair = std::make_pair(apa, channel);
+        processed_apa_channel.insert(apa_ch_pair);
+        
+        // Get wire information for this channel to determine plane
+        auto wire_info = get_wires_for_channel(apa, channel);
+        
+        // Classify charge data by plane and store in appropriate map
+        // A channel can map to multiple wires (wrapped wires), but they should be on same plane
+        for (const auto& [face, plane, wire] : wire_info) {
+            // Store in appropriate plane map based on plane index
+            // Assuming plane: 0=U, 1=V, 2=W
+            if (plane == 0) {
+                charge_2d_u[coord_key] = charge_measurement;
+            } else if (plane == 1) {
+                charge_2d_v[coord_key] = charge_measurement;
+            } else if (plane == 2) {
+                charge_2d_w[coord_key] = charge_measurement;
+            }
+            
+            // Only need to categorize once per channel
+            break;
+        }
+    }
+    
+    // Step 2: Build geometry map efficiently - only process unique (apa, channel) pairs
+    // This is time-independent, so we only need to do this once per channel
+    for (const auto& apa_ch_pair : processed_apa_channel) {
+        int apa = apa_ch_pair.first;
+        int channel = apa_ch_pair.second;
+        
+        // Get all wires for this channel (handles wrapped wires)
+        auto wire_info = get_wires_for_channel(apa, channel);
+        
+        // Store in map: (apa, channel) -> vector of (face, plane, wire)
+        map_apa_ch_plane_wires[apa_ch_pair] = wire_info;
+    }
+}
+
 void TrackFitting::fill_global_rb_map() {
     // Clear the global readout map first
     if (global_rb_map.size() != 0 ) return;
@@ -831,7 +897,14 @@ void TrackFitting::check_and_reset_close_vertices() {
         if (segment_wcpts.empty()) continue;
         
         // Check vertex ordering by comparing with segment endpoints
-        if (start_v->wcpt().index != segment_wcpts.front().index) {
+        // Use wcpt().point to determine which vertex matches the segment's front/back
+        double dist_start_front = (start_v->wcpt().point - segment_wcpts.front().point).magnitude();
+        double dist_start_back  = (start_v->wcpt().point - segment_wcpts.back().point).magnitude();
+
+        // std::cout << "Vertex Distance Check: " << start_v->wcpt().point << " to front " << segment_wcpts.front().point << " = " << dist_start_front/units::cm << " cm, to back " << segment_wcpts.back().point << " = " << dist_start_back/units::cm << " cm" << std::endl;
+
+        // If start_v is closer to the back, swap
+        if (dist_start_back < dist_start_front) {
             std::swap(start_v, end_v);
             std::swap(vd1, vd2);
         }
@@ -883,8 +956,14 @@ bool TrackFitting::get_ordered_segment_vertices(
     const auto& segment_wcpts = segment->wcpts();
     if (segment_wcpts.empty()) return false;
     
-    // Check vertex ordering by comparing with segment endpoints
-    if (start_v->wcpt().index != segment_wcpts.front().index) {
+    // Use wcpt().point to determine which vertex matches the segment's front/back
+    double dist_start_front = (start_v->wcpt().point - segment_wcpts.front().point).magnitude();
+    double dist_start_back  = (start_v->wcpt().point - segment_wcpts.back().point).magnitude();
+
+    // std::cout << "Vertex Distance Check 1: " << start_v->wcpt().point << " to front " << segment_wcpts.front().point << " = " << dist_start_front/units::cm << " cm, to back " << segment_wcpts.back().point << " = " << dist_start_back/units::cm << " cm" << std::endl;
+
+    // If start_v is closer to the back, swap
+    if (dist_start_back < dist_start_front) {
         std::swap(start_v, end_v);
         std::swap(vd1, vd2);
     }
@@ -916,7 +995,7 @@ std::vector<PR::Fit> TrackFitting::generate_fits_with_projections(
             int apa = test_wpid.apa();
             int face = test_wpid.face();
             
-            auto p_raw = transform->backward(pts.at(i), cluster_t0, apa, face);
+            auto p_raw = transform->backward(pts.at(i), cluster_t0, face, apa);
             WirePlaneId wpid(kAllLayers, face, apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
@@ -1259,6 +1338,9 @@ void TrackFitting::organize_segments_path(double low_dis_limit, double end_point
         
         WireCell::Point start_p, end_p;
         
+        start_v->fit().index = -1;
+        end_v->fit().index = -1;
+
         // Process start vertex
         if (!start_v->fit().flag_fix) {
             start_p = temp_wcps_vec.front();
@@ -1370,6 +1452,9 @@ void TrackFitting::organize_segments_path(double low_dis_limit, double end_point
         // Generate 2D projections and store fit points in the segment
         segment->fits(generate_fits_with_projections(segment, pts));
     }
+
+
+
 }
 
 std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit, double end_point_limit) {
@@ -1691,9 +1776,12 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     int cur_time_slice =  cluster->blob_with_point(closest_point_index)->slice_index_min();
     int cur_ntime_ticks = cluster->blob_with_point(closest_point_index)->slice_index_max() - cur_time_slice;
 
+
+    // std::cout << "Closest " << closest_point << " " << p << " " << temp_dis/units::cm << std::endl;
+
     if (temp_dis < dis_cut){
         
-        // auto p_raw = transform->backward(p, cluster_t0, apa, face);
+        // auto p_raw = transform->backward(p, cluster_t0, face, apa);
         // std::cout << "WirePlaneId: " << wpid << ", Angles: (" << angle_u << ", " << angle_v << ", " << angle_w << ")" << " " << time_tick_width/units::cm << " " << pitch_u/units::cm << " " << pitch_v/units::cm << " " << pitch_w/units::cm << std::endl;
         // Get graph algorithms interface
         // auto cached_gas = cluster->get_cached_graph_algorithms();
@@ -1909,7 +1997,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             auto total_vertices_found = ga.find_neighbors_nlevel(closest_point_index, nlevel);
 
             // find the raw point ...
-            auto closest_point_raw = transform->backward(closest_point, cluster_t0, apa, face);
+            auto closest_point_raw = transform->backward(closest_point, cluster_t0, face, apa);
 
             // std::cout << p << " " << closest_point << " "  << closest_point_raw << std::endl;
 
@@ -1948,7 +2036,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                                                 y_coords[vertex_idx], 
                                                 z_coords[vertex_idx]};
 
-                    auto vertex_point_raw = transform->backward(vertex_point, cluster_t0, apa, face);
+                    auto vertex_point_raw = transform->backward(vertex_point, cluster_t0, face, apa);
                     auto vertex_u = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 0);
                     auto vertex_v = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 1);
                     auto vertex_w = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 2);
@@ -2067,6 +2155,11 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                     min_w_dis = 0;
                 }
 
+                // min_u_dis -=1; if (min_u_dis<0) min_u_dis=0;
+                // min_v_dis -=1; if (min_v_dis<0) min_v_dis=0;
+                // min_w_dis -=1; if (min_w_dis<0) min_w_dis=0;
+
+
                 // Use the dedicated calculate_ranges_simplified function (replaces original range calculation)
                 float range_u, range_v, range_w;
                 WireCell::Clus::TrackFittingUtil::calculate_ranges_simplified(
@@ -2076,7 +2169,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                     pitch_u, pitch_v, pitch_w,
                     range_u, range_v, range_w);
 
-                // std::cout << min_u_dis << " " << min_v_dis << " " << min_w_dis << " " << range_u << " " << range_v << " " << range_w << std::endl;
+                //    std::cout << vertex_time_slice << " " << min_u_dis << " " << min_v_dis << " " << min_w_dis << " " << range_u << " " << range_v << " " << range_w << std::endl;
                 
                     // If all ranges are positive, add wire indices to associations
                     if (range_u > 0 && range_v > 0 && range_w > 0) {
@@ -2335,7 +2428,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
     if (apa == -1 || face == -1) return;
 
     // // Convert 3D point to wire/time coordinates for each plane
-    geo_point_t p_raw = transform->backward(p, cluster_t0, apa, face);
+    geo_point_t p_raw = transform->backward(p, cluster_t0, face, apa);
     auto [time_u, wire_u] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 0);
     auto [time_v, wire_v] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 1);
     auto [time_w, wire_w] = m_grouping->convert_3Dpoint_time_ch(p_raw, apa, face, 2);
@@ -2734,13 +2827,10 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
         
         if (v_bundle1.vertex && v_bundle2.vertex) {
-            // Determine which vertex is start and which is end by comparing with first/last fit points
-            auto& first_fit = fits.front();
-            auto& last_fit = fits.back();
-            
-            double dist1_first = (v_bundle1.vertex->fit().point - first_fit.point).magnitude();
-            double dist1_last = (v_bundle1.vertex->fit().point - last_fit.point).magnitude();
-            
+            // Determine which vertex is start and which is end by comparing with first/last fit points   
+            double dist1_first = (v_bundle1.vertex->wcpt().point - segment->wcpts().front().point).magnitude();
+            double dist1_last = (v_bundle1.vertex->wcpt().point - segment->wcpts().back().point).magnitude();
+
             if (dist1_first < dist1_last) {
                 start_v = v_bundle1.vertex;
                 end_v = v_bundle2.vertex;
@@ -2756,9 +2846,10 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
             distances.push_back((fits[i+1].point - fits[i].point).magnitude());
         }
 
-        std::vector<WireCell::Point> saved_pts;
-        std::vector<int> saved_index;
-        std::vector<bool> saved_skip;
+        // std::vector<WireCell::Point> saved_pts;
+        // std::vector<int> saved_index;
+        // std::vector<bool> saved_skip;
+        std::vector<PR::Fit> saved_fits;
 
         // Process each fit point
         for (size_t i = 0; i < fits.size(); i++) {
@@ -2787,10 +2878,16 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                                   4.0/3.0 * mid_point_factor * units::cm);
             }
 
+            // std::cout << i << " " << fits[i].point << " " << fits[i].index << " " << end_point_factor << " " << dis_cut << std::endl;
+
+
             // Not the first and last point - process middle points
             if (i != 0 && i + 1 != fits.size()) {
                 TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
                 form_point_association(segment, fits[i].point, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+
+                // std::cout << i << " " << fits[i].point << " " << temp_2dut.quantity << " " << temp_2dvt.quantity << " " << temp_2dwt.quantity << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << " " << dis_cut/units::cm << " " << nlevel << " " << time_tick_cut<< std::endl;
+
 
                 if (flag_exclusion) {
                     update_association(segment, temp_2dut, temp_2dvt, temp_2dwt);
@@ -2799,6 +2896,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                 // Examine point association
                 bool is_end_point = (i == 1 || i + 2 == fits.size());
                 examine_point_association(segment, fits[i].point, temp_2dut, temp_2dvt, temp_2dwt, is_end_point, charge_cut);
+
 
                 if (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0) {
                     // Store in mapping structures
@@ -2817,34 +2915,44 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                         m_2d_to_3d[coord].insert(count);
                     }
 
-                    saved_pts.push_back(fits[i].point);
-                    saved_index.push_back(count);
-                    saved_skip.push_back(false);
+                    saved_fits.push_back(fits[i]);
+                    saved_fits.back().index = count;
+                    saved_fits.back().flag_fix = false;
+
                     count++;
                 }
             } else if (i == 0) {
                 // First point
-                saved_pts.push_back(fits[i].point);
-                saved_index.push_back(count);
-                saved_skip.push_back(true);
-                if (start_v && start_v->fit_index() == -1) {
+                saved_fits.push_back(fits[i]);
+                saved_fits.back().flag_fix = true;
+                if (start_v->fit_index() == -1) {
                     start_v->fit_index(count);
+                    saved_fits.back().index = count;
                     count++;
+                }else{
+                    saved_fits.back().index = start_v->fit_index();
+                    // saved_index.push_back(start_v->fit_index());
+
                 }
             } else if (i + 1 == fits.size()) {
                 // Last point
-                saved_pts.push_back(fits[i].point);
-                saved_index.push_back(count);
-                saved_skip.push_back(true);
-                if (end_v && end_v->fit_index() == -1) {
+                saved_fits.push_back(fits[i]);
+                saved_fits.back().flag_fix = true;
+                if (end_v->fit_index() == -1) {
                     end_v->fit_index(count);
+                    saved_fits.back().index = count;
                     count++;
+                }else{
+                    saved_fits.back().index = end_v->fit_index();
                 }
             }
         }
 
+        // std::cout << "Form Map: "  << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
+
+
         // Set fit associate vector for the segment
-        segment->set_fit_associate_vec(saved_pts, saved_index, saved_skip, m_dv, "fit");
+        segment->set_fit_associate_vec(saved_fits, m_dv, "fit");
     }
 
     // Deal with all vertices again
@@ -2870,7 +2978,14 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
             
             if (dummy_segment) {
                 form_point_association(dummy_segment, pt, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+
+                // std::cout << "V " << vertex->fit().point << " " << temp_2dut.quantity << " " << temp_2dvt.quantity << " " << temp_2dwt.quantity << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << " " << dis_cut/units::cm << " " << nlevel << " " << time_tick_cut << std::endl;
+
+
                 examine_point_association(dummy_segment, pt, temp_2dut, temp_2dvt, temp_2dwt, true, charge_cut);
+
+
+
 
                 // Store vertex associations
                 m_3d_to_2d[vertex_count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
@@ -2890,6 +3005,8 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
             }
         }
     }
+
+    //  std::cout << "Form Map: "  << " I " <<  " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
 }
 
 
@@ -2936,7 +3053,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
             TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
             form_point_association(segment, ptss.at(i).first, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
 
-            // std::cout << i << " " << ptss.at(i).first << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
+            // std::cout << i << " S " << ptss.at(i).first << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << " " << dis_cut/units::cm << " " << nlevel << " " << time_tick_cut << std::endl;
 
             if (i == 0 || i == 1 || i + 1 == ptss.size() || i + 2 == ptss.size()) {
                 examine_point_association(segment, ptss.at(i).first, temp_2dut, temp_2dvt, temp_2dwt, true, charge_cut);
@@ -3425,13 +3542,15 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                                                 offset_t, slope_x, offset_u, slope_yu, slope_zu,
                                                 offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
             
+            // std::cout << "Vertex Fit " << i << " " << init_p << " --> " << fitted_p << std::endl;
+
             // Update vertex with fitted position and projections
             auto& vertex_fit = vertex->fit();
             vertex_fit.point = fitted_p;
-            vertex_fit.index = i;
+            vertex_fit.index = -1;
 
             // Store 2D projections (following WCP pattern with offsets)
-            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0, test_wpid.apa(), test_wpid.face());
+            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0,  test_wpid.face(), test_wpid.apa());
             vertex_fit.pu = offset_u  + (slope_yu * fitted_p_raw.y() + slope_zu * fitted_p_raw.z());
             vertex_fit.pv = offset_v  + (slope_yv * fitted_p_raw.y() + slope_zv * fitted_p_raw.z());
             vertex_fit.pw = offset_w  + (slope_yw * fitted_p_raw.y() + slope_zw * fitted_p_raw.z());
@@ -3461,9 +3580,11 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         
         std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
         if (v_bundle1.vertex && v_bundle2.vertex) {
-            // Determine which vertex is start and which is end based on fit indices
-            if (v_bundle1.vertex->fit_index() == 0 || 
-                (v_bundle1.vertex->fit_index() < v_bundle2.vertex->fit_index() && v_bundle1.vertex->fit_index() >= 0)) {
+            // Determine which vertex is start and which is end by comparing with first/last fit points   
+            double dist1_first = (v_bundle1.vertex->wcpt().point - segment->wcpts().front().point).magnitude();
+            double dist1_last = (v_bundle1.vertex->wcpt().point - segment->wcpts().back().point).magnitude();
+
+            if (dist1_first < dist1_last) {
                 start_v = v_bundle1.vertex;
                 end_v = v_bundle2.vertex;
             } else {
@@ -3530,6 +3651,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                         }
                     }
                 }
+                // std::cout << "Fit point Track " << i << ": (" << init_ps[i].x() << ", " << init_ps[i].y() << ", " << init_ps[i].z() << ")" <<  " : (" << temp_p.x() << ", " << temp_p.y() << ", " << temp_p.z() << ")" << std::endl;
                 final_ps.push_back(temp_p);
             }
         }
@@ -3537,6 +3659,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         // Apply trajectory examination/smoothing
         std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps);
         
+        // std::cout  << " fitted with " << examined_ps.size() << " " << init_ps.size() << " " << final_ps.size() << " points." << std::endl;
+
         // Update segment with fitted results
         std::vector<PR::Fit> new_fits;
         for (size_t i = 0; i < examined_ps.size(); i++) {
@@ -3547,12 +3671,14 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             
             // Calculate 2D projections
             auto test_wpid = m_dv->contained_by(examined_ps[i]);
+
+
             if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
                 WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
                 auto offset_it = wpid_offsets.find(wpid);
                 auto slope_it = wpid_slopes.find(wpid);
                 
-                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0, test_wpid.apa(), test_wpid.face());
+                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0,  test_wpid.face(), test_wpid.apa());
                 fit.paf = std::make_pair(test_wpid.apa(), test_wpid.face());
 
                 if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
@@ -4077,7 +4203,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             s = (a+b+c)/2.;
             double area2 = sqrt(s*(s-a)*(s-b)*(s-c));
             //std::cout << i << " B " << area1/c << " " << area2/c  << std::endl;
-            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) flag_replace = true;	
+            if (area1 > m_params.area_ratio1 * c && area1 > m_params.area_ratio2 * area2) flag_replace = true;	
         }
         //-1, +2
         if ((!flag_replace) && i>0 && i+2<fine_tracking_path.size()){
@@ -4104,7 +4230,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
 
             //      std::cout << i << " C " << area1/c << " " << area2/c  << std::endl;
             
-            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) flag_replace = true;
+            if (area1 > m_params.area_ratio1 * c && area1 > m_params.area_ratio2 * area2) flag_replace = true;
         }
         
         
@@ -4131,7 +4257,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         int apa = saved_paf.at(i).first;
         int face = saved_paf.at(i).second;
 
-        auto p_raw = transform->backward(p, cluster_t0, apa, face);
+        auto p_raw = transform->backward(p, cluster_t0, face, apa);
         WirePlaneId wpid(kAllLayers, face, apa);
         auto offset_it = wpid_offsets.find(wpid);
         auto slope_it = wpid_slopes.find(wpid);
@@ -4176,6 +4302,8 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
     }
     
     for (size_t i = 0; i < final_ps_vec.size(); i++) {
+        // std::cout << i << " " << final_ps_vec[i].x() << " " << final_ps_vec[i].y() << " " << final_ps_vec[i].z() << " : " << init_ps_vec[i].x() << " " << init_ps_vec[i].y() << " " << init_ps_vec[i].z() << std::endl;
+
         pss_vec.push_back(std::make_pair(final_ps_vec[i], segment));
     }
     
@@ -4242,7 +4370,7 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
             s = (a + b + c) / 2.0;
             double area2 = sqrt(s * (s - a) * (s - b) * (s - c));
 
-            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) {
+            if (area1 > m_params.area_ratio1 * c && area1 > m_params.area_ratio2 * area2) {
                 flag_replace = true;
             }
         }
@@ -4270,7 +4398,7 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
             s = (a + b + c) / 2.0;
             double area2 = sqrt(s * (s - a) * (s - b) * (s - c));
             
-            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) {
+            if (area1 > m_params.area_ratio1 * c && area1 > m_params.area_ratio2 * area2) {
                 flag_replace = true;	
             }
         }
@@ -4298,7 +4426,7 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
             s = (a + b + c) / 2.0;
             double area2 = sqrt(s * (s - a) * (s - b) * (s - c));
             
-            if (area1 > 1.8*units::mm * c && area1 > 1.7 * area2) {
+            if (area1 > m_params.area_ratio1 * c && area1 > m_params.area_ratio2 * area2) {
                 flag_replace = true;
             }
         }
@@ -4797,7 +4925,7 @@ void TrackFitting::recover_original_charge_data(){
     m_orig_charge_data.clear();
 }
 
-std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position){
+std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position){
     // Initialize results vector - returns sharing ratios for each 3D position
     std::vector<std::vector<double>> results(n_3d_positions);
 
@@ -4933,17 +5061,8 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix_mu
         }
     }
     
-    // Convert to the expected return type (pair format for compatibility)
-    // Note: The WCP version returns vector<vector<double>>, but our signature expects vector<pair<double,double>>
-    // We'll return the first two sharing ratios as a pair, or (0,0) if less than 2 connections
-    std::vector<std::pair<double, double>> pair_results(results.size());
-    for (size_t i = 0; i < results.size(); i++) {
-        double first = (results[i].size() > 0) ? results[i][0] : 0.0;
-        double second = (results[i].size() > 1) ? results[i][1] : 0.0;
-        pair_results[i] = std::make_pair(first, second);
-    }
-    
-    return pair_results;
+    // Return the 2D vector directly (consistent with WCPPID)
+    return results;
 }
 
 
@@ -5197,6 +5316,11 @@ void TrackFitting::dQ_dx_fill(double dis_end_point_ext) {
 void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit_reg){
     if (!m_graph) return;
     
+    // Clear output vectors
+    dQ.clear();
+    dx.clear();
+    reduced_chi2.clear();
+
     // Update charge data for shared wires
     update_dQ_dx_data();
     
@@ -5248,9 +5372,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             case 2: map_W_charge_2D[coord_readout] = charge_coord_pair; break;
         }
     }
+    std::cout << "dQ/dx: " << map_U_charge_2D.size() << " " << map_V_charge_2D.size() << " " << map_W_charge_2D.size() << std::endl;
     
     // Count total 3D positions from all segments and vertices
     int n_3D_pos = 0;
+    // reset fit_index for all vertices and segment points
+    
     std::map<std::shared_ptr<PR::Vertex>, int> vertex_index_map;
     std::map<std::pair<std::shared_ptr<PR::Segment>, int>, int> segment_point_index_map;
     
@@ -5271,8 +5398,9 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         auto& v_bundle2 = (*m_graph)[vd2];
         
         std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
+        // std::cout << "Check: " << v_bundle1.vertex->fit().index << " " << v_bundle2.vertex->fit().index << " " << fits.front().index << " " << fits.back().index << " " << fits.size() << std::endl;
         if (v_bundle1.vertex && v_bundle2.vertex) {
-            if (v_bundle1.vertex->fit().index <= v_bundle2.vertex->fit().index) {
+            if (v_bundle1.vertex->fit().index == fits.front().index) {
                 start_v = v_bundle1.vertex;
                 end_v = v_bundle2.vertex;
             } else {
@@ -5283,33 +5411,40 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         
         // Assign indices to points
         for (size_t i = 0; i < fits.size(); i++) {
+            int idx = fits[i].index;
             if (i == 0) {
                 // Start vertex
                 if (start_v && vertex_index_map.find(start_v) == vertex_index_map.end()) {
                     vertex_index_map[start_v] = start_v->fit().index;
+                    idx = start_v->fit().index;
                 }
                 if (start_v) {
                     segment_point_index_map[std::make_pair(segment, i)] = vertex_index_map[start_v];
                 } else {
-                    segment_point_index_map[std::make_pair(segment, i)] = segment->fits()[i].index;
+                    segment_point_index_map[std::make_pair(segment, i)] = idx;
                 }
             } else if (i + 1 == fits.size()) {
                 // End vertex
                 if (end_v && vertex_index_map.find(end_v) == vertex_index_map.end()) {
                     vertex_index_map[end_v] = end_v->fit().index;
+                    idx = end_v->fit().index;
                 }
                 if (end_v) {
                     segment_point_index_map[std::make_pair(segment, i)] = vertex_index_map[end_v];
                 } else {
-                    segment_point_index_map[std::make_pair(segment, i)] = segment->fits()[i].index;
+                    segment_point_index_map[std::make_pair(segment, i)] = idx;
                 }
             } else {
                 // Middle points
-                segment_point_index_map[std::make_pair(segment, i)] = segment->fits()[i].index;
+                segment_point_index_map[std::make_pair(segment, i)] = idx;
             }
+            // Track maximum index to determine n_3D_pos
+            if (idx + 1 > n_3D_pos) n_3D_pos = idx + 1;
         }
     }
     
+    // std::cout << n_3D_pos << " 3D positions identified for dQ/dx fitting." << std::endl;
+
     if (n_3D_pos == 0) return;
     
     int n_2D_u = map_U_charge_2D.size();
@@ -5333,7 +5468,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     // Initialize solution vector
     Eigen::VectorXd pos_3D_init(n_3D_pos);
     for (int i = 0; i < n_3D_pos; i++) {
-        pos_3D_init(i) = 50000.0; // Initial guess for single MIP
+        pos_3D_init(i) = 5000.0*6; // Initial guess for single MIP
     }
     
     // Fill data vectors with charge/uncertainty ratios
@@ -5349,6 +5484,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             } else {
                 data_u_2D(n_u) = 0;
             }
+            // std::cout << coord_key.time << " " << coord_key.channel << " " << measurement.charge << " " << measurement.charge_err << " " << data_u_2D(n_u) << std::endl;
+
             n_u++;
         }
         
@@ -5380,8 +5517,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             n_w++;
         }
     }
-    
-    // Fill trajectory points and calculate dx values
+
+    // Build response matrices using cal_gaus_integral_seg
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         if (!edge_bundle.segment) continue;
@@ -5390,7 +5527,15 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         auto& fits = segment->fits();
         if (fits.empty()) continue;
         
-        // Fill trajectory points
+        // Get time ticks from cluster
+        int cur_ntime_ticks = 10; // Default value, should be calculated from cluster
+        if (edge_bundle.segment && edge_bundle.segment->cluster()) {
+            auto cluster = edge_bundle.segment->cluster();
+            auto first_blob = cluster->children()[0];
+            cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+        }
+
+          // Fill trajectory points
         for (size_t i = 0; i < fits.size(); i++) {
             int idx = segment_point_index_map[std::make_pair(segment, i)];
             traj_pts[idx] = fits[i].point;
@@ -5410,114 +5555,69 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             double dx = (curr_pos - prev_mid).magnitude() + (curr_pos - next_mid).magnitude();
             local_dx[idx] = dx;
         }
-    }
-    
-    // Calculate dx for vertices (endpoints)
-    for (const auto& [vertex, vertex_idx] : vertex_index_map) {
-        std::vector<WireCell::Point> connected_pts;
-        
-        // Find connected segments
-        auto vertex_desc = vertex->get_descriptor();
-        if (vertex_desc != PR::Graph::null_vertex()) {
-            auto adj_edges = boost::adjacent_vertices(vertex_desc, *m_graph);
-            for (auto v_it = adj_edges.first; v_it != adj_edges.second; ++v_it) {
-                auto edge_desc = boost::edge(vertex_desc, *v_it, *m_graph);
-                if (edge_desc.second) {
-                    auto& edge_bundle = (*m_graph)[edge_desc.first];
-                    if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
-                        auto& fits = edge_bundle.segment->fits();
-                        if (fits.size() > 1) {
-                            // Add second point from segment
-                            connected_pts.push_back(fits[1].point);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // If only one connection, extend endpoint
-        if (connected_pts.size() == 1) {
-            WireCell::Point curr_pos = vertex->fit().point;
-            WireCell::Vector dir = (connected_pts[0] - curr_pos).norm();
-            WireCell::Point extended = curr_pos - dir * dis_end_point_ext;
-            connected_pts.push_back(extended);
-        }
-        
-        // Calculate total dx
-        double total_dx = 0;
-        for (const auto& pt : connected_pts) {
-            total_dx += (pt - vertex->fit().point).magnitude();
-        }
-        local_dx[vertex_idx] = total_dx;
-    }
-    
-    // Get time ticks from cluster
-    int cur_ntime_ticks = 10; // Default value, should be calculated from cluster
-    auto edge_range_temp = boost::edges(*m_graph);
-    for (auto e_it = edge_range_temp.first; e_it != edge_range_temp.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
-        if (edge_bundle.segment && edge_bundle.segment->cluster()) {
-            auto cluster = edge_bundle.segment->cluster();
-            auto first_blob = cluster->children()[0];
-            cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
-            break;
-        }
-    }
-    
-    // Build response matrices using cal_gaus_integral_seg
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
-        if (!edge_bundle.segment) continue;
-        
-        auto segment = edge_bundle.segment;
-        auto& fits = segment->fits();
-        if (fits.empty()) continue;
-        
+
         // Process middle points
         for (size_t i = 1; i + 1 < fits.size(); i++) {
             int idx = segment_point_index_map[std::make_pair(segment, i)];
-            
-            WireCell::Point prev_pos = fits[i-1].point;
+
+            WireCell::Point prev_pos = (fits[i-1].point + fits[i].point) / 2.;
             WireCell::Point curr_pos = fits[i].point;
-            WireCell::Point next_pos = fits[i+1].point;
-            
+            WireCell::Point next_pos = (fits[i+1].point + fits[i].point) / 2.;
+        
             // Create sampling points for Gaussian integration
             std::vector<double> centers_U, centers_V, centers_W, centers_T;
             std::vector<double> sigmas_T, sigmas_U, sigmas_V, sigmas_W;
             std::vector<double> weights;
             
+            // Get geometry parameters
+            auto test_wpid = m_dv->contained_by(curr_pos);
+            if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+            int apa = test_wpid.apa();
+            int face = test_wpid.face();
+
+            WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+            auto geom_it = wpid_geoms.find(wpid);
+            
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
+            auto cluster = segment->cluster();
+            const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+            double cluster_t0 = cluster->get_cluster_t0();
+
+            auto offset_t = std::get<0>(offset_it->second);
+            auto offset_u = std::get<1>(offset_it->second);
+            auto offset_v = std::get<2>(offset_it->second);
+            auto offset_w = std::get<3>(offset_it->second);
+            auto slope_x = std::get<0>(slope_it->second);
+            auto slope_yu = std::get<1>(slope_it->second).first;
+            auto slope_zu = std::get<1>(slope_it->second).second;
+            auto slope_yv = std::get<2>(slope_it->second).first;
+            auto slope_zv = std::get<2>(slope_it->second).second;
+            auto slope_yw = std::get<3>(slope_it->second).first;
+            auto slope_zw = std::get<3>(slope_it->second).second;
+
+            auto time_tick_width = std::get<0>(geom_it->second);
+            auto pitch_u = std::get<1>(geom_it->second);
+            auto pitch_v = std::get<2>(geom_it->second);
+            auto pitch_w = std::get<3>(geom_it->second);
+
+            // Get anode and tick information for drift time calculation
+            auto anode = m_grouping->get_anode(test_wpid.apa());
+            auto iface = anode->faces()[test_wpid.face()];
+            // double xsign = iface->dirx();
+            double xorig = iface->planes()[2]->wires().front()->center().x();  // Anode plane position
+            // double tick_size = m_grouping->get_tick().at(test_wpid.apa()).at(test_wpid.face());
+            double drift_speed = m_grouping->get_drift_speed().at(test_wpid.apa()).at(test_wpid.face());
+
+            // std::cout << curr_pos << " " << prev_pos << " " << next_pos << std::endl;
+
+
             // Sample 5 points each from prev->curr and curr->next
             for (int j = 0; j < 5; j++) {
                 // First half: prev -> curr
                 WireCell::Point reco_pos = prev_pos + (curr_pos - prev_pos) * (j + 0.5) / 5.0;
-                
-                // Get geometry parameters
-                auto test_wpid = m_dv->contained_by(reco_pos);
-                if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
-                
-                WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
-                auto offset_it = wpid_offsets.find(wpid);
-                auto slope_it = wpid_slopes.find(wpid);
-                auto geom_it = wpid_geoms.find(wpid);
-                
-                if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
-                
-                auto cluster = segment->cluster();
-                const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-                double cluster_t0 = cluster->get_cluster_t0();
                 auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, test_wpid.face(), test_wpid.apa());
-                
-                auto offset_t = std::get<0>(offset_it->second);
-                auto offset_u = std::get<1>(offset_it->second);
-                auto offset_v = std::get<2>(offset_it->second);
-                auto offset_w = std::get<3>(offset_it->second);
-                auto slope_x = std::get<0>(slope_it->second);
-                auto slope_yu = std::get<1>(slope_it->second).first;
-                auto slope_zu = std::get<1>(slope_it->second).second;
-                auto slope_yv = std::get<2>(slope_it->second).first;
-                auto slope_zv = std::get<2>(slope_it->second).second;
-                auto slope_yw = std::get<3>(slope_it->second).first;
-                auto slope_zw = std::get<3>(slope_it->second).second;
                 
                 double central_T = offset_t + slope_x * reco_pos_raw.x();
                 double central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
@@ -5526,17 +5626,11 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                 
                 double weight = (prev_pos - curr_pos).magnitude();
                 
-                // Calculate diffusion sigmas (simplified - would need flash time in full implementation)
-                auto time_tick_width = std::get<0>(geom_it->second);
-                double drift_time = std::max(50.0 * units::microsecond, 
-                                            reco_pos_raw.x() / time_tick_width * 0.5 * units::microsecond);
-                
+                // Calculate drift time from drift distance
+                double drift_distance = std::abs(reco_pos.x() - xorig);
+                double drift_time = std::max(m_params.min_drift_time, drift_distance / drift_speed);
                 double diff_sigma_L = sqrt(2 * DL * drift_time);
                 double diff_sigma_T = sqrt(2 * DT * drift_time);
-                
-                auto pitch_u = std::get<1>(geom_it->second);
-                auto pitch_v = std::get<2>(geom_it->second);
-                auto pitch_w = std::get<3>(geom_it->second);
                 
                 double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L, 2)) / time_tick_width;
                 double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T, 2)) / pitch_u;
@@ -5555,16 +5649,107 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                 
                 // Second half: curr -> next
                 reco_pos = next_pos + (curr_pos - next_pos) * (j + 0.5) / 5.0;
-                // ... (repeat similar calculations for second half)
+                reco_pos_raw = transform->backward(reco_pos, cluster_t0, test_wpid.face(), test_wpid.apa()); 
+
+                central_T = offset_t + slope_x * reco_pos_raw.x();
+                central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
+                central_V = offset_v + (slope_yv * reco_pos_raw.y() + slope_zv * reco_pos_raw.z());
+                central_W = offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z());
+                
+                weight = (next_pos - curr_pos).magnitude();
+                
+                // Calculate drift time from drift distance
+                drift_distance = std::abs(reco_pos.x() - xorig);
+                drift_time = std::max(m_params.min_drift_time, drift_distance / drift_speed);
+                
+                diff_sigma_L = sqrt(2 * DL * drift_time);
+                diff_sigma_T = sqrt(2 * DT * drift_time);
+                
+            
+                sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L, 2)) / time_tick_width;
+                sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T, 2)) / pitch_u;
+                sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T, 2)) / pitch_v;
+                sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T, 2)) / pitch_w;
+                
+                centers_U.push_back(central_U);
+                centers_V.push_back(central_V);
+                centers_W.push_back(central_W);
+                centers_T.push_back(central_T);
+                weights.push_back(weight);
+                sigmas_U.push_back(sigma_T_u);
+                sigmas_V.push_back(sigma_T_v);
+                sigmas_W.push_back(sigma_T_w);
+                sigmas_T.push_back(sigma_L);
             }
             
-            // Fill response matrices using Gaussian integrals
+            // std::cout << i << " U ";
+            // for (size_t idx = 0; idx < centers_U.size(); ++idx) {
+            //     std::cout << centers_U[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " V ";
+            // for (size_t idx = 0; idx < centers_V.size(); ++idx) {
+            //     std::cout << centers_V[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " W ";
+            // for (size_t idx = 0; idx < centers_W.size(); ++idx) {
+            //     std::cout << centers_W[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " T ";
+            // for (size_t idx = 0; idx < centers_T.size(); ++idx) {
+            //     std::cout << centers_T[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " Weights ";
+            // for (size_t idx = 0; idx < weights.size(); ++idx) {
+            //     std::cout << weights[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout <<i << " SU ";
+            // for (size_t idx = 0; idx < sigmas_U.size(); ++idx) {
+            //     std::cout << sigmas_U[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " SV ";
+            // for (size_t idx = 0; idx < sigmas_V.size(); ++idx) {
+            //     std::cout << sigmas_V[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " SW ";
+            // for (size_t idx = 0; idx < sigmas_W.size(); ++idx) {
+            //     std::cout << sigmas_W[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // std::cout << i << " ST ";
+            // for (size_t idx = 0; idx < sigmas_T.size(); ++idx) {
+            //     std::cout << sigmas_T[idx] << " ";
+            // }
+            // std::cout << std::endl;
+
+            // Fill response matrices using Gaussian integrals - U plane
             int n_u = 0;
+            std::set<std::pair<int, int>> set_UT;
+
             for (const auto& [coord_key, result] : map_U_charge_2D) {
+                // const auto& measurement = result.first;
                 const auto& coord_2d_set = result.second;
                 for (const auto& coord_2d : coord_2d_set) {
-                    if (abs(coord_2d.wire - centers_U.front()) <= 10 && 
-                        abs(coord_2d.time - centers_T.front()) <= 10) {
+                    if (coord_2d.plane != kUlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
+                    int wire = coord_2d.wire;
+                    int time = coord_2d.time;
+                    set_UT.insert(std::make_pair(wire, time));
+
+                    if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                         
                         double value = cal_gaus_integral_seg(coord_2d.time, coord_2d.wire, centers_T, sigmas_T, 
                                                            centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
@@ -5576,17 +5761,372 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                                                   pow(result.first.charge * rel_uncer_ind, 2) + 
                                                   pow(add_uncer_ind, 2));
                             RU.insert(n_u, idx) = value / total_err;
+
+                            // std::cout << n_u << " " << i << " " << time << " " << wire << " " << i << " " << value / total_err << std::endl;
+
                         }
                     }
-                    break; // Only process first coord_2d for now
                 }
                 n_u++;
             }
             
-            // Similar processing for V and W planes...
+            // Fill response matrices using Gaussian integrals - V plane
+            int n_v = 0;
+            std::set<std::pair<int, int>> set_VT;
+            for (const auto& [coord_key, result] : map_V_charge_2D) {
+                const auto& coord_2d_set = result.second;
+                for (const auto& coord_2d : coord_2d_set) {
+                    if (coord_2d.plane != kVlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
+                    int wire = coord_2d.wire;
+                    int time = coord_2d.time;
+                    set_VT.insert(std::make_pair(wire, time));
+                      if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                        
+                        double value = cal_gaus_integral_seg(coord_2d.time, coord_2d.wire, centers_T, sigmas_T, 
+                                                           centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
+                        
+                        if (result.first.flag == 0 && value > 0) reg_flag_v[idx] = 1;
+                        
+                        if (value > 0 && result.first.charge > 0 && result.first.flag != 0) {
+                            double total_err = sqrt(pow(result.first.charge_err, 2) + 
+                                                  pow(result.first.charge * rel_uncer_ind, 2) + 
+                                                  pow(add_uncer_ind, 2));
+                            RV.insert(n_v, idx) = value / total_err;
+                        }
+                    }
+                }
+                n_v++;
+            }
+            
+            // Fill response matrices using Gaussian integrals - W plane
+            int n_w = 0;
+            std::set<std::pair<int, int>> set_WT;
+            for (const auto& [coord_key, result] : map_W_charge_2D) {
+                const auto& coord_2d_set = result.second;
+                for (const auto& coord_2d : coord_2d_set) {
+                    if (coord_2d.plane != kWlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
+                    int wire = coord_2d.wire;
+                    int time = coord_2d.time;
+                    set_WT.insert(std::make_pair(wire, time));
+                    if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+
+                        double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T,
+                                                           centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
+                        
+                        if (result.first.flag == 0 && value > 0) reg_flag_w[idx] = 1;
+                        
+                        if (value > 0 && result.first.charge > 0 && result.first.flag != 0) {
+                            double total_err = sqrt(pow(result.first.charge_err, 2) + 
+                                                  pow(result.first.charge * rel_uncer_col, 2) + 
+                                                  pow(add_uncer_col, 2));
+                            RW.insert(n_w, idx) = value / total_err;
+                        }
+                    }
+                }
+                n_w++;
+            }
+            
+            // Additional checks on dead channels for segments
+            if (reg_flag_u[idx] == 0) {
+                for (size_t kk = 0; kk < centers_U.size(); kk++) {
+                    if (set_UT.find(std::make_pair(std::round(centers_U[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_UT.end()) {
+                        reg_flag_u[idx] = 1;
+                        break;
+                    }
+                }
+            }
+            
+            if (reg_flag_v[idx] == 0) {
+                for (size_t kk = 0; kk < centers_V.size(); kk++) {
+                     if (set_VT.find(std::make_pair(std::round(centers_V[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_VT.end()) {
+                        reg_flag_v[idx] = 1;
+                        break;
+                    }
+                }
+            }
+            
+            if (reg_flag_w[idx] == 0) {
+                for (size_t kk = 0; kk < centers_W.size(); kk++) {
+                    if (set_WT.find(std::make_pair(std::round(centers_W[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_WT.end()) {
+                        reg_flag_w[idx] = 1;
+                        break;
+                    }
+                }
+            }
+            // std::cout << idx << " " << reg_flag_u[idx] << " " << reg_flag_v[idx] << " " << reg_flag_w[idx] << std::endl;
+
         }
     }
-    
+
+
+     // Calculate dx for vertices (endpoints)
+    for (const auto& [vertex, vertex_idx] : vertex_index_map) {
+        std::vector<WireCell::Point> connected_pts;
+        
+        WireCell::Clus::Facade::Cluster* cluster = nullptr;
+        // Find connected segments
+        auto vertex_desc = vertex->get_descriptor();
+        if (vertex_desc != PR::Graph::null_vertex()) {
+            auto adj_edges = boost::adjacent_vertices(vertex_desc, *m_graph);
+            for (auto v_it = adj_edges.first; v_it != adj_edges.second; ++v_it) {
+                auto edge_desc = boost::edge(vertex_desc, *v_it, *m_graph);
+                if (edge_desc.second) {
+                    auto& edge_bundle = (*m_graph)[edge_desc.first];
+                    if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
+                        auto& fits = edge_bundle.segment->fits();
+                        cluster = edge_bundle.segment->cluster();
+
+                        if (fits.size() > 1){
+                        
+                            // std::cout << vertex->fit().point << " " << vertex->fit().index << " " << fits.front().index << " " << fits.back().index << " " << vertex->fit().paf << " " << fits.front().paf << " " << fits.back().paf << " " << (vertex->fit().paf == fits[1].paf) << " " << (vertex->fit().paf == fits[fits.size() - 2].paf) << std::endl;
+
+                            if (vertex->fit().index == fits.front().index) {
+                                // Start point
+                                if (vertex->fit().paf == fits[1].paf) connected_pts.push_back((fits[1].point + vertex->fit().point) / 2.0);
+                            } else {
+                                // End point
+                                if (vertex->fit().paf == fits[fits.size() - 2].paf) connected_pts.push_back((fits[fits.size() - 2].point + vertex->fit().point) / 2.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If only one connection, extend endpoint
+        if (connected_pts.size() == 1) {
+            WireCell::Point curr_pos = vertex->fit().point;
+            WireCell::Vector dir = (connected_pts[0] - curr_pos).norm();
+            WireCell::Point extended = curr_pos - dir * dis_end_point_ext;
+            connected_pts.push_back(extended);
+
+            // std::cout << (extended - curr_pos).magnitude()/units::cm << " " << (connected_pts[0] - curr_pos).magnitude()/units::cm << std::endl;
+        }
+        
+        // Calculate total dx
+        double total_dx = 0;
+        for (const auto& pt : connected_pts) {
+            // std::cout << "Vertex connected point: (" << pt.x() << ", " << pt.y() << ", " << pt.z() << ")" << " " << (pt - vertex->fit().point).magnitude()/units::cm << std::endl;
+            total_dx += (pt - vertex->fit().point).magnitude();
+        }
+        local_dx[vertex_idx] = total_dx;
+
+        WireCell::Point curr_pos = vertex->fit().point;
+
+        // Create sampling points for Gaussian integration
+        std::vector<double> centers_U, centers_V, centers_W, centers_T;
+        std::vector<double> sigmas_T, sigmas_U, sigmas_V, sigmas_W;
+        std::vector<double> weights;
+        
+        // Get geometry parameters
+        auto test_wpid = m_dv->contained_by(curr_pos);
+        if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+        int apa = test_wpid.apa();
+        int face = test_wpid.face();
+
+        WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
+        auto offset_it = wpid_offsets.find(wpid);
+        auto slope_it = wpid_slopes.find(wpid);
+        auto geom_it = wpid_geoms.find(wpid);
+        
+        if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
+        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+        double cluster_t0 = cluster->get_cluster_t0();
+
+        auto offset_t = std::get<0>(offset_it->second);
+        auto offset_u = std::get<1>(offset_it->second);
+        auto offset_v = std::get<2>(offset_it->second);
+        auto offset_w = std::get<3>(offset_it->second);
+        auto slope_x = std::get<0>(slope_it->second);
+        auto slope_yu = std::get<1>(slope_it->second).first;
+        auto slope_zu = std::get<1>(slope_it->second).second;
+        auto slope_yv = std::get<2>(slope_it->second).first;
+        auto slope_zv = std::get<2>(slope_it->second).second;
+        auto slope_yw = std::get<3>(slope_it->second).first;
+        auto slope_zw = std::get<3>(slope_it->second).second;
+
+        auto time_tick_width = std::get<0>(geom_it->second);
+        auto pitch_u = std::get<1>(geom_it->second);
+        auto pitch_v = std::get<2>(geom_it->second);
+        auto pitch_w = std::get<3>(geom_it->second);
+
+        // Get anode and tick information for drift time calculation
+        auto anode = m_grouping->get_anode(test_wpid.apa());
+        auto iface = anode->faces()[test_wpid.face()];
+        // double xsign = iface->dirx();
+        double xorig = iface->planes()[2]->wires().front()->center().x();  // Anode plane position
+        // double tick_size = m_grouping->get_tick().at(test_wpid.apa()).at(test_wpid.face());
+        double drift_speed = m_grouping->get_drift_speed().at(test_wpid.apa()).at(test_wpid.face());
+
+        auto first_blob = cluster->children()[0];
+        int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+
+        for (size_t k = 0; k < connected_pts.size(); k++) {
+
+            // std::cout << k << " " << curr_pos << " " << connected_pts[k] << std::endl;
+
+
+            for (int j = 0; j < 5; j++) {
+                WireCell::Point reco_pos = connected_pts[k] + (curr_pos - connected_pts[k]) * (j + 0.5) / 5.0;
+            
+                auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, test_wpid.face(), test_wpid.apa());
+                
+                double central_T = offset_t + slope_x * reco_pos_raw.x();
+                double central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
+                double central_V = offset_v + (slope_yv * reco_pos_raw.y() + slope_zv * reco_pos_raw.z());
+                double central_W = offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z());
+                
+                double weight = (connected_pts[k] - curr_pos).magnitude();
+                
+                // Calculate drift time from drift distance
+                double drift_distance = std::abs(reco_pos.x() - xorig);
+                double drift_time = std::max(m_params.min_drift_time, drift_distance / drift_speed);
+                double diff_sigma_L = sqrt(2 * DL * drift_time);
+                double diff_sigma_T = sqrt(2 * DT * drift_time);
+                
+                double sigma_L = sqrt(pow(diff_sigma_L, 2) + pow(add_sigma_L, 2)) / time_tick_width;
+                double sigma_T_u = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_u_T, 2)) / pitch_u;
+                double sigma_T_v = sqrt(pow(diff_sigma_T, 2) + pow(ind_sigma_v_T, 2)) / pitch_v;
+                double sigma_T_w = sqrt(pow(diff_sigma_T, 2) + pow(col_sigma_w_T, 2)) / pitch_w;
+                
+                centers_U.push_back(central_U);
+                centers_V.push_back(central_V);
+                centers_W.push_back(central_W);
+                centers_T.push_back(central_T);
+                weights.push_back(weight);
+                sigmas_U.push_back(sigma_T_u);
+                sigmas_V.push_back(sigma_T_v);
+                sigmas_W.push_back(sigma_T_w);
+                sigmas_T.push_back(sigma_L);
+            }
+        }
+
+        //  std::cout  << " U ";
+        // for (size_t idx = 0; idx < centers_U.size(); ++idx) {
+        //     std::cout << centers_U[idx] << " ";
+        // }
+        // std::cout << std::endl;
+
+        int n_u = 0;
+        std::set<std::pair<int, int>> set_UT;
+        for (const auto& [coord_key, result] : map_U_charge_2D) {
+            // const auto& measurement = result.first;
+            const auto& coord_2d_set = result.second;
+            for (const auto& coord_2d : coord_2d_set) {
+                if (coord_2d.plane != kUlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
+                int wire = coord_2d.wire;
+                int time = coord_2d.time;
+                set_UT.insert(std::make_pair(wire, time));
+
+                if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                    
+                    double value = cal_gaus_integral_seg(coord_2d.time, coord_2d.wire, centers_T, sigmas_T, 
+                                                        centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
+                    
+                    if (result.first.flag == 0 && value > 0) reg_flag_u[vertex_idx] = 1;
+                    
+                    if (value > 0 && result.first.charge > 0 && result.first.flag != 0) {
+                        double total_err = sqrt(pow(result.first.charge_err, 2) + 
+                                                pow(result.first.charge * rel_uncer_ind, 2) + 
+                                                pow(add_uncer_ind, 2));
+                        RU.insert(n_u, vertex_idx) = value / total_err;
+                        // std::cout << "U: " << n_u << " " << vertex_idx << " " << time << " " << wire << " " << vertex_idx << " " << value / total_err << std::endl;
+                    }
+                }
+            }
+            n_u++;
+        }
+
+       
+
+        // Fill response matrices using Gaussian integrals - V plane
+        int n_v = 0;
+        std::set<std::pair<int, int>> set_VT;
+        for (const auto& [coord_key, result] : map_V_charge_2D) {
+            const auto& coord_2d_set = result.second;
+            for (const auto& coord_2d : coord_2d_set) {
+                if (coord_2d.plane != kVlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
+                int wire = coord_2d.wire;
+                int time = coord_2d.time;
+                set_VT.insert(std::make_pair(wire, time));
+                    if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                    
+                    double value = cal_gaus_integral_seg(coord_2d.time, coord_2d.wire, centers_T, sigmas_T, 
+                                                        centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
+                    
+                    if (result.first.flag == 0 && value > 0) reg_flag_v[vertex_idx] = 1;
+                    
+                    if (value > 0 && result.first.charge > 0 && result.first.flag != 0) {
+                        double total_err = sqrt(pow(result.first.charge_err, 2) + 
+                                                pow(result.first.charge * rel_uncer_ind, 2) + 
+                                                pow(add_uncer_ind, 2));
+                        RV.insert(n_v, vertex_idx) = value / total_err;
+                    }
+                }
+            }
+            n_v++;
+        }
+        
+        // Fill response matrices using Gaussian integrals - W plane
+        int n_w = 0;
+        std::set<std::pair<int, int>> set_WT;
+        for (const auto& [coord_key, result] : map_W_charge_2D) {
+            const auto& coord_2d_set = result.second;
+            for (const auto& coord_2d : coord_2d_set) {
+                if (coord_2d.plane != kWlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
+                int wire = coord_2d.wire;
+                int time = coord_2d.time;
+                set_WT.insert(std::make_pair(wire, time));
+                if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+
+                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T,
+                                                        centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
+                    
+                    if (result.first.flag == 0 && value > 0) reg_flag_w[vertex_idx] = 1;
+                    
+                    if (value > 0 && result.first.charge > 0 && result.first.flag != 0) {
+                        double total_err = sqrt(pow(result.first.charge_err, 2) + 
+                                                pow(result.first.charge * rel_uncer_col, 2) + 
+                                                pow(add_uncer_col, 2));
+                        RW.insert(n_w, vertex_idx) = value / total_err;
+                    }
+                }
+            }
+            n_w++;
+        }
+
+        // Additional checks on dead channels for segments
+        if (reg_flag_u[vertex_idx] == 0) {
+            for (size_t kk = 0; kk < centers_U.size(); kk++) {
+                if (set_UT.find(std::make_pair(std::round(centers_U[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_UT.end()) {
+                    reg_flag_u[vertex_idx] = 1;
+                    break;
+                }
+            }
+        }
+        
+        if (reg_flag_v[vertex_idx] == 0) {
+            for (size_t kk = 0; kk < centers_V.size(); kk++) {
+                    if (set_VT.find(std::make_pair(std::round(centers_V[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_VT.end()) {
+                    reg_flag_v[vertex_idx] = 1;
+                    break;
+                }
+            }
+        }
+        
+        if (reg_flag_w[vertex_idx] == 0) {
+            for (size_t kk = 0; kk < centers_W.size(); kk++) {
+                if (set_WT.find(std::make_pair(std::round(centers_W[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_WT.end()) {
+                    reg_flag_w[vertex_idx] = 1;
+                    break;
+                }
+            }
+        }
+
+        // std::cout << vertex_idx << " " << reg_flag_u[vertex_idx] << " " << reg_flag_v[vertex_idx] << " " << reg_flag_w[vertex_idx] << std::endl;
+    }
+        
+        
     // Build connected_vec for regularization
     std::vector<std::vector<int>> connected_vec(n_3D_pos);
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
@@ -5646,13 +6186,17 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     auto overlap_v = calculate_compact_matrix_multi(connected_vec, MV, RVT, n_2D_v, n_3D_pos, 3.0);
     auto overlap_w = calculate_compact_matrix_multi(connected_vec, MW, RWT, n_2D_w, n_3D_pos, 2.0);
     
+    // for(size_t i=0;i!=connected_vec.size();i++){ 
+    //     std::cout << i << " " << connected_vec.at(i).size() << " " << overlap_u.at(i).size() << " " << overlap_v.at(i).size() << " " << overlap_w.at(i).size() << std::endl;
+    // }
+
     // Build regularization matrix
     Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
     
-    double dead_ind_weight = 0.3;
-    double dead_col_weight = 0.9;
-    double close_ind_weight = 0.25;
-    double close_col_weight = 0.75;
+    const double dead_ind_weight = m_params.dead_ind_weight;
+    const double dead_col_weight = m_params.dead_col_weight;
+    const double close_ind_weight = m_params.close_ind_weight;
+    const double close_col_weight = m_params.close_col_weight;
     
     const size_t n3d = static_cast<size_t>(n_3D_pos);
     for (size_t i = 0; i < n3d; i++) {
@@ -5670,24 +6214,23 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         double scaling = (connected_vec[i].size() > 2) ? 2.0 / connected_vec[i].size() : 1.0;
         
         for (size_t j = 0; j < connected_vec[i].size(); j++) {
-            if (j >= overlap_u.size() || i >= overlap_u.size()) continue;
-            
             double weight1 = weight;
             int row = i;
             int col = connected_vec[i][j];
             
-            if (overlap_u[i].first > 0.5) weight1 += close_ind_weight * pow(overlap_u[i].first - 0.5, 2);
-            if (overlap_v[i].first > 0.5) weight1 += close_ind_weight * pow(overlap_v[i].first - 0.5, 2);
-            if (overlap_w[i].first > 0.5) weight1 += close_col_weight * pow(overlap_w[i].first - 0.5, 2);
+            if (overlap_u[i][j] > m_params.overlap_th) weight1 += close_ind_weight * pow(overlap_u[i][j] - 0.5, 2);
+            if (overlap_v[i][j] > m_params.overlap_th) weight1 += close_ind_weight * pow(overlap_v[i][j] - 0.5, 2);
+            if (overlap_w[i][j] > m_params.overlap_th) weight1 += close_col_weight * pow(overlap_w[i][j] - 0.5, 2);
             
-            double dx_norm = (local_dx[row] + 0.001 * units::cm) / (0.6 * units::cm);
-            FMatrix.coeffRef(row, row) += -weight1 * scaling / dx_norm;
-            FMatrix.coeffRef(row, col) += weight1 * scaling / dx_norm;
+            double dx_norm_row = (local_dx[row] + 0.001 * units::cm) / m_params.dx_norm_length;
+            double dx_norm_col = (local_dx[col] + 0.001 * units::cm) / m_params.dx_norm_length;
+            FMatrix.coeffRef(row, row) += -weight1 * scaling / dx_norm_row;
+            FMatrix.coeffRef(row, col) += weight1 * scaling / dx_norm_col;
         }
     }
     
     // Apply regularization strength
-    double lambda = 0.0008;
+    double lambda = m_params.lambda*8.0/5.0; // adjusted for multi-track fitting ...
     if (!flag_dQ_dx_fit_reg) lambda *= 0.01;
     FMatrix *= lambda;
     
@@ -5712,7 +6255,28 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     
     // Calculate reduced chi2
     traj_reduced_chi2.clear();
-    traj_reduced_chi2.resize(n_3D_pos, 0.0);
+    // std::vector<int> traj_ndf(n_3D_pos, 0);
+    
+    // Calculate chi-squared contributions from U plane
+    for (int k = 0; k < RU.outerSize(); ++k) {
+        double sum[3]={0,0,0};
+        double sum1[3] = {0,0,0};
+        for (Eigen::SparseMatrix<double>::InnerIterator it(RU, k); it; ++it) {
+            sum[0] += pow(data_u_2D(it.row()) - pred_data_u_2D(it.row()),2) * (it.value() * pos_3D(k) )/pred_data_u_2D(it.row());
+            sum1[0] += (it.value() * pos_3D(k) )/pred_data_u_2D(it.row());      
+        }
+        for (Eigen::SparseMatrix<double>::InnerIterator it(RV, k); it; ++it) {
+            sum[1] += pow(data_v_2D(it.row()) - pred_data_v_2D(it.row()),2) * (it.value() * pos_3D(k))/pred_data_v_2D(it.row());
+            sum1[1] += (it.value() * pos_3D(k))/pred_data_v_2D(it.row());
+        }
+        for (Eigen::SparseMatrix<double>::InnerIterator it(RW, k); it; ++it) {
+            sum[2] += pow(data_w_2D(it.row()) - pred_data_w_2D(it.row()),2) * (it.value() * pos_3D(k))/pred_data_w_2D(it.row());
+            sum1[2] += (it.value()*pos_3D(k))/pred_data_w_2D(it.row());
+        }
+        traj_reduced_chi2.push_back(sqrt((sum[0] + sum[1] + sum[2]/4.)/(sum1[0]+sum1[1]+sum1[2])));
+    }
+    
+   
     
     // Update vertex and segment fit results
     for (const auto& [vertex, vertex_idx] : vertex_index_map) {
@@ -5915,8 +6479,10 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     for (int i = 0; i < n_3D_pos; i++) {
         WireCell::Point prev_rec_pos, next_rec_pos;
         WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
-        
-        if (i == 0) {
+
+        // if (i!=0) std::cout << i << " TTT " << (paf.at(i) == paf.at(i-1)) << std::endl;
+
+        if (i == 0 || (i!=0 && paf.at(i) != paf.at(i-1))) {
             // First point: extrapolate backward
             if (n_3D_pos > 1) {
                 WireCell::Point next_point = fine_tracking_path.at(i+1).first;
@@ -5932,7 +6498,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 prev_rec_pos = curr_rec_pos;
                 next_rec_pos = curr_rec_pos;
             }
-        } else if (i == n_3D_pos - 1) {
+        } else if (i == n_3D_pos - 1 || (i!=n_3D_pos-1 && paf.at(i) != paf.at(i+1))) {
             // Last point: extrapolate forward
             WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
             WireCell::Vector dir = curr_rec_pos - prev_point;
@@ -5943,10 +6509,14 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 next_rec_pos = curr_rec_pos;
             }
             prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
-        } else {
+        } else if (paf.at(i) == paf.at(i-1) && paf.at(i) == paf.at(i+1)){
             // Middle point
             prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
             next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
+        }else {
+            // Default case (should not happen)
+            prev_rec_pos = curr_rec_pos;
+            next_rec_pos = curr_rec_pos;
         }
         
         dx[i] = (curr_rec_pos - prev_rec_pos).magnitude() + (curr_rec_pos - next_rec_pos).magnitude();
@@ -5995,10 +6565,18 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         double pitch_v = std::get<2>(geom_it->second);
         double pitch_w = std::get<3>(geom_it->second);
 
+        // Get anode and tick information for drift time calculation
+        auto anode = m_grouping->get_anode(apa);
+        auto iface = anode->faces()[face];
+        // double xsign = iface->dirx();
+        double xorig = iface->planes()[2]->wires().front()->center().x();  // Anode plane position
+        // double tick_size = m_grouping->get_tick().at(apa).at(face);
+        double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
+
         
         // Calculate previous and next positions for Gaussian integration
         WireCell::Point prev_rec_pos, next_rec_pos;
-        if (i == 0) {
+        if (i == 0 || (i!=0 && paf.at(i) != paf.at(i-1))) {
             if (n_3D_pos > 1) {
                 WireCell::Point next_point = fine_tracking_path.at(i+1).first;
                 next_rec_pos = (curr_rec_pos + next_point) * 0.5;
@@ -6012,7 +6590,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             } else {
                 prev_rec_pos = next_rec_pos = curr_rec_pos;
             }
-        } else if (i == n_3D_pos - 1) {
+        } else if (i == n_3D_pos - 1 || (i!=n_3D_pos-1 && paf.at(i) != paf.at(i+1))) {
             WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
             prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
             WireCell::Vector dir = curr_rec_pos - prev_point;
@@ -6022,9 +6600,12 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             } else {
                 next_rec_pos = curr_rec_pos;
             }
-        } else {
+        } else if (paf.at(i) == paf.at(i-1) && paf.at(i) == paf.at(i+1)) {
             prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
             next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
+        }else{
+            prev_rec_pos = curr_rec_pos;
+            next_rec_pos = curr_rec_pos;
         }
         
         // Create Gaussian integration points and weights
@@ -6037,7 +6618,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             // First half (prev to curr)
             WireCell::Point reco_pos = prev_rec_pos + (curr_rec_pos - prev_rec_pos) * (j + 0.5) / 5.0;
             // find out the raw position ...
-            auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, apa, face);
+            auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, face, apa);
 
             double central_T = offset_t + slope_x * reco_pos_raw.x();
             double central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
@@ -6045,8 +6626,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             double central_W = offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z());
             double weight = (curr_rec_pos - prev_rec_pos).magnitude();
             
-            // Calculate drift time and diffusion
-            double drift_time = std::max(m_params.min_drift_time, reco_pos.x() / time_tick_width * 0.5*units::us );
+            // Calculate drift time from drift distance
+            double drift_distance = std::abs(reco_pos.x() - xorig);
+            double drift_time = std::max(m_params.min_drift_time, drift_distance / drift_speed);
             double diff_sigma_L = sqrt(2 * DL * drift_time);
             double diff_sigma_T = sqrt(2 * DT * drift_time);
             
@@ -6067,7 +6649,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             
             // Second half (curr to next)
             reco_pos = next_rec_pos + (curr_rec_pos - next_rec_pos) * (j + 0.5) / 5.0;
-            reco_pos_raw = transform->backward(reco_pos, cluster_t0, apa, face);
+            reco_pos_raw = transform->backward(reco_pos, cluster_t0, face, apa);
 
             central_T = offset_t + slope_x * reco_pos_raw.x();
             central_U = offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z());
@@ -6075,7 +6657,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             central_W = offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z());
             weight = (curr_rec_pos - next_rec_pos).magnitude();
 
-            drift_time = std::max(m_params.min_drift_time, reco_pos.x() / time_tick_width * 0.5*units::us );
+            // Calculate drift time from drift distance
+            drift_distance = std::abs(reco_pos.x() - xorig);
+            drift_time = std::max(m_params.min_drift_time, drift_distance / drift_speed);
             diff_sigma_L = sqrt(2 * DL * drift_time);
             diff_sigma_T = sqrt(2 * DT * drift_time);
 
@@ -6448,6 +7032,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
 }
 
 void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_exclusion, bool flag_hack){
+
     // Reset fit properties for all vertices first
     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
         auto vd = *vp.first;
@@ -6459,6 +7044,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
                 auto& vertex_fit = v_bundle.vertex->fit();
                 vertex_fit.point = p;
             }
+
+            // std::cout << "Vertex fit point before reset: " << flag_fix << " " << v_bundle.vertex->fit().point << " " << v_bundle.vertex->wcpt().point << std::endl;
             // v_bundle.vertex->reset_fit_prop();
             // v_bundle.vertex->flag_fix(flag_fix);
         }
@@ -6474,16 +7061,182 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         fill_global_rb_map();
     }
 
+       
+
+    // auto edge_range = boost::edges(*m_graph);
+    //  for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+    //         auto& edge_bundle = (*m_graph)[*e_it];
+    //         if (edge_bundle.segment) {
+    //             std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+    //             for (const auto& fit : edge_bundle.segment->fits()) {
+    //                 std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+    //             }
+    //         }
+    //     }
+    //     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+    //         auto vd = *vp.first;
+    //         auto& v_bundle = (*m_graph)[vd];
+    //         if (v_bundle.vertex) {
+    //             std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+    //         }
+    //     }
+
+    // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+    //     auto& edge_bundle = (*m_graph)[*e_it];
+    //     if (edge_bundle.segment) {
+    //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+    //     }
+    // }
+
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
     organize_segments_path(low_dis_limit, end_point_limit);
 
+    // std::cout << "After first organization " << std::endl;
 
+    // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+    //     auto& edge_bundle = (*m_graph)[*e_it];
+    //     if (edge_bundle.segment) {
+    //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+    //     }
+    // }
+    // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+    //     auto& edge_bundle = (*m_graph)[*e_it];
+    //     if (edge_bundle.segment) {
+    //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+    //         for (const auto& fit : edge_bundle.segment->fits()) {
+    //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+    //         }
+    //     }
+    // }
+    // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+    //     auto vd = *vp.first;
+    //     auto& v_bundle = (*m_graph)[vd];
+    //     if (v_bundle.vertex) {
+    //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+    //     }
+    // }
   
     if (flag_1st_tracking){
+
+        // auto edge_range = boost::edges(*m_graph);
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
         multi_trajectory_fit(1, m_params.div_sigma);
+
+        // std::cout << "After first Fit " << std::endl;
+
+        
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //     }
+        // }
+        // int count_segments = 0;
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         if (count_segments == 0){
+        //             std::vector<WireCell::Point> override_points = {
+        //                 WireCell::Point(2192.13, -873.682, 2094.73),
+        //                 WireCell::Point(2190.05, -877.433, 2095.44),
+        //                 WireCell::Point(2187.83, -882.064, 2096.35),
+        //                 WireCell::Point(2180.81, -896.504, 2099.74),
+        //                 WireCell::Point(2177.78, -906.556, 2101.00),
+        //                 WireCell::Point(2171.11, -917.69, 2104.21),
+        //                 WireCell::Point(2166.54, -930.426, 2106.31),
+        //                 WireCell::Point(2162.36, -936.867, 2108.50),
+        //                 WireCell::Point(2158.23, -947.918, 2110.48)
+        //             };
+        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //                 edge_bundle.segment->fits()[i].point = override_points[i];
+        //             }
+        //         }else{
+        //             std::vector<WireCell::Point> override_points = {
+        //                 WireCell::Point(2158.23, -947.918, 2110.48),
+        //                 WireCell::Point(2152.65, -958.508, 2113.46),
+        //                 WireCell::Point(2147.92, -966.199, 2115.89),
+        //                 WireCell::Point(2143.84, -977.016, 2117.63),
+        //                 WireCell::Point(2139.62, -984.948, 2119.62),
+        //                 WireCell::Point(2133.49, -997.683, 2122.44),
+        //                 WireCell::Point(2127.23, -1006.59, 2125.5),
+        //                 WireCell::Point(2123.37, -1017.77, 2127.39),
+        //                 WireCell::Point(2121.5, -1023.82, 2128.23),
+        //                 WireCell::Point(2120.98, -1028.6, 2128.63)
+        //             };
+        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //                 edge_bundle.segment->fits()[i].point = override_points[i];
+        //             }
+        //         }
+            
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
+        //     }
+        //     count_segments++;
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         // Set vertex fit point to the closest of the three given points
+        //         std::vector<WireCell::Point> candidate_points = {
+        //             WireCell::Point(2192.13, -873.682, 2094.73),
+        //             WireCell::Point(2158.23, -947.918, 2110.48),
+        //             WireCell::Point(2120.98, -1028.6, 2128.63)
+        //         };
+        //         double min_dist = std::numeric_limits<double>::max();
+        //         WireCell::Point closest_point = v_bundle.vertex->fit().point;
+        //         for (const auto& cp : candidate_points) {
+        //             double dist = sqrt(pow(cp.x() - v_bundle.vertex->fit().point.x(), 2) +
+        //                                pow(cp.y() - v_bundle.vertex->fit().point.y(), 2) +
+        //                                pow(cp.z() - v_bundle.vertex->fit().point.z(), 2));
+        //             if (dist < min_dist) {
+        //                 min_dist = dist;
+        //                 closest_point = cp;
+        //             }
+        //         }
+        //         v_bundle.vertex->fit().point = closest_point;
+
+
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
+
     }
 
   
@@ -6492,16 +7245,155 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         low_dis_limit = m_params.low_dis_limit/2.;
         end_point_limit = m_params.end_point_limit/2.;
         
+        // auto edge_range = boost::edges(*m_graph);
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
+
         // organize path
         organize_segments_path_2nd(low_dis_limit, end_point_limit);    
         
+        // std::cout << "After second organization " << std::endl;
+        //  for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
+
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
-        
         multi_trajectory_fit(1, m_params.div_sigma);
+
+        // std::cout << "After second Fit " << std::endl;
+
+        // int count_segments = 0;
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         if (count_segments == 0){
+        //             std::vector<WireCell::Point> override_points = {
+        //                 WireCell::Point(2191.77, -873.687, 2094.66),
+        //                 WireCell::Point(2189.93, -878.246, 2095.67),
+        //                 WireCell::Point(2188.76, -881.477, 2096.10),
+        //                 WireCell::Point(2185.86, -886.508, 2097.41),
+        //                 WireCell::Point(2183.5, -890.672, 2098.29),
+        //                 WireCell::Point(2180.25, -899.103, 2099.89),
+        //                 WireCell::Point(2179.17, -902.032, 2100.32),
+        //                 WireCell::Point(2177.74, -905.425, 2101.21),
+        //                 WireCell::Point(2174.8, -911.866, 2102.45),
+        //                 WireCell::Point(2170.12, -919.848, 2104.71),
+        //                 WireCell::Point(2167.97, -925.905, 2105.65),
+        //                 WireCell::Point(2166.54, -930.426, 2106.31),
+        //                 WireCell::Point(2162.86, -936.994, 2108.18),
+        //                 WireCell::Point(2160.29, -942.265, 2109.29),
+        //                 WireCell::Point(2158.08, -947.736, 2110.60)
+        //             };
+        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //                 edge_bundle.segment->fits()[i].point = override_points[i];
+        //             }
+        //         }else{
+        //             std::vector<WireCell::Point> override_points = {
+        //                 WireCell::Point(2158.08, -947.736, 2110.6),
+        //                 WireCell::Point(2155.04, -952.146, 2112.02),
+        //                 WireCell::Point(2152.23, -958.438, 2113.63),
+        //                 WireCell::Point(2147.92, -966.199, 2115.89),
+        //                 WireCell::Point(2147.03, -967.753, 2116.48),
+        //                 WireCell::Point(2143.84, -977.016, 2117.63),
+        //                 WireCell::Point(2139.8, -983.235, 2119.51),
+        //                 WireCell::Point(2136.43, -990.294, 2120.93),
+        //                 WireCell::Point(2133.67, -997.807, 2122.05),
+        //                 WireCell::Point(2130.73, -1001.33, 2123.6),
+        //                 WireCell::Point(2127.06, -1006.35, 2125.66),
+        //                 WireCell::Point(2125.3, -1012.18, 2126.44),
+        //                 WireCell::Point(2121.84, -1018.37, 2128.12),
+        //                 WireCell::Point(2120.71, -1023.03, 2128.69),
+        //                 WireCell::Point(2120.71, -1026.48, 2128.67)
+        //             };
+        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //                 edge_bundle.segment->fits()[i].point = override_points[i];
+        //             }
+        //         }
+            
+        //         // std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         // for (const auto& fit : edge_bundle.segment->fits()) {
+        //         //     std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         // }
+        //     }
+        //     count_segments++;
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         // Set vertex fit point to the closest of the three given points
+        //         std::vector<WireCell::Point> candidate_points = {
+        //             WireCell::Point(2191.77, -873.687, 2094.66),
+        //             WireCell::Point(2158.08, -947.736, 2110.6),
+        //             WireCell::Point(2120.71, -1026.48, 2128.67)
+        //         };
+        //         double min_dist = std::numeric_limits<double>::max();
+        //         WireCell::Point closest_point = v_bundle.vertex->fit().point;
+        //         for (const auto& cp : candidate_points) {
+        //             double dist = sqrt(pow(cp.x() - v_bundle.vertex->fit().point.x(), 2) +
+        //                                pow(cp.y() - v_bundle.vertex->fit().point.y(), 2) +
+        //                                pow(cp.z() - v_bundle.vertex->fit().point.z(), 2));
+        //             if (dist < min_dist) {
+        //                 min_dist = dist;
+        //                 closest_point = cp;
+        //             }
+        //         }
+        //         v_bundle.vertex->fit().point = closest_point;
+
+
+        //         // std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
 
         // organize path
         low_dis_limit = 0.6*units::cm;
         organize_segments_path_3rd(low_dis_limit);
+
+        // std::cout << "After third organization " << std::endl;
+        //  for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << " " << fit.paf.first << " " << fit.paf.second << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << " " << v_bundle.vertex->fit().paf.first << " " << v_bundle.vertex->fit().paf.second << std::endl;
+        //     }
+        // }
+
     }
   
   
@@ -6523,7 +7415,29 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
                 edge_bundle.segment->reset_fit_prop();
             }
         }
+        form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+
+
+
         dQ_dx_multi_fit(end_point_limit, flag_dQ_dx_fit_reg);
+
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << " " << fit.dQ << " " << fit.dx/units::cm << " " << fit.reduced_chi2 << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << " " << v_bundle.vertex->fit().dQ << " " << v_bundle.vertex->fit().dx/units::cm << " " << v_bundle.vertex->fit().reduced_chi2 << std::endl;
+        //     }
+        // }
+
     }
 }
 
@@ -6763,7 +7677,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
             int apa = test_wpid.apa();
             int face = test_wpid.face();
 
-            auto p_raw = transform->backward(p, cluster_t0, apa, face);
+            auto p_raw = transform->backward(p, cluster_t0, face, apa);
             WirePlaneId wpid(kAllLayers, face, apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
@@ -6846,6 +7760,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         fit.pw = pw[i];
         fit.pt = pt[i];
         fit.paf = paf[i];
+        // std::cout <<"test " << fit.paf.first << " " << fit.paf.second << " " << paf[i].first << " " << paf[i].second << std::endl;
         fit.reduced_chi2 = reduced_chi2[i];
 
         // Set trajectory information

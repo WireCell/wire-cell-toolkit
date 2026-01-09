@@ -104,6 +104,12 @@ namespace WireCell::Clus::PR {
          */
         bool remove_segment(SegmentPtr seg);
 
+        /** Get the set of node descriptors in this view. */
+        const node_unordered_set& nodes() const { return m_nodes; }
+
+        /** Get the set of edge descriptors in this view. */
+        const edge_unordered_set& edges() const { return m_edges; }
+
     private:
         view_graph_type m_graph;
         node_unordered_set m_nodes;
