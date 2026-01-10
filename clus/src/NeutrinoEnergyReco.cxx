@@ -374,3 +374,285 @@ double PatternAlgorithms::cal_kine_charge(ShowerPtr shower, Graph& graph, TrackF
     
     return kine_energy;
 }
+
+double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    (void)graph; // Unused for now
+    
+    if (!segment) return 0.0;
+    
+    auto grouping = track_fitter.grouping();
+    if (!grouping) return 0.0;
+    
+    double kine_energy = 0;
+    
+    // Recombination and fudge factors based on particle type
+    double fudge_factor = 0.95;
+    double recom_factor = 0.7;
+    
+    // Check if segment has shower topology or trajectory flags
+    if (segment->flags_any(PR::SegmentFlags::kShowerTopology)) {
+        recom_factor = 0.5; // assume shower
+        fudge_factor = 0.8; // shower ...
+    } else if (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 2212) {
+        recom_factor = 0.35; // proton
+    }
+    
+    // Collect 2D charge data divided by plane
+    std::map<TrackFitting::CoordReadout, TrackFitting::ChargeMeasurement> charge_2d_u;
+    std::map<TrackFitting::CoordReadout, TrackFitting::ChargeMeasurement> charge_2d_v;
+    std::map<TrackFitting::CoordReadout, TrackFitting::ChargeMeasurement> charge_2d_w;
+    std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>> map_apa_ch_plane_wires;
+    
+    track_fitter.collect_2D_charge(charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires);
+    
+    // Get point clouds from segment
+    auto pcloud1 = segment->dpcloud("associate_points"); // associated points
+    auto pcloud2 = segment->dpcloud("fit");              // fit points
+    
+    if (!pcloud1 && !pcloud2) return 0;
+    if (!pcloud1 && pcloud2) pcloud1 = pcloud2;
+    if (!pcloud2 && pcloud1) pcloud2 = pcloud1;
+    
+    double sum_u_charge = 0;
+    double sum_v_charge = 0;
+    double sum_w_charge = 0;
+    
+    double dis_cut = 0.6 * units::cm;
+    
+    // Process U plane charges
+    for (const auto& [coord_key, charge_data] : charge_2d_u) {
+        int time_slice = coord_key.time;
+        int channel = coord_key.channel;
+        int apa = coord_key.apa;
+        
+        // Get wire info for this channel
+        auto apa_ch_key = std::make_pair(apa, channel);
+        auto wire_it = map_apa_ch_plane_wires.find(apa_ch_key);
+        if (wire_it == map_apa_ch_plane_wires.end()) continue;
+        
+        int face = -1;
+        for (const auto& [f, plane, wire] : wire_it->second) {
+            if (plane == 0) { // U plane
+                face = f;
+                break;
+            }
+        }
+        if (face < 0) continue;
+        
+        // Convert time and channel to 2D point
+        auto p2d = grouping->convert_time_ch_2Dpoint(time_slice, channel, apa, face, 0);
+        WireCell::Point test_p2d(p2d.first, p2d.second, 0);
+        
+        // Find closest 3D point in point clouds
+        double dis = 1e9;
+        size_t point_index = 0;
+        const Facade::Cluster* closest_cluster = nullptr;
+        
+        if (pcloud1) {
+            auto result = pcloud1->get_closest_2d_point_info(test_p2d, 0, face, apa);
+            dis = std::get<0>(result);
+            closest_cluster = std::get<1>(result);
+            point_index = std::get<2>(result);
+        }
+        
+        if (dis < dis_cut && closest_cluster) {
+            const auto& points = pcloud1->get_points();
+            if (point_index < points.size()) {
+                WireCell::Point test_p(points[point_index].x, points[point_index].y, points[point_index].z);
+                double factor = cal_corr_factor(test_p, track_fitter, dv);
+                sum_u_charge += charge_data.charge * factor;
+            }
+        } else if (pcloud2) {
+            // Try second point cloud
+            auto result = pcloud2->get_closest_2d_point_info(test_p2d, 0, face, apa);
+            dis = std::get<0>(result);
+            closest_cluster = std::get<1>(result);
+            point_index = std::get<2>(result);
+            
+            if (dis < dis_cut && closest_cluster) {
+                const auto& points = pcloud2->get_points();
+                if (point_index < points.size()) {
+                    WireCell::Point test_p(points[point_index].x, points[point_index].y, points[point_index].z);
+                    double factor = cal_corr_factor(test_p, track_fitter, dv);
+                    sum_u_charge += charge_data.charge * factor;
+                }
+            }
+        }
+    }
+    
+    // Process V plane charges
+    for (const auto& [coord_key, charge_data] : charge_2d_v) {
+        int time_slice = coord_key.time;
+        int channel = coord_key.channel;
+        int apa = coord_key.apa;
+        
+        // Get wire info for this channel
+        auto apa_ch_key = std::make_pair(apa, channel);
+        auto wire_it = map_apa_ch_plane_wires.find(apa_ch_key);
+        if (wire_it == map_apa_ch_plane_wires.end()) continue;
+        
+        int face = -1;
+        for (const auto& [f, plane, wire] : wire_it->second) {
+            if (plane == 1) { // V plane
+                face = f;
+                break;
+            }
+        }
+        if (face < 0) continue;
+        
+        // Convert time and channel to 2D point
+        auto p2d = grouping->convert_time_ch_2Dpoint(time_slice, channel, apa, face, 1);
+        WireCell::Point test_p2d(p2d.first, p2d.second, 0);
+        
+        // Find closest 3D point in point clouds
+        double dis = 1e9;
+        size_t point_index = 0;
+        const Facade::Cluster* closest_cluster = nullptr;
+        
+        if (pcloud1) {
+            auto result = pcloud1->get_closest_2d_point_info(test_p2d, 1, face, apa);
+            dis = std::get<0>(result);
+            closest_cluster = std::get<1>(result);
+            point_index = std::get<2>(result);
+        }
+        
+        if (dis < dis_cut && closest_cluster) {
+            const auto& points = pcloud1->get_points();
+            if (point_index < points.size()) {
+                WireCell::Point test_p(points[point_index].x, points[point_index].y, points[point_index].z);
+                double factor = cal_corr_factor(test_p, track_fitter, dv);
+                sum_v_charge += charge_data.charge * factor;
+            }
+        } else if (pcloud2) {
+            // Try second point cloud
+            auto result = pcloud2->get_closest_2d_point_info(test_p2d, 1, face, apa);
+            dis = std::get<0>(result);
+            closest_cluster = std::get<1>(result);
+            point_index = std::get<2>(result);
+            
+            if (dis < dis_cut && closest_cluster) {
+                const auto& points = pcloud2->get_points();
+                if (point_index < points.size()) {
+                    WireCell::Point test_p(points[point_index].x, points[point_index].y, points[point_index].z);
+                    double factor = cal_corr_factor(test_p, track_fitter, dv);
+                    sum_v_charge += charge_data.charge * factor;
+                }
+            }
+        }
+    }
+    
+    // Process W plane charges
+    for (const auto& [coord_key, charge_data] : charge_2d_w) {
+        int time_slice = coord_key.time;
+        int channel = coord_key.channel;
+        int apa = coord_key.apa;
+        
+        // Get wire info for this channel
+        auto apa_ch_key = std::make_pair(apa, channel);
+        auto wire_it = map_apa_ch_plane_wires.find(apa_ch_key);
+        if (wire_it == map_apa_ch_plane_wires.end()) continue;
+        
+        int face = -1;
+        for (const auto& [f, plane, wire] : wire_it->second) {
+            if (plane == 2) { // W plane
+                face = f;
+                break;
+            }
+        }
+        if (face < 0) continue;
+        
+        // Convert time and channel to 2D point
+        auto p2d = grouping->convert_time_ch_2Dpoint(time_slice, channel, apa, face, 2);
+        WireCell::Point test_p2d(p2d.first, p2d.second, 0);
+        
+        // Find closest 3D point in point clouds
+        double dis = 1e9;
+        size_t point_index = 0;
+        const Facade::Cluster* closest_cluster = nullptr;
+        
+        if (pcloud1) {
+            auto result = pcloud1->get_closest_2d_point_info(test_p2d, 2, face, apa);
+            dis = std::get<0>(result);
+            closest_cluster = std::get<1>(result);
+            point_index = std::get<2>(result);
+        }
+        
+        if (dis < dis_cut && closest_cluster) {
+            const auto& points = pcloud1->get_points();
+            if (point_index < points.size()) {
+                WireCell::Point test_p(points[point_index].x, points[point_index].y, points[point_index].z);
+                double factor = cal_corr_factor(test_p, track_fitter, dv);
+                sum_w_charge += charge_data.charge * factor;
+            }
+        } else if (pcloud2) {
+            // Try second point cloud
+            auto result = pcloud2->get_closest_2d_point_info(test_p2d, 2, face, apa);
+            dis = std::get<0>(result);
+            closest_cluster = std::get<1>(result);
+            point_index = std::get<2>(result);
+            
+            if (dis < dis_cut && closest_cluster) {
+                const auto& points = pcloud2->get_points();
+                if (point_index < points.size()) {
+                    WireCell::Point test_p(points[point_index].x, points[point_index].y, points[point_index].z);
+                    double factor = cal_corr_factor(test_p, track_fitter, dv);
+                    sum_w_charge += charge_data.charge * factor;
+                }
+            }
+        }
+    }
+    
+    // Calculate overall charge using weighted average
+    double charge[3] = {sum_u_charge, sum_v_charge, sum_w_charge};
+    double weight[3] = {0.25, 0.25, 1.0};
+    
+    // Find min, max, and median charges
+    int min_index = 0, max_index = 0, med_index = 0;
+    double min_charge = 1e9, max_charge = -1e9;
+    for (int i = 0; i < 3; i++) {
+        if (min_charge > charge[i]) {
+            min_charge = charge[i];
+            min_index = i;
+        }
+        if (max_charge < charge[i]) {
+            max_charge = charge[i];
+            max_index = i;
+        }
+    }
+    
+    if (min_index != max_index) {
+        for (int i = 0; i < 3; i++) {
+            if (i == min_index) continue;
+            if (i == max_index) continue;
+            med_index = i;
+        }
+    } else {
+        min_index = 0;
+        med_index = 1;
+        max_index = 2;
+    }
+    
+    // Calculate asymmetries
+    double max_asy = 0;
+    if (charge[med_index] + charge[max_index] > 0) {
+        max_asy = std::abs(charge[med_index] - charge[max_index]) / 
+                  (charge[med_index] + charge[max_index]);
+    }
+    
+    // Calculate overall charge
+    double overall_charge = (weight[0]*charge[0] + weight[1]*charge[1] + weight[2]*charge[2]) /
+                           (weight[0] + weight[1] + weight[2]);
+    
+    // Exclude maximal charge if asymmetry is too large
+    if (max_asy > 0.04) {
+        overall_charge = (weight[med_index] * charge[med_index] + 
+                         weight[min_index] * charge[min_index]) /
+                        (weight[med_index] + weight[min_index]);
+    }
+    
+    // Convert charge to kinetic energy
+    // Using W-value of 23.6 eV per electron-ion pair
+    kine_energy = overall_charge / recom_factor / fudge_factor * 23.6 / 1e6 * units::MeV;
+    
+    return kine_energy;
+}
