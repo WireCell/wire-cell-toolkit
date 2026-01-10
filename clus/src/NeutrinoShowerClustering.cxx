@@ -1198,3 +1198,87 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     
     std::cout << "With separated-cluster shower: " << showers.size() << std::endl;
 }
+
+void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, VertexPtr main_vertex,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+
+    if (!main_vertex || map_vertex_to_shower.find(main_vertex) == map_vertex_to_shower.end()) {
+        return;
+    }
+    
+    // Get all showers starting at main vertex
+    auto& main_vertex_showers = map_vertex_to_shower[main_vertex];
+    
+    // Track which showers have been merged
+    std::set<ShowerPtr> showers_to_remove;
+    bool flag_update = false;
+    
+    // Iterate through all showers from main vertex
+    for (auto shower1 : main_vertex_showers) {
+        // Skip if already processed
+        if (showers_to_remove.find(shower1) != showers_to_remove.end()) continue;
+        
+        // Skip muons (particle type 13)
+        if (shower1->get_particle_type() == 13) continue;
+        
+        // Check start vertex type
+        auto [start_vtx1, start_type1] = shower1->get_start_vertex_and_type();
+        if (start_type1 != 1) continue;
+        
+        // Calculate direction for shower1 (100 cm distance cut)
+        WireCell::Point start_point1 = shower1->get_start_point();
+        WireCell::Vector dir1 = shower_cal_dir_3vector(*shower1, start_point1, 100 * units::cm);
+        
+        // Look for candidate showers to merge
+        for (auto shower2 : main_vertex_showers) {
+            // Skip if same shower
+            if (shower1 == shower2) continue;
+            
+            // Skip if already processed
+            if (showers_to_remove.find(shower2) != showers_to_remove.end()) continue;
+            
+            // Skip muons
+            if (shower2->get_particle_type() == 13) continue;
+            
+            // Check start vertex type
+            auto [start_vtx2, start_type2] = shower2->get_start_vertex_and_type();
+            if (start_type2 != 2) continue;
+            
+            // Calculate direction for shower2
+            WireCell::Point start_point2 = shower2->get_start_point();
+            WireCell::Vector dir2 = shower_cal_dir_3vector(*shower2, start_point2, 100 * units::cm);
+            
+            // Calculate angle between directions
+            double cos_angle = dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude());
+            double angle = std::acos(std::max(-1.0, std::min(1.0, cos_angle)));
+            double angle_deg = angle * 180.0 / M_PI;
+            
+            // Merge if angle is less than 10 degrees
+            if (angle_deg < 10.0) {
+                // Merge shower2 into shower1
+                shower1->add_shower(*shower2);
+                
+                // Update particle type and kinematics
+                shower1->update_particle_type(particle_data, recomb_model);
+                shower1->calculate_kinematics(particle_data, recomb_model);
+                
+                // Recalculate kinetic charge
+                cal_kine_charge(shower1, graph, track_fitter, dv);
+                
+                // Mark shower2 for removal
+                showers_to_remove.insert(shower2);
+                flag_update = true;
+            }
+        }
+    }
+    
+    // Remove merged showers from the main set
+    for (auto shower : showers_to_remove) {
+        showers.erase(shower);
+    }
+    
+    // Update shower maps if any merges occurred
+    if (flag_update) {
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
+                          map_vertex_to_shower, used_shower_clusters);
+    }
+}
