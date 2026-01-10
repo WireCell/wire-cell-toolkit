@@ -151,5 +151,7 @@ namespace WireCell::Clus::PR {
 
         // energy calculation ...
         double cal_corr_factor(WireCell::Point& pt, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+
+        double cal_kine_charge(ShowerPtr Shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
     };
 }
