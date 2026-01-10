@@ -656,3 +656,32 @@ double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, Trac
     
     return kine_energy;
 }
+
+void PatternAlgorithms::calculate_shower_kinematics(std::set<ShowerPtr>& showers, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    (void)vertices_in_long_muon; // Currently unused
+    
+    for (auto& shower : showers) {
+        if (!shower) continue;
+        
+        // Skip if kinematics already calculated
+        if (shower->get_flag_kinematics()) continue;
+        
+        // Get particle type (PDG code)
+        int particle_type = shower->get_particle_type();
+        
+        // Check if it's a muon (PDG code = ±13)
+        if (std::abs(particle_type) != 13) {
+            // Not a muon - use regular kinematics calculation
+            shower->calculate_kinematics(particle_data, recomb_model);
+            double kine_charge = cal_kine_charge(shower, graph, track_fitter, dv);
+            shower->set_kine_charge(kine_charge);
+            shower->set_flag_kinematics(true);
+        } else {
+            // Long muon - use special kinematics calculation
+            shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model);
+            double kine_charge = cal_kine_charge(shower, graph, track_fitter, dv);
+            shower->set_kine_charge(kine_charge);
+            shower->set_flag_kinematics(true);
+        }
+    }
+}
