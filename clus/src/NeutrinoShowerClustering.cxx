@@ -1262,7 +1262,9 @@ void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, Vert
                 shower1->calculate_kinematics(particle_data, recomb_model);
                 
                 // Recalculate kinetic charge
-                cal_kine_charge(shower1, graph, track_fitter, dv);
+                double kine_charge = cal_kine_charge(shower1, graph, track_fitter, dv);
+                shower1->set_kine_charge(kine_charge);
+                shower1->set_flag_kinematics(true);
                 
                 // Mark shower2 for removal
                 showers_to_remove.insert(shower2);
@@ -1281,4 +1283,285 @@ void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, Vert
         update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
                           map_vertex_to_shower, used_shower_clusters);
     }
+}
+
+
+void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    
+    if (!main_vertex || !main_cluster) return;
+    
+    // Build map_vertex_segments and map_segment_vertices
+    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
+    std::map<SegmentPtr, std::set<VertexPtr>> map_segment_vertices;
+    
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        if (!seg) continue;
+        
+        auto source_vdesc = boost::source(*eit, graph);
+        auto target_vdesc = boost::target(*eit, graph);
+        VertexPtr v1 = graph[source_vdesc].vertex;
+        VertexPtr v2 = graph[target_vdesc].vertex;
+        
+        if (v1) {
+            map_vertex_segments[v1].insert(seg);
+            map_segment_vertices[seg].insert(v1);
+        }
+        if (v2) {
+            map_vertex_segments[v2].insert(seg);
+            map_segment_vertices[seg].insert(v2);
+        }
+    }
+    
+    // Build map_cluster_length
+    std::map<Facade::Cluster*, double> map_cluster_length;
+    for (auto cluster : other_clusters) {
+        map_cluster_length[cluster] = cluster->get_length();
+    }
+    
+    // Collect vertices in main cluster as well as existing showers
+    std::vector<VertexPtr> vertices;
+    for (auto& [vtx, seg_set] : map_vertex_segments) {
+        if ((vtx->cluster() && vtx->cluster()->get_cluster_id() == main_cluster->get_cluster_id()) ||
+            map_vertex_in_shower.find(vtx) != map_vertex_in_shower.end()) {
+            vertices.push_back(vtx);
+        }
+    }
+    
+    // Process clusters in map_cluster_main_vertices
+    for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+        if (used_shower_clusters.find(cluster) != used_shower_clusters.end()) continue;
+        if (map_cluster_length[cluster] < 4 * units::cm) continue;
+        
+        double min_dis = 1e9;
+        VertexPtr min_vertex = nullptr;
+        double main_dis = 1e9;
+        
+        for (auto vtx : vertices) {
+            WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            
+            // Get closest distance using cluster's get_closest_dis method
+            double dis = cluster->get_closest_dis(vtx_pt);
+            
+            if (dis < min_dis) {
+                min_dis = dis;
+                min_vertex = vtx;
+            }
+            
+            if (vtx == main_vertex) {
+                main_dis = dis;
+            }
+        }
+        
+        if (min_dis > 0.8 * main_dis) {
+            min_dis = main_dis;
+            min_vertex = main_vertex;
+        }
+        
+        // Find a shower segment starting at vertex
+        SegmentPtr sg = nullptr;
+        if (map_vertex_segments.find(vertex) != map_vertex_segments.end()) {
+            for (auto seg : map_vertex_segments[vertex]) {
+                if (seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+                    seg->flags_any(SegmentFlags::kShowerTopology)) {
+                    sg = seg;
+                    break;
+                }
+            }
+        }
+        
+        int connection_type = 3;
+        
+        if (sg) {
+            // Create new shower
+            ShowerPtr shower = std::make_shared<Shower>(graph);
+            shower->set_start_vertex(min_vertex, connection_type);
+            shower->set_start_segment(sg);
+            
+            // Set direction based on distance to vertex
+            WireCell::Point vertex_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+            const auto& fits = sg->fits();
+            if (!fits.empty()) {
+                double dis1 = (vertex_pt - fits.front().point).magnitude();
+                double dis2 = (vertex_pt - fits.back().point).magnitude();
+                
+                if (dis1 < dis2) {
+                    sg->dirsign(1);
+                } else {
+                    sg->dirsign(-1);
+                }
+            }
+            
+            // Complete shower structure
+            std::set<SegmentPtr> used_segments;
+            shower->complete_structure_with_start_segment(used_segments);
+            
+            // Calculate shower direction
+            WireCell::Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_pt, 15 * units::cm);
+            
+            // Cluster with the rest - add segments based on angle and distance
+            for (auto& [seg1, vertices_set] : map_segment_vertices) {
+                if (seg1->cluster() == main_cluster) continue;
+                if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
+                if (seg1->cluster() == shower->start_segment()->cluster()) continue;
+                
+                // Find the closest point
+                auto [pair_dis, pair_point] = segment_get_closest_point(seg1, vertex_pt);
+                WireCell::Vector v1(pair_point.x() - vertex_pt.x(), 
+                                   pair_point.y() - vertex_pt.y(), 
+                                   pair_point.z() - vertex_pt.z());
+                
+                double angle = std::acos(std::clamp(dir_shower.dot(v1) / (dir_shower.magnitude() * v1.magnitude()), -1.0, 1.0));
+                angle = angle / M_PI * 180.0;
+                
+                if ((angle < 25 && pair_dis < 80 * units::cm) ||
+                    (angle < 12.5 && pair_dis < 120 * units::cm)) {
+                    shower->add_segment(seg1);
+                }
+            }
+            
+            // Update particle type
+            shower->update_particle_type(particle_data, recomb_model);
+            
+            // Check with other showers and merge if needed
+            std::vector<ShowerPtr> showers_to_be_removed;
+            for (auto shower1 : showers) {
+                WireCell::Point start_pt1 = shower1->get_start_point();
+                WireCell::Vector dir_shower1 = shower_cal_dir_3vector(*shower1, start_pt1, 15 * units::cm);
+                WireCell::Vector dir2(start_pt1.x() - vertex_pt.x(),
+                                     start_pt1.y() - vertex_pt.y(),
+                                     start_pt1.z() - vertex_pt.z());
+                
+                double angle = std::acos(std::clamp(dir_shower.dot(dir_shower1) / (dir_shower.magnitude() * dir_shower1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                double angle1 = std::acos(std::clamp(dir_shower.dot(dir2) / (dir_shower.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                
+                if ((angle < 25 && angle1 < 15 && dir2.magnitude() < 80 * units::cm) ||
+                    (angle < 12.5 && angle1 < 7.5 && dir2.magnitude() < 120 * units::cm)) {
+                    shower->add_shower(*shower1);
+                    showers_to_be_removed.push_back(shower1);
+                }
+            }
+            
+            for (auto shower_to_remove : showers_to_be_removed) {
+                showers.erase(shower_to_remove);
+            }
+            
+            showers.insert(shower);
+        }
+    }
+    
+    update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
+                      map_vertex_to_shower, used_shower_clusters);
+    
+    // Process remaining other_clusters not in map_cluster_main_vertices
+    for (auto cluster : other_clusters) {
+        if (used_shower_clusters.find(cluster) != used_shower_clusters.end()) continue;
+        
+        double min_dis = 1e9;
+        VertexPtr min_vertex = nullptr;
+        double main_dis = 1e9;
+        
+        for (auto vtx : vertices) {
+            WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            
+            // Get closest distance using cluster's get_closest_dis method
+            double dis = cluster->get_closest_dis(vtx_pt);
+            
+            if (dis < min_dis) {
+                min_dis = dis;
+                min_vertex = vtx;
+            }
+            
+            if (vtx == main_vertex) {
+                main_dis = dis;
+            }
+        }
+        
+        if (min_dis > 0.8 * main_dis) {
+            min_dis = main_dis;
+            min_vertex = main_vertex;
+        }
+        
+        // Find a segment from this cluster
+        SegmentPtr sg = nullptr;
+        for (auto& [seg, vertices_set] : map_segment_vertices) {
+            if (seg->cluster() != cluster) continue;
+            sg = seg;
+            break;
+        }
+        
+        int connection_type = 3;
+        if (min_dis > 80 * units::cm) {
+            connection_type = 4;
+        }
+        
+        if (sg) {
+            // Create new shower
+            ShowerPtr shower = std::make_shared<Shower>(graph);
+            shower->set_start_vertex(min_vertex, connection_type);
+            shower->set_start_segment(sg);
+            
+            // Set direction if not already set
+            if (sg->dirsign() == 0) {
+                // Get start and end vertices
+                auto seg_edesc = sg->get_descriptor();
+                auto source_vdesc = boost::source(seg_edesc, graph);
+                auto target_vdesc = boost::target(seg_edesc, graph);
+                VertexPtr v1 = graph[source_vdesc].vertex;
+                VertexPtr v2 = graph[target_vdesc].vertex;
+                
+                if (v1 && v2) {
+                    if (map_vertex_segments[v1].size() == 1 && map_vertex_segments[v2].size() > 1) {
+                        sg->dirsign(1);
+                    } else if (map_vertex_segments[v1].size() > 1 && map_vertex_segments[v2].size() == 1) {
+                        sg->dirsign(-1);
+                    } else {
+                        // Examine vertices based on distance to main_vertex
+                        WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+                        const auto& fits = sg->fits();
+                        if (!fits.empty()) {
+                            double dis1 = (main_vtx_pt - fits.front().point).magnitude();
+                            double dis2 = (main_vtx_pt - fits.back().point).magnitude();
+                            
+                            if (dis1 < dis2) {
+                                sg->dirsign(1);
+                            } else {
+                                sg->dirsign(-1);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Set particle type to electron if needed
+            int particle_type = 0;
+            if (sg->has_particle_info() && sg->particle_info()) {
+                particle_type = sg->particle_info()->pdg();
+            }
+            
+            if (particle_type == 0 || 
+                (std::abs(particle_type) == 13 && segment_track_length(sg) < 40 * units::cm && sg->dir_weak())) {
+                auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model);
+                
+                // Create ParticleInfo for electron
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    11,                                          // electron PDG
+                    particle_data->get_particle_mass(11),       // electron mass
+                    particle_data->pdg_to_name(11),             // "electron"
+                    four_momentum                                // 4-momentum
+                );
+                
+                sg->particle_info(pinfo);
+            }
+            
+            // Complete shower structure
+            std::set<SegmentPtr> used_segments;
+            shower->complete_structure_with_start_segment(used_segments);
+            showers.insert(shower);
+        }
+    }
+    
+    update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
+                      map_vertex_to_shower, used_shower_clusters);
 }
