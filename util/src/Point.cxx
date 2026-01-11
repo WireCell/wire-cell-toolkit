@@ -84,6 +84,92 @@ double WireCell::ray_dist(const WireCell::Ray& ray, const WireCell::Point& point
     return ray_unit(ray).dot(point - ray.first);
 }
 
+double WireCell::ray_closest_dis(const WireCell::Ray& ray, const WireCell::Point& point)
+{
+    // Perpendicular distance from point to line
+    // Calculate vectors from point to both ray endpoints
+    WireCell::Vector d1 = point - ray.first;  // point to tail
+    WireCell::Vector d2 = point - ray.second; // point to head
+    
+    // Cross product gives a vector perpendicular to the plane containing the point and line
+    WireCell::Vector cross = d1.cross(d2);
+    
+    // Distance = |cross product| / |direction vector|
+    WireCell::Vector dir = ray_vector(ray);
+    return cross.magnitude() / dir.magnitude();
+}
+
+double WireCell::ray_closest_dis(const WireCell::Ray& ray1, const WireCell::Ray& ray2)
+{
+    // Distance between two skew lines
+    // ca = vector from ray2.first to ray1.first
+    WireCell::Vector ca = ray1.first - ray2.first;
+    
+    // Get direction vectors
+    WireCell::Vector dir1 = ray_vector(ray1);
+    WireCell::Vector dir2 = ray_vector(ray2);
+    
+    // Cross product of direction vectors
+    WireCell::Vector bd = dir1.cross(dir2);
+    
+    // Distance = |ca · (dir1 × dir2)| / |dir1 × dir2|
+    double bd_mag = bd.magnitude();
+    if (bd_mag < 1e-6) {
+        // Lines are parallel, use point-to-line distance
+        return ray_closest_dis(ray1, ray2.first);
+    }
+    
+    return std::abs(ca.dot(bd) / bd_mag);
+}
+
+std::pair<WireCell::Point, WireCell::Point> WireCell::ray_closest_points(const WireCell::Ray& ray1, const WireCell::Ray& ray2)
+{
+    // Find the closest points on two infinite lines
+    // Using the algorithm similar to WCP's closest_dis_points
+    
+    WireCell::Vector d = ray1.first - ray2.first;
+    WireCell::Vector dir1 = ray_vector(ray1);
+    WireCell::Vector dir2 = ray_vector(ray2);
+    
+    // Normal vector to both lines
+    WireCell::Vector c = dir1.cross(dir2);
+    double c_mag = c.magnitude();
+    
+    if (c_mag < 1e-6) {
+        // Lines are parallel, return arbitrary closest points
+        return std::make_pair(ray1.first, ray2.first);
+    }
+    
+    WireCell::Vector c_unit = c.norm();
+    
+    // Project d onto dir2 and calculate rejection
+    double proj_mag = d.dot(dir2) / dir2.magnitude();
+    WireCell::Vector proj = proj_mag * dir2.norm();
+    WireCell::Vector rej = d - proj - (d.dot(c_unit) / c_mag) * c_unit;
+    
+    // Find point on ray1
+    WireCell::Vector dir1_unit = dir1.norm();
+    double rej_mag = rej.magnitude();
+    double scale1 = rej_mag / dir1_unit.dot(rej.norm());
+    WireCell::Point tp1 = ray1.first - scale1 * dir1_unit;
+    
+    // Now find point on ray2
+    WireCell::Vector d_p = d * (-1.0);
+    WireCell::Vector c_p = c * (-1.0);
+    WireCell::Vector c_p_unit = c_p.norm();
+    
+    double proj_p_mag = d_p.dot(dir1) / dir1.magnitude();
+    WireCell::Vector proj_p = proj_p_mag * dir1.norm();
+    WireCell::Vector rej_p = d_p - proj_p - (d_p.dot(c_p_unit) / c_mag) * c_p_unit;
+    
+    WireCell::Vector dir2_unit = dir2.norm();
+    double rej_p_mag = rej_p.magnitude();
+    double scale2 = rej_p_mag / dir2_unit.dot(rej_p.norm());
+    WireCell::Point tp2 = ray2.first - scale2 * dir2_unit;
+    
+    return std::make_pair(tp1, tp2);
+}
+
 double WireCell::ray_volume(const WireCell::Ray& ray)
 {
     auto diff = ray_vector(ray);

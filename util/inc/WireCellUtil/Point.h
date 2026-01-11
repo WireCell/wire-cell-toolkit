@@ -84,6 +84,18 @@ namespace WireCell {
      * projected onto the ray's direction. */
     double ray_dist(const Ray& ray, const Point& point);
 
+    /** Return the perpendicular distance from a point to the infinite line
+     * defined by the ray. This is the shortest distance from the point to the line. */
+    double ray_closest_dis(const Ray& ray, const Point& point);
+
+    /** Return the shortest distance between two infinite lines defined by the rays.
+     * For skew lines, this is the distance between the two closest approach points. */
+    double ray_closest_dis(const Ray& ray1, const Ray& ray2);
+
+    /** Return a pair of points representing the closest points on two infinite lines
+     * defined by the rays. The first point is on ray1, the second on ray2. */
+    std::pair<Point, Point> ray_closest_points(const Ray& ray1, const Ray& ray2);
+
     /** Return the volume of a box aligned with axes and with the ray
      * at opposite corners. */
     double ray_volume(const Ray& ray);

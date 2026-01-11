@@ -2324,3 +2324,567 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
                     map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
                     track_fitter, dv, particle_data, recomb_model);
 }
+
+
+void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+
+    if (!main_vertex) return;
+    
+    // Build map_vertex_segments
+    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        if (!seg) continue;
+        
+        auto source_vdesc = boost::source(*eit, graph);
+        auto target_vdesc = boost::target(*eit, graph);
+        VertexPtr v1 = graph[source_vdesc].vertex;
+        VertexPtr v2 = graph[target_vdesc].vertex;
+        
+        if (v1) map_vertex_segments[v1].insert(seg);
+        if (v2) map_vertex_segments[v2].insert(seg);
+    }
+    
+    // Figure out all disconnected showers
+    std::set<ShowerPtr> disconnected_showers;
+    std::map<ShowerPtr, WireCell::Vector> map_shower_dir;
+    
+    for (auto& [vtx, shower_set] : map_vertex_to_shower) {
+        for (auto shower : shower_set) {
+            auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+            
+            if (conn_type == 2 && std::abs(shower->get_particle_type()) != 13) {
+                disconnected_showers.insert(shower);
+                map_shower_dir[shower] = shower_cal_dir_3vector(*shower, shower->get_start_point(), 15 * units::cm);
+            } else if (conn_type == 1) {
+                WireCell::Point start_vtx_pt = start_vtx->fit().valid() ? start_vtx->fit().point : start_vtx->wcpt().point;
+                map_shower_dir[shower] = shower_cal_dir_3vector(*shower, start_vtx_pt, 15 * units::cm);
+            }
+        }
+    }
+    
+    // Build candidate vertices
+    std::set<VertexPtr> candidate_vertices;
+    candidate_vertices.insert(main_vertex);
+    
+    for (auto& [vtx, shower_set] : map_vertex_to_shower) {
+        bool flag_add = true;
+        auto it_in_shower = map_vertex_in_shower.find(vtx);
+        if (it_in_shower != map_vertex_in_shower.end()) {
+            flag_add = false;
+            auto [start_vtx, conn_type] = it_in_shower->second->get_start_vertex_and_type();
+            if (vtx == start_vtx) flag_add = true;
+        }
+        if (flag_add) candidate_vertices.insert(vtx);
+    }
+    
+    // Map shower pairs to masses and vertices
+    std::map<std::pair<ShowerPtr, ShowerPtr>, std::vector<std::pair<double, VertexPtr>>> map_shower_pair_mass_vertex;
+    
+    for (auto vtx : candidate_vertices) {
+        std::vector<ShowerPtr> tmp_showers;
+        std::map<ShowerPtr, WireCell::Vector> local_dirs;
+        
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        
+        // Add directly connected showers (type 1, not muon)
+        auto it2 = map_vertex_to_shower.find(vtx);
+        if (it2 != map_vertex_to_shower.end()) {
+            for (auto shower : it2->second) {
+                auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+                if (conn_type == 1 && std::abs(shower->get_particle_type()) != 13) {
+                    tmp_showers.push_back(shower);
+                    local_dirs[shower] = shower->get_init_dir();
+                }
+            }
+        }
+        
+        // Add disconnected showers within angle
+        for (auto shower : disconnected_showers) {
+            WireCell::Vector dir1 = map_shower_dir[shower];
+            WireCell::Vector dir2(shower->get_start_point().x() - vtx_pt.x(),
+                                 shower->get_start_point().y() - vtx_pt.y(),
+                                 shower->get_start_point().z() - vtx_pt.z());
+            
+            auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+            
+            if (start_vtx == vtx) {
+                tmp_showers.push_back(shower);
+                local_dirs[shower] = shower->get_init_dir();
+            } else {
+                double angle = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                if (angle < 30) {
+                    tmp_showers.push_back(shower);
+                    local_dirs[shower] = dir2;
+                }
+            }
+        }
+        
+        // Calculate pi0 masses for all pairs
+        if (tmp_showers.size() > 1) {
+            for (size_t i = 0; i < tmp_showers.size(); i++) {
+                ShowerPtr shower_1 = tmp_showers[i];
+                WireCell::Vector dir1 = local_dirs[shower_1];
+                
+                for (size_t j = i + 1; j < tmp_showers.size(); j++) {
+                    ShowerPtr shower_2 = tmp_showers[j];
+                    WireCell::Vector dir2 = local_dirs[shower_2];
+                    
+                    double angle = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0));
+                    double mass_pio = std::sqrt(4 * shower_1->get_kine_charge() * shower_2->get_kine_charge() * 
+                                               std::pow(std::sin(angle / 2.0), 2));
+                    
+                    auto [start_vtx_1, conn_type_1] = shower_1->get_start_vertex_and_type();
+                    auto [start_vtx_2, conn_type_2] = shower_2->get_start_vertex_and_type();
+                    
+                    if (conn_type_1 == 1 && conn_type_2 == 1) continue;
+                    
+                    map_shower_pair_mass_vertex[std::make_pair(shower_1, shower_2)].push_back(std::make_pair(mass_pio, vtx));
+                }
+            }
+        }
+    }
+    
+    // Store pi0 kinematic variables (not implemented as member variables yet, just processing)
+    WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+    
+    // Find pi0 iteratively
+    // static int acc_segment_id = 100000;  // Static counter for pi0 IDs
+    
+    while (map_shower_pair_mass_vertex.size() > 0) {
+        double mass_diff = 1e9;
+        double mass_save = 0;
+        ShowerPtr shower_1 = nullptr;
+        ShowerPtr shower_2 = nullptr;
+        double mass_offset = 10 * units::MeV;
+        VertexPtr vtx = nullptr;
+        double mass_penalty = 0;
+        double tmp_mass_penalty = 0;
+        
+        // Find best pi0 candidate
+        for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex) {
+            for (auto& [mass, candidate_vtx] : mass_vtx_vec) {
+                auto [start_vtx_1, conn_type_1] = shower_pair.first->get_start_vertex_and_type();
+                auto [start_vtx_2, conn_type_2] = shower_pair.second->get_start_vertex_and_type();
+                
+                if (conn_type_1 == 2 && conn_type_2 == 2) {
+                    tmp_mass_penalty = 6 * units::MeV;
+                } else {
+                    tmp_mass_penalty = 0;
+                }
+                
+                if (mass - 135 * units::MeV + mass_offset < 35 * units::MeV && 
+                    mass - 135 * units::MeV + mass_offset > -25 * units::MeV) {
+                    if (std::abs(mass - 135 * units::MeV + mass_offset) - tmp_mass_penalty < 
+                        std::abs(mass_diff) - mass_penalty) {
+                        mass_diff = mass - 135 * units::MeV + mass_offset;
+                        mass_penalty = tmp_mass_penalty;
+                        mass_save = mass;
+                        shower_1 = shower_pair.first;
+                        shower_2 = shower_pair.second;
+                        vtx = candidate_vtx;
+                    }
+                }
+            }
+        }
+        
+        // If found a good pi0, mark it
+        if (mass_diff < 35 * units::MeV && mass_diff > -25 * units::MeV) {
+            pi0_showers.insert(shower_1);
+            pi0_showers.insert(shower_2);
+            
+            int pio_id = acc_segment_id;
+            acc_segment_id++;
+            
+            map_shower_pio_id[shower_1] = pio_id;
+            map_shower_pio_id[shower_2] = pio_id;
+            map_pio_id_mass[pio_id] = std::make_pair(mass_save, 1);
+            map_pio_id_showers[pio_id].push_back(shower_1);
+            map_pio_id_showers[pio_id].push_back(shower_2);
+            
+            // Update shower start vertices if needed
+            auto [start_vtx_1, conn_type_1] = shower_1->get_start_vertex_and_type();
+            if (start_vtx_1 != vtx) {
+                shower_1->set_start_vertex(vtx, 2);
+                shower_1->calculate_kinematics(particle_data, recomb_model);
+            }
+            
+            auto [start_vtx_2, conn_type_2] = shower_2->get_start_vertex_and_type();
+            if (start_vtx_2 != vtx) {
+                shower_2->set_start_vertex(vtx, 2);
+                shower_2->calculate_kinematics(particle_data, recomb_model);
+            }
+            
+            std::cout << "Pi0 found with mass: " << mass_save / units::MeV << " MeV with " 
+                      << shower_1->get_kine_charge() / units::MeV << " MeV + " 
+                      << shower_2->get_kine_charge() / units::MeV << " MeV" << std::endl;
+        } else {
+            break;
+        }
+        
+        // Remove pairs involving these showers
+        std::vector<std::pair<ShowerPtr, ShowerPtr>> to_be_removed;
+        for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex) {
+            if (shower_pair.first == shower_1 || shower_pair.first == shower_2 ||
+                shower_pair.second == shower_1 || shower_pair.second == shower_2) {
+                to_be_removed.push_back(shower_pair);
+            }
+        }
+        for (auto& pair : to_be_removed) {
+            map_shower_pair_mass_vertex.erase(pair);
+        }
+    }
+    
+    // Find pi0 vertices and change incoming muons to pions
+    std::set<VertexPtr> pi0_vertices;
+    for (auto shower : pi0_showers) {
+        auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+        pi0_vertices.insert(start_vtx);
+    }
+    
+    for (auto vtx : pi0_vertices) {
+        if (map_vertex_segments.find(vtx) == map_vertex_segments.end()) continue;
+        
+        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        
+        for (auto sg : map_vertex_segments[vtx]) {
+            // Determine if segment starts or ends at this vertex
+            bool flag_start = false;
+            if (!sg->fits().empty()) {
+                double dist_front = (sg->fits().front().point - vtx_pt).magnitude();
+                double dist_back = (sg->fits().back().point - vtx_pt).magnitude();
+                flag_start = (dist_front < dist_back);
+            }
+            
+            int dirsign_val = sg->dirsign();
+            
+            // Check if segment is coming in (opposite direction)
+            bool is_incoming = (flag_start && dirsign_val == -1) || (!flag_start && dirsign_val == 1);
+            
+            if (is_incoming && sg->has_particle_info()) {
+                int pdg = sg->particle_info()->pdg();
+                if (std::abs(pdg) == 13 || pdg == 0) {
+                    // Change muon to pion
+                    sg->particle_info()->set_pdg(211);
+                    sg->particle_info()->set_mass(139.57 * units::MeV);  // Pion mass
+                }
+            }
+        }
+    }
+}
+
+
+void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+
+    if (!main_vertex) return;
+    
+    // Build map_vertex_segments and segments_in_long_muon
+    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
+    std::set<SegmentPtr> segments_in_long_muon;  // Placeholder - would need proper implementation
+    
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr seg = graph[*eit].segment;
+        if (!seg) continue;
+        
+        auto source_vdesc = boost::source(*eit, graph);
+        auto target_vdesc = boost::target(*eit, graph);
+        VertexPtr v1 = graph[source_vdesc].vertex;
+        VertexPtr v2 = graph[target_vdesc].vertex;
+        
+        if (v1) map_vertex_segments[v1].insert(seg);
+        if (v2) map_vertex_segments[v2].insert(seg);
+    }
+    
+    // Check main vertex conditions
+    if (map_vertex_segments[main_vertex].size() > 2) return;
+    
+    if (map_vertex_segments[main_vertex].size() > 0) {
+        auto first_seg = *map_vertex_segments[main_vertex].begin();
+        auto last_seg = *map_vertex_segments[main_vertex].rbegin();
+        
+        if ((map_segment_in_shower.find(first_seg) == map_segment_in_shower.end() &&
+             map_segment_in_shower.find(last_seg) == map_segment_in_shower.end()) ||
+            segments_in_long_muon.find(first_seg) != segments_in_long_muon.end() ||
+            segments_in_long_muon.find(last_seg) != segments_in_long_muon.end()) {
+            return;
+        }
+    }
+    
+    // Build good_showers set
+    std::set<ShowerPtr> good_showers;
+    {
+        auto it = map_vertex_to_shower.find(main_vertex);
+        if (it != map_vertex_to_shower.end()) {
+            for (auto shower : it->second) {
+                if (pi0_showers.find(shower) != pi0_showers.end()) return;
+                
+                auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+                if (conn_type == 1) {
+                    good_showers.insert(shower);
+                }
+            }
+        }
+        
+        if (good_showers.size() > 1) {
+            ShowerPtr max_shower = nullptr;
+            double max_energy = 0;
+            for (auto shower : good_showers) {
+                double energy = shower->get_kine_charge();
+                if (energy > max_energy) {
+                    max_energy = energy;
+                    max_shower = shower;
+                }
+            }
+            good_showers.clear();
+            if (max_shower) good_showers.insert(max_shower);
+        }
+    }
+    
+    // Check if we have exactly 2 segments at main vertex
+    if (map_vertex_segments[main_vertex].size() == 2) {
+        bool flag_return = true;
+        int num_showers = 0;
+        
+        for (auto sg : map_vertex_segments[main_vertex]) {
+            if (map_segment_in_shower.find(sg) == map_segment_in_shower.end()) {
+                double sg_length = segment_track_length(sg);
+                if (sg_length < 1.2 * units::cm && (sg->dirsign() == 0 || sg->dir_weak())) {
+                    flag_return = false;
+                }
+            } else {
+                num_showers++;
+            }
+        }
+        
+        if (flag_return && num_showers == map_vertex_segments[main_vertex].size()) {
+            flag_return = false;
+        }
+        if (flag_return) return;
+    }
+    
+    // Build map of showers to rays (lines)
+    std::map<ShowerPtr, WireCell::Ray> map_shower_ray;
+    WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+    
+    // Add showers from main vertex
+    auto it_main = map_vertex_to_shower.find(main_vertex);
+    if (it_main != map_vertex_to_shower.end()) {
+        for (auto shower : it_main->second) {
+            if (shower->get_particle_type() == 13) continue;
+            if (shower->get_total_length() < 3 * units::cm) continue;
+            if (pi0_showers.find(shower) != pi0_showers.end()) continue;
+            
+            WireCell::Point test_p = shower->get_start_point();
+            WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
+            WireCell::Point p2(test_p.x() + dir.x(), test_p.y() + dir.y(), test_p.z() + dir.z());
+            map_shower_ray[shower] = WireCell::Ray(test_p, p2);
+        }
+    }
+    
+    // Add showers from other vertices
+    for (auto& [vtx, shower_set] : map_vertex_to_shower) {
+        if (vtx == main_vertex) continue;
+        
+        for (auto shower : shower_set) {
+            if (shower->get_particle_type() == 13) continue;
+            if (shower->get_total_length() < 3 * units::cm) continue;
+            if (pi0_showers.find(shower) != pi0_showers.end()) continue;
+            
+            auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+            if (conn_type != 3) continue;
+            
+            if (!shower->start_segment()->flags_any(SegmentFlags::kShowerTrajectory) &&
+                !shower->start_segment()->flags_any(SegmentFlags::kShowerTopology)) continue;
+            
+            auto [closest_dis, test_p] = shower_get_closest_point(*shower, main_vtx_pt);
+            WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
+            WireCell::Point p2(test_p.x() + dir.x(), test_p.y() + dir.y(), test_p.z() + dir.z());
+            map_shower_ray[shower] = WireCell::Ray(test_p, p2);
+        }
+    }
+    
+    if (map_shower_ray.size() > 1) {
+        // Calculate pi0 masses for shower pairs
+        std::map<std::pair<ShowerPtr, ShowerPtr>, std::pair<double, WireCell::Point>> map_shower_pair_mass_point;
+        
+        for (auto it = map_shower_ray.begin(); it != map_shower_ray.end(); it++) {
+            ShowerPtr shower_1 = it->first;
+            WireCell::Ray ray1 = it->second;
+            double length_1 = shower_1->get_total_length();
+            
+            for (auto it1 = it; it1 != map_shower_ray.end(); it1++) {
+                ShowerPtr shower_2 = it1->first;
+                if (shower_1 == shower_2) continue;
+                
+                WireCell::Ray ray2 = it1->second;
+                if (ray1.first == ray2.first) continue;
+                
+                double length_2 = shower_2->get_total_length();
+                
+                WireCell::Vector dir1 = ray_vector(ray1);
+                WireCell::Vector dir2 = ray_vector(ray2);
+                double angle_between = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0));
+                if (angle_between == 0) continue;
+                
+                auto [p1_closest, p2_closest] = ray_closest_points(ray1, ray2);
+                WireCell::Point center((p1_closest.x() + p2_closest.x()) / 2.0,
+                                      (p1_closest.y() + p2_closest.y()) / 2.0,
+                                      (p1_closest.z() + p2_closest.z()) / 2.0);
+                
+                if (length_1 > 15 * units::cm && length_2 > 15 * units::cm) {
+                    WireCell::Vector dir_to_shower1(ray1.first.x() - center.x(),
+                                                   ray1.first.y() - center.y(),
+                                                   ray1.first.z() - center.z());
+                    WireCell::Vector dir_to_shower2(ray2.first.x() - center.x(),
+                                                   ray2.first.y() - center.y(),
+                                                   ray2.first.z() - center.z());
+                    
+                    if (dir_to_shower1.magnitude() < 3 * units::cm) dir_to_shower1 = dir1;
+                    if (dir_to_shower2.magnitude() < 3 * units::cm) dir_to_shower2 = dir2;
+                    
+                    double angle1 = std::acos(std::clamp(dir_to_shower1.dot(dir1) / (dir_to_shower1.magnitude() * dir1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                    double angle2 = std::acos(std::clamp(dir_to_shower2.dot(dir2) / (dir_to_shower2.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                    
+                    if (angle1 > 25 || angle2 > 25) continue;
+                    
+                    double angle = std::acos(std::clamp(dir_to_shower1.dot(dir_to_shower2) / (dir_to_shower1.magnitude() * dir_to_shower2.magnitude()), -1.0, 1.0));
+                    double mass_pio = std::sqrt(4 * shower_1->get_kine_charge() * shower_2->get_kine_charge() * 
+                                               std::pow(std::sin(angle / 2.0), 2));
+                    map_shower_pair_mass_point[std::make_pair(shower_1, shower_2)] = std::make_pair(mass_pio, center);
+                    
+                } else if (length_1 > 15 * units::cm || length_2 > 15 * units::cm) {
+                    WireCell::Vector dir_to_c1, dir_to_c2;
+                    
+                    if (length_1 > length_2) {
+                        center = WireCell::Point((p1_closest.x() + p2_closest.x()) / 2.0,
+                                                (p1_closest.y() + p2_closest.y()) / 2.0,
+                                                (p1_closest.z() + p2_closest.z()) / 2.0);
+                        
+                        auto [dis2, test_p] = shower_get_closest_point(*shower_2, center);
+                        WireCell::Vector dir3 = shower_cal_dir_3vector(*shower_2, test_p, 15 * units::cm);
+                        WireCell::Point p3(test_p.x() + dir3.x(), test_p.y() + dir3.y(), test_p.z() + dir3.z());
+                        WireCell::Ray ray3(test_p, p3);
+                        
+                        auto [new_p1, new_p2] = ray_closest_points(ray1, ray3);
+                        center = new_p1;
+                        
+                        dir_to_c1 = WireCell::Vector(ray1.first.x() - center.x(),
+                                                     ray1.first.y() - center.y(),
+                                                     ray1.first.z() - center.z());
+                        dir_to_c2 = WireCell::Vector(test_p.x() - center.x(),
+                                                     test_p.y() - center.y(),
+                                                     test_p.z() - center.z());
+                        
+                        double angle1 = std::acos(std::clamp(dir_to_c1.dot(dir1) / (dir_to_c1.magnitude() * dir1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        double angle2 = std::acos(std::clamp(dir_to_c2.dot(dir3) / (dir_to_c2.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        if (angle1 > 25 || angle2 > 25) continue;
+                        
+                    } else {
+                        center = WireCell::Point((p1_closest.x() + p2_closest.x()) / 2.0,
+                                                (p1_closest.y() + p2_closest.y()) / 2.0,
+                                                (p1_closest.z() + p2_closest.z()) / 2.0);
+                        
+                        auto [dis1, test_p] = shower_get_closest_point(*shower_1, center);
+                        WireCell::Vector dir3 = shower_cal_dir_3vector(*shower_1, test_p, 15 * units::cm);
+                        WireCell::Point p3(test_p.x() + dir3.x(), test_p.y() + dir3.y(), test_p.z() + dir3.z());
+                        WireCell::Ray ray3(test_p, p3);
+                        
+                        auto [new_p1, new_p2] = ray_closest_points(ray3, ray2);
+                        center = new_p2;
+                        
+                        dir_to_c2 = WireCell::Vector(ray2.first.x() - center.x(),
+                                                     ray2.first.y() - center.y(),
+                                                     ray2.first.z() - center.z());
+                        dir_to_c1 = WireCell::Vector(test_p.x() - center.x(),
+                                                     test_p.y() - center.y(),
+                                                     test_p.z() - center.z());
+                        
+                        double angle1 = std::acos(std::clamp(dir_to_c1.dot(dir3) / (dir_to_c1.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        double angle2 = std::acos(std::clamp(dir_to_c2.dot(dir2) / (dir_to_c2.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        if (angle1 > 25 || angle2 > 25) continue;
+                    }
+                    
+                    double angle = std::acos(std::clamp(dir_to_c1.dot(dir_to_c2) / (dir_to_c1.magnitude() * dir_to_c2.magnitude()), -1.0, 1.0));
+                    double mass_pio = std::sqrt(4 * shower_1->get_kine_charge() * shower_2->get_kine_charge() * 
+                                               std::pow(std::sin(angle / 2.0), 2));
+                    map_shower_pair_mass_point[std::make_pair(shower_1, shower_2)] = std::make_pair(mass_pio, center);
+                    
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        // Find best pi0 candidate
+        double mass_diff = 1e9;
+        double mass_save = 0;
+        ShowerPtr shower_1 = nullptr;
+        ShowerPtr shower_2 = nullptr;
+        double mass_offset = 10 * units::MeV;
+        WireCell::Point vtx_point;
+        
+        for (auto& [shower_pair, mass_point] : map_shower_pair_mass_point) {
+            if (std::abs(mass_point.first - 135 * units::MeV + mass_offset) < mass_diff) {
+                if (good_showers.find(shower_pair.first) == good_showers.end() && 
+                    good_showers.find(shower_pair.second) == good_showers.end()) continue;
+                
+                shower_1 = shower_pair.first;
+                shower_2 = shower_pair.second;
+                mass_diff = std::abs(mass_point.first - 135 * units::MeV + mass_offset);
+                mass_save = mass_point.first;
+                vtx_point = mass_point.second;
+            }
+        }
+        
+        // If found good pi0, update everything
+        if (mass_diff < 60 * units::MeV && shower_1 && shower_2) {
+            pi0_showers.insert(shower_1);
+            pi0_showers.insert(shower_2);
+            
+            int pio_id = acc_segment_id;
+            acc_segment_id++;
+            
+            map_shower_pio_id[shower_1] = pio_id;
+            map_shower_pio_id[shower_2] = pio_id;
+            map_pio_id_mass[pio_id] = std::make_pair(mass_save, 2);
+            map_pio_id_showers[pio_id].push_back(shower_1);
+            map_pio_id_showers[pio_id].push_back(shower_2);
+            
+            // Update main vertex position (hack) - set to reconstructed pi0 decay point
+            main_vertex->fit().point = vtx_point;
+            main_vertex->fit().dQ = 0;
+            
+            // Add other segments from main_vertex to showers
+            auto [start_vtx_1, conn_type_1] = shower_1->get_start_vertex_and_type();
+            if (start_vtx_1 == main_vertex && conn_type_1 == 1) {
+                for (auto sg : map_vertex_segments[main_vertex]) {
+                    if (sg == shower_1->start_segment()) continue;
+                    shower_1->add_segment(sg);
+                }
+            }
+            
+            auto [start_vtx_2, conn_type_2] = shower_2->get_start_vertex_and_type();
+            if (start_vtx_2 == main_vertex && conn_type_2 == 1) {
+                for (auto sg : map_vertex_segments[main_vertex]) {
+                    if (sg == shower_2->start_segment()) continue;
+                    shower_2->add_segment(sg);
+                }
+            }
+            
+            shower_1->set_start_vertex(main_vertex, 2);
+            shower_1->calculate_kinematics(particle_data, recomb_model);
+            
+            shower_2->set_start_vertex(main_vertex, 2);
+            shower_2->calculate_kinematics(particle_data, recomb_model);
+            
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                              map_vertex_to_shower, used_shower_clusters);
+            
+            std::cout << "Pi0 (displaced vertex) found with mass: " << mass_save / units::MeV 
+                      << " MeV with " << shower_1->get_kine_charge() / units::MeV << " MeV + " 
+                      << shower_2->get_kine_charge() / units::MeV << " MeV" << std::endl;
+        }
+    }
+}
