@@ -1286,7 +1286,7 @@ void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, Vert
 }
 
 
-void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_save){
     
     if (!main_vertex || !main_cluster) return;
     
@@ -1495,6 +1495,8 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
         if (min_dis > 80 * units::cm) {
             connection_type = 4;
         }
+
+        if (!flag_save) connection_type = 4;
         
         if (sg) {
             // Create new shower
@@ -2887,4 +2889,74 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
                       << shower_2->get_kine_charge() / units::MeV << " MeV" << std::endl;
         }
     }
+}
+
+
+void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+
+    
+    
+    // Connect to the main cluster
+    shower_clustering_with_nv_in_main_cluster(graph, main_vertex, showers, 
+                                              map_vertex_in_shower, map_segment_in_shower, 
+                                              map_vertex_to_shower, used_shower_clusters,
+                                              vertices_in_long_muon, segments_in_long_muon);
+    
+    // Examine things connecting to the main vertex
+    shower_clustering_connecting_to_main_vertex(graph, main_vertex, showers,
+                                                map_vertex_in_shower, map_segment_in_shower,
+                                                map_vertex_to_shower, used_shower_clusters);
+    
+    // Shower clustering from main cluster
+    shower_clustering_with_nv_from_main_cluster(graph, main_vertex, main_cluster, showers,
+                                                map_vertex_in_shower, map_segment_in_shower,
+                                                map_vertex_to_shower, used_shower_clusters);
+    
+    // Shower clustering from vertices
+    shower_clustering_with_nv_from_vertices(graph, main_vertex, main_cluster, other_clusters, showers,
+                                           map_vertex_in_shower, map_segment_in_shower,
+                                           map_vertex_to_shower, used_shower_clusters,
+                                           vertices_in_long_muon, segments_in_long_muon,
+                                           track_fitter, dv, particle_data, recomb_model);
+    
+    // Calculate shower kinematics
+    calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
+                                graph, track_fitter, dv, particle_data, recomb_model);
+    
+    // Examine and merge showers
+    examine_merge_showers(showers, main_vertex, map_vertex_in_shower, map_segment_in_shower,
+                         map_vertex_to_shower, used_shower_clusters,
+                         vertices_in_long_muon, segments_in_long_muon,
+                         graph, track_fitter, dv, particle_data, recomb_model);
+    
+    // Check remaining clusters
+    shower_clustering_in_other_clusters(graph, main_vertex, showers, main_cluster, other_clusters,
+                                       map_cluster_main_vertices, map_vertex_in_shower,
+                                       map_segment_in_shower, map_vertex_to_shower,
+                                       used_shower_clusters, track_fitter, dv,
+                                       particle_data, recomb_model, true);
+    
+    // Calculate shower kinematics again
+    calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
+                                graph, track_fitter, dv, particle_data, recomb_model);
+    
+    // Examine shower trunk and add to shower
+    examine_showers(graph, main_vertex, showers, main_cluster, other_clusters,
+                   map_cluster_main_vertices, map_vertex_in_shower, map_segment_in_shower,
+                   map_vertex_to_shower, used_shower_clusters,
+                   track_fitter, dv, particle_data, recomb_model);
+    
+    // Identify pi0 with vertex
+    id_pi0_with_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
+                      map_pio_id_saved_pair, graph, main_vertex, showers, main_cluster,
+                      other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
+                      map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
+                      track_fitter, dv, particle_data, recomb_model);
+    
+    // Identify pi0 without vertex (displaced vertex)
+    id_pi0_without_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers,
+                         map_pio_id_mass, map_pio_id_saved_pair, graph, main_vertex, showers,
+                         main_cluster, other_clusters, map_cluster_main_vertices,
+                         map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower,
+                         used_shower_clusters, track_fitter, dv, particle_data, recomb_model);
 }
