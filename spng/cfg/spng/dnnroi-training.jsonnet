@@ -5,6 +5,7 @@
 local wc = import "wirecell.jsonnet";
 local pg = import 'pgraph.jsonnet';
 local io = import "spng/io.jsonnet";
+local torchio = import "spng/torchio.jsonnet";
 local det_js = import "spng/det.jsonnet";
 local drift_js = import "spng/drift.jsonnet";
 local splatroi_js = import "spng/splatroi.jsonnet";
@@ -30,7 +31,7 @@ local detconf = import "spng/detconf.jsonnet";
 // populate this TPC.
 //
 function(input,
-         outpat="dnnroi-training-%(tier)s.npz",
+         outpat="dnnroi-training-%(tier)s-%(view)s.pkl",
          detname='pdhd',
          engine='Pgrapher',
          device='cpu',
@@ -72,13 +73,28 @@ function(input,
     local simfodder = pg.pipeline([sim, fodder]);
 
     local body = pg.intern(innodes=[upstream], outnodes=[truth, simfodder],
+                           centernodes=[depo_fan],
                            edges=[
                                pg.edge(upstream, depo_fan),
                                pg.edge(depo_fan, truth, 0, 0),
                                pg.edge(depo_fan, simfodder, 1, 0)]);
 
 
-    local graph = body; 
+    local truth_sinks = [
+        torchio.pickle_tensor_set(outpat % {tier:"truth", view:view})
+        for view in [0,1,2]];
+    local fodder_sinks = [
+        torchio.pickle_tensor_set(outpat % {tier:"fodder", view:view})
+        for view in [0,1]];
+    local graph = pg.intern(centernodes=[body]+truth_sinks+fodder_sinks,
+                            edges=[
+                                pg.edge(truth, truth_sinks[view], view, 0),
+                                for view in [0,1,2]
+                            ] + [
+                                pg.edge(fodder, fodder_sinks[view], view, 0),
+                                for view in [0,1]]);
+
+    // local graph = pg.components([body, sinks]); 
     //local graph = fodder;
     //local graph = pg.components([sim, fodder]);
 
