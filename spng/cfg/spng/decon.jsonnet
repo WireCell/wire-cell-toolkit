@@ -136,6 +136,7 @@ function(tpc, control={})
 
 
     /// Given array of nodes that span view groups, return array that span views
+    /// fixme: move this out to a more generic jsonnet.
     collect_groups_by_view(nodes)::
         [$.group_fanin([
             nodes[gi.index]

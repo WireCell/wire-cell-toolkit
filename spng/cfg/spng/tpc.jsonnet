@@ -104,20 +104,6 @@ function(tpc, control, pg) {
     // crossviews each of three inputs making a fully-connected net.
     crossfan(view_crossed=[1,1,0]): cv.crossfan(tpc, view_crossed=view_crossed),
 
-
-
-
-
-
-    // // Node: 2x3 -> 3.  Connect the dnnroi filters and output of crossviews
-    // dnnroi_prepare: dnnroi.prepare(tpc.name, time_filters.dnnroi, $.crossfan),
-    
-    // // Node: 3 -> 3.  Connect dnnroi pre with forward inference.
-    // dnnroi_forward: dnnroi.forward(tpc.name, $.dnnroi_prepare),
-
-    // // Node: 2x3 -> 3.  Apply rois.
-    // dnnroi_apply: dnnroi.apply(tpc.name, time_filters.gauss, $.dnnroi_forward),
-
     // Node: nview->1 set.  Collect view tensors into a tensor set.
     frame_set_repack: frame.tensorset_view_repacker(tpc.name),
 

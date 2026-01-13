@@ -12,7 +12,10 @@ function(control)
     /// Make a FrameToTDM config object for a tpc with a single set of grouped
     /// views.  See the class documentation for details.  If more than one of
     /// these per tpc, use extra_name to distinguish.
-    to_tdm(tpc, tag="", extra_name=""):: pg.pnode({
+    to_tdm(tpc, tag="", extra_name="", groups=null):: pg.pnode({
+        local the_groups = if std.type(groups) == "null"
+                           then tpc.view_groups
+                           else groups,
         type: 'SPNGFrameToTdm',
         name: tpc.name + extra_name,
         data: {
@@ -21,7 +24,7 @@ function(control)
                 tag: tag,
                 groups: [{
                     wpids: g.signed_wpids(tpc.ident),
-                }, for g in tpc.view_groups]
+                }, for g in the_groups]
             }],                 // just one rule
         } + control
     }, nin=1, nout=1, uses=[tpc.anode]),
