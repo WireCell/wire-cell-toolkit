@@ -88,6 +88,7 @@ function(
                     device: (if debug_force_cpu then 'cpu' else 'gpu'),
                 }
             },
+
             local tf_fans = make_fanout(tools.anodes[0]),
             local u_stacker =  g.pnode({
                 type: 'TorchTensorSetStacker',
@@ -400,25 +401,69 @@ function(
                 }, nin=2, nout=1) for plane in ['u', 'v', 'w1', 'w2']
             ],
 
+            //local dnn_rois = [
+            //   g.pnode({
+            //        type: 'SPNGDNNROI',
+            //        name: 'dnnroi_%s' % plane,
+            //        data: {
+            //            
+            //            plane: plane,
+            //            input_scale: 1.0/4000,
+            //            input_offset: 0.0,
+            //            mask_threshold: 0.5,
+            //            output_scale: 1.0,
+            //           output_offset: 0.0,
+            //            nchunks: 1,
+            //           forward: wc.tn(SPNGTorchService),
+            //        },
+            //
+            //        },
+            //    }, nin=1, nout=1, uses=[SPNGTorchService]) for plane in ['u', 'v']
+           // ],
+            local dnn_preprocess = [
+                g.pnode({
+                    type: 'SPNGDNNROIPreProcess',
+                    name: 'dnnroi_preprocess_%s' % plane,
+                    data: {
+                        plane: plane,
+                        nchunks: 1,
+                        input_scale: 1.0,
+                        input_offset: 0.0,
+                        ntick: 6000,
+                        tick_per_slice: 4,
+                    },
+                }, nin=1, nout=1) for plane in ['u', 'v']
+            ],
+            local dnn_postprocess = [
+                g.pnode({
+                    type: 'SPNGDNNROIPostProcess',
+                    name: 'dnnroi_postprocess_%s' % plane,
+                    data: {
+                        plane: plane,
+                        nchunks: 1,
+                        output_scale: 1.0,
+                        output_offset: 0.0,
+                        ntick: 6000,
+                        tick_per_slice: 4,
+                    },
+                }, nin=1, nout=1) for plane in ['u', 'v']
+            ],
             local dnn_rois = [
                 g.pnode({
-                    type: 'SPNGDNNROI',
+                    type: 'SPNGDNNROIProcess',
                     name: 'dnnroi_%s' % plane,
                     data: {
-                        
                         plane: plane,
                         input_scale: 1.0/4000,
                         input_offset: 0.0,
                         mask_threshold: 0.5,
                         output_scale: 1.0,
                         output_offset: 0.0,
-                        nchunks: 4,
+                        nchunks: 1,
                         forward: wc.tn(SPNGTorchService),
-
                     },
                 }, nin=1, nout=1, uses=[SPNGTorchService]) for plane in ['u', 'v']
             ],
-
             local tensor_sinks = [g.pnode({
                 type: 'TensorFileSink',
                 name: 'tfsink_mp_finding_%s' % plane,
@@ -433,7 +478,7 @@ function(
                     do_gaus_filters + do_loose_roi_filters + do_tight_roi_filters +
                     threshold_rois + post_tight_replicators + roi_application +
                     collators_for_mp_finding + torch_to_tensors + mp_finding
-                    + collators_for_dnn_roi + dnn_rois + tensor_sinks,
+                    + collators_for_dnn_roi + dnn_preprocess + dnn_rois + dnn_postprocess + tensor_sinks,
                     
             local mp_finding_edges = [
                     g.edge(tf_fans, spng_decons[0], 0),
@@ -501,14 +546,22 @@ function(
                     g.edge(do_loose_roi_filters[1], collators_for_dnn_roi[1], 0, 1),//V
 
                     // g.edge(collators_for_dnn_roi[0], torch_to_tensors[0]),
-                    g.edge(collators_for_dnn_roi[0], dnn_rois[0]),
-                    g.edge(dnn_rois[0], roi_application[0], 0, 0),//U
+                    g.edge(collators_for_dnn_roi[0], dnn_preprocess[0]),
+                   // g.edge(collators_for_dnn_roi[0], dnn_rois[0]),
+                    g.edge(dnn_preprocess[0], dnn_rois[0]),
+                    g.edge(dnn_rois[0], dnn_postprocess[0]),
+                    g.edge(dnn_postprocess[0], roi_application[0]),
+                    //g.edge(dnn_rois[0], roi_application[0], 0, 0),//U
                     g.edge(do_gaus_filters[0], roi_application[0], 0, 1),//U
                     g.edge(roi_application[0], torch_to_tensors[0]),
 
                     // g.edge(collators_for_dnn_roi[1], torch_to_tensors[1]),
-                    g.edge(collators_for_dnn_roi[1], dnn_rois[1]),
-                    g.edge(dnn_rois[1], roi_application[1], 0, 0),//V
+                    g.edge(collators_for_dnn_roi[1], dnn_preprocess[1]),
+                    g.edge(dnn_preprocess[1], dnn_rois[1]),
+                    g.edge(dnn_rois[1], dnn_postprocess[1]),
+                    g.edge(dnn_postprocess[1], roi_application[1]),
+                   // g.edge(collators_for_dnn_roi[1], dnn_rois[1]),
+                   // g.edge(dnn_rois[1], roi_application[1], 0, 0),//V
                     g.edge(do_gaus_filters[1], roi_application[1], 0, 1),//V
                     g.edge(roi_application[1], torch_to_tensors[1]),
 

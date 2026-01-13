@@ -25,8 +25,8 @@ namespace WireCell::SPNG {
         virtual WireCell::Configuration default_configuration() const;
 
         // ITensorSetFilter interface.  This is thread-safe.
-        virtual ITorchTensorSet::pointer forward(const ITorchTensorSet::pointer& input) const;
-
+        //virtual ITorchTensorSet::pointer forward(const ITorchTensorSet::pointer& input) const;
+        virtual torch::Tensor forward(const torch::Tensor& input) const;
       private:
 
         // for read-only access, claim is that .forward() is thread

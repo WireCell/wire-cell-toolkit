@@ -1,25 +1,49 @@
-#ifndef WIRECELL_SPNGDNNROI
-#define WIRECELL_SPNGDNNROI
+#ifndef WIRECELL_SPNG_FRAMETOTORCHSET
+#define WIRECELL_SPNG_FRAMETOTORCHSET
 
-#include "WireCellAux/Logger.h"
-#include "WireCellSpng/ITorchToTensorSet.h"
-#include "WireCellSpng/ITorchForward.h"
-#include "WireCellSpng/ITorchTensorSetFilter.h"
+#include "WireCellSpng/IFrameToTorchSet.h"
 #include "WireCellIface/IConfigurable.h"
-#include "WireCellSpng/ITorchSpectrum.h"
+#include "WireCellIface/IFrameFilter.h"
+#include "WireCellUtil/Array.h"
+#include "WireCellAux/Logger.h"
 
-
+#include <unordered_set>
 namespace WireCell {
     namespace SPNG {
+
+        /**
+           FrameToTorchSet converts an input IFrame into a TorchTensorSet.
+
+           Configuration:
+
+           - (none yet)
+
+        */
+        class FrameToTorchSet
+            : public Aux::Logger,
+              public IFrameToTorchSet, public IConfigurable {
+           public:
+            FrameToTorchSet();
+            virtual ~FrameToTorchSet() {};
+
+            // INode, override because we get multiplicity at run time.
+            // virtual std::vector<std::string> output_types();
+
+            // IFrameToTorchSet
+            virtual bool operator()(const input_pointer& in, output_pointer& out);
+
+            // IConfigurable
+            virtual void configure(const WireCell::Configuration& cfg);
+            virtual WireCell::Configuration default_configuration() const;
         struct DNNROIFindingCfg {
 
-            // The APA to focus on
-            std::string apa{"AnodePlane"};
+            // The anode to focus on
+            std::string anode{"AnodePlane"};
 
             // The plane index number (in 0,1,2) to determine which
             // channels span the data.
-           // int plane{-1};
-            std::string plane{"na"};
+            int plane{0};
+
             // If true, sort the selected channels by their channel ID
             // value.  If false, the ordering given by the channel
             // placement (ordered according to the so called "wire
@@ -28,7 +52,7 @@ namespace WireCell {
 
             // DNN needs consistent scaling with trained model.  This is
             // multiplied to the input charge values.
-            double input_scale{1.0 / 8000};
+            double input_scale{1.0 / 4000};
 
             // Charge offset added to input charge values.
             double input_offset{0.0};
@@ -56,7 +80,6 @@ namespace WireCell {
             double mask_thresh{0.5};
 
             // The IForward service to use
-            //Should be some variant of TorchService (AB)
             std::string forward{"TorchService"};
 
             // Tags of sets of traces to use as input.  These are
@@ -87,44 +110,17 @@ namespace WireCell {
             // if true, save the negative parts of the charge traces
             bool save_negative_charge{false};
         };
-
-        //ROI data has target plane and mp2 and mp3 planes
-        struct ROIData {
-            std::vector<torch::Tensor> tensors; //induction planes
-            std::vector<std::string> r_tags; //tags associated with each tensor
-        };
-
-        class DNNROI : public Aux::Logger, 
-                       public ITorchTensorSetFilter,                      
-                       public IConfigurable {
-        public:
-            DNNROI( );
-            virtual ~DNNROI();
-
-            virtual bool operator()(const input_pointer& in, output_pointer& out);
-            virtual void configure(const Configuration& config);
-            virtual WireCell::Configuration default_configuration() const {
-                Configuration cfg;
-                return cfg;
-            };
-            virtual void finalize();
-        private:
+           private:
             DNNROIFindingCfg m_cfg;
-            
-            std::unordered_set<int>m_chset; // channels to processstd
-            std::vector<int>m_chlist; // channels to process in order
+            std::unordered_set<int> m_chset;
+            std::vector<int> m_chlist;
             size_t m_nrows{0}, m_ncols{0};
-            
-            //AB: Forward the pointer
-            ITorchForward::pointer m_forward{nullptr};
-            
-            
-            //std::shared_ptr<ITorchSpectrum> base_frer_spectrum, base_wire_filter;
-            int m_coarse_time_offset = 0;
-            int m_save_count = 0;
-            bool m_is_gpu{false};
+            IFrame::trace_list_t m_trace_indices;
+            torch::Tensor traces_to_tensor(ITrace::vector traces);
+            ITrace::vector select(ITrace::vector traces);
 
         };
-    }
-}
+    }  // namespace SPNG
+}  // namespace WireCell
+
 #endif

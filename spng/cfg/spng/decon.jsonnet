@@ -157,7 +157,22 @@ function(tpc, control={})
                             ];
         local view_frers = $.collect_groups_by_view(decon_frers);
         pg.intern(innodes=decon_frers, outnodes=view_frers),
-                             
+
+
+    /// Produce an ngroup->nview subgraph doing FR*ER decon.
+    group_decon_simple:
+        local groups = tpc.view_groups;
+        local ngroups = std.length(groups);
+
+        local decon_kernels = [$.tpc_group_decon_kernel(group_index, extra_name="")
+                               for group_index in wc.iota(ngroups)];
+        local decon_frers = [$.tpc_group_decon_frer(it.index,
+                                                    decon_kernels[it.value.view_index])
+                             for it in wc.enumerate(groups)
+                            ];
+        local view_frers = $.group_fanin(decon_frers);
+        pg.intern(innodes=decon_frers, outnodes=[view_frers]),
+
     /// One filter along time dimension
     time_filter_one(filter, view_index, extra_name="")::
         local vis = std.toString(view_index);

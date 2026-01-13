@@ -211,6 +211,12 @@ namespace WireCell::SPNG {
     // Note, removed pad() as it was too limiting and was never used.  Use
     // torch::nn::pad().  See spng/test/doctest_simple_convo.cxx for one
     // example.
+    /**
+    * @brief Return a string representation of a tensor's shape.
+    */
+    std::string tensor_shape_string(const torch::Tensor& tensor);
+
+    void write_torch_to_npy(const torch::Tensor &ten, const std::string &filename);
 
 }
 
