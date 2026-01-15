@@ -1,0 +1,78 @@
+* Basic command
+
+To generate training files for DNNROI, find some depos file and run:
+
+#+begin_example
+$ wire-cell -l stderr -L debug -c spng/cfg/spng/dnnroi-training.jsonnet -A input=test/data/muon-depos.npz
+#+end_example
+
+** Options
+
+The =dnnroi-training.jsonnet= takes many options (top-level arguments) that control algorithms, logging and saving of intermediate tensors.
+
+*** I/O Files
+
+- =input= :: A "depo file", required
+- ~outpat="dnnroi-training-%(tier)s.npz"~ :: file name pattern.  The tier is replaced by "truth" (true ROIs) or "fodder" (looseLF, mp2, mp3) tensor.
+
+*** Detector context
+
+This config creates exactly one APA.  Depos must be in this APA to be processed.
+You can control which one to focus on with:
+
+- ~tpcid=3~ :: the APA number
+
+*** Parameters
+
+These are some parameters exposed as TLAs with their default value
+
+- ~downsample_factor=4~ :: After SP filters, the data is oversampled by about a factor of 4.  We downsample to reduce data size.  Larger than 4 downsampling can be applied but will begin to lose info.
+
+- ~splat_threshold=100.0~ :: The "true" ROIs are found by applying a threshold on the "depo flux splat".  The value is in units of number of ionized electrons per channel per time slice.
+
+* Debugging
+
+The =dnnroi-training.jsonnet= job provides some debugging options and methods.
+
+** Options
+
+*** Verbose logging
+
+In addition to bare =log= many nodes react to a =verbosity= integer value
+
+#+begin_example
+-A vebosity=2
+#+end_example
+
+*** Dump out intermediate tensors
+
+To dump out intermediate tensors a set of "tier" labels are supported by adding this option
+
+#+begin_example
+-A dump=dnnroi,wiener  
+#+end_example
+See the =pnode_wrappers= object in =dnnroi-training.jsonnet= for full list.
+
+** Converting =.pkl= to =.npz=
+
+Not many tools read the =.pkl= files directly but it is possible to convert them
+into to "WCT frame files".
+
+#+begin_example
+$ ./spng/test/check-decon.py tonp tensors-*.pkl
+#+end_example
+
+** Visualizing
+
+The dumped =.pkl= files can be plotted to PDF.
+
+#+begin_example
+$ ./spng/test/check-decon.py plot-raw tensors-*.pkl
+#+end_example
+
+The package https://github.com/brettviren/teepeesee has the command =cueteepeesee= that provides interactive visualize of WCT frame files.
+
+#+begin_example
+$ cueteepeesee dnnroi-training-truth.npz
+#+end_example
+

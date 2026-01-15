@@ -1,5 +1,6 @@
 #include "WireCellSpng/Transform.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/Util.h"
 
 
 #include "WireCellUtil/NamedFactory.h"
@@ -26,12 +27,13 @@ namespace WireCell::SPNG {
         for (auto op : m_ops) {
             tensor = op(tensor);
         }
-
+        log->debug("filtered: {} total={}", to_string(tensor), torch::sum(tensor).item<double>());
         return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
 
     void Transform::configure(const WireCell::Configuration& jconfig)
     {
+        log->debug("Transform config: {}", jconfig);
         this->TensorFilter::configure(jconfig);
         from_json(m_config, jconfig);
 
@@ -41,6 +43,9 @@ namespace WireCell::SPNG {
             std::vector<int64_t> dims(opcfg.dims.begin(), opcfg.dims.end());
             const float scalar = opcfg.scalar;
         
+            log->debug("Applying transform operation \"{}\" with scalar={} and ndims={}",
+                       opcfg.operation, scalar, dims.size());
+
             if (opcfg.operation == "permute") {
                 // dims size must match tensor shape size, leave it to torch to check
                 if (dims.size() < 2) {
@@ -62,6 +67,9 @@ namespace WireCell::SPNG {
                 continue;
             }
             if (opcfg.operation == "scale") {
+                if (! scalar) {
+                    raise<ValueError>("cowardly assuming you do not want to multiply by zero");
+                }
                 m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
                     return torch::mul(tensor, scalar);
                 });

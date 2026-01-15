@@ -32,13 +32,14 @@
 local wc = import "wirecell.jsonnet";
 local pg = import 'pgraph.jsonnet';
 local io = import "spng/io.jsonnet";
-local torchio = import "spng/torchio.jsonnet";
+local tio = import "spng/torchio.jsonnet";
 local det_js = import "spng/det.jsonnet";
 local drift_js = import "spng/drift.jsonnet";
 local splatroi_js = import "spng/splatroi.jsonnet";
 local roifodder_js = import "spng/roifodder.jsonnet";
 local control_js = import "spng/control.jsonnet";
-
+local frame_js = import "spng/frame.jsonnet";
+local hacks = import "spng/hacks.jsonnet";
 local detconf = import "spng/detconf.jsonnet";
 
 // The TLAs:
@@ -63,7 +64,9 @@ function(input,
          engine='Pgrapher',
          device='cpu',
          downsample_factor=4,
-         tpcid=0,
+         splat_threshold=100.0,
+         tpcid=3,
+         dump="",
          verbosity=0)
 
 
@@ -73,6 +76,54 @@ function(input,
     // We focus here on just one TPC
     local det = detconf.get(detname, [tpcid]);
     local tpc = det.tpcs[0];
+
+    local frame = frame_js(control);
+
+    // Wrap a tensor producing pnode with a pickle dumper.
+    local dump_tensors(tier, inode, pnode) =
+        local wrap="tensors-%(tier)s-%(tpcid)s-%(itype)s-%(iname)s.pkl";
+        local name = tier + '_' + inode.type + '_' + inode.name;
+        local filename = wrap % {tier: tier, tpcid: std.toString(tpcid), itype:inode.type, iname:inode.name};
+        local sink = tio.pickle_tensor_set(filename);
+        local tap = frame.sink_taps(name, std.length(pnode.oports), sink);
+        pg.shuntline(pnode, tap);
+
+    // Wrap pnode in file dumper for tier if user has tier in dump
+    local dump_tensors_maybe(tier, inode, pnode) =
+        if std.findSubstr(tier,dump) == []
+        then pnode
+        else dump_tensors(tier, inode, pnode);
+
+    local have_tier(tier, labels, inode) =
+        std.findSubstr(tier, dump) != [] && std.findSubstr(labels[tier], inode.name) != []; 
+
+    // Wrap pnode if a key of labels is in dump list and value matches inode.name
+    local dump_tensors_matched(labels, inode, pnode) =
+        local tiers = [tier
+                       for tier in std.objectFields(labels)
+                       if have_tier(tier, labels, inode)];
+        if tiers == []
+        then pnode
+        else dump_tensors(tiers[0], inode, pnode);
+
+    local pnode_wrappers = {
+        SPNGCrossViews: function(inode, pnode)
+            dump_tensors_maybe("crossviews", inode, pnode),
+        SPNGRebinner: function(inode, pnode)
+            dump_tensors_maybe("rebin", inode, pnode),
+        SPNGTransform: function(inode, pnode)
+            dump_tensors_matched({scale:"scale"}, inode, pnode),
+        SPNGKernelConvolve: function(inode, pnode)
+            dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener"}, inode, pnode),
+        SPNGThreshold: function(inode, pnode)
+            dump_tensors_matched({wthresh:"wthresh",splat:"sthresh"}, inode, pnode),
+        SPNGCrossViewsExtract: function(inode, pnode)
+            dump_tensors_maybe("cvxtract", inode, pnode),
+        SPNGReduce: function(inode, pnode)
+            dump_tensors_matched({stack:"stack"}, inode, pnode),
+    };
+    local wpg = hacks.wrap_pnode(pnode_wrappers);
+
 
     // Source of depos
     local source = io.depo_source(input);
@@ -92,12 +143,12 @@ function(input,
     },nin=1, nout=2);
 
 
-    local truth = splatroi_js(tpc, control, downsample_factor);
+    local truth = splatroi_js(tpc, control, downsample_factor, splat_threshold, pg=wpg);
     local detmod = det_js(det, control);
 
     local sim = detmod.inducer;
 
-    local fodder = roifodder_js(tpc, control);
+    local fodder = roifodder_js(tpc, control, pg=wpg);
     local simfodder = pg.pipeline([sim, fodder]);
 
     local body = pg.intern(innodes=[upstream], outnodes=[truth, simfodder],

@@ -40,7 +40,7 @@ namespace WireCell::SPNG {
         std::string operation = "";
 
         /// A scalar value used in some operations
-        float scalar = 0;
+        double scalar = 0;
 
         /// Specify which dimension(s) to operate on.
         std::vector<int> dims = {};
@@ -51,7 +51,7 @@ namespace WireCell::SPNG {
         std::vector<TransformOpConfig> operations;
     };
 }
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TransformOpConfig, operation, dims);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TransformOpConfig, operation, scalar, dims);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TransformConfig, operations);
 
 namespace WireCell::SPNG {

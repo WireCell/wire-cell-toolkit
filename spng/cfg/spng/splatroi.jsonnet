@@ -2,14 +2,14 @@
 /// (drifted depos)->splat->reframer->totdm->resample->threshold->(rois x 3 views)
 
 local wc = import "wirecell.jsonnet";
-local pg = import "pgraph.jsonnet";
+local real_pg = import "pgraph.jsonnet";
 
 local sim_js = import "sim.jsonnet";
 local frame_js = import "frame.jsonnet";
 local tpc_js = import "tpc.jsonnet";
 local decon_js = import "decon.jsonnet";
 
-function(tpc, control, downsample_factor=4) 
+function(tpc, control, downsample_factor=4, splat_threshold=100.0, pg=real_pg) 
 
     local sim = sim_js(tpc, control);
     local frame = frame_js(control);
@@ -23,6 +23,7 @@ function(tpc, control, downsample_factor=4)
     local frame_source = pg.pipeline([
         sim.splat,
         sim.reframer("_splat"),
+        
         to_tdm,                 // frame->tensor SET
         to_tens                 // tensor SET to per group tensors
     ]);
@@ -47,7 +48,7 @@ function(tpc, control, downsample_factor=4)
             type: 'SPNGThreshold',
             name: this_name,
             data: {
-                nominal: 0.5,   // FIXME: a study is needed to best set this
+                nominal: splat_threshold,
                 tag: "roi",
                 datapath_format: "/traces/Threshold/" + this_name,
             } + control

@@ -10,6 +10,7 @@ local frame_js = import "spng/frame.jsonnet";
 local fans_js = import "spng/fans.jsonnet";
 local roi_js = import "spng/roi.jsonnet";
 local tpc_js = import "spng/tpc.jsonnet";
+local cv_js = import "spng/crossviews.jsonnet";
 
 
 /// Return a 1->1 node consuming ADC IFrame from one anode and producing a signal IFrame.
@@ -23,6 +24,7 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
     local tpcmod = tpc_js(tpc, control, pg=pg);
     local roimod = roi_js(control, pg=pg);
     local fanmod = fans_js(control);
+    local cvmod = cv_js(control, pg=pg);
 
     local to_tdm = frame_js(control).to_tdm(tpc);
 
@@ -58,14 +60,9 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
     // rest are 3->3
     local wiener_filter = tpcmod.time_filter("wiener");
     local wiener_rebin = tpcmod.downsampler("wiener");
-    local threshold = tpcmod.threshold;
+    local threshold = cvmod.threshold_views(tpc, extra_name="_wthresh");
 
     local crossview_wiener = pg.shuntline(decon_fans.targets.wiener, wiener_filter);
-    local threshold_wfull = pg.pnode({
-        type: 'SPNGThreshold',
-        name: tpc.name + 'wfull',
-        data: tpc.crossview_thresholds[2] + control
-    }, nin=1, nout=1);
                             
     // 3->ncrossed cross views.
     local crossviews = tpcmod.crossfan(view_crossed);
@@ -86,6 +83,7 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
     local dense_stage = pg.shuntlines([
         decon_fans.targets.dnnroi,
         dense_filter,
+        // rebin + threshold should go here........
     ]);
 
 

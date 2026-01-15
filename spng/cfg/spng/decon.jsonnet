@@ -1,7 +1,7 @@
 local wc = import "wirecell.jsonnet";
-local pg = import "pgraph.jsonnet";
+local real_pg = import "pgraph.jsonnet";
 
-function(tpc, control={})
+function(tpc, control={}, pg=real_pg)
 {
     /// A kernel providing a Fourier-space filter.
     filter_kernel(name,         // unique name

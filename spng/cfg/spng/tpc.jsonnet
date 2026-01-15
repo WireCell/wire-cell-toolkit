@@ -17,7 +17,7 @@ local tlas = import "tlas.jsonnet";
 
 /// Return an object with various TDM nodes and subgraphs for one tpc
 ///
-function(tpc, control, pg) {
+function(tpc, control, pg=real_pg) {
 
     // Pull these out to help debug dumping.
     tpc: tpc,
@@ -26,7 +26,7 @@ function(tpc, control, pg) {
     local cv = cv_mod(control, pg=pg),
     local fans = fans_mod(control),
     local frame = frame_mod(control),
-    local decon = decon_mod(tpc, control),
+    local decon = decon_mod(tpc, control, pg=pg),
     // local dnnroi = dnnroi_mod(control),
 
     /// We use notation:

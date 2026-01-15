@@ -17,6 +17,10 @@ $ wcpy plot frame-image test-tdm-decon-adc.npz -o test-tdm-decon-adc.pdf --trans
 $ wcpy plot frame-image test-tdm-decon-sig.npz -o test-tdm-decon-sig.pdf
 $ check-decon plot-raw *gauss.pkl
 
+Other jobs that can dump pkl files:
+
+- dnnroi-training.jsonnet -A dump=crossviews,wiener,dnnroi,stack,wthresh [etc]
+
 """
 
 from pathlib import Path
@@ -43,13 +47,24 @@ def maybe_abs(tensor):
         return torch.abs(tensor)
     return tensor
 
-def maybe_median(tensor):
+def maybe_median(tensor, dim=-1):
+    '''
+    Subtract the median if the tensor holds numbers.
+    '''
     if "bool" in str(tensor.dtype):
         return tensor
-    return (tensor.T - torch.median(tensor, axis=1).values).T
+    return tensor - torch.median(tensor, dim=dim, keepdim=True).values
     
 
 def do_plot(tensor, title, pdf):
+    ndim = tensor.dim()
+    if ndim == 3:
+        print(f'assuming 3D tensor of shape {tensor.shape} is batched on dim=0')
+        for ind, one in enumerate(tensor):
+            do_plot(one, f'{title} - (batch {ind})', pdf)
+        return
+    
+
     print(f'plotting {tensor.dtype} {tensor.shape} {title} sum={torch.sum(tensor)}')
 
     if "complex" in str(tensor.dtype):
@@ -62,7 +77,6 @@ def do_plot(tensor, title, pdf):
 
     tensor = maybe_median(tensor)
 
-    ndim = tensor.dim()
     if ndim == 1:
         plt.plot(tensor)
         plt.title(title);
