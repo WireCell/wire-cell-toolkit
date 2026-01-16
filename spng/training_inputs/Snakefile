@@ -1,0 +1,67 @@
+
+rule gen_cosmics:
+    #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
+    container:
+        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+    output:
+        "cosmics_{sample}_gen.root"
+    shell:
+        """
+        set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
+        source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+        setup dunesw v10_14_00d00 -q e26:prof
+        set -euo pipefail  # Reenable Snakemake's strict mode
+
+        lar --no-timing --no-memcheck -n 1 -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
+        rm hist_{output}
+        """
+
+import os 
+SRC_DIR = workflow.basedir
+
+rule g4:
+    container:
+        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+    input:
+        file="cosmics_{sample}_gen.root",
+        fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
+    output:
+        "cosmics_{sample}_g4.root"
+    shadow: "minimal"
+    shell:
+        """
+        set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
+        source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+        setup dunesw v10_14_00d00 -q e26:prof
+        set -euo pipefail  # Reenable Snakemake's strict mode
+
+        lar --no-timing --no-memcheck -c {input.fcl} {input.file} -o {output} -T hist_{output}
+        rm hist_{output} #No need to save these
+        """
+
+rule save_depos:
+    container:
+        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+    input:
+        inputfile="{name}_g4.root",
+        fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
+        js=os.path.join(SRC_DIR, "wcls-save-larg4-depos.jsonnet"),
+    output:
+        "{name}_depos.tar.bz2"
+    shadow: "minimal" #This runs in an auto-removed tmp dir
+    shell:
+        """
+        set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
+        source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+        setup dunesw v10_14_00d00 -q e26:prof
+        set -euo pipefail  # Reenable Snakemake's strict mode
+
+        export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
+
+        lar --no-timing --no-memcheck -n 1 -c {input.fcl} {input.inputfile} --no-output
+        mv pdhd-depos-out.tar.bz2 {output}
+        """
+
+# rule drift:
+#     input:
+#         "{name}_depos.tar.bz2"
