@@ -63,18 +63,24 @@ function(input,
          detname='pdhd',
          engine='Pgrapher',
          device='cpu',
-         downsample_factor=4,
-         splat_threshold=100.0,
+         rebin=4,
+         scale=4000.0,
          tpcid=3,
          dump="",
          verbosity=0)
 
+    # Assure numbers
+    local irebin = wc.numberify(rebin);
+    local fscale = wc.numberify(scale);
+    local itpcid = wc.numberify(tpcid);
+    local iverbosity = wc.numberify(verbosity);
 
-    local controls = control_js(device=device, verbosity=wc.intify(verbosity));
+
+    local controls = control_js(device=device, verbosity=iverbosity);
     local control = controls.config;
 
     // We focus here on just one TPC
-    local det = detconf.get(detname, [tpcid]);
+    local det = detconf.get(detname, [itpcid]);
     local tpc = det.tpcs[0];
 
     local frame = frame_js(control);
@@ -111,12 +117,14 @@ function(input,
             dump_tensors_maybe("crossviews", inode, pnode),
         SPNGRebinner: function(inode, pnode)
             dump_tensors_maybe("rebin", inode, pnode),
+        SPNGResampler: function(inode, pnode)
+            dump_tensors_matched({splat:"splat"}, inode, pnode),
         SPNGTransform: function(inode, pnode)
-            dump_tensors_matched({scale:"scale"}, inode, pnode),
+            dump_tensors_matched({dscale:"dnnroi_scale", sscale:"splat_scale"}, inode, pnode),
         SPNGKernelConvolve: function(inode, pnode)
             dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener"}, inode, pnode),
         SPNGThreshold: function(inode, pnode)
-            dump_tensors_matched({wthresh:"wthresh",splat:"sthresh"}, inode, pnode),
+            dump_tensors_matched({wthresh:"wthresh"}, inode, pnode),
         SPNGCrossViewsExtract: function(inode, pnode)
             dump_tensors_maybe("cvxtract", inode, pnode),
         SPNGReduce: function(inode, pnode)
@@ -143,12 +151,12 @@ function(input,
     },nin=1, nout=2);
 
 
-    local truth = splatroi_js(tpc, control, downsample_factor, splat_threshold, pg=wpg);
+    local truth = splatroi_js(tpc, control, rebin=irebin, scale=1.0/fscale, pg=wpg);
     local detmod = det_js(det, control);
 
     local sim = detmod.inducer;
 
-    local fodder = roifodder_js(tpc, control, pg=wpg);
+    local fodder = roifodder_js(tpc, control, rebin=irebin, scale=1.0/fscale, pg=wpg);
     local simfodder = pg.pipeline([sim, fodder]);
 
     local body = pg.intern(innodes=[upstream], outnodes=[truth, simfodder],

@@ -1,3 +1,12 @@
+#+title The dnnroi training job
+
+This job consumes "depo" files and produces "truth" and "fodder" files for use
+in training DNNROI.
+
+- depo :: file of depo sets in "WCT depo file format".
+- truth :: the "depo flux splat" charge distribution represents "true" signals.
+- fodder :: 3 layered image with "looseLF" filtered decon and mp2 and mp3 
+
 * Basic command
 
 To generate training files for DNNROI, find some depos file and run:
@@ -8,7 +17,7 @@ $ wire-cell -l stderr -L debug -c spng/cfg/spng/dnnroi-training.jsonnet -A input
 
 ** Options
 
-The =dnnroi-training.jsonnet= takes many options (top-level arguments) that control algorithms, logging and saving of intermediate tensors.
+The =dnnroi-training.jsonnet= takes several options (top-level arguments) most with defaults that control algorithms, logging and saving of intermediate tensors.
 
 *** I/O Files
 
@@ -26,9 +35,23 @@ You can control which one to focus on with:
 
 These are some parameters exposed as TLAs with their default value
 
-- ~downsample_factor=4~ :: After SP filters, the data is oversampled by about a factor of 4.  We downsample to reduce data size.  Larger than 4 downsampling can be applied but will begin to lose info.
+- ~rebin=4~ :: After SP filters, the data is oversampled by about a factor of 4.
+  We downsample to reduce data size.  Larger than 4 downsampling can be applied
+  but will begin to lose info.
 
-- ~splat_threshold=100.0~ :: The "true" ROIs are found by applying a threshold on the "depo flux splat".  The value is in units of number of ionized electrons per channel per time slice.
+- ~scale=4000.0~ :: The amount to scale down (divide by) both the looseLF "fodder"
+  and "splat" truth.  The value is in units of number of ionized electrons per
+  channel per time slice.  The goal is to bring these "dense" array values near
+  Boolean 0's and 1's.  Whatever value is chosen here likely MUST be used during
+  inference.
+
+*** Non-parameters
+
+- thresholds :: The "truth" produced by this job is dense and continuous.  A
+  threshold must be applied by DNNROI training to produce "true ROI images".
+  This threshold is a hyperparameter of the training.  The range over which it
+  may be optimized depends in part on the =scale= parameter used in this job.
+
 
 * Debugging
 
@@ -52,6 +75,7 @@ To dump out intermediate tensors a set of "tier" labels are supported by adding 
 -A dump=dnnroi,wiener  
 #+end_example
 See the =pnode_wrappers= object in =dnnroi-training.jsonnet= for full list.
+
 
 ** Converting =.pkl= to =.npz=
 

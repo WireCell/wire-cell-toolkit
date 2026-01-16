@@ -67,7 +67,7 @@ function(control, pg)
         /// input by the magic 4000.
         local scaler = pg.pnode({
             type:'SPNGTransform',
-            name: this_name+'_scale',
+            name: this_name+'_dnnroi_scale',
             data: {
                 operations: [
                     { operation: "scale", scalar: scale },

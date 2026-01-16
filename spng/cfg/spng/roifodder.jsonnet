@@ -14,7 +14,7 @@ local cv_js = import "spng/crossviews.jsonnet";
 
 
 /// Return a 1->1 node consuming ADC IFrame from one anode and producing a signal IFrame.
-function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
+function(tpc, control, view_crossed=[1,1,0], rebin=4, scale=1.0/4000.0, pg=real_pg)
 
     // A list of view indices for views that have crossviews calculated for DNNROI type ROIs.
     local crossed_view_indices = [x.index for x in wc.enumerate(view_crossed) if x.value == 1];
@@ -91,7 +91,8 @@ function(tpc, control, view_crossed=[1,1,0], pg=real_pg)
 
 
     local downstream = [
-        local sg = roimod.dnnroi_subgraph(tpc.name + "v" + std.toString(vi.value), forward=null);
+        local sg = roimod.dnnroi_subgraph(tpc.name + "v" + std.toString(vi.value),
+                                          forward=null, rebin=rebin, scale=scale);
         local cv = pg.oport_node(crossviews_stage, vi.value);
         local df = pg.oport_node(dense_stage, vi.index);
         pg.intern(centernodes=[ cv, df, sg.crossviews, sg.dense],

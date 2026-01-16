@@ -9,7 +9,7 @@ local frame_js = import "frame.jsonnet";
 local tpc_js = import "tpc.jsonnet";
 local decon_js = import "decon.jsonnet";
 
-function(tpc, control, downsample_factor=4, splat_threshold=100.0, pg=real_pg) 
+function(tpc, control, rebin=4, scale=4000.0, pg=real_pg) 
 
     local sim = sim_js(tpc, control);
     local frame = frame_js(control);
@@ -36,24 +36,24 @@ function(tpc, control, downsample_factor=4, splat_threshold=100.0, pg=real_pg)
 
 
     local one_view(view_index) = 
-        local this_name = tpc.name + "_splat_v" + std.toString(view_index);
+        local this_name = tpc.name + "v" + std.toString(view_index) + "_splat";
         local downsampler = pg.pnode({
             type:'SPNGResampler',
             name: this_name,
             data: {
-                ratio: 1.0/downsample_factor,
+                ratio: 1.0/rebin,
             } + control
         }, nin=1, nout=1);
-        local thresholder = pg.pnode({
-            type: 'SPNGThreshold',
-            name: this_name,
+        local scaler = pg.pnode({
+            type:'SPNGTransform',
+            name: this_name+'_scale',
             data: {
-                nominal: splat_threshold,
-                tag: "roi",
-                datapath_format: "/traces/Threshold/" + this_name,
-            } + control
+                operations: [
+                    { operation: "scale", scalar: scale },
+                ],                
+            } + control,
         }, nin=1, nout=1);
-        pg.pipeline([downsampler, thresholder]);
+        pg.pipeline([downsampler, scaler]);
     local downstream = pg.crossline([one_view(view_index) for view_index in [0,1,2]]);
 
 
