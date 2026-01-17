@@ -1,0 +1,52 @@
+@startuml
+
+class Interface
+class "IComponent<InterfaceType>" as IComponent_t
+class "IComponent<IFactory>" as IComponent_factory
+class "IComponent<InterfaceA>" as IComponent_A
+class "IComponent<InterfaceB>" as IComponent_B
+class IFactory
+class INamedFactory
+class Concrete
+
+Interface <|-- IComponent_t
+IComponent_t <|-- IComponent_factory
+
+IComponent_factory <|-- IFactory
+IFactory <|-- INamedFactory
+
+
+class "NamedFactory<Concrete>" as NamedFactory_Concrete
+class NamedFactory_Concrete {
+        Interface::pointer find(name);
+        Interface::pointer create(name);
+
+
+}
+
+class "NamedFactoryRegistry<InterfaceType>" as NamedFactoryRegistry_t
+class NamedFactoryRegistry_t {
+        size_t hello(wctname, cppname, intname);
+        const std::string& interface_name();
+        known_type_set known_types();
+        wct_to_cpp_map known_classes();
+        bool associate(classname, factory);
+        factory_ptr lookup_factory(classname);
+        interface_ptr instance(classname, instname, create, nullok)
+        std::vector<std::string> known_classes()
+}
+
+IComponent_t <|-- IComponent_A
+IComponent_t <|-- IComponent_B
+
+IComponent_A <|-- InterfaceA
+IComponent_B <|-- InterfaceB
+
+InterfaceA <|-- Concrete
+InterfaceB <|-- Concrete
+
+INamedFactory <|-- NamedFactory_Concrete
+
+        
+
+@enduml
