@@ -23,25 +23,36 @@ local wcls_input = {
 
 local bagger = sim.make_bagger("bagger%d");
 
+// local output_file=std.extVar('outname');
+
 local sinks = g.pnode({
     name: "deposink",
     type: "DepoFileSink",
     data: {
-        outname: "pdhd-depos-out.tar.bz2",
+        // outname: output_file,
     }
 }, nin=1, nout=0);
 
+local save = g.pnode({
+    type: "NumpyDepoSaver",
+    name: 'numpysave',
+    data: {
+        // filename: fname
+    }
+}, nin=1, nout=1);
+local dump = g.pnode({type: 'DumpDepos', name: 'dump_depos', data: {}}, nin=1, nout=0);
+
+local graph = g.pipeline([wcls_input.depos, save, dump], 'mygraph');
 // g4 sim as input
-local graph = g.intern(
-    innodes=[wcls_input.depos], centernodes=[bagger], outnodes=[sinks],
-    edges = 
-        [
-            g.edge(wcls_input.depos, bagger),
+// local graph = g.intern(
+//     innodes=[wcls_input.depos], centernodes=[bagger], outnodes=[sinks],
+//     edges = 
+//         [
+//             g.edge(wcls_input.depos, bagger),
+//             g.edge(bagger, sinks, 0, 0),
 
-            g.edge(bagger, sinks, 0, 0),
-
-        ],
-);
+//         ],
+// );
 
 local app = {
   type: 'Pgrapher',

@@ -47,7 +47,7 @@ rule save_depos:
         fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
         js=os.path.join(SRC_DIR, "wcls-save-larg4-depos.jsonnet"),
     output:
-        "{name}_depos.tar.bz2"
+        "{name}_wct-depos.npz",
     shadow: "minimal" #This runs in an auto-removed tmp dir
     shell:
         """
@@ -59,9 +59,17 @@ rule save_depos:
         export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
 
         lar --no-timing --no-memcheck -n 1 -c {input.fcl} {input.inputfile} --no-output
-        mv pdhd-depos-out.tar.bz2 {output}
+        mv wct-depos.npz {output}
         """
 
-# rule drift:
-#     input:
-#         "{name}_depos.tar.bz2"
+rule drift:
+    input:
+        "{name}_wct-depos.npz",
+    output:
+        "{name}_splat_frame.npz",
+    shell:
+        """
+        wire-cell -l stdout  -L debug   \
+        -A "input={input}" -A outname={output} --ext-code nanodes=1 \
+        wct-sim-deposource-framesink.jsonnet
+        """
