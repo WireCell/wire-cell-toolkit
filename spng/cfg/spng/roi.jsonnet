@@ -67,7 +67,7 @@ function(control, pg)
         /// input by the magic 4000.
         local scaler = pg.pnode({
             type:'SPNGTransform',
-            name: this_name+'_scale',
+            name: this_name+'_dnnroi_scale',
             data: {
                 operations: [
                     { operation: "scale", scalar: scale },
@@ -199,6 +199,14 @@ function(control, pg)
                                  pg.edge(rebinner, scaler),
                                  pg.edge(scaler, stack)
                              ]),
+            // The other top-level attributes work together.  If you need
+            // individual nodes, they are under this attribute
+            nodes: {
+                extract:ex,
+                rebinner:rebinner, scaler:scaler, stack:stack, // prep
+                pre:pre, fwd:fwd, post:post,                   // dnnroi
+                thresh:thresh, unbinner:unbinner, mul:mul, rbl:rbl // apply
+            }
         },
     
     /// A 1-port source of signal tensors.

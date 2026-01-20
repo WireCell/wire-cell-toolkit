@@ -17,7 +17,7 @@ local tlas = import "tlas.jsonnet";
 
 /// Return an object with various TDM nodes and subgraphs for one tpc
 ///
-function(tpc, control, pg) {
+function(tpc, control, pg=real_pg) {
 
     // Pull these out to help debug dumping.
     tpc: tpc,
@@ -26,7 +26,7 @@ function(tpc, control, pg) {
     local cv = cv_mod(control, pg=pg),
     local fans = fans_mod(control),
     local frame = frame_mod(control),
-    local decon = decon_mod(tpc, control),
+    local decon = decon_mod(tpc, control, pg=pg),
     // local dnnroi = dnnroi_mod(control),
 
     /// We use notation:
@@ -105,20 +105,6 @@ function(tpc, control, pg) {
     // Node: [nview]tensor->tensor[nview].  3 inputs are fanned to three
     // crossviews each of three inputs making a fully-connected net.
     crossfan(view_crossed=[1,1,0]): cv.crossfan(tpc, view_crossed=view_crossed),
-
-
-
-
-
-
-    // // Node: 2x3 -> 3.  Connect the dnnroi filters and output of crossviews
-    // dnnroi_prepare: dnnroi.prepare(tpc.name, time_filters.dnnroi, $.crossfan),
-    
-    // // Node: 3 -> 3.  Connect dnnroi pre with forward inference.
-    // dnnroi_forward: dnnroi.forward(tpc.name, $.dnnroi_prepare),
-
-    // // Node: 2x3 -> 3.  Apply rois.
-    // dnnroi_apply: dnnroi.apply(tpc.name, time_filters.gauss, $.dnnroi_forward),
 
     // Node: nview->1 set.  Collect view tensors into a tensor set.
     frame_set_repack: frame.tensorset_view_repacker(tpc.name),

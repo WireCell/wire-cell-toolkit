@@ -404,6 +404,12 @@
         then std.parseInt(number)
         else std.ceil(number),
 
+    // Return a number from possibly a string
+    numberify(number)::
+        if std.type(number) == "string"
+        then std.parseJson(number)
+        else number,
+
     // Try hard to return a list of integer values given various types of stuff.
     intlistify(stuff)::
         if std.type(stuff) == "array"

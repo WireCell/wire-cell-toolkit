@@ -1,0 +1,687 @@
+#+TITLE: PyTorch vs. LibTorch Operations Reference
+
+This gives some (mostly llm generated) quick guidance on python/c++ equivalence with torch.  See also =WireCellSpng/Util.h= for some =std::= to =torch::= relationships.
+
+* Memory Management
+
+In Python, the garbage collector handles tensor lifetimes. In C++, LibTorch uses Intrusive Reference Counting (similar to =std::shared_ptr=). This means:
+
+- Returning a tensor from a function is cheap (it just copies the pointer).
+
+- If you need a deep copy of the data, you must explicitly call =.clone()=.
+
+* Indexing, slicing and selecting
+
+* Simple indexing
+
+You can pass multiple tensors to index into multiple dimensions simultaneously. This is often called "Coordinate Indexing."
+
+Python (PyTorch)
+
+#+begin_src python
+# Select elements at (0,0) and (1,1)
+rows = torch.tensor([0, 1])
+cols = torch.tensor([0, 1])
+result = data[rows, cols]
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+auto rows = torch::tensor({0, 1}, torch::kLong);
+auto cols = torch::tensor({0, 1}, torch::kLong);
+
+// Note: Pass both tensors in the initializer list
+auto result = data.index({rows, cols});
+#+end_src
+
+
+** Indexing tensors with integer tensors
+
+When you index a tensor A with another tensor B containing integers, you are essentially performing a "lookup" where the output contains the elements of A at the positions specified by B.
+
+Constraints:
+
+    Copy vs. View: Unlike basic slicing, indexing with a tensor typically results in a copy of the data, not a view. This is because the selected elements are often not stored contiguously in memory.
+
+    Dimensions: If you pass a 1D tensor of indices to a 2D tensor, it selects those specific rows.
+
+    In-place: In Python, you can use tensor[indices] = values. In C++, you must use .index_put_().
+
+Python (PyTorch)
+
+#+begin_src python
+# Source tensor
+data = torch.tensor([[10, 20], [30, 40], [50, 60]])
+
+# Index tensor (select row 0 and row 2)
+indices = torch.tensor([0, 2])
+
+# Perform indexing
+result = data[indices] 
+# Output: tensor([[10, 20], [50, 60]])
+
+# In-place update
+data[indices] = torch.tensor([[1, 2], [3, 4]])
+#+end_src
+
+C++ (LibTorch)
+
+In C++, you pass the index tensor inside the {} initializer list of the .index() method.
+
+#+begin_src cpp
+// Source tensor
+auto data = torch::tensor({{10, 20}, {30, 40}, {50, 60}});
+
+// Index tensor
+auto indices = torch::tensor({0, 2}, torch::kLong);
+
+// Perform indexing
+auto result = data.index({indices});
+
+// In-place update
+data.index_put_({indices}, torch::tensor({{1, 2}, {3, 4}}));
+#+end_src
+
+Multiple index tensors can be passed.  If you pass two tensors, indices_dim0 and indices_dim1, to a 2D tensor, LibTorch pairs them up. The result will contain: output[i] = source[indices_dim0[i], indices_dim1[i]]
+
+Constraints:
+
+- Shapes :: The index tensors must have the same shape, or be broadcastable to the same shape.
+
+- Dtype :: The index tensors must be of type torch::kLong (Int64).
+
+- Copying :: This operation returns a copy of the data, not a view, because the elements being accessed are typically not contiguous in memory.
+
+Python (PyTorch)
+
+#+begin_src python
+data = torch.tensor([[10, 11], 
+                     [20, 21]])
+
+rows = torch.tensor([0, 1])
+cols = torch.tensor([1, 0])
+
+# Selects (0,1) and (1,0)
+result = data[rows, cols] 
+# Output: tensor([11, 20])
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+auto data = torch::tensor({{10, 11}, 
+                           {20, 21}});
+
+auto rows = torch::tensor({0, 1}, torch::kLong);
+auto cols = torch::tensor({1, 0}, torch::kLong);
+
+// Pass a list of tensors
+auto result = data.index({rows, cols}); 
+// Output: [11, 20]
+#+end_src
+
+Comparison of Passing Multiple Indices
+
+| Scenario         | Python       | C++                       | Resulting selection          |
+|------------------+--------------+---------------------------+------------------------------------|
+| Single Tensor    | =data[idx_t]=  | =data.index({idx_t}=        | along Dim 0                |
+| Two Tensors      | =data[t1, t2]= | =data.index({t1, t2})=      | coordinates =(t1i​,t2i​)=       |
+| Tensor + Slice   | =data[t1, :]=  | =data.index({t1, Slice()})= | specific rows, all cols     |
+| Tensor + Integer | =data[t1, 0]=  | =data.index({t1, 0})=       | column 0 for specific rows  |
+
+
+** Index with slices
+
+Slicing extracts a view of a tensor based on a range
+of indices. In LibTorch, the index method is the primary gateway for complex
+slicing, using a syntax very similar to Python's colon notation.
+
+Constraints: Usually returns a view (no copy) unless the indexing is "fancy" (non-contiguous indices).
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Select all rows, first two columns
+sub_tensor = tensor[:, :2]
+
+# Range with step: index 1 to 10 with step 2
+stepped = tensor[1:10:2]
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+
+  using namespace torch::indexing;
+
+  // Select all rows, first two columns
+  auto sub_tensor = tensor.index({Slice(), Slice(None, 2)});
+
+  // Range with step: index 1 to 10 with step 2
+  auto stepped = tensor.index({Slice(1, 10, 2)});
+
+  // Preconstruct the indexing
+  std::initializer_list<TensorIndex> sub_index = {Slice(), Slice(None, 2)};
+  auto sub_tensor_same = tensor.index(sub_index);
+#+END_SRC
+
+** Selecting
+
+=select()= is a more explicit alternative to basic slicing. For example, selecting index 2 on dimension 0 of a 3D tensor (D,H,W) results in a 2D tensor (H,W).
+
+Constraints:
+
+- View :: =select()= returns a view of the original tensor. No data is copied; modifications to the selection will affect the original tensor.
+
+- Dimensionality :: The resulting tensor has one fewer dimension than the original.
+
+Python (PyTorch)
+
+#+begin_src python
+# Select the 3rd row (index 2) of a 2D tensor
+# Equivalent to tensor[2, :]
+row = tensor.select(dim=0, index=2)
+
+# Select the 1st channel of a (C, H, W) image tensor
+# Equivalent to tensor[0, :, :]
+channel = tensor.select(0, 0)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Select the 3rd row (index 2) of a 2D tensor
+// Arguments: (dimension, index)
+auto row = tensor.select(0, 2);
+
+// Select the 1st channel of a (C, H, W) image tensor
+auto channel = tensor.select(0, 0);
+#+end_src
+
+Related Operations and Variants
+
+- =index_select(dim, index_tensor)= :: Unlike select(), which takes a single integer, index_select takes a 1D tensor of indices. This allows you to pick multiple, non-contiguous slices (e.g., rows 0, 2, and 5). Note that index_select usually results in a copy, not a view.
+
+- =unfold()= :: Extracts multiple overlapping slices at once (useful for sliding window operations).
+
+- =unbind(dim)= :: Removes a dimension and returns a tuple/vector of all slices along that dimension.
+
+
+* Accessing Sub-tensors (Rows, Columns, and Blocks)
+
+Extracting specific structural components of a 2D or 3D tensor.
+
+Constraints: These typically return views. Changing the sub-tensor will change the original tensor.
+
+Python (PyTorch)
+
+#+begin_src python
+# Get a specific row
+row = tensor[1, :]
+
+# Get a specific column
+col = tensor[:, 2]
+
+# Get a 2x2 block from top-left
+block = tensor[0:2, 0:2]
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+using namespace torch::indexing;
+
+// Get a specific row
+auto row = tensor.index({1, Slice()});
+
+// Get a specific column
+auto col = tensor.index({Slice(), 2});
+
+// Get a 2x2 block from top-left
+auto block = tensor.index({Slice(0, 2), Slice(0, 2)});
+#+end_src
+
+Variants: select(dim, index), slice(dim, start, end, step).
+
+* Setting and getting
+
+Setting and Getting Atomic Elements Accessing or modifying a single scalar value
+at a specific coordinate. In C++, while =.index()= works, for high-performance
+loops, Accessors or =.item<T>()= are preferred.
+
+Constraints: =.item()= and =.index()= involve overhead; for performance in C++, use =accessor<float, 2>()=.
+
+Python (PyTorch):
+#+BEGIN_SRC python
+# Get value
+val = tensor[0, 1].item()
+
+# Set value (In-place)
+tensor[0, 1] = 5.5
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+  // Get value
+  float val = tensor.index({0, 1}).item<float>();
+
+  // Set value (In-place)
+  tensor.index_put_({0, 1}, 5.5);
+
+  // Fast access (C++ only)
+  auto accessor = tensor.accessor<float, 2>();
+  accessor[0][1] = 5.5; 
+#+END_SRC
+
+* Squeeze and Unsqueeze
+
+Squeeze removes dimensions of size 1, while unsqueeze inserts a dimension of size 1 at a specified position.
+
+
+Constraints: Returns a view; the underlying data is shared.
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Remove all dims of size 1
+y = tensor.squeeze()
+
+# Add dim at index 0
+y = tensor.unsqueeze(0)
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+  // Remove all dims of size 1
+  auto y = tensor.squeeze();
+
+  // Add dim at index 0
+  auto y = tensor.unsqueeze(0);
+#+END_SRC
+
+* Permute and Transpose
+
+Changes the order of dimensions. transpose swaps two dimensions, while permute reorders all of them.
+
+Constraints: Returns a view. The resulting tensor is often non-contiguous in memory.
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Swap dims 0 and 1
+y = tensor.transpose(0, 1)
+
+# shorthand
+y = tensor.T
+
+# Reorder dims (H, W, C) -> (C, H, W)
+y = tensor.permute(2, 0, 1)
+#+END_SRC
+
+C++ (LibTorch):
+
+#+BEGIN_SRC cpp
+  // Swap dims 0 and 1 
+  auto y = tensor.transpose(0, 1); 
+
+  // shorthand
+  auto y = tensor.t();
+
+  // Reorder dims 
+  auto y = tensor.permute({2, 0, 1});
+#+END_SRC
+
+Reshape and view
+
+View Both operations change the shape of the tensor without changing its data.
+
+Constraints: view requires the tensor to be contiguous. reshape will return a view if possible, but will copy data if the tensor is non-contiguous.
+
+Python (PyTorch): 
+
+#+BEGIN_SRC python
+  # Change shape to (2, 5)
+  y = tensor.view(2, 5)
+  y = tensor.reshape(-1, 10) 
+#+END_SRC
+
+C++ (LibTorch): 
+#+BEGIN_SRC cpp 
+  // Change shape to (2, 5) 
+  auto y = tensor.view({2, 5}); 
+  auto y = tensor.reshape({-1, 10}); 
+#+END_SRC
+
+* Concatenation and Stacking
+
+Joining multiple tensors along an existing dimension (cat) or a new one (stack).
+
+Constraints: Always causes a copy of the data into a new memory block.
+
+Python (PyTorch):
+
+#+BEGIN_SRC python
+# Join along dim 0
+
+z = torch.cat([t1, t2], dim=0)
+# Stack into new dim
+
+z = torch.stack([t1, t2], dim=0)
+#+END_SRC
+
+C++ (LibTorch): 
+
+#+BEGIN_SRC cpp
+ // Join along dim 0
+ auto z = torch::cat({t1, t2}, 0);
+ // Stack into new dim
+ auto z = torch::stack({t1, t2}, 0); 
+#+END_SRC
+
+* Gradients and Autograd
+
+This involves enabling or disabling gradient tracking and accessing the calculated gradients after a backward pass. In C++, we use a RAII-style guard (NoGradGuard) instead of Python's with statement.
+
+Constraints: Disabling gradients reduces memory consumption and speeds up computations during inference.
+Python (PyTorch)
+
+#+begin_src python
+# Enable gradient tracking
+x = torch.randn(3, 3, requires_grad=True)
+
+# Context manager to disable gradients
+with torch.no_grad():
+    y = x * 2
+
+# Backward pass
+loss.backward()
+
+# Access gradient
+print(x.grad)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Enable gradient tracking
+auto x = torch::randn({3, 3}, torch::requires_grad());
+
+// RAII guard to disable gradients
+{
+  torch::NoGradGuard no_grad;
+  auto y = x * 2;
+}
+
+// Backward pass
+loss.backward();
+
+// Access gradient
+std::cout << x.grad() << std::endl;
+#+end_src
+Related Operations: detach(), is_grad_enabled(), set_grad_enabled(bool).
+
+SPNG: See =ContextBase= and =TorchContext=.
+
+* Transform and map operations
+
+Applying functions across tensor elements. While PyTorch encourages vectorized operations, sometimes custom element-wise transformations are necessary.
+
+Constraints: =.map_()= is an in-place operation. Custom C++ transforms are significantly faster when using the =Tensor.apply_= method with a lambda.
+
+Python (PyTorch)
+
+#+begin_src python
+  # Element-wise absolute value
+  y = torch.abs(tensor)
+
+  # In-place fill
+  tensor.fill_(0.5)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+  // Element-wise absolute value
+  auto y = torch::abs(tensor);
+
+  // In-place fill
+  tensor.fill_(0.5);
+
+  // Custom element-wise transform (C++ specific)
+  tensor.for_each([](float& val) {
+      val = std::sin(val);
+  });
+#+end_src
+
+* Ranges
+
+Both arange and linspace are factory functions used to create 1D tensors with sequences of numbers. While they look similar, the key difference lies in how they determine the "gap" between numbers.
+
+** =arange=
+
+=arange()= (Array Range) generates values starting from a start point, up to (but excluding) an end point, incrementing by a specific step.
+
+Constraints:
+
+- Exclusive :: The end value is typically not included.
+
+- Floating Point Risk :: Using =arange= with floating-point steps can lead to inconsistent results due to precision errors (sometimes the end value might be included or excluded unexpectedly).
+
+Python (PyTorch)
+
+#+begin_src python
+# Values from 0 to 4 (step defaults to 1)
+a = torch.arange(5)
+
+# Values from 1 to 2.5 with step 0.5
+# Output: tensor([1.0, 1.5, 2.0])
+b = torch.arange(1, 2.5, 0.5)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Values from 0 to 4
+auto a = torch::arange(5);
+
+// Values from 1 to 2.5 with step 0.5
+// Note: Arguments are (start, end, step)
+auto b = torch::arange(1, 2.5, 0.5);
+#+end_src
+
+Related Operations: =torch.range= (deprecated in Python, as it is inclusive), =torch.logspace=, =torch.linspace=.
+
+** =linspace=
+
+=linspace()= (Linear Space) generates a specific number of steps (points) evenly spaced between a start and end point.
+
+Constraints:
+
+- Inclusive :: Unlike arange, the end value is always included by default.
+
+- Copy :: Creates a new tensor in memory.
+
+- Precision :: Generally safer than =arange= for floating-point sequences because it calculates the step size based on the total number of points requested.
+
+Python (PyTorch)
+
+#+begin_src python
+# 5 points between 3 and 10
+# Output: tensor([ 3.00,  4.75,  6.50,  8.25, 10.00])
+a = torch.linspace(3, 10, steps=5)
+
+# 100 points (default) between 0 and 1
+b = torch.linspace(0, 1)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// 5 points between 3 and 10
+// Arguments: (start, end, steps)
+auto a = torch::linspace(3, 10, 5);
+
+// In C++, the 'steps' argument is required (no default 100)
+auto b = torch::linspace(0, 1, 100);
+#+end_src
+
+** Comparison table
+
+| Feature       | =arange()=                      | =linspace()=                     |
+|---------------+---------------------------------+----------------------------------|
+| Primary Input | step size                       | Total number of steps            |
+| End Point     | Exclusive: =[start, end)=         | Inclusive: =[start, end]=          |
+| Best Use Case | Integer sequences / Counters    | Floating-point ranges / Graphing |
+| Safety        | Prone to float precision issues | High precision for float ranges  |
+|---------------+---------------------------------+----------------------------------|
+
+* Clamping
+
+The clamp operation (also known as "clipping" in other libraries) takes every element x in a tensor and applies the following logic:
+f(x)=min(max(x,min_val),max_val)
+
+Constraints:
+
+    Out-of-place: clamp returns a new tensor.
+
+    In-place: clamp_ (with an underscore) modifies the tensor in memory without a copy.
+
+    Partial clamping: You can provide only a minimum (clamping the lower bound) or only a maximum (clamping the upper bound).
+
+Python (PyTorch)
+
+#+begin_src python
+# Out-of-place: Clamping between 0 and 1
+y = tensor.clamp(min=0.0, max=1.0)
+
+# In-place: Modifying the original tensor
+tensor.clamp_(min=-0.5, max=0.5)
+
+# Only clamp the lower bound (values < 0 become 0)
+lower_only = tensor.clamp(min=0.0)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src c++
+// Out-of-place: Clamping between 0 and 1
+auto y = tensor.clamp(0.0, 1.0);
+
+// In-place: Modifying the original tensor
+tensor.clamp_( -0.5, 0.5);
+
+// Only clamp the lower bound
+// Use c10::nullopt or {} to skip a bound in C++
+auto lower_only = tensor.clamp(0.0, c10::nullopt);
+#+end_src
+
+Related Operations and Variants
+
+- =torch.clip= :: This is an alias for clamp, introduced to provide naming consistency for users coming from NumPy.
+
+- =torch.where= :: Useful if you want to clamp values to different limits based on a condition rather than global scalar values.
+
+- =torch.threshold= :: Commonly used in activation functions (like ReLU); it replaces values below a threshold with a specific value.
+
+* Device and dtype
+
+** Direct Specification in Factory Functions
+
+When creating a tensor from scratch (e.g., =zeros()=, =ones()=, =rand()=, =arange()=), you specify the properties at the moment of allocation.
+
+- Constraints :: In C++, factory functions use a =TensorOptions= object. This is more verbose than Python’s keyword arguments but follows a clear "builder" pattern.
+
+Python (PyTorch)
+
+#+begin_src python
+# Create a float16 tensor on the first GPU
+x = torch.zeros((3, 3), dtype=torch.float16, device="cuda:0")
+
+# Create an int32 tensor on CPU
+y = torch.ones((2, 2), dtype=torch.int32, device="cpu")
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Create a float16 tensor on the first GPU
+auto x = torch::zeros({3, 3}, 
+    torch::TensorOptions().dtype(torch::kFloat16).device(torch::kCUDA, 0));
+
+// Create an int32 tensor on CPU
+auto y = torch::ones({2, 2}, 
+    torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU));
+#+end_src
+
+** Setting/Changing Type and Device on Existing Tensors
+
+If a tensor already exists, you can move it between devices or change its precision.
+
+Constraints: These operations generally return a copy if the device or dtype changes. If the target device and dtype are the same as the source, PyTorch usually returns the original tensor (no-op).
+Python (PyTorch)
+
+#+begin_src python
+# Move to GPU
+x_gpu = x.to("cuda")
+
+# Change dtype
+x_float = x.to(torch.float32)
+
+# Combined move and change
+x_final = x.to(device="cuda", dtype=torch.float64)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Move to GPU
+auto x_gpu = x.to(torch::kCUDA);
+
+// Change dtype
+auto x_float = x.to(torch::kFloat32);
+
+// Combined move and change
+auto x_final = x.to(torch::kCUDA, torch::kFloat64);
+#+end_src
+
+** The device and dtype Rules for Existing Tensors
+
+Often you want a new tensor to automatically match the properties of an existing one (e.g., when creating a mask or a temporary buffer).
+
+Constraints: Using device=tensor.device is the safest way to ensure code works on both CPU and multi-GPU setups without hardcoding IDs.
+
+Python (PyTorch)
+
+#+begin_src python
+# Create a new tensor with the same properties as 'x'
+mask = torch.ones_like(x)
+
+# Manually matching properties
+new_t = torch.randn(x.shape, device=x.device, dtype=x.dtype)
+#+end_src
+
+C++ (LibTorch)
+
+#+begin_src cpp
+// Create a new tensor with the same properties as 'x'
+auto mask = torch::ones_like(x);
+
+// Manually matching properties using options()
+auto new_t = torch::randn(x.sizes(), x.options());
+#+end_src
+
+** Common Type Mappings
+
+| Feature      | Python                        | C++                               |
+|--------------+-------------------------------+-----------------------------------|
+| 32-bit Float | =torch.float32= or =torch.float=  | =torch::kFloat32= or =torch::kFloat=  |
+| 64-bit Float | =torch.float64= or =torch.double= | =torch::kFloat64= or =torch::kDouble= |
+| 32-bit Int   | =torch.int32= or =torch.int=      | =torch::kInt32= or =torch::kInt=      |
+| 64-bit Int   | =torch.int64= or =torch.long=     | =torch::kInt64= or =torch::kLong=     |
+| Boolean      | =torch.bool=                    | =torch::kBool=                      |
+|--------------+-------------------------------+-----------------------------------|
+
+

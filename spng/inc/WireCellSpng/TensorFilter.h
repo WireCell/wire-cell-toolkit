@@ -46,7 +46,7 @@ namespace WireCell::SPNG {
         virtual void configure(const WireCell::Configuration& config);
         virtual WireCell::Configuration default_configuration() const;
         
-        /// Base class must implement.
+        /// Subclass must implement.
         ///
         /// This base class takes care of EOS and this method is only called if
         /// "in" is not nullptr.  This class also assures the context base

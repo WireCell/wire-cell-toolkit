@@ -107,9 +107,6 @@ namespace WireCell::SPNG::RayGrid {
             throw std::invalid_argument("Input 'points' must be a tensor of shape (nbatch, 2).");
         }
 
-        // (nbatch, 2)
-        // long nbatch = points.size(0);
-
         // Reshape points to (nbatch, 1, 2) for broadcasting with view data
         // (nbatch, 1, 2)
         torch::Tensor points_reshaped = points.unsqueeze(1);
@@ -135,13 +132,36 @@ namespace WireCell::SPNG::RayGrid {
         return pitches;
     }
 
-    torch::Tensor Coordinates::point_indices(const torch::Tensor& points) const {
+    torch::Tensor Coordinates::point_pitches(const torch::Tensor& points, int view) const {
+        if (points.dim() != 2 || points.size(1) != 2) {
+            throw std::invalid_argument("Input 'points' must be a tensor of shape (nbatch, 2).");
+        }
+        if (view < 0 || view >= nviews()) {
+            throw std::out_of_range("View index out of range.");
+        }
+
+        // (nbatch, 2)
+        // Calculate vector from the specified view's center to each point
+        // (nbatch, 2) - (2) -> (nbatch, 2)
+        torch::Tensor center_at_view = center.index({view});
+        torch::Tensor vec_center_to_point = points - center_at_view;
+
+        // Get pitch direction for the specified view
+        // (2)
+        torch::Tensor pitch_dir_at_view = pitch_dir.index({view});
+
+        // Calculate the dot product. This is a batched dot product:
+        // sum((nbatch, 2) * (2)) over dim 1
+        // Result will be (nbatch,)
+        torch::Tensor pitches = torch::sum(vec_center_to_point * pitch_dir_at_view, /*dim=*/1);
+
+        return pitches;
+    }
+
+    torch::Tensor Coordinates::point_indices(const torch::Tensor& points, Rounding rd) const {
         // Calculate the floating-point pitch locations for each point in each view
         // (nbatch, nview)
         torch::Tensor pitches_per_view = this->point_pitches(points);
-
-        // Get nviews from the calculated pitches_per_view (or self.pitch_mag)
-        // long nviews_val = pitches_per_view.size(1);
 
         // Reshape pitch_mag to (1, Nview) for broadcasting with pitches_per_view
         // (nbatch, Nview) / (1, Nview) -> (nbatch, Nview)
@@ -152,11 +172,49 @@ namespace WireCell::SPNG::RayGrid {
         // (nbatch, nview)
         torch::Tensor indices_float = pitches_per_view / pitch_mag_reshaped;
 
-        // Apply floor and convert to long integer type
+        // Apply rounding to convert to integer
         // (nbatch, nview)
-        torch::Tensor pitch_indices = torch::floor(indices_float).to(torch::kLong);
+        torch::Tensor pitch_indices;
+        if (rd == Rounding::kCeil) {
+            pitch_indices = torch::ceil(indices_float);
+        }
+        else if (rd == Rounding::kRound) {
+            pitch_indices = torch::round(indices_float);
+        }
+        else {
+            pitch_indices = torch::floor(indices_float);
+        }
 
-        return pitch_indices;
+        return pitch_indices.to(torch::kLong);
+    }
+
+    torch::Tensor Coordinates::point_indices(const torch::Tensor& points, int view, Rounding rd) const {
+        // Calculate the floating-point pitch locations for each point in the specified view
+        // (nbatch,)
+        torch::Tensor pitches_at_view = this->point_pitches(points, view);
+
+        // Get pitch magnitude for the specified view
+        // (1)
+        torch::Tensor pitch_mag_at_view = pitch_mag.index({view});
+
+        // Calculate pitch indices: pitch / pitch_mag
+        // (nbatch,) / (1) -> (nbatch,)
+        torch::Tensor indices_float = pitches_at_view / pitch_mag_at_view;
+
+        // Apply rounding to convert to integer
+        // (nbatch,)
+        torch::Tensor pitch_indices;
+        if (rd == Rounding::kCeil) {
+            pitch_indices = torch::ceil(indices_float);
+        }
+        else if (rd == Rounding::kRound) {
+            pitch_indices = torch::round(indices_float);
+        }
+        else {
+            pitch_indices = torch::floor(indices_float);
+        }
+
+        return pitch_indices.to(torch::kLong);
     }
 
     torch::Tensor Coordinates::ray_crossing(torch::Tensor view1, torch::Tensor ray1,
@@ -213,11 +271,24 @@ namespace WireCell::SPNG::RayGrid {
             ray2.to(b_val.dtype()).to(b_val.device()) * a_val_12 +
             ray1.to(b_val.dtype()).to(b_val.device()) * a_val_21;    }
 
-    torch::Tensor Coordinates::pitch_index(const torch::Tensor& pitch_val, const torch::Tensor& view_idx) const {
+    torch::Tensor Coordinates::pitch_index(const torch::Tensor& pitch_val,
+                                           const torch::Tensor& view_idx,
+                                           Rounding rd) const {
         // return torch.floor(pitch/self.pitch_mag[view]).to(torch.long)
         torch::Tensor view_idx_long = view_idx.to(torch::kLong);
         torch::Tensor mag_at_view = pitch_mag.index({view_idx_long});
-        return torch::floor(pitch_val / mag_at_view).to(torch::kLong);
+        torch::Tensor indices = pitch_val / mag_at_view;
+
+        if (rd == Rounding::kCeil) {
+            indices = torch::ceil(indices);
+        }
+        else if (rd == Rounding::kRound) {
+            indices = torch::round(indices);
+        }
+        else {
+            indices = torch::floor(indices);
+        }
+        return indices.to(torch::kLong);
     }
 
     void Coordinates::init(const torch::Tensor& pitches_user)

@@ -38,7 +38,7 @@ namespace WireCell::SPNG {
         // Sanity check the config
         size_t nfaces = m_cfg.face_idents.size();
         if (nfaces > 2) {
-            raise<ValueError>("CrossViews can no understand how yhou give it %d faces", nfaces);
+            raise<ValueError>("CrossViews got nonphysical number of faces: %d", nfaces);
         }
 
         // Initialize the face view data. 

@@ -11,7 +11,7 @@ function(control={}, pg)
     threshold_views(tpc, extra_name=""):: pg.crossline([pg.pnode(
         {
             type: 'SPNGThreshold',
-            name: tpc.name + 'v' + std.toString(it.index),
+            name: tpc.name + 'v' + std.toString(it.index) + extra_name,
             data: it.value + control,
         }, nin=1, nout=1) for it in wc.enumerate(tpc.crossview_thresholds)]),
 
