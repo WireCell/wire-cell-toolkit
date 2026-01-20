@@ -3,6 +3,7 @@
 #include "WireCellSpng/Logger.h"
 #include "WireCellSpng/ContextBase.h"
 #include "WireCellSpng/ITorchTensorSetFilter.h"
+#include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/HanaJsonCPP.h"
 
@@ -14,7 +15,7 @@ namespace WireCell::SPNG {
     struct TensorSetFilter: public ContextBase,
                             public Logger,
                             virtual public ITorchTensorSetFilter,
-                            virtual public IConfigurable {
+                            virtual public WireCell::IConfigurable {
 
         TensorSetFilter(const std::string& type_name, const std::string& group_name="spng");
         virtual ~TensorSetFilter() = default;
@@ -31,7 +32,7 @@ namespace WireCell::SPNG {
         /// This base class takes care of EOS and this method is only called if
         /// "in" is not nullptr.  This class also assures the context base
         /// semaphore.
-        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in) = 0;
+        virtual ITorchTensorSet::pointer filter_tensor(const ITorchTensorSet::pointer& in) = 0;
 
 
     };

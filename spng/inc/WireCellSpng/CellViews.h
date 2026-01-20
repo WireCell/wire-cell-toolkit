@@ -1,5 +1,8 @@
 #pragma once
 
+#include "WireCellSpng/TensorSetFilter.h"
+#include <torch/torch.h>
+
 namespace WireCell::SPNG {
 
     struct CellViewsConfig {
@@ -17,15 +20,17 @@ namespace WireCell::SPNG {
         /// Required, name of IAnodePlane component corresponding to the channels.
         std::string anode ="";
 
-        
         /// Name and order of the kinds of "cell views" to produce.  Each cell
         /// view maps to one index on the dim=-3 dimension of the output
         /// tensors.  
         std::vector<std::string> cell_views = {"mp2", "mp3"};
+
+        /// If set, perform chunked processing
+        int chunk_size = 0;
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::CellViewsConfig, face_idents, uvw_index, anode, cell_views);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::CellViewsConfig, face_idents, uvw_index, anode, cell_views, chunk_size);
 
 namespace WireCell::SPNG {
 
@@ -61,17 +66,20 @@ namespace WireCell::SPNG {
        The cell views are named in the cell_views configuration variable.
 
      */
-    struct CellViews : public TensorSetFilter, virtual public IConfigurable {
+    struct CellViews : public TensorSetFilter {
         CellViews();
-        virtual ~CellVeiws() = default;
+        virtual ~CellViews() = default;
         virtual void configure(const WireCell::Configuration& config);
         virtual WireCell::Configuration default_configuration() const;
-        virtual ITorchTensor::pointer filter_tensor(const ITorchTensor::pointer& in);
+        virtual ITorchTensorSet::pointer filter_tensor(const ITorchTensorSet::pointer& in);
         
     private:
+        
+        std::vector<torch::Tensor> process_chunked(const std::vector<torch::Tensor>& uvw_tensors);
 
         CellViewsConfig m_config;
-        std::vector<torch::Tensor> m_wire_basis; // by face
+        // (3, ncell) holding channel dimension indices, one column for each view.
+        torch::Tensor m_cell_channel_indices;
 
     };
 }
