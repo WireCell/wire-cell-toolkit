@@ -35,11 +35,6 @@ function(input, outname="frame.npz") {
 
   local sim = sim_maker(params, tools),
 
-  // local source = fileio.depo_file_source(input),
-  // local source = g.pnode({
-  //     type: 'NumpyDepoLoader',
-  //     data: { filename: input }
-  // }, nin=0, nout=1),
   local source = g.pnode({
       type: 'NumpyDepoSetLoader',
       data: { filename: input }
@@ -94,7 +89,7 @@ function(input, outname="frame.npz") {
   local parallel_pipes = [
     g.pipeline([
                 sn_pipes[n],
-                nf_pipes[n],
+                // nf_pipes[n],
                 // sp_pipes[n],
               ],
               'parallel_pipe_%d' % n)
@@ -104,12 +99,33 @@ function(input, outname="frame.npz") {
   local parallel_graph = f.fanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', 'sn_mag_nf', outtags),
 
 
-  // local drifted_frame_output = fileio.frame_file_sink(
-  //   'drifted-%s' % outname, tags=[]
-  // ),
-  local splat_frame_output = fileio.frame_file_sink(
-    outname, tags=[]
+  local drifted_frame_output = fileio.frame_file_sink(
+    'drifted-%s-frame.npz' % outname, tags=[]
   ),
+// local drifted_frame_output = fileio.frame_tensor_file_sink('drifted-%s-frame.tar'%outname, mode='tagged'),
+
+  local splat_frame_output = fileio.frame_file_sink(
+    'splat-%s-frame.npz'%outname, tags=[]
+  ),
+
+local hio_truth = g.pnode({
+      type: 'HDF5FrameTap',
+      name: 'hio_truth',
+      data: {
+        anode: wc.tn(tools.anodes[0]),
+        trace_tags: ['deposplat0'],
+        filename: "splat-%s-0.h5"%outname,
+        chunk: [0, 0], // ncol, nrow
+        gzip: 2,
+        high_throughput: true,
+      },
+    }, nin=1, nout=1),
+
+  local truth_fork = g.pipeline([
+             hio_truth,
+             g.pnode({ type: 'DumpFrames', name: 'truth_fork'  }, nin=1, nout=0)
+  ], 'truth_fork'),
+
 
 
   local splat_reframers = [
@@ -117,6 +133,7 @@ function(input, outname="frame.npz") {
           type: 'Reframer',
           name: 'reframer-splat-'+a.name,
           data: {
+              frame_tag: 'deposplat0',
               anode: wc.tn(a),
               nticks: 6000,
           },
@@ -139,31 +156,32 @@ local sink = g.pnode({
         outname: 'test.tar.bz2',
     }
 }, nin=1, nout=0),
-local graph = g.pipeline([source, setdrifter, deposplats, splat_reframers[0], splat_frame_output], 'graph'),
-  // local graph = g.intern(
-  //   innodes=[source],
-  //   outnodes=[
-  //     splat_frame_output,
-  //     drifted_frame_output,
-  //     // frame_sink
-  //   ],
-  //   centernodes=[
-  //     setdrifter,
-  //     parallel_graph,
-  //     depo_fanout,
-  //     deposplats,
-  //   ]+ splat_reframers + sig_reframers,
-  //   edges=[
-  //     g.edge(source, setdrifter),
-  //     // g.edge(setdrifter, parallel_graph),
-  //     g.edge(setdrifter, depo_fanout),
-  //     g.edge(depo_fanout, parallel_graph, 0, 0),
-  //     g.edge(depo_fanout, deposplats, 1, 0),
-  //     g.edge(deposplats, splat_reframers[0]),
-  //     g.edge(parallel_graph, drifted_frame_output),
-  //     g.edge(splat_reframers[0], splat_frame_output),
-  //   ],
-  // ),
+// local graph = g.pipeline([source, setdrifter, deposplats, splat_reframers[0], splat_frame_output], 'graph'),
+  local graph = g.intern(
+    innodes=[source],
+    outnodes=[
+    //   splat_frame_output,
+      drifted_frame_output,
+      // frame_sink
+    ],
+    centernodes=[
+      setdrifter,
+      parallel_graph,
+      depo_fanout,
+      deposplats,
+      truth_fork,
+    ]+ splat_reframers + sig_reframers,
+    edges=[
+      g.edge(source, setdrifter),
+      g.edge(setdrifter, depo_fanout),
+      g.edge(depo_fanout, parallel_graph, 0, 0),
+      g.edge(depo_fanout, deposplats, 1, 0),
+      g.edge(parallel_graph, drifted_frame_output),
+      
+      g.edge(deposplats, splat_reframers[0]),
+      g.edge(splat_reframers[0], truth_fork),
+    ],
+  ),
 
 
   local app = {
@@ -176,7 +194,7 @@ local graph = g.pipeline([source, setdrifter, deposplats, splat_reframers[0], sp
   local cmdline = {
       type: "wire-cell",
       data: {
-          plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellRoot"],
+          plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellRoot", "WireCellHio"],
           apps: ["Pgrapher"]
       }
   },

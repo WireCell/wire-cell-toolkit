@@ -62,14 +62,28 @@ rule save_depos:
         mv wct-depos.npz {output}
         """
 
-rule drift:
+rule splat_and_drift:
     input:
         "{name}_wct-depos.npz",
     output:
-        "{name}_splat_frame.npz",
+        "splat-{name}-0.h5",
+        "drifted-{name}-frame.npz"
     shell:
         """
         wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A outname={output} --ext-code nanodes=1 \
+        -A "input={input}" -A outname={wildcards.name} --ext-code nanodes=1 \
         wct-sim-deposource-framesink.jsonnet
+        """
+
+
+rule sigproc:
+    input:
+        "drifted-{name}-frame.npz",
+    output:
+        "sigproc-{style}-{name}-0.h5",
+    shell:
+        """
+        wire-cell -l stdout  -L debug   \
+        -A "input={input}" -A outname={wildcards.name} --ext-code nanodes=1 \
+        wct-sim-framesource-sigproc.jsonnet
         """
