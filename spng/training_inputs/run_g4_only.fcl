@@ -1,0 +1,8 @@
+#include "standard_g4_protodunehd.fcl"
+services.PhotonVisibilityService: @erase
+physics.simulate: [
+   "rns",
+   "largeant",
+   "IonAndScint",
+   "IonAndScintExternal"
+]

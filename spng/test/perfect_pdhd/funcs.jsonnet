@@ -134,5 +134,53 @@ local wc = import 'wirecell.jsonnet';
     ret: g.pipeline([bg, sp, rt],"%s-%s" % [bg.name, sp.name]),
 }.ret,
 
+ // The approximated sim+sigproc
+  splatonly:: function(params, tools, anode, name=null) {
+    local apaid = anode.data.ident,
+    local sufix = if std.type(name) == "null" then apaid else name,
 
+    local sp = g.pnode({
+        type: 'DepoFluxSplat',
+        name: sufix,
+        data: {
+            anode: wc.tn(anode),
+            field_response: wc.tn(tools.field), // for speed and origin
+            sparse: true,
+            tick: params.daq.tick,
+            window_start: params.sim.ductor.start_time,
+            window_duration: params.sim.ductor.readout_time,
+            reference_time: 0.0,
+            // Run wirecell-gen morse-* to find these numbers that match the extra
+            // spread the sigproc induces.
+            "smear_long": [
+                2.691862363980221,
+                2.6750200122535057,
+                2.7137567141154055
+            ],
+            "smear_tran": [
+                0.7377218875719689,
+                0.7157764520393882,
+                0.13980698710556544
+            ]
+        },
+    }, nin=1, nout=1, uses=[anode, tools.field]),
+    local rt = g.pnode({
+        type: 'Retagger',
+        name: sufix,
+        data: {
+            // Note: retagger keeps tag_rules an array to be like frame fanin/fanout.
+            tag_rules: [{
+                // Retagger also handles "frame" and "trace" like fanin/fanout
+                // merge separately all traces like gaussN to gauss.
+                frame: {
+                ".*": "deposplat%d" % apaid
+                },
+                merge: {
+                ".*": "deposplat%d" % apaid
+                },
+            }],
+        },
+    }, nin=1, nout=1),
+    ret: g.pipeline([sp, rt],"%s-%s" % [sp.name]),
+}.ret,
 }

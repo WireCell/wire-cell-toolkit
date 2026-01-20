@@ -7,7 +7,6 @@ local detsim_mod = import "spng/detsim.jsonnet";
 local deposplat_mod = import "spng/deposplat.jsonnet";
 local frame_mod = import "spng/frame.jsonnet";
 local spng_mod = import "spng/spng.jsonnet";
-local spng_newdnn_mod = import "spng/spng_newdnn.jsonnet";
 local fans_mod = import "spng/fans.jsonnet";
 
 function(det, control)
@@ -49,12 +48,7 @@ function(det, control)
     // Processing, Next Generation subgraph to produce signals.
     spng:
         pg.crossline([spng_mod(tpc, control) for tpc in det.tpcs]),
-
-    // [ntpcs]IFrame->IFrame[ntpcs] node.  Input ADC frames to Signal
-    // Processing, Next Generation subgraph to produce signals.
-    spng_newdnn:
-        pg.crossline([spng_newdnn_mod(tpc, control) for tpc in det.tpcs]),
-
+    
     // [1]IDepoSet -> IFrame[ntpcs].  Depos input to drift and detsim to produce ADC frames.
     depos_to_adc:
         pg.pipeline([$.drifter, $.inducer]),
@@ -100,18 +94,17 @@ function(det, control)
         };
 
         local ntpcs = std.length(det.tpcs);
-        local nadc_consumers = 3;
+        local nadc_consumers = 2;
         local adc_fans = fans.fanout_cross_gen(ntpcs, nadc_consumers, fanout_inode);
         // a 3-in sink
         local adc_terminal = adc_fans[0];
         // 3-out sources
         local osp_adc = adc_fans[1][0];
         local spng_adc = adc_fans[1][1];
-        local spng_newdnn_adc = adc_fans[1][2];
 
         local osp = $.osp;
         local spng = $.spng;
-        local spng_newdnn = $.spng_newdnn;
+
 
         // This holds the depo consumers (splat+sim).
         local depo_sink = pg.intern(innodes=[drift],
@@ -138,27 +131,17 @@ function(det, control)
                                          pg.edge(spng_adc, spng, tpcid, tpcid)
                                          for tpcid in wc.iota(ntpcs)
                                      ]);
-
-        local spng_newdnn_source = pg.intern(centernodes=[spng_newdnn_adc],
-                                     outnodes=[spng_newdnn],
-                                     edges=[
-                                         pg.edge(spng_newdnn_adc, spng_newdnn, tpcid, tpcid)
-                                         for tpcid in wc.iota(ntpcs)
-                                     ]);
-
         {
             depo_sink : depo_sink,
             splat_source : splat_source,
             osp_source : osp_source,
             spng_source : spng_source,
-            spng_newdnn_source : spng_newdnn_source,
 
             test: {
                 osp:osp,
                 adc_terminal: adc_terminal,
                 osp_adc: osp_adc,
                 spng_adc: spng_adc,
-                spng_newdnn_adc: spng_newdnn_adc,
                 adc_fans: adc_fans,
             },
         }
