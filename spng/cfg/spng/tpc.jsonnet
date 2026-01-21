@@ -8,7 +8,7 @@ local real_pg = import "pgraph.jsonnet";
 local fans_mod = import "fans.jsonnet";
 local frame_mod = import "frame.jsonnet";
 local decon_mod = import "decon.jsonnet";
-local cv_mod = import "crossviews.jsonnet";
+local xv_mod = import "crossviews.jsonnet";
 // local dnnroi_mod = import "dnnroi.jsonnet";
 
 local tlas = import "tlas.jsonnet";
@@ -23,7 +23,7 @@ function(tpc, control, pg=real_pg) {
     tpc: tpc,
     anode: tpc.anode,
 
-    local cv = cv_mod(control, pg=pg),
+    local xv = xv_mod(control, pg=pg),
     local fans = fans_mod(control),
     local frame = frame_mod(control),
     local decon = decon_mod(tpc, control, pg=pg),
@@ -98,11 +98,11 @@ function(tpc, control, pg=real_pg) {
     },
 
     // Node: [nview]tensor -> tensor[nview] apply threshold to produce boolean tensor
-    threshold: cv.threshold_views(tpc),
+    threshold: xv.threshold_views(tpc),
 
     // Node: [nview]tensor->tensor[nview].  3 inputs are fanned to three
     // crossviews each of three inputs making a fully-connected net.
-    crossfan(view_crossed=[1,1,0]): cv.crossfan(tpc, view_crossed=view_crossed),
+    crossfan(view_crossed=[1,1,0]): xv.crossfan(tpc, view_crossed=view_crossed),
 
     // Node: nview->1 set.  Collect view tensors into a tensor set.
     frame_set_repack: frame.tensorset_view_repacker(tpc.name),

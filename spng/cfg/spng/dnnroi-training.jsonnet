@@ -27,7 +27,8 @@
 /// shape (3, nchan, ntick) the feature dimension of size 3 holds the "dense"
 /// (eg looseLF) and the mp2 and mp3 images.  The dense image is scaled by 4000
 /// and the mp2/mp3 are boolean.
-
+///
+/// To visualize, use: https://github.com/brettviren/teepeesee
 
 local wc = import "wirecell.jsonnet";
 local pg = import 'pgraph.jsonnet';
@@ -113,8 +114,6 @@ function(input,
         else dump_tensors(tiers[0], inode, pnode);
 
     local pnode_wrappers = {
-        SPNGCrossViews: function(inode, pnode)
-            dump_tensors_maybe("crossviews", inode, pnode),
         SPNGRebinner: function(inode, pnode)
             dump_tensors_maybe("rebin", inode, pnode),
         SPNGResampler: function(inode, pnode)
@@ -125,8 +124,6 @@ function(input,
             dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener"}, inode, pnode),
         SPNGThreshold: function(inode, pnode)
             dump_tensors_matched({wthresh:"wthresh"}, inode, pnode),
-        SPNGCrossViewsExtract: function(inode, pnode)
-            dump_tensors_maybe("cvxtract", inode, pnode),
         SPNGReduce: function(inode, pnode)
             dump_tensors_matched({stack:"stack"}, inode, pnode),
     };
