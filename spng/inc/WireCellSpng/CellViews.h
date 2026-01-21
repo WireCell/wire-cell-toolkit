@@ -17,6 +17,10 @@ namespace WireCell::SPNG {
         /// The indices for the U, V and W tensors in the input tensor set.
         std::vector<int> uvw_index = {0,1,2};
 
+        /// Enumerate the views (plane indices) for which output tensors will be
+        /// produced.
+        std::vector<int> out_views = {0,1};
+
         /// Required, name of IAnodePlane component corresponding to the channels.
         std::string anode ="";
 
@@ -30,7 +34,9 @@ namespace WireCell::SPNG {
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::CellViewsConfig, face_idents, uvw_index, anode, cell_views, chunk_size);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::CellViewsConfig,
+                        face_idents, uvw_index, out_views,
+                        anode, cell_views, chunk_size);
 
 namespace WireCell::SPNG {
 
@@ -52,7 +58,8 @@ namespace WireCell::SPNG {
 
        (nbatch, nchan, ntick)
 
-       Output tensor set contains exactly 3 tensors in order U, V and W.
+       Output tensor set contains tensors following entries and order of the
+       out_views configuration parameter.
 
        Output tensors are shaped either:
 

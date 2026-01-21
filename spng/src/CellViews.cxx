@@ -115,6 +115,16 @@ namespace WireCell::SPNG {
 
 
 
+    // Strategy of this function is to heavily vectorize construction of MP2 and
+    // MP3.  However, full vectorization over the sizes of some detectors can
+    // exhaust memory.  To combat that, the vectorization can be chunked over
+    // the tick dimension.  This function has a triple nested loop: chunks,
+    // batch and output view.  The outer loops have low cardinality and the
+    // inner kernel of the full nested loops is "heavily vectorized".  Thus, we
+    // expect this function to still be very performant.  We further reduce its
+    // cost by not calculating MP2 and final scatter for views that are not
+    // requested.  There is a 3-view overhead to make MP3 even if just one
+    // output view is requested so it is best to make all output views together.
     std::vector<torch::Tensor> CellViews::process_chunked(const std::vector<torch::Tensor>& uvw_tensors)
     {
         auto U = uvw_tensors[0];
@@ -130,23 +140,34 @@ namespace WireCell::SPNG {
             chunk_size = ntick;
         }
 
-        auto nchanU = U.size(1);
-        auto nchanV = V.size(1);
-        auto nchanW = W.size(1);
+        // auto nchanU = U.size(1);
+        // auto nchanV = V.size(1);
+        // auto nchanW = W.size(1);
 
         // 1. Prepare indices for the three columns of cells
-        auto idxU = cells.select(1, 0);
-        auto idxV = cells.select(1, 1);
-        auto idxW = cells.select(1, 2);
+        std::vector<torch::Tensor> idx;
+        for (int view=0; view<3; ++view) {
+            idx.push_back(cells.select(1, view));
+        }
+        // auto idxU = cells.select(1, 0);
+        // auto idxV = cells.select(1, 1);
+        // auto idxW = cells.select(1, 2);
 
         // 2. Initialize output buffers (nbatch, 2, nchanX, ntick)
-        auto outU = torch::zeros({nbatch, 2, nchanU, ntick}, torch::kBool);
-        auto outV = torch::zeros({nbatch, 2, nchanV, ntick}, torch::kBool);
-        auto outW = torch::zeros({nbatch, 2, nchanW, ntick}, torch::kBool);
+        std::vector<torch::Tensor> out;
+        for (int view : m_config.out_views) {
+            int64_t nchan = uvw_tensors[view].size(1);
+            out.push_back(torch::zeros({nbatch, 2, nchan, ntick}, torch::kBool));
+        }
+        // auto outU = torch::zeros({nbatch, 2, nchanU, ntick}, torch::kBool);
+        // auto outV = torch::zeros({nbatch, 2, nchanV, ntick}, torch::kBool);
+        // auto outW = torch::zeros({nbatch, 2, nchanW, ntick}, torch::kBool);
 
-        // 3. Loop over ticks in chunks
+        // 3. Loop over chunks of ticks.
         for (int64_t t = 0; t < ntick; t += chunk_size) {
             int64_t actual_chunk = std::min(chunk_size, ntick - t);
+
+            // Regardless of the number of out's we need some processing of all three views
 
             // narrow(dimension, start, length)
             auto U_slice = U.narrow(2, t, actual_chunk);
@@ -154,18 +175,29 @@ namespace WireCell::SPNG {
             auto W_slice = W.narrow(2, t, actual_chunk);
 
             // Indexing: (nbatch, ncell, actual_chunk)
-            auto Uc = U_slice.index_select(1, idxU);
-            auto Vc = V_slice.index_select(1, idxV);
-            auto Wc = W_slice.index_select(1, idxW);
+            auto Uc = U_slice.index_select(1, idx[0]);
+            auto Vc = V_slice.index_select(1, idx[1]);
+            auto Wc = W_slice.index_select(1, idx[2]);
 
-            // Boolean Logic
+            // Need MP3 for all output views.
             auto MP3 = Uc & Vc & Wc;
-            auto MP2u = (~Uc) & Vc & Wc;
-            auto MP2v = Uc & (~Vc) & Wc;
-            auto MP2w = Uc & Vc & (~Wc);
+
+            // Only need MP2 for output views
+            std::vector<torch::Tensor> MP2;
+            for (int view : m_config.out_views) {
+                switch (view) {
+                case 0: MP2.push_back( (~Uc) & Vc & Wc ); break;
+                case 1: MP2.push_back( Uc & (~Vc) & Wc ); break;
+                case 2: MP2.push_back( Uc & Vc & (~Wc) ); break;
+                }
+            }
+            // auto MP2u = (~Uc) & Vc & Wc;
+            // auto MP2v = Uc & (~Vc) & Wc;
+            // auto MP2w = Uc & Vc & (~Wc);
 
             // 4. Contract and store back to the output buffers
             for (int64_t b = 0; b < nbatch; ++b) {
+
                 // Helper to reduce and place into the correct tick-slice
                 auto scatter_chunk = [&](torch::Tensor& out_full, const torch::Tensor& data, 
                                          const torch::Tensor& indices, int64_t plane_idx) {
@@ -176,18 +208,24 @@ namespace WireCell::SPNG {
                     target_slice.index_reduce_(0, indices, data.select(0, b), "amax", false);
                 };
 
-                scatter_chunk(outU, MP3,  idxU, 0);
-                scatter_chunk(outU, MP2u, idxU, 1);
+                // Only compute requested output views.
+                for (size_t view_index=0; view_index<m_config.out_views.size(); ++view_index) {
+                    int view = m_config.out_views[view_index];
+                    scatter_chunk(out[view_index], MP3, idx[view], 0);
+                    scatter_chunk(out[view_index], MP2[view_index], idx[view], 1);
+                }                    
+                // scatter_chunk(outU, MP3,  idxU, 0);
+                // scatter_chunk(outU, MP2u, idxU, 1);
 
-                scatter_chunk(outV, MP3,  idxV, 0);
-                scatter_chunk(outV, MP2v, idxV, 1);
+                // scatter_chunk(outV, MP3,  idxV, 0);
+                // scatter_chunk(outV, MP2v, idxV, 1);
 
-                scatter_chunk(outW, MP3,  idxW, 0);
-                scatter_chunk(outW, MP2w, idxW, 1);
+                // scatter_chunk(outW, MP3,  idxW, 0);
+                // scatter_chunk(outW, MP2w, idxW, 1);
             }
         }
 
-        return {outU, outV, outW};
+        return out;
     }
 
     ITorchTensorSet::pointer CellViews::filter_tensor(const ITorchTensorSet::pointer& in)
