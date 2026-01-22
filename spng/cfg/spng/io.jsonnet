@@ -93,10 +93,4 @@ local pg = import "pgraph.jsonnet";
         frame_sink: $.frame_array_sink,
     },
 
-
-
-
-    // todo:
-    // - [ ] clusters
-    // - [ ] ROOT formats
 }

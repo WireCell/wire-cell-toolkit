@@ -20,5 +20,8 @@ local fans = fans_js();
             multiplicity: M
         }
     }),
-    fangen_source0: fangen[1][0]
-}.crossed
+    fangen_source0: fangen[1][0],
+
+    fosl: fans.fanout_shuntline(3),
+
+}.fosl

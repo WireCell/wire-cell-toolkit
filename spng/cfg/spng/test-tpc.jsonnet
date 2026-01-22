@@ -47,7 +47,7 @@ function(detname="pdhd", tpcid="tpc0", stage="decon_pack")
         },
         wiener: filters.wiener,
 
-        frame_filters: fans.tensor_fanout_shuntline($.frame_decon, [
+        frame_filters: fans.tensor_fanout_shuntline_connect($.frame_decon, [
             filters.gauss, filters.wiener, filters.dnnroi
         ]),
 

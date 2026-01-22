@@ -618,7 +618,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         {
             dense_sink: pg.intern(iports=[pv.iports[0] for pv in perview]),
             roi_sink: pg.intern(iports=[pv.iports[1] for pv in perview]),
-            signal_source: pg.intern(oports=perview),
+            signal_source: pg.intern(outnodes=perview),
         },
 
 
@@ -654,5 +654,50 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                   outnodes=[applyrois.signal_source],
                   centernodes=[rois_cap, dense_cap]),
 
+
+    // Return object that keeps source's iports and caps off its oports by
+    // attaching a file sink.
+    attach_file_sink_views(source, filename, extra_name="", prefix="")::
+        local mult = std.length(source.oports);
+        local this_name = tpc.name + extra_name;
+        local pack = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: this_name,
+            data: {
+                multiplicity: mult,
+            } + control
+        }, nin=mult, nout=1);
+        local ttt = pg.pnode({
+            type: 'TorchToTensor',
+            name: this_name,
+            data: {},
+        }, nin=1, nout=1);
+        local sink = pg.pnode({
+            type: 'TensorFileSink',
+            name: this_name,
+            data: {
+                outname: filename,
+                prefix: prefix,
+            },
+        }, nin=1, nout=0);
+        pg.intern(innodes=[source],
+                  centernodes=[pack, ttt, sink],
+                  edges=[
+                      pg.edge(source, pack, port.index, port.index)
+                      for port in wc.enumerate(source.oports)
+                  ] + [
+                      pg.edge(pack, ttt),
+                      pg.edge(ttt, sink)
+                  ]),
+
+    // Like attach_file_sink_views() but source's oports are fanned out with one
+    // fan going to a sink and the other exposing the oports.
+    attach_file_tap_views(source, filename, extra_name="", prefix="")::
+        local fos = fans.fanout_shuntline(std.length(source.oports), nout=2, extra_name='_tap'+extra_name);
+        local sink = $.attach_file_sink_views(fos.sources[1], filename, extra_name, prefix);
+        local head = pg.shuntline(source, fos.sink);
+        pg.intern(innodes=[head], outnodes=[fos.sources[0]], centernodes=[source, sink, head]),
+
 }
+
 

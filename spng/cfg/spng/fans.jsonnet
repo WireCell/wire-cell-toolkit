@@ -17,7 +17,7 @@ function(control={})
 
     /// A fanout + shuntlines.  Fan out N oports of upstream node to N ports of
     /// each in list of downstream nodes.  
-    fanout_shuntline(upstream, downstreams, extra_name="")::
+    fanout_shuntline_connect(upstream, downstreams, extra_name="")::
         local Nu = std.length(upstream.oports);
         local Nd = std.length(downstreams);
         local fans = [pg.pnode({
@@ -37,6 +37,23 @@ function(control={})
                       for ifan in wc.iota(Nu)
                       for id in wc.iota(Nd)
                   ]),
+
+    /// Like fanout_shuntline_connect but instead of connecting return an object
+    /// with attribute .sink and .sources for caller to connect.
+    fanout_shuntline(nports, nout=2, extra_name="")::
+        local fans = [pg.pnode({
+            type: 'SPNGFanoutTensors',
+            name: 'fan' + std.toString(ifan) + extra_name,
+            data: {
+                multiplicity: nout,
+            } + control
+        }, nin=1, nout=nout) for ifan in wc.iota(nports)];
+        {
+            sink: pg.intern(innodes=fans),
+            sources: [pg.intern(outnodes=[pg.oport_node(f, pind) for f in fans]) for pind in wc.iota(nout)],
+        },
+
+
 
     /// Forward N ports M ways.
     ///
