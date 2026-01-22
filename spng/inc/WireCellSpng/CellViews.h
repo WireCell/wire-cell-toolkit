@@ -26,7 +26,7 @@ namespace WireCell::SPNG {
 
         /// Name and order of the kinds of "cell views" to produce.  Each cell
         /// view maps to one index on the dim=-3 dimension of the output
-        /// tensors.  
+        /// tensors.  Note, the order determines the order of the feature dimension.
         std::vector<std::string> cell_views = {"mp2", "mp3"};
 
         /// If set, perform chunked processing

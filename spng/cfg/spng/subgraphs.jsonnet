@@ -89,7 +89,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// A decon kernel with filters and responses determined from the tpc group.
     tpc_group_decon_kernel(group_index, extra_name="")::
         local group = tpc.view_groups[group_index];
-        local name = $.this_name(extra_name, group.name);
+        local name = $.this_name(extra_name, '_'+group.name);
         local plane_index = group.view_index;
         local fk = $.filter_kernel([tpc.filters[plane_index].channel.decon,{kind:"none"}],
                                    extra_name=extra_name);
@@ -120,7 +120,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// one decon in the same tpc+group, pass extra_name.
     tpc_group_decon_frer(group_index, kernel, tag="", extra_name="")::
         local group = tpc.view_groups[group_index];
-        local name = tpc.name + group.name + extra_name;
+        local name = tpc.name + '_' + group.name + extra_name;
         //local co = $.convo_options(group.connection, group.view_index);
         local co_channel = [
             {cyclic: false, crop: -2},  // one plane
@@ -135,7 +135,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         };
         $.kernel_convolve(kernel, [co_channel, co_time],
                           datapath_format='/traces/group/' + std.toString(group_index) + "/KernelConvolve/" + name,
-                          tag="decon", extra_name=group.name+extra_name),
+                          tag="decon", extra_name='_'+group.name+extra_name),
 
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.
     tpc_group_fanin(nodes, extra_name="")::
@@ -197,16 +197,15 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local ngroups = std.length(tpc.view_groups);
         pg.pnode({
             type: 'SPNGTorchSetUnpacker',
-            name: $.this_name(extra_name, "groups"),
+            name: $.this_name(extra_name, "_groups"),
             data: {
                 selections: [{datapath:datapath_pattern % group} for group in wc.iota(ngroups) ],
             } + control
         }, nin=1, nout=ngroups),
 
 
-    /// A 1->3 subgraph with frame input and 3 per-view decon output.
+    /// A 1->3 subgraph with TDM frame tensor set input and 3 per-view decon output.
     frame_decon(extra_name=""):: pg.shuntlines([
-        $.frame_to_tdm(extra_name=extra_name),
         $.tpc_group_unpacker(extra_name=extra_name),
         $.tpc_group_decon_views(extra_name=extra_name)]),
 
@@ -216,8 +215,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// ("wiener" filter) and dnnroi_dense_Views ("dnnroi" filter).  This omits
     /// "gauss", see fanout_for_inference().  The dnnroi_views list which views
     /// provide dnnroi fodder.
-    fanout_for_training(crossed_views=[1,1,0], extra_name=extra_name)::
-        fans.fanout_select($.this_name(extra_name, "dnnroi_training"),
+    fanout_for_dnnroi_training(crossed_views=[1,1,0], extra_name=extra_name)::
+        fans.fanout_select($.this_name(extra_name, "_dnnroi_training"),
                            std.length(crossed_views), targets_list=[
                                if is_crossed == 1
                                then ["wiener", "dense"]
@@ -226,8 +225,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
 
     // Like fanout_for_training but include gauss to connect with apply_roi_views.
-    fanout_for_inference(crossed_views=[1,1,0], extra_name=extra_name)::
-        fans.fanout_select($.this_name(extra_name, "dnnroi_training"),
+    fanout_for_dnnroi_inference(crossed_views=[1,1,0], extra_name=extra_name)::
+        fans.fanout_select($.this_name(extra_name, "_dnnroi_inference"),
                            std.length(crossed_views), targets_list=[
                                if is_crossed == 1
                                then ["wiener", "gauss", "dense"]
@@ -280,7 +279,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     tight_roi(rebin=4, views=[0,1,2], extra_name="")::
         pg.shuntlines([
             $.time_filter_views("wiener", views=views, extra_name=extra_name),
-            $.downsample_views(rebin, views=views, extra_name=extra_name),
+            $.downsample_views(rebin, views=views, extra_name='_tight'+extra_name),
             $.cross_threshold_views(extra_name=extra_name)]),
 
 
@@ -302,7 +301,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     dnnroi_dense_views(scale=1.0/4000, views=[0,1], rebin=4, extra_name="")::
         pg.shuntlines([
             $.time_filter_views("dnnroi", views=views, extra_name=extra_name),
-            $.downsample_views(rebin, views=views, extra_name=extra_name),
+            $.downsample_views(rebin, views=views, extra_name='_dense'+extra_name),
             $.scale_views(scale, views, extra_name="_dnnroi_dense"+extra_name),
         ]),
 
@@ -377,14 +376,17 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// - mp_sink :: an N-port sink of cellviews tensors (with feature dimension)
     /// - dense_sink :: an N-port sink of "dense' tensors (with no feature dimension)
     /// - source :: an N-port source of dense added to the feature dimension
+    ///
+    /// Note, this puts the dense as the first feature prior to the MPs.
+    /// The order of the MPs depends on where they come from, eg CellViews.
     dnnroi_stack_features(views=[0,1], extra_name=""):: {
         local features = $.transform_views("unsqueeze", dims=[1], views=views, extra_name=extra_name),
         local stacks = $.reduce_views_list("cat", dim=-3, views=views, extra_name=extra_name),
         dense_sink: features,
         source: pg.intern(outnodes=stacks, edges=[
-            pg.edge(features, stacks[vi.index], vi.index, 1)
+            pg.edge(features, stacks[vi.index], vi.index, 0)
             for vi in wc.enumerate(views)]),
-        mp_sink: pg.intern(iports=[s.iports[0] for s in stacks]),
+        mp_sink: pg.intern(iports=[s.iports[1] for s in stacks]),
     },        
 
     // Connect source mp and dense to the dnnroi stack operation.  Return pnode
@@ -396,18 +398,261 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         pg.intern(centernodes=[pg.shuntline(mp, sf.mp_sink), pg.shuntline(dense, sf.dense_sink)],
                   outnodes=[sf.source]),
 
+    /// [1]tensor set -> tensor[2].
+    /// Input is TDM frame tensor set.  Output is the 3-feature tensors for input to dnnroi training.
+    ///
+    dnnroi_training_preface(crossed_views = [1,1,0], rebin=4, extra_name="")::
+        local sg1 = $.frame_decon(extra_name=extra_name);
+
+        local decon_fan = $.fanout_for_dnnroi_training(crossed_views,extra_name=extra_name);
+        local sg1_connection = pg.shuntline(sg1, decon_fan.sink);
+
+        // [3]tensor -> tensor[3]
+        local sg2 = $.tight_roi(rebin=rebin, extra_name=extra_name);
+
+        local dnnroi_views = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
+
+        // [3]tensor -> tensor[2]
+        local sg3 = $.cellviews_tensors(out_views=dnnroi_views, chunk_size=0, extra_name=extra_name);
+
+        // [3]tensor -> tensor[2] combo of two above
+        local sg23 = pg.shuntline(sg2, sg3);
+        local sg23_connection = pg.shuntline(decon_fan.targets.wiener, sg23);
+
+        // [2]tensor -> tensor[2]
+        local sg4 = $.dnnroi_dense_views(views=dnnroi_views, rebin=rebin, extra_name=extra_name);
+        local sg4_connection = pg.shuntline(decon_fan.targets.dense, sg4);
+
+        // mp_sink:[3]tensor + dense_sink:[2]tensor(decon) -> source:tensor[2]
+        local sg5 = $.connect_dnnroi_stack(sg3, sg4, views=dnnroi_views, extra_name=extra_name);
+
+        pg.intern(innodes=[sg1], outnodes=[sg5],
+                  centernodes=[sg1_connection, sg23_connection, sg4_connection]),
+
 
     /// An Nview->Nview applying the "gauss" filter and rebinning.
-    gauss_dense_views(views=[0,1,2], rebin=4, extra_name="")::
-        pg.shuntlines([
+    ///
+    /// Note, unlike wiener and dnnroi, we do not rebin by default.  With no
+    /// rebin, ROIs must be unrebinned prior to being applied.
+    gauss_dense_views(views=[0,1,2], rebin=1, extra_name="")::
+        if rebin == 1 
+        then $.time_filter_views("gauss", views=views, extra_name=extra_name)
+        else pg.shuntlines([
             $.time_filter_views("gauss", views=views, extra_name=extra_name),
             $.downsample_views(rebin, views=views, extra_name=extra_name)]),
 
-    /// Return object with pseudo sinks/sources:
-    /// - roi_sink :: An Nview port sink to connect to a source of ROIs
-    /// - dense_sink :: An Nview port sink to connect to a source of dense (eg "gauss")
-    /// - source :: An Nview port source of signals after ROIs are applied to dense.
-    //apply_roi_views(views=[0,1,2], extra_name="")::
+    // 
+    dnnroi_inference_preface(crossed_views = [1,1,0], rebin=4, extra_name="")::
+        local sg1 = $.frame_decon(extra_name=extra_name);
+
+        // Give .sink and .targets.{gauss, wiener, dense}
+        local decon_fan = $.fanout_for_dnnroi_inference(crossed_views,extra_name=extra_name);
+        local sg1_cap = pg.shuntline(sg1, decon_fan.sink);
+
+        // Must extract any rois NOT crossed so that we can expose them to caller.
+        local roi_fan = fans.fanout_select($.this_name(extra_name, "_initrois"),
+                                           std.length(crossed_views), targets_list=[
+                                               if is_crossed == 1
+                                               then ["shunt"]
+                                               else ["shunt", "extract"]
+                                               for is_crossed in crossed_views]);
+
+        // Initial ROI block
+        local sg2_block = pg.shuntlines([decon_fan.targets.wiener,
+                                         $.tight_roi(extra_name=extra_name),
+                                         roi_fan.sink]);
+
+
+        local dnnroi_views = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
+
+        // [3]tensor -> tensor[2]
+        local sg3 = $.cellviews_tensors(out_views=dnnroi_views, chunk_size=0, extra_name=extra_name);
+        local sg3_feed = pg.shuntline(roi_fan.targets.shunt, sg3);
+
+        // [2]tensor -> tensor[2]
+        local sg4 = $.dnnroi_dense_views(views=dnnroi_views, rebin=rebin, extra_name=extra_name);
+        local sg4_feed = pg.shuntline(decon_fan.targets.dense, sg4);
+
+        // mp_sink:[3]tensor + dense_sink:[2]tensor(decon) -> source:tensor[2]
+        local sg5 = $.connect_dnnroi_stack(sg3, sg4, views=dnnroi_views, extra_name=extra_name);
+
+        local sg6 = pg.shuntline(decon_fan.targets.gauss,
+                                 $.gauss_dense_views(views=wc.iota(std.length(crossed_views)),
+                                                     rebin=1, extra_name=extra_name));
+        {
+            decon_sink: pg.intern(innodes=[sg1],
+                                  centernodes=[
+                                      sg1_cap,
+                                      sg2_block,
+                                      sg3_feed,
+                                      sg4_feed,
+                                      ]),
+            fodder: sg5,
+            gauss: sg6,
+            rois: roi_fan.targets.extract
+        },
+
+    dnnroi_model(modelfile="unet-l23-cosmic500-e50.ts"):: {
+        type:'SPNGTensorForwardTS',
+        name:modelfile,     // explicitly do not use any context name to enable sharing.
+        data: {
+            ts_filename:modelfile,
+        } + control
+    },
+
+    /// A single view dnnroi forward node.
+    ///
+    /// Note: OG DNNROI requires some seemingly arbitrary pre/post transforms.
+    /// Future DNNs or if/when retraining DNNROI it would be nice to not require
+    /// them.
+    ///
+    /// FIXME: There is likely a mismatch in the feature order between what is
+    /// provided and what OG DNNROI expects.
+    dnnroi_forward_view(model, view, extra_name="")::
+        local prefix = "v"+std.toString(view)+"_dnnroi";
+        local pre = pg.pnode({
+            type: 'SPNGTransform',
+            name: $.this_name(extra_name, prefix + "_pre"),
+            data: {
+                operations: [
+                    { operation: "transpose", dims: [-2,-1] }
+                ]
+            } + control
+        }, nin=1, nout=1);
+
+        local fwd = pg.pnode({
+            type: 'SPNGTensorForward',
+            name: $.this_name(extra_name, prefix+"_fwd"),
+            data: {
+                forward: wc.tn(model),
+                nbatch: 1,
+            } + control
+        }, nin=1, nout=1, uses=[model]);
+
+        local post = pg.pnode({
+            type: 'SPNGTransform',
+            name: $.this_name(extra_name, prefix+"_post"),
+            data: {
+                operations: [
+                    /// DNNROI traditionally works in (ntick,nchan) for last two
+                    /// dims while WCT works in (nchan,ntick) so we must bookend
+                    /// the forward with a transpose.
+                    { operation: "transpose", dims: [-2,-1] },
+                    // in principle could threshold here but see comments, next.
+
+                    // We have to force nbatch=1 on TensorForward because DNNROI
+                    // expects a batch dim.  But we don't actually want it on
+                    // output so remove it now.  Also, DNNROI keeps the "feature
+                    // dimension".
+                    { operation: "squeeze", dims: [1, 0] },
+                ],
+            } + control
+        }, nin=1, nout=1);
+
+        // Convert DNNROI output to Boolean mask.
+        local thresh_name = $.this_name(extra_name, prefix+'_roi');
+        local thresh = pg.pnode({
+            type: 'SPNGThreshold',
+            name: thresh_name,
+            data: {
+                nominal: 0.5,   // FIXME: a study is needed to best set this
+                tag: "roi",
+                datapath_format: "/traces/Threshold/" + thresh_name,
+            } + control
+        }, nin=1, nout=1);
+
+        pg.pipeline([pre, fwd, post, thresh]),
+
+    /// Ncrossed->Ncrossed Make DNNROI-forward subgraph.  Input is initial
+    /// dnnroi "fodder" tensors with three features.  Output are DNNROI ROI
+    /// tensors.
+    dnnroi_forward_views(modelfile="unet-l23-cosmic500-e50.ts", crossed_views=[1,1,0], extra_name="")::
+        local model = $.dnnroi_model(modelfile);
+        pg.crossline([$.dnnroi_forward_view(model, view=vi.index, extra_name=extra_name)
+                      for vi in wc.enumerate(crossed_views)
+                      if vi.value == 1]),
+
+    /// 3->3 do interval space unrebin by given factor.
+    unrebin_views(rebin=4, views=[0,1,2], tag="", extra_name="")::
+        pg.crossline([
+            pg.pnode({
+                local this_name = $.this_name(extra_name, 'v'+std.toString(view)),
+                type: "SPNGRebinner",
+                name: this_name,
+                data: {
+                    norm: "maximum",
+                    factor: -rebin,     // FIXME: must match upstream resampler.
+                    tag: tag,
+                    datapath_format: "/traces/Rebinner/" + this_name+'_unbin'
+                } + control
+            }, nin=1, nout=1) for view in views]),
+            
+
+
+    /// Return pnode for single view that applies ROIs.  It takes in a dense (eg
+    /// gauss) on iport=0 and roi on iport=1 and outputs signal on its only
+    /// oport=0.
+    applyroi_view(view, extra_name="")::
+        local name = $.this_name(extra_name, "v"+std.toString(view)+"_applyroi");
+        local mul = pg.pnode({
+            type: 'SPNGReduce',
+            name: name,
+            data: {
+                operation: 'mul',
+            } + control
+        }, nin=2, nout=1);
+        local rbl = pg.pnode({
+            type: 'SPNGRebaseliner',
+            name: name,
+            data: {
+                tag: "signal",
+                datapath_format: "/traces/Rebaseliner/" + name
+            } + control
+        }, nin=1, nout=1);
+        pg.pipeline([mul, rbl]),
+
+    /// Return object with .roi_sink, .dense_sink and .signal_source with apply
+    /// ROIs in the middle.  All inputs/outputs are size that of views.
+    applyroi_views(views=[0,1,2], extra_name="")::
+        local perview = [$.applyroi_view(view, extra_name) for view in views];
+        {
+            dense_sink: pg.intern(iports=[pv.iports[0] for pv in perview]),
+            roi_sink: pg.intern(iports=[pv.iports[1] for pv in perview]),
+            signal_source: pg.intern(oports=perview),
+        },
+
+
+    /// [3]tensor -> tensor[3]
+    ///
+    /// Input decon, output signals using cell basis initial rois and DNNROI
+    /// inference for crossed views.  Intermediate waveforms are rebinned.
+    dnnroi_inference(modelfile="unet-l23-cosmic500-e50", crossed_views=[1,1,0], rebin=4, extra_name="")::
+        local all_views = wc.iota(std.length(crossed_views));
+        
+        // For inference, sg1_infer is just the beginning.  Must feed .fodder to
+        // dnnroi forward and then that plus .rois plus .gauss into apply_roi.
+        local sg1_infer = $.dnnroi_inference_preface(rebin=rebin, extra_name="_INFER");
+
+        local dnnroifwd = $.dnnroi_forward_views(modelfile=modelfile, 
+                                                  crossed_views=crossed_views, extra_name="_FORWARD");
+        local sg1_dnnroi = pg.shuntline(sg1_infer.fodder, dnnroifwd);
+
+        // Merge all sources of ROIs.
+        ///
+        // BIG FAT WARNING: this should be done with knowledge of crossed_views to
+        // get the port ordering correct.  As is, it assumes dnnroi rois all come
+        // before the views that have only initial rois.
+        local fat_rois = pg.crossline([sg1_dnnroi, sg1_infer.rois]);
+        local unrebin = $.unrebin_views(rebin=rebin, views=all_views, extra_name="_ROIS");
+        local rois = pg.shuntline(fat_rois, unrebin);
+
+        /// Gives .roi_sink, .dense_sink and .signal_source
+        local applyrois = $.applyroi_views(views=all_views, extra_name="_APPLYROIS");
+        local rois_cap = pg.shuntline(rois, applyrois.roi_sink);
+        local dense_cap = pg.shuntline(sg1_infer.gauss, applyrois.dense_sink);
+        pg.intern(innodes=[sg1_infer.decon_sink],
+                  outnodes=[applyrois.signal_source],
+                  centernodes=[rois_cap, dense_cap]),
 
 }
 

@@ -135,6 +135,13 @@ namespace WireCell::SPNG {
         auto nbatch = U.size(0);
         auto ntick  = U.size(2);
 
+        // Fixme: this could be done in configure()
+        // This controls the order of feature dimension.
+        std::map<std::string, size_t> cell_view_index;
+        for (size_t ind=0; ind<m_config.cell_views.size(); ++ind) {
+            cell_view_index[m_config.cell_views[ind]] = ind;
+        }
+
         int64_t chunk_size = m_config.chunk_size;
         if (chunk_size <= 0) {
             chunk_size = ntick;
@@ -211,8 +218,8 @@ namespace WireCell::SPNG {
                 // Only compute requested output views.
                 for (size_t view_index=0; view_index<m_config.out_views.size(); ++view_index) {
                     int view = m_config.out_views[view_index];
-                    scatter_chunk(out[view_index], MP3, idx[view], 0);
-                    scatter_chunk(out[view_index], MP2[view_index], idx[view], 1);
+                    scatter_chunk(out[view_index], MP2[view_index], idx[view], cell_view_index["mp2"]);
+                    scatter_chunk(out[view_index], MP3, idx[view], cell_view_index["mp3"]);
                 }                    
                 // scatter_chunk(outU, MP3,  idxU, 0);
                 // scatter_chunk(outU, MP2u, idxU, 1);

@@ -1,7 +1,7 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
-function(control)
+function(control={})
 {
     fanin(name, multiplicity=2, type='Tensor'):: pg.pnode({
         type: "SPNGFanin"+type+'s',
