@@ -6,7 +6,199 @@
 
 The most popular way to construct WCT jobs is via its support for "data flow
 programming" (DFP).  The "programming" here means constructing a graph with
-vertices or /nodes/ representing operations on data that is transferred on /edges/.
+vertices or /nodes/ representing operations on data objects that are transferred
+between nodes on /edges/.
+
+This document describes the concepts of WCT DFP graphs, how to construct them
+via configuration, how that configuration is used by WCT to construct, configure
+and connect C++ components and the special code required to turn a WCT component
+into a DFP graph node.
+
+* Concepts of WCT DFP graphs
+
+** Directed acyclic graph.
+
+The WCT DFP graph is a *directed acyclic graph* (DAG).  This simply means that
+data flows in one direction along any given edge and there is no path in the
+graph that cycles back to any given node.  A node in a DAG thus has two sets of
+edges: "out edges" carry data produced by a node and "in edges" carry data
+consumed by a node.
+
+** Port graphs
+
+The WCT DFP graph is a *port graph* (PG or pgraph).  In a port graph, an edge connects to a
+node via an identified "port".  Given WCT DFP graph is also a DAG, there are two
+sets of ports: "in ports" (or /iports/) and "out ports" (/oports/).  In side its
+set, a port is identified by an /index/ number.
+
+** Graph rules
+
+WCT DFP graphs have rules that govern connections:
+
+1. Nodes only connect to (hold) ports.
+
+2. Exactly one edge may connect to any two ports.
+
+3. An out port of one node connects to an in port of a different ndoe (DAG).
+
+4. An edge and its ports pass a sequence of data units of a well-defined data type (=IData=).
+
+** Complete and incomplete graphs
+
+In WCT DFP graphs, the number of input and output ports in any given node is
+predetermined when that node is created.  If a graph has all ports connected we
+call it *complete* and otherwise we call it an *incomplete subgrap* (or often, less
+properly, just "subgraph").
+
+
+** Atomic and aggregate nodes
+
+Port graphs have a powerful scaling feature that assists in their construction.
+An incomplete subgraph can be interpreted as a node by collected all
+disconnected iports and oports across its nodes.  This allows the aggreagte
+subgraph-as-node to be used for further construction in the same way that a
+single, atomic node may be.  We give the name *pnode* to mean either an atomic
+node or an aggregate, incomplete subgraph.  And, indeed, a complete WCT DFP
+graph is simply a single pnode with no ports.
+
+** Graph representation 
+
+A WCT DFP graph is represented in terms of the following objects.
+
+*** Inode
+
+An *inode* represents an instance of a WCT C++ component class (=IComponent=
+interface base class).  The component implementation is most often a DFP node
+type (=INode=) and a configurable type (=IConfigurable=) but in some cases a
+component is only one of these types or neither.  An *inode* object is defined by
+these attributes:
+
+- type :: A string identifying the WCT =type name= (see description of =WIRECELL_FACTORY=).
+- *name* :: A string unique among all instance of a common *type*.  Can be empty if the instance is a singleton of the type.
+- data :: An object providing configuration to the instance.  Can be empty or omitted if the type is not configurable or its default configuration is sufficient.
+- uses :: A set of other inodes or pnodes that this inode refers to by name in a data attribute.  (See section [[Uses]]).
+
+*** Pnode
+
+A *pnode* represents either an atomic *inode* or an aggregate of other pnodes.  A
+*pnode* object is defined by these attributes:
+
+- type :: The literal string =Pnode=.
+- name :: A string formed from *inode.type* and *inode.name* for atomic pnodes and may otherwise be omitted.
+- iports :: An ordered list of input ports.
+- oports :: An ordered list of output ports.
+- edges :: A set of edge representations.
+- uses :: A set of other pnodes that the pnode aggregates.  (See section [[Uses]]).
+
+*** Port
+
+A *port* object is represented with these two attributes
+
+- node :: The =pnode.name= of the node that holds to port.
+- port :: The index number of the port in its set.
+
+While the port "knows" its node, there is no representation stating if the port
+is in the input or the output set.  No "loose" port objects are kept and a port
+set context is provided by an edge.
+
+*** Edge
+
+An *edge* represents an ordered connection from an output port to an input port.
+It has these attributes.
+
+- tail :: an output port object
+- head :: an input port object
+
+Think of an edge as an arrow pointing from its arrow tail to its arrow head.
+
+*** Uses
+
+Both *inode* and *pnode* has a *uses* set.  This allows for either to hold objects
+that are referenced by name in the *data* object.  Holding referenced objects is
+required to order the final set of configuration objects by their dependencies.
+See the section [[C++ configuration]].
+
+*** Graph
+
+A WCT DFP graph is represented by a flat list of *inode* objects in order of their
+"uses" dependency.  The last inode in the list configures a *graph execution
+engine* component (Pgraph or TbbFlow).  All such engines are configured
+identically with a list of all the edges of the graph.
+
+
+* Constructing graphs with Jsonnet configuration
+
+This section will walk through how to construct a WCT DFP graph.
+
+** Jsonnet
+
+Ultimately, a final WCT configuration can be expressed in JSON.  JSON is purely
+a data structure language.  It lacks any construction features whatsoever.  We
+use the Jsonnet language to perform data construction.  Jsonnet can be
+summarized as JSON plus extras.  The extras include modules, functions,
+comments, list and object comprehensions and a JSON-like but friendlier syntax.
+Jsonnet is a purely functional language in that variables can only be
+initialized to a value and never modified.
+
+** WCT Jsonnet support
+
+WCT provides some core Jsonnet files (Jsonnet "libraries" aka "modules") for
+using Jsonnet to construct configuration.
+
+- =wirecell.jsonnet= :: Wire-Cell system of units and basic utility functions.
+- =pgraph.jsonnet= :: A full suite of functions to build directed acyclic port graphs.
+  
+In addition, WCT provides Jsonnet files containing higher level abstractions to
+the construction process.  Before introducing them, we will show how to use the
+core function, focusing primarily on =pgraph.jsonnet=.
+
+** Building an inode
+
+The most atomic unit is an *inode* object that will cause a C++ instance to be
+constructed and potentially configured.  We will create a =Drifter= which is the
+component in WCT simulation responsible for drifting energy depositions
+("depos") in the bulk of the detector.  It is most direct created simply by
+typing out the structure as Jsonnet:
+
+#+begin_src jsonnet
+  {
+      type: "Drifter",
+      name: "",
+      data: { /* ... */ }
+  }
+#+end_src
+
+To know the *type* we must check the first argument to the =WIRECELL_FACTORY= C++
+macro in the component source file.  And to know what may or must be placed in
+*data* we must, in general, examine the C++ implementation source.  See section
+[[C++ configuration]] for details.  Here, we give the object an empty string for its
+name as one drifter can service an entire detector.
+
+To help future configuration authors, a friendly developer can provide a Jsonnet
+function that helps to build the structure.
+
+#+include: drifter.jsonnet src jsonnet
+
+#+RESULTS:
+#+begin_src jsonq
+#+end_src
+
+For brevity, this omits some required parameters.  A user may then make an
+instance of a drifter configuration object:
+
+#+begin_src jsonnet :results value
+  local drift = import "drifter.jsonnet";
+  drift.drifter(); // accept defaults
+#+end_src
+
+
+* C++ configuration
+
+- tbd: loading, construction, configuration dispatch
+- tbd: ad-hoc JSON object vs Hana struct
+- tbd: issues with C++ side of things (ad-hoc vs hana, discovery of *type* and contents for *data*)
+
+* C++ DFP graph node components 
 
 Each node has a /component type/ (mapped to a C++ class, first argument to the
 ~WIRECELL_FACTORY()~ CPP macro call) and an instance name and a set number of
