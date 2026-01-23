@@ -7,37 +7,52 @@ local frame_js = import "spng/frame.jsonnet";
 local fans_js = import "spng/fans.jsonnet";
 
 
-// Make a subgraphs factory object.
-//
-// @param tpc An detconf object describing the TPC context
-// @param control A control object with verbosity, device, etc.
-// @param pg A pgraph-like module.
-// @param context_name A name to combine with the tpc name for all pnodes made.
-//
-// These general categories of configuration objects are returned:
-//
-// - a "service" component
-// - an atomic pnode
-// - a per-view pipeline
-// - an all-view "crossline" with 3 inputs and/or 3 outputs
-// - a structure of named "pseudo sinks and sources".
-//
-// A pseudo sink/source is a pnode that the caller should connect.  It is
-// "pseudo" as it only appears to be a sink or a source to the caller while in
-// fact the sinks and/or the sources hold edges connecting the sinks and
-// sources.  This is done as a way to collect ports into separate, meaningful
-// sets and facilitate the user making further connections.
+/**
+ * Make a subgraphs factory object.
+ * 
+ * These general categories of configuration objects are returned:
+ *
+ * - a "service" component
+ * - an atomic pnode
+ * - a per-view pipeline
+ * - an all-view "crossline" with 3 inputs and/or 3 outputs
+ * - a structure of named "pseudo sinks and sources".
+ *
+ * A pseudo sink/source is a pnode that the caller should connect.  It is
+ * "pseudo" as it only appears to be a sink or a source to the caller while in
+ * fact the sinks and/or the sources hold edges connecting the sinks and
+ * sources.  This is done as a way to collect ports into separate, meaningful
+ * sets and facilitate the user making further connections.
+ * 
+ * @name subgraphs
+ * @param tpc An detconf object describing the TPC context
+ * @param control A control object with verbosity, device, etc.
+ * @param pg A pgraph-like module.
+ * @param context_name A name to combine with the tpc name for all pnodes made.
+ */
 function(tpc, control={}, pg=real_pg, context_name="") {
 
+    /// The subgraphs object is mostly independent from other Jsonnet's.  The
+    /// exceptions are here and they are made available to the caller.
     local fans = fans_js(control),
+    local frame = frame_js(control),
+    wc: wc,
+    pg: pg,
+    fans: fans,
+    frame: frame,
 
 
-    // A function to make a unique name in the context of a method.
+    /**
+     * A function to make a unique name in the context of a method.
+     *
+     * Produce instance names in a regular way.
+     *
+     * @name this_name
+     * @param extra_name The extra name passed to most functions to qualify a caller's context.
+     * @param meth_name Qualify the context of a method in this object.
+     * @return A name based on arguments and tpc.name.
+     */
     this_name(extra_name, meth_name="") :: tpc.name+context_name+meth_name+extra_name,
-
-    //
-    //  Decon related
-    //
 
 
     /// A kernel providing a Fourier-space filter component (not a pnode).
@@ -183,9 +198,9 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
 
 
-    /// Pnode to convert frame to TDM tensor set.
-    frame_to_tdm(extra_name=""):: frame_js(control).to_tdm(tpc, extra_name=extra_name),
-
+    /// Pnode to convert between frame and TDM tensor set.
+    frame_to_tdm(extra_name=""):: frame.to_tdm(tpc, extra_name=extra_name),
+    tdm_to_frame(extra_name=""):: frame.from_tdm(tpc, extra_name=extra_name),
 
     /// An input tensor set to N-tensor outputs specifically for tpc groups.
     /// Map a tensors in a set by an iteration of a datapath pattern over a set
@@ -325,6 +340,15 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         }, nin=1, nout=1, uses=[tpc.anode]),
     
         
+    tensor_packer(multiplicity=3, extra_name="")::
+        pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: $.this_name(extra_name, '_pack' + std.toString(multiplicity)),
+            data: {
+                multiplicity: multiplicity
+            } + control
+        }, nin=multiplicity, nout=1),
+
 
     /// A subgraph with three input ports and N output ports.  Input ports
     /// accept, in order, U, V and W ITorchTensor.  Output ports provide
@@ -656,8 +680,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
 
     // Return object that keeps source's iports and caps off its oports by
-    // attaching a file sink.
-    attach_file_sink_views(source, filename, extra_name="", prefix="")::
+    // attaching a file sink saving in WCT "tensor file" format..
+    attach_tensor_file_sink_views(source, filename, extra_name="", prefix="")::
         local mult = std.length(source.oports);
         local this_name = tpc.name + extra_name;
         local pack = pg.pnode({
@@ -692,12 +716,33 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
     // Like attach_file_sink_views() but source's oports are fanned out with one
     // fan going to a sink and the other exposing the oports.
-    attach_file_tap_views(source, filename, extra_name="", prefix="")::
+    attach_tensor_file_tap_views(source, filename, extra_name="", prefix="")::
         local fos = fans.fanout_shuntline(std.length(source.oports), nout=2, extra_name='_tap'+extra_name);
-        local sink = $.attach_file_sink_views(fos.sources[1], filename, extra_name, prefix);
+        local sink = $.attach_tensor_file_sink_views(fos.sources[1], filename, extra_name, prefix);
         local head = pg.shuntline(source, fos.sink);
         pg.intern(innodes=[head], outnodes=[fos.sources[0]], centernodes=[source, sink, head]),
 
+
+    /**
+     * Wrap a graph in a bypass.
+     *
+     * The input frame tensor set is sent into body and bypasses the body graph.
+     * The output tensor set from the body is merged into the bypassed tensor set and provides the final output.
+     *
+     * @param body A subgraph that is bookended with a frame tensor set sink and source.
+     * @return A subgraph with same bookends.
+     * 
+     */
+    wrap_bypass(body, extra_name="")::
+        local name = $.this_name(extra_name, '_bypass');
+        local bypass = frame.bypass(name);
+        pg.intern(iports=[bypass.iports[0]],
+                  oports=[bypass.oports[1]],
+                  centernodes=[body, bypass],
+                  edges=[
+                      pg.edge(bypass, body),
+                      pg.edge(body, bypass, 0, 1),
+                  ]),
 }
 
 

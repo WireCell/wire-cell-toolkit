@@ -26,6 +26,21 @@ local pg = import "pgraph.jsonnet";
     // Frames have several source/sink nodes to choose from.  Each take a
     // filename.  Sinks take a "digitize" argument.
 
+    frame_sink_by_extension: {
+        npz:: $.frame_array_sink,
+        tgz:: $.frame_array_sink,
+        tar:: $.frame_array_sink,
+        zip:: $.frame_array_sink,
+        hdf:: $.frame_hdf_sink,
+        h5:: $.frame_hdf_sink,
+        hdf5:: $.frame_hdf_sink,
+    },
+
+    /// Return a sync based on the file name extension.
+    frame_array_any_sink(filename, digitize=false)::
+        local parts = std.split(filename, ".");
+        local ext = parts[std.length(parts)-1];
+        $.frame_sink_by_extension[ext](filename, digitize),
 
     // A "frame tensor file" is a "tensor file" in WCT frame tensor data model
     // (similar but different than SPNG tensor data model).  This serializes

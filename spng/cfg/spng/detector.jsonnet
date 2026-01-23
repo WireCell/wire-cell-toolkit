@@ -1,4 +1,34 @@
 /// This abstracts how to construct a detector.
+
+/*
+
+Here is Gemini's "artistic" take how this Jsonnet breaks a multiplicative
+complexity to an additive one.
+
+
+CURRENT STATE: Hand-crafted Matrix          TARGET STATE: Abstracted Schema
+    Complexity: O(Ndet * Njob)                  Complexity: O(Ndet + Njob)
+
+    DETECTORS (Ndet)                            DETECTORS (Ndet)
+      D1  D2  D3  ... Dn                          D1  D2  D3  ... Dn
+    +---+---+---+---+---+                       +---+---+---+---+---+
+J1  | X | X | X | X | X |                       |   |   |   |   |   |
+    +---+---+---+---+---+                       v   v   v   v   v   v
+J2  | X | X | X | X | X |      -------->              detconf
+    +---+---+---+---+---+       EVOLVE           +-------+-------+
+J3  | X | X | X | X | X |                        |       |       |
+    +---+---+---+---+---+                   +----v----+--v--+----v----+
+... | X | X | X | X | X |                   |  f(J1)  | f(J2) | f(J3) |  <-- Job
+    +---+---+---+---+---+                   +---------+-------+-------+      Funcs
+Jn  | X | X | X | X | X |                        JOBS (Njob)
+    +---+---+---+---+---+
+
+
+See subgraphs.jsonnet for one implementation of the "Njob vector".k
+
+*/
+
+
 local wc = import "wirecell.jsonnet";
 local known_detectors = import "detectors.jsonnet";
 

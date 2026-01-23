@@ -4,13 +4,14 @@
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 
+local io = import "spng/io.jsonnet";
 local detconf = import "spng/detconf.jsonnet";
 local detector = import "spng/detector.jsonnet";
 local control_js = import "spng/control.jsonnet";
 
 local sg_js = import "spng/subgraphs.jsonnet";
 
-function(detname='pdhd', tpcids=[], engine='Pgrapher', device='cpu', verbosity=0)
+function(input, output="test-subgraphs.npz", detname='pdhd', tpcids=[], engine='Pgrapher', device='cpu', verbosity=0)
     
     local controls = control_js(device=device, verbosity=wc.intify(verbosity));
     local det = detector.subset(detconf[detname], tpcids);
@@ -23,18 +24,21 @@ function(detname='pdhd', tpcids=[], engine='Pgrapher', device='cpu', verbosity=0
 
     local dnnroi_model_file = "unet-l23-cosmic500-e50.ts";
 
-    local sg0 = sg.frame_to_tdm(extra_name="_TOTDM");
+    local source = io.frame_array_source(input);
+    local sink = io.frame_array_any_sink(output);
 
-    // For a training job we just need sg0+sg1_train
-    // local sg1_train = sg.dnnroi_training_preface(rebin=rebin, extra_name="_TRAIN");
+    local head = sg.frame_to_tdm(extra_name="_TOTDM");
+    local tail = sg.tdm_to_frame(extra_name="_FROMTDM");
 
-    local sg1_infer = sg.dnnroi_inference(modelfile=dnnroi_model_file,
+    local infer = sg.dnnroi_inference(modelfile=dnnroi_model_file,
                                           rebin=rebin, crossed_views=crossed_views);
+    local pack = sg.tensor_packer(extra_name="_signals");
+    local guts = pg.shuntlines([infer, pack]);
+    local body = sg.wrap_bypass(guts);
 
-    local sg1_sink = sg.attach_file_sink_views(sg1_infer, "test-subgraphs.npz",
-                                               extra_name="_SINK", prefix="signals");
 
-    local graph = pg.pipeline([sg0, sg1_sink]);
+    local graph = pg.pipeline([source, head, body, tail, sink]);
+
     pg.main(graph, engine, plugins=["WireCellSpng"])
 
 
