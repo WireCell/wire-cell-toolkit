@@ -1,0 +1,31 @@
+{
+   "edges": [ ],
+   "iports": [
+      {
+         "node": "Drifter",
+         "port": 0
+      }
+   ],
+   "name": "",
+   "oports": [
+      {
+         "node": "Drifter",
+         "port": 0
+      }
+   ],
+   "type": "Pnode",
+   "uses": [
+      {
+         "_pnode": {
+            "nin": 1,
+            "nout": 1
+         },
+         "data": {
+            "drift_speed": 0.0016000000000000001,
+            "lifetime": 8000000
+         },
+         "name": "",
+         "type": "Drifter"
+      }
+   ]
+}
