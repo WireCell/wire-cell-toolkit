@@ -9,5 +9,9 @@ local drifter = pg.pnode({
 local sink = pg.pnode({
     type: 'DepoFileSink', name:"",
 }, nin=1, nout=0);
-local graph = pg.intern(innodes=[source], centernodes=[drifter], outnodes=[sink]);
+local graph = pg.intern(
+    innodes=[source], centernodes=[drifter], outnodes=[sink],
+    edges=[
+        pg.edge(source, drifter),
+        pg.edge(drifter, sink)]);
 pg.main(graph)
