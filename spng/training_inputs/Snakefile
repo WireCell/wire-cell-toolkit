@@ -1,3 +1,5 @@
+config.setdefault('nevents', '2')
+
 
 rule gen_cosmics:
     #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
@@ -12,7 +14,7 @@ rule gen_cosmics:
         setup dunesw v10_14_00d00 -q e26:prof
         set -euo pipefail  # Reenable Snakemake's strict mode
 
-        lar --no-timing --no-memcheck -n 1 -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
+        lar --no-timing --no-memcheck -n {config[nevents]} -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
         rm hist_{output}
         """
 
@@ -58,7 +60,7 @@ rule save_depos:
 
         export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
 
-        lar --no-timing --no-memcheck -n 1 -c {input.fcl} {input.inputfile} --no-output
+        lar --no-timing --no-memcheck -c {input.fcl} {input.inputfile} --no-output
         mv wct-depos.npz {output}
         """
 
@@ -76,14 +78,34 @@ rule splat_and_drift:
         """
 
 
-rule sigproc:
+rule osp_sigproc:
     input:
         "drifted-{name}-frame.npz",
     output:
-        "sigproc-{style}-{name}-0.h5",
+        "sigproc-osp-{name}-0.h5",
     shell:
         """
         wire-cell -l stdout  -L debug   \
         -A "input={input}" -A outname={wildcards.name} --ext-code nanodes=1 \
         wct-sim-framesource-sigproc.jsonnet
         """
+
+rule spng_sigproc:
+    input:
+        "drifted-{name}-frame.npz",
+    output:
+        "sigproc-spng-{name}.pt",
+    shell:
+        """
+        wire-cell -l stdout  -L debug   \
+        -A "input={input}" -A style=spng -A outname={wildcards.name} --ext-code nanodes=1 \
+        wct-sim-framesource-sigproc.jsonnet
+        """
+
+rule convert_spng_to_hdf5:
+    input:
+        "sigproc-spng-{name}.pt",
+    output:
+        "sigproc-spng-{name}.h5",
+    script:
+        "scripts/convert_to_h5.py"
