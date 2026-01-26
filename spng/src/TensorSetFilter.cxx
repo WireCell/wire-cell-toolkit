@@ -33,6 +33,7 @@ namespace WireCell::SPNG {
 
     void TensorSetFilter::configure(const WireCell::Configuration& config)
     {
+        log->debug("{}", config);
         WireCell::configure_bases<TensorSetFilter, ContextBase, Logger>(this, config);
     }
 

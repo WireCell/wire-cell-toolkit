@@ -336,7 +336,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 uvw_index: uvw_index,
                 out_views: out_views,
                 chunk_size: chunk_size,
-            },
+            } + control,
         }, nin=1, nout=1, uses=[tpc.anode]),
     
         
@@ -363,10 +363,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 multiplicity: 3
             } + control
         }, nin=3, nout=1);
-        local cellviews = $.cellviews_tensorset(tpc, out_views, chunk_size, extra_name=extra_name);
+        local cellviews = $.cellviews_tensorset(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
         local nout = std.length(out_views);
         local unpacker = pg.pnode({
-            type: 'SPNGTensorUnpacker',
+            type: 'SPNGTorchSetUnpacker',
             name: this_name,
             data: {
                 selections: [{index: ind} for ind in wc.iota(nout)],
@@ -383,17 +383,17 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             operation: operation,
             scalar: scalar,
             dims: dims,
-        },
+        } + control,
     }, nin=1, nout=1) for view in views]),
         
     /// Return list of pnode that apply a 2->1 reduction per view.
     reduce_views_list(operation, dim=0, views=[0,1,2], extra_name=""):: [pg.pnode({
-        type: 'SPNGTransform',
+        type: 'SPNGReduce',
         name: $.this_name(extra_name, 'v'+std.toString(view) + '_'+operation),
         data: {
             operation: operation,
             dim: dim,
-        },
+        } + control,
     }, nin=2, nout=1) for view in views],
 
     /// Return object with pseudo sinks/sources:

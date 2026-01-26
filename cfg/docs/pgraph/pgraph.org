@@ -388,6 +388,10 @@ local graph = pg.pipeline([source, fanpipe, sink]);
 
 
 
+** Finalizing the graph
+
+=pg.main()=
+
 * C++ configuration
 
 - tbd: loading, construction, configuration dispatch

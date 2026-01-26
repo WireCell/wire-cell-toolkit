@@ -2,6 +2,7 @@
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/CellBasis.h"
+#include "WireCellSpng/Util.h"
 
 #include "WireCellAux/WireTools.h"
 
@@ -82,6 +83,7 @@ namespace WireCell::SPNG {
 
             // Get wire indices in the cell basis.
             torch::Tensor wire_basis = CellBasis::cell_basis(iface);
+            log->debug("wire basis: face={} tensor={}", face_ident, to_string(wire_basis));
 
             // Build tensor indexed by wire indices to return channel indices.
             std::vector<torch::Tensor> chan_indices;
@@ -94,15 +96,17 @@ namespace WireCell::SPNG {
                 // Get mapping from wire index to channel index
                 torch::Tensor w2c = CellBasis::wire_channel_index(wires, chans);
                 chan_indices.push_back(w2c); // indexed by wire 
+                log->debug("w2c: face={} view={} tensor={}", face_ident, view, to_string(w2c));
             }
 
             // Convert wire indices to channel indices in cell basis.
             torch::Tensor channel_basis = CellBasis::index(wire_basis, chan_indices);
+            log->debug("chan basis: face={} tensor={}", face_ident, to_string(channel_basis));
             cell_channel_indices_by_face.push_back(channel_basis);
         }
 
         m_cell_channel_indices = torch::cat(cell_channel_indices_by_face, 0);
-
+        log->debug("cell channel indices: {}", to_string(m_cell_channel_indices));
     }
 
     WireCell::Configuration CellViews::default_configuration() const
