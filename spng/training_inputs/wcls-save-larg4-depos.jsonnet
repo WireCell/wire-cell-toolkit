@@ -25,7 +25,7 @@ local bagger = sim.make_bagger("bagger%d");
 
 // local output_file=std.extVar('outname');
 
-local sinks = g.pnode({
+local sink = g.pnode({
     name: "deposink",
     type: "DepoFileSink",
     data: {
@@ -42,7 +42,8 @@ local save = g.pnode({
 }, nin=1, nout=1);
 local dump = g.pnode({type: 'DumpDepos', name: 'dump_depos', data: {}}, nin=1, nout=0);
 
-local graph = g.pipeline([wcls_input.depos, save, dump], 'mygraph');
+// local graph = g.pipeline([wcls_input.depos, save, dump], 'mygraph');
+local graph = g.pipeline([wcls_input.depos, save, bagger, sink], 'mygraph');
 // g4 sim as input
 // local graph = g.intern(
 //     innodes=[wcls_input.depos], centernodes=[bagger], outnodes=[sinks],

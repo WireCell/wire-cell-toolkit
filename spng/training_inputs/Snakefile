@@ -1,5 +1,22 @@
 config.setdefault('nevents', '2')
 
+rule tracking:
+    output:
+        depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.npz',
+        meta='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.json',
+    params:
+        offset="--offset '0*m,0*m,0*m'"
+    shell: '''
+    wcpy gen detlinegen \
+    {params.offset} \
+    --detector=pdhd \
+    --plane={wildcards.plane} \
+    --angle-coords=wire-plane \
+    --theta_xz="{wildcards.txz}*deg" \
+    --theta_y="{wildcards.ty}*deg" \
+    --output_depos {output.depos} \
+    --output_meta {output.meta}
+    '''
 
 rule gen_cosmics:
     #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
@@ -28,7 +45,7 @@ rule g4:
         file="cosmics_{sample}_gen.root",
         fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
     output:
-        "cosmics_{sample}_g4.root"
+        temp("cosmics_{sample}_g4.root")
     shadow: "minimal"
     shell:
         """
@@ -68,7 +85,7 @@ rule splat_and_drift:
     input:
         "{name}_wct-depos.npz",
     output:
-        "splat-{name}-0.h5",
+        "splat-{name}.h5",
         "drifted-{name}-frame.npz"
     shell:
         """
@@ -94,7 +111,7 @@ rule spng_sigproc:
     input:
         "drifted-{name}-frame.npz",
     output:
-        "sigproc-spng-{name}.pt",
+        temp("sigproc-spng-{name}.npz"),
     shell:
         """
         wire-cell -l stdout  -L debug   \
@@ -104,8 +121,12 @@ rule spng_sigproc:
 
 rule convert_spng_to_hdf5:
     input:
-        "sigproc-spng-{name}.pt",
+        "sigproc-spng-{name}.npz",
     output:
         "sigproc-spng-{name}.h5",
+    params:
+        tags={
+            '*':'loose_lf'
+        }
     script:
         "scripts/convert_to_h5.py"

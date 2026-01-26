@@ -7,6 +7,7 @@ function(input, outname="frame", style='osp', device='cpu', verbosity=0) {
 
   // local io = import 'pgrapher/common/fileio.jsonnet',
   local fileio = import 'layers/high/fileio.jsonnet',
+  local spngio = import 'spng/io.jsonnet',
 
   local tools_maker = import 'pgrapher/common/tools.jsonnet',
 
@@ -41,6 +42,10 @@ function(input, outname="frame", style='osp', device='cpu', verbosity=0) {
 
   local tools = tools_maker(params),
   local source = fileio.frame_file_source(input),
+  local spng_sink = fileio.frame_file_sink(
+    "sigproc-%s-%s.npz"% [style, outname], tags=[]
+  ),
+  // local spng_sink = spngio.frame_array_any_sink('test-%s.h5' %outname),
 
   local nanodes = std.length(tools.anodes),
   local anode_iota = std.range(0, nanodes-1),
@@ -62,11 +67,11 @@ local hio_sp = g.pnode({
       name: 'hio_sp',
       data: {
         anode: wc.tn(tools.anodes[0]),
-        trace_tags: [
+        trace_tags:if style == "osp" then [
           'loose_lf0',
           'mp3_roi0',
           'mp2_roi0',
-          'gauss0'],
+          'gauss0'] else [''],
         filename:"sigproc-%s-%s-0.h5"% [style, outname],
         chunk: [0, 0], // ncol, nrow
         gzip: 2,
@@ -99,7 +104,9 @@ local reco_fork = if style == 'osp' then g.pipeline([
              ],
              'reco_fork') else g.pipeline([
               spng_graph,
-              g.pnode({ type: 'DumpFrames', name: 'reco_fork' }, nin=1, nout=0),
+              spng_sink,
+              // hio_sp,
+              // g.pnode({ type: 'DumpFrames', name: 'reco_fork' }, nin=1, nout=0),
              ]),
 local graph = g.pipeline([source, reco_fork], 'graph'),
 

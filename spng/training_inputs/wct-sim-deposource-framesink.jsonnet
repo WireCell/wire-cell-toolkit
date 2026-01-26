@@ -114,7 +114,7 @@ local hio_truth = g.pnode({
       data: {
         anode: wc.tn(tools.anodes[0]),
         trace_tags: ['deposplat0'],
-        filename: "splat-%s-0.h5"%outname,
+        filename: "splat-%s.h5"%outname,
         chunk: [0, 0], // ncol, nrow
         gzip: 2,
         high_throughput: true,
