@@ -30,7 +30,7 @@ function(control)
     }, nin=1, nout=1, uses=[tpc.anode]),
 
     /// Convert a TDM frame tensor set back into IFrame
-    from_tdm(tpc, extra_name=""):: pg.pnode({
+    from_tdm(tpc, extra_name="", traces_tag="signal", chid_tag="null"):: pg.pnode({
         type: 'SPNGTdmToFrame',
         name: tpc.name + extra_name,
         data: {
@@ -38,9 +38,9 @@ function(control)
             // chmasks: ...
             tagged_traces: [ {
                 // eg datapath of /frames/0/tags/gauss/groups/0/traces
-                traces: { tag: "signal" },
+                traces: { tag: traces_tag },
                 // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
-                chids: { tag: "null" },
+                chids: { tag: chid_tag },
             }]
         } + control
     }, nin=1, nout=1, uses=[]),
